@@ -342,8 +342,18 @@ _probe_selftest() {
   delta=$(( now_s - cut_s ))
   _check "probe_utc_cutoff 24 is 24h back within a minute (delta=${delta}s)" \
     "$([ "$delta" -ge 86340 ] && [ "$delta" -le 86460 ] && echo 1 || echo 0)"
-  _check "probe_utc_cutoff is TZ-invariant" \
-    "$([ "$(TZ=Asia/Tokyo probe_utc_cutoff 24)" = "$(TZ=UTC probe_utc_cutoff 24)" ] && echo 1 || echo 0)"
+  # These are two separate calls to the live clock, so an exact string equality is flaky at a
+  # second boundary. A timezone regression is hours apart; allow one second only for that clock
+  # tick while still rejecting local-wall-clock arithmetic.
+  local tokyo_cut utc_cut tokyo_s utc_s cutoff_skew
+  tokyo_cut="$(TZ=Asia/Tokyo probe_utc_cutoff 24)"
+  utc_cut="$(TZ=UTC probe_utc_cutoff 24)"
+  tokyo_s="$(probe_utc_epoch "$tokyo_cut")"
+  utc_s="$(probe_utc_epoch "$utc_cut")"
+  cutoff_skew=$(( tokyo_s - utc_s ))
+  [ "$cutoff_skew" -lt 0 ] && cutoff_skew=$(( -cutoff_skew ))
+  _check "probe_utc_cutoff is TZ-invariant within live-clock rounding (skew=${cutoff_skew}s)" \
+    "$([ "$cutoff_skew" -le 1 ] && echo 1 || echo 0)"
 
   # The network probes (probe_pr_failing_checks, probe_zombie_runs) have no hermetic fixture: their
   # subject is GitHub's own state machine. Declared rather than silently skipped — an unexercised
