@@ -163,10 +163,10 @@ def claim_audit_producers(root: pathlib.Path) -> dict:
 
 
 def claim_image_pins(root: pathlib.Path) -> dict[str, str]:
-    """Every `openbank-*:sandbox-<sha>` image gitops pins. The fact side asks whether it exists."""
+    """Every immutable GitOps pin, including manual-refresh run provenance suffixes."""
     pins: dict[str, str] = {}
     for path in sorted(root.glob("openbank-infra/gitops/**/*.yaml")):
-        for repo, tag in re.findall(r"/(openbank-[a-z0-9-]+):(sandbox-[0-9a-f]+)", _read(path)):
+        for repo, tag in re.findall(r"/(openbank-[a-z0-9-]+):(sandbox-[0-9a-f]+(?:-run[1-9][0-9]*)?)", _read(path)):
             pins[repo] = tag
     return pins
 
