@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.192.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.192.0...admin-ui-v0.192.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* **admin-ui:** make evidence refresh images unique ([#6785](https://github.com/JiRaska/open-bank-oss/issues/6785)) ([802b775](https://github.com/JiRaska/open-bank-oss/commit/802b775d14d607c028ef1de63fdedbe3a594a273))
+
 ## [0.192.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.191.0...admin-ui-v0.192.0) (2026-08-25)
 
 
