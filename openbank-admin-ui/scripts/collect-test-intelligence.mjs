@@ -321,7 +321,11 @@ function performance() {
     })
     const summary = summaryFile ? readJson(summaryFile) : null
     const summaryMeta = summaryFile ? readJson(`${summaryFile}.meta.json`) : null
-    const performanceRun = summaryFile ? readJson(`${summaryFile}.run.json`) : null
+    // perf-gate writes sibling <service>-summary.json and <service>-run.json files.
+    // Keep the former sidecar spelling as a fallback for any older retained artifact.
+    const performanceRun = summaryFile
+      ? readJson(summaryFile.replace(/-summary\.json$/, '-run.json')) ?? readJson(`${summaryFile}.run.json`)
+      : null
     const specialized = performanceRun?.specializedEvidence?.find(item => item.kind === 'performance')
     const thresholdResults = summary
       ? Object.values(summary.metrics ?? {}).flatMap(metric => Object.values(metric?.thresholds ?? {}))
