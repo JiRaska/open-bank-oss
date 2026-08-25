@@ -52,6 +52,9 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
+    // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
+    testImplementation(project(":openbank-libs-testing"))
     // D3b SVID tests build an EC CA + leaf cert at runtime (no committed private keys → gitleaks-clean).
     // Declared directly (not via the shared catalog) so this one-service test dep does not trigger a
     // full-fleet rebuild on the shared libs.versions.toml.
