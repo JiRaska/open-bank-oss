@@ -27,6 +27,7 @@
 #   ECR_REPO      openbank-admin-ui
 #   AWS_REGION    eu-north-1
 #   AWS_PROFILE   openbank
+#   ADMIN_UI_IMAGE_TAG_SUFFIX  optional immutable CI retry suffix (`run<id>`)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -72,7 +73,15 @@ if ! git diff --quiet HEAD -- openbank-admin-ui 2>/dev/null; then
   GIT_SHA="${GIT_SHA}-dirty"
 fi
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-TAG="sandbox-${GIT_SHA}"
+# A workflow_dispatch may rebuild the same commit after newly available evidence
+# has been staged. ECR tags are immutable, so it must use a distinct, still
+# commit-derived tag instead of attempting to overwrite the original image.
+TAG_SUFFIX="${ADMIN_UI_IMAGE_TAG_SUFFIX:-}"
+if [ -n "${TAG_SUFFIX}" ] && ! [[ "${TAG_SUFFIX}" =~ ^run[0-9]+$ ]]; then
+  echo "ERROR: ADMIN_UI_IMAGE_TAG_SUFFIX must be empty or run<GitHub run id>." >&2
+  exit 2
+fi
+TAG="sandbox-${GIT_SHA}${TAG_SUFFIX:+-${TAG_SUFFIX}}"
 IMAGE="${ECR_REGISTRY}/${ECR_REPO}:${TAG}"
 
 echo "==> admin-ui image provenance"
