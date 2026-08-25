@@ -100,6 +100,18 @@ gates:
     run: |
       python3 .github/scripts/check-synthetic-taint-rest-clients.py --enforce
 
+  - id: synthetic-outbox-taint-persistence
+    name: "Synthetic taint survives shared transactional outbox persistence (ADR-0252, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A synthetic marker forwarded over REST but replaced by a false default at the asynchronous event boundary makes test activity indistinguishable from real banking activity; both schema and writer mapping must survive together."
+    review_after: "2027-08-25"
+    min_subjects: 20
+    selftest: python3 .github/scripts/check-synthetic-outbox-taint.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-synthetic-outbox-taint.py --enforce
+
   # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an
