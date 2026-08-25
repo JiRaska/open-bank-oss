@@ -267,10 +267,12 @@ jobs:
       # second invocation of the same, single-shaped `test` task.
       - name: Generate Kover XML report
         continue-on-error: true
-        # This is advisory evidence, never a second mandatory build.  Keep it daemonless
+        # This is advisory evidence, never a second mandatory build. Keep it daemonless
         # and bounded so a Gradle/Kover process cannot retain the raw coverage file or
         # hold a fleet runner after the enforcing build has already completed (#6734).
-        run: timeout --kill-after=10s 180s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --build-cache --console=plain
+        # Account's real Testcontainers suite needs more than the old three-minute limit:
+        # preserve its money-path coverage proof while retaining a firm ten-minute ceiling.
+        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --build-cache --console=plain
 
       # The envelope is built even after a failing suite. A missing envelope is not a
       # passing zero: the projection renders it as absent evidence. The collector only

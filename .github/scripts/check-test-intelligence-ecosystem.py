@@ -31,6 +31,8 @@ def check(root: Path) -> list[str]:
     for needle in ("collect-test-run-evidence.py", "build/test-intelligence/run.json", "if: always()", "docker events", "--filter event=start", "--filter event=die"):
         if needle not in workflow:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
+    if "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport" not in workflow:
+        errors.append("Kover evidence is not bounded with the money-path-safe timeout")
 
     convention = text(root / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts")
     if "OPENBANK_TEST_EVIDENCE_DIR" not in convention:
