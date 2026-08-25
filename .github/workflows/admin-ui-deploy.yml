@@ -408,30 +408,22 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
           MAX_ENVELOPES=100
-          for workflow in services-ci.yml ci.yml; do
-            # Deploy-only commits can arrive faster than service envelopes (each creates a
-            # completed Services CI run with no per-service artifact).  A 20-run window then
-            # contains only those empty runs and silently erases Testcontainers lifecycle proof
-            # from the projection.  Keep the bounded history but search a wider 100-run window
-            # for the latest immutable envelopes instead of treating workflow recency as evidence.
-            api "https://api.github.com/repos/${REPO}/actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100" \
-              | python3 -c "import json,sys; [print(r['id']) for r in json.load(sys.stdin).get('workflow_runs',[])]" 2>/dev/null \
-              | while read -r run_id; do
-                  [ "$(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ')" -lt "$MAX_ENVELOPES" ] || break
-                  [ -n "${run_id}" ] || continue
-                  api "https://api.github.com/repos/${REPO}/actions/runs/${run_id}/artifacts?per_page=100" \
-                    | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired']]" 2>/dev/null \
-                    | while read -r artifact_id artifact_name; do
-                        [ -n "${artifact_id}" ] || continue
-                        archive="/tmp/${artifact_name}.zip"
-                        api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
-                        envelope="$(unzip -Z1 "${archive}" | grep 'test-intelligence/run.json$' | head -1 || true)"
-                        [ -n "${envelope}" ] || continue
-                        unzip -p "${archive}" "${envelope}" > "openbank-admin-ui/test-run-history/${artifact_name}.json"
-                        [ "$(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ')" -lt "$MAX_ENVELOPES" ] || break
-                      done
-                done
-          done
+          # The workflow-runs endpoint is dominated by deploy-only Services CI runs, which
+          # produce no per-service envelope.  Even a 100-run scan can therefore find zero
+          # evidence while fresh immutable artifacts exist. Query the artifact inventory
+          # directly, retaining only non-expired main-branch envelopes. This is both faster
+          # and evidence-complete for the bounded latest-artifact window.
+          api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100" \
+            | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null \
+            | while read -r artifact_id artifact_name; do
+                [ "$(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ')" -lt "$MAX_ENVELOPES" ] || break
+                [ -n "${artifact_id}" ] || continue
+                archive="/tmp/${artifact_name}.zip"
+                api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
+                envelope="$(unzip -Z1 "${archive}" | grep 'test-intelligence/run.json$' | head -1 || true)"
+                [ -n "${envelope}" ] || continue
+                unzip -p "${archive}" "${envelope}" > "openbank-admin-ui/test-run-history/${artifact_name}.json"
+              done
           echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes."
 
       - name: Stage pitest mutation results from latest weekly run
