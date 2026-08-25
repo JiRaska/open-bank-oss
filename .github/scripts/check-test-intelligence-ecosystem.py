@@ -47,6 +47,15 @@ def check(root: Path) -> list[str]:
     deploy = text(root / ".github/workflows/admin-ui-deploy.yml")
     if "build/test-intelligence/run.json" not in deploy:
         errors.append("admin deployment does not stage the versioned run envelope")
+    # A staged Pact file is not a provider-verification verdict. The deploy collector
+    # can query the existing read-only Broker credentials and must receive them only
+    # in its build/collection step; without this wiring the UI bakes every Pact as
+    # `unknown` even though main CI has published authoritative results.
+    for needle in ("PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}",
+                   "PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}",
+                   "PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}"):
+        if needle not in deploy:
+            errors.append(f"admin deployment cannot project Pact Broker verification evidence: {needle}")
     for needle in ("openbank-app-test-intelligence-", ".get('head_branch') == 'main'", "client-test-evidence/openbank-app-${artifact_id}.json"):
         if needle not in deploy:
             errors.append(f"admin deployment lost trusted mobile evidence staging: {needle}")

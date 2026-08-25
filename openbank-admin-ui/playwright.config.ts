@@ -14,7 +14,15 @@ export default defineConfig({
   // Fail fast in CI — one retry on flake
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  // CI retains both the human GitHub/HTML reports and a machine-readable JUnit
+  // report. The latter is consumed by the shared Test Intelligence envelope;
+  // merely exporting PLAYWRIGHT_JUNIT_OUTPUT_FILE in the workflow does nothing
+  // unless the reporter is configured to write it.
+  reporter: process.env.CI ? [
+    ['github'],
+    ['html', { open: 'never' }],
+    ['junit', { outputFile: process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? 'build/test-results/e2e/playwright.xml' }],
+  ] : 'list',
 
   use: {
     baseURL: 'http://localhost:3001',

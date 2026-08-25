@@ -206,7 +206,12 @@ STUB
       failures=$((failures + 1))
       return
     fi
-    if ! printf '%s' "$out" | grep -qF "$expected_summary"; then
+    # Do not use `printf | grep -q` here: with `pipefail`, grep may exit as
+    # soon as it finds the expected summary and leave printf with SIGPIPE.
+    # That turns a correct, sufficiently large self-test output into a false
+    # failure on a faster CI runner. Feed grep directly so this assertion is
+    # about the summary, not pipe scheduling.
+    if ! grep -qF "$expected_summary" <<< "$out"; then
       printf '  FAIL: %s — exit %s correct, but summary missing\n' "$name" "$code"
       printf '        expected summary: %s\n' "$expected_summary"
       fixture_diagnostics

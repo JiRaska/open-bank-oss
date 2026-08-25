@@ -222,10 +222,26 @@ function Coverage({ report }: { report: TestIntelligenceReport }) {
 }
 
 function Contracts({ report }: { report: TestIntelligenceReport }) {
-  return <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
-    <thead><tr><th style={thStyle}>Consumer</th><th style={thStyle}>Provider</th><th style={thStyle}>State</th><th style={thStyle}>Interactions</th><th style={thStyle}>Pact</th><th style={thStyle}>Verified</th></tr></thead>
-    <tbody>{report.contracts.map(row => <tr key={row.pactFile}><td style={tdStyle}>{row.consumer}</td><td style={tdStyle}>{row.provider}</td><td style={tdStyle}><StateBadge state={row.state} /></td><td style={tdStyle}>{row.interactions}</td><td style={tdStyle}>{row.pactFile}</td><td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt) : '—'}</td></tr>)}</tbody>
-  </table></div>
+  const { t } = useLanguage()
+  const unknown = report.contracts.filter(row => row.state === 'unknown')
+  const contractSuites = report.runHistory.flatMap(run => Object.entries(run.states)
+    .filter(([kind]) => kind === 'contract')
+    .map(([, state]) => state))
+  const suiteSummary = contractSuites.length === 0
+    ? t('V uchované historii není přibalen žádný contract suite verdict.', 'No contract-suite verdict is bundled in retained run history.')
+    : t(`${contractSuites.filter(state => state === 'passed').length}/${contractSuites.length} uchovaných CI contract suite verdiktů prošlo.`, `${contractSuites.filter(state => state === 'passed').length}/${contractSuites.length} retained CI contract-suite verdicts passed.`)
+  return <div style={{ display: 'grid', gap: 12 }}>
+    <div style={{ padding: 13, border: '1px solid color-mix(in srgb, #64748b 36%, var(--border))', borderRadius: 10, background: 'var(--surface-2)', color: 'var(--text-secondary)', fontSize: 12 }}>
+      <strong style={{ color: 'var(--text-primary)' }}>{t('Dva nezaměnitelné druhy důkazu.', 'Two non-interchangeable evidence types.')}</strong>{' '}
+      {t('Tabulka níže ukazuje per-Pact provider-verification verdikt z Pact Brokeru. Historie běhů ukazuje CI contract suite verdikt. Jeden není náhradou druhého a neznámý broker verdikt se nikdy nevydává za zelený.', 'The table below shows the per-Pact provider-verification verdict from the Pact Broker. Run history shows the CI contract-suite verdict. Neither substitutes for the other, and an unavailable broker verdict is never presented as green.')}
+      <div style={{ marginTop: 7 }}>{suiteSummary}</div>
+      {unknown.length > 0 && <div style={{ marginTop: 7, color: '#64748b' }}>{t(`${unknown.length} Pactů má neznámý broker verdikt v tomto snapshotu; otevři detail řádku pro přesný důvod.`, `${unknown.length} Pacts have an unavailable broker verdict in this snapshot; open a row detail for the precise reason.`)}</div>}
+    </div>
+    <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+      <thead><tr><th style={thStyle}>Consumer</th><th style={thStyle}>Provider</th><th style={thStyle}>{t('Broker verdict', 'Broker verdict')}</th><th style={thStyle}>Interactions</th><th style={thStyle}>Pact</th><th style={thStyle}>Verified</th><th style={thStyle}>{t('Evidence basis', 'Evidence basis')}</th></tr></thead>
+      <tbody>{report.contracts.map(row => <tr key={row.pactFile}><td style={tdStyle}>{row.consumer}</td><td style={tdStyle}>{row.provider}</td><td style={tdStyle}><StateBadge state={row.state} /></td><td style={tdStyle}>{row.interactions}</td><td style={tdStyle}>{row.pactFile}</td><td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt) : '—'}</td><td style={{ ...tdStyle, minWidth: 300, color: 'var(--text-secondary)', fontSize: 11 }}>{row.verificationDetail ?? t('Snapshot does not provide a verification explanation.', 'Snapshot neposkytuje vysvětlení ověření.')}</td></tr>)}</tbody>
+    </table></div>
+  </div>
 }
 
 function Mutations({ report }: { report: TestIntelligenceReport }) {
