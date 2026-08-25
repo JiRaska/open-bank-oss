@@ -26,6 +26,10 @@ describe('test-intelligence collector', () => {
     write(repo, 'openbank-alpha-service/build/reports/kover/report.xml',
       '<report><counter type="BRANCH" missed="4" covered="6"/><counter type="LINE" missed="20" covered="80"/></report>')
     write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services:\n  - openbank-alpha-service\n')
+    write(repo, 'openbank-admin-ui/quality-report.json', JSON.stringify({ contracts: [{
+      consumer: 'openbank-alpha-service', provider: 'openbank-provider-not-inventory', pactFile: 'alpha-provider.json',
+      status: 'pending', verifiedAt: null, interactions: [{ description: 'create', status: 'pending' }],
+    }] }))
     write(repo, 'openbank-libs/governance/journeys.yaml', `version: 1
 journeys:
   - id: edge
@@ -80,6 +84,10 @@ journeys:
     expect(report.components[0].coverage.lines.percentage).toBe(80)
     expect(report.components[1].evidence).toEqual([])
     expect(report.totals.missingEvidence).toBe(1)
+    expect(report.contracts).toEqual([expect.objectContaining({
+      pactFile: 'alpha-provider.json', state: 'unknown',
+      verificationDetail: expect.stringMatching(/not a passing result/i),
+    })])
     expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *' })
     expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
     expect(report.performance.find(item => item.id === 'openbank-alpha-service-alpha-smoke')).toMatchObject({ state: 'passed', metrics: {

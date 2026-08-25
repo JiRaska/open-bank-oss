@@ -85,6 +85,8 @@ export interface ContractEvidence {
   state: EvidenceState
   observedAt: string | null
   interactions: number
+  /** Why a broker verdict is unavailable, or the authority behind one that is. */
+  verificationDetail?: string
 }
 
 export interface MutationEvidence {

@@ -252,6 +252,9 @@ function contracts() {
     consumer: item.consumer, provider: item.provider, pactFile: item.pactFile,
     state: item.status === 'pending' ? 'unknown' : item.status,
     observedAt: item.verifiedAt ?? null, interactions: item.interactions?.length ?? 0,
+    verificationDetail: item.status === 'pending'
+      ? 'Pact Broker provider-verification verdict was unavailable when this immutable deployment snapshot was built. This is not a passing result.'
+      : 'Verified by the Pact Broker provider-verification verdict retained in this deployment snapshot.',
   }))
   const dir = path.join(repo, 'pacts')
   if (!exists(dir)) return []
@@ -260,6 +263,7 @@ function contracts() {
     return pact ? [{
       consumer: pact.consumer?.name ?? 'unknown', provider: pact.provider?.name ?? 'unknown',
       pactFile: name, state: 'unknown', observedAt: null, interactions: pact.interactions?.length ?? 0,
+      verificationDetail: 'No Pact Broker verification snapshot was bundled. This is not a passing result.',
     }] : []
   })
 }
