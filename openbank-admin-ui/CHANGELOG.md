@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.194.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.193.0...admin-ui-v0.194.0) (2026-08-25)
+
+
+### Features
+
+* **admin-ui:** expose performance test scope ([#6821](https://github.com/JiRaska/open-bank-oss/issues/6821)) ([2606d03](https://github.com/JiRaska/open-bank-oss/commit/2606d032eeac680c56d155e6083340685130ec10))
+
 ## [0.193.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.192.2...admin-ui-v0.193.0) (2026-08-25)
 
 
