@@ -214,6 +214,7 @@ export default function AccountsPage() {
               <option value="">{t('Všechny typy', 'All types')}</option>
               <option value="CURRENT">{t('Běžný', 'Current')}</option>
               <option value="SAVINGS">{t('Spořicí', 'Savings')}</option>
+              <option value="TERM_DEPOSIT">{t('Termínovaný', 'Term deposit')}</option>
             </select>
             <button
               className="btn btn-primary"

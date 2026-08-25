@@ -5,13 +5,14 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import Link from 'next/link'
 import {
   Package, Search, RefreshCw, Edit, Play, Square, Plus, X,
   Eye, EyeOff, CreditCard, Globe, TrendingDown,
   Clock, FileText, Tag, Users, ExternalLink, History, CheckCircle2,
   Layers, Banknote, Shield,
 } from 'lucide-react'
-import { AuthGuard } from '@/components/auth/AuthGuard'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -167,6 +168,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
           {product.shortDescription && <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>{product.shortDescription}</div>}
         </div>
         <div style={{ display: 'flex', gap: '6px', flexShrink: 0, marginLeft: '12px' }}>
+          <Can permission="catalog:author">
           <button
             type="button"
             onClick={onEdit}
@@ -180,6 +182,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
           <button type="button" aria-pressed={product.status === 'ACTIVE'} onClick={onToggleStatus} aria-label={product.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')} style={{ background: sc.bg, border: `1px solid ${sc.border}`, borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: sc.text }}>
             {product.status === 'ACTIVE' ? <><Square size={11} aria-hidden="true" /> {t('Deaktivovat', 'Deactivate')}</> : <><Play size={11} aria-hidden="true" /> {t('Aktivovat', 'Activate')}</>}
           </button>
+          </Can>
           <button type="button" onClick={onClose} aria-label={t('Zavřít detail produktu', 'Close product details')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '4px' }}>
             <X size={18} aria-hidden="true" />
           </button>
@@ -542,6 +545,10 @@ export default function ProductCatalogPage() {
 
   const handleToggleStatus = async (p: Product) => {
     if (!p.id) return
+    if (p.status === 'ACTIVE' && !window.confirm(t(
+      `Deaktivovat produkt ${p.name}? Historie zůstane zachována a produkt nebude možné použít pro nové účty.`,
+      `Deactivate ${p.name}? Its history remains available and it cannot be used for new accounts.`,
+    ))) return
     setActionError(null)
     try {
       if (p.revision === undefined) {
@@ -556,7 +563,7 @@ export default function ProductCatalogPage() {
   }
 
   return (
-    <AuthGuard permission="payments:view">
+    <AuthGuard permission="catalog:read">
       <div style={{ display: 'flex', height: '100%' }}>
         <div style={{ flex: 1, minWidth: 0, padding: '28px 32px', overflowY: 'auto' }}>
 
@@ -566,9 +573,14 @@ export default function ProductCatalogPage() {
             subtitle={t('Správa bankovních produktů, sazeb, poplatků a obchodních podmínek', 'Manage banking products, rates, fees and terms')}
             breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Katalog produktů', 'Product Catalog')}</span></div>}
             actions={<div style={{ display: 'flex', gap: '8px' }}>
+              <Can permission="accounts:create"><Link href="/accounts/new" className="btn btn-secondary">
+                <CreditCard size={14} aria-hidden="true" /> {t('Založit účet', 'Open Account')}
+              </Link></Can>
+              <Can permission="catalog:author">
               <button type="button" className="btn btn-primary" onClick={openCreateModal} disabled={loading} aria-label={t('Vytvořit nový produkt', 'Create new product')}>
                 <Plus size={14} aria-hidden="true" /> {t('Nový produkt', 'New Product')}
               </button>
+              </Can>
               <button className="btn btn-secondary" type="button" onClick={load} disabled={loading}
                 aria-busy={loading} aria-label={t('Obnovit katalog produktů', 'Refresh product catalog')}>
                 <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
@@ -576,6 +588,14 @@ export default function ProductCatalogPage() {
               </button>
             </div>}
           />
+
+          <div className="card" style={{ padding: '14px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: '260px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Produkty, účty a doplňkové služby', 'Products, accounts and add-on services')}</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '3px' }}>{t('Produkt zde vytvoříte nebo deaktivujete. Účet otevřete z aktivního produktu a uzavřete v jeho detailu. Doplňkové služby přidáte či odeberete jako vazby nabídky v Produktovém studiu.', 'Create or deactivate products here. Open an account from an active product and close it from its detail. Add or remove add-on services as offering relationships in Product Studio.')}</div>
+            </div>
+            <Can permission="catalog:read"><Link href="/product-studio" className="btn btn-secondary"><Layers size={13} />{t('Spravovat služby', 'Manage services')}</Link></Can>
+          </div>
 
           {unavailable && (
             <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
@@ -689,12 +709,14 @@ export default function ProductCatalogPage() {
                     </td>
                     <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
+                        <Can permission="catalog:author">
                         <button type="button" className="btn btn-secondary btn-sm" disabled={p.status === 'ACTIVE'} onClick={() => openEditModal(p)} style={{ padding: '4px' }} title={p.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')} aria-label={p.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}>
                           <Edit size={13} aria-hidden="true" />
                         </button>
                         <button type="button" aria-pressed={p.status === 'ACTIVE'} className="btn btn-secondary btn-sm" onClick={() => handleToggleStatus(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')} aria-label={p.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')}>
                           {p.status === 'ACTIVE' ? <Square size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}
                         </button>
+                        </Can>
                       </div>
                     </td>
                   </tr>

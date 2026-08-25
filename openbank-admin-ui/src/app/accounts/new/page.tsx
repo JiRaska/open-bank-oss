@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Save, AlertCircle } from 'lucide-react'
@@ -14,10 +14,21 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 import { accountPartySelection } from '@/lib/accounts/partySelection'
+import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 
 
-const ACCOUNT_TYPES = ['CURRENT', 'SAVINGS', 'NOSTRO', 'GL_ASSET', 'GL_LIABILITY', 'GL_INCOME', 'GL_EXPENSE']
+const ACCOUNT_TYPES = ['CURRENT', 'SAVINGS', 'TERM_DEPOSIT', 'NOSTRO', 'GL_ASSET', 'GL_LIABILITY', 'GL_INCOME', 'GL_EXPENSE']
+const CUSTOMER_ACCOUNT_TYPES = new Set(['CURRENT', 'SAVINGS', 'TERM_DEPOSIT'])
 const CURRENCIES    = ['CZK', 'EUR', 'USD', 'GBP', 'CHF', 'PLN']
+
+interface CatalogProduct {
+  id: string
+  code: string
+  name: string
+  type: string
+  currency: string
+  status: string
+}
 
 export default function NewAccountPage() {
   const router = useRouter()
@@ -32,6 +43,37 @@ export default function NewAccountPage() {
   const [errors, setErrors]   = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError]     = useState<string | null>(null)
+  const [products, setProducts] = useState<CatalogProduct[]>([])
+  const [productsLoading, setProductsLoading] = useState(true)
+  const [productsUnavailable, setProductsUnavailable] = useState(false)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetch(svcUrl('product-catalog', '/api/v1/products?status=ACTIVE'), {
+      cache: 'no-store', signal: controller.signal,
+    }).then(async response => {
+      if (!response.ok) {
+        await classifyBffFailure(response.clone())
+        throw new Error('catalog unavailable')
+      }
+      const body = await response.json() as CatalogProduct[] | { products?: CatalogProduct[]; items?: CatalogProduct[] }
+      const rows = Array.isArray(body) ? body : body.products ?? body.items ?? []
+      setProducts(rows.filter(product => product.status === 'ACTIVE' && CUSTOMER_ACCOUNT_TYPES.has(product.type)))
+    }).catch(error => {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      setProductsUnavailable(true)
+    }).finally(() => setProductsLoading(false))
+    return () => controller.abort()
+  }, [])
+
+  function selectProduct(productId: string) {
+    const product = products.find(item => item.id === productId)
+    setForm(current => ({
+      ...current,
+      productId,
+      ...(product ? { accountType: product.type, currencyCode: product.currency } : {}),
+    }))
+  }
 
   function validate() {
     const e: Record<string, string> = {}
@@ -131,17 +173,31 @@ export default function NewAccountPage() {
 
               <div className="field">
                 <label htmlFor="account-product-id">{t('Product ID', 'Product ID')} <span aria-hidden="true" style={{ color: 'var(--danger)' }}>*</span></label>
-                <input
+                {!productsUnavailable ? <select
+                  id="account-product-id"
+                  className="input"
+                  required
+                  disabled={productsLoading}
+                  value={form.productId}
+                  onChange={event => selectProduct(event.target.value)}
+                  aria-invalid={Boolean(errors.productId)}
+                  aria-describedby={errors.productId ? 'account-product-id-error' : 'account-product-id-help'}
+                  style={{ borderColor: errors.productId ? 'var(--danger)' : undefined }}
+                >
+                  <option value="">{productsLoading ? t('Načítám produkty…', 'Loading products…') : t('Vyberte aktivní produkt', 'Select an active product')}</option>
+                  {products.map(product => <option key={product.id} value={product.id}>{product.name} ({product.code}) · {product.currency}</option>)}
+                </select> : <input
                   id="account-product-id"
                   className="input"
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                   value={form.productId}
                   onChange={set('productId')}
                   aria-invalid={Boolean(errors.productId)}
-                  aria-describedby={errors.productId ? 'account-product-id-error' : undefined}
+                  aria-describedby={errors.productId ? 'account-product-id-error' : 'account-product-id-help'}
                   style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', borderColor: errors.productId ? 'var(--danger)' : undefined }}
-                />
+                />}
                 {errors.productId && <span id="account-product-id-error" role="alert" style={{ fontSize: '11px', color: 'var(--danger)' }}>{errors.productId}</span>}
+                {!errors.productId && <span id="account-product-id-help" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{productsUnavailable ? t('Katalog není dostupný; Product ID lze zadat ručně.', 'Catalog is unavailable; enter the Product ID manually.') : t('Typ účtu a měna se převezmou z produktu.', 'Account type and currency follow the selected product.')}</span>}
               </div>
 
               <div className="field">
