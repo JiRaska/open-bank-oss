@@ -47,9 +47,14 @@ def check(root: Path) -> list[str]:
     deploy = text(root / ".github/workflows/admin-ui-deploy.yml")
     for needle, message in (
         ("build/test-intelligence/run.json", "admin deployment does not stage the versioned run envelope"),
+        ("workflow_run:", "admin deployment does not refresh Test Intelligence after successful Services CI"),
+        ("workflows: [\"Services CI\"]", "admin deployment is not subscribed to the authoritative Services CI workflow"),
+        ("workflow_run.conclusion == 'success'", "admin deployment accepts unsuccessful Services CI evidence"),
+        ("workflow_run.head_branch == 'main'", "admin deployment accepts non-main Services CI evidence"),
         ("schedule:", "admin deployment has no scheduled Test Intelligence snapshot refresh"),
         ("cron: '17 3 * * *'", "admin deployment refresh cadence drifted from the governed daily schedule"),
         ("github.event_name }}\" = \"schedule\"", "scheduled snapshot refresh does not use a unique immutable image tag"),
+        ("github.event_name }}\" = \"workflow_run\"", "event-driven snapshot refresh does not use a unique immutable image tag"),
     ):
         if needle not in deploy:
             errors.append(message)
