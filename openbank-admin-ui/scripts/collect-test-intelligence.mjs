@@ -315,12 +315,23 @@ function performance() {
       ? Object.values(summary.metrics ?? {}).flatMap(metric => Object.values(metric?.thresholds ?? {}))
       : []
     const failed = thresholdResults.filter(result => result?.ok === false).length
+    const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null
+    const ratePercent = value => {
+      const rate = number(value)
+      return rate === null ? null : Math.round(rate * 10_000) / 100
+    }
+    const metrics = summary ? {
+      p95Ms: number(summary.metrics?.http_req_duration?.values?.['p(95)']),
+      errorRatePercent: ratePercent(summary.metrics?.http_req_failed?.values?.rate),
+      checkPassRatePercent: ratePercent(summary.metrics?.checks?.values?.rate),
+    } : undefined
     const at = summaryFile ? observedAt(summaryFile) : null
     return {
       id, component,
       state: specialized?.state ?? (summary ? stateFrom(failed, 1, at) : 'not-run'),
       observedAt: performanceRun?.run?.observedAt ?? at,
       source: path.relative(repo, file), thresholds,
+      ...(metrics ? { metrics } : {}),
       detail: specialized?.detail ?? (summary
         ? `${thresholdResults.length} threshold result(s), ${failed} breached`
         : 'Scenario is declared; the latest k6 run artifact is not bundled into this image.'),

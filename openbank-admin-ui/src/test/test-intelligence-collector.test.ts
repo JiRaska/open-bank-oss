@@ -45,6 +45,11 @@ journeys:
     blocked_by: needs canary devices
 `)
     write(repo, 'perf/k6/smoke.js', 'export const options = { thresholds: { checks: ["rate>0.99"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/smoke-summary.json', JSON.stringify({ metrics: {
+      http_req_duration: { values: { 'p(95)': 321.4 } },
+      http_req_failed: { values: { rate: 0.0125 } },
+      checks: { values: { rate: 0.9875 } },
+    } }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
@@ -57,7 +62,9 @@ journeys:
     expect(report.totals.missingEvidence).toBe(1)
     expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *' })
     expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
-    expect(report.performance[0]).toMatchObject({ id: 'smoke', state: 'not-run' })
+    expect(report.performance[0]).toMatchObject({ id: 'smoke', state: 'passed', metrics: {
+      p95Ms: 321.4, errorRatePercent: 1.25, checkPassRatePercent: 98.75,
+    } })
     expect(report.clientExperiences).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'admin-ui', rum: expect.objectContaining({ policy: 'rejected' }) }),
       expect.objectContaining({ id: 'openbank-app', evidence: [], blocker: expect.stringMatching(/artifact/i) }),
