@@ -55,42 +55,61 @@ function allFiles(dir, predicate) {
   return result
 }
 
-function junitEvidence(component) {
+async function junitEvidence(component) {
   const root = path.join(repo, component, 'build', 'test-results')
-  const files = allFiles(root, file => path.basename(file).startsWith('TEST-') && file.endsWith('.xml'))
+  // Gradle's TEST-*.xml convention is not universal: Vitest and Playwright emit
+  // arbitrary XML names with a <testsuites> wrapper.  This is a fallback for a
+  // missing run envelope, so losing those reports would turn a real CI result
+  // into a false "not run" observation in the operator UI.
+  const files = allFiles(root, file => file.endsWith('.xml'))
   const buckets = new Map()
   for (const file of files) {
     const relative = path.relative(root, file).split(path.sep)
     const task = relative[0] || 'test'
-    const xml = fs.readFileSync(file, 'utf8')
+    let parsed
+    try {
+      parsed = await parseStringPromise(fs.readFileSync(file, 'utf8'), { explicitArray: true })
+    } catch {
+      warnings.push(`unparsable JUnit report skipped: ${path.relative(repo, file)}`)
+      continue
+    }
+    const directSuites = Array.isArray(parsed?.testsuite) ? parsed.testsuite : parsed?.testsuite ? [parsed.testsuite] : []
+    const wrappers = Array.isArray(parsed?.testsuites) ? parsed.testsuites : parsed?.testsuites ? [parsed.testsuites] : []
+    const suites = directSuites.length ? directSuites : wrappers.flatMap(wrapper => wrapper.testsuite ?? [])
+    if (!suites.length) continue
     // Gradle commonly puts Quarkus/API/DB `*IT` classes under the ordinary `test`
     // task. Directory-only classification was the reason those tests disappeared
     // from the integration count. Prefer explicit task metadata, then the JUnit
     // suite/class identity carried by the artifact itself.
-    const integrationIdentity = /(?:name|classname)="[^"]*(?:\.integration\.|\.it\.|IT(?:"|\$|\.))/i.test(xml)
-    const kind = /integration|inttest/i.test(task) || integrationIdentity ? 'integration'
-      : /e2e|playwright/i.test(task) ? 'e2e'
-        : component === 'openbank-simulation' ? 'simulation' : 'unit'
-    const bucket = buckets.get(kind) ?? {
-      kind, source: `JUnit:${task}`, environment: 'ci', durationMs: 0,
-      counts: { discovered: 0, executed: 0, passed: 0, failed: 0, skipped: 0, errors: 0 },
-      observedAt: null,
+    for (const suite of suites) {
+      const attributes = suite.$ ?? {}
+      const cases = suite.testcase ?? []
+      const identity = [attributes.name, ...cases.map(item => item.$?.classname)].filter(Boolean).join(' ')
+      const integrationIdentity = /(?:\.integration\.|\.it\.|IT(?:$|\$|\.))/i.test(identity)
+      const kind = /integration|inttest/i.test(task) || integrationIdentity ? 'integration'
+        : /e2e|playwright/i.test(task) ? 'e2e'
+          : component === 'openbank-simulation' ? 'simulation' : 'unit'
+      const bucket = buckets.get(kind) ?? {
+        kind, source: `JUnit:${task}`, environment: 'ci', durationMs: 0,
+        counts: { discovered: 0, executed: 0, passed: 0, failed: 0, skipped: 0, errors: 0 },
+        observedAt: null,
+      }
+      const value = name => Number(attributes[name] ?? 0)
+      const discovered = value('tests')
+      const failures = value('failures')
+      const errors = value('errors')
+      const skipped = value('skipped')
+      bucket.counts.discovered += discovered
+      bucket.counts.failed += failures + errors
+      bucket.counts.errors += errors
+      bucket.counts.skipped += skipped
+      bucket.counts.executed += Math.max(0, discovered - skipped)
+      bucket.counts.passed += Math.max(0, discovered - failures - errors - skipped)
+      bucket.durationMs += Math.round(value('time') * 1000)
+      const at = observedAt(file)
+      if (at && (!bucket.observedAt || at > bucket.observedAt)) bucket.observedAt = at
+      buckets.set(kind, bucket)
     }
-    const value = name => Number(new RegExp(`<testsuite[^>]*\\b${name}="([0-9.]+)"`).exec(xml)?.[1] ?? 0)
-    const discovered = value('tests')
-    const failures = value('failures')
-    const errors = value('errors')
-    const skipped = value('skipped')
-    bucket.counts.discovered += discovered
-    bucket.counts.failed += failures + errors
-    bucket.counts.errors += errors
-    bucket.counts.skipped += skipped
-    bucket.counts.executed += Math.max(0, discovered - skipped)
-    bucket.counts.passed += Math.max(0, discovered - failures - errors - skipped)
-    bucket.durationMs += Math.round(value('time') * 1000)
-    const at = observedAt(file)
-    if (at && (!bucket.observedAt || at > bucket.observedAt)) bucket.observedAt = at
-    buckets.set(kind, bucket)
   }
   return [...buckets.values()].map(bucket => ({
     ...bucket,
@@ -335,7 +354,7 @@ function mobileClientRuns() {
     .sort((a, b) => Date.parse(b.run?.observedAt ?? 0) - Date.parse(a.run?.observedAt ?? 0))
 }
 
-function clientExperiences() {
+async function clientExperiences() {
   const mobileRuns = mobileClientRuns()
   // Mobile lanes complete independently.  Select the latest *execution of each
   // evidence kind*, rather than treating a later connected-device artifact as a
@@ -352,7 +371,7 @@ function clientExperiences() {
   const appSource = path.join(repo, '.app-src')
   const androidRum = exists(path.join(appSource, 'shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt'))
   const iosRum = exists(path.join(appSource, 'shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt'))
-  const webEvidence = runEnvelope('openbank-admin-ui')?.evidence ?? junitEvidence('openbank-admin-ui')
+  const webEvidence = runEnvelope('openbank-admin-ui')?.evidence ?? await junitEvidence('openbank-admin-ui')
   const mobileEvidence = [...latestMobileSuites.values()].map(({ suite: item, run }) => ({
     kind: item.kind, state: item.state, observedAt: run.run?.observedAt ?? null,
     source: 'openbank-app-test-intelligence:v1', environment: 'ci', durationMs: item.durationMs,
@@ -386,19 +405,19 @@ async function main() {
   const names = releasedComponents()
   const moneyPath = moneyPathComponents()
   const currentEnvelopes = names.map(component => readJson(path.join(repo, component, 'build', 'test-intelligence', 'run.json'))).filter(Boolean)
-  const components = names.map(component => {
+  const components = await Promise.all(names.map(async component => {
     const envelope = runEnvelope(component)
     return {
       component, released: true, moneyPath: moneyPath.has(component),
-      evidence: envelope?.evidence ?? junitEvidence(component),
+      evidence: envelope?.evidence ?? await junitEvidence(component),
       coverage: envelope?.coverage ?? coverage(component),
       testInfrastructure: envelope?.testInfrastructure ?? { declared: [], observed: [] },
     }
-  })
+  }))
   const simulation = 'openbank-simulation'
   if (exists(path.join(repo, simulation))) components.push({
     component: simulation, released: false, moneyPath: false,
-    evidence: junitEvidence(simulation), coverage: coverage(simulation),
+    evidence: await junitEvidence(simulation), coverage: coverage(simulation),
     testInfrastructure: { declared: [], observed: [] },
   })
   const mutationEvidence = await mutations(names)
@@ -428,7 +447,7 @@ async function main() {
     })
   }
   const synthetic = syntheticJourneys()
-  const clientExperience = clientExperiences()
+  const clientExperience = await clientExperiences()
   const testCases = testCaseHistory(currentEnvelopes)
   const failingEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'failed').length
   const staleEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'stale').length

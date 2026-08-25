@@ -64,6 +64,25 @@ journeys:
     ]))
   })
 
+  it('keeps Vitest and multi-suite Playwright fallback evidence when no CI envelope was retained', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-xml-fallback-'))
+    dirs.push(repo)
+    write(repo, 'openbank-admin-ui/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-admin-ui/build/test-results/test/vitest.xml', '<testsuites><testsuite name="unit" tests="2" failures="0" errors="0" skipped="0" time="1"><testcase classname="guard" name="allows"/><testcase classname="guard" name="denies"/></testsuite></testsuites>')
+    write(repo, 'openbank-admin-ui/build/test-results/e2e/playwright.xml', '<testsuites><testsuite name="first" tests="1" failures="0" errors="0" skipped="0" time="2"><testcase classname="first.spec.ts" name="loads"/></testsuite><testsuite name="second" tests="1" failures="1" errors="0" skipped="0" time="3"><testcase classname="second.spec.ts" name="fails"><failure/></testcase></testsuite></testsuites>')
+    write(repo, 'openbank-admin-ui/build/test-results/test/not-junit.xml', '<report><counter/></report>')
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const web = report.clientExperiences.find(item => item.id === 'admin-ui')!
+    expect(web.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'unit', state: 'passed', counts: expect.objectContaining({ discovered: 2, passed: 2 }) }),
+      expect.objectContaining({ kind: 'e2e', state: 'failed', counts: expect.objectContaining({ discovered: 2, failed: 1, passed: 1 }) }),
+    ]))
+  })
+
   it('prefers the versioned run envelope and preserves provenance plus Testcontainers runtime proof', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-envelope-'))
     dirs.push(repo)
