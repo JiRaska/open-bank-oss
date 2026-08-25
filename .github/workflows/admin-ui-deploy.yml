@@ -420,7 +420,11 @@ jobs:
                 [ -n "${artifact_id}" ] || continue
                 archive="/tmp/${artifact_name}.zip"
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
-                envelope="$(unzip -Z1 "${archive}" | grep 'test-intelligence/run.json$' | head -1 || true)"
+                # actions/upload-artifact strips the uploaded directory prefix, so the
+                # immutable service envelope is normally `run.json` at the zip root.
+                # Keep accepting a nested path for compatibility with an artifact action
+                # layout change, but never require a source-tree path that is not retained.
+                envelope="$(unzip -Z1 "${archive}" | awk '$0 == "run.json" || /\/run\.json$/ { print; exit }' || true)"
                 [ -n "${envelope}" ] || continue
                 unzip -p "${archive}" "${envelope}" > "openbank-admin-ui/test-run-history/${artifact_name}.json"
               done
