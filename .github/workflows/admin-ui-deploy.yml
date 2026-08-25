@@ -35,6 +35,12 @@
 name: Admin-UI deploy
 
 on:
+  # CI evidence changes far more frequently than the Admin UI source. Rebuild the
+  # read-only evidence projection daily so a successful service/contract run cannot
+  # remain invisible in the sandbox until the next UI release. The existing job
+  # still uses the same signed image and GitOps-PR path as source-triggered deploys.
+  schedule:
+    - cron: '17 3 * * *'
   push:
     branches: [main]
     paths:
@@ -610,10 +616,10 @@ jobs:
           # skips ./gradlew sbomAll (too heavy for CI); SBOMs are staged from the
           # security workflow artifact in the preceding step instead.
           # --no-bump skips the sed+git step; the gitops PR job handles the bump.
-          # ECR tags are immutable. A manual refresh can intentionally rebuild the
-          # same commit after a new evidence artifact arrives, so make only that
-          # retry unique while retaining the commit-derived provenance in the tag.
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # ECR tags are immutable. An operator-initiated or scheduled evidence
+          # refresh can intentionally rebuild the same commit after new artifacts
+          # arrive, so make that refresh unique while retaining commit provenance.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ]; then
             export ADMIN_UI_IMAGE_TAG_SUFFIX="run${GITHUB_RUN_ID}"
           fi
           bash openbank-infra/scripts/build-push-admin-ui.sh --no-sbom --no-bump --no-login \
