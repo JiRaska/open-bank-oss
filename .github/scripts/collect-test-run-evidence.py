@@ -212,7 +212,11 @@ def observations(service: Path) -> list[dict]:
     return result
 
 
-def specialized_evidence(performance_summary: str | None, mutation_report: str | None) -> list[dict]:
+def specialized_evidence(
+    performance_summary: str | None,
+    mutation_report: str | None,
+    performance_not_run_detail: str | None = None,
+) -> list[dict]:
     specialized = []
     if performance_summary:
         summary_file = Path(performance_summary)
@@ -222,8 +226,10 @@ def specialized_evidence(performance_summary: str | None, mutation_report: str |
         # k6 summary-export encodes a crossed threshold as bare True (and a passing
         # threshold as False). Accept the older object fixture form too.
         failed = sum(1 for value in thresholds if value is True or (isinstance(value, dict) and value.get("ok") is False))
+        detail = (performance_not_run_detail or "performance summary absent") if summary is None \
+            else f"{len(thresholds)} threshold result(s), {failed} breached"
         specialized.append({"kind": "performance", "state": "not-run" if summary is None else "failed" if failed else "passed",
-                            "source": str(summary_file), "detail": f"{len(thresholds)} threshold result(s), {failed} breached"})
+                            "source": str(summary_file), "detail": detail})
     if mutation_report:
         mutation_file = Path(mutation_report)
         if mutation_file.exists():
@@ -244,6 +250,7 @@ def main() -> None:
     parser.add_argument("--out")
     parser.add_argument("--component")
     parser.add_argument("--performance-summary")
+    parser.add_argument("--performance-not-run-detail")
     parser.add_argument("--mutation-report")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
@@ -301,6 +308,8 @@ def main() -> None:
             assert [item["lifecycle"] for item in observations(service)] == ["started", "stopped"]
             specialized = specialized_evidence(str(performance), str(mutation))
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "passed")]
+            absent = specialized_evidence(str(service / "missing-summary.json"), None, "no safe target configured")
+            assert absent == [{"kind": "performance", "state": "not-run", "source": str(service / "missing-summary.json"), "detail": "no safe target configured"}]
             valid = {
                 "schemaVersion": 1,
                 "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "", "observedAt": "2026-08-22T00:00:00Z"},
@@ -328,7 +337,11 @@ def main() -> None:
     server = os.getenv("GITHUB_SERVER_URL", "")
     repository = os.getenv("GITHUB_REPOSITORY", "")
     run_id = os.getenv("GITHUB_RUN_ID", "local")
-    specialized = specialized_evidence(args.performance_summary, args.mutation_report)
+    specialized = specialized_evidence(
+        args.performance_summary,
+        args.mutation_report,
+        args.performance_not_run_detail,
+    )
     envelope = {
         "schemaVersion": 1,
         "run": {

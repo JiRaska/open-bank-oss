@@ -302,6 +302,9 @@ function performance() {
     definitionsByComponent.set(component, (definitionsByComponent.get(component) ?? 0) + 1)
   }
   const summaries = allFiles(path.join(repo, 'openbank-admin-ui', 'perf-artifacts'), file => file.endsWith('-summary.json'))
+  // A no-target baseline has a versioned envelope but deliberately no k6 summary.
+  // It is still evidence: the UI must distinguish that outcome from a lost artifact.
+  const runSidecars = allFiles(path.join(repo, 'openbank-admin-ui', 'perf-artifacts'), file => file.endsWith('-summary.json.run.json'))
   return definitions.map(file => {
     const raw = fs.readFileSync(file, 'utf8')
     const thresholds = (raw.match(/thresholds\s*:/g) ?? []).length
@@ -309,7 +312,7 @@ function performance() {
     const component = relative[0].startsWith('openbank-') ? relative[0] : null
     const localId = path.basename(file, '.js')
     const id = component ? `${component}-${localId.replace(/^openbank-/, '')}` : localId
-    const summaryFile = summaries.find(candidate => {
+    const matchesScenario = candidate => {
       const name = path.basename(candidate)
       // perf-gate names its artifact after the service, not the script.  That fallback is
       // unambiguous only while the service declares exactly one k6 scenario; otherwise leaving
@@ -318,14 +321,16 @@ function performance() {
         && definitionsByComponent.get(component) === 1
         && name === `${component}-summary.json`
       return name.includes(id) || name.includes(localId) || singleScenarioServiceSummary
-    })
+    }
+    const summaryFile = summaries.find(matchesScenario)
+    const runSidecar = runSidecars.find(matchesScenario)
     const summary = summaryFile ? readJson(summaryFile) : null
     const summaryMeta = summaryFile ? readJson(`${summaryFile}.meta.json`) : null
     // perf-gate writes sibling <service>-summary.json and <service>-run.json files.
     // Keep the former sidecar spelling as a fallback for any older retained artifact.
     const performanceRun = summaryFile
       ? readJson(summaryFile.replace(/-summary\.json$/, '-run.json')) ?? readJson(`${summaryFile}.run.json`)
-      : null
+      : readJson(runSidecar)
     const specialized = performanceRun?.specializedEvidence?.find(item => item.kind === 'performance')
     const thresholdResults = summary
       ? Object.values(summary.metrics ?? {}).flatMap(metric => Object.values(metric?.thresholds ?? {}))
