@@ -36,11 +36,14 @@ name: Admin-UI deploy
 
 on:
   # CI evidence changes far more frequently than the Admin UI source. A successful
-  # main Services CI immediately rebuilds the read-only evidence projection; the
+  # main Services CI and CI immediately rebuild the read-only evidence projection; the
   # daily run is its recovery path when GitHub suppresses or delays an event. Both
   # use the same signed image and GitOps-PR path as source-triggered deploys.
   workflow_run:
-    workflows: ["Services CI"]
+    # Services CI produces fleet envelopes; CI produces the Admin UI envelope.  Subscribe
+    # to both: refreshing after Services CI alone can snapshot a stale Admin UI verdict
+    # before the same main commit's UI test artifact is available.
+    workflows: ["Services CI", "CI"]
     types: [completed]
   schedule:
     - cron: '17 3 * * *'

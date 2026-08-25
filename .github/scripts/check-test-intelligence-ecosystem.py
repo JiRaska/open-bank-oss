@@ -48,7 +48,7 @@ def check(root: Path) -> list[str]:
     for needle, message in (
         ("build/test-intelligence/run.json", "admin deployment does not stage the versioned run envelope"),
         ("workflow_run:", "admin deployment does not refresh Test Intelligence after successful Services CI"),
-        ("workflows: [\"Services CI\"]", "admin deployment is not subscribed to the authoritative Services CI workflow"),
+        ("workflows: [\"Services CI\", \"CI\"]", "admin deployment is not subscribed to both fleet and Admin UI CI evidence workflows"),
         ("workflow_run.conclusion == 'success'", "admin deployment accepts unsuccessful Services CI evidence"),
         ("workflow_run.head_branch == 'main'", "admin deployment accepts non-main Services CI evidence"),
         ("schedule:", "admin deployment has no scheduled Test Intelligence snapshot refresh"),
