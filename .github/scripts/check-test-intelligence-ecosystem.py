@@ -45,8 +45,14 @@ def check(root: Path) -> list[str]:
             errors.append(f"shared Testcontainers resource emits no lifecycle proof: {name}")
 
     deploy = text(root / ".github/workflows/admin-ui-deploy.yml")
-    if "build/test-intelligence/run.json" not in deploy:
-        errors.append("admin deployment does not stage the versioned run envelope")
+    for needle, message in (
+        ("build/test-intelligence/run.json", "admin deployment does not stage the versioned run envelope"),
+        ("schedule:", "admin deployment has no scheduled Test Intelligence snapshot refresh"),
+        ("cron: '17 3 * * *'", "admin deployment refresh cadence drifted from the governed daily schedule"),
+        ("github.event_name }}\" = \"schedule\"", "scheduled snapshot refresh does not use a unique immutable image tag"),
+    ):
+        if needle not in deploy:
+            errors.append(message)
     # A staged Pact file is not a provider-verification verdict. The deploy collector
     # can query the existing read-only Broker credentials and must receive them only
     # in its build/collection step; without this wiring the UI bakes every Pact as
