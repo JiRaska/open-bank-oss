@@ -194,4 +194,27 @@ journeys:
     expect(app.rum).toMatchObject({ policy: 'consent-gated', state: 'unknown' })
     expect(report.runHistory.filter(item => item.component === 'openbank-app').map(item => item.run.id)).toEqual(['10', '9', '8'])
   })
+
+  it('marks old mobile CI evidence stale without hiding a recorded failure', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-client-freshness-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-unit.json', JSON.stringify({
+      schemaVersion: 1, component: 'openbank-app',
+      run: { id: 'old-pass', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://example.test/old-pass', observedAt: '2020-01-01T00:00:00Z' },
+      suites: [{ kind: 'unit', state: 'passed', durationMs: 100, counts: { discovered: 1, executed: 1, passed: 1, failed: 0, skipped: 0, errors: 0 } }],
+    }))
+    write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-e2e.json', JSON.stringify({
+      schemaVersion: 1, component: 'openbank-app',
+      run: { id: 'old-fail', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://example.test/old-fail', observedAt: '2020-01-01T00:00:00Z' },
+      suites: [{ kind: 'e2e', state: 'failed', durationMs: 100, counts: { discovered: 1, executed: 1, passed: 0, failed: 1, skipped: 0, errors: 0 } }],
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '1'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const app = report.clientExperiences.find(item => item.id === 'openbank-app')!
+    expect(app.evidence.find(item => item.kind === 'unit')).toMatchObject({ state: 'stale', run: { id: 'old-pass' } })
+    expect(app.evidence.find(item => item.kind === 'e2e')).toMatchObject({ state: 'failed', run: { id: 'old-fail' } })
+  })
 })

@@ -393,6 +393,16 @@ function mobileClientRuns() {
     .sort((a, b) => Date.parse(b.run?.observedAt ?? 0) - Date.parse(a.run?.observedAt ?? 0))
 }
 
+function clientEvidenceState(suite, observedAt) {
+  // A private-client artifact is immutable CI evidence, but it is still only
+  // useful while it is recent.  Do not turn a recorded failure into "stale":
+  // the failure remains the more important operator verdict.
+  if (suite.state === 'failed') return 'failed'
+  if (!observedAt) return 'not-run'
+  if (collectedAt.getTime() - new Date(observedAt).getTime() > staleAfterMs) return 'stale'
+  return suite.state
+}
+
 async function clientExperiences() {
   const mobileRuns = mobileClientRuns()
   // Mobile lanes complete independently.  Select the latest *execution of each
@@ -412,7 +422,7 @@ async function clientExperiences() {
   const iosRum = exists(path.join(appSource, 'shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt'))
   const webEvidence = runEnvelope('openbank-admin-ui')?.evidence ?? await junitEvidence('openbank-admin-ui')
   const mobileEvidence = [...latestMobileSuites.values()].map(({ suite: item, run }) => ({
-    kind: item.kind, state: item.state, observedAt: run.run?.observedAt ?? null,
+    kind: item.kind, state: clientEvidenceState(item, run.run?.observedAt ?? null), observedAt: run.run?.observedAt ?? null,
     source: 'openbank-app-test-intelligence:v1', environment: 'ci', durationMs: item.durationMs,
     counts: item.counts, detail: item.detail,
     ...(run.run ? { run: run.run } : {}),
