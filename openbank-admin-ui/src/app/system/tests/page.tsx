@@ -255,9 +255,23 @@ function Mutations({ report }: { report: TestIntelligenceReport }) {
 
 function Performance({ report }: { report: TestIntelligenceReport }) {
   const { t } = useLanguage()
-  return <div style={{ display: 'grid', gap: 10 }}>{report.performance.map(row => <div key={row.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+  const declaredComponents = new Set(report.performance.flatMap(row => row.component ? [row.component] : []))
+  const executed = report.performance.filter(row => row.state === 'passed' || row.state === 'failed').length
+  const undeclared = report.components.filter(component => !declaredComponents.has(component.component)).length
+  return <div style={{ display: 'grid', gap: 10 }}>
+    <section aria-label={t('Rozsah pokrytí výkonnostních testů', 'Performance-test coverage scope')} style={{ border: '1px solid color-mix(in srgb, var(--accent) 35%, var(--border))', borderRadius: 12, padding: 16, background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, var(--surface-1)), var(--surface-1))' }}>
+      <strong>{t('Rozsah výkonnostních důkazů', 'Performance evidence scope')}</strong>
+      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginTop: 10, fontSize: 13 }}>
+        <span><strong>{report.performance.length}</strong> {t('deklarovaných scénářů', 'declared scenarios')}</span>
+        <span><strong>{executed}</strong> {t('s výsledkem běhu', 'with run evidence')}</span>
+        <span><strong>{undeclared}</strong> {t('komponent bez deklarovaného scénáře', 'components without a declared scenario')}</span>
+      </div>
+      <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '10px 0 0' }}>{t('Absence scénáře není zelený výsledek. Tento panel odděluje měřený rozsah od neprovedeného či dosud nedefinovaného výkonového pokrytí.', 'An absent scenario is not a green result. This panel separates measured scope from performance coverage that is not run or not yet declared.')}</p>
+    </section>
+    {report.performance.map(row => <div key={row.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
     <div><strong>{row.id}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 5 }}>{row.source} · {row.thresholds} threshold group(s)</div>{row.metrics && <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 9, fontSize: 12 }}><span><strong>p95</strong> {row.metrics.p95Ms === null ? '—' : `${Math.round(row.metrics.p95Ms)} ms`}</span><span><strong>{t('Chybovost', 'Error rate')}</strong> {row.metrics.errorRatePercent === null ? '—' : `${row.metrics.errorRatePercent}%`}</span><span><strong>{t('Kontroly', 'Checks')}</strong> {row.metrics.checkPassRatePercent === null ? '—' : `${row.metrics.checkPassRatePercent}%`}</span><span><strong>{t('Požadavky', 'Requests')}</strong> {row.metrics.requests === null ? '—' : row.metrics.requests}</span></div>}{row.run && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>run {row.run.id} · {row.run.commit.slice(0, 8)} · {row.run.branch}</div>}{row.detail && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>{row.detail}</div>}</div><StateBadge state={row.state} />
-  </div>)}</div>
+    </div>)}
+  </div>
 }
 
 function Synthetics({ report }: { report: TestIntelligenceReport }) {
