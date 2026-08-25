@@ -407,6 +407,7 @@ jobs:
           set -u
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
+          MAX_ENVELOPES=100
           for workflow in services-ci.yml ci.yml; do
             # Deploy-only commits can arrive faster than service envelopes (each creates a
             # completed Services CI run with no per-service artifact).  A 20-run window then
@@ -416,6 +417,7 @@ jobs:
             api "https://api.github.com/repos/${REPO}/actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100" \
               | python3 -c "import json,sys; [print(r['id']) for r in json.load(sys.stdin).get('workflow_runs',[])]" 2>/dev/null \
               | while read -r run_id; do
+                  [ "$(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ')" -lt "$MAX_ENVELOPES" ] || break
                   [ -n "${run_id}" ] || continue
                   api "https://api.github.com/repos/${REPO}/actions/runs/${run_id}/artifacts?per_page=100" \
                     | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired']]" 2>/dev/null \
@@ -426,6 +428,7 @@ jobs:
                         envelope="$(unzip -Z1 "${archive}" | grep 'test-intelligence/run.json$' | head -1 || true)"
                         [ -n "${envelope}" ] || continue
                         unzip -p "${archive}" "${envelope}" > "openbank-admin-ui/test-run-history/${artifact_name}.json"
+                        [ "$(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ')" -lt "$MAX_ENVELOPES" ] || break
                       done
                 done
           done
