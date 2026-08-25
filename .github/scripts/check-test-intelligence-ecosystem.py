@@ -35,6 +35,11 @@ def check(root: Path) -> list[str]:
     convention = text(root / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts")
     if "OPENBANK_TEST_EVIDENCE_DIR" not in convention:
         errors.append("service test JVMs do not receive the runtime-evidence directory")
+    # Kover's agent otherwise transforms Testcontainers' shaded classes during Quarkus
+    # integration tests.  That can leave the advisory report task green but no XML to
+    # project, which is indistinguishable from absent coverage in the operator view.
+    if 'excludedClasses.add("org.testcontainers.*")' not in convention:
+        errors.append("Kover does not exclude Testcontainers from on-the-fly instrumentation")
 
     recorder = root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/evidence/TestInfrastructureEvidence.kt"
     if not recorder.exists():
