@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.192.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.191.0...admin-ui-v0.192.0) (2026-08-25)
+
+
+### Features
+
+* **testing:** retain unmeasured perf provenance ([#6782](https://github.com/JiRaska/open-bank-oss/issues/6782)) ([c878fed](https://github.com/JiRaska/open-bank-oss/commit/c878fede297660569fa973c9126255b1dc2a68b3))
+
 ## [0.191.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.190.1...admin-ui-v0.191.0) (2026-08-25)
 
 
