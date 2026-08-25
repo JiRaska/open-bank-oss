@@ -93,7 +93,11 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
     const [scheduled, successful, failures, recentRuns] = await Promise.all([
       queryPrometheus(base, `max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="${cronjob}"})`),
       queryPrometheus(base, `max(kube_cronjob_status_last_successful_time{namespace="observability",cronjob="${cronjob}"})`),
-      queryPrometheus(base, `max(max_over_time(kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"}[30m]))`),
+      // kube-state-metrics continues exporting terminal Job status until the Job is garbage
+      // collected. A historical failed Job therefore remains `1` forever; selecting it with
+      // max_over_time makes a later successful schedule look failed. Join on completion time so
+      // only a Job which both failed AND completed inside the window is a current failure.
+      queryPrometheus(base, `max((kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} > 0) and on(namespace,job_name) (time() - kube_job_status_completion_time{namespace="observability",job_name=~"${cronjob}.*"} < 1800))`),
       queryPrometheusRuns(base, cronjob),
     ])
     const observedAt = new Date().toISOString()
