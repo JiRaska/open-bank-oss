@@ -39,9 +39,39 @@ def files(path: pathlib.Path, pattern: str) -> list[pathlib.Path]:
     return sorted(path.glob(pattern))
 
 
+def strip_non_code(source: str) -> str:
+    """Remove Kotlin comments and strings before looking for a persistence operation.
+
+    A KDoc which correctly describes ``OutboxMessage.synthetic`` is not a writer. Neither is a
+    SQL/log string mentioning it. Kotlin block comments nest, so a regex for comments would leave
+    an inner tail live and let prose satisfy the gate.
+    """
+    source = re.sub(r'"""[\s\S]*?"""', '""', source)
+    source = re.sub(r'"(?:\\.|[^"\\])*"', '""', source)
+    source = re.sub(r"//[^\n]*", "", source)
+    result: list[str] = []
+    depth = index = 0
+    while index < len(source):
+        if source.startswith("/*", index):
+            depth += 1
+            index += 2
+            continue
+        if source.startswith("*/", index) and depth:
+            depth -= 1
+            index += 2
+            continue
+        if not depth:
+            result.append(source[index])
+        index += 1
+    return "".join(result)
+
+
 def service_findings(service: pathlib.Path) -> tuple[list[str], int]:
-    kotlin = files(service, "src/main/**/*.kt")
-    entities = [p for p in kotlin if ENTITY.search(p.read_text(encoding="utf-8"))]
+    kotlin = {
+        path: strip_non_code(path.read_text(encoding="utf-8"))
+        for path in files(service, "src/main/**/*.kt")
+    }
+    entities = [path for path, source in kotlin.items() if ENTITY.search(source)]
     if not entities:
         return [], 0
 
@@ -50,8 +80,8 @@ def service_findings(service: pathlib.Path) -> tuple[list[str], int]:
     # Some services own an outbox for an internally-derived event and have no OutboxMessage input
     # at all. A literal ``synthetic = false`` there is not a dropped marker: there is no marker at
     # this boundary to receive. Do not turn that distinct design decision into a false failure.
-    uses_message_contract = any("OutboxMessage" in p.read_text(encoding="utf-8") for p in kotlin)
-    propagates = any(PROPAGATES.search(p.read_text(encoding="utf-8")) for p in kotlin)
+    uses_message_contract = any("OutboxMessage" in source for source in kotlin.values())
+    propagates = any(PROPAGATES.search(source) for source in kotlin.values())
     findings: list[str] = []
     if not migration_ok:
         findings.append(
@@ -101,6 +131,8 @@ def self_test() -> int:
         "wrong migration default": ("ALTER TABLE demo_outbox ADD COLUMN synthetic BOOLEAN NOT NULL DEFAULT TRUE;", "fun OutboxMessage.toEntity() { synthetic = synthetic }", True),
         "missing propagation": (valid_migration, "fun OutboxMessage.toEntity() { synthetic = false }", True),
         "internally derived event has no marker to drop": (valid_migration, "fun write() { synthetic = false }", False),
+        "KDoc mapping does not count": (valid_migration, "fun map(message: OutboxMessage) { /** synthetic = message.synthetic */ synthetic = false }", True),
+        "string mapping does not count": (valid_migration, "fun map(message: OutboxMessage) { val description = \"synthetic = message.synthetic\"; synthetic = false }", True),
         "empty shared-outbox corpus fails closed": ("", "class AgentAuditOutbox { }", True),
     }
     failures: list[str] = []
