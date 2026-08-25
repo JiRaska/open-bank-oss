@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.191.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.190.1...admin-ui-v0.191.0) (2026-08-25)
+
+
+### Features
+
+* **admin-ui:** expose k6 evidence details ([#6774](https://github.com/JiRaska/open-bank-oss/issues/6774)) ([5e18b93](https://github.com/JiRaska/open-bank-oss/commit/5e18b936a28a70f06d15879eab1803cbd9121913))
+
 ## [0.190.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.190.0...admin-ui-v0.190.1) (2026-08-25)
 
 
