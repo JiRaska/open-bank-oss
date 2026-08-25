@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.193.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.192.2...admin-ui-v0.193.0) (2026-08-25)
+
+
+### Features
+
+* **admin-ui:** explain contract verification evidence ([#6801](https://github.com/JiRaska/open-bank-oss/issues/6801)) ([7f78e40](https://github.com/JiRaska/open-bank-oss/commit/7f78e40129344f1d8ed070187973f53a6390160d))
+
 ## [0.192.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.192.1...admin-ui-v0.192.2) (2026-08-25)
 
 
