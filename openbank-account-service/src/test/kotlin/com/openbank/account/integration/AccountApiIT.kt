@@ -125,7 +125,7 @@ class AccountApiIT {
               "partyId": "$partyId",
               "productId": "00000000-2222-0000-0000-000000000002",
               "accountType": "TERM_DEPOSIT",
-              "currencyCode": "CZK",
+              "currencyCode": "EUR",
               "legalName": "Test Customer"
             }
         """.trimIndent()
@@ -139,7 +139,7 @@ class AccountApiIT {
         } Then {
             statusCode(201)
             body("accountType", equalTo("TERM_DEPOSIT"))
-            body("currencyCode", equalTo("CZK"))
+            body("currencyCode", equalTo("EUR"))
             body("status", equalTo("ACTIVE"))
         }
     }
