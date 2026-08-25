@@ -61,12 +61,18 @@ test('Customer 360 joins authoritative portfolio and documents to the name-selec
 })
 
 test('Test Coverage is backed by a dated CI evidence snapshot, not a static score', async ({ page }) => {
-  await json(page, '**/api/test-results', { collectedAt: '2026-08-22T08:00:00Z', totals: { tests: 10, passed: 9, failed: 1, skipped: 0, services: 2, servicesWithTests: 1, unit: { tests: 8, passed: 7, failed: 1 }, integration: { tests: 2, passed: 2, failed: 0 } }, services: [{ service: 'openbank-ledger-service', tests: 10, passed: 9, failed: 1, skipped: 0, errors: 0, durationMs: 250, lastRunAt: '2026-08-22T08:00:00Z', testFiles: 2, unit: { tests: 8, passed: 7, failed: 1 }, integration: { tests: 2, passed: 2, failed: 0 } }, { service: 'openbank-account-service', tests: 0, passed: 0, failed: 0, skipped: 0, errors: 0, durationMs: 0, lastRunAt: null, testFiles: 0, unit: { tests: 0, passed: 0, failed: 0 }, integration: { tests: 0, passed: 0, failed: 0 } }] })
-  await json(page, '**/api/quality-report', { contracts: [], mutations: [], serviceScores: [] })
+  await json(page, '**/api/test-intelligence', {
+    schemaVersion: 1, collectedAt: '2026-08-22T08:00:00Z', contracts: [], mutations: [], performance: [], syntheticJourneys: [], clientExperiences: [], history: [], runHistory: [], testCases: [], warnings: [],
+    totals: { components: 2, componentsWithExecutionEvidence: 1, moneyPathComponents: 1, failingEvidence: 1, missingEvidence: 1, staleEvidence: 0 },
+    components: [
+      { component: 'ledger-service', released: true, moneyPath: true, evidence: [{ kind: 'unit', state: 'failed', observedAt: '2026-08-22T08:00:00Z', source: 'Services CI', environment: 'ci', counts: { discovered: 10, executed: 10, passed: 9, failed: 1, skipped: 0, errors: 0 } }], coverage: { state: 'passed', observedAt: '2026-08-22T08:00:00Z', lines: { covered: 90, missed: 10, percentage: 90 }, branches: { covered: 0, missed: 0, percentage: null }, source: 'Kover' }, testInfrastructure: { declared: [], observed: [] } },
+      { component: 'account-service', released: true, moneyPath: false, evidence: [], coverage: { state: 'not-run', observedAt: null, lines: { covered: 0, missed: 0, percentage: null }, branches: { covered: 0, missed: 0, percentage: null }, source: null }, testInfrastructure: { declared: [], observed: [] } },
+    ],
+  })
 
   await page.goto('/system/tests')
-  await expect(page.getByText(/CI snapshot vytvořen|CI snapshot collected/)).toBeVisible()
-  await expect(page.getByText(/0 znamená, že pro službu nebyl|0 means no artifact/)).toBeVisible()
+  await expect(page.getByText(/sesbíráno|collected/)).toBeVisible()
+  await expect(page.getByText(/absence se nikdy nevykresluje jako nula|absence is never rendered as zero/)).toBeVisible()
   await expect(page.getByText('ledger-service')).toBeVisible()
   await expect(page.getByText('account-service')).toBeVisible()
 })

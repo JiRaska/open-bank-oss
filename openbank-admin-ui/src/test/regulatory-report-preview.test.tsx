@@ -56,7 +56,7 @@ describe('Regulatory report preview', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F02.00?asOf=')
     expect(screen.getByText('finrep-service ← ledger trial balance (ne ClickHouse)')).toBeInTheDocument()
     expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Ready for internal export/)
-    expect(screen.getByRole('button', { name: 'Export JSON' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeEnabled()
   })
 
   it('does not present an implemented endpoint as live data when the BFF cannot load it', async () => {
@@ -89,7 +89,7 @@ describe('Regulatory report preview', () => {
     const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
     fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
     await waitFor(() => expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Export blocked.*incomplete data/i))
-    expect(screen.getByRole('button', { name: 'Export JSON' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Export preview as CSV' })).toBeDisabled()
   })
 })
