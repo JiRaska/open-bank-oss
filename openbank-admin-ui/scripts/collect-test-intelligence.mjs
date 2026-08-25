@@ -295,6 +295,12 @@ function performance() {
       .filter(entry => entry.isDirectory() && entry.name.startsWith('openbank-'))
       .flatMap(entry => allFiles(path.join(repo, entry.name, 'src', 'test', 'k6'), file => file.endsWith('.js'))),
   ]
+  const definitionsByComponent = new Map()
+  for (const file of definitions) {
+    const component = path.relative(repo, file).split(path.sep)[0]
+    if (!component.startsWith('openbank-')) continue
+    definitionsByComponent.set(component, (definitionsByComponent.get(component) ?? 0) + 1)
+  }
   const summaries = allFiles(path.join(repo, 'openbank-admin-ui', 'perf-artifacts'), file => file.endsWith('-summary.json'))
   return definitions.map(file => {
     const raw = fs.readFileSync(file, 'utf8')
@@ -305,22 +311,46 @@ function performance() {
     const id = component ? `${component}-${localId.replace(/^openbank-/, '')}` : localId
     const summaryFile = summaries.find(candidate => {
       const name = path.basename(candidate)
-      return name.includes(id) || name.includes(localId)
+      // perf-gate names its artifact after the service, not the script.  That fallback is
+      // unambiguous only while the service declares exactly one k6 scenario; otherwise leaving
+      // the result not-run is safer than attaching one scenario's latency to another.
+      const singleScenarioServiceSummary = component
+        && definitionsByComponent.get(component) === 1
+        && name === `${component}-summary.json`
+      return name.includes(id) || name.includes(localId) || singleScenarioServiceSummary
     })
     const summary = summaryFile ? readJson(summaryFile) : null
     const summaryMeta = summaryFile ? readJson(`${summaryFile}.meta.json`) : null
-    const performanceRun = summaryFile ? readJson(`${summaryFile}.run.json`) : null
+    // perf-gate writes sibling <service>-summary.json and <service>-run.json files.
+    // Keep the former sidecar spelling as a fallback for any older retained artifact.
+    const performanceRun = summaryFile
+      ? readJson(summaryFile.replace(/-summary\.json$/, '-run.json')) ?? readJson(`${summaryFile}.run.json`)
+      : null
     const specialized = performanceRun?.specializedEvidence?.find(item => item.kind === 'performance')
     const thresholdResults = summary
       ? Object.values(summary.metrics ?? {}).flatMap(metric => Object.values(metric?.thresholds ?? {}))
       : []
-    const failed = thresholdResults.filter(result => result?.ok === false).length
+    // k6 summary-export uses bare booleans with inverted-looking polarity: true means
+    // crossed/breached, false means passed. The object form is kept for compatible fixtures.
+    const failed = thresholdResults.filter(result => result === true || result?.ok === false).length
+    const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null
+    const ratePercent = value => {
+      const rate = number(value)
+      return rate === null ? null : Math.round(rate * 10_000) / 100
+    }
+    const metrics = summary ? {
+      p95Ms: number(summary.metrics?.http_req_duration?.values?.['p(95)'] ?? summary.metrics?.http_req_duration?.['p(95)']),
+      errorRatePercent: ratePercent(summary.metrics?.http_req_failed?.values?.rate ?? summary.metrics?.http_req_failed?.value),
+      checkPassRatePercent: ratePercent(summary.metrics?.checks?.values?.rate ?? summary.metrics?.checks?.value),
+      requests: number(summary.metrics?.http_reqs?.values?.count ?? summary.metrics?.http_reqs?.count),
+    } : undefined
     const at = summaryFile ? observedAt(summaryFile) : null
     return {
       id, component,
       state: specialized?.state ?? (summary ? stateFrom(failed, 1, at) : 'not-run'),
       observedAt: performanceRun?.run?.observedAt ?? at,
       source: path.relative(repo, file), thresholds,
+      ...(metrics ? { metrics } : {}),
       detail: specialized?.detail ?? (summary
         ? `${thresholdResults.length} threshold result(s), ${failed} breached`
         : 'Scenario is declared; the latest k6 run artifact is not bundled into this image.'),

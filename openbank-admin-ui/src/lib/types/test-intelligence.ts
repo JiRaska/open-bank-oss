@@ -106,6 +106,12 @@ export interface PerformanceEvidence {
   observedAt: string | null
   source: string
   thresholds: number
+  metrics?: {
+    p95Ms: number | null
+    errorRatePercent: number | null
+    checkPassRatePercent: number | null
+    requests: number | null
+  }
   detail?: string
   run?: TestRunProvenance
 }
