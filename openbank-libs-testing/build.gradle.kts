@@ -38,6 +38,11 @@ dependencies {
     api(libs.junit.jupiter)
     api(libs.assertj)
 
+    // Trace-contract kit exposes SpanData/SpanExporter in its public test API. Keep the
+    // SDK version aligned with the fleet's Quarkus OpenTelemetry line rather than making
+    // every consumer reinvent an in-memory exporter and ad-hoc span assertions.
+    api("io.opentelemetry:opentelemetry-sdk:1.62.0")
+
     // AuditEventTime parses a producer's real outbox payload with the same Jackson the audit
     // consumer uses. jsr310 (not bare databind) because it carries jackson-databind/core
     // transitively at the catalog's pinned `jackson` version, and this module has no Quarkus BOM
