@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.192.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.192.1...admin-ui-v0.192.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* **admin-ui:** age synthetic job failures ([#6795](https://github.com/JiRaska/open-bank-oss/issues/6795)) ([5d36ac7](https://github.com/JiRaska/open-bank-oss/commit/5d36ac7bc34bf7cfb60af78ba0ac0a22722b0f5f))
+
 ## [0.192.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.192.0...admin-ui-v0.192.1) (2026-08-25)
 
 
