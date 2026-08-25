@@ -35,10 +35,13 @@
 name: Admin-UI deploy
 
 on:
-  # CI evidence changes far more frequently than the Admin UI source. Rebuild the
-  # read-only evidence projection daily so a successful service/contract run cannot
-  # remain invisible in the sandbox until the next UI release. The existing job
-  # still uses the same signed image and GitOps-PR path as source-triggered deploys.
+  # CI evidence changes far more frequently than the Admin UI source. A successful
+  # main Services CI immediately rebuilds the read-only evidence projection; the
+  # daily run is its recovery path when GitHub suppresses or delays an event. Both
+  # use the same signed image and GitOps-PR path as source-triggered deploys.
+  workflow_run:
+    workflows: ["Services CI"]
+    types: [completed]
   schedule:
     - cron: '17 3 * * *'
   push:
@@ -98,7 +101,14 @@ jobs:
     # scopes the deploy commit to the gitops manifest alone, so the loop can no longer form by
     # that route. This guard is kept as belt-and-braces: it costs nothing and still holds if a
     # future step writes into openbank-admin-ui/** again.
-    if: "!startsWith(github.event.head_commit.message, 'chore(admin-ui): deploy')"
+    # `workflow_run` is trusted only after a successful Services CI on main.  It
+    # executes this default-branch workflow, never unreviewed PR YAML, and only
+    # refreshes a read-only projection from CI artifacts.  Keep the old push
+    # loop-breaker; workflow_run has no head_commit, hence the explicit fallback.
+    if: >-
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')) &&
+      !startsWith(github.event.head_commit.message || '', 'chore(admin-ui): deploy')
     # Native arm64 GitHub-hosted runner (free on public repos): the admin-ui image
     # is linux/arm64. ECR push + cosign use the same GitHub-OIDC role as before.
     runs-on: ubuntu-24.04-arm
@@ -619,7 +629,7 @@ jobs:
           # ECR tags are immutable. An operator-initiated or scheduled evidence
           # refresh can intentionally rebuild the same commit after new artifacts
           # arrive, so make that refresh unique while retaining commit provenance.
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_run" ]; then
             export ADMIN_UI_IMAGE_TAG_SUFFIX="run${GITHUB_RUN_ID}"
           fi
           bash openbank-infra/scripts/build-push-admin-ui.sh --no-sbom --no-bump --no-login \
