@@ -460,7 +460,9 @@ jobs:
         # The Test Intelligence collector reads k6 summaries only from the deployment-local
         # perf-artifacts directory.  A declared scenario is deliberately not promoted to a
         # result, so bring in only artifacts emitted by the latest successful main run of the
-        # governed performance workflow.  Missing or expired evidence remains `not-run` in the
+        # governed performance workflows.  The money-path baseline may intentionally emit only
+        # a `not-run` envelope when no safe runner target exists; retain that provenance too.
+        # Missing or expired evidence remains `not-run` in the
         # UI; this best-effort staging step must never turn absence into a deployment failure.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -496,6 +498,42 @@ jobs:
           done <<< "${ARTIFACTS}"
           COUNT=$(find openbank-admin-ui/perf-artifacts -name '*-summary.json' | wc -l | tr -d ' ')
           echo "Staged ${COUNT} k6 summary file(s) from ${DOWNLOADED} performance artifact(s), run ${RUN_ID}."
+
+          BASELINE_RUN_ID=$(api \
+            "https://api.github.com/repos/${REPO}/actions/workflows/perf-baseline.yml/runs?branch=main&status=success&per_page=1" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
+            2>/dev/null || true)
+          if [ -z "${BASELINE_RUN_ID}" ]; then
+            echo "No successful money-path baseline run found — it remains declared but unmeasured."
+            exit 0
+          fi
+          BASELINE_ARTIFACT=$(api \
+            "https://api.github.com/repos/${REPO}/actions/runs/${BASELINE_RUN_ID}/artifacts?per_page=100" \
+            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if x['name']=='k6-money-path-summary' and not x['expired']]; print(a[0]['id'] if a else '')" \
+            2>/dev/null || true)
+          if [ -z "${BASELINE_ARTIFACT}" ]; then
+            echo "Money-path baseline ${BASELINE_RUN_ID} has no retained evidence artifact."
+            exit 0
+          fi
+          BASELINE_DIR="$(mktemp -d)"
+          if ! api "https://api.github.com/repos/${REPO}/actions/artifacts/${BASELINE_ARTIFACT}/zip" -L -o /tmp/k6-money-path-summary.zip \
+            || ! unzip -q /tmp/k6-money-path-summary.zip -d "${BASELINE_DIR}"; then
+            echo "::warning::Could not stage money-path baseline evidence from run ${BASELINE_RUN_ID}."
+            exit 0
+          fi
+          BASELINE_SUMMARY=$(find "${BASELINE_DIR}" -name 'perf-summary.json' -print -quit)
+          BASELINE_ENVELOPE=$(find "${BASELINE_DIR}" -name 'perf-run.json' -print -quit)
+          SUMMARY_STATUS=no
+          if [ -n "${BASELINE_SUMMARY}" ]; then
+            cp "${BASELINE_SUMMARY}" openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json
+            SUMMARY_STATUS=yes
+          fi
+          ENVELOPE_STATUS=no
+          if [ -n "${BASELINE_ENVELOPE}" ]; then
+            cp "${BASELINE_ENVELOPE}" openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json
+            ENVELOPE_STATUS=yes
+          fi
+          echo "Staged money-path baseline ${BASELINE_RUN_ID}: summary=${SUMMARY_STATUS} envelope=${ENVELOPE_STATUS}."
 
       - name: Collect production-readiness scorecard
         # Derives C1–C9 maturity scores from the repo and writes

@@ -62,6 +62,14 @@ journeys:
     write(repo, 'openbank-admin-ui/perf-artifacts/breached-summary.json', JSON.stringify({ metrics: {
       checks: { value: 0.9, thresholds: { 'rate==1.0': true } },
     } }))
+    write(repo, 'perf/k6/money-path-smoke.js', 'export const options = { thresholds: { checks: ["rate>0.99"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'baseline-7', attempt: 1, commit: 'fedcba987654', branch: 'main', workflow: 'Perf baseline', url: 'https://example.test/perf/baseline-7', observedAt: '2026-08-25T07:00:00Z' },
+      component: 'openbank-money-path', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'performance', state: 'not-run', source: 'perf-summary.json', detail: 'No safe money-path target is configured for this GitHub-hosted runner.' }],
+    }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
@@ -78,6 +86,9 @@ journeys:
       p95Ms: 321.4, errorRatePercent: 1.25, checkPassRatePercent: 98.75, requests: 80,
     }, run: { id: 'perf-42', workflow: 'Performance gate' } })
     expect(report.performance.find(item => item.id === 'breached')).toMatchObject({ state: 'failed', detail: '1 threshold result(s), 1 breached' })
+    expect(report.performance.find(item => item.id === 'money-path-smoke')).toMatchObject({
+      state: 'not-run', detail: 'No safe money-path target is configured for this GitHub-hosted runner.', run: { id: 'baseline-7', workflow: 'Perf baseline' },
+    })
     expect(report.clientExperiences).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'admin-ui', rum: expect.objectContaining({ policy: 'rejected' }) }),
       expect.objectContaining({ id: 'openbank-app', evidence: [], blocker: expect.stringMatching(/artifact/i) }),

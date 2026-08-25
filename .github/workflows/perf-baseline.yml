@@ -51,6 +51,7 @@ jobs:
           if [ -z "$ledger" ] || [ -z "$txn" ]; then
             echo "::notice::PERF_LEDGER_URL / PERF_TXN_URL not configured — skipping the perf baseline (no target to measure)."
             echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "reason=No safe money-path target is configured for this GitHub-hosted runner." >> "$GITHUB_OUTPUT"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "ledger=$ledger" >> "$GITHUB_OUTPUT"
@@ -74,7 +75,9 @@ jobs:
         run: |
           python3 .github/scripts/collect-test-run-evidence.py \
             --service perf --component openbank-money-path \
-            --performance-summary perf-summary.json --out perf-run.json
+            --performance-summary perf-summary.json \
+            --performance-not-run-detail "${{ steps.target.outputs.reason }}" \
+            --out perf-run.json
 
       - name: Upload k6 summary and versioned envelope
         if: always()
