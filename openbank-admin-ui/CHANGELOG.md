@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.190.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.190.0...admin-ui-v0.190.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* **admin-ui:** retain XML fallback evidence ([#6765](https://github.com/JiRaska/open-bank-oss/issues/6765)) ([af88cb3](https://github.com/JiRaska/open-bank-oss/commit/af88cb3a34eb8d3e59a4f477afeb3b8d6625970f))
+
 ## [0.190.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.4...admin-ui-v0.190.0) (2026-08-24)
 
 
