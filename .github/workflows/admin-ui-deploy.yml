@@ -345,7 +345,12 @@ jobs:
               TMPDIR_ART="/tmp/${art_name}-extracted"
               rm -rf "${TMPDIR_ART}" && mkdir -p "${TMPDIR_ART}"
               unzip -q "/tmp/${art_name}.zip" -d "${TMPDIR_ART}" 2>/dev/null || true
-              RUN_JSON="$(find "${TMPDIR_ART}" -path '*/test-intelligence/run.json' -print -quit)"
+              # actions/upload-artifact strips the uploaded directory prefix: the
+              # service envelope is therefore normally `run.json` at the archive
+              # root.  Keep accepting the previous nested layout too, so the UI
+              # retains the latest per-service execution evidence across action
+              # layout changes rather than silently falling back to stale JUnit.
+              RUN_JSON="$(find "${TMPDIR_ART}" -type f \( -name 'run.json' -o -path '*/test-intelligence/run.json' \) -print -quit)"
               if [ -n "${RUN_JSON}" ]; then
                 mkdir -p "${svc}/build/test-intelligence"
                 cp "${RUN_JSON}" "${svc}/build/test-intelligence/run.json"

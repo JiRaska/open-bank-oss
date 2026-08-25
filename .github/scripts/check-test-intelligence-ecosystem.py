@@ -47,6 +47,7 @@ def check(root: Path) -> list[str]:
     deploy = text(root / ".github/workflows/admin-ui-deploy.yml")
     for needle, message in (
         ("build/test-intelligence/run.json", "admin deployment does not stage the versioned run envelope"),
+        ("-name 'run.json'", "admin deployment does not accept the root run-envelope artifact layout"),
         ("workflow_run:", "admin deployment does not refresh Test Intelligence after successful Services CI"),
         ("workflows: [\"Services CI\", \"CI\"]", "admin deployment is not subscribed to both fleet and Admin UI CI evidence workflows"),
         ("workflow_run.conclusion == 'success'", "admin deployment accepts unsuccessful Services CI evidence"),
