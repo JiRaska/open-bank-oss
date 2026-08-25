@@ -49,6 +49,7 @@ journeys:
       http_req_duration: { 'p(95)': 321.4, thresholds: { 'p(95)<500': false } },
       http_req_failed: { value: 0.0125, thresholds: { 'rate<0.02': false } },
       checks: { value: 0.9875, thresholds: { 'rate>0.98': false } },
+      http_reqs: { count: 80 },
     } }))
     write(repo, 'openbank-admin-ui/perf-artifacts/openbank-alpha-service-run.json', JSON.stringify({
       schemaVersion: 1,
@@ -74,7 +75,7 @@ journeys:
     expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *' })
     expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
     expect(report.performance.find(item => item.id === 'openbank-alpha-service-alpha-smoke')).toMatchObject({ state: 'passed', metrics: {
-      p95Ms: 321.4, errorRatePercent: 1.25, checkPassRatePercent: 98.75,
+      p95Ms: 321.4, errorRatePercent: 1.25, checkPassRatePercent: 98.75, requests: 80,
     }, run: { id: 'perf-42', workflow: 'Performance gate' } })
     expect(report.performance.find(item => item.id === 'breached')).toMatchObject({ state: 'failed', detail: '1 threshold result(s), 1 breached' })
     expect(report.clientExperiences).toEqual(expect.arrayContaining([

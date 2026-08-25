@@ -342,6 +342,7 @@ function performance() {
       p95Ms: number(summary.metrics?.http_req_duration?.values?.['p(95)'] ?? summary.metrics?.http_req_duration?.['p(95)']),
       errorRatePercent: ratePercent(summary.metrics?.http_req_failed?.values?.rate ?? summary.metrics?.http_req_failed?.value),
       checkPassRatePercent: ratePercent(summary.metrics?.checks?.values?.rate ?? summary.metrics?.checks?.value),
+      requests: number(summary.metrics?.http_reqs?.values?.count ?? summary.metrics?.http_reqs?.count),
     } : undefined
     const at = summaryFile ? observedAt(summaryFile) : null
     return {

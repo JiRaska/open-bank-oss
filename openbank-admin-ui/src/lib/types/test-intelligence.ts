@@ -110,6 +110,7 @@ export interface PerformanceEvidence {
     p95Ms: number | null
     errorRatePercent: number | null
     checkPassRatePercent: number | null
+    requests: number | null
   }
   detail?: string
   run?: TestRunProvenance
