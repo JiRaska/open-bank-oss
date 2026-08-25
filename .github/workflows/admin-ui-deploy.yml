@@ -593,6 +593,13 @@ jobs:
       - name: Build, collect, push
         id: build
         env:
+          # The build script's quality collector reads these only to fetch the
+          # Pact Broker's per-Pact provider-verification verdict before the
+          # immutable Test Intelligence snapshot is baked. Docker receives no
+          # build arg for them, so they cannot enter the image or browser bundle.
+          PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
           # Optional: enables source-map upload to GlitchTip (#3235). Unset = no upload, normal
           # build — the maps are what turn a captured error into a file and a line.
           GLITCHTIP_AUTH_TOKEN: ${{ secrets.GLITCHTIP_AUTH_TOKEN }}
