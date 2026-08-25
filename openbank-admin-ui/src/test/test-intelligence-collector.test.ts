@@ -44,11 +44,15 @@ journeys:
     falsification: break the app route
     blocked_by: needs canary devices
 `)
-    write(repo, 'perf/k6/smoke.js', 'export const options = { thresholds: { checks: ["rate>0.99"] } }')
-    write(repo, 'openbank-admin-ui/perf-artifacts/smoke-summary.json', JSON.stringify({ metrics: {
-      http_req_duration: { values: { 'p(95)': 321.4 } },
-      http_req_failed: { values: { rate: 0.0125 } },
-      checks: { values: { rate: 0.9875 } },
+    write(repo, 'openbank-alpha-service/src/test/k6/alpha-smoke.js', 'export const options = { thresholds: { checks: ["rate>0.99"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/openbank-alpha-service-summary.json', JSON.stringify({ metrics: {
+      http_req_duration: { 'p(95)': 321.4, thresholds: { 'p(95)<500': false } },
+      http_req_failed: { value: 0.0125, thresholds: { 'rate<0.02': false } },
+      checks: { value: 0.9875, thresholds: { 'rate>0.98': false } },
+    } }))
+    write(repo, 'perf/k6/breached.js', 'export const options = { thresholds: { checks: ["rate==1.0"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/breached-summary.json', JSON.stringify({ metrics: {
+      checks: { value: 0.9, thresholds: { 'rate==1.0': true } },
     } }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
@@ -62,9 +66,10 @@ journeys:
     expect(report.totals.missingEvidence).toBe(1)
     expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *' })
     expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
-    expect(report.performance[0]).toMatchObject({ id: 'smoke', state: 'passed', metrics: {
+    expect(report.performance.find(item => item.id === 'openbank-alpha-service-alpha-smoke')).toMatchObject({ state: 'passed', metrics: {
       p95Ms: 321.4, errorRatePercent: 1.25, checkPassRatePercent: 98.75,
     } })
+    expect(report.performance.find(item => item.id === 'breached')).toMatchObject({ state: 'failed', detail: '1 threshold result(s), 1 breached' })
     expect(report.clientExperiences).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'admin-ui', rum: expect.objectContaining({ policy: 'rejected' }) }),
       expect.objectContaining({ id: 'openbank-app', evidence: [], blocker: expect.stringMatching(/artifact/i) }),

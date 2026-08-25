@@ -456,6 +456,47 @@ jobs:
           COUNT=$(find . -path "*/build/reports/pitest/mutations.xml" | wc -l | tr -d ' ')
           echo "Staged ${COUNT} mutations.xml files from ${DOWNLOADED} artifacts."
 
+      - name: Stage performance evidence from latest successful k6 run
+        # The Test Intelligence collector reads k6 summaries only from the deployment-local
+        # perf-artifacts directory.  A declared scenario is deliberately not promoted to a
+        # result, so bring in only artifacts emitted by the latest successful main run of the
+        # governed performance workflow.  Missing or expired evidence remains `not-run` in the
+        # UI; this best-effort staging step must never turn absence into a deployment failure.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" "$@"; }
+          mkdir -p openbank-admin-ui/perf-artifacts
+          RUN_ID=$(api \
+            "https://api.github.com/repos/${REPO}/actions/workflows/perf-gate.yml/runs?branch=main&status=success&per_page=1" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
+            2>/dev/null || true)
+          if [ -z "${RUN_ID}" ]; then
+            echo "No successful performance run found — performance evidence remains not-run."
+            exit 0
+          fi
+          ARTIFACTS=$(api \
+            "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+            | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('perf-reports-') and not a['expired']]" \
+            2>/dev/null || true)
+          if [ -z "${ARTIFACTS}" ]; then
+            echo "No non-expired performance artifacts in run ${RUN_ID} — performance evidence remains not-run."
+            exit 0
+          fi
+          DOWNLOADED=0
+          while IFS=' ' read -r artifact_id artifact_name; do
+            [ -n "${artifact_id}" ] || continue
+            archive="/tmp/${artifact_name}.zip"
+            if api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null; then
+              unzip -q "${archive}" -d openbank-admin-ui/perf-artifacts 2>/dev/null || true
+              DOWNLOADED=$((DOWNLOADED + 1))
+            fi
+          done <<< "${ARTIFACTS}"
+          COUNT=$(find openbank-admin-ui/perf-artifacts -name '*-summary.json' | wc -l | tr -d ' ')
+          echo "Staged ${COUNT} k6 summary file(s) from ${DOWNLOADED} performance artifact(s), run ${RUN_ID}."
+
       - name: Collect production-readiness scorecard
         # Derives C1–C9 maturity scores from the repo and writes
         # openbank-admin-ui/prod-readiness.json so the Dockerfile bakes it into

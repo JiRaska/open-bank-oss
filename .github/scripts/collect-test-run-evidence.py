@@ -219,7 +219,9 @@ def specialized_evidence(performance_summary: str | None, mutation_report: str |
         summary = json.loads(summary_file.read_text()) if summary_file.exists() else None
         thresholds = [value for metric in (summary or {}).get("metrics", {}).values()
                       for value in (metric.get("thresholds") or {}).values()]
-        failed = sum(1 for value in thresholds if value.get("ok") is False)
+        # k6 summary-export encodes a crossed threshold as bare True (and a passing
+        # threshold as False). Accept the older object fixture form too.
+        failed = sum(1 for value in thresholds if value is True or (isinstance(value, dict) and value.get("ok") is False))
         specialized.append({"kind": "performance", "state": "not-run" if summary is None else "failed" if failed else "passed",
                             "source": str(summary_file), "detail": f"{len(thresholds)} threshold result(s), {failed} breached"})
     if mutation_report:
@@ -255,7 +257,8 @@ def main() -> None:
                 '{"image":"postgres:16.3-alpine","lifecycle":"die","observedAtUnix":1787433060}\n'
             )
             performance = service / "perf.json"
-            performance.write_text('{"metrics":{"http_req_duration":{"thresholds":{"p(95)<500":{"ok":false}}}}}')
+            # This is k6's actual summary-export form: true means the threshold was crossed.
+            performance.write_text('{"metrics":{"http_req_duration":{"thresholds":{"p(95)<500":true}}}}')
             mutation = service / "mutations.xml"
             mutation.write_text('<mutations><mutation status="KILLED"/><mutation status="SURVIVED"/></mutations>')
             # Negative control for the report discovery itself: a vitest/Playwright
