@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.194.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.194.0...admin-ui-v0.194.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* **admin-ui:** stale client test evidence ([#6836](https://github.com/JiRaska/open-bank-oss/issues/6836)) ([7b2956d](https://github.com/JiRaska/open-bank-oss/commit/7b2956d08755bd85279028dd1e03c1348a74d5c2))
+
 ## [0.194.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.193.0...admin-ui-v0.194.0) (2026-08-25)
 
 
