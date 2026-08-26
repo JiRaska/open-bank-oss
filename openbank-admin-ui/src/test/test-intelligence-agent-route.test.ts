@@ -65,4 +65,29 @@ describe('Test Intelligence agent BFF', () => {
     expect(JSON.stringify(outbound)).not.toContain('sampledSpansLast7d')
     rmSync(dir, { recursive: true, force: true })
   })
+
+  it('fails closed for unrecognised snapshot vocabulary before AI analysis', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-agent-'))
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-22T10:00:00Z',
+      components: [
+        { component: 'openbank-ledger-service', moneyPath: true,
+          evidence: [{ kind: 'future-evidence-kind', state: 'future-state' }],
+          testInfrastructure: { declared: ['untrusted-resource'], observed: [{ lifecycle: 'started' }] } },
+        { component: '../outside-the-contract', moneyPath: true, evidence: [], testInfrastructure: { declared: [], observed: [] } },
+      ], clientExperiences: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { POST } = await import('@/app/api/test-intelligence/agents/route')
+    expect((await POST()).status).toBe(200)
+    const outbound = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(outbound.components).toEqual([{
+      component: 'openbank-ledger-service', moneyPath: true,
+      evidence: [{ kind: 'unknown', state: 'unknown' }], declaredInfrastructure: [], observedInfrastructureStarts: 1,
+    }])
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
