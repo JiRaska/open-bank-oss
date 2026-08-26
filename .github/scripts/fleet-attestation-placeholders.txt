@@ -47,3 +47,10 @@
 #   gh workflow run auto-deploy.yml -f services=openbank-case-coordinator-agent
 # DELETE THIS ENTRY once that build lands and the auto-deploy gitops PR rewrites the pin.
 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-4405a74fa
+
+# referral-service: first sandbox registration. The service existed before its GitOps workload,
+# so auto-deploy could not build it and this source tag is absent from ECR. The Deployment is
+# deliberately held at replicas=0; scheduled/manual reconcile builds, signs and attests the image
+# through the normal contract gate, then rewrites this pin in a reviewed GitOps PR.
+# DELETE THIS ENTRY as part of that image-pin PR, before the separate replicas=1 activation.
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-referral-service:sandbox-d92d20f5
