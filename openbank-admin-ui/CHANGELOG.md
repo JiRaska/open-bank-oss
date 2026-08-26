@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.202.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.201.1...admin-ui-v0.202.0) (2026-08-26)
+
+
+### Features
+
+* **admin-ui:** add test evidence triage ([#7150](https://github.com/JiRaska/open-bank-oss/issues/7150)) ([9ae16ff](https://github.com/JiRaska/open-bank-oss/commit/9ae16ffcc11405048a8d1cef1a75068d9b01a1a7))
+* **admin-ui:** show synthetic performance evidence ([#7151](https://github.com/JiRaska/open-bank-oss/issues/7151)) ([a732e20](https://github.com/JiRaska/open-bank-oss/commit/a732e20a95b180bf132d43635f9d8f8e164b1833))
+
 ## [0.201.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.201.0...admin-ui-v0.201.1) (2026-08-26)
 
 
