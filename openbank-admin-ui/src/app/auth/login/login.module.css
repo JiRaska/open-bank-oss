@@ -1,0 +1,82 @@
+.page {
+  --login-ink: #12233f;
+  --login-muted: #53647c;
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: minmax(360px, 0.92fr) minmax(480px, 1.08fr);
+  background: #f5f7fb;
+  color: var(--login-ink);
+}
+
+.skipLink { position: fixed; z-index: 20; top: 12px; left: 12px; transform: translateY(-180%); padding: 10px 14px; border-radius: 10px; background: #fff; color: #172554; font-weight: 700; box-shadow: 0 8px 30px rgba(10, 27, 58, .2); transition: transform .16s ease; }
+.skipLink:focus { transform: translateY(0); }
+
+.story { position: relative; isolation: isolate; overflow: hidden; display: flex; min-height: 100%; flex-direction: column; padding: clamp(32px, 5vw, 72px); color: #fff; background: radial-gradient(circle at 5% 4%, rgba(92, 180, 255, .25), transparent 30%), linear-gradient(145deg, #0d2242 0%, #123a69 56%, #0b2445 100%); }
+.story::after { content: ""; position: absolute; z-index: -1; right: -14%; bottom: -21%; width: min(38vw, 540px); aspect-ratio: 1; border: 1px solid rgba(255,255,255,.13); border-radius: 50%; box-shadow: 0 0 0 68px rgba(255,255,255,.025), 0 0 0 136px rgba(255,255,255,.018); }
+.storyGlow { position: absolute; z-index: -1; top: 40%; left: 65%; width: 380px; height: 380px; border-radius: 50%; background: rgba(30, 197, 174, .09); filter: blur(50px); }
+.brand { display: flex; align-items: center; gap: 12px; letter-spacing: -.01em; }
+.brand > span:last-child { display: grid; }
+.brand strong { font-size: 1.02rem; }
+.brand small { color: #bdcbe0; font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; }
+.brandMark { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid rgba(255,255,255,.22); border-radius: 13px; background: rgba(255,255,255,.1); box-shadow: inset 0 1px 0 rgba(255,255,255,.16); }
+.storyBody { margin: auto 0; max-width: 620px; padding: 64px 0; }
+.eyebrow { margin: 0 0 18px; color: #8ce3d3; font-size: .76rem; font-weight: 750; letter-spacing: .18em; text-transform: uppercase; }
+.story h1 { max-width: 680px; margin: 0; font-size: clamp(2.6rem, 5.2vw, 5.8rem); font-weight: 650; letter-spacing: -.055em; line-height: .98; text-wrap: balance; }
+.intro { max-width: 540px; margin: 28px 0 34px; color: #d3deed; font-size: clamp(1rem, 1.5vw, 1.22rem); line-height: 1.65; }
+.benefits { display: grid; gap: 13px; margin: 0; padding: 0; list-style: none; color: #edf5ff; font-size: .92rem; }
+.benefits li { display: flex; align-items: center; gap: 11px; }
+.benefits svg { flex: none; color: #7ce2cf; }
+.storyFootnote { margin: 0; color: #9fb2ca; font-size: .72rem; letter-spacing: .06em; }
+
+.access { display: flex; min-height: 100%; flex-direction: column; padding: clamp(24px, 4vw, 56px) clamp(28px, 7vw, 104px); }
+.accessHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.secureBadge { display: inline-flex; align-items: center; gap: 7px; color: #36526f; font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.secureBadge svg { color: #167866; }
+.languageButton { display: inline-flex; align-items: center; gap: 7px; padding: 9px 11px; border: 1px solid #d8e0eb; border-radius: 10px; background: rgba(255,255,255,.72); color: #314761; font: inherit; font-size: .78rem; font-weight: 650; cursor: pointer; transition: border-color .16s, background .16s, transform .16s; }
+.languageButton:hover { border-color: #9eb0c7; background: #fff; transform: translateY(-1px); }
+.languageButton:focus-visible, .signInButton:focus-visible, .privacy:focus-visible { outline: 3px solid rgba(24, 116, 204, .3); outline-offset: 3px; }
+.panel { width: min(100%, 500px); margin: auto; padding: 56px 0; }
+.panel:focus { outline: none; }
+.keyIcon { display: grid; width: 50px; height: 50px; place-items: center; margin-bottom: 26px; border: 1px solid #dbe4ef; border-radius: 15px; background: #fff; color: #126a78; box-shadow: 0 10px 30px rgba(23, 52, 87, .08); }
+.panel h2 { margin: 0 0 14px; color: var(--login-ink); font-size: clamp(2rem, 3vw, 2.8rem); font-weight: 680; letter-spacing: -.035em; }
+.guidance { margin: 0 0 30px; color: var(--login-muted); font-size: .96rem; line-height: 1.7; }
+.error { margin-bottom: 18px; padding: 13px 15px; border: 1px solid #efb9b9; border-radius: 11px; background: #fff2f2; color: #962828; font-size: .84rem; line-height: 1.5; }
+.signInButton { display: grid; width: 100%; min-height: 54px; grid-template-columns: 22px 1fr 22px; align-items: center; gap: 10px; padding: 13px 17px; border: 0; border-radius: 12px; background: linear-gradient(135deg, #0d5f6c, #0f7180); color: #fff; font: inherit; font-size: .91rem; font-weight: 720; cursor: pointer; box-shadow: 0 13px 28px rgba(12, 91, 104, .2); transition: box-shadow .18s, transform .18s, filter .18s; }
+.signInButton:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 17px 34px rgba(12, 91, 104, .27); transform: translateY(-2px); }
+.signInButton:disabled { cursor: wait; opacity: .76; }
+.arrow { justify-self: end; }
+.spinner { animation: spin .8s linear infinite; }
+.trustNote { display: grid; grid-template-columns: 24px 1fr; gap: 12px; margin-top: 22px; padding: 17px; border: 1px solid #dce5ee; border-radius: 12px; background: rgba(255,255,255,.62); }
+.trustNote > svg { margin-top: 1px; color: #167866; }
+.trustNote strong { display: block; color: #2c435c; font-size: .8rem; }
+.trustNote p { margin: 5px 0 0; color: #64748b; font-size: .76rem; line-height: 1.55; }
+.help { margin: 28px 0 7px; color: #64748b; font-size: .78rem; text-align: center; }
+.privacy { display: block; width: fit-content; margin: 0 auto; border-radius: 4px; color: #2f6179; font-size: .77rem; font-weight: 650; text-underline-offset: 3px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 860px) {
+  .page { grid-template-columns: 1fr; }
+  .story { min-height: auto; padding: 28px clamp(24px, 7vw, 64px) 38px; }
+  .storyBody { padding: 52px 0 42px; }
+  .story h1 { font-size: clamp(2.5rem, 10vw, 4.5rem); }
+  .storyFootnote { display: none; }
+  .access { min-height: auto; padding: 24px clamp(24px, 8vw, 72px) 48px; }
+  .panel { padding: 58px 0 20px; }
+}
+
+@media (max-width: 520px) {
+  .story { padding: 22px 22px 30px; }
+  .storyBody { padding: 44px 0 30px; }
+  .story h1 { font-size: 2.72rem; }
+  .intro { margin: 22px 0 28px; font-size: .94rem; }
+  .access { padding: 20px 22px 42px; }
+  .secureBadge { font-size: .67rem; }
+  .languageButton { padding: 8px 9px; }
+  .panel { padding-top: 48px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skipLink, .languageButton, .signInButton { transition: none; }
+  .spinner { animation-duration: 1.6s; }
+}
