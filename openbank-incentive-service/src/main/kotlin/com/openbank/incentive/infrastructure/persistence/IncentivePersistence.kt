@@ -11,6 +11,7 @@ import com.openbank.incentive.domain.OfferStatus
 import com.openbank.incentive.domain.PromoReservation
 import com.openbank.incentive.domain.ReservationStatus
 import com.openbank.incentive.domain.StackingPolicy
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.PanacheQuery
@@ -213,7 +214,7 @@ class PanacheIncentiveStore(
                             }
                             code.status = "RESERVED"
                             val reservation = PromoReservation(
-                                UUID.randomUUID(),
+                                Ids.newId(),
                                 offer.ref,
                                 digest,
                                 partyRef,
@@ -297,14 +298,14 @@ class PanacheIncentiveStore(
     private fun evidence(id: UUID, type: String, actor: String): Uni<Void> {
         val at = Instant.now()
         val audit = AuditEntity().apply {
-            this.id = UUID.randomUUID()
+            this.id = Ids.newId()
             aggregateId = id
             eventType = type
             this.actor = actor
             occurredAt = at
             details = "{}"
         }
-        val eventId = UUID.randomUUID()
+        val eventId = Ids.newId()
         val correlationId = id
         val event = OutboxEntity().apply {
             this.id = eventId

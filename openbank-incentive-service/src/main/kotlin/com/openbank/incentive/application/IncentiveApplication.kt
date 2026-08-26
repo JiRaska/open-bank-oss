@@ -7,6 +7,7 @@ import com.openbank.incentive.domain.OfferRef
 import com.openbank.incentive.domain.OfferStatus
 import com.openbank.incentive.domain.PromoReservation
 import com.openbank.incentive.domain.StackingPolicy
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -29,7 +30,7 @@ class IncentiveApplication(
     suspend fun createOffer(command: CreateOffer, actor: String, now: Instant = Instant.now()): IncentiveOffer =
         store.createOffer(
             IncentiveOffer(
-                ref = OfferRef(UUID.randomUUID(), command.name, command.version),
+                ref = OfferRef(Ids.newId(), command.name, command.version),
                 productScope = command.productScope,
                 effectiveFrom = command.effectiveFrom,
                 expiresAt = command.expiresAt,
