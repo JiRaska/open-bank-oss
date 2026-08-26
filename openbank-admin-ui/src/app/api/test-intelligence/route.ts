@@ -264,11 +264,14 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
   // Tempo's span-metrics prove arrival after the hardened, consent-gated RUM gateway.
   // `or vector(0)` distinguishes a reachable Prometheus with no sampled mobile signal
   // from an unavailable query. Zero is normal and must not become a failed CI verdict.
-  const [tempoTraces, mobilePlatforms, spanCounterIncrements, errorSpans] = await Promise.all([
+  const [tempoTraces, mobilePlatforms, spanCounterIncrements, errorSpans, auditScheduled, auditScheduledSuccessful, auditManualSuccessful] = await Promise.all([
     tracesBase ? queryTempoMobileTraces(tracesBase) : Promise.resolve(null),
     tracesBase ? queryTempoMobilePlatforms(tracesBase) : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*"}[7d])) or vector(0)') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)') : Promise.resolve(null),
+    metricsBase ? queryPrometheus(metricsBase, 'max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="rum-attribute-audit"})') : Promise.resolve(null),
+    metricsBase ? queryPrometheus(metricsBase, 'max(kube_job_status_completion_time{namespace="observability",job_name=~"rum-attribute-audit-[0-9]+"})') : Promise.resolve(null),
+    metricsBase ? queryPrometheus(metricsBase, 'max(kube_job_status_completion_time{namespace="observability",job_name=~"rum-attribute-audit-manual-.*"})') : Promise.resolve(null),
   ])
   if (tempoTraces === null && spanCounterIncrements === null) return report
 
@@ -280,6 +283,22 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
   const errors = errorSpans === null ? null : Math.max(0, Math.round(errorSpans))
   const source = tempoTraces === null ? 'prometheus' as const : 'tempo' as const
   const countLabel = tempoTraces?.truncated ? `at least ${sampled}` : String(sampled)
+  const auditFreshnessSeconds = auditScheduledSuccessful === null ? null : Math.max(0, Date.now() / 1000 - auditScheduledSuccessful)
+  const auditState: EvidenceState = auditScheduledSuccessful === null ? 'unknown' : auditFreshnessSeconds !== null && auditFreshnessSeconds > 8 * 86400 ? 'stale' : 'passed'
+  const audit = metricsBase ? {
+    state: auditState,
+    lastScheduledAt: auditScheduled === null ? null : new Date(auditScheduled * 1000).toISOString(),
+    lastSuccessfulAt: auditScheduledSuccessful === null ? null : new Date(auditScheduledSuccessful * 1000).toISOString(),
+    lastManualSuccessfulAt: auditManualSuccessful === null ? null : new Date(auditManualSuccessful * 1000).toISOString(),
+    freshnessSeconds: auditFreshnessSeconds,
+    detail: auditScheduledSuccessful === null ? auditScheduled === null
+      ? 'RUM attribute audit CronJob was not observable from Prometheus.'
+      : 'RUM attribute audit was scheduled but has no recorded successful run.'
+      : auditState === 'stale' ? auditManualSuccessful === null
+        ? 'RUM attribute audit has no scheduled successful result inside its eight-day freshness window.'
+        : 'A manual RUM attribute audit succeeded, but it does not satisfy the missed regular schedule.'
+        : 'RUM attribute audit has a current successful result.',
+  } : undefined
   const clientExperiences = report.clientExperiences.map(client => client.id !== mobile.id ? client : ({
     ...client,
     rum: {
@@ -289,6 +308,7 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
       observedAt,
       sampledSpansLast7d: sampled,
       errorSpansLast7d: errors,
+      audit,
       backendCorrelations,
       platforms: client.rum.platforms?.map(platform => {
         if (mobilePlatforms === null) return platform

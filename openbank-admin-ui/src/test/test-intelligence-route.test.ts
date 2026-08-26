@@ -120,7 +120,11 @@ describe('GET /api/test-intelligence', () => {
         return new Response(JSON.stringify({ batches: [] }), { status: 200 })
       }
       const query = url.searchParams.get('query') ?? ''
-      const value = query.includes('STATUS_CODE_ERROR') ? '2' : '1'
+      const value = query.includes('STATUS_CODE_ERROR')
+        ? '2'
+        : query.includes('rum-attribute-audit-manual-')
+          ? String(Math.floor(Date.now() / 1000))
+          : '1'
       return new Response(JSON.stringify({ status: 'success', data: { result: [{ value: [1, value] }] } }), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
@@ -129,6 +133,13 @@ describe('GET /api/test-intelligence', () => {
       state: 'passed', policy: 'consent-gated', source: 'tempo', sampledSpansLast7d: 12, errorSpansLast7d: 2,
     })
     expect(body.clientExperiences[0].rum.detail).toContain('12 sampled mobile RUM trace(s)')
+    expect(body.clientExperiences[0].rum.audit).toMatchObject({
+      state: 'stale',
+      lastScheduledAt: new Date(1000).toISOString(),
+      lastSuccessfulAt: new Date(1000).toISOString(),
+    })
+    expect(body.clientExperiences[0].rum.audit.lastManualSuccessfulAt).not.toBeNull()
+    expect(body.clientExperiences[0].rum.audit.detail).toContain('manual RUM attribute audit succeeded')
     expect(body.clientExperiences[0].rum.platforms).toEqual([
       expect.objectContaining({ platform: 'android', capability: 'passed', runtime: 'not-run' }),
       expect.objectContaining({ platform: 'ios', capability: 'passed', runtime: 'passed' }),
