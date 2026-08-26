@@ -12,6 +12,10 @@ import com.openbank.incentive.domain.PromoReservation
 import com.openbank.incentive.domain.ReservationStatus
 import com.openbank.incentive.domain.StackingPolicy
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxEntry
+import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
+import com.openbank.libs.persistence.outbox.OutboxRepository
+import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.PanacheQuery
@@ -23,6 +27,8 @@ import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.LockModeType
 import jakarta.persistence.Table
+import org.hibernate.LockMode
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
@@ -94,6 +100,13 @@ class OutboxEntity : PanacheEntityBase() {
     lateinit var payload: String
     lateinit var occurredAt: Instant
     var publishedAt: Instant? = null
+    lateinit var status: String
+    var attemptCount: Int = 0
+    var claimedAt: Instant? = null
+    var claimToken: UUID? = null
+    lateinit var updatedAt: Instant
+    var lastError: String? = null
+    var synthetic: Boolean = false
 }
 
 @ApplicationScoped class OfferEntities : PanacheRepository<OfferEntity>
@@ -104,7 +117,129 @@ class OutboxEntity : PanacheEntityBase() {
 
 @ApplicationScoped class AuditEntities : PanacheRepository<AuditEntity>
 
-@ApplicationScoped class OutboxEntities : PanacheRepository<OutboxEntity>
+@ApplicationScoped
+class OutboxEntities :
+    PanacheRepository<OutboxEntity>,
+    OutboxRepository {
+    override suspend fun listProcessable(limit: Int): List<OutboxEntry> = listProcessableUni(limit).awaitSuspending()
+
+    fun listProcessableUni(limit: Int): Uni<List<OutboxEntry>> = Panache.getSession().flatMap { session ->
+        session.createQuery(
+            "from OutboxEntity where status in (:pending, :failed) order by occurredAt asc",
+            OutboxEntity::class.java,
+        ).setParameter("pending", OutboxStatus.PENDING.name)
+            .setParameter("failed", OutboxStatus.FAILED.name)
+            .setMaxResults(limit.coerceAtLeast(1))
+            .resultList
+    }.map { rows -> rows.map { it.toEntry() } }
+
+    override suspend fun countProcessable(): Long = Panache.withSession {
+        count("status in (?1, ?2)", OutboxStatus.PENDING.name, OutboxStatus.FAILED.name)
+    }.awaitSuspending()
+
+    override suspend fun claimProcessable(limit: Int, staleAfter: Duration): List<OutboxEntry> =
+        claimWithToken(limit, staleAfter).map {
+            it.entry
+        }
+
+    data class ClaimedEntry(val entry: OutboxEntry, val token: UUID)
+
+    suspend fun claimWithToken(limit: Int, staleAfter: Duration): List<ClaimedEntry> {
+        val now = Instant.now()
+        val token = Ids.newId()
+        return Panache.withTransaction {
+            Panache.getSession().chain { session ->
+                session.createNativeQuery(CLAIM_SQL, OutboxEntity::class.java)
+                    .setParameter("pending", OutboxStatus.PENDING.name)
+                    .setParameter("failed", OutboxStatus.FAILED.name)
+                    .setParameter("dispatching", OutboxStatus.DISPATCHING.name)
+                    .setParameter("staleThreshold", now.minus(staleAfter))
+                    .setParameter("claimLimit", limit.coerceAtLeast(1))
+                    .setParameter("now", now)
+                    .setParameter("claimToken", token)
+                    .resultList
+            }
+        }.map { rows -> rows.map { ClaimedEntry(it.toEntry(), token) } }.awaitSuspending()
+    }
+
+    suspend fun markSentClaimed(claimed: ClaimedEntry, sentAt: Instant): Boolean = Panache.withTransaction {
+        update(
+            "status = ?1, attemptCount = attemptCount + 1, publishedAt = ?2, updatedAt = ?2, " +
+                "lastError = null, claimToken = null where id = ?3 and status = ?4 and claimToken = ?5",
+            OutboxStatus.SENT.name,
+            sentAt,
+            claimed.entry.eventId,
+            OutboxStatus.DISPATCHING.name,
+            claimed.token,
+        ).map { it == 1 }
+    }.awaitSuspending()
+
+    suspend fun markFailedClaimed(claimed: ClaimedEntry, error: String, failedAt: Instant): OutboxStatus? =
+        Panache.withTransaction {
+            Panache.getSession().chain { session ->
+                session.find(OutboxEntity::class.java, claimed.entry.eventId, LockMode.PESSIMISTIC_WRITE)
+            }.map { entity ->
+                val current = entity ?: return@map null
+                if (current.status != OutboxStatus.DISPATCHING.name || current.claimToken != claimed.token) {
+                    return@map null
+                }
+                current.attemptCount += 1
+                current.status = OutboxFailurePolicy.statusAfterFailure(current.attemptCount).name
+                current.lastError = error.take(OutboxFailurePolicy.MAX_ERROR_LEN)
+                current.updatedAt = failedAt
+                current.claimToken = null
+                OutboxStatus.valueOf(current.status)
+            }
+        }.awaitSuspending()
+
+    override suspend fun markSent(eventId: UUID, sentAt: Instant) {
+        Panache.withTransaction {
+            find("id", eventId).firstResult<OutboxEntity>().invoke { row ->
+                if (row != null) {
+                    row.status = OutboxStatus.SENT.name
+                    row.attemptCount += 1
+                    row.publishedAt = sentAt
+                    row.updatedAt = sentAt
+                    row.lastError = null
+                }
+            }.replaceWithVoid()
+        }.awaitSuspending()
+    }
+
+    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus =
+        Panache.withTransaction {
+            find("id", eventId).firstResult<OutboxEntity>().map { row ->
+                if (row == null) return@map OutboxStatus.FAILED
+                row.attemptCount += 1
+                row.status = OutboxFailurePolicy.statusAfterFailure(row.attemptCount).name
+                row.lastError = error.take(OutboxFailurePolicy.MAX_ERROR_LEN)
+                row.updatedAt = failedAt
+                OutboxStatus.valueOf(row.status)
+            }
+        }.awaitSuspending()
+
+    private fun OutboxEntity.toEntry() = OutboxEntry(
+        id, aggregateId, eventType, payload, OutboxStatus.valueOf(status), attemptCount,
+        occurredAt, updatedAt, publishedAt, lastError, synthetic,
+    )
+
+    private companion object {
+        @Suppress("MaxLineLength")
+        const val CLAIM_SQL = """
+            UPDATE incentive_outbox
+            SET status = :dispatching, claimed_at = :now, claim_token = :claimToken, updated_at = :now
+            WHERE id IN (
+                SELECT id FROM incentive_outbox
+                WHERE status IN (:pending, :failed)
+                   OR (status = :dispatching AND claimed_at < :staleThreshold)
+                ORDER BY occurred_at ASC
+                LIMIT :claimLimit
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
+        """
+    }
+}
 
 @ApplicationScoped
 @Suppress("TooManyFunctions")
@@ -116,7 +251,9 @@ class PanacheIncentiveStore(
     private val outbox: OutboxEntities,
 ) : IncentiveStore {
     override suspend fun createOffer(offer: IncentiveOffer): IncentiveOffer = Panache.withTransaction {
-        offers.persist(offer.toEntity()).flatMap { evidence(offer.ref.id, "incentive.offer.created.v1", offer.maker) }
+        offers.persist(offer.toEntity()).flatMap {
+            evidence(offer.ref.id, eventType = "incentive.offer.created.v1", actor = offer.maker)
+        }
             .replaceWith(offer)
     }.awaitSuspending()
 
@@ -128,7 +265,7 @@ class PanacheIncentiveStore(
             val current = entity?.toDomain() ?: throw IncentiveNotFound("offer not found")
             val submitted = current.submit(actor)
             entity.status = submitted.status.name
-            evidence(id, "incentive.offer.submitted.v1", actor).replaceWith(submitted)
+            evidence(id, eventType = "incentive.offer.submitted.v1", actor = actor).replaceWith(submitted)
         }
     }.awaitSuspending()
 
@@ -139,7 +276,7 @@ class PanacheIncentiveStore(
             entity.status = published.status.name
             entity.checker = actor
             entity.publishedAt = at
-            evidence(id, "incentive.offer.published.v1", actor).replaceWith(published)
+            evidence(id, eventType = "incentive.offer.published.v1", actor = actor).replaceWith(published)
         }
     }.awaitSuspending()
 
@@ -161,7 +298,9 @@ class PanacheIncentiveStore(
                         retainedUntil = offer.expiresAt.atZone(ZoneOffset.UTC).plusMonths(RETENTION_MONTHS).toInstant()
                     }
                 }
-                codes.persist(entities).flatMap { evidence(offerId, "incentive.codes.imported.v1", actor) }
+                codes.persist(entities).flatMap {
+                    evidence(offerId, eventType = "incentive.codes.imported.v1", actor = actor)
+                }
                     .replaceWith(entities.size)
             }
         }.awaitSuspending()
@@ -224,7 +363,11 @@ class PanacheIncentiveStore(
                                 expiresAt,
                             )
                             reservations.persist(reservation.toEntity()).flatMap {
-                                evidence(reservation.id, "incentive.reservation.created.v1", actor)
+                                evidence(
+                                    reservation.id,
+                                    eventType = "incentive.reservation.created.v1",
+                                    actor = actor,
+                                )
                             }.replaceWith(reservation)
                         }
                 }
@@ -278,11 +421,20 @@ class PanacheIncentiveStore(
                 lockedCode(entity.codeDigest).flatMap { code ->
                     requireNotNull(code)
                     code.status = if (target == ReservationStatus.COMMITTED) "REDEEMED" else "AVAILABLE"
-                    evidence(
-                        id,
-                        "incentive.reservation.${target.name.lowercase()}.v1",
-                        actor,
-                    ).replaceWith(updated)
+                    when (target) {
+                        ReservationStatus.COMMITTED -> evidence(
+                            id,
+                            eventType = "incentive.reservation.committed.v1",
+                            actor = actor,
+                        )
+                        ReservationStatus.RELEASED -> evidence(
+                            id,
+                            eventType = "incentive.reservation.released.v1",
+                            actor = actor,
+                        )
+                        else -> error("unsupported transition")
+                    }
+                        .replaceWith(updated)
                 }
             }
         }.awaitSuspending()
@@ -292,15 +444,15 @@ class PanacheIncentiveStore(
             entity.status = ReservationStatus.EXPIRED.name
             entity.releasedAt = at
             requireNotNull(code).status = "AVAILABLE"
-            evidence(entity.id, "incentive.reservation.expired.v1", "expiry")
+            evidence(entity.id, eventType = "incentive.reservation.expired.v1", actor = "expiry")
         }
 
-    private fun evidence(id: UUID, type: String, actor: String): Uni<Void> {
+    private fun evidence(id: UUID, eventType: String, actor: String): Uni<Void> {
         val at = Instant.now()
         val audit = AuditEntity().apply {
             this.id = Ids.newId()
             aggregateId = id
-            eventType = type
+            this.eventType = eventType
             this.actor = actor
             occurredAt = at
             details = "{}"
@@ -310,11 +462,13 @@ class PanacheIncentiveStore(
         val event = OutboxEntity().apply {
             this.id = eventId
             aggregateId = id
-            eventType = type
+            this.eventType = eventType
             payload =
                 "{\"eventId\":\"$eventId\",\"correlationId\":\"$correlationId\",\"aggregateId\":\"$id\"," +
-                "\"eventType\":\"$type\",\"occurredAt\":\"$at\"}"
+                "\"eventType\":\"$eventType\",\"occurredAt\":\"$at\"}"
             occurredAt = at
+            status = OutboxStatus.PENDING.name
+            updatedAt = at
         }
         return audits.persist(audit).flatMap { outbox.persist(event) }.replaceWithVoid()
     }

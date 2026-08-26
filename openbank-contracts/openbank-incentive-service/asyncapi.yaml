@@ -1,0 +1,195 @@
+# SPDX-License-Identifier: Apache-2.0
+# ADR-0006: every delivered Kafka topic has a versioned AsyncAPI contract.
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Incentive Service — events
+  version: 1.0.0
+  description: |
+    Lifecycle evidence emitted from the incentive transactional outbox. This topic does not
+    authorize pricing, settlement, account mutation or cash rewards; consumers treat it as an
+    at-least-once notification of a transition already committed in incentive-service.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+channels:
+  incentiveEvents:
+    address: openbank.incentive.events
+    title: Governed incentive lifecycle evidence
+    description: |
+      The Kafka key is `aggregateId`, preserving order for one offer or reservation. Delivery is
+      at least once; consumers must deduplicate by `idempotency-key` / `ce-id`.
+    messages:
+      offerCreated: {$ref: '#/components/messages/offerCreated'}
+      offerSubmitted: {$ref: '#/components/messages/offerSubmitted'}
+      offerPublished: {$ref: '#/components/messages/offerPublished'}
+      codesImported: {$ref: '#/components/messages/codesImported'}
+      reservationCreated: {$ref: '#/components/messages/reservationCreated'}
+      reservationCommitted: {$ref: '#/components/messages/reservationCommitted'}
+      reservationReleased: {$ref: '#/components/messages/reservationReleased'}
+      reservationExpired: {$ref: '#/components/messages/reservationExpired'}
+
+operations:
+  publishIncentiveEvidence:
+    action: send
+    channel:
+      $ref: '#/channels/incentiveEvents'
+    messages:
+      - $ref: '#/channels/incentiveEvents/messages/offerCreated'
+      - $ref: '#/channels/incentiveEvents/messages/offerSubmitted'
+      - $ref: '#/channels/incentiveEvents/messages/offerPublished'
+      - $ref: '#/channels/incentiveEvents/messages/codesImported'
+      - $ref: '#/channels/incentiveEvents/messages/reservationCreated'
+      - $ref: '#/channels/incentiveEvents/messages/reservationCommitted'
+      - $ref: '#/channels/incentiveEvents/messages/reservationReleased'
+      - $ref: '#/channels/incentiveEvents/messages/reservationExpired'
+
+components:
+  schemas:
+    outboxHeaders:
+      type: object
+      required: [ce-id, idempotency-key]
+      properties:
+        ce-id:
+          type: string
+          format: uuid
+          description: Stable UUIDv7 outbox event id.
+        idempotency-key:
+          type: string
+          format: uuid
+          description: Equal to `ce-id`; use for at-least-once deduplication.
+        x-openbank-synthetic:
+          type: string
+          enum: ['true', 'false']
+    eventType:
+      type: string
+      enum:
+        - incentive.offer.created.v1
+        - incentive.offer.submitted.v1
+        - incentive.offer.published.v1
+        - incentive.codes.imported.v1
+        - incentive.reservation.created.v1
+        - incentive.reservation.committed.v1
+        - incentive.reservation.released.v1
+        - incentive.reservation.expired.v1
+    lifecycleEnvelope:
+      type: object
+      additionalProperties: false
+      required: [eventId, correlationId, aggregateId, eventType, occurredAt]
+      properties:
+        eventId: {type: string, format: uuid}
+        correlationId: {type: string, format: uuid}
+        aggregateId: {type: string, format: uuid}
+        eventType: {type: string}
+        occurredAt: {type: string, format: date-time}
+
+  messages:
+    offerCreated:
+      <<: &lifecycleEvidence
+        title: An incentive offer, inventory or reservation transition committed
+        contentType: application/json
+      name: incentive.offer.created.v1
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.offer.created.v1}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/lifecycleEnvelope'
+          - properties: {eventType: {const: incentive.offer.created.v1}}
+    offerSubmitted:
+      <<: *lifecycleEvidence
+      name: incentive.offer.submitted.v1
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.offer.submitted.v1}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/lifecycleEnvelope'
+          - properties: {eventType: {const: incentive.offer.submitted.v1}}
+    offerPublished:
+      <<: *lifecycleEvidence
+      name: incentive.offer.published.v1
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.offer.published.v1}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/lifecycleEnvelope'
+          - properties: {eventType: {const: incentive.offer.published.v1}}
+    codesImported:
+      <<: *lifecycleEvidence
+      name: incentive.codes.imported.v1
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.codes.imported.v1}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/lifecycleEnvelope'
+          - properties: {eventType: {const: incentive.codes.imported.v1}}
+    reservationCreated:
+      <<: *lifecycleEvidence
+      name: incentive.reservation.created.v1
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.reservation.created.v1}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/lifecycleEnvelope'
+          - properties: {eventType: {const: incentive.reservation.created.v1}}
+    reservationCommitted:
+      <<: *lifecycleEvidence
+      name: incentive.reservation.committed.v1
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.reservation.committed.v1}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/lifecycleEnvelope'
+          - properties: {eventType: {const: incentive.reservation.committed.v1}}
+    reservationReleased:
+      <<: *lifecycleEvidence
+      name: incentive.reservation.released.v1
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.reservation.released.v1}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/lifecycleEnvelope'
+          - properties: {eventType: {const: incentive.reservation.released.v1}}
+    reservationExpired:
+      <<: *lifecycleEvidence
+      name: incentive.reservation.expired.v1
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.reservation.expired.v1}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/lifecycleEnvelope'
+          - properties: {eventType: {const: incentive.reservation.expired.v1}}

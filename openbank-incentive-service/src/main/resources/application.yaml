@@ -27,13 +27,45 @@ quarkus:
     port: 8087
     host: 0.0.0.0
     root-path: /q
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      incentive-events-out:
+        connector: smallrye-kafka
+        client:
+          id: incentive-service-${quarkus.uuid}
+        topic: openbank.incentive.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
+  outbox:
+    dispatch-enabled: true
+    poll-interval: 5s
+    initial-delay: 5s
   incentive:
     code-pepper: ${PROMO_CODE_PEPPER:}
     reservation-ttl: ${PROMO_RESERVATION_TTL:PT15M}
 
 "%test":
+  openbank:
+    outbox:
+      dispatch-enabled: false
   quarkus:
     management:
       enabled: false
