@@ -29,7 +29,7 @@ describe('KYC party search', () => {
     fireEvent.change(screen.getByLabelText('Search parties'), { target: { value: 'Oldrich Vanek' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     await waitFor(() => expect(screen.getByText('Oldřich Vaněk')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: 'Select' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Select Oldřich Vaněk' }))
 
     await waitFor(() => expect(f.mock.calls.some(([u]) => String(u).endsWith(`/api/v1/kyc/cases/party/${PARTY}`))).toBe(true))
     expect(screen.getByText('All cases')).toBeInTheDocument()
