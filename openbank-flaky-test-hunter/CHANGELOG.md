@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.13.0...flaky-test-hunter-v0.14.0) (2026-08-26)
+
+
+### Features
+
+* **flaky-test-hunter:** detect unterminated testcontainers ([#7152](https://github.com/JiRaska/open-bank-oss/issues/7152)) ([44ac456](https://github.com/JiRaska/open-bank-oss/commit/44ac4562a52eaa9793eac9dc4996db95c21f5cd8))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.12.0...flaky-test-hunter-v0.13.0) (2026-08-26)
 
 
