@@ -4,13 +4,14 @@
 
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { ArrowRight, Clock3, Plus, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { claimSingleFlight, releaseSingleFlight } from '@/lib/single-flight'
 
 // Read-only by design. ADR-0201 D1: a segment is a versioned artifact defined in code, reviewed and
 // released like anything else — "no free-form SQL from a UI". A marketer picks from this catalogue;
@@ -37,6 +38,9 @@ export default function SegmentsPage() {
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const [previews, setPreviews] = useState<Record<string, Preview | 'loading'>>({})
+  const [lifecycleBusy, setLifecycleBusy] = useState<string | null>(null)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const lifecycleInFlight = useRef(false)
 
   const loadAudiences = useCallback(() => {
     fetch('/api/audiences').then(r => r.json()).then((d: { items: Segment[]; state: string }) => {
@@ -51,11 +55,26 @@ export default function SegmentsPage() {
     loadAudiences()
   }, [loadAudiences])
 
-  const lifecycle = (s: Segment, action: 'submit' | 'approve') => {
-    fetch(`/api/audiences/${encodeURIComponent(s.name)}/${s.version}/${action}`, { method: 'POST' }).then(r => {
-      if (!r.ok) throw new Error()
+  const lifecycle = async (s: Segment, action: 'submit' | 'approve') => {
+    if (!claimSingleFlight(lifecycleInFlight)) return
+    const actionKey = `${key(s)}:${action}`
+    setLifecycleBusy(actionKey)
+    setLifecycleError(null)
+    try {
+      const response = await fetch(`/api/audiences/${encodeURIComponent(s.name)}/${s.version}/${action}`, { method: 'POST' })
+      if (!response.ok) {
+        throw new Error(t(
+          `Změnu publika se nepodařilo uložit (HTTP ${response.status}).`,
+          `Could not save the audience lifecycle change (HTTP ${response.status}).`,
+        ))
+      }
       loadAudiences()
-    }).catch(() => setUnavailable('unreachable'))
+    } catch (error) {
+      setLifecycleError(error instanceof Error ? error.message : t('Změna publika se nezdařila.', 'Audience lifecycle change failed.'))
+    } finally {
+      releaseSingleFlight(lifecycleInFlight)
+      setLifecycleBusy(null)
+    }
   }
 
   const key = (s: Segment) => `${s.name}@${s.version}`
@@ -158,6 +177,11 @@ export default function SegmentsPage() {
 
       {!loading && !unavailable && items.length > 0 && (
         <>
+          {lifecycleError && (
+            <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {lifecycleError}
+            </div>
+          )}
           <section className="grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
             <div className="rounded-2xl border border-violet-100 bg-[radial-gradient(circle_at_top_left,_rgba(116,91,255,.18),_transparent_42%),linear-gradient(135deg,_#fff,_#f8f7ff)] p-5 shadow-sm">
               <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.12em] text-violet-700"><Sparkles className="h-3.5 w-3.5" /> {t('Audience library', 'Audience library')}</p>
@@ -198,7 +222,7 @@ export default function SegmentsPage() {
                     data-use-audience={key(s)}
                   >
                     {t('Použít v kampani', 'Use in campaign')} <ArrowRight className="h-3.5 w-3.5" />
-                  </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => lifecycle(s, 'submit')} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800">{t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={() => lifecycle(s, 'approve')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700">{t('Schválit publikum', 'Approve audience')}</button></Can>}
+                  </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => lifecycle(s, 'submit')} disabled={lifecycleBusy !== null} aria-busy={lifecycleBusy === `${key(s)}:submit`} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60">{lifecycleBusy === `${key(s)}:submit` ? t('Odesílám…', 'Submitting…') : t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={() => lifecycle(s, 'approve')} disabled={lifecycleBusy !== null} aria-busy={lifecycleBusy === `${key(s)}:approve`} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">{lifecycleBusy === `${key(s)}:approve` ? t('Schvaluji…', 'Approving…') : t('Schválit publikum', 'Approve audience')}</button></Can>}
                 </div>
                 <p className="mt-3 flex items-center gap-1.5 text-[.68rem] text-slate-400"><Clock3 className="h-3 w-3" />{t('Dosah se mění s aktuálním stavem; verze pravidel zůstává stejná.', 'Reach changes with current state; the rule version stays fixed.')}</p>
               </article>
