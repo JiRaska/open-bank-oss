@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.201.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.201.0...admin-ui-v0.201.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify ICT incident register states ([#7107](https://github.com/JiRaska/open-bank-oss/issues/7107)) ([bdbb144](https://github.com/JiRaska/open-bank-oss/commit/bdbb1442f93a0302fb502b006ac0811ec49ccf62))
+* **admin-ui:** guard account lifecycle mutations ([#7113](https://github.com/JiRaska/open-bank-oss/issues/7113)) ([a5f1ef3](https://github.com/JiRaska/open-bank-oss/commit/a5f1ef36603afda324ca39fa1720bfe4c6f67b07))
+
 ## [0.201.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.200.0...admin-ui-v0.201.0) (2026-08-26)
 
 
