@@ -69,6 +69,16 @@ def check(root: Path) -> list[str]:
     ):
         if needle not in deploy:
             errors.append(message)
+    history_stage = deploy.partition("Stage immutable per-attempt Test Intelligence history")[2].partition(
+        "Stage pitest mutation results"
+    )[0]
+    for needle, message in (
+        ("for page in 1 2 3 4 5; do", "immutable run history is not paginated"),
+        ("per_page=100&page=${page}", "immutable run history does not request later artifact pages"),
+        ("head -\"${MAX_ENVELOPES}\"", "immutable run history is not bounded before artifact download"),
+    ):
+        if needle not in history_stage:
+            errors.append(message)
     # A staged Pact file is not a provider-verification verdict. The deploy collector
     # can query the existing read-only Broker credentials and must receive them only
     # in its build/collection step; without this wiring the UI bakes every Pact as
