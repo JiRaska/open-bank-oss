@@ -33,14 +33,14 @@ data class IncentiveOffer(
     }
 
     fun submit(requester: String): IncentiveOffer {
-        require(status == OfferStatus.DRAFT) { "only a draft can be submitted" }
-        require(requester == maker) { "only the maker can submit this offer" }
+        if (status != OfferStatus.DRAFT) throw IncentiveConflict("only a draft can be submitted")
+        if (requester != maker) throw IncentiveConflict("only the maker can submit this offer")
         return copy(status = OfferStatus.PENDING_APPROVAL)
     }
 
     fun publish(checker: String): IncentiveOffer {
-        require(status == OfferStatus.PENDING_APPROVAL) { "offer is not pending approval" }
-        require(checker.isNotBlank() && checker != maker) { "checker must be independent" }
+        if (status != OfferStatus.PENDING_APPROVAL) throw IncentiveConflict("offer is not pending approval")
+        if (checker.isBlank() || checker == maker) throw IncentiveConflict("checker must be independent")
         return copy(status = OfferStatus.PUBLISHED, checker = checker)
     }
 

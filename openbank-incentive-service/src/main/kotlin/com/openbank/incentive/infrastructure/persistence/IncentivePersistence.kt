@@ -173,43 +173,53 @@ class PanacheIncentiveStore(
         expiresAt: Instant,
     ): PromoReservation = Panache.withTransaction {
         lockedOffer(offerId).flatMap { offerEntity ->
-            reservations.find("idempotencyKey", idempotencyKey).firstResult<ReservationEntity>().flatMap { replay ->
-                if (replay != null) return@flatMap Uni.createFrom().item(replay.toDomain())
-                val offer = offerEntity?.toDomain() ?: throw IncentiveNotFound("offer not found")
-                if (!offer.accepts(productRef, now)) throw IncentiveConflict("offer is not redeemable")
-                reservations.count("offerId = ?1 and status in (?2, ?3)", offerId, "RESERVED", "COMMITTED")
-                    .flatMap { total ->
-                        if (total >= offer.totalLimit) throw IncentiveConflict("offer total limit reached")
-                        reservations.count(
-                            "offerId = ?1 and partyRef = ?2 and status in (?3, ?4)",
-                            offerId,
-                            partyRef,
-                            "RESERVED",
-                            "COMMITTED",
-                        )
-                    }.flatMap { partyCount ->
-                        if (partyCount >= offer.perPartyLimit) throw IncentiveConflict("party limit reached")
-                        lockedCode(digest.value)
-                    }.flatMap { code ->
-                        if (code == null || code.offerId != offerId || code.status != "AVAILABLE") {
-                            throw IncentiveConflict("code is unavailable")
+            reservations.find("offerId = ?1 and idempotencyKey = ?2", offerId, idempotencyKey)
+                .firstResult<ReservationEntity>().flatMap { replay ->
+                    if (replay != null) {
+                        if (
+                            replay.codeDigest != digest.value ||
+                            replay.partyRef != partyRef ||
+                            replay.productRef != productRef
+                        ) {
+                            throw IncentiveConflict("idempotency key was already used for a different request")
                         }
-                        code.status = "RESERVED"
-                        val reservation = PromoReservation(
-                            UUID.randomUUID(),
-                            offer.ref,
-                            digest,
-                            partyRef,
-                            productRef,
-                            idempotencyKey,
-                            now,
-                            expiresAt,
-                        )
-                        reservations.persist(reservation.toEntity()).flatMap {
-                            evidence(reservation.id, "incentive.reservation.created.v1", partyRef)
-                        }.replaceWith(reservation)
+                        return@flatMap Uni.createFrom().item(replay.toDomain())
                     }
-            }
+                    val offer = offerEntity?.toDomain() ?: throw IncentiveNotFound("offer not found")
+                    if (!offer.accepts(productRef, now)) throw IncentiveConflict("offer is not redeemable")
+                    reservations.count("offerId = ?1 and status in (?2, ?3)", offerId, "RESERVED", "COMMITTED")
+                        .flatMap { total ->
+                            if (total >= offer.totalLimit) throw IncentiveConflict("offer total limit reached")
+                            reservations.count(
+                                "offerId = ?1 and partyRef = ?2 and status in (?3, ?4)",
+                                offerId,
+                                partyRef,
+                                "RESERVED",
+                                "COMMITTED",
+                            )
+                        }.flatMap { partyCount ->
+                            if (partyCount >= offer.perPartyLimit) throw IncentiveConflict("party limit reached")
+                            lockedCode(digest.value)
+                        }.flatMap { code ->
+                            if (code == null || code.offerId != offerId || code.status != "AVAILABLE") {
+                                throw IncentiveConflict("code is unavailable")
+                            }
+                            code.status = "RESERVED"
+                            val reservation = PromoReservation(
+                                UUID.randomUUID(),
+                                offer.ref,
+                                digest,
+                                partyRef,
+                                productRef,
+                                idempotencyKey,
+                                now,
+                                expiresAt,
+                            )
+                            reservations.persist(reservation.toEntity()).flatMap {
+                                evidence(reservation.id, "incentive.reservation.created.v1", partyRef)
+                            }.replaceWith(reservation)
+                        }
+                }
         }
     }.awaitSuspending()
 
@@ -221,10 +231,21 @@ class PanacheIncentiveStore(
 
     override suspend fun expireDue(at: Instant): Int = Panache.withTransaction {
         reservations.find("status = ?1 and expiresAt <= ?2", "RESERVED", at).list<ReservationEntity>().flatMap { due ->
-            val expiration = due.fold(Uni.createFrom().voidItem()) { chain, entity ->
-                chain.flatMap { expireEntity(entity, at) }
+            due.fold(Uni.createFrom().item(0)) { chain, candidate ->
+                chain.flatMap { count ->
+                    lockedReservation(candidate.id).flatMap { locked ->
+                        if (
+                            locked == null ||
+                            locked.status != ReservationStatus.RESERVED.name ||
+                            locked.expiresAt.isAfter(at)
+                        ) {
+                            Uni.createFrom().item(count)
+                        } else {
+                            expireEntity(locked, at).replaceWith(count + 1)
+                        }
+                    }
+                }
             }
-            expiration.replaceWith(due.size)
         }
     }.awaitSuspending()
 
@@ -272,12 +293,13 @@ class PanacheIncentiveStore(
             details = "{}"
         }
         val eventId = UUID.randomUUID()
+        val correlationId = UUID.randomUUID()
         val event = OutboxEntity().apply {
             this.id = eventId
             aggregateId = id
             eventType = type
             payload =
-                "{\"eventId\":\"$eventId\",\"aggregateId\":\"$id\"," +
+                "{\"eventId\":\"$eventId\",\"correlationId\":\"$correlationId\",\"aggregateId\":\"$id\"," +
                 "\"eventType\":\"$type\",\"occurredAt\":\"$at\"}"
             occurredAt = at
         }

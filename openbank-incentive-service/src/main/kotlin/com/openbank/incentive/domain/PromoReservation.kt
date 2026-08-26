@@ -33,21 +33,21 @@ data class PromoReservation(
 
     fun commit(at: Instant): PromoReservation {
         if (status == ReservationStatus.COMMITTED) return this
-        require(status == ReservationStatus.RESERVED) { "only a reservation can be committed" }
-        require(at.isBefore(expiresAt)) { "an expired reservation cannot be committed" }
+        if (status != ReservationStatus.RESERVED) throw IncentiveConflict("only a reservation can be committed")
+        if (!at.isBefore(expiresAt)) throw IncentiveConflict("an expired reservation cannot be committed")
         return copy(status = ReservationStatus.COMMITTED)
     }
 
     fun release(): PromoReservation {
         if (status == ReservationStatus.RELEASED) return this
-        require(status == ReservationStatus.RESERVED) { "only a reservation can be released" }
+        if (status != ReservationStatus.RESERVED) throw IncentiveConflict("only a reservation can be released")
         return copy(status = ReservationStatus.RELEASED)
     }
 
     fun expire(at: Instant): PromoReservation {
         if (status == ReservationStatus.EXPIRED) return this
-        require(status == ReservationStatus.RESERVED) { "only a reservation can expire" }
-        require(!at.isBefore(expiresAt)) { "reservation is not expired" }
+        if (status != ReservationStatus.RESERVED) throw IncentiveConflict("only a reservation can expire")
+        if (at.isBefore(expiresAt)) throw IncentiveConflict("reservation is not expired")
         return copy(status = ReservationStatus.EXPIRED)
     }
 }

@@ -7,20 +7,25 @@ import com.openbank.incentive.domain.OfferRef
 import com.openbank.incentive.domain.OfferStatus
 import com.openbank.incentive.domain.PromoReservation
 import com.openbank.incentive.domain.StackingPolicy
+import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
+import java.util.Optional
 import java.util.UUID
 
 @ApplicationScoped
+@Startup
 class IncentiveApplication(
     private val store: IncentiveStore,
-    @ConfigProperty(name = "openbank.incentive.code-pepper") private val pepper: String,
+    @ConfigProperty(name = "openbank.incentive.code-pepper") configuredPepper: Optional<String>,
     @ConfigProperty(name = "openbank.incentive.reservation-ttl") private val reservationTtl: Duration,
 ) {
+    private val pepper = configuredPepper.filter { it.length >= MIN_PEPPER_LENGTH }
+        .orElseThrow { IllegalStateException("PROMO_CODE_PEPPER must contain at least $MIN_PEPPER_LENGTH characters") }
     suspend fun createOffer(command: CreateOffer, actor: String, now: Instant = Instant.now()): IncentiveOffer =
         store.createOffer(
             IncentiveOffer(
@@ -76,6 +81,7 @@ class IncentiveApplication(
     private companion object {
         const val MIN_CODE_LENGTH = 8
         const val MAX_CODE_LENGTH = 128
+        const val MIN_PEPPER_LENGTH = 32
     }
 }
 

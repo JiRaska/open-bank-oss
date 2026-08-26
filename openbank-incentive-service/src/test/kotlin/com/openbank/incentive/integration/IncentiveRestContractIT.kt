@@ -12,10 +12,10 @@ import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.hasKey
+import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
-import java.sql.Timestamp
 import java.time.Instant
-import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -23,15 +23,30 @@ import javax.sql.DataSource
 
 @QuarkusTest
 @QuarkusTestResource(IncentivePostgresTestResource::class)
-@TestSecurity(user = "checker@openbank.test", roles = ["ROLE_OPERATOR"])
+@TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR"])
 class IncentiveRestContractIT {
     @Inject lateinit var dataSource: DataSource
 
     @Suppress("LongMethod")
     @Test
     fun `published inventory reserves once under concurrency then releases commits and expires`() {
-        val offerId = UUID.randomUUID()
-        seedPendingOffer(offerId, perPartyLimit = 2)
+        val offerId = Given {
+            contentType("application/json")
+            body(
+                """{"name":"summer-current-account","version":1,"productScope":["current-account"],"effectiveFrom":"${Instant.now().minusSeconds(
+                    60,
+                )}","expiresAt":"${Instant.now().plusSeconds(
+                    86_400,
+                )}","totalLimit":10,"perPartyLimit":2,"stackingPolicy":"EXCLUSIVE"}""",
+            )
+        } When { post("/api/v1/incentives/offers") } Then {
+            statusCode(201)
+            body("status", equalTo("DRAFT"))
+        } Extract { path<String>("ref.id") }
+
+        Given { contentType("application/json") }
+            .When { post("/api/v1/incentives/offers/$offerId/publish") }
+            .Then { statusCode(409) }
 
         Given {
             contentType("application/json")
@@ -41,6 +56,17 @@ class IncentiveRestContractIT {
             body("imported", equalTo(3))
         }
 
+        Given { contentType("application/json") }
+            .When { post("/api/v1/incentives/offers/$offerId/submit") }
+            .Then {
+                statusCode(200)
+                body("status", equalTo("PENDING_APPROVAL"))
+            }
+        Given { contentType("application/json") }
+            .When { post("/api/v1/incentives/offers/$offerId/publish") }
+            .Then { statusCode(409) }
+
+        TestJsonWebToken.actor = "checker@openbank.test"
         Given { contentType("application/json") }
             .When { post("/api/v1/incentives/offers/$offerId/publish") }
             .Then {
@@ -60,6 +86,7 @@ class IncentiveRestContractIT {
                         body("""{"code":"SUMMER-0001","partyRef":"party-1","productRef":"current-account"}""")
                     } When { post("/api/v1/incentives/offers/$offerId/reservations") } Then {
                         statusCode(201)
+                        body("$", not(hasKey("codeDigest")))
                     } Extract { path<String>("id") }
                 },
             )
@@ -71,6 +98,15 @@ class IncentiveRestContractIT {
         assertThat(count("select count(*) from promo_reservation where offer_id = '$offerId'")).isEqualTo(1)
         assertThat(string("select digest from promo_code_inventory where offer_id = '$offerId' limit 1"))
             .doesNotContain("SUMMER")
+
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", "checkout-$offerId")
+            body("""{"code":"SUMMER-0002","partyRef":"party-2","productRef":"current-account"}""")
+        } When { post("/api/v1/incentives/offers/$offerId/reservations") } Then {
+            statusCode(409)
+        }
+        assertThat(count("select count(*) from promo_reservation where offer_id = '$offerId'")).isEqualTo(1)
 
         val firstId = ids.toSet().single()
         Given { contentType("application/json") }
@@ -96,7 +132,7 @@ class IncentiveRestContractIT {
             }
         Given { contentType("application/json") }
             .When { post("/api/v1/incentives/reservations/$committedId/release") }
-            .Then { statusCode(400) }
+            .Then { statusCode(409) }
 
         val expiringId = Given {
             contentType("application/json")
@@ -121,36 +157,10 @@ class IncentiveRestContractIT {
         assertThat(
             count(
                 """select count(*) from incentive_outbox
-                    where payload::jsonb ?& array['eventId','aggregateId','eventType','occurredAt']
+                    where payload::jsonb ?& array['eventId','correlationId','aggregateId','eventType','occurredAt']
                 """.trimIndent(),
             ),
         ).isEqualTo(count("select count(*) from incentive_outbox"))
-    }
-
-    private fun seedPendingOffer(id: UUID, perPartyLimit: Int) {
-        dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                """insert into incentive_offer
-                    (id,name,version,product_scope,effective_from,expires_at,total_limit,per_party_limit,
-                     stacking_policy,status,maker,created_at)
-                    values (?,?,?,?,?,?,?,?,?,?,?,?)
-                """.trimIndent(),
-            ).use { statement ->
-                statement.setObject(1, id)
-                statement.setString(2, "summer-$id")
-                statement.setInt(3, 1)
-                statement.setString(4, "current-account")
-                statement.setTimestamp(5, Timestamp.from(Instant.now().minusSeconds(60)))
-                statement.setTimestamp(6, Timestamp.from(Instant.now().plusSeconds(86_400)))
-                statement.setInt(7, 10)
-                statement.setInt(8, perPartyLimit)
-                statement.setString(9, "EXCLUSIVE")
-                statement.setString(10, "PENDING_APPROVAL")
-                statement.setString(11, "maker@openbank.test")
-                statement.setTimestamp(12, Timestamp.from(Instant.now()))
-                statement.executeUpdate()
-            }
-        }
     }
 
     private fun count(sql: String): Long = dataSource.connection.use { connection ->

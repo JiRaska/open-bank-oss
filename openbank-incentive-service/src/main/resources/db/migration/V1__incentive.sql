@@ -36,12 +36,13 @@ CREATE TABLE promo_reservation (
   code_digest CHAR(64) NOT NULL REFERENCES promo_code_inventory(digest),
   party_ref VARCHAR(255) NOT NULL,
   product_ref VARCHAR(255) NOT NULL,
-  idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+  idempotency_key VARCHAR(255) NOT NULL,
   status VARCHAR(24) NOT NULL,
   reserved_at TIMESTAMPTZ NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
   committed_at TIMESTAMPTZ,
-  released_at TIMESTAMPTZ
+  released_at TIMESTAMPTZ,
+  UNIQUE (offer_id, idempotency_key)
 );
 CREATE INDEX promo_reservation_offer_status_idx ON promo_reservation(offer_id, status);
 CREATE INDEX promo_reservation_party_status_idx ON promo_reservation(offer_id, party_ref, status);

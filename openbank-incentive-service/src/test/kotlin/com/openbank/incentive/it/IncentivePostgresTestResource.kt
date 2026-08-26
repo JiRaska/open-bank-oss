@@ -28,7 +28,7 @@ class IncentivePostgresTestResource : QuarkusTestResourceLifecycleManager {
             "quarkus.datasource.username" to "openbank",
             "quarkus.datasource.password" to "openbank_secret",
             "quarkus.devservices.enabled" to "false",
-            "openbank.incentive.code-pepper" to "integration-pepper",
+            "openbank.incentive.code-pepper" to "integration-pepper-with-32-characters-minimum",
         )
     }
 

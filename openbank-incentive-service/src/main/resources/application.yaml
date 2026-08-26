@@ -30,7 +30,7 @@ quarkus:
 
 openbank:
   incentive:
-    code-pepper: ${PROMO_CODE_PEPPER:CHANGE_ME_LOCAL_DEV_ONLY}
+    code-pepper: ${PROMO_CODE_PEPPER:}
     reservation-ttl: ${PROMO_RESERVATION_TTL:PT15M}
 
 "%test":
