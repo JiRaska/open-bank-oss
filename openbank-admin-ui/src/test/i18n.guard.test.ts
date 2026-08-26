@@ -37,12 +37,14 @@ import path from 'path'
 const APP_DIR = path.resolve(__dirname, '../app')
 const COMPONENTS_DIR = path.resolve(__dirname, '../components')
 
-// Auth screens (and the GDPR privacy notice) are static, pre-login, single-language by design.
+// Auth screens are static, pre-login, single-language by design. The GDPR privacy
+// notice (privacy/page.tsx) is no longer in this set — it renders no copy of its
+// own (the bilingual content lives in components/privacy/PrivacyContent.tsx,
+// covered by the component-level guard below) and is bilingual since #7068.
 const EXEMPT = new Set<string>([
   'auth/login/page.tsx',
   'auth/error/page.tsx',
   'auth/forbidden/page.tsx',
-  'privacy/page.tsx',
 ])
 
 // Brand / proper nouns / technical tokens that read identically in cs and en and
