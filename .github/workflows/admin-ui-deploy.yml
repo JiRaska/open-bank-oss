@@ -312,9 +312,11 @@ jobs:
         # run, so unchanged services always show 0 tests in the UI.
         #
         # Fix: look up the most recent non-expired artifact for EACH known service
-        # independently via GET /actions/artifacts?name=test-reports-{svc}&per_page=1.
-        # This spans all runs — a service not touched for 6 days still shows its
-        # latest results, as long as the 7-day artifact retention hasn't lapsed.
+        # independently from successful `main` workflow runs.  A global artifact
+        # list with `per_page=1` is unsound here: its newest item can be an
+        # unmerged PR artifact, and filtering it out would hide the older valid
+        # main artifact. This spans all main runs — a service not touched for 6
+        # days still shows its latest result while retention permits it.
         #
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
         # Best-effort: expired or absent → shows tests:0 (accurate "not run recently").
@@ -328,21 +330,41 @@ jobs:
           mapfile -t SERVICES < <(find . -mindepth 2 -maxdepth 2 -name version.txt -printf '%h\n' \
             | sed 's#^./##' | sort)
 
+          # Service envelopes come from Services CI; the admin-ui envelope comes
+          # from CI. Build the catalog once from newest successful main attempts.
+          # This is bounded to 42 list calls (two run lists plus at most 40 artifact
+          # pages), rather than querying each of ~59 services against every run.
+          declare -A MAIN_ARTIFACTS=()
+          for workflow in services-ci.yml ci.yml; do
+            while read -r run_id; do
+              [ -n "${run_id}" ] || continue
+              while read -r artifact_id artifact_name; do
+                [ -n "${artifact_id}" ] || continue
+                [[ "${artifact_name}" == test-intelligence-* ]] || continue
+                # API runs are newest-first: retain the first main artifact for an
+                # exact name and never replace it with an older attempt.
+                if [ -z "${MAIN_ARTIFACTS[${artifact_name}]+present}" ]; then
+                  MAIN_ARTIFACTS["${artifact_name}"]="${artifact_id}"
+                fi
+              done < <(api "https://api.github.com/repos/${REPO}/actions/runs/${run_id}/artifacts?per_page=100" \
+                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if not a['expired']]" \
+                2>/dev/null || true)
+            done < <(api "https://api.github.com/repos/${REPO}/actions/workflows/${workflow}/runs?branch=main&status=success&per_page=20" \
+              | python3 -c "import json,sys; [print(r['id']) for r in json.load(sys.stdin).get('workflow_runs',[])]" \
+              2>/dev/null || true)
+          done
+
           DOWNLOADED=0
           for svc in "${SERVICES[@]}"; do
             art_name="test-intelligence-${svc}"
             # This image represents deployed main, not the newest PR candidate.
             # Keep branch provenance explicit: an unmerged artifact must never be
             # presented in the sandbox as evidence for the deployed revision.
-            ARTIFACT=$(api \
-              "https://api.github.com/repos/${REPO}/actions/artifacts?name=${art_name}&per_page=1" \
-              | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; print(str(a[0]['id'])+' '+a[0]['name'] if a else '')" \
-              2>/dev/null || true)
-            if [ -z "${ARTIFACT}" ]; then
+            art_id="${MAIN_ARTIFACTS[${art_name}]:-}"
+            if [ -z "${art_id}" ]; then
               echo "  ${svc}: no artifact (skip)"
               continue
             fi
-            art_id="${ARTIFACT%% *}"
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
                 -L -o "/tmp/${art_name}.zip" 2>/dev/null; then
               TMPDIR_ART="/tmp/${art_name}-extracted"
