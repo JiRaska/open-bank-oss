@@ -1,5 +1,5 @@
--- Forward-only. Rollback: remove the incentive deployment first, export audit evidence,
--- then DROP the six new tables; no existing schema or money-path data is modified.
+-- Rollback: remove the incentive deployment first, export audit evidence, then DROP the six new
+-- tables in reverse dependency order; no existing schema or money-path data is modified.
 CREATE TABLE incentive_offer (
   id UUID PRIMARY KEY,
   name VARCHAR(160) NOT NULL,
