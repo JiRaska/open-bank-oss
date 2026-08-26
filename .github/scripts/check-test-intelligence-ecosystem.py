@@ -59,6 +59,8 @@ def check(root: Path) -> list[str]:
         ("workflows: [\"Services CI\", \"CI\"]", "admin deployment is not subscribed to both fleet and Admin UI CI evidence workflows"),
         ("workflow_run.conclusion == 'success'", "admin deployment accepts unsuccessful Services CI evidence"),
         ("workflow_run.head_branch == 'main'", "admin deployment accepts non-main Services CI evidence"),
+        ("not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main'",
+         "admin deployment can stage a PR artifact as deployed-main evidence"),
         ("schedule:", "admin deployment has no scheduled Test Intelligence snapshot refresh"),
         ("cron: '17 3 * * *'", "admin deployment refresh cadence drifted from the governed daily schedule"),
         ("github.event_name }}\" = \"schedule\"", "scheduled snapshot refresh does not use a unique immutable image tag"),

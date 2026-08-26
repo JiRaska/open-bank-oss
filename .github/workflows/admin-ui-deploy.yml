@@ -331,9 +331,12 @@ jobs:
           DOWNLOADED=0
           for svc in "${SERVICES[@]}"; do
             art_name="test-intelligence-${svc}"
+            # This image represents deployed main, not the newest PR candidate.
+            # Keep branch provenance explicit: an unmerged artifact must never be
+            # presented in the sandbox as evidence for the deployed revision.
             ARTIFACT=$(api \
               "https://api.github.com/repos/${REPO}/actions/artifacts?name=${art_name}&per_page=1" \
-              | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired']]; print(str(a[0]['id'])+' '+a[0]['name'] if a else '')" \
+              | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; print(str(a[0]['id'])+' '+a[0]['name'] if a else '')" \
               2>/dev/null || true)
             if [ -z "${ARTIFACT}" ]; then
               echo "  ${svc}: no artifact (skip)"
