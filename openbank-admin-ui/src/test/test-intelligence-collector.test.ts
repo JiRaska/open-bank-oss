@@ -105,6 +105,7 @@ scenarios:
     expect(report.components[0].coverage.lines.percentage).toBe(80)
     expect(report.components[1].evidence).toEqual([])
     expect(report.totals.missingEvidence).toBe(1)
+    expect(report.totals.unknownEvidence).toBe(1)
     expect(report.contracts).toEqual([expect.objectContaining({
       pactFile: 'alpha-provider.json', state: 'unknown',
       verificationDetail: expect.stringMatching(/not a passing result/i),

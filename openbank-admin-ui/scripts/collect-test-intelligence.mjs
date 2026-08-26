@@ -566,6 +566,7 @@ async function main() {
   const testCases = testCaseHistory(currentEnvelopes)
   const failingEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'failed').length
   const staleEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'stale').length
+  const unknownEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'unknown').length
   const missingEvidence = components.filter(item => item.evidence.length === 0).length
   const historyDir = path.join(repo, 'openbank-admin-ui', 'test-intelligence-history')
   const historicalReports = allFiles(historyDir, file => file.endsWith('.json'))
@@ -573,7 +574,7 @@ async function main() {
     .map(item => ({ collectedAt: item.collectedAt, ...item.totals }))
   const currentPoint = { collectedAt: collectedAt.toISOString(), components: components.length,
     componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
-    failingEvidence, missingEvidence, staleEvidence }
+    failingEvidence, missingEvidence, staleEvidence, unknownEvidence }
   const history = [...historicalReports, currentPoint]
     .sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
     .filter((item, index, all) => index === 0 || item.collectedAt !== all[index - 1].collectedAt)
@@ -609,7 +610,7 @@ async function main() {
       components: components.length,
       componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
       moneyPathComponents: components.filter(item => item.moneyPath).length,
-      failingEvidence, missingEvidence, staleEvidence,
+      failingEvidence, missingEvidence, staleEvidence, unknownEvidence,
     },
     warnings,
   }

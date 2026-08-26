@@ -210,6 +210,7 @@ export interface TestIntelligenceReport {
     failingEvidence: number
     missingEvidence: number
     staleEvidence: number
+    unknownEvidence?: number
   }
   warnings: string[]
 }
@@ -246,6 +247,7 @@ export interface TestIntelligenceHistoryPoint {
   failingEvidence: number
   missingEvidence: number
   staleEvidence: number
+  unknownEvidence?: number
 }
 
 export interface TestAgentFinding {
