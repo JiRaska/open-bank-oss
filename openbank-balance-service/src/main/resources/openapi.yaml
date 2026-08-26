@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Balance Service API
-  version: 1.8.0
+  version: 1.9.0
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -274,6 +274,36 @@ paths:
         '404':
           description: No reconciliation has been run yet
 
+  /api/v1/balances/approvals:
+    get:
+      tags: [Balances]
+      summary: List pending balance approvals, oldest first
+      description: >-
+        PENDING maker-checker approvals for balance credit/debit actions. This read-only queue is
+        consumed by the unified approval inbox; deciding remains on PATCH
+        /api/v1/balances/approvals/{id}. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending balance approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/balances/approvals/{id}:
     patch:
       tags: [Balances]
@@ -306,22 +336,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [id, action, status]
-                properties:
-                  id:
-                    type: string
-                  action:
-                    type: string
-                    description: The gated action this approval was raised for.
-                  resourceId:
-                    type: string
-                    nullable: true
-                  status:
-                    type: string
-                  decidedBy:
-                    type: string
-                    nullable: true
+                $ref: '#/components/schemas/ApprovalResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -356,6 +371,34 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes balance approval. makerId identifies who requested the money-path action; the
+        shared ApprovalStore requires a different authenticated principal to decide it.
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+          description: The gated balance action this approval was raised for.
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          description: Request time; pending approvals expire after 24 hours.
+        decidedBy:
+          type: string
+          nullable: true
+
     BalanceResponse:
       type: object
       properties:
