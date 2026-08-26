@@ -22,13 +22,12 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 // the inbox can distinguish "not wired" from an empty queue. Omitting them would make
 // the most dangerous state look healthy to an operator.
 const NOT_CONFIGURED_SOURCES = {
-  billing: 'not-configured',
   consent: 'not-configured',
 } as const satisfies Record<string, SourceState>
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'balance' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'balance' | 'billing' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -104,6 +103,10 @@ type AccountApproval = LendingApproval
 // balance-service serves the shared PendingApproval shape for gated credit/debit actions.
 // The inbox is read-only; every decision remains subject to the existing money-path controls.
 type BalanceApproval = LendingApproval
+
+// billing-service serves the shared PendingApproval shape for gated fee-posting actions.
+// Listing is read-only; posting and reversal controls remain entirely service-owned.
+type BillingApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -345,6 +348,21 @@ async function balancePending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function billingPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('billing-service', 'billing', 8132, '/api/v1/fees/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as BillingApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'billing' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -372,7 +390,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, balance, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, balance, billing, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -387,9 +405,10 @@ export async function GET() {
     partyPending(headers).catch(() => unavailable),
     accountPending(headers).catch(() => unavailable),
     balancePending(headers).catch(() => unavailable),
+    billingPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...balance.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...balance.items, ...billing.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -409,6 +428,7 @@ export async function GET() {
       party: party.state,
       account: account.state,
       balance: balance.state,
+      billing: billing.state,
       agent: agent.state,
     },
   })
