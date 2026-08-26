@@ -4,13 +4,13 @@
 
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import {
   Package, Search, RefreshCw, Edit, Play, Square, Plus, X,
   Eye, EyeOff, CreditCard, Globe, TrendingDown,
   Clock, FileText, Tag, Users, ExternalLink, History, CheckCircle2,
-  Layers, Banknote, Shield,
+  Layers, Banknote, Shield, AlertTriangle,
 } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -461,6 +461,11 @@ export default function ProductCatalogPage() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [formData, setFormData] = useState<Partial<Product>>({})
   const [saving, setSaving] = useState(false)
+  const [pendingLifecycle, setPendingLifecycle] = useState<Product | null>(null)
+  const [lifecycleBusy, setLifecycleBusy] = useState(false)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const lifecycleCancelRef = useRef<HTMLButtonElement>(null)
+  const lifecycleConfirmRef = useRef<HTMLButtonElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -543,13 +548,18 @@ export default function ProductCatalogPage() {
     }
   }
 
-  const handleToggleStatus = async (p: Product) => {
+  const requestLifecycleChange = (p: Product) => {
     if (!p.id) return
-    if (p.status === 'ACTIVE' && !window.confirm(t(
-      `Deaktivovat produkt ${p.name}? Historie zůstane zachována a produkt nebude možné použít pro nové účty.`,
-      `Deactivate ${p.name}? Its history remains available and it cannot be used for new accounts.`,
-    ))) return
     setActionError(null)
+    setLifecycleError(null)
+    setPendingLifecycle(p)
+  }
+
+  const confirmLifecycleChange = async () => {
+    const p = pendingLifecycle
+    if (!p?.id || lifecycleBusy) return
+    setLifecycleBusy(true)
+    setLifecycleError(null)
     try {
       if (p.revision === undefined) {
         throw new Error(t('Katalog se právě aktualizuje; načtěte stránku znovu.', 'Catalog is upgrading; reload the page.'))
@@ -557,8 +567,11 @@ export default function ProductCatalogPage() {
       const action = p.status === 'ACTIVE' ? 'deactivate' : 'activate'
       await apiFetch(`/${p.id}/${action}`, { method: 'POST', headers: { 'If-Match': `"${p.revision}"` } })
       await load()
+      setPendingLifecycle(null)
     } catch (err: any) {
-      setActionError(err.message ?? 'Failed to change status')
+      setLifecycleError(err.message ?? t('Stav produktu se nepodařilo změnit.', 'Failed to change product status.'))
+    } finally {
+      setLifecycleBusy(false)
     }
   }
 
@@ -713,7 +726,7 @@ export default function ProductCatalogPage() {
                         <button type="button" className="btn btn-secondary btn-sm" disabled={p.status === 'ACTIVE'} onClick={() => openEditModal(p)} style={{ padding: '4px' }} title={p.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')} aria-label={p.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}>
                           <Edit size={13} aria-hidden="true" />
                         </button>
-                        <button type="button" aria-pressed={p.status === 'ACTIVE'} className="btn btn-secondary btn-sm" onClick={() => handleToggleStatus(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')} aria-label={p.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')}>
+                        <button type="button" aria-pressed={p.status === 'ACTIVE'} className="btn btn-secondary btn-sm" onClick={() => requestLifecycleChange(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')} aria-label={p.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')}>
                           {p.status === 'ACTIVE' ? <Square size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}
                         </button>
                         </Can>
@@ -731,7 +744,7 @@ export default function ProductCatalogPage() {
             product={selectedProduct}
             onClose={() => setSelectedProduct(null)}
             onEdit={() => openEditModal(selectedProduct)}
-            onToggleStatus={() => handleToggleStatus(selectedProduct)}
+            onToggleStatus={() => requestLifecycleChange(selectedProduct)}
           />
         )}
       </div>
@@ -810,6 +823,100 @@ export default function ProductCatalogPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {pendingLifecycle && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="catalog-lifecycle-title"
+          aria-describedby="catalog-lifecycle-impact"
+          onKeyDown={event => {
+            if (event.key === 'Escape' && !lifecycleBusy) {
+              setPendingLifecycle(null)
+              setLifecycleError(null)
+            }
+            if (event.key === 'Tab') {
+              const first = lifecycleCancelRef.current
+              const last = lifecycleConfirmRef.current
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault()
+                last?.focus()
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault()
+                first?.focus()
+              }
+            }
+          }}
+          style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+        >
+          <div className="card" style={{ width: '440px', maxWidth: '100%', padding: '22px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+              <AlertTriangle size={18} aria-hidden="true" style={{ color: pendingLifecycle.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)', flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <h2 id="catalog-lifecycle-title" style={{ margin: 0, fontSize: '15px', fontWeight: 750, color: 'var(--text-primary)' }}>
+                  {pendingLifecycle.status === 'ACTIVE'
+                    ? t('Deaktivovat produkt?', 'Deactivate product?')
+                    : t('Aktivovat produkt?', 'Activate product?')}
+                </h2>
+                <p id="catalog-lifecycle-impact" style={{ margin: '5px 0 0', fontSize: '12.5px', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                  {pendingLifecycle.status === 'ACTIVE'
+                    ? t('Historie i existující účty zůstanou zachované. Produkt se přestane nabízet pro zakládání nových účtů.', 'History and existing accounts remain available. The product stops being offered for new accounts.')
+                    : t('Produkt bude možné použít pro nové účty. Ve veřejné nabídce se zobrazí pouze tehdy, pokud má nastavenou veřejnou viditelnost.', 'The product becomes available for new accounts. It appears in the public offer only when public visibility is enabled.')}
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', margin: '16px 0', padding: '11px 12px', borderRadius: '8px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+              <div style={{ minWidth: 0, marginRight: 'auto' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pendingLifecycle.name}</div>
+                <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)', marginTop: '2px' }}>{pendingLifecycle.code}</div>
+              </div>
+              <StatusBadge status={pendingLifecycle.status} />
+              <span aria-hidden="true" style={{ color: 'var(--text-tertiary)' }}>→</span>
+              <StatusBadge status={pendingLifecycle.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'} />
+            </div>
+
+            {lifecycleError && (
+              <div role="alert" style={{ padding: '10px 12px', marginBottom: '14px', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--danger-border)' }}>
+                {lifecycleError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                ref={lifecycleCancelRef}
+                autoFocus
+                disabled={lifecycleBusy}
+                onClick={() => {
+                  setPendingLifecycle(null)
+                  setLifecycleError(null)
+                }}
+              >
+                {t('Zrušit', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                className={pendingLifecycle.status === 'ACTIVE' ? 'btn btn-danger' : 'btn btn-primary'}
+                ref={lifecycleConfirmRef}
+                disabled={lifecycleBusy}
+                aria-busy={lifecycleBusy}
+                aria-label={pendingLifecycle.status === 'ACTIVE'
+                  ? t(`Potvrdit deaktivaci produktu ${pendingLifecycle.name}`, `Confirm deactivation of ${pendingLifecycle.name}`)
+                  : t(`Potvrdit aktivaci produktu ${pendingLifecycle.name}`, `Confirm activation of ${pendingLifecycle.name}`)}
+                onClick={confirmLifecycleChange}
+              >
+                {lifecycleBusy
+                  ? t('Provádím změnu…', 'Applying change…')
+                  : pendingLifecycle.status === 'ACTIVE'
+                    ? t('Deaktivovat produkt', 'Deactivate product')
+                    : t('Aktivovat produkt', 'Activate product')}
+              </button>
+            </div>
           </div>
         </div>
       )}
