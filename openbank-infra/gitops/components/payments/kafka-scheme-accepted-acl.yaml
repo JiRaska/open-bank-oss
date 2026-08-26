@@ -458,6 +458,7 @@ rules:
       - kafka-ui                        # issue #3393: the cluster-browsing console, and the only workload that was actually SPEAKING on :9092 — every DESCRIBE denied as User:ANONYMOUS. Unusually, it runs IN `messaging`, so this projection does not cross a namespace; it goes through ESO anyway to stay in this inventory (see components/kafka/kafka-ui-mtls.yaml)
       - case-coordinator                # ADR-0244: proposal-events producer (case_outbox), ns platform — third ESO Kafka client there after agent-service and copilot-service, sharing that namespace's kafka-cluster-ca-truststore
       - billing-service                 # issue #4701: fee-event outbox producer, ns billing (first ESO client there); had been failing since the topic was introduced (SmallRye default localhost:9092, no KafkaUser/cert ever provisioned)
+      - referral-service                # ADR-0266: MGM lifecycle producer, ns referral (first ESO Kafka client there)
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
