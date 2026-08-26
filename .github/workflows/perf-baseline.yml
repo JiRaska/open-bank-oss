@@ -34,6 +34,9 @@ jobs:
     name: k6 money-path read baseline
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Keep both performance lanes on one immutable, independently verified executor.
+      K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -58,16 +61,30 @@ jobs:
             echo "txn=$txn" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Resolve pinned k6 runtime
+        if: steps.target.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          docker pull "${K6_IMAGE}"
+          docker run --rm "${K6_IMAGE}" version
+
       - name: Run k6 baseline
         if: steps.target.outputs.run == 'true'
-        uses: grafana/k6-action@e4714b734f2b0afaabeb7b4a69142745548ab9ec # v0.3.1
-        with:
-          filename: perf/k6/money-path-smoke.js
-          # Advisory: report threshold breaches, never fail the workflow on them.
-          flags: --no-thresholds-fail --summary-export=perf-summary.json
         env:
           LEDGER_URL: ${{ steps.target.outputs.ledger }}
           TXN_URL: ${{ steps.target.outputs.txn }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env LEDGER_URL \
+            --env TXN_URL \
+            --volume "$PWD:/work" \
+            --workdir /work \
+            "${K6_IMAGE}" run \
+            --no-thresholds-fail \
+            --summary-export=perf-summary.json \
+            perf/k6/money-path-smoke.js
 
       - name: Build money-path performance Test Intelligence envelope
         if: always()

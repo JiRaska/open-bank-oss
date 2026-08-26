@@ -160,10 +160,15 @@ def check(root: Path) -> list[str]:
             if needle not in workflow:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
     perf_gate = text(root / ".github/workflows/perf-gate.yml")
-    if "ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79" not in perf_gate:
-        errors.append("performance gate does not execute its k6 runtime by immutable official digest")
-    if "github.com/grafana/k6/releases/download" in perf_gate or "curl -fsSL" in perf_gate:
-        errors.append("performance gate still executes an unauthenticated downloaded k6 archive")
+    perf_baseline = text(root / ".github/workflows/perf-baseline.yml")
+    pinned_k6 = "ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79"
+    for workflow_name, workflow in (("performance gate", perf_gate), ("performance baseline", perf_baseline)):
+        if pinned_k6 not in workflow:
+            errors.append(f"{workflow_name} does not execute its k6 runtime by immutable official digest")
+        if "github.com/grafana/k6/releases/download" in workflow or "curl -fsSL" in workflow:
+            errors.append(f"{workflow_name} still executes an unauthenticated downloaded k6 archive")
+        if "grafana/k6-action@" in workflow:
+            errors.append(f"{workflow_name} still depends on the archived legacy k6 action")
     for needle in ('--network host', '--user "$(id -u):$(id -g)"', '--volume "$PWD:/work"'):
         if needle not in perf_gate:
             errors.append(f"performance gate pinned container cannot safely reach/write its subject: {needle}")
