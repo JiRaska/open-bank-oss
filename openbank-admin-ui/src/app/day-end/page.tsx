@@ -23,13 +23,14 @@ import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   RefreshCw, Clock, CheckCircle2, AlertTriangle, Scale, CalendarClock, Coins,
-  ArrowRightLeft, CalendarCheck2, Play, ChevronDown, ChevronRight, History, FileClock,
+  ArrowRightLeft, CalendarCheck2, Play, ChevronDown, ChevronRight, History, FileClock, ShieldCheck,
 } from 'lucide-react'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { hasPermission } from '@/lib/auth/roles'
 import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { RegulatoryPeriodPanel } from '@/components/closings/RegulatoryPeriodPanel'
 
 const POLL = 30_000
 // A healthy daily tie-out (23:30) is at most ~24h old; past 25h the day's close likely
@@ -42,7 +43,7 @@ const HISTORY_LIMIT = 20
 // Page shell — tabbed view (EoD | EoM), tab restorable via ?tab=eom
 // ---------------------------------------------------------------------------
 
-type Tab = 'eod' | 'eom'
+type Tab = 'eod' | 'eom' | 'regulatory'
 
 export default function ClosingsPage() {
   const { t } = useLanguage()
@@ -57,11 +58,12 @@ function ClosingsContent() {
   const { t } = useLanguage()
   const searchParams = useSearchParams()
   const router = useRouter()
-  const [tab, setTab] = useState<Tab>(searchParams.get('tab') === 'eom' ? 'eom' : 'eod')
+  const requestedTab = searchParams.get('tab')
+  const [tab, setTab] = useState<Tab>(requestedTab === 'eom' || requestedTab === 'regulatory' ? requestedTab : 'eod')
 
   const changeTab = useCallback((next: Tab) => {
     setTab(next)
-    router.replace(next === 'eom' ? '/day-end?tab=eom' : '/day-end', { scroll: false })
+    router.replace(next === 'eod' ? '/day-end' : `/day-end?tab=${next}`, { scroll: false })
   }, [router])
 
   return (
@@ -73,6 +75,7 @@ function ClosingsContent() {
         {([
           { key: 'eod' as Tab, icon: Scale, labelCs: 'Závěrka dne (EoD)', labelEn: 'Day-end (EoD)' },
           { key: 'eom' as Tab, icon: CalendarCheck2, labelCs: 'Měsíční uzávěrka (EoM)', labelEn: 'Month-end (EoM)' },
+          { key: 'regulatory' as Tab, icon: ShieldCheck, labelCs: 'Regulatorní období', labelEn: 'Regulatory period' },
         ]).map(item => {
           const Icon = item.icon
           const isActive = tab === item.key
@@ -91,7 +94,7 @@ function ClosingsContent() {
         })}
       </div>
 
-      {tab === 'eod' ? <EodPanel /> : <EomPanel />}
+      {tab === 'eod' ? <EodPanel /> : tab === 'eom' ? <EomPanel /> : <RegulatoryPeriodPanel />}
     </div>
   )
 }
