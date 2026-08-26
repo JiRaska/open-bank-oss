@@ -39,9 +39,10 @@
 #   money_moving   true when the journey initiates a real payment or ledger posting.
 #   cronjob        path to the manifest that runs it — the CronJob and the ConfigMap holding
 #                  its k6 script live in that one file (active only). The script is embedded
-#                  rather than kept as a sibling .js so there is no second copy to drift:
-#                  the same reason the external-feed watch reads its URL out of the committed
-#                  config instead of keeping its own.
+#                  rather than kept as a sibling .js so there is no second copy to drift.
+#                  CI extracts this exact ConfigMap scalar for the PR and post-GitOps-merge
+#                  calls; the periodic CronJob mounts it directly. One executable artifact,
+#                  three call sites, enforced by check-journey-catalog.py.
 #   schedule       cron expression, mirrored from the manifest (active only).
 #   target_schedule intended cadence once a planned journey's blocker is removed. It is shown
 #                  in Test Intelligence but never interpreted as proof that a scheduler exists.

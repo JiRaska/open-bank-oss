@@ -60,6 +60,7 @@ on:
       - "openbank-libs/governance/agents.yaml"
       - "openbank-libs/governance/compliance-controls.yaml"
       - "openbank-libs/governance/rules.yaml"
+      - "openbank-libs/governance/journeys.yaml"
       # openbank-libs/docs is the ONLY docs tree baked into the image: the Dockerfile's
       # docs-collector copies /repo/openbank-*/docs, and src/lib/services/docs.ts serves the
       # `libs` service from /app/docs-bundle rather than from a running pod. Every other
