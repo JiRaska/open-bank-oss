@@ -12,9 +12,21 @@ summary: "The customer app gets a hidden in-app diagnostics surface whose securi
 
 # In-app diagnostics / debug surface (customer app)
 
-**Delivery note (updated 2026-06-30):**
-- **Core build-gating** — ✅ Shipped: `DebugGate.isDebugBuild` compilation-out for release binaries, 7-tap activation gesture, build-info/edge `/api/v1/info` panel live in `openbank-app`.
-- **UI panels (F2+)** — ⬜ Pending: feature-flag variant panel, session-state panel, and network-throttling/deep-link-launcher panels are tracked follow-ups.
+**Delivery note (updated 2026-08-26):**
+- **Core build-gating** — ✅ Shipped: 7-tap activation gesture, build-info/edge `/api/v1/info` panel.
+- **UI panels** — ✅ Shipped, correcting the previous note which listed them as pending: the
+  feature-flag, session-claims, SCA-challenge and proximity panels are all present in `DebugMenu`.
+- **Reachability** — ⚠️ Was broken until 2026-08-26, and the two notes above hid it. The gate was
+  `DebugGate.isDebugBuild` (`Platform.isDebugBinary` on iOS), but **TestFlight builds are compiled
+  Release**, so the gesture was a no-op in every build anyone ever installed — the surface worked
+  only when run from Xcode, i.e. exactly where a debugger is already attached and the panel is
+  least needed. Reported as "the debug feature disappeared"; it had never been reachable off a
+  developer's own machine. The gate is now the DISTRIBUTION CHANNEL (`BuildChannel`): developer
+  builds and TestFlight yes, App Store never. Invariant 1 is unchanged — the boundary is still the
+  build, decided offline with no network in the trust path.
+
+  Lesson for future delivery notes: "shipped" was asserted from the code existing, not from the
+  feature being reachable in a distributed build. A gate that compiles is not a gate that runs.
 
 ## Context
 
