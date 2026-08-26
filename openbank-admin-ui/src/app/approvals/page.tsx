@@ -18,6 +18,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
 import { resolveAgentIdentity, type AgentIdentityRegistry } from '@/lib/governance/agentIdentity'
+import { approvalActionLabel, approvalDomainLabel, approvalExpiresAt, type ApprovalDomain } from '@/lib/approvals/presentation'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 
 interface Proposal {
@@ -37,7 +38,7 @@ interface Proposal {
 
 interface InboxItem {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'balance' | 'billing' | 'consent' | 'agent'
+  domain: ApprovalDomain
   action: string
   resourceId: string | null
   maker: string | null
@@ -202,22 +203,27 @@ export default function ApprovalsPage() {
         </div>
       )}
       <div style={{ display: 'grid', gap: 10, marginBottom: 24 }}>
-        {domainItems.filter(i => i.domain !== 'agent').map(item => (
-          <div key={`${item.domain}:${item.id}`} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+        {domainItems.filter(i => i.domain !== 'agent').map(item => {
+          const expiresAt = approvalExpiresAt(item.proposedAt)
+          return (
+          <div key={`${item.domain}:${item.id}`} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{
               fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase',
               color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', flexShrink: 0,
             }}>
-              {item.domain}
+              {approvalDomainLabel(item.domain, language)}
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.action}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{approvalActionLabel(item.action, language)}</div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                <span title={t('Přesný klíč autorizační politiky', 'Exact authorization policy key')} style={{ fontFamily: 'var(--font-mono)' }}>{item.action}</span>
+                <span> · </span>
                 <span style={{ fontFamily: 'var(--font-mono)' }}>{item.id}</span>
                 {(item.resourceId || item.maker || item.proposedAt) && <span> · </span>}
                 {item.resourceId && <span style={{ fontFamily: 'var(--font-mono)' }}>{item.resourceId} · </span>}
                 {item.maker && <span>{t('navrhl', 'by')} {item.maker}</span>}
                 {item.proposedAt && <span> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</span>}
+                {expiresAt && <span style={{ color: 'var(--warning-text)' }}> · {t('vyprší', 'expires')} {expiresAt.toLocaleString(dateLocale)}</span>}
               </div>
             </div>
             {item.domain === 'notification' && (
@@ -242,7 +248,8 @@ export default function ApprovalsPage() {
               {t('Čeká', 'Pending')}
             </span>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>
