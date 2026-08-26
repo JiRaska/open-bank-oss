@@ -16,8 +16,8 @@ const COPY = {
   en: {
     skip: "Skip to sign in",
     eyebrow: "OpenBank Operations",
-    headline: "Operate with confidence.",
-    intro: "One calm, governed workspace for the people who keep a bank moving.",
+    headline: "Explore operations with confidence.",
+    intro: "Your OpenBank Explorer is ready to guide you through one calm, governed workspace.",
     benefits: ["A shared operational picture", "Decisions with context", "Security built into every action"],
     secure: "Secure access",
     welcome: "Welcome back",
@@ -36,8 +36,8 @@ const COPY = {
   cs: {
     skip: "Přeskočit k přihlášení",
     eyebrow: "OpenBank Operations",
-    headline: "Řiďte banku s jistotou.",
-    intro: "Jedno klidné a řízené pracovní prostředí pro všechny, kdo zajišťují chod banky.",
+    headline: "Prozkoumejte provoz s jistotou.",
+    intro: "OpenBank Explorer vás provede jedním klidným a řízeným pracovním prostředím.",
     benefits: ["Společný provozní přehled", "Rozhodnutí v souvislostech", "Bezpečnost v každém kroku"],
     secure: "Zabezpečený přístup",
     welcome: "Vítejte zpět",
