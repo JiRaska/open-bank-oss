@@ -164,7 +164,7 @@ spec:
             # reaches Grafana Tempo's query API in-cluster. Absent → the page
             # degrades calmly to "Tempo unreachable" (graceful-state rule).
             - name: TEMPO_URL
-              value: http://tempo.observability.svc:3100
+              value: http://tempo.observability.svc:3200
             # Onboarding funnel analytics (/onboarding/analytics): the BFF queries the ClickHouse
             # gold views over the HTTP interface. Absent → defaults to localhost:8123 and the board
             # degrades calmly to the "unavailable" state (graceful-state rule). Auth is the
