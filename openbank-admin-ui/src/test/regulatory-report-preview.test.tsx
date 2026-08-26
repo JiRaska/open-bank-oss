@@ -55,6 +55,8 @@ describe('Regulatory report preview', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F01.01?asOf=')
     expect(String(fetchMock.mock.calls[1][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F02.00?asOf=')
     expect(screen.getByText('finrep-service ← ledger trial balance (ne ClickHouse)')).toBeInTheDocument()
+    expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Ready for internal export/)
+    expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeEnabled()
   })
 
   it('does not present an implemented endpoint as live data when the BFF cannot load it', async () => {
@@ -75,5 +77,19 @@ describe('Regulatory report preview', () => {
     expect(screen.queryByText('Celková aktiva')).not.toBeInTheDocument()
     expect(screen.queryByText('Živý datový náhled')).not.toBeInTheDocument()
     expect(screen.queryByText('Dostupnost dat')).not.toBeInTheDocument()
+  })
+
+  it('blocks export when COREP honestly reports a data gap', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      templateId: 'C_01.00', period: '2026-06-30', hasDataGaps: true,
+      cells: [{ rowRef: 'r010', colRef: 'c010', value: 0, currency: 'CZK', isDataGap: true, gapReason: 'capital accounts unavailable' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } })))
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
+    fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
+    await waitFor(() => expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Export blocked.*incomplete data/i))
+    expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Export preview as CSV' })).toBeDisabled()
   })
 })

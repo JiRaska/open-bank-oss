@@ -353,15 +353,17 @@ jobs:
       # A flake cannot be counted from run CONCLUSIONS alone (a re-run flips it away from
       # `failure`), so retain the JUnit XML per ATTEMPT — a flake becomes a diffable artifact
       # pair instead of something that has to be noticed and reported at re-run time (#4878).
-      - name: Upload JUnit XML (every run — flake accounting)
+      - name: Upload quality evidence (every run)
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: junit-xml-${{ inputs.service }}-a${{ github.run_attempt }}
-          path: ${{ inputs.service }}/build/test-results/**/*.xml
+          name: quality-evidence-${{ inputs.service }}-a${{ github.run_attempt }}
+          path: |
+            ${{ inputs.service }}/build/test-results/**/*.xml
+            ${{ inputs.service }}/build/reports/kover/report.xml
           if-no-files-found: ignore
-          retention-days: 3
+          retention-days: 7
 
       # Compatibility projection for the image build: the latest envelope remains
       # separate from immutable attempts above, so a re-run cannot erase history.

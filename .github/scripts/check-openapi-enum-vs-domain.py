@@ -100,6 +100,8 @@ BASELINE: dict[str, str] = {
         "AccountingDayStatus; OPEN is unreachable as a transition target (no reopen, ADR-0207).",
     "openbank-lending-service:APPROVED,EXECUTED,PENDING,REJECTED":
         "#5962 — CollateralStatus: spec-only EXECUTED",
+    "openbank-lending-service:APPROVED,EXECUTED,PROPOSED,REJECTED":
+        "Compliance pack ProposalState, not CollateralStatus; value-overlap pairing is ambiguous.",
     # Also deliberate: the enum is right to flag (INDIVIDUAL has never existed; the DB CHECK is
     # ('NATURAL_PERSON','LEGAL_ENTITY','SOLE_TRADER')), but it sits inside `CreatePartyRequest`,
     # whose declared properties — legalName, tradingName, taxId, dateOfBirth, nationality —

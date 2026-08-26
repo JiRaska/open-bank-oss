@@ -35,6 +35,9 @@ const PENDING = [{
   proposedBy: 'maker@openbank.local',
   decidedBy: null,
   decidedAt: null,
+  proposedAt: '2026-08-20T08:00:00Z',
+  decisionReason: null,
+  pack: { jurisdiction: 'CZ', productType: 'CONSUMER_CREDIT', version: 1, coolingOffDays: 14 },
 }]
 
 const ACTIVE = [{ ...PENDING[0], id: '00000000-0000-0000-0000-000000000000', state: 'EXECUTED', proposedBy: '-' }]
@@ -105,6 +108,17 @@ describe('compliance pack activation console', () => {
     // The hash is what ties an activated pack to a reviewable document. A console that shows
     // "CZ v1 active" without it cannot answer "active *as of which text*".
     expect(screen.getAllByText(/b7c4d1e9a0f35286/).length).toBeGreaterThan(0)
+  })
+
+  it('opens the exact reviewed pack and maker-checker audit detail', async () => {
+    vi.stubGlobal('fetch', mockFetch({ active: { status: 200, body: ACTIVE } }))
+    render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
+
+    await waitFor(() => expect(screen.getByText(/details/)).toBeTruthy())
+    fireEvent.click(screen.getByText(/details/))
+    expect(screen.getByText('Exact pack content')).toBeInTheDocument()
+    expect(screen.getByText(/"coolingOffDays": 14/)).toBeInTheDocument()
+    expect(screen.getByText(PENDING[0].contentHash)).toBeInTheDocument()
   })
 
   it('an empty active list states the enforce-pack consequence, not just "none"', async () => {

@@ -424,7 +424,7 @@ export default function TemporalPage() {
                         ))}
                       </div>
                       <div style={{ fontSize: '10.5px', color: 'var(--text-tertiary)', fontFamily: 'monospace', background: 'var(--surface-2)', padding: '3px 8px', borderRadius: 4 }}>
-                        {t(wf.flagCs, wf.flagEn)}
+                        {wf.svc}
                       </div>
                     </div>
                   )
@@ -549,8 +549,8 @@ export default function TemporalPage() {
               <CheckCircle size={16} color="#22c55e" style={{ flexShrink: 0, marginTop: '1px' }} />
               <span>
                 {t(
-                  'P0–P4 nasazeno; feature flagy ON v GitOps. P3 (settlement, money-path) prošlo se 2 review approvaly a aktualizovaným threat modelem (docs/threat-models/settlement.md) podle ADR-0030. Zbývá P5 — dekomisace legacy saga tabulek.',
-                  'P0–P4 deployed; feature flags ON in GitOps. P3 (settlement, money-path) shipped with 2 review approvals and an updated threat model (docs/threat-models/settlement.md) per ADR-0030. P5 remaining — decommission legacy saga tables.',
+                  'Toto je referenční migrační plán z ADR-0100, ne živý stav běhů. Aktuální aktivitu a typy workflow potvrzují pouze metriky níže.',
+                  'This is the ADR-0100 reference migration plan, not live execution state. Only the metrics below confirm current activity and workflow types.',
                 )}
               </span>
             </div>
@@ -584,12 +584,12 @@ export default function TemporalPage() {
                 <Clock size={16} color="#818cf8" style={{ flexShrink: 0, marginTop: 2 }} />
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-                    {t('Temporal server běží — Prometheus metriky se ještě neobjeví', 'Temporal server is running — Prometheus metrics not yet visible')}
+                    {t('Temporal nelze potvrdit z Promethea', 'Temporal cannot be confirmed from Prometheus')}
                   </div>
                   <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                     {t(
-                      'Temporal server je nasazen (Helm chart + PodMonitor enablePodMonitor=true v GitOpsu). Temporal vystavuje metriky na portu 9090 pod prefixem temporal_. Pokud Prometheus nevrací temporal_server_start_count, nejčastější příčiny jsou: (1) PodMonitor v namespace temporal ještě čeká na první scrape cyklus (~30 s po startu), (2) kube-prometheus-stack má podMonitorNamespaceSelector omezený jen na vlastní namespace — zkontroluj Helm values. Workflowy domácích plateb, SEPA, FX a uzávěrek jsou aktivní (feature flagy ON), metriky se zobrazí po vyřešení scrape konfigurace.',
-                      'Temporal server is deployed (Helm chart + PodMonitor enablePodMonitor=true in GitOps). Temporal exposes metrics on port 9090 with the temporal_ prefix. If Prometheus does not return temporal_server_start_count, the most common causes are: (1) PodMonitor in the temporal namespace is still waiting for the first scrape cycle (~30 s after start), (2) kube-prometheus-stack podMonitorNamespaceSelector is scoped only to its own namespace — check Helm values. Domestic payment, SEPA, FX and closing workflows are active (feature flags ON); metrics will appear once the scrape config is resolved.',
+                      'Prometheus odpověděl, ale nevrátil žádnou temporal_restarts řadu. To může znamenat nenasazený Temporal nebo chybějící scrape; tato stránka z toho neodvozuje, že server či workflow běží. Ověř PodMonitor, target health a Temporal frontend.',
+                      'Prometheus responded but returned no temporal_restarts series. Temporal may be absent or its scrape may be missing; this page does not infer that the server or workflows are running. Check the PodMonitor, target health, and Temporal frontend.',
                     )}
                   </div>
                 </div>

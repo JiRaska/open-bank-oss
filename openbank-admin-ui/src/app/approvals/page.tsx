@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSession } from 'next-auth/react'
-import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle } from 'lucide-react'
+import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot, UserRound } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
@@ -31,6 +31,7 @@ interface Proposal {
   decidedAt: string | null
   decisionReason: string | null
   modelId: string | null
+  agent?: { id: string; displayName: string; icon: 'bot' | 'user'; charterKnown: boolean }
 }
 
 interface InboxItem {
@@ -240,10 +241,13 @@ export default function ApprovalsPage() {
           // The ADR-0080 caution stands whenever AI authorship is established OR cannot be
           // ruled out. Only a positively unchartered actor drops it.
           const cautionAi = identity.status !== 'unresolved'
+          const aiGenerated = p.agent ? p.agent.icon === 'bot' : /assistant|agent|\bai\b/i.test(p.proposedBy)
+          const ProposerIcon = aiGenerated ? Bot : UserRound
           return (
             <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${chartered ? '#d97706' : m.color}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 8, background: aiGenerated ? '#fffbeb' : 'var(--surface-2)', color: aiGenerated ? '#b45309' : 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><ProposerIcon size={15} /></span>
                   {p.title}
                   <AgentIdentityBadge identity={identity} loading={registryLoading} lang={language} />
                 </div>
@@ -265,7 +269,9 @@ export default function ApprovalsPage() {
                 <span style={{ fontWeight: 700 }}>{t('Navrhovaná akce: ', 'Suggested action: ')}</span>{p.suggestedAction}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 10 }}>
-                {t('Navrhl', 'Proposed by')} <b>{p.proposedBy}</b> · {new Date(p.proposedAt).toLocaleString(dateLocale)}
+                {t('Navrhl', 'Proposed by')} <b>{p.agent?.displayName ?? p.proposedBy}</b>
+                <span className="mono"> · {p.agent?.id ?? p.proposedBy}</span>
+                {p.modelId ? <span className="mono"> · {p.modelId}</span> : null} · {new Date(p.proposedAt).toLocaleString(dateLocale)}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <Can permission="agent:decide" fallback={<span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Rozhodování vyžaduje oprávnění agenta.', 'Decision access requires agent authorization.')}</span>}>

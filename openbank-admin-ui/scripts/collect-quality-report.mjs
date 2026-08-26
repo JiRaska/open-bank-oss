@@ -9,27 +9,26 @@
 import fs from 'fs'
 import path from 'path'
 import { parseStringPromise } from 'xml2js'
+import { moneyPathServices } from './lib/service-inventory.mjs'
 
 const args = process.argv.slice(2)
 const repoRootIdx = args.indexOf('--repo-root')
 const REPO_ROOT = repoRootIdx >= 0 ? path.resolve(args[repoRootIdx + 1]) : path.resolve('..')
 const OUT = path.resolve('quality-report.json')
 
-const MONEY_PATH_SERVICES = [
-  'openbank-ledger-service',
-  'openbank-transaction-service',
-  'openbank-account-service',
-  'openbank-balance-service',
-  'openbank-sepa-payment',
-  'openbank-sepa-instant',
-  'openbank-domestic-payment',
-  'openbank-clearing-service',
-  'openbank-swift-service',
-  'openbank-fx-service',
-  'openbank-lending-service',
-  'openbank-sca-service',
-  'openbank-consent-service',
-]
+const MONEY_PATH_SERVICES = moneyPathServices(REPO_ROOT)
+
+function collectCoverage(service) {
+  const xmlPath = path.join(REPO_ROOT, service, 'build', 'reports', 'kover', 'report.xml')
+  if (!fs.existsSync(xmlPath)) return null
+  const xml = fs.readFileSync(xmlPath, 'utf8')
+  const counters = [...xml.matchAll(/<counter\s+type="LINE"\s+missed="(\d+)"\s+covered="(\d+)"\s*\/>/g)]
+  const total = counters.at(-1)
+  if (!total) return null
+  const missed = Number(total[1])
+  const covered = Number(total[2])
+  return missed + covered > 0 ? Math.round((covered / (missed + covered)) * 100) : null
+}
 
 // ── Pitest ───────────────────────────────────────────────────────────────────
 
@@ -171,9 +170,7 @@ function buildServiceScores(testResults, mutations, contracts) {
     const tr = testResults?.services?.find(s => s.service === service)
     const unitScore = tr && tr.tests > 0 ? Math.round((tr.passed / tr.tests) * 100) : null
 
-    // coverage from kover — not directly available in the report; placeholder null
-    // (will be populated once kover XML is parsed in a follow-up)
-    const coverageScore = null
+    const coverageScore = collectCoverage(service)
 
     const mut = mutations.find(m => m?.service === service)
     const mutationScore = mut?.score ?? null
@@ -185,7 +182,7 @@ function buildServiceScores(testResults, mutations, contracts) {
       : serviceContracts.some(c => c.status === 'failed') ? 0
       : null
 
-    const components = [unitScore, mutationScore, contractScore].filter(v => v !== null)
+    const components = [unitScore, coverageScore, mutationScore, contractScore].filter(v => v !== null)
     const composite = components.length > 0
       ? Math.round(components.reduce((a, b) => a + b, 0) / components.length)
       : null
