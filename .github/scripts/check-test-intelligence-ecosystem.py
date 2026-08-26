@@ -213,6 +213,9 @@ def check(root: Path) -> list[str]:
     agent_route = text(root / "openbank-admin-ui/src/app/api/test-intelligence/agents/route.ts")
     if "runtimeFreshnessState(item.state as EvidenceState, item.observedAt)" not in agent_route:
         errors.append("AI agent can analyze an expired successful snapshot as current evidence")
+    for needle in ("parsed.hostname === 'github.com'", "parts[1] === 'JiRaska'", "parts[2] === 'open-bank-oss'", "parts[3] === 'pull'", "!parsed.search", "!parsed.hash"):
+        if needle not in agent_route:
+            errors.append(f"AI proposal can render an untrusted outbound link: {needle}")
     for needle in ("kube_cronjob_status_last_schedule_time", "kube_cronjob_status_last_successful_time", "kube_job_status_failed"):
         if needle not in synthetic_route:
             errors.append(f"synthetic runtime projection lost its verified Kubernetes signal: {needle}")

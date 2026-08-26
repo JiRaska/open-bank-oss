@@ -107,6 +107,8 @@ describe('Test Intelligence agent BFF', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([
       { id: 'safe-1', component: 'openbank-ledger-service', title: 'Investigate retry', severity: 'CRITICAL', rootCause: 'timeout', proposalUrl: 'https://github.com/JiRaska/open-bank-oss/pull/1' },
       { id: 'unsafe-link', component: 'openbank-ledger-service', title: 'Do not render a command', severity: 'WARNING', proposalUrl: 'javascript:alert(1)' },
+      { id: 'phishing-link', component: 'openbank-ledger-service', title: 'Do not leave the repository boundary', severity: 'WARNING', proposalUrl: 'https://attacker.example/pull/1' },
+      { id: 'lookalike-link', component: 'openbank-ledger-service', title: 'Do not trust lookalike paths', severity: 'WARNING', proposalUrl: 'https://github.com/attacker/open-bank-oss/pull/1' },
       { id: 'invalid-component', component: '../outside', title: 'Reject', severity: 'WARNING' },
       { id: 'invalid-severity', component: 'openbank-ledger-service', title: 'Reject', severity: 'PASSED' },
     ]), { status: 200 }))
@@ -116,6 +118,8 @@ describe('Test Intelligence agent BFF', () => {
     expect(body.findings).toEqual([
       expect.objectContaining({ id: 'safe-1', proposalUrl: 'https://github.com/JiRaska/open-bank-oss/pull/1' }),
       expect.objectContaining({ id: 'unsafe-link', proposalUrl: null }),
+      expect.objectContaining({ id: 'phishing-link', proposalUrl: null }),
+      expect.objectContaining({ id: 'lookalike-link', proposalUrl: null }),
     ])
   })
 })

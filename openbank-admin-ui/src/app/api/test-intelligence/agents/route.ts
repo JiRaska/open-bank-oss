@@ -53,7 +53,18 @@ const safeProposalUrl = (value: unknown): string | null => {
   if (!text) return null
   try {
     const parsed = new URL(text)
-    return parsed.protocol === 'https:' ? parsed.toString() : null
+    const parts = parsed.pathname.split('/')
+    return parsed.protocol === 'https:'
+      && parsed.hostname === 'github.com'
+      && !parsed.search
+      && !parsed.hash
+      && parts.length === 5
+      && parts[1] === 'JiRaska'
+      && parts[2] === 'open-bank-oss'
+      && parts[3] === 'pull'
+      && /^\d+$/.test(parts[4])
+      ? parsed.toString()
+      : null
   } catch { return null }
 }
 

@@ -241,6 +241,11 @@ opening a ticket or PR. The UI renders the agent as unavailable without changing
 and root-cause agents may consume the same report, but they cannot rewrite a run verdict, lower a
 gate, approve their own proposal or turn missing evidence into a prediction.
 
+Agent-returned proposal links cross a separate outbound trust boundary. The BFF renders only a
+canonical pull-request URL in the OpenBank repository, with a numeric id and no query or fragment;
+an arbitrary HTTPS, lookalike-repository or executable URL is discarded while the advisory finding
+remains visible.
+
 ### D8 — Competitive benchmark and banking safety boundary
 
 The 2026-08 benchmark found no single product that closes this whole loop. Datadog provides
