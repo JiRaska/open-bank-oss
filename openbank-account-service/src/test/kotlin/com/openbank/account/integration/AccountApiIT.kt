@@ -118,6 +118,34 @@ class AccountApiIT {
 
     @Test
     @Order(5)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `POST accounts persists a term deposit account`() {
+        val payload = """
+            {
+              "partyId": "$partyId",
+              "productId": "00000000-2222-0000-0000-000000000002",
+              "accountType": "TERM_DEPOSIT",
+              "currencyCode": "EUR",
+              "legalName": "Test Customer"
+            }
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            body(payload)
+        } When {
+            post("/api/v1/accounts")
+        } Then {
+            statusCode(201)
+            body("accountType", equalTo("TERM_DEPOSIT"))
+            body("currencyCode", equalTo("EUR"))
+            body("status", equalTo("ACTIVE"))
+        }
+    }
+
+    @Test
+    @Order(5)
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
     fun `GET accounts by partyId returns list`() {
         val body = (

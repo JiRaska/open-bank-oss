@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-export type AccountType = 'CURRENT' | 'SAVINGS' | 'NOSTRO' | 'GL_ASSET' | 'GL_LIABILITY' | 'GL_INCOME' | 'GL_EXPENSE'
+export type AccountType = 'CURRENT' | 'SAVINGS' | 'TERM_DEPOSIT' | 'NOSTRO' | 'GL_ASSET' | 'GL_LIABILITY' | 'GL_INCOME' | 'GL_EXPENSE'
 export type AccountStatus = 'PENDING_ACTIVATION' | 'ACTIVE' | 'DORMANT' | 'FROZEN' | 'CLOSED'
 export type TransactionType = 'DEBIT' | 'CREDIT' | 'TRANSFER' | 'FEE' | 'INTEREST' | 'REVERSAL' | 'ADJUSTMENT'
 export type TransactionStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'REVERSED'

@@ -54,6 +54,15 @@ class CustomerEdgeResourceTest {
     private fun accountJson(accountId: UUID, ownerParty: UUID) =
         Response.ok("""{"id":"$accountId","partyId":"$ownerParty"}""").build()
 
+    private fun termDepositProduct(id: UUID, public: Boolean = true, status: String = "ACTIVE"): String = """{
+        "id":"$id", "code":"TERM_DEPOSIT_6M_CZK", "name":"Termínovaný vklad 6 měsíců",
+        "type":"TERM_DEPOSIT", "currency":"CZK", "status":"$status", "isPublic":$public,
+        "minBalance":10000, "termDepositConfig":{"termMonths":6,"interestRateAnnual":5.8,
+        "payoutFrequency":"AT_MATURITY","autoRenewEnabled":true,"earlyWithdrawalPenaltyPct":50.0,
+        "earlyWithdrawalNoticeDays":0}, "termsAndConditions":[]
+    }
+    """.trimIndent()
+
     @Test
     fun `getBalance rejects an account owned by another party and does not proxy (IDOR guard)`() {
         val caller = UUID.randomUUID()
@@ -100,6 +109,52 @@ class CustomerEdgeResourceTest {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(any(), any()) } returns Response.status(404).build()
         assertThat(resourceFor(upstream, caller).getBalance(acct).status).isEqualTo(403)
+    }
+
+    @Test
+    fun `term deposit catalogue exposes only public active offers`() {
+        val caller = UUID.randomUUID()
+        val visible = UUID.randomUUID()
+        val private = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("type=TERM_DEPOSIT") }, any()) } returns Response.ok(
+            "[${termDepositProduct(visible)},${termDepositProduct(private, public = false)}]",
+        ).build()
+
+        val response = resourceFor(upstream, caller).apply {
+            productCatalogUrl = "http://catalog"
+        }.listTermDepositOffers()
+
+        assertThat(response.status).isEqualTo(200)
+        val items = ObjectMapper().readTree(response.entity.toString()).path("items")
+        assertThat(items).hasSize(1)
+        assertThat(items[0].path("id").asText()).isEqualTo(visible.toString())
+        assertThat(items[0].path("term").path("termMonths").asInt()).isEqualTo(6)
+    }
+
+    @Test
+    fun `term deposit opening derives type and currency from the public offer`() {
+        val caller = UUID.randomUUID()
+        val product = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.endsWith("/products/$product") }, any()) } returns
+            Response.ok(termDepositProduct(product)).build()
+        every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
+            Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
+        val sent = slot<String>()
+        every { upstream.post(match { it.contains("/api/v1/accounts") }, any(), capture(sent), "retry-key") } returns
+            Response.status(201).entity("""{"id":"${UUID.randomUUID()}"}""").build()
+
+        val response = resourceFor(upstream, caller).apply {
+            productCatalogUrl = "http://catalog"
+            partyServiceUrl = "http://party"
+        }.openTermDeposit("""{"productId":"$product","accountType":"CURRENT","currencyCode":"EUR"}""", "retry-key")
+
+        assertThat(response.status).isEqualTo(201)
+        val body = ObjectMapper().readTree(sent.captured)
+        assertThat(body.path("accountType").asText()).isEqualTo("TERM_DEPOSIT")
+        assertThat(body.path("currencyCode").asText()).isEqualTo("CZK")
+        assertThat(body.path("legalName").asText()).isEqualTo("Ada Customer")
     }
 
     // ── party_id claim resolution (B1 fix, ADR-0069 §2) ─────────────────────

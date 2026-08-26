@@ -409,6 +409,93 @@ class CustomerEdgeResource(
         return Response.ok(body).type(MediaType.APPLICATION_JSON).build()
     }
 
+    // --- Term deposits ---
+
+    /**
+     * Customer-safe term-deposit catalogue. The operator catalogue deliberately contains draft,
+     * private and historical products too; none of those must become discoverable merely because
+     * this edge has an M2M credential. This projection is therefore also the single source for
+     * the product eligibility check at [openTermDeposit].
+     */
+    @GET
+    @Path("/products/term-deposits")
+    @Authorize(action = "customer.products.read")
+    @Blocking
+    fun listTermDepositOffers(): Response {
+        val customer = customer()
+        val catalog = upstream.get(
+            "$productCatalogUrl/api/v1/products?type=TERM_DEPOSIT&status=ACTIVE",
+            customer.partyId.toString(),
+        )
+        if (catalog.status != 200) return termDepositCatalogueUnavailable()
+        val products = parseJson(catalog)?.takeIf { it.isArray } ?: return termDepositCatalogueUnavailable()
+        val offers = objectMapper.createArrayNode()
+        products.forEach { product -> termDepositOffer(product)?.let(offers::add) }
+        return Response.ok(objectMapper.createObjectNode().set<ArrayNode>("items", offers)).build()
+    }
+
+    @GET
+    @Path("/products/term-deposits/{productId}")
+    @Authorize(action = "customer.products.read", resource = "#productId")
+    @Blocking
+    fun getTermDepositOffer(@PathParam("productId") productId: UUID): Response =
+        when (val result = resolvePublicTermDeposit(customer(), productId)) {
+            is TermDepositResolution.Found -> Response.ok(result.offer).build()
+            TermDepositResolution.NotFound -> termDepositNotFound()
+            TermDepositResolution.Unavailable -> termDepositCatalogueUnavailable()
+        }
+
+    /**
+     * Opens a term-deposit account selected from [listTermDepositOffers]. The app intentionally
+     * supplies no account type or currency: both are fixed by the public catalogue product, so a
+     * crafted client cannot turn a term-deposit offer into another account kind or currency.
+     * Funding and maturity instructions are outside account-service's account-opening contract;
+     * this operation creates the dedicated account and the app can then present its normal funding
+     * flow.
+     */
+    @POST
+    @Path("/term-deposits")
+    @Authorize(action = "customer.products.open-term-deposit")
+    @Blocking
+    fun openTermDeposit(body: String, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        require(idempotencyKey.isNotBlank()) { "Idempotency-Key header must not be blank" }
+        val customer = customer()
+        val productId = extractTextField(objectMapper, body, "productId")
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return Response.status(400).entity("{\"error\":\"productId must be a UUID\"}").build()
+        val offer = when (val result = resolvePublicTermDeposit(customer, productId)) {
+            is TermDepositResolution.Found -> result.offer
+            TermDepositResolution.NotFound -> return termDepositNotFound()
+            TermDepositResolution.Unavailable -> return termDepositCatalogueUnavailable()
+        }
+        val party = when (val result = activeParty(customer)) {
+            is ActivePartyResult.Approved -> result
+            is ActivePartyResult.Rejected -> return result.response
+        }
+        val accountBody = objectMapper.createObjectNode()
+            .put("partyId", customer.partyId.toString())
+            .put("productId", productId.toString())
+            .put("accountType", "TERM_DEPOSIT")
+            .put("currencyCode", offer.path("currency").asText())
+            .put("legalName", party.legalName)
+        val response = upstream.post(
+            "$accountServiceUrl/api/v1/accounts",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(accountBody),
+            idempotencyKey,
+        )
+        audit.emit(
+            eventType = "CUSTOMER_TERM_DEPOSIT_OPENED",
+            partyId = customer.partyId.toString(),
+            operation = "termDeposits.open",
+            result = if (response.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
+            resourceId = extractTextField(objectMapper, (response.entity as? String).orEmpty(), "id"),
+            details = mapOf("productId" to productId.toString(), "currency" to offer.path("currency").asText()),
+        )
+        return response
+    }
+
     // --- KYC / identity verification status (AML Act §8, ADR-0116) ---
 
     /**
@@ -4377,6 +4464,106 @@ class CustomerEdgeResource(
         // upstream trouble the resolver hands back `claimed` unchanged. See PartyMergeResolver.
         return CustomerIdentity(partyMergeResolver.resolve(claimed))
     }
+
+    private sealed interface ActivePartyResult {
+        data class Approved(val legalName: String) : ActivePartyResult
+        data class Rejected(val response: Response) : ActivePartyResult
+    }
+
+    /** Shared KYC gate for products opened from the authenticated customer surface. */
+    private fun activeParty(customer: CustomerIdentity): ActivePartyResult {
+        val partyResponse = upstream.get(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}",
+            customer.partyId.toString(),
+        )
+        if (partyResponse.status != 200) {
+            return ActivePartyResult.Rejected(
+                Response.status(404).entity("{\"error\":\"Party not found\"}").type(MediaType.APPLICATION_JSON).build(),
+            )
+        }
+        val partyJson = (partyResponse.entity as? String).orEmpty()
+        val partyStatus = extractTextField(objectMapper, partyJson, "status").orEmpty()
+        if (partyStatus != "ACTIVE") {
+            return ActivePartyResult.Rejected(
+                Response.status(422)
+                    .entity("{\"error\":\"KYC not approved — party status: $partyStatus\"}")
+                    .type(MediaType.APPLICATION_JSON)
+                    .build(),
+            )
+        }
+        val legalName = extractTextField(objectMapper, partyJson, "legalName")
+            ?: return ActivePartyResult.Rejected(
+                Response.status(422).entity("{\"error\":\"Party has no legal name\"}")
+                    .type(MediaType.APPLICATION_JSON).build(),
+            )
+        return ActivePartyResult.Approved(legalName)
+    }
+
+    private sealed interface TermDepositResolution {
+        data class Found(val offer: ObjectNode) : TermDepositResolution
+        data object NotFound : TermDepositResolution
+        data object Unavailable : TermDepositResolution
+    }
+
+    private fun resolvePublicTermDeposit(customer: CustomerIdentity, productId: UUID): TermDepositResolution {
+        val catalog = upstream.get("$productCatalogUrl/api/v1/products/$productId", customer.partyId.toString())
+        if (catalog.status == 404) return TermDepositResolution.NotFound
+        if (catalog.status != 200) return TermDepositResolution.Unavailable
+        return parseJson(catalog)?.let(::termDepositOffer)?.let(TermDepositResolution::Found)
+            ?: TermDepositResolution.NotFound
+    }
+
+    /** Maps the rich operator product into only the terms a retail customer needs to decide. */
+    private fun termDepositOffer(product: JsonNode): ObjectNode? {
+        val today = LocalDate.now(clock)
+        if (!isDiscoverableTermDeposit(product) || !isCurrentlyValid(product, today)) return null
+        val configuration = product.get("termDepositConfig")?.takeIf { it.isObject } ?: return null
+        return objectMapper.createObjectNode().apply {
+            put("id", product.path("id").asText())
+            put("code", product.path("code").asText())
+            put("name", product.path("name").asText())
+            product.get("shortDescription")?.takeIf { !it.isNull }?.let { set<JsonNode>("shortDescription", it) }
+            product.get("description")?.takeIf { !it.isNull }?.let { set<JsonNode>("description", it) }
+            put("currency", product.path("currency").asText())
+            product.get("minBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("minimumDeposit", it) }
+            product.get("maxBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("maximumDeposit", it) }
+            put("annualRate", configuration.path("interestRateAnnual").asDouble())
+            set<JsonNode>("term", configuration)
+            set<JsonNode>("termsAndConditions", product.path("termsAndConditions"))
+        }
+    }
+
+    private fun isDiscoverableTermDeposit(product: JsonNode): Boolean =
+        product.path("type").asText() == "TERM_DEPOSIT" &&
+            product.path("status").asText() == "ACTIVE" &&
+            product.path("isPublic").asBoolean(false) &&
+            product.path("id").asText().isNotBlank() &&
+            product.path("currency").asText().isNotBlank()
+
+    private fun isCurrentlyValid(product: JsonNode, today: LocalDate): Boolean {
+        val validFrom = product.optionalDate("validFrom")
+        val validTo = product.optionalDate("validTo")
+        return !(validFrom?.isAfter(today) == true || validTo?.isBefore(today) == true)
+    }
+
+    private fun JsonNode.optionalDate(field: String): LocalDate? =
+        path(field).asText().takeIf { it.isNotBlank() }?.let { value ->
+            runCatching { LocalDate.parse(value) }.getOrNull()
+        }
+
+    private fun parseJson(response: Response): JsonNode? = runCatching {
+        objectMapper.readTree(response.entity?.toString().orEmpty())
+    }.getOrNull()
+
+    private fun termDepositCatalogueUnavailable(): Response = Response.status(Response.Status.BAD_GATEWAY)
+        .entity("{\"error\":\"Term deposit offers are temporarily unavailable\"}")
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+
+    private fun termDepositNotFound(): Response = Response.status(404)
+        .entity("{\"error\":\"Term deposit offer not found\"}")
+        .type(MediaType.APPLICATION_JSON)
+        .build()
 
     /** Accepts "number/bankcode" BBAN or Czech IBAN — contacts store the IBAN form. */
     private fun resolveCreditorBban(raw: String): Pair<String, String>? =

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.41.0
+  version: 1.42.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -24,6 +24,7 @@ servers:
 tags:
   - name: Reference
   - name: Accounts
+  - name: Term deposits
   - name: Balances
   - name: SCA
   - name: Devices
@@ -52,6 +53,82 @@ tags:
   - name: Complaints
 
 paths:
+  /products/term-deposits:
+    get:
+      tags: [Term deposits]
+      summary: List public term-deposit offers available to the signed-in customer
+      description: >-
+        Projects only ACTIVE, public and currently valid TERM_DEPOSIT products from the operator
+        catalogue. The response includes the rate, fixed term, deposit limits, early-withdrawal
+        conditions and linked terms so the app can make the product discoverable before asking the
+        customer to open it.
+      operationId: listTermDepositOffers
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Current public offers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermDepositOfferList'
+        '502':
+          description: Product catalogue unavailable
+
+  /products/term-deposits/{productId}:
+    get:
+      tags: [Term deposits]
+      summary: Read one public term-deposit offer
+      operationId: getTermDepositOffer
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Offer and contractual conditions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermDepositOffer'
+        '404':
+          description: No active public term-deposit offer with this ID
+
+  /term-deposits:
+    post:
+      tags: [Term deposits]
+      summary: Open a term-deposit account from a public offer
+      description: >-
+        Requires an ACTIVE KYC party. The client submits only the catalogue product ID; the edge
+        derives TERM_DEPOSIT and the product currency server-side. This creates the dedicated
+        account. Initial funding is intentionally a separate normal account-funding flow.
+      operationId: openTermDeposit
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenTermDepositRequest'
+      responses:
+        '201':
+          description: Term-deposit account opened
+        '400':
+          description: Missing idempotency key or malformed product ID
+        '404':
+          description: Product is not an active public term-deposit offer, or party is absent
+        '422':
+          description: KYC not approved
+
   /feedback:
     post:
       tags: [Feedback]
@@ -4156,10 +4233,67 @@ components:
           description: Product catalogue ID for the account product
         accountType:
           type: string
-          enum: [CURRENT, SAVINGS]
+          enum: [CURRENT, SAVINGS, TERM_DEPOSIT]
         currencyCode:
           type: string
           example: EUR
+
+    OpenTermDepositRequest:
+      type: object
+      required: [productId]
+      additionalProperties: false
+      properties:
+        productId:
+          type: string
+          format: uuid
+          description: ID returned by /products/term-deposits
+
+    TermDepositOfferList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TermDepositOffer'
+
+    TermDepositOffer:
+      type: object
+      required: [id, code, name, currency, annualRate, term, termsAndConditions]
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string, example: TERM_DEPOSIT_12M}
+        name: {type: string}
+        shortDescription: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        currency: {type: string, example: CZK}
+        minimumDeposit: {type: number, nullable: true}
+        maximumDeposit: {type: number, nullable: true}
+        annualRate: {type: number, format: double, example: 5.8}
+        term:
+          type: object
+          required: [termMonths, interestRateAnnual, payoutFrequency, autoRenewEnabled, earlyWithdrawalPenaltyPct, earlyWithdrawalNoticeDays]
+          properties:
+            termMonths: {type: integer, minimum: 1}
+            minTermMonths: {type: integer, nullable: true}
+            maxTermMonths: {type: integer, nullable: true}
+            interestRateAnnual: {type: number, format: double}
+            payoutFrequency: {type: string, enum: [MONTHLY, QUARTERLY, SEMI_ANNUAL, ANNUAL, AT_MATURITY]}
+            autoRenewEnabled: {type: boolean}
+            earlyWithdrawalPenaltyPct: {type: number, format: double}
+            earlyWithdrawalNoticeDays: {type: integer, minimum: 0}
+        termsAndConditions:
+          type: array
+          items:
+            type: object
+            required: [version, url, effectiveFrom, language]
+            properties:
+              version: {type: string}
+              url: {type: string, format: uri}
+              effectiveFrom: {type: string, format: date}
+              effectiveTo: {type: string, format: date, nullable: true}
+              language: {type: string, example: cs}
+              summary: {type: string, nullable: true}
 
     # --- Cards ---
     # Mirrors openbank-card-issuance-service CardResponse (masked PAN only).
