@@ -262,6 +262,7 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
             it.eventType = message.eventType
             it.payload = message.payload
             it.status = OutboxStatus.PENDING.name
+            it.synthetic = message.synthetic
             it.createdAt = message.createdAt
             it.updatedAt = message.createdAt
         }
