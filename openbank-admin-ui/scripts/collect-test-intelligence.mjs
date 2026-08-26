@@ -452,8 +452,12 @@ async function clientExperiences() {
 
 async function main() {
   const names = releasedComponents()
+  const simulation = 'openbank-simulation'
+  const tooling = exists(path.join(repo, simulation)) ? [simulation] : []
   const moneyPath = moneyPathComponents()
-  const currentEnvelopes = names.map(component => readJson(path.join(repo, component, 'build', 'test-intelligence', 'run.json'))).filter(Boolean)
+  const currentEnvelopes = [...names, ...tooling]
+    .map(component => readJson(path.join(repo, component, 'build', 'test-intelligence', 'run.json')))
+    .filter(Boolean)
   const components = await Promise.all(names.map(async component => {
     const envelope = runEnvelope(component)
     return {
@@ -463,12 +467,15 @@ async function main() {
       testInfrastructure: envelope?.testInfrastructure ?? { declared: [], observed: [] },
     }
   }))
-  const simulation = 'openbank-simulation'
-  if (exists(path.join(repo, simulation))) components.push({
-    component: simulation, released: false, moneyPath: false,
-    evidence: await junitEvidence(simulation), coverage: coverage(simulation),
-    testInfrastructure: { declared: [], observed: [] },
-  })
+  if (exists(path.join(repo, simulation))) {
+    const envelope = runEnvelope(simulation)
+    components.push({
+      component: simulation, released: false, moneyPath: false,
+      evidence: envelope?.evidence ?? await junitEvidence(simulation),
+      coverage: envelope?.coverage ?? coverage(simulation),
+      testInfrastructure: envelope?.testInfrastructure ?? { declared: [], observed: [] },
+    })
+  }
   const mutationEvidence = await mutations(names)
   for (const item of mutationEvidence) {
     components.find(component => component.component === item.component)?.evidence.push({
