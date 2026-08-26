@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.10.0...flaky-test-hunter-v0.10.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** surface failed evidence ([#6998](https://github.com/JiRaska/open-bank-oss/issues/6998)) ([f849536](https://github.com/JiRaska/open-bank-oss/commit/f8495368790c39002b481e5d3d5c156e85d4744e))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.9.0...flaky-test-hunter-v0.10.0) (2026-08-24)
 
 
