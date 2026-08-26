@@ -312,9 +312,11 @@ jobs:
         # run, so unchanged services always show 0 tests in the UI.
         #
         # Fix: look up the most recent non-expired artifact for EACH known service
-        # independently via GET /actions/artifacts?name=test-reports-{svc}&per_page=1.
-        # This spans all runs — a service not touched for 6 days still shows its
-        # latest results, as long as the 7-day artifact retention hasn't lapsed.
+        # independently from the named-artifact endpoint.  A global artifact list
+        # with `per_page=1` is unsound here: its newest item can be an unmerged PR
+        # artifact, and filtering it out would hide the older valid main artifact.
+        # Scan a bounded number of pages for the latest non-expired main result,
+        # so unrelated frequent main runs cannot evict an unchanged service's proof.
         #
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
         # Best-effort: expired or absent → shows tests:0 (accurate "not run recently").
@@ -328,18 +330,34 @@ jobs:
           mapfile -t SERVICES < <(find . -mindepth 2 -maxdepth 2 -name version.txt -printf '%h\n' \
             | sed 's#^./##' | sort)
 
+          latest_main_artifact() {
+            local artifact_name="$1" page artifact
+            # Artifact results are newest-first for this exact name.  Five pages
+            # cap this best-effort collector at 295 read calls for 59 components;
+            # a hit normally arrives on page one.
+            for page in 1 2 3 4 5; do
+              artifact="$(api "https://api.github.com/repos/${REPO}/actions/artifacts?name=${artifact_name}&per_page=100&page=${page}" \
+                | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; print(str(a[0]['id']) if a else '')" \
+                2>/dev/null || true)"
+              if [ -n "${artifact}" ]; then
+                printf '%s\n' "${artifact}"
+                return 0
+              fi
+            done
+            return 1
+          }
+
           DOWNLOADED=0
           for svc in "${SERVICES[@]}"; do
             art_name="test-intelligence-${svc}"
-            ARTIFACT=$(api \
-              "https://api.github.com/repos/${REPO}/actions/artifacts?name=${art_name}&per_page=1" \
-              | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired']]; print(str(a[0]['id'])+' '+a[0]['name'] if a else '')" \
-              2>/dev/null || true)
-            if [ -z "${ARTIFACT}" ]; then
+            # This image represents deployed main, not the newest PR candidate.
+            # Keep branch provenance explicit: an unmerged artifact must never be
+            # presented in the sandbox as evidence for the deployed revision.
+            art_id="$(latest_main_artifact "${art_name}" || true)"
+            if [ -z "${art_id}" ]; then
               echo "  ${svc}: no artifact (skip)"
               continue
             fi
-            art_id="${ARTIFACT%% *}"
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
                 -L -o "/tmp/${art_name}.zip" 2>/dev/null; then
               TMPDIR_ART="/tmp/${art_name}-extracted"
@@ -416,10 +434,15 @@ jobs:
           # The workflow-runs endpoint is dominated by deploy-only Services CI runs, which
           # produce no per-service envelope.  Even a 100-run scan can therefore find zero
           # evidence while fresh immutable artifacts exist. Query the artifact inventory
-          # directly, retaining only non-expired main-branch envelopes. This is both faster
-          # and evidence-complete for the bounded latest-artifact window.
-          api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100" \
-            | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null \
+          # directly, retaining only non-expired main-branch envelopes. The artifact list is
+          # newest-first across the entire repository; one 100-item page is readily filled
+          # by per-service evidence, so page it before applying the bounded 100-envelope cap.
+          # GitHub's `name` filter is exact-match and cannot select run-id-suffixed artifacts.
+          for page in 1 2 3 4 5; do
+            api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
+              | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+          done \
+            | head -"${MAX_ENVELOPES}" \
             | while read -r artifact_id artifact_name; do
                 [ "$(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ')" -lt "$MAX_ENVELOPES" ] || break
                 [ -n "${artifact_id}" ] || continue

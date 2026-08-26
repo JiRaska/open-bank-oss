@@ -31,10 +31,17 @@ def check(root: Path) -> list[str]:
     for needle in ("collect-test-run-evidence.py", "build/test-intelligence/run.json", "if: always()", "docker events", "--filter event=start", "--filter event=die"):
         if needle not in workflow:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
+    if "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport" not in workflow:
+        errors.append("Kover evidence is not bounded with the money-path-safe timeout")
 
     convention = text(root / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts")
     if "OPENBANK_TEST_EVIDENCE_DIR" not in convention:
         errors.append("service test JVMs do not receive the runtime-evidence directory")
+    # Kover's agent otherwise transforms Testcontainers' shaded classes during Quarkus
+    # integration tests.  That can leave the advisory report task green but no XML to
+    # project, which is indistinguishable from absent coverage in the operator view.
+    if 'excludedClasses.add("org.testcontainers.*")' not in convention:
+        errors.append("Kover does not exclude Testcontainers from on-the-fly instrumentation")
 
     recorder = root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/evidence/TestInfrastructureEvidence.kt"
     if not recorder.exists():
@@ -52,12 +59,25 @@ def check(root: Path) -> list[str]:
         ("workflows: [\"Services CI\", \"CI\"]", "admin deployment is not subscribed to both fleet and Admin UI CI evidence workflows"),
         ("workflow_run.conclusion == 'success'", "admin deployment accepts unsuccessful Services CI evidence"),
         ("workflow_run.head_branch == 'main'", "admin deployment accepts non-main Services CI evidence"),
+        ("latest_main_artifact", "admin deployment cannot select main-only service evidence"),
+        ("per_page=100&page=${page}",
+         "admin deployment can stage a PR artifact as deployed-main evidence"),
         ("schedule:", "admin deployment has no scheduled Test Intelligence snapshot refresh"),
         ("cron: '17 3 * * *'", "admin deployment refresh cadence drifted from the governed daily schedule"),
         ("github.event_name }}\" = \"schedule\"", "scheduled snapshot refresh does not use a unique immutable image tag"),
         ("github.event_name }}\" = \"workflow_run\"", "event-driven snapshot refresh does not use a unique immutable image tag"),
     ):
         if needle not in deploy:
+            errors.append(message)
+    history_stage = deploy.partition("Stage immutable per-attempt Test Intelligence history")[2].partition(
+        "Stage pitest mutation results"
+    )[0]
+    for needle, message in (
+        ("for page in 1 2 3 4 5; do", "immutable run history is not paginated"),
+        ("per_page=100&page=${page}", "immutable run history does not request later artifact pages"),
+        ("head -\"${MAX_ENVELOPES}\"", "immutable run history is not bounded before artifact download"),
+    ):
+        if needle not in history_stage:
             errors.append(message)
     # A staged Pact file is not a provider-verification verdict. The deploy collector
     # can query the existing read-only Broker credentials and must receive them only

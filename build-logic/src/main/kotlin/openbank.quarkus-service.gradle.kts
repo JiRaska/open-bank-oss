@@ -204,6 +204,20 @@ tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setSchemaVersion("1.5")
 }
 
+// Kover instruments every class that a Quarkus test JVM loads unless told otherwise.
+// Testcontainers is third-party test infrastructure, never part of this module's coverage
+// denominator; attempting to transform its shaded classes has produced invalid frames and a
+// missing XML report while the advisory CI step still looked green.  Exclude it at the
+// instrumentation boundary (rather than report filtering) so application classes remain
+// measured and a Testcontainers-heavy integration suite can still publish its evidence.
+kover {
+    currentProject {
+        instrumentation {
+            excludedClasses.add("org.testcontainers.*")
+        }
+    }
+}
+
 // Coverage gate (ADR-0020, ratchet-only — sweep #466). koverVerify is wired into
 // check fleet-wide: a module with a kover verify{} rule gets its floor enforced, a
 // module without rules passes trivially — so a module cannot silently opt out of

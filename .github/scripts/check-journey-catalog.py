@@ -70,6 +70,10 @@ RULES = "openbank-infra/gitops/components/observability/prometheus-rules-journey
 COMPONENTS = "openbank-infra/gitops/components"
 
 CRONJOB_PREFIX = "journey-"
+# A journey id becomes both the CronJob name and the Prometheus selector used by the
+# operator UI. Validate the *derived* DNS label at catalog time: otherwise an id can look
+# harmless in YAML but be unqueryable at runtime once the prefix is added.
+JOURNEY_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,53}[a-z0-9])?$")
 
 # PromQL string literals accept double quotes, single quotes AND backticks, and whitespace
 # around `=` is legal. Matching only `cronjob="journey-x"` would report a MISSING alert for a
@@ -212,6 +216,12 @@ def check(root: pathlib.Path):
         if jid in seen_ids:
             findings.append(f"{jid}: duplicate id")
         seen_ids.add(jid)
+
+        if not isinstance(jid, str) or not JOURNEY_ID_RE.fullmatch(jid):
+            findings.append(
+                f"{jid!r}: id must be a lowercase DNS-label suffix of at most 55 characters "
+                f"so `{CRONJOB_PREFIX}<id>` remains a valid Kubernetes CronJob name"
+            )
 
         for field in REQUIRED_ALWAYS:
             if entry.get(field) in (None, ""):
@@ -375,6 +385,10 @@ def self_test():
 
     run("catalog entry whose manifest does not exist",
         SELF_TEST_CATALOG_OK.replace("cronjob-journey-demo.yaml", "cronjob-journey-ghost.yaml"),
+        SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
+
+    run("journey id whose prefixed CronJob name exceeds the Kubernetes DNS-label limit",
+        SELF_TEST_CATALOG_OK.replace("id: demo", f"id: {'a' * 56}"),
         SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
 
     run("schedule drifted between catalog and manifest",
