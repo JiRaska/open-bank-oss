@@ -47,6 +47,9 @@ import pathlib
 import re
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import gatelib  # noqa: E402
+
 # `CREATE SEQUENCE [IF NOT EXISTS] "<ident>"` where <ident> contains at least one upper-case letter.
 # An all-lower-case quoted name is harmless (folding is a no-op), so it is deliberately not matched.
 # NOTE: re.IGNORECASE must NOT be used globally here. It would make `[A-Z]` match a lower-case
@@ -84,15 +87,16 @@ def strip_sql_comments(text: str) -> str:
 
 
 def scan(root: pathlib.Path):
-    """Return {(relative path, sequence name): line number} for every live occurrence."""
+    """Return (list of migration files examined, {(path, sequence name): line number})."""
+    files = sorted(root.glob("*/src/main/resources/db/migration/*.sql"))
     found = {}
-    for path in sorted(root.glob("*/src/main/resources/db/migration/*.sql")):
+    for path in files:
         rel = path.relative_to(root).as_posix()
         cleaned = strip_sql_comments(path.read_text(encoding="utf-8"))
         for match in SEQ_RE.finditer(cleaned):
             line = cleaned.count("\n", 0, match.start()) + 1
             found[(rel, match.group(1))] = line
-    return found
+    return files, found
 
 
 def self_test() -> int:
@@ -146,7 +150,13 @@ def main() -> int:
         print(f"ERROR: --root {root} is not a directory", file=sys.stderr)
         return 2
 
-    found = scan(root)
+    files, found = scan(root)
+
+    # The corpus is every Flyway migration in the tree, not just the ones that match. A moved
+    # source root, a renamed directory or a changed glob would otherwise turn this gate into a
+    # green no-op that examines nothing and therefore passes everything.
+    gatelib.subjects(len(files), "Flyway migration files")
+
     new = sorted(k for k in found if k not in BASELINE)
     stale = sorted(BASELINE - set(found))
 

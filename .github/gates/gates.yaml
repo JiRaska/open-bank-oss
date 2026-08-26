@@ -3118,6 +3118,7 @@ gates:
       never be edited, only repaired forward. Only party-service has ever used the quoted form
       across the 54 migration files that create a sequence, so this is prevention, not debt paydown.
     review_after: '2027-02-22'
+    min_subjects: 300
     selftest: python3 .github/scripts/check-quoted-sequence-names.py --self-test
     selftest_expect: pass
     run: |
