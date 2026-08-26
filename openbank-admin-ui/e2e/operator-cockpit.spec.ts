@@ -136,7 +136,7 @@ test('Temporal and approvals show live source-backed operator state and human pr
   await expect(page.getByText(/Provozní|Running/)).toBeVisible()
   await page.getByRole('button', { name: /Metriky|Metrics/ }).click()
   await expect(page.getByRole('heading', { name: /Workflowy \(posledních 60 minut\)|Workflows \(last 60 minutes\)/ })).toBeVisible()
-  await expect(page.getByText('12')).toBeVisible()
+  await expect(page.getByLabel(/^(Spuštěno|Scheduled): 12$/)).toBeVisible()
 
   await json(page, '**/api/agent/proposals?state=all', [{
     id: 'proposal-human', title: 'Human customer correction', rationale: 'verified with customer', suggestedAction: 'party.correct',
