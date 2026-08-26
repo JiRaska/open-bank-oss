@@ -125,7 +125,9 @@ class LedgerService(
         }
 
         val messages =
-            listOf(journalPostedMessage(entry)) + bookedChangedMessages(entry) + command.additionalOutboxMessages(entry)
+            listOf(journalPostedMessage(entry, command.synthetic)) +
+                bookedChangedMessages(entry, command.synthetic) +
+                command.additionalOutboxMessages(entry)
         val saved = try {
             journalRepository.save(entry, command.idempotencyKey, messages)
         } catch (e: PersistenceException) {
@@ -152,9 +154,10 @@ class LedgerService(
         return journalRepository.findByIdempotencyKey(idempotencyKey) ?: throw e
     }
 
-    private fun journalPostedMessage(entry: JournalEntry): OutboxMessage = OutboxMessage(
+    private fun journalPostedMessage(entry: JournalEntry, synthetic: Boolean): OutboxMessage = OutboxMessage(
         aggregateId = entry.id,
         eventType = JOURNAL_POSTED,
+        synthetic = synthetic,
         payload = objectMapper.writeValueAsString(
             JournalPostedEvent(
                 aggregateId = entry.id,
@@ -314,24 +317,26 @@ class LedgerService(
      * (pure GL movements). Computed from the SAME entry that is being persisted, so a reversal's
      * flipped sides naturally yield negated deltas, keyed by the reversal entry's id.
      */
-    private fun bookedChangedMessages(entry: JournalEntry): List<OutboxMessage> = entry.bookedDeltas().map { d ->
-        OutboxMessage(
-            aggregateId = d.accountId,
-            eventType = ACCOUNT_BOOKED_CHANGED,
-            payload = objectMapper.writeValueAsString(
-                AccountBookedChangedEvent(
-                    aggregateId = d.accountId,
-                    version = entry.version,
-                    currency = d.currency,
-                    delta = d.delta,
-                    journalEntryId = entry.id,
-                    transactionId = entry.transactionId,
-                    entryDate = entry.entryDate,
-                    occurredAt = clock.instant(),
+    private fun bookedChangedMessages(entry: JournalEntry, synthetic: Boolean = false): List<OutboxMessage> =
+        entry.bookedDeltas().map { d ->
+            OutboxMessage(
+                aggregateId = d.accountId,
+                eventType = ACCOUNT_BOOKED_CHANGED,
+                synthetic = synthetic,
+                payload = objectMapper.writeValueAsString(
+                    AccountBookedChangedEvent(
+                        aggregateId = d.accountId,
+                        version = entry.version,
+                        currency = d.currency,
+                        delta = d.delta,
+                        journalEntryId = entry.id,
+                        transactionId = entry.transactionId,
+                        entryDate = entry.entryDate,
+                        occurredAt = clock.instant(),
+                    ),
                 ),
-            ),
-        )
-    }
+            )
+        }
 
     companion object {
         // The bank time zone constant that used to live here is gone: the accounting date is no
