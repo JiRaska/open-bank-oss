@@ -66,7 +66,12 @@ async function queryTempoMobileTraces(base: string): Promise<{ count: number; tr
 }
 
 async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>> {
-  const query = `(kube_job_status_succeeded{namespace="observability",job_name=~"${cronjob}.*"} == 1) or (kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} == 1)`
+  // Status gauges retain value 1 and their query sample timestamp advances on every scrape.
+  // Use the completion-time gauge as the value, and attach an explicit result label, otherwise
+  // a week-old retained Job is rendered as a run that happened "now" and its state depends on
+  // Prometheus retaining the implementation-specific __name__ label in a union response.
+  const completed = `kube_job_status_completion_time{namespace="observability",job_name=~"${cronjob}.*"}`
+  const query = `label_replace(max by (job_name) (${completed} and on(namespace,job_name) (kube_job_status_succeeded{namespace="observability",job_name=~"${cronjob}.*"} == 1)), "openbank_evidence_state", "passed", "job_name", ".*") or label_replace(max by (job_name) (${completed} and on(namespace,job_name) (kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} == 1)), "openbank_evidence_state", "failed", "job_name", ".*")`
   try {
     const response = await fetch(`${base}/api/v1/query?query=${encodeURIComponent(query)}`, {
       headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(2500), cache: 'no-store',
@@ -75,10 +80,11 @@ async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array
     const payload = await response.json() as PrometheusLabelVector
     return (payload.data?.result ?? []).flatMap(item => {
       const id = item.metric?.job_name
-      const timestamp = item.value?.[0]
-      const value = Number(item.value?.[1] ?? 0)
-      if (!id || timestamp === undefined || value <= 0) return []
-      return [{ id, state: item.metric?.__name__?.includes('failed') ? 'failed' as const : 'passed' as const, observedAt: new Date(timestamp * 1000).toISOString() }]
+      const completedAt = Number(item.value?.[1] ?? 0)
+      const state = item.metric?.openbank_evidence_state
+      if (!id || !Number.isFinite(completedAt) || completedAt <= 0 || (state !== 'passed' && state !== 'failed')) return []
+      const evidenceState: 'passed' | 'failed' = state === 'failed' ? 'failed' : 'passed'
+      return [{ id, state: evidenceState, observedAt: new Date(completedAt * 1000).toISOString() }]
     }).sort((left, right) => right.observedAt.localeCompare(left.observedAt)).slice(0, 10)
   } catch { return [] }
 }

@@ -157,4 +157,33 @@ describe('GET /api/test-intelligence', () => {
     expect(queries.some(query => query.includes('< 900'))).toBe(true)
     expect(queries.some(query => query.includes('max_over_time(kube_job_status_failed'))).toBe(false)
   })
+
+  it('uses Kubernetes completion time, not the Prometheus scrape time, for recent synthetic runs', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-run-history-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-25T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], history: [], runHistory: [], testCases: [], clientExperiences: [],
+      syntheticJourneys: [{ id: 'public-edge', title: 'Public edge', status: 'active', state: 'unknown', severity: 'page', schedule: '*/5 * * * *', environment: 'sandbox', covers: [], falsifies: 'Break the edge.', blocker: null }],
+      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.PROMETHEUS_URL = 'http://prometheus.test'
+    const now = Date.now() / 1000
+    const completed = Math.floor(now - 120)
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      const payload = query.includes('openbank_evidence_state')
+        ? { status: 'success', data: { result: [{ metric: { job_name: 'journey-public-edge-123', openbank_evidence_state: 'passed' }, value: [now, String(completed)] }] } }
+        : query.includes('kube_job_status_completion_time')
+          ? { status: 'success', data: { result: [] } }
+          : { status: 'success', data: { result: [{ value: [now, String(now)] }] } }
+      return new Response(JSON.stringify(payload), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+    expect(body.syntheticJourneys[0].live.recentRuns).toEqual([
+      { id: 'journey-public-edge-123', state: 'passed', observedAt: new Date(completed * 1000).toISOString() },
+    ])
+  })
 })
