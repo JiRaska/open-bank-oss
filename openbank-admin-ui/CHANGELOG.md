@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.199.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.199.0...admin-ui-v0.199.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **admin-ui:** contain card dialog focus ([#7059](https://github.com/JiRaska/open-bank-oss/issues/7059)) ([e532230](https://github.com/JiRaska/open-bank-oss/commit/e53223061f2cab0f3458f175097a043e6ece5cc9))
+* **admin-ui:** guide product lifecycle changes ([#7052](https://github.com/JiRaska/open-bank-oss/issues/7052)) ([600fb49](https://github.com/JiRaska/open-bank-oss/commit/600fb49657ddaeb1a7083679620b25801cf3d875))
+
 ## [0.199.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.198.0...admin-ui-v0.199.0) (2026-08-26)
 
 
