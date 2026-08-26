@@ -43,6 +43,8 @@ class ReferralService(
 ) {
     private val random = SecureRandom()
 
+    suspend fun listPublishedPrograms(): List<ReferralProgram> = programs.listPublished()
+
     suspend fun createProgram(
         name: String,
         version: Int,

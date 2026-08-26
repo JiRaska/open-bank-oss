@@ -1,9 +1,20 @@
 openapi: 3.0.3
 info:
   title: OpenBank Referral Service
-  version: 1.0.0
+  version: 1.1.0
 paths:
   /api/v1/referrals/programs:
+    get:
+      summary: List published immutable referral program versions
+      responses:
+        "200":
+          description: Published referral programs, newest publication first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReferralProgram'
     post:
       summary: Create a draft referral program
       responses: {"201": {description: Created}}
@@ -27,3 +38,21 @@ paths:
       summary: Qualify one event and request a fixed reward
       parameters: [{name: token, in: path, required: true, schema: {type: string}}, {name: Idempotency-Key, in: header, required: true, schema: {type: string}}]
       responses: {"202": {description: Reward requested}}
+components:
+  schemas:
+    ReferralProgram:
+      type: object
+      required: [id, name, version, rewardAmount, currency, qualifyingEvent, attributionWindowEndsAt, status, maker, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        version: {type: integer, minimum: 1}
+        rewardAmount: {type: number}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        qualifyingEvent: {type: string}
+        attributionWindowEndsAt: {type: string, format: date-time}
+        status: {type: string, enum: [PUBLISHED]}
+        maker: {type: string}
+        checker: {type: string, nullable: true}
+        createdAt: {type: string, format: date-time}
+        publishedAt: {type: string, format: date-time, nullable: true}

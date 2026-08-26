@@ -5,6 +5,7 @@ import com.openbank.referral.domain.ReferralValidationException
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -31,6 +32,10 @@ data class QualifyReferralInviteRequest(val eventName: String, val eventId: Stri
 @RolesAllowed("ROLE_OPERATOR")
 class ReferralResource(private val service: ReferralService, private val identity: SecurityIdentity) {
     private fun actor() = identity.principal.name
+
+    @GET
+    @Path("/programs")
+    suspend fun programs(): Response = Response.ok(service.listPublishedPrograms()).build()
 
     @POST
     @Path("/programs")
