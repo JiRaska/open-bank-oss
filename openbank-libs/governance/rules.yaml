@@ -383,8 +383,6 @@ change_requirements:
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
       - topic: "openbank.billing.fee.event"
         reason: "ADR-0248, temporary — the consumer exists but isn't on main yet: document-service's AnnualFeeSummaryReadyConsumer is in #4122 (open). This is a real cross-PR merge-order gap, not a #889-class abandoned producer. Re-triage: remove this entry once #4122 merges."
-      - topic: "openbank.referral.events"
-        reason: "Temporary merge-order gap tracked by #7194: #7190 establishes the atomic producer and stable wire contract while the referral workload remains at zero replicas; the next Campaign Studio slice consumes it into the governed MGM funnel projection. Remove this entry with that consumer PR, before workload activation."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
