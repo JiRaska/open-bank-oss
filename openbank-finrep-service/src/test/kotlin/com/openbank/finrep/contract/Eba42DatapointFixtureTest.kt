@@ -10,6 +10,7 @@ import com.openbank.finrep.domain.mapper.F0101Mapper
 import com.openbank.finrep.domain.mapper.F0102Mapper
 import com.openbank.finrep.domain.mapper.F0103Mapper
 import com.openbank.finrep.domain.mapper.F0200Mapper
+import com.openbank.finrep.domain.model.EbaReportingFramework42
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -26,6 +27,10 @@ class Eba42DatapointFixtureTest {
         assertThat(fixture["reportingFramework"].asText()).isEqualTo("4.2")
         assertThat(fixture["dpmVersion"].asText()).isEqualTo("4.2.1")
         assertThat(fixture["taxonomyVersion"].asText()).isEqualTo("4.2.0.0")
+        assertThat(EbaReportingFramework42.REPORTING_FRAMEWORK_VERSION)
+            .isEqualTo(fixture["reportingFramework"].asText())
+        assertThat(EbaReportingFramework42.DPM_VERSION).isEqualTo(fixture["dpmVersion"].asText())
+        assertThat(EbaReportingFramework42.TAXONOMY_VERSION).isEqualTo(fixture["taxonomyVersion"].asText())
         assertThat(fixture["taxonomyPackageSha256"].asText())
             .isEqualTo("0bf9e33720de1472e809417999cfd29e4b5eadb31750c7770622e502590bbdd0")
         assertThat(fixture["supportedFacts"].map { it["datapointId"]?.takeUnless { id -> id.isNull }?.asInt() })

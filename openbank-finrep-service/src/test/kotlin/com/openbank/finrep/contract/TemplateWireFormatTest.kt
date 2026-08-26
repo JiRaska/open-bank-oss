@@ -181,6 +181,33 @@ class TemplateWireFormatTest {
     }
 
     @Test
+    fun `the XBRL CSV preflight exposes blockers rather than an artifact`() {
+        val json = getJson("/api/v1/finrep/templates/F01.01/xbrl-csv/preflight", LocalDate.of(2026, 6, 30))
+
+        assertThat(json.keys).containsExactlyInAnyOrder(
+            "templateId",
+            "period",
+            "reportingFrameworkVersion",
+            "dpmVersion",
+            "taxonomyVersion",
+            "state",
+            "blockers",
+        )
+        assertThat(json["templateId"]).isEqualTo("F01.01")
+        assertThat(json["period"]).isEqualTo("2026-06-30")
+        assertThat(json["reportingFrameworkVersion"]).isEqualTo("4.2")
+        assertThat(json["dpmVersion"]).isEqualTo("4.2.1")
+        assertThat(json["taxonomyVersion"]).isEqualTo("4.2.0.0")
+        assertThat(json["state"]).isEqualTo("BLOCKED")
+
+        @Suppress("UNCHECKED_CAST")
+        val blockers = json["blockers"] as List<Map<*, *>>
+        assertThat(blockers).hasSize(1)
+        assertThat(blockers.single().keys).containsExactlyInAnyOrder("code", "reason")
+        assertThat(blockers.single()["code"]).isEqualTo("INCOMPLETE_OFFICIAL_MAPPING")
+    }
+
+    @Test
     fun `the COREP template wire format matches the published openapi schema`() {
         val json = getJson("/api/v1/corep/templates/C_01.00", LocalDate.of(2026, 6, 30))
 
