@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.199.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.199.1...admin-ui-v0.199.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* **finrep:** restore regulatory previews at runtime ([#7043](https://github.com/JiRaska/open-bank-oss/issues/7043)) ([d688dc4](https://github.com/JiRaska/open-bank-oss/commit/d688dc4c3596bf41cf17abf7b161c4f9b6904882))
+
 ## [0.199.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.199.0...admin-ui-v0.199.1) (2026-08-26)
 
 
