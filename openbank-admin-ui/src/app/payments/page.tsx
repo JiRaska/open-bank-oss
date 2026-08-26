@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -16,6 +16,8 @@ import { stashRow } from '@/lib/services/rowHandoff'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { hasPermission } from '@/lib/auth/roles'
 import { PageHeader, StatusBadge } from '@/components/ui'
+import { clearPaymentAttempt, idempotencyKeyForPayload, type PaymentAttempt } from '@/lib/payments/idempotency'
+import { claimSingleFlight, releaseSingleFlight } from '@/lib/single-flight'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
 // routes — never NEXT_PUBLIC_ localhost URLs, which leaked the internal port map into the
@@ -268,6 +270,9 @@ function PaymentsContent() {
   const [createSuccess, setCreateSuccess] = useState<string | null>(null)
   const [domesticForm, setDomesticForm] = useState<DomesticFormData>(emptyDomestic(false))
   const [sepaForm, setSepaForm] = useState<SepaFormData>(emptySepa(false))
+  const createInFlight = useRef(false)
+  const domesticAttempt = useRef<PaymentAttempt | null>(null)
+  const sepaAttempt = useRef<PaymentAttempt | null>(null)
 
   // SCT Inst monitoring state
   const [sctPayments, setSctPayments] = useState<SctInstPayment[]>([])
@@ -339,33 +344,36 @@ function PaymentsContent() {
       setCreateError(t('Vyplňte všechna povinná pole', 'Please fill all required fields'))
       return
     }
+    const payload = {
+      debtorAccountId: f.debtorAccountId, debtorAccountNumber: f.debtorAccountNumber,
+      debtorBankCode: f.debtorBankCode, debtorName: f.debtorName,
+      creditorAccountNumber: f.creditorAccountNumber, creditorBankCode: f.creditorBankCode,
+      creditorName: f.creditorName, amount: Number(f.amount), currency: f.currency,
+      priority: f.priority, transferScope: f.transferScope, instant: f.instant,
+      ...(f.variableSymbol && { variableSymbol: f.variableSymbol }),
+      ...(f.specificSymbol && { specificSymbol: f.specificSymbol }),
+      ...(f.constantSymbol && { constantSymbol: f.constantSymbol }),
+      ...(f.messageForPayee && { messageForPayee: f.messageForPayee }),
+      ...(f.transferScope === 'TECHNICAL_ACCOUNT' && f.technicalAccountCode && { technicalAccountCode: f.technicalAccountCode }),
+      ...(f.statementLabel && { statementLabel: f.statementLabel }),
+      ...(f.endToEndId && { endToEndId: f.endToEndId }),
+    }
+    if (!claimSingleFlight(createInFlight)) return
     setCreating(true)
     try {
-      const payload = {
-        debtorAccountId: f.debtorAccountId, debtorAccountNumber: f.debtorAccountNumber,
-        debtorBankCode: f.debtorBankCode, debtorName: f.debtorName,
-        creditorAccountNumber: f.creditorAccountNumber, creditorBankCode: f.creditorBankCode,
-        creditorName: f.creditorName, amount: Number(f.amount), currency: f.currency,
-        priority: f.priority, transferScope: f.transferScope, instant: f.instant,
-        ...(f.variableSymbol && { variableSymbol: f.variableSymbol }),
-        ...(f.specificSymbol && { specificSymbol: f.specificSymbol }),
-        ...(f.constantSymbol && { constantSymbol: f.constantSymbol }),
-        ...(f.messageForPayee && { messageForPayee: f.messageForPayee }),
-        ...(f.transferScope === 'TECHNICAL_ACCOUNT' && f.technicalAccountCode && { technicalAccountCode: f.technicalAccountCode }),
-        ...(f.statementLabel && { statementLabel: f.statementLabel }),
-        ...(f.endToEndId && { endToEndId: f.endToEndId }),
-      }
+      const body = JSON.stringify(payload)
+      const idempotencyKey = idempotencyKeyForPayload(domesticAttempt, body, () => crypto.randomUUID())
       const res = await fetch(`/api/domestic-payments`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
-        body: JSON.stringify(payload),
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey }, body,
       })
       if (!res.ok) throw new Error(await res.text() || t('Vytvoření platby selhalo', 'Failed to create payment'))
+      clearPaymentAttempt(domesticAttempt)
       setCreateSuccess(t(f.instant ? 'Okamžitá platba vytvořena' : 'Platba vytvořena', f.instant ? 'Instant payment created' : 'Payment created'))
       setShowCreate(null)
       load()
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : t('Neznámá chyba', 'Unknown error'))
-    } finally { setCreating(false) }
+    } finally { releaseSingleFlight(createInFlight); setCreating(false) }
   }
 
   const handleSepaCreate = async (e: React.FormEvent) => {
@@ -393,28 +401,31 @@ function PaymentsContent() {
       setCreateError(t('Jméno příjemce nesouhlasí (VoP NO_MATCH) — platbu nelze odeslat', 'Payee name does not match (VoP NO_MATCH) — payment cannot be sent'))
       return
     }
+    const payload = {
+      debtorIban: f.debtorIban, creditorIban: f.creditorIban,
+      creditorName: f.creditorName, amount: Number(f.amount),
+      currency: 'EUR', instant: f.instant,
+      ...(f.bic && { bic: f.bic }),
+      ...(f.endToEndId && { endToEndId: f.endToEndId }),
+      ...(f.remittanceInfo && { remittanceInfo: f.remittanceInfo }),
+      ...(f.purposeCode && { purposeCode: f.purposeCode }),
+    }
+    if (!claimSingleFlight(createInFlight)) return
     setCreating(true)
     try {
-      const payload = {
-        debtorIban: f.debtorIban, creditorIban: f.creditorIban,
-        creditorName: f.creditorName, amount: Number(f.amount),
-        currency: 'EUR', instant: f.instant,
-        ...(f.bic && { bic: f.bic }),
-        ...(f.endToEndId && { endToEndId: f.endToEndId }),
-        ...(f.remittanceInfo && { remittanceInfo: f.remittanceInfo }),
-        ...(f.purposeCode && { purposeCode: f.purposeCode }),
-      }
+      const body = JSON.stringify(payload)
+      const idempotencyKey = idempotencyKeyForPayload(sepaAttempt, body, () => crypto.randomUUID())
       const res = await fetch(`/api/sepa-payments`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
-        body: JSON.stringify(payload),
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey }, body,
       })
       if (!res.ok) throw new Error(await res.text() || t('Vytvoření platby selhalo', 'Failed to create payment'))
+      clearPaymentAttempt(sepaAttempt)
       setCreateSuccess(t(f.instant ? 'SCT Inst platba vytvořena' : 'SEPA platba vytvořena', f.instant ? 'SCT Inst payment created' : 'SEPA payment created'))
       setShowCreate(null)
       load()
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : t('Neznámá chyba', 'Unknown error'))
-    } finally { setCreating(false) }
+    } finally { releaseSingleFlight(createInFlight); setCreating(false) }
   }
 
   // ── Filtered data ──────────────────────────────────────────────
@@ -785,7 +796,7 @@ function PaymentsContent() {
                 {createError && <div style={{ color: 'var(--red)', fontSize: '13px', marginTop: '4px' }}>{createError}</div>}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(null)}>{t('Zrušit', 'Cancel')}</button>
-                  <button type="submit" className="btn btn-primary" disabled={creating}>
+                  <button type="submit" className="btn btn-primary" disabled={creating} aria-busy={creating}>
                     {creating ? t('Odesílám...', 'Sending...') : t(domesticForm.instant ? 'Odeslat okamžitě' : 'Vytvořit', domesticForm.instant ? 'Send instant' : 'Create')}
                   </button>
                 </div>
@@ -867,7 +878,7 @@ function PaymentsContent() {
                 {createError && <div style={{ color: 'var(--red)', fontSize: '13px', marginTop: '4px' }}>{createError}</div>}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(null)}>{t('Zrušit', 'Cancel')}</button>
-                  <button type="submit" className="btn btn-primary" disabled={creating}>
+                  <button type="submit" className="btn btn-primary" disabled={creating} aria-busy={creating}>
                     {creating ? t('Odesílám...', 'Sending...') : t(sepaForm.instant ? 'Odeslat okamžitě' : 'Vytvořit', sepaForm.instant ? 'Send instant' : 'Create')}
                   </button>
                 </div>
