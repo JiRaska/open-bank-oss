@@ -328,8 +328,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
   // fleet's first 202/X-Approval-Id UI flow; a real approval notification channel is a separate,
   // larger piece of work). We hold the EXACT request that was paused: the retry must resend the
   // byte-identical body (the interceptor binds the approval to the request's content), and the
-  // maker relays `approvalId` to a colleague, who decides it on the Notifications page. The maker
-  // then clicks "Retry send".
+  // Approval Centre exposes the request to a different operator, who decides it in the
+  // Notifications workspace. The maker then clicks "Retry send".
   const [pendingSubmit, setPendingSubmit] = useState<{ request: ComposeMessageRequest; approvalId: string } | null>(null)
   const [retrying, setRetrying] = useState(false)
 

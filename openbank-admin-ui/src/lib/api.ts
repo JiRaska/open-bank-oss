@@ -138,9 +138,9 @@ export interface ApprovalDecision {
 
 export const opsMessageApi = {
   // 201 -> {status:'SENT', id}. 202 (four-eyes on) -> {status:'PENDING_APPROVAL', approvalId}:
-  // relay that id to a DIFFERENT operator to decide, then replay this exact request (same body)
-  // with `approvalId` set — the interceptor binds the approval to the request's content, so the
-  // retry must be byte-identical or it mints a fresh pending approval.
+  // a DIFFERENT operator discovers and decides it through the Approval Centre; the maker then
+  // replays this exact request (same body) with `approvalId` set. The interceptor binds the
+  // approval to the request's content, so the retry must be byte-identical or it mints a fresh one.
   compose: async (req: ComposeMessageRequest, approvalId?: string): Promise<ComposeResult> => {
     const res = await fetch(`${NOTIFICATION_SERVICE}/api/v1/notifications/messages`, {
       method: 'POST',
