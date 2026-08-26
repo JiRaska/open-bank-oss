@@ -28,6 +28,7 @@ object F0103Mapper {
                 FinrepCell("r0300", "c0010", equity),
                 FinrepCell("r0310", "c0010", equity.add(liabilities)),
             ),
+            dataGaps = FinrepCoverage.gapsFor("F01.03"),
             isBalanced = assessment.verdict == BalanceVerdict.AGREED_BALANCED,
             balanceVerdict = assessment.verdict,
         )

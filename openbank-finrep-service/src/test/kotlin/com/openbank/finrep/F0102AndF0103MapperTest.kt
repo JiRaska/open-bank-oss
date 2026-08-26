@@ -33,6 +33,7 @@ class F0102AndF0103MapperTest {
         assertThat(cell.rowRef).isEqualTo("r0300")
         assertThat(cell.colRef).isEqualTo("c0010")
         assertThat(cell.value).isEqualByComparingTo("300000")
+        assertThat(template.dataGaps.single().affectedScope).isEqualTo("F01.02 except r0300/c0010")
     }
 
     @Test
@@ -44,6 +45,8 @@ class F0102AndF0103MapperTest {
             mapOf("r0300" to BigDecimal("200000"), "r0310" to BigDecimal("500000")),
         )
         assertThat(template.cells).allMatch { it.colRef == "c0010" }
+        assertThat(template.dataGaps.single().affectedScope)
+            .isEqualTo("F01.03 except r0300/c0010, r0310/c0010")
     }
 
     private fun line(code: String, accountType: String, net: String) =

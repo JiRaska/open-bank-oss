@@ -1,0 +1,15 @@
+{
+  "reportingFramework": "4.2",
+  "dpmVersion": "4.2.1",
+  "taxonomyVersion": "4.2.0.0",
+  "taxonomyPackageUrl": "https://www.eba.europa.eu/sites/default/files/2026-01/b54d2c74-877c-4195-a32a-6591253d8b0f/taxo_package_4.2_hotfix.zip",
+  "taxonomyPackageSha256": "0bf9e33720de1472e809417999cfd29e4b5eadb31750c7770622e502590bbdd0",
+  "annotatedTemplatesUrl": "https://www.eba.europa.eu/sites/default/files/2026-02/c92d5e2b-bcd7-4767-ab5b-cdf0b1737368/260106%20Annotated%20templates_with_finpre9dp_4.2.1.zip",
+  "supportedFacts": [
+    { "templateId": "F01.01", "rowRef": "r0380", "colRef": "c0010", "datapointId": 32354, "meaning": "TOTAL ASSETS" },
+    { "templateId": "F01.02", "rowRef": "r0300", "colRef": "c0010", "datapointId": 32592, "meaning": "TOTAL LIABILITIES" },
+    { "templateId": "F01.03", "rowRef": "r0300", "colRef": "c0010", "datapointId": 32464, "meaning": "TOTAL EQUITY" },
+    { "templateId": "F01.03", "rowRef": "r0310", "colRef": "c0010", "datapointId": null, "meaning": "TOTAL EQUITY AND LIABILITIES" },
+    { "templateId": "F02.00", "rowRef": "r0670", "colRef": "c0010", "datapointId": 57025, "meaning": "PROFIT OR LOSS FOR THE YEAR" }
+  ]
+}

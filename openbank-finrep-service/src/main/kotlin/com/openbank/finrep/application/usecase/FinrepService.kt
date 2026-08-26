@@ -57,8 +57,7 @@ class FinrepService(private val ledgerPort: LedgerPort, private val metrics: Fin
                 templateId = template.templateId,
                 trialBalanceLines = snapshot.lines.size,
                 cells = template.cells.size,
-                // FINREP cells carry no data-gap flag; only COREP C 01.00 has unavailable inputs today.
-                dataGapCells = 0,
+                dataGapCells = template.dataGaps.size,
                 balanced = template.isBalanced,
                 balanceVerdict = template.balanceVerdict,
                 duration = Duration.ofNanos(System.nanoTime() - startedAt),

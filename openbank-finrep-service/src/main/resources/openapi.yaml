@@ -22,7 +22,7 @@ info:
     FINREP output is a bounded preview containing only the official datapoints the platform can
     currently derive without inventing regulatory classifications; it is not a complete return.
     COREP preview gaps remain explicit flagged zeroes (`isDataGap`) with reasons.
-  version: 1.4.0
+  version: 1.5.0
 tags:
   - name: FINREP
   - name: COREP
@@ -166,7 +166,7 @@ components:
         F01.03 publishes r0300/c0010 (total equity) and r0310/c0010 (total equity and liabilities);
         F02.00 publishes r0670/c0010 (profit or loss for the year). It is not a complete regulatory
         return or an XBRL artifact. Values are reported in their natural reporting sign.
-      required: [templateId, period, cells, isBalanced, balanceVerdict]
+      required: [templateId, period, cells, dataGaps, hasDataGaps, isBalanced, balanceVerdict]
       properties:
         templateId: { type: string, example: F01.01 }
         period:
@@ -176,6 +176,15 @@ components:
         cells:
           type: array
           items: { $ref: '#/components/schemas/FinrepCell' }
+        dataGaps:
+          type: array
+          description: Machine-readable findings covering the official cells this preview cannot derive.
+          items: { $ref: '#/components/schemas/FinrepDataGap' }
+        hasDataGaps:
+          type: boolean
+          description: >-
+            Derived from `dataGaps`. A true value makes this bounded preview ineligible for use as
+            a complete regulatory artifact.
         isBalanced:
           type: boolean
           description: >-
@@ -205,6 +214,16 @@ components:
             paginated response — an evidence defect, not an accounting one); `LEDGER_FLAG_ABSENT`
             means the ledger response carried no verdict at all, which is a contract change rather
             than a statement about the books, and is kept distinct from a verdict of `false`.
+
+    FinrepDataGap:
+      type: object
+      required: [code, affectedScope, reason]
+      properties:
+        code: { type: string, example: UNMAPPED_OFFICIAL_CELLS }
+        affectedScope: { type: string, example: "F01.01 except r0380/c0010" }
+        reason:
+          type: string
+          description: Why the affected official cells cannot be derived and why submission is blocked.
 
     CorepCell:
       type: object

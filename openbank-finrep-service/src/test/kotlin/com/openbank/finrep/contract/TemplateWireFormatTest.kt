@@ -142,12 +142,28 @@ class TemplateWireFormatTest {
     fun `the FINREP template wire format matches the published openapi schema`() {
         val json = getJson("/api/v1/finrep/templates/F01.01", LocalDate.of(2026, 6, 30))
 
-        assertThat(json.keys).containsExactlyInAnyOrder("templateId", "period", "cells", "isBalanced", "balanceVerdict")
+        assertThat(json.keys).containsExactlyInAnyOrder(
+            "templateId",
+            "period",
+            "cells",
+            "dataGaps",
+            "hasDataGaps",
+            "isBalanced",
+            "balanceVerdict",
+        )
         assertThat(json["templateId"]).isEqualTo("F01.01")
         assertThat(json["period"]).isEqualTo("2026-06-30")
         assertThat(json["isBalanced"]).isEqualTo(true)
         // The verdict is served as the ENUM NAME, which is what `openapi.yaml` documents (#6011).
         assertThat(json["balanceVerdict"]).isEqualTo("AGREED_BALANCED")
+        assertThat(json["hasDataGaps"]).isEqualTo(true)
+
+        @Suppress("UNCHECKED_CAST")
+        val gaps = json["dataGaps"] as List<Map<*, *>>
+        assertThat(gaps).hasSize(1)
+        assertThat(gaps.single().keys).containsExactlyInAnyOrder("code", "affectedScope", "reason")
+        assertThat(gaps.single()["code"]).isEqualTo("UNMAPPED_OFFICIAL_CELLS")
+        assertThat(gaps.single()["affectedScope"]).isEqualTo("F01.01 except r0380/c0010")
 
         @Suppress("UNCHECKED_CAST")
         val cells = json["cells"] as List<Map<*, *>>

@@ -44,6 +44,8 @@ class F0101MapperTest {
         assertThat(template.cells).hasSize(1)
         assertThat(cell(template.cells, "r0380")).isEqualByComparingTo("500000")
         assertThat(template.cells.single().colRef).isEqualTo("c0010")
+        assertThat(template.hasDataGaps).isTrue()
+        assertThat(template.dataGaps.single().affectedScope).isEqualTo("F01.01 except r0380/c0010")
     }
 
     @Test

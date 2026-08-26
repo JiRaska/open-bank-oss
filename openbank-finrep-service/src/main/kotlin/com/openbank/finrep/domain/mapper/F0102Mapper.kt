@@ -23,6 +23,7 @@ object F0102Mapper {
             templateId = "F01.02",
             period = asOf,
             cells = listOf(FinrepCell("r0300", "c0010", liabilities)),
+            dataGaps = FinrepCoverage.gapsFor("F01.02"),
             isBalanced = assessment.verdict == BalanceVerdict.AGREED_BALANCED,
             balanceVerdict = assessment.verdict,
         )
