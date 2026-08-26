@@ -13,4 +13,12 @@ describe('system code quality accessibility', () => {
     expect(source).toContain('type="button"\n            aria-pressed={tab === tabDef.id}')
     expect(source).toContain('<span aria-hidden="true">{tabDef.icon}</span>')
   })
+
+  it('does not encode synthetic journey coverage by colour alone', () => {
+    const source = read()
+    expect(source).toContain("t('Sledováno', 'Covered')")
+    expect(source).toContain("t('Nesledováno', 'Unwatched')")
+    expect(source).toContain('aria-label={`${service.component}: ${stateLabel}${detail ? `. ${detail}` : \'\'}`}')
+    expect(source).toContain(' · <strong>{stateLabel}</strong>')
+  })
 })
