@@ -12,7 +12,7 @@ describe('approval inbox source truthfulness', () => {
   it('exposes known-but-unwired queues instead of treating them as empty', () => {
     expect(routeSource).toContain("'not-configured'")
     expect(routeSource).not.toContain("balance: 'not-configured'")
-    expect(routeSource).toContain("billing: 'not-configured'")
+    expect(routeSource).not.toContain("billing: 'not-configured'")
     expect(routeSource).toContain("consent: 'not-configured'")
     expect(routeSource).toContain('...NOT_CONFIGURED_SOURCES')
   })
