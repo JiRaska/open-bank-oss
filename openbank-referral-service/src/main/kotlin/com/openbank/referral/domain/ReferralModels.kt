@@ -15,27 +15,6 @@ enum class RewardStatus { QUALIFIED, REWARD_REQUESTED, REWARDED, RETRYABLE, REVE
 
 enum class LedgerOutcome { ACCEPTED, REJECTED, REVERSED }
 
-/**
- * The outcome of handing a [ReferralEvent] to the transport.
- *
- * A skipped/unwired publish MUST NOT share a signal with a real delivery. This is the
- * `PushResult.skipped()` lesson applied on a money path: a boolean `success` that is `true`
- * for "nothing left the process" makes an off-by-default adapter indistinguishable from a
- * working one, and no telemetry anywhere disagrees. Hence a distinct enum constant, and a
- * name for what can actually be established — `HANDED_TO_TRANSPORT`, never `DELIVERED`.
- */
-enum class ReferralPublishOutcome {
-    /** The event was accepted by a real transport. */
-    HANDED_TO_TRANSPORT,
-
-    /** No transport is wired in this build: the event was DROPPED and nothing was sent. */
-    TRANSPORT_NOT_WIRED,
-    ;
-
-    /** True only when something actually left this process. */
-    val isHandedOff: Boolean get() = this == HANDED_TO_TRANSPORT
-}
-
 data class ReferralProgram(
     val id: UUID,
     val name: String,

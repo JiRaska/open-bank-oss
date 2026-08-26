@@ -5,7 +5,6 @@ package com.openbank.referral.application
 
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.referral.application.port.out.ReferralAuditRepository
-import com.openbank.referral.application.port.out.ReferralEventPublisher
 import com.openbank.referral.application.port.out.ReferralInviteRepository
 import com.openbank.referral.application.port.out.ReferralProgramRepository
 import com.openbank.referral.application.port.out.ReferralRewardRepository
@@ -17,7 +16,6 @@ import com.openbank.referral.domain.ReferralEvent
 import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralNotFoundException
 import com.openbank.referral.domain.ReferralProgram
-import com.openbank.referral.domain.ReferralPublishOutcome
 import com.openbank.referral.domain.ReferralReward
 import com.openbank.referral.domain.ReferralValidationException
 import com.openbank.referral.domain.RewardStatus
@@ -40,7 +38,6 @@ class ReferralService(
     private val programs: ReferralProgramRepository,
     private val invites: ReferralInviteRepository,
     private val rewards: ReferralRewardRepository,
-    private val events: ReferralEventPublisher,
     private val audit: ReferralAuditRepository,
     private val clock: Clock,
 ) {
@@ -190,8 +187,7 @@ class ReferralService(
             requestedAt = now,
             rewardedAt = null,
         )
-        val created = rewards.create(reward)
-        publishAudited(
+        val qualified =
             ReferralEvent.Qualified(
                 eventId = Ids.randomId(),
                 occurredAt = now,
@@ -200,25 +196,18 @@ class ReferralService(
                 referrerPartyId = invite.referrerPartyId,
                 refereePartyId = invite.refereePartyId,
                 qualificationEventId = eventId,
-            ),
-            created.id,
-            actor,
-            now,
-        )
-        publishAudited(
+            )
+        val requested =
             ReferralEvent.RewardRequested(
                 eventId = Ids.randomId(),
                 occurredAt = now,
                 programId = program.id,
                 inviteId = invite.id,
-                rewardReference = created.rewardReference,
-                amount = created.amount,
-                currency = created.currency,
-            ),
-            created.id,
-            actor,
-            now,
-        )
+                rewardReference = reward.rewardReference,
+                amount = reward.amount,
+                currency = reward.currency,
+            )
+        val created = rewards.create(reward, listOf(qualified, requested))
         audit.append("REWARD_REQUESTED", created.id, actor, created.rewardReference, now)
         return created
     }
@@ -232,40 +221,17 @@ class ReferralService(
             LedgerOutcome.REJECTED -> RewardStatus.RETRYABLE
             LedgerOutcome.REVERSED -> RewardStatus.REVERSED
         }
-        val updated = rewards.outcome(reference, next.name, now)
-        publishAudited(
-            ReferralEvent.RewardOutcome(
-                eventId = Ids.randomId(),
-                occurredAt = now,
-                programId = reward.programId,
-                inviteId = reward.inviteId,
-                rewardReference = reference,
-                outcome = outcome,
-            ),
-            updated.id,
-            actor,
-            now,
+        val event = ReferralEvent.RewardOutcome(
+            eventId = Ids.randomId(),
+            occurredAt = now,
+            programId = reward.programId,
+            inviteId = reward.inviteId,
+            rewardReference = reference,
+            outcome = outcome,
         )
+        val updated = rewards.outcome(reference, next.name, now, event)
         audit.append("LEDGER_${outcome.name}", updated.id, actor, reference, now)
         return updated
-    }
-
-    /**
-     * Publishes [event] and records the transport outcome in the audit trail when nothing left the
-     * process. An undelivered money-path event must be visible in the evidentiary record, not only
-     * in a log line — the caller cannot otherwise tell a dropped reward from a delivered one.
-     */
-    private suspend fun publishAudited(event: ReferralEvent, aggregateId: UUID, actor: String, at: Instant) {
-        val outcome = events.publish(event)
-        if (outcome != ReferralPublishOutcome.HANDED_TO_TRANSPORT) {
-            audit.append(
-                "EVENT_NOT_PUBLISHED",
-                aggregateId,
-                actor,
-                "type=${event.eventType} eventId=${event.eventId} outcome=${outcome.name}",
-                at,
-            )
-        }
     }
 
     private fun randomToken(): String {
