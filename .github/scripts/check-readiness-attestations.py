@@ -94,14 +94,7 @@ DRILL_LOGS = ("docs/bcp/dr-test-log.md", "docs/bcp/chaos-test-log.md")
 # Exercise attestations that predate this rule and still cite a runbook. Shrink-only and
 # checked BOTH WAYS: a new one fails, and an entry that healed is reported so the list
 # cannot rot into a permanent exemption. Key: "<service>.<attestation key>".
-EXERCISE_REF_DEBT = {
-    "ledger.restore_drill": (
-        "#5673 — cites runbook-0003 (a PG major-upgrade procedure) for a 2026-07-26 "
-        "restore drill that has no entry in docs/bcp/dr-test-log.md. Left in place rather "
-        "than deleted because the drill may genuinely have happened; the attestant must "
-        "either log it with measured RTO/RPO or drop the claim."
-    ),
-}
+EXERCISE_REF_DEBT: dict[str, str] = {}
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ISSUE_RE = re.compile(r"^#\d+$")
