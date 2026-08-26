@@ -16,17 +16,55 @@ info:
     (F01.01 Assets, F01.02 Liabilities, F01.03 Equity, F02.00 Profit & Loss) and the COREP C 01.00
     Own Funds template from
     openbank-ledger-service's GL trial balance. Derive-only and stateless — it holds no datastore,
-    moves no money, and has NO ČNB transmission channel; EBA XBRL/DPM taxonomy rendering is
-    explicitly out of scope for this increment.
+    moves no money, and has NO ČNB transmission channel. It exposes an EBA XBRL-CSV *preflight*
+    only: the preflight states why a bounded preview is blocked before a future renderer can create
+    a local artifact. It never creates an XBRL file or submits anything.
 
     FINREP output is a bounded preview containing only the official datapoints the platform can
     currently derive without inventing regulatory classifications; it is not a complete return.
     COREP preview gaps remain explicit flagged zeroes (`isDataGap`) with reasons.
-  version: 1.5.0
+  version: 1.6.0
 tags:
   - name: FINREP
   - name: COREP
 paths:
+  /api/v1/finrep/templates/{templateId}/xbrl-csv/preflight:
+    get:
+      tags: [FINREP]
+      summary: Check whether a FINREP preview is eligible for future XBRL-CSV rendering
+      description: >-
+        Returns an explicit, local readiness result; it does not produce an XBRL-CSV archive,
+        validate an XBRL instance, or contact ČNB. Missing official mappings and a trial-balance
+        disagreement are blockers. A `READY_FOR_RENDERING` result is not a validated regulatory
+        artifact and does not imply a submission is possible.
+      operationId: getFinrepXbrlCsvPreflight
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          description: EBA FINREP template identifier
+          schema: { type: string, enum: [F01.01, F01.02, F01.03, F02.00] }
+        - name: asOf
+          in: query
+          required: false
+          description: Reporting reference date, ISO yyyy-MM-dd. Defaults to today when omitted.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Local rendering preflight; a blocked result is a successful safety check
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/XbrlCsvPreflight' }
+        '400':
+          description: Unknown templateId or an invalid reporting date
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
   /api/v1/finrep/periods:
     get:
       tags: [FINREP]
@@ -130,6 +168,36 @@ paths:
 
 components:
   schemas:
+    XbrlCsvPreflight:
+      type: object
+      description: >-
+        Local safeguard result for a future EBA XBRL-CSV renderer. This is not an XBRL artifact,
+        validation result, or regulator submission acknowledgement.
+      required: [templateId, period, reportingFrameworkVersion, dpmVersion, taxonomyVersion, state, blockers]
+      properties:
+        templateId: { type: string, example: F01.01 }
+        period: { type: string, format: date }
+        reportingFrameworkVersion: { type: string, example: '4.2' }
+        dpmVersion: { type: string, example: '4.2.1' }
+        taxonomyVersion: { type: string, example: '4.2.0.0' }
+        state:
+          type: string
+          enum: [READY_FOR_RENDERING, BLOCKED]
+          description: >-
+            READY_FOR_RENDERING only means the implemented safeguards pass. It is not a validated
+            XBRL-CSV artifact and must not be submitted to a regulator.
+        blockers:
+          type: array
+          items: { $ref: '#/components/schemas/XbrlCsvBlocker' }
+    XbrlCsvBlocker:
+      type: object
+      required: [code, reason]
+      properties:
+        code:
+          type: string
+          enum: [INCOMPLETE_OFFICIAL_MAPPING, TRIAL_BALANCE_NOT_AGREED]
+        reason: { type: string }
+
     ReportingPeriods:
       type: object
       required: [periods]
