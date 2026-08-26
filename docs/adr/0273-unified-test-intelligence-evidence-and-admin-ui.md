@@ -235,13 +235,15 @@ provenance. Missing private-repository access or an expired artifact renders `no
 source presence is never promoted to a completed test.
 
 Mobile RUM is consent-gated runtime evidence. The deploy-time projection records Android/iOS exporter
-capability from a read-only checkout that is excluded from the Docker build context, while the BFF
-queries Tempo span-metrics through Prometheus for sampled `openbank-app` arrival over seven days. A
-non-zero observation proves that telemetry crossed the hardened gateway; it does not prove traffic
-volume, a particular OS deployment, or test success. Zero is an explicit absent observation, not a
-failure, because consent is opt-in. Operator-triggered AI analysis receives only bounded client CI
-kind/state pairs; it does not receive RUM counts, details or source paths. The agent may diagnose a
-missing mobile execution envelope, but cannot synthesize a client verdict or alter CI/RUM state.
+capability from a read-only checkout that is excluded from the Docker build context. The BFF counts
+unique `openbank-app` trace IDs from a bounded seven-day Tempo search (maximum 1,000 results), marks a
+full result page as a lower bound, and uses Tempo span-metrics through Prometheus only for the error
+signal and as a degraded fallback. A non-zero observation proves that telemetry crossed the hardened
+gateway; it does not prove traffic volume, a particular OS deployment, or test success. Zero is an
+explicit absent observation, not a failure, because consent is opt-in. Operator-triggered AI analysis
+receives only bounded client CI kind/state pairs; it does not receive RUM counts, details or source
+paths. The agent may diagnose a missing mobile execution envelope, but cannot synthesize a client
+verdict or alter CI/RUM state.
 
 ## Alternatives considered
 

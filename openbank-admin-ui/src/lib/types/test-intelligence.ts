@@ -183,7 +183,7 @@ export interface ClientExperienceEvidence {
     policy: 'not-applicable' | 'rejected' | 'consent-gated'
     detail: string
     observedAt: string | null
-    source?: 'prometheus' | null
+    source?: 'prometheus' | 'tempo' | null
     sampledSpansLast7d?: number | null
     errorSpansLast7d?: number | null
   }

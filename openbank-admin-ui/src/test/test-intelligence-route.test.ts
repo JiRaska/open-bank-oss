@@ -8,6 +8,7 @@ const dirs: string[] = []
 afterEach(() => {
   delete process.env.OPENBANK_TEST_INTELLIGENCE
   delete process.env.PROMETHEUS_URL
+  delete process.env.TEMPO_URL
   vi.unstubAllGlobals()
   dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true }))
 })
@@ -51,14 +52,25 @@ describe('GET /api/test-intelligence', () => {
     }))
     process.env.OPENBANK_TEST_INTELLIGENCE = file
     process.env.PROMETHEUS_URL = 'http://prometheus.test'
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'success', data: { result: [{ value: [1, '12'] }] } }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'success', data: { result: [{ value: [1, '2'] }] } }) }))
+    process.env.TEMPO_URL = 'http://tempo.test'
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input))
+      if (url.hostname === 'tempo.test') {
+        expect(url.pathname).toBe('/api/search')
+        expect(url.searchParams.get('tags')).toBe('service.name="openbank-app"')
+        expect(url.searchParams.get('limit')).toBe('1000')
+        return new Response(JSON.stringify({ traces: Array.from({ length: 12 }, (_, index) => ({ traceID: `trace-${index}` })) }), { status: 200 })
+      }
+      const query = url.searchParams.get('query') ?? ''
+      const value = query.includes('STATUS_CODE_ERROR') ? '2' : '1'
+      return new Response(JSON.stringify({ status: 'success', data: { result: [{ value: [1, value] }] } }), { status: 200 })
+    }))
     const { GET } = await import('@/app/api/test-intelligence/route')
     const body = await (await GET()).json()
     expect(body.clientExperiences[0].rum).toMatchObject({
-      state: 'passed', policy: 'consent-gated', source: 'prometheus', sampledSpansLast7d: 12, errorSpansLast7d: 2,
+      state: 'passed', policy: 'consent-gated', source: 'tempo', sampledSpansLast7d: 12, errorSpansLast7d: 2,
     })
+    expect(body.clientExperiences[0].rum.detail).toContain('12 sampled mobile RUM trace(s)')
     expect(body.clientExperiences[0].evidence).toEqual([])
   })
 

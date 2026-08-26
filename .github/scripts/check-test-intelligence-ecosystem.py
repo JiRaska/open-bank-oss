@@ -163,8 +163,11 @@ def check(root: Path) -> list[str]:
     for needle in ("kube_cronjob_status_last_schedule_time", "kube_cronjob_status_last_successful_time", "kube_job_status_failed"):
         if needle not in synthetic_route:
             errors.append(f"synthetic runtime projection lost its verified Kubernetes signal: {needle}")
+    for needle in ('queryTempoMobileTraces', 'service.name="openbank-app"', 'http://tempo:3200'):
+        if needle not in synthetic_route:
+            errors.append(f"mobile RUM projection lost its live Tempo trace signal: {needle}")
     if 'traces_spanmetrics_calls_total{service=~"openbank-app.*"}' not in synthetic_route:
-        errors.append("mobile RUM projection lost its live Tempo span-metrics signal")
+        errors.append("mobile RUM projection lost its Prometheus error/fallback signal")
     synthetic_workflow = text(root / ".github/workflows/synthetic-journeys.yml")
     for needle, message in (
         ("--extract public-edge", "synthetic CI does not execute the ConfigMap-mounted runtime artifact"),
