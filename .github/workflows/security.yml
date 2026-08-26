@@ -178,7 +178,7 @@ jobs:
       contents: read
       security-events: write # upload-sarif
     timeout-minutes: 40
-    # The java-kotlin leg's build step shells out to its own `./gradlew testClasses`
+    # The java-kotlin leg's build step shells out to its own `./gradlew classes`
     # (whole-fleet dependency resolution, ~30 modules + quarkus-bom) without picking up
     # any GRADLE_OPTS we'd set in a step — it needs the env var at the job level. Without
     # this, Gradle's auto-detected 3 GiB default heap OOMs on that resolution (first seen
@@ -199,7 +199,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # The build step below shells out to `./gradlew testClasses` for the java-kotlin
+      # The build step below shells out to `./gradlew classes` for the java-kotlin
       # leg — validate the wrapper jar before it runs, same as every other job
       # that invokes gradlew.
       - name: Validate Gradle wrapper
@@ -225,7 +225,7 @@ jobs:
 
       # java-kotlin uses an explicit build step (build-mode: manual), not autobuild.
       # This repo has `org.gradle.caching=true` + a remote HTTP build cache
-      # (settings.gradle.kts) fleet-wide; autobuild's `./gradlew testClasses` was
+      # (settings.gradle.kts) fleet-wide; autobuild's Gradle compilation was
       # intermittently satisfied entirely from the build cache, so javac/kotlinc
       # Cache the Gradle build between runs (same setup-gradle as the service CI). The
       # cold --no-build-cache leg took ~25-30 min of wall time and was the single most
@@ -237,14 +237,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         if: matrix.language == 'java-kotlin'
 
-      # Two-phase: try the cached build; if NO compile task actually executed (all
+      # Two-phase: try the cached production build; if NO compile task actually executed (all
       # FROM-CACHE/UP-TO-DATE — grep anchors on the line end so FROM-CACHE rows don't
       # count), fall back to the cold compile so the CodeQL trace stays non-empty.
-      - name: Build (java-kotlin) for CodeQL tracing
+      - name: Build production classes (java-kotlin) for CodeQL tracing
         if: matrix.language == 'java-kotlin'
         run: |
           set -euo pipefail
-          .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew testClasses --no-daemon 2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build.log"
+          # CodeQL evaluates deployable Kotlin/Java. `testClasses` also compiles every
+          # fleet test source, but that is not shipped code and repeatedly received SIGTERM
+          # before analysis could start. `classes` retains generated and
+          # production compilation for every module while keeping the trace bounded.
+          .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew classes --no-daemon 2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build.log"
           executed=$( { grep -c '> Task :.*:compileKotlin$' "${RUNNER_TEMP:-/tmp}/codeql-build.log" || true; } )
           if [ "$executed" -eq 0 ]; then
             echo "::warning::every compile resolved from cache — cold re-run so the CodeQL trace is non-empty"
@@ -254,7 +258,7 @@ jobs:
             # `60 UP-TO-DATE, 60 FROM-CACHE, 0 executed` and CodeQL then failed with
             # "could not process any code written in Java/Kotlin".
             .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- \
-              ./gradlew testClasses --no-build-cache --rerun-tasks --no-daemon \
+              ./gradlew classes --no-build-cache --rerun-tasks --no-daemon \
               2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build-cold.log"
             cold=$( { grep -c '> Task :.*:compileKotlin$' "${RUNNER_TEMP:-/tmp}/codeql-build-cold.log" || true; } )
             if [ "$cold" -eq 0 ]; then
