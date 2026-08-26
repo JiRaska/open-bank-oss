@@ -15,6 +15,10 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
+    // openbank-libs-runtime's outbound SyntheticTaintClientFilter reads OpenTelemetry baggage.
+    // Without the extension the service compiles, but every REST-client call fails in the
+    // packaged fast-jar with NoClassDefFoundError before it reaches ledger.
+    implementation(libs.quarkus.opentelemetry)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 
