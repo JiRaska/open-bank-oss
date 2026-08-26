@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.205.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.205.0...admin-ui-v0.205.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **test-intelligence:** verify mobile RUM source contract ([#7241](https://github.com/JiRaska/open-bank-oss/issues/7241)) ([11553c4](https://github.com/JiRaska/open-bank-oss/commit/11553c4c28f21ad4000602f059fe9cd72483ae3a))
+
 ## [0.205.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.204.1...admin-ui-v0.205.0) (2026-08-26)
 
 
