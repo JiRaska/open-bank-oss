@@ -12,14 +12,6 @@
 # closes #2314; the per-service corrections are blocked on the unsatisfiable-bump gap (#2313).
 #
 # Format: <service> <served-not-published|published-not-served> <VERB> <absolute path>
-openbank-account-service served-not-published DELETE /api/v1/accounts/{accountId}/authorizations/{authorizationId}
-openbank-account-service served-not-published DELETE /api/v1/accounts/{accountId}/pockets/{currency}
-openbank-account-service served-not-published GET /api/v1/accounts/{accountId}/authorizations
-openbank-account-service served-not-published GET /api/v1/accounts/{accountId}/authorizations/check
-openbank-account-service served-not-published GET /api/v1/accounts/{accountId}/pockets
-openbank-account-service served-not-published GET /api/v1/accounts/{accountId}/pockets/resolve
-openbank-account-service served-not-published POST /api/v1/accounts/{accountId}/authorizations
-openbank-account-service served-not-published POST /api/v1/accounts/{accountId}/pockets
 openbank-agent-service served-not-published GET /api/v1/admin/agents/halts
 openbank-agent-service served-not-published POST /api/v1/admin/agents/halt
 openbank-agent-service served-not-published POST /api/v1/admin/agents/resume
