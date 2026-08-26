@@ -6,7 +6,7 @@ info:
   title: Billing Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
   # endpoint only (POST /fees/reverse) — phase 2e, no breaking change.
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Runtime product fee assessment, posting and reversal (ADR-0143). POST /api/v1/fees/assess
     computes an account's fee assessment from live account/balance/catalog reads and returns it
@@ -137,6 +137,28 @@ paths:
           description: No assessed fee with that idempotencyKey.
         "409":
           description: The fee exists but was never POSTED (waived, zero, still PENDING, or FAILED) — nothing to reverse.
+  /api/v1/fees/approvals:
+    get:
+      summary: List pending billing approvals, oldest first (ADR-0227 D2).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: Pending billing approvals, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApprovalResponse' }
+        "401":
+          description: Unauthenticated.
+        "403":
+          description: Authenticated but denied by the OPA authorization policy (ADR-0034).
   /api/v1/fees/approvals/{id}:
     patch:
       summary: Approve or reject a pending four-eyes approval for a fee posting (ADR-0155).
@@ -156,6 +178,9 @@ paths:
       responses:
         "200":
           description: The decided approval.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalResponse' }
         "401":
           description: Unauthenticated.
         "403":
@@ -168,3 +193,23 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  schemas:
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes billing approval. makerId identifies who requested the fee action; the shared
+        ApprovalStore requires a different authenticated principal to decide it.
+      required: [id, action, status]
+      properties:
+        id: { type: string }
+        action:
+          type: string
+          description: The gated billing action this approval was raised for.
+        resourceId: { type: string, nullable: true }
+        status: { type: string }
+        makerId: { type: string, nullable: true }
+        createdAt:
+          type: string
+          format: date-time
+          description: Request time; pending approvals expire after 24 hours.
+        decidedBy: { type: string, nullable: true }
