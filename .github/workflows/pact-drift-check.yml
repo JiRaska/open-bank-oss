@@ -29,7 +29,10 @@ jobs:
   drift-check:
     name: Regenerate consumer pacts and diff against committed
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The fleet-wide regeneration reached 18m10s while successful and twice hit the old 20m
+    # ceiling on #7001 before Gradle could finish. Keep the full derived scope and drift proof;
+    # the extra headroom covers cold-cache variance without weakening either assertion below.
+    timeout-minutes: 30
     # This job regenerates EVERY consumer pact in one Gradle invocation, and the scope is derived
     # from the @Pact annotations — so it grows by one module each time anyone adds a pact, while
     # the heap did not grow at all. It set no GRADLE_OPTS, so the daemon ran on Gradle's default,
