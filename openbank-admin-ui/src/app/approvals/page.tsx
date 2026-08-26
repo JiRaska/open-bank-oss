@@ -36,7 +36,7 @@ interface Proposal {
 
 interface InboxItem {
   id: string
-  domain: 'lending' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'balance' | 'billing' | 'consent' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -75,16 +75,16 @@ export default function ApprovalsPage() {
         fetch('/api/agent/proposals?state=all', { cache: 'no-store' }),
         fetch('/api/approvals/pending', { cache: 'no-store' }),
       ])
+      if (!proposalsRes.ok) throw new Error('agent')
       const data = await proposalsRes.json()
       setRows(Array.isArray(data) ? data : [])
-      if (inboxRes.ok) {
-        const inbox = await inboxRes.json()
-        setDomainItems(Array.isArray(inbox.items) ? inbox.items : [])
-        setDomainSources(inbox.sources ?? {})
-      }
+      if (!inboxRes.ok) throw new Error('queue')
+      const inbox = await inboxRes.json()
+      setDomainItems(Array.isArray(inbox.items) ? inbox.items : [])
+      setDomainSources(inbox.sources ?? {})
       setError(null)
-    } catch {
-      setError('unreachable')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'unreachable')
     } finally {
       setLoading(false)
     }
@@ -152,8 +152,8 @@ export default function ApprovalsPage() {
       <PageHeader
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Schvalování', 'Approvals')}</span></div>}
         icon={<ClipboardCheck size={18} aria-hidden="true" />}
-        title={t('Fronta schvalování (AI agent)', 'Approval queue (AI agent)')}
-        subtitle={t('Agent navrhuje, governance rozhoduje (ADR-0031 D4). Návrhy nemají žádný efekt, dokud je člověk neschválí. Schválení musí udělat někdo jiný než autor.', 'Agents propose, governance disposes (ADR-0031 D4). Proposals have no effect until a human approves them. The approver must differ from the author.')}
+        title={t('Centrum schvalování', 'Approval centre')}
+        subtitle={t('Jedno místo pro bankovní princip čtyř očí i návrhy AI. Fronta je pouze přehled — rozhodnutí zůstávají v řízených doménových tocích a schvalovatel musí být jiný než autor.', 'One place for bank maker-checker work and AI proposals. The domain queue is an overview only — decisions stay in governed domain flows, and the checker must differ from the maker.')}
         actions={<button type="button" onClick={load} disabled={loading} aria-busy={loading}
           aria-label={t('Obnovit schvalovací frontu', 'Refresh approval queue')} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
@@ -162,7 +162,9 @@ export default function ApprovalsPage() {
 
       {error && (
         <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid #dc2626', display: 'flex', gap: 8, alignItems: 'center', color: '#dc2626', fontSize: 13 }}>
-          <AlertTriangle size={15} /> {error === 'unreachable' ? t('Agent je nedostupný.', 'Agent unreachable.') : error}
+          <AlertTriangle aria-hidden="true" size={15} /> {error === 'queue'
+            ? t('Schvalovací frontu se nepodařilo načíst. Nevykládejte prázdnou obrazovku jako stav bez čekajících rozhodnutí.', 'The approval queue could not be loaded. Do not interpret an empty screen as no pending decisions.')
+            : t('Návrhy AI se nepodařilo načíst.', 'AI proposals could not be loaded.')}
         </div>
       )}
 

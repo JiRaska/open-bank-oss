@@ -9,18 +9,20 @@ const routeSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/approv
 const pageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/approvals/page.tsx'), 'utf8')
 
 describe('approval inbox source truthfulness', () => {
-  it('exposes known-but-unwired queues instead of treating them as empty', () => {
-    expect(routeSource).toContain("'not-configured'")
-    expect(routeSource).not.toContain("balance: 'not-configured'")
-    expect(routeSource).not.toContain("billing: 'not-configured'")
-    expect(routeSource).toContain("consent: 'not-configured'")
-    expect(routeSource).toContain('...NOT_CONFIGURED_SOURCES')
+  it('has no known approval source left silently unwired', () => {
+    expect(routeSource).not.toContain('NOT_CONFIGURED_SOURCES')
+    expect(routeSource).toContain('consentPending(headers)')
+    expect(routeSource).toContain('consent: consent.state')
   })
 
-  it('does not render an empty-state claim while a source is not configured', () => {
-    expect(pageSource).toContain('const notConfiguredSources = useMemo(')
-    expect(pageSource).toContain('notConfiguredSources.length === 0 && domainItems.filter')
-    expect(pageSource).toContain('Decisions from these domains will not appear here until their read endpoint is available.')
+  it('fails visibly when the federated queue itself does not answer', () => {
+    expect(pageSource).toContain("if (!inboxRes.ok) throw new Error('queue')")
+    expect(pageSource).toContain('Do not interpret an empty screen as no pending decisions.')
+  })
+
+  it('names the screen for the whole bank workflow rather than only the AI subsection', () => {
+    expect(pageSource).toContain("t('Centrum schvalování', 'Approval centre')")
+    expect(pageSource).toContain('The domain queue is an overview only')
   })
 
   it('renders the proposer identity supplied by the BFF rather than assuming every proposer is a bot', () => {
