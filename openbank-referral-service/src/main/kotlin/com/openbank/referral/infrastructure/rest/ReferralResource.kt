@@ -37,6 +37,12 @@ class ReferralResource(private val service: ReferralService, private val identit
     @Path("/programs")
     suspend fun programs(): Response = Response.ok(service.listPublishedPrograms()).build()
 
+    @GET
+    @Path("/programs/{id}")
+    suspend fun program(@PathParam("id") id: UUID): Response = service.publishedProgram(id)
+        ?.let { Response.ok(it).build() }
+        ?: Response.status(Response.Status.NOT_FOUND).build()
+
     @POST
     @Path("/programs")
     suspend fun create(req: CreateReferralProgramRequest): Response = Response.status(

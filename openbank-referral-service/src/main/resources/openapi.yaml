@@ -23,6 +23,17 @@ paths:
       summary: Publish after independent checker approval
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
       responses: {"200": {description: Published}, "409": {description: Conflict}}
+  /api/v1/referrals/programs/{id}:
+    get:
+      summary: Resolve one published immutable referral program version
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        "200":
+          description: Published referral program
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralProgram'}
+        "404": {description: Unknown or unpublished program}
   /api/v1/referrals/programs/{id}/invites:
     post:
       summary: Issue an opaque invite token
