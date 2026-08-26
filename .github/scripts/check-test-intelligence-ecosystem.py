@@ -206,6 +206,9 @@ def check(root: Path) -> list[str]:
     if "may contain sensitive browser data" not in tests_page:
         errors.append("Admin UI does not expose the diagnostic privacy warning")
     synthetic_route = text(root / "openbank-admin-ui/src/app/api/test-intelligence/route.ts")
+    for needle in ("function enforceRuntimeFreshness", "runtimeFreshnessState(item.state, item.observedAt)", "staleEvidence: evidence.filter"):
+        if needle not in synthetic_route:
+            errors.append(f"running Admin UI can keep an expired successful snapshot green: {needle}")
     for needle in ("kube_cronjob_status_last_schedule_time", "kube_cronjob_status_last_successful_time", "kube_job_status_failed"):
         if needle not in synthetic_route:
             errors.append(f"synthetic runtime projection lost its verified Kubernetes signal: {needle}")

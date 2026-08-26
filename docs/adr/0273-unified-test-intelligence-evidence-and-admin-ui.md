@@ -93,6 +93,11 @@ fallback reports and mobile CI. A retained success becomes `stale` after that bu
 failure, blocker or unknown control remains the stronger operator verdict and is never laundered by
 age.
 
+The authenticated BFF enforces that budget again at request time and recomputes current posture
+totals. This is intentionally independent of the daily image refresh: a failed deploy cannot leave
+an old successful snapshot green indefinitely. Immutable history retains its original verdict and
+timestamp; only the current operator projection ages.
+
 The fleet totals and history count both `unknown` and unresolved (`unknown`, `not-run`, `blocked`)
 observations explicitly. A component may have other passing suites and still contribute unresolved
 evidence; the assurance map remains neutral rather than turning an unresolved contract, performance
