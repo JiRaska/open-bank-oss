@@ -131,7 +131,6 @@ function EodPanel() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const busyRef = useRef(false)
-  const triggerInFlight = useRef(false)
 
   const refresh = useCallback(async (spinner = false) => {
     if (busyRef.current) return
@@ -439,6 +438,7 @@ function EomPanel() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [failures, setFailures] = useState<Record<string, FailuresState>>({})
   const busyRef = useRef(false)
+  const triggerInFlight = useRef(false)
   // Operator-local check trail — survives reloads and (crucially) statement-service
   // outages, so a later operator/agent can see WHEN the close was checked and what
   // state it was in, even when the live run history isn't answering.
