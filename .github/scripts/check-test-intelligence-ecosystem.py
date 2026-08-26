@@ -11,10 +11,23 @@ from pathlib import Path
 
 
 REQUIRED_SCHEMA = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
+TESTCONTAINERS_EVIDENCE_BASELINE = "openbank-libs/governance/testcontainers-evidence-baseline.txt"
 
 
 def text(path: Path) -> str:
     return path.read_text(errors="ignore") if path.exists() else ""
+
+
+def unrecorded_service_testcontainers_resources(root: Path) -> set[str]:
+    """Find service-owned Testcontainers lifecycle managers without shared evidence."""
+    resources = set()
+    for path in root.glob("openbank-*/src/test/**/*.kt"):
+        source = text(path)
+        if ("QuarkusTestResourceLifecycleManager" in source
+                and re.search(r"org\.testcontainers|PostgreSQLContainer|GenericContainer|KafkaContainer|RedpandaContainer", source)
+                and "TestInfrastructureEvidence.record" not in source):
+            resources.add(path.relative_to(root).as_posix())
+    return resources
 
 
 def check(root: Path) -> list[str]:
@@ -69,6 +82,20 @@ def check(root: Path) -> list[str]:
         source = text(root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/containers" / name)
         if "TestInfrastructureEvidence.record" not in source:
             errors.append(f"shared Testcontainers resource emits no lifecycle proof: {name}")
+
+    baseline_path = root / TESTCONTAINERS_EVIDENCE_BASELINE
+    baseline = {
+        line.strip() for line in text(baseline_path).splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    if not baseline_path.exists():
+        errors.append("service-owned Testcontainers lifecycle-evidence baseline is missing")
+    else:
+        unrecorded = unrecorded_service_testcontainers_resources(root)
+        for path in sorted(unrecorded - baseline):
+            errors.append(f"new service-owned Testcontainers resource lacks lifecycle evidence: {path}")
+        for path in sorted(baseline - unrecorded):
+            errors.append(f"Testcontainers evidence baseline is stale; remove migrated path: {path}")
 
     trace_contract = text(root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/trace/TraceContract.kt")
     for needle in ("fun verifiedAs", "OPENBANK_TRACE_CONTRACT_V1:", "successfulAssertions > 0"):
@@ -282,6 +309,24 @@ def self_test() -> int:
         failures = check(root)
         if len(failures) < 8:
             print(f"self-test failed: broken fixture produced only {len(failures)} findings")
+            return 1
+        baseline = root / TESTCONTAINERS_EVIDENCE_BASELINE
+        baseline.parent.mkdir(parents=True, exist_ok=True)
+        baseline.write_text("")
+        resource = root / "openbank-example/src/test/kotlin/com/openbank/example/PostgresTestResource.kt"
+        resource.parent.mkdir(parents=True, exist_ok=True)
+        resource.write_text(
+            "import io.quarkus.test.common.QuarkusTestResourceLifecycleManager\n"
+            "import org.testcontainers.containers.PostgreSQLContainer\n"
+            "class PostgresTestResource : QuarkusTestResourceLifecycleManager"
+        )
+        new_resource = "openbank-example/src/test/kotlin/com/openbank/example/PostgresTestResource.kt"
+        if not any(new_resource in failure for failure in check(root)):
+            print("self-test failed: new unrecorded Testcontainers resource was accepted")
+            return 1
+        baseline.write_text(f"{new_resource}\n")
+        if any(new_resource in failure for failure in check(root)):
+            print("self-test failed: baseline did not account for existing migration debt")
             return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0
