@@ -4,10 +4,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/auth', () => ({ auth: vi.fn(async () => ({ user: { accessToken: 'token' } })) }))
-vi.mock('@/lib/services/bff', () => ({
-  serverSvcUrl: (_service: string, _namespace: string, _port: number, path: string) => `http://referral${path}`,
-}))
-
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -21,7 +17,7 @@ describe('referral program catalogue BFF', () => {
 
     const response = await GET()
     expect(await response.json()).toEqual({ items: [{ id: 'p-1', name: 'friends', version: 2, status: 'PUBLISHED' }], state: 'ok' })
-    expect(upstream).toHaveBeenCalledWith('http://referral/api/v1/referrals/programs', expect.objectContaining({
+    expect(upstream).toHaveBeenCalledWith('http://localhost:8155/api/v1/referrals/programs', expect.objectContaining({
       headers: { authorization: 'Bearer token' }, cache: 'no-store',
     }))
   })
