@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.11.0...flaky-test-hunter-v0.12.0) (2026-08-26)
+
+
+### Features
+
+* **libs-testing:** project executed trace contracts ([#7032](https://github.com/JiRaska/open-bank-oss/issues/7032)) ([54a076f](https://github.com/JiRaska/open-bank-oss/commit/54a076fd7760adba467f1b53ddacb67baca73085))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.10.1...flaky-test-hunter-v0.11.0) (2026-08-26)
 
 
