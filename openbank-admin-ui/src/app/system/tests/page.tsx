@@ -9,6 +9,7 @@ import {
   Gauge, RefreshCw, ShieldCheck, Timer, TriangleAlert, XCircle,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
 import type {
   ComponentTestPosture, EvidenceKind, EvidenceState, TestIntelligenceReport,
 } from '@/lib/types/test-intelligence'
@@ -51,19 +52,17 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
 function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
   const { t } = useLanguage()
   const syntheticActive = report.syntheticJourneys.filter(item => item.status === 'active')
-  const syntheticState: EvidenceState = syntheticActive.some(item => item.state === 'failed') ? 'failed'
-    : syntheticActive.length === 0 ? 'unknown'
-      : syntheticActive.some(item => item.state !== 'passed') ? 'stale' : 'passed'
+  const syntheticState = aggregateEvidenceState(syntheticActive.map(item => item.state))
   const runtimeRows = report.components.filter(component => component.testInfrastructure.declared.length > 0)
   const runtimeState: EvidenceState = runtimeRows.some(component => {
     const observed = component.testInfrastructure.observed
     return observed.filter(item => item.lifecycle === 'stopped').length < observed.filter(item => item.lifecycle === 'started').length
   }) ? 'failed' : runtimeRows.some(component => component.testInfrastructure.observed.length === 0) ? 'unknown' : 'passed'
   const clientEvidence = report.clientExperiences ?? []
-  const clientState: EvidenceState = clientEvidence.some(client => client.evidence.some(item => item.state === 'failed')) ? 'failed'
-    : clientEvidence.some(client => client.rum.state === 'blocked') ? 'blocked'
-      : clientEvidence.some(client => client.rum.state === 'unknown') ? 'unknown'
-        : clientEvidence.length === 0 ? 'not-run' : 'passed'
+  const clientState = aggregateEvidenceState(
+    clientEvidence.flatMap(client => [...client.evidence.map(item => item.state), client.rum.state]),
+    'not-run',
+  )
   const ciState: EvidenceState = report.totals.failingEvidence > 0 ? 'failed'
     : (report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) > 0 ? 'unknown'
       : report.totals.missingEvidence > 0 || report.totals.staleEvidence > 0 ? 'stale' : 'passed'
@@ -314,7 +313,7 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
 function ClientExperiences({ report }: { report: TestIntelligenceReport }) {
   const { t } = useLanguage()
   return <div style={{ display: 'grid', gap: 12 }}>{(report.clientExperiences ?? []).map(client => <div key={client.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 18, background: 'var(--surface-1)' }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{client.title}</strong><span style={{ marginLeft: 8, color: 'var(--text-tertiary)', fontSize: 11 }}>{client.platforms.join(' · ')}</span></div><StateBadge state={client.evidence.some(item => item.state === 'failed') ? 'failed' : client.evidence.length ? 'passed' : 'not-run'} /></div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{client.title}</strong><span style={{ marginLeft: 8, color: 'var(--text-tertiary)', fontSize: 11 }}>{client.platforms.join(' · ')}</span></div><StateBadge state={aggregateEvidenceState(client.evidence.map(item => item.state), 'not-run')} /></div>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginTop: 12 }}>{client.evidence.map((item, index) => <div key={`${item.kind}-${index}`} style={{ padding: 10, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>{item.kind}</strong><div style={{ marginTop: 6 }}><StateBadge state={item.state} /></div>{item.counts && <div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{item.counts.passed}/{item.counts.executed} passed</div>}{item.detail && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{item.detail}</div>}{item.diagnostics?.map(diagnostic => <div key={diagnostic.name} style={{ marginTop: 7 }}><a href={diagnostic.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', fontWeight: 650 }}>{t('Otevřít diagnostiku běhu', 'Open run diagnostics')}</a><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t(`Chráněný GitHub artefakt · ${diagnostic.retentionDays} dní · může obsahovat citlivá browser data`, `GitHub-authenticated artifact · ${diagnostic.retentionDays} days · may contain sensitive browser data`)}</div></div>)}</div>)}</div>
     {client.evidence.length === 0 && <p style={{ fontSize: 12, color: '#d97706', margin: '12px 0 0' }}>{t('Není přibalen důkaz posledního client CI běhu; zdrojový kód se nesmí vydávat za proběhlý test.', 'No latest client-CI evidence is bundled; source code is not represented as a completed test.')}</p>}
     <div style={{ marginTop: 12, padding: 11, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>RUM</strong><span style={{ marginLeft: 8 }}><StateBadge state={client.rum.state} /></span>{client.rum.source && <span style={{ marginLeft: 8, color: 'var(--text-tertiary)' }}>{client.rum.source} · 7d</span>}<div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{client.rum.detail}</div>{client.rum.sampledSpansLast7d !== undefined && client.rum.sampledSpansLast7d !== null && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{client.rum.sampledSpansLast7d} sampled {client.rum.source === 'tempo' ? 'traces' : 'span-counter increments'} · {client.rum.errorSpansLast7d ?? 'unknown'} error span-counter increments</div>}</div>
