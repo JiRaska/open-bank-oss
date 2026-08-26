@@ -5,10 +5,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { headers } from 'next/headers'
-import { Toaster } from 'sonner'
-import { SessionProvider } from '@/components/auth/SessionProvider'
-import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { AgentDock } from '@/components/agent/AgentDock'
+import { AppProviders } from '@/components/layout/AppProviders'
 
 export const metadata: Metadata = {
   title: 'OpenBank Admin',
@@ -29,13 +26,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body>
-        <SessionProvider>
-          <LanguageProvider>
-            {children}
-            <AgentDock />
-            <Toaster richColors position="top-right" />
-          </LanguageProvider>
-        </SessionProvider>
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   )
