@@ -385,6 +385,19 @@ function syntheticJourneys() {
   const file = path.join(repo, 'openbank-libs', 'governance', 'journeys.yaml')
   try {
     const raw = parseYaml(fs.readFileSync(file, 'utf8'))
+    const latestCi = new Map()
+    const history = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), candidate => candidate.endsWith('.json'))
+      .map(readJson).filter(item => item?.schemaVersion === 1 && item?.run)
+      .sort((a, b) => Date.parse(a.run.observedAt) - Date.parse(b.run.observedAt))
+    for (const envelope of history) {
+      for (const evidence of envelope.specializedEvidence ?? []) {
+        if (evidence.kind !== 'synthetic' || !evidence.source?.startsWith('journey:')) continue
+        latestCi.set(evidence.source.slice('journey:'.length), {
+          state: evidence.state, observedAt: envelope.run.observedAt,
+          detail: evidence.detail ?? 'Synthetic run retained without detail.', run: envelope.run,
+        })
+      }
+    }
     return (raw?.journeys ?? []).map(item => ({
       id: item.id, title: item.name ?? item.title ?? item.id, status: item.status,
       capability: item.capability ?? '',
@@ -392,6 +405,7 @@ function syntheticJourneys() {
       schedule: item.schedule ?? item.target_schedule ?? null, environment: item.environment ?? null,
       covers: item.covers ?? item.covered_services ?? [],
       falsifies: item.falsification ?? '', blocker: item.blocked_by ?? null,
+      ...(latestCi.has(item.id) ? { ci: latestCi.get(item.id) } : {}),
     }))
   } catch (error) {
     warnings.push(`synthetic journey catalogue unavailable: ${error.message}`)

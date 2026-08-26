@@ -70,6 +70,8 @@ def check(root: Path) -> list[str]:
         ("cron: '17 3 * * *'", "admin deployment refresh cadence drifted from the governed daily schedule"),
         ("github.event_name }}\" = \"schedule\"", "scheduled snapshot refresh does not use a unique immutable image tag"),
         ("github.event_name }}\" = \"workflow_run\"", "event-driven snapshot refresh does not use a unique immutable image tag"),
+        ("github.event.workflow_run.conclusion != 'success'", "ineligible workflow-run events can evict a valid pending Admin UI deploy"),
+        ("github.run_id || 'eligible'", "ineligible Admin UI deploy events do not use an isolated concurrency group"),
     ):
         if needle not in deploy:
             errors.append(message)
@@ -136,6 +138,26 @@ def check(root: Path) -> list[str]:
             errors.append(f"synthetic runtime projection lost its verified Kubernetes signal: {needle}")
     if 'traces_spanmetrics_calls_total{service=~"openbank-app.*"}' not in synthetic_route:
         errors.append("mobile RUM projection lost its live Tempo span-metrics signal")
+    synthetic_workflow = text(root / ".github/workflows/synthetic-journeys.yml")
+    for needle, message in (
+        ("--extract public-edge", "synthetic CI does not execute the ConfigMap-mounted runtime artifact"),
+        ('event_name }}-${{ github.ref }}', "synthetic PR and post-GitOps calls do not have isolated concurrency"),
+        ('branches: [main]', "synthetic workflow has no post-GitOps main call site"),
+        ('cronjob-journey-public-edge.yaml', "synthetic workflow does not run when the runtime artifact changes"),
+        ('--synthetic-summary', "synthetic workflow does not publish compatible Test Intelligence evidence"),
+        ('test-intelligence-run-openbank-platform-', "synthetic run envelope is not retained in immutable history"),
+        ('grafana/k6:1.2.0@sha256:', "synthetic CI image is not pinned to the runtime k6 digest"),
+    ):
+        if needle not in synthetic_workflow:
+            errors.append(message)
+    collector = text(root / "openbank-admin-ui/scripts/collect-test-intelligence.mjs")
+    for needle, message in (
+        ("evidence.kind !== 'synthetic'", "Admin projection ignores retained synthetic run evidence"),
+        ("latestCi.set", "Admin projection cannot select the latest synthetic CI verdict"),
+        ("ci: latestCi.get", "Admin journey rows do not expose the synthetic CI verdict"),
+    ):
+        if needle not in collector:
+            errors.append(message)
     if not (root / "openbank-libs/governance/journeys.yaml").exists():
         errors.append("synthetic journey inventory is missing")
     return errors

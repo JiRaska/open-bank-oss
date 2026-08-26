@@ -91,7 +91,17 @@ concurrency:
   # later, far from the cause (same hazard auto-deploy.yml documents). Queueing is
   # safe: GitHub keeps only the newest pending run per group, so the latest commit
   # still wins — it just waits for the in-flight deploy to finish signing.
-  group: admin-ui-deploy
+  # Job-level `if:` is evaluated only after concurrency admission. A cancelled CI
+  # workflow_run therefore used to enter this shared queue, evict the valid pending push
+  # deploy, and then skip itself in deploy-source. Observed in runs 32945400498/32945568749
+  # (#7023). Give events that cannot possibly deploy a run-unique group; only eligible
+  # push/dispatch/schedule and successful main workflow_run events share the deploy queue.
+  group: >-
+    admin-ui-deploy-${{
+      github.event_name == 'workflow_run' &&
+      (github.event.workflow_run.conclusion != 'success' || github.event.workflow_run.head_branch != 'main') &&
+      github.run_id || 'eligible'
+    }}
   cancel-in-progress: false
 
 jobs:

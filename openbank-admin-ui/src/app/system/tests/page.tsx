@@ -299,6 +299,7 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Čerstvost evidence', 'Evidence freshness')}</span><br /><strong>{row.live.freshnessSeconds === null ? 'unknown' : `${Math.round(row.live.freshnessSeconds / 60)} min`}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední Kubernetes běhy', 'Recent Kubernetes runs')}</span><br /><strong>{row.live.recentRuns.length || 'none retained'}</strong></div>
     </div>}
+    {row.ci && <p style={{ fontSize: 11, color: 'var(--text-tertiary)', margin: '10px 0 0' }}><strong>CI / post-deploy:</strong> <StateBadge state={row.ci.state} /> · {row.ci.detail} · <a href={row.ci.run.url} target="_blank" rel="noreferrer">run {row.ci.run.id}</a></p>}
     {row.falsifies && <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '10px 0 0' }}><strong>Falsification:</strong> {row.falsifies}</p>}
     {row.blocker && <p style={{ fontSize: 12, color: '#7c3aed', margin: '10px 0 0' }}><strong>Blocker:</strong> {row.blocker}</p>}
   </div>)}</div>

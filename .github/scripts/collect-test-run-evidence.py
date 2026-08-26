@@ -216,6 +216,8 @@ def specialized_evidence(
     performance_summary: str | None,
     mutation_report: str | None,
     performance_not_run_detail: str | None = None,
+    synthetic_summary: str | None = None,
+    synthetic_journey: str | None = None,
 ) -> list[dict]:
     specialized = []
     if performance_summary:
@@ -241,6 +243,22 @@ def specialized_evidence(
                                 "source": str(mutation_file), "detail": f"{killed}/{len(mutations)} killed ({score if score is not None else 'n/a'}%)"})
         else:
             specialized.append({"kind": "mutation", "state": "not-run", "source": str(mutation_file), "detail": "mutation report absent"})
+    if synthetic_summary:
+        if not synthetic_journey or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", synthetic_journey):
+            raise ValueError("--synthetic-summary requires a valid --synthetic-journey id")
+        summary_file = Path(synthetic_summary)
+        summary = json.loads(summary_file.read_text()) if summary_file.exists() else None
+        thresholds = [value for metric in (summary or {}).get("metrics", {}).values()
+                      for value in (metric.get("thresholds") or {}).values()]
+        failed = sum(1 for value in thresholds if value is True or
+                     (isinstance(value, dict) and value.get("ok") is False))
+        specialized.append({
+            "kind": "synthetic",
+            "state": "not-run" if summary is None else "failed" if failed else "passed",
+            "source": f"journey:{synthetic_journey}",
+            "detail": "synthetic summary absent" if summary is None else
+                      f"{len(thresholds)} threshold result(s), {failed} breached",
+        })
     return specialized
 
 
@@ -252,6 +270,8 @@ def main() -> None:
     parser.add_argument("--performance-summary")
     parser.add_argument("--performance-not-run-detail")
     parser.add_argument("--mutation-report")
+    parser.add_argument("--synthetic-summary")
+    parser.add_argument("--synthetic-journey")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -310,6 +330,8 @@ def main() -> None:
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "passed")]
             absent = specialized_evidence(str(service / "missing-summary.json"), None, "no safe target configured")
             assert absent == [{"kind": "performance", "state": "not-run", "source": str(service / "missing-summary.json"), "detail": "no safe target configured"}]
+            synthetic = specialized_evidence(None, None, synthetic_summary=str(performance), synthetic_journey="public-edge")
+            assert synthetic == [{"kind": "synthetic", "state": "failed", "source": "journey:public-edge", "detail": "1 threshold result(s), 1 breached"}]
             valid = {
                 "schemaVersion": 1,
                 "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "", "observedAt": "2026-08-22T00:00:00Z"},
@@ -341,6 +363,8 @@ def main() -> None:
         args.performance_summary,
         args.mutation_report,
         args.performance_not_run_detail,
+        args.synthetic_summary,
+        args.synthetic_journey,
     )
     envelope = {
         "schemaVersion": 1,
