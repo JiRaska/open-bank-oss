@@ -87,6 +87,12 @@ Absence is not zero. `0 tests executed` is a valid observed result; `not-run` me
 artifact was collected. Missing and stale required evidence are attention states, never silently
 excluded from an average.
 
+Artifact retention is not evidence freshness. The projection applies the same freshness budget to
+versioned service suites and specialised mutation, performance and synthetic verdicts as it does to
+fallback reports and mobile CI. A retained success becomes `stale` after that budget; a recorded
+failure, blocker or unknown control remains the stronger operator verdict and is never laundered by
+age.
+
 The fleet totals and history count both `unknown` and unresolved (`unknown`, `not-run`, `blocked`)
 observations explicitly. A component may have other passing suites and still contribute unresolved
 evidence; the assurance map remains neutral rather than turning an unresolved contract, performance

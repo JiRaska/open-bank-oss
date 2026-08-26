@@ -323,4 +323,64 @@ scenarios:
     expect(app.evidence.find(item => item.kind === 'unit')).toMatchObject({ state: 'stale', run: { id: 'old-pass' } })
     expect(app.evidence.find(item => item.kind === 'e2e')).toMatchObject({ state: 'failed', run: { id: 'old-fail' } })
   })
+
+  it('expires retained backend, mutation, performance and synthetic successes without hiding failures', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-fleet-freshness-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', `version: 1
+journeys:
+  - id: old-journey
+    title: Old journey
+    status: active
+    severity: ticket
+    covers: [openbank-alpha-service]
+    schedule: "0 * * * *"
+    falsification: old success must expire
+`)
+    const oldRun = { id: 'old-42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/old-42', observedAt: '2020-01-01T00:00:00Z' }
+    write(repo, 'openbank-alpha-service/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1, run: oldRun, component: 'openbank-alpha-service',
+      suites: [
+        { kind: 'unit', state: 'passed', discovered: 1, executed: 1, passed: 1, failed: 0, skipped: 0, errors: 0, durationMs: 10 },
+        { kind: 'integration', state: 'failed', discovered: 1, executed: 1, passed: 0, failed: 1, skipped: 0, errors: 0, durationMs: 10 },
+      ],
+      specializedEvidence: [{ kind: 'trace', state: 'passed', source: 'trace-contract:old' }],
+      coverage: null, testInfrastructure: { declared: [], observed: [] },
+    }))
+    write(repo, 'openbank-alpha-service/src/test/k6/alpha-smoke.js', 'export const options = { thresholds: { checks: ["rate>0.99"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/openbank-alpha-service-summary.json', JSON.stringify({ metrics: { checks: { value: 1, thresholds: { 'rate>0.99': false } } } }))
+    write(repo, 'openbank-admin-ui/perf-artifacts/openbank-alpha-service-run.json', JSON.stringify({
+      schemaVersion: 1, run: oldRun, component: 'openbank-alpha-service', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'performance', state: 'passed', source: 'summary.json' }],
+    }))
+    write(repo, 'openbank-alpha-service/build/reports/pitest/mutations.xml', '<mutations><mutation status="KILLED"/></mutations>')
+    write(repo, 'openbank-alpha-service/build/reports/pitest/test-intelligence-run.json', JSON.stringify({
+      schemaVersion: 1, run: oldRun, component: 'openbank-alpha-service', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'mutation', state: 'passed', source: 'mutations.xml' }],
+    }))
+    write(repo, 'openbank-admin-ui/test-run-history/synthetic-old.json', JSON.stringify({
+      schemaVersion: 1, run: oldRun, component: 'openbank-platform', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:old-journey' }],
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '1'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.components[0].evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'unit', state: 'stale' }),
+      expect.objectContaining({ kind: 'integration', state: 'failed' }),
+      expect.objectContaining({ kind: 'trace', state: 'stale' }),
+      expect.objectContaining({ kind: 'mutation', state: 'stale' }),
+      expect.objectContaining({ kind: 'performance', state: 'stale' }),
+    ]))
+    expect(report.mutations[0]).toMatchObject({ state: 'stale' })
+    expect(report.performance[0]).toMatchObject({ state: 'stale' })
+    expect(report.syntheticJourneys[0].ci).toMatchObject({ state: 'stale' })
+    expect(report.totals).toMatchObject({ failingEvidence: 1, staleEvidence: 4 })
+  })
 })

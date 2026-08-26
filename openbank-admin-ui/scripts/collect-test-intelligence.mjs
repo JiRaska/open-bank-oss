@@ -57,6 +57,17 @@ const stateFrom = (failed, executed, at) => {
   if (collectedAt.getTime() - new Date(at).getTime() > staleAfterMs) return 'stale'
   return 'passed'
 }
+const freshnessAwareState = (state, at) => {
+  // An old failure or explicit control gap remains actionable; age must never
+  // launder it into a weaker verdict. Conversely, a successful observation is
+  // not evergreen just because its signed envelope is retained longer than the
+  // fleet freshness budget.
+  if (state === 'failed' || state === 'blocked' || state === 'unknown' || state === 'not-run') return state
+  const observed = Date.parse(at ?? '')
+  if (!Number.isFinite(observed)) return 'not-run'
+  if (collectedAt.getTime() - observed > staleAfterMs) return 'stale'
+  return state
+}
 
 function releasedComponents() {
   return fs.readdirSync(repo, { withFileTypes: true })
@@ -146,7 +157,7 @@ function runEnvelope(component) {
   const provenance = safeRun(run.run, component)
   return {
     evidence: [...run.suites.map(suite => ({
-      kind: suite.kind, state: suite.state, observedAt: run.run?.observedAt ?? observedAt(file),
+      kind: suite.kind, state: freshnessAwareState(suite.state, run.run?.observedAt ?? observedAt(file)), observedAt: run.run?.observedAt ?? observedAt(file),
       source: 'test-intelligence-run:v1', environment: 'ci', durationMs: suite.durationMs,
       counts: { discovered: suite.discovered, executed: suite.executed, passed: suite.passed,
         failed: suite.failed, skipped: suite.skipped, errors: suite.errors }, run: provenance,
@@ -156,7 +167,7 @@ function runEnvelope(component) {
         access: item.access, mayContainSensitiveData: item.mayContainSensitiveData,
       })),
     })), ...(run.specializedEvidence ?? []).map(item => ({
-      kind: item.kind, state: item.state, observedAt: run.run?.observedAt ?? observedAt(file),
+      kind: item.kind, state: freshnessAwareState(item.state, run.run?.observedAt ?? observedAt(file)), observedAt: run.run?.observedAt ?? observedAt(file),
       source: item.source, environment: 'ci', detail: item.detail, run: provenance,
     }))],
     coverage: run.coverage ? {
@@ -311,7 +322,9 @@ async function mutations(components) {
     const specialized = mutationRun?.specializedEvidence?.find(item => item.kind === 'mutation')
     const provenance = safeRun(mutationRun?.run, `mutation:${component}`)
     result.push({
-      component, state: specialized?.state ?? stateFrom(0, items.length, at), observedAt: mutationRun?.run?.observedAt ?? at,
+      component, state: specialized
+        ? freshnessAwareState(specialized.state, mutationRun?.run?.observedAt ?? at)
+        : stateFrom(0, items.length, at), observedAt: mutationRun?.run?.observedAt ?? at,
       total: items.length, killed, survived, noCoverage,
       score: items.length ? Math.round((killed / items.length) * 10_000) / 100 : null,
       ...(provenance ? { run: provenance } : {}),
@@ -391,7 +404,9 @@ function performance() {
     const provenance = safeRun(performanceRun?.run ?? summaryMeta?.run, `performance:${id}`)
     return {
       id, component,
-      state: specialized?.state ?? (summary ? stateFrom(failed, 1, at) : 'not-run'),
+      state: specialized
+        ? freshnessAwareState(specialized.state, performanceRun?.run?.observedAt ?? at)
+        : (summary ? stateFrom(failed, 1, at) : 'not-run'),
       observedAt: performanceRun?.run?.observedAt ?? at,
       source: path.relative(repo, file), thresholds,
       ...(plan ? { plan: {
@@ -423,7 +438,7 @@ function syntheticJourneys() {
       for (const evidence of envelope.specializedEvidence ?? []) {
         if (evidence.kind !== 'synthetic' || !evidence.source?.startsWith('journey:')) continue
         latestCi.set(evidence.source.slice('journey:'.length), {
-          state: evidence.state, observedAt: envelope.run.observedAt,
+          state: freshnessAwareState(evidence.state, envelope.run.observedAt), observedAt: envelope.run.observedAt,
           detail: evidence.detail ?? 'Synthetic run retained without detail.',
           ...(provenance ? { run: provenance } : {}),
         })
@@ -483,10 +498,7 @@ function clientEvidenceState(suite, observedAt) {
   // A private-client artifact is immutable CI evidence, but it is still only
   // useful while it is recent.  Do not turn a recorded failure into "stale":
   // the failure remains the more important operator verdict.
-  if (suite.state === 'failed') return 'failed'
-  if (!observedAt) return 'not-run'
-  if (collectedAt.getTime() - new Date(observedAt).getTime() > staleAfterMs) return 'stale'
-  return suite.state
+  return freshnessAwareState(suite.state, observedAt)
 }
 
 async function clientExperiences() {
