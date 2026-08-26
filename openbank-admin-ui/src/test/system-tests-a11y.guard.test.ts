@@ -25,7 +25,10 @@ describe('system code quality accessibility', () => {
   it('explains unmatched Testcontainers lifecycle evidence in text', () => {
     const source = read()
     expect(source).toContain('const unmatchedStarts = started.length - stopped.length')
+    expect(source).toContain('const impossibleStops = stopped.length > started.length')
+    expect(source).toContain("started.length === 0 || impossibleStops ? 'unknown'")
     expect(source).toContain('role="status"')
     expect(source).toContain("unmatched start${unmatchedStarts === 1 ? '' : 's'}")
+    expect(source).toContain('Inconsistent lifecycle evidence: more stops than starts.')
   })
 })
