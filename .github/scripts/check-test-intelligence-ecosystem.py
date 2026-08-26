@@ -159,6 +159,14 @@ def check(root: Path) -> list[str]:
         for needle in required:
             if needle not in workflow:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
+    perf_gate = text(root / ".github/workflows/perf-gate.yml")
+    if "ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79" not in perf_gate:
+        errors.append("performance gate does not execute its k6 runtime by immutable official digest")
+    if "github.com/grafana/k6/releases/download" in perf_gate or "curl -fsSL" in perf_gate:
+        errors.append("performance gate still executes an unauthenticated downloaded k6 archive")
+    for needle in ('--network host', '--user "$(id -u):$(id -g)"', '--volume "$PWD:/work"'):
+        if needle not in perf_gate:
+            errors.append(f"performance gate pinned container cannot safely reach/write its subject: {needle}")
     performance_catalog = text(root / "perf/scenarios.yaml")
     for scenario in ("money-path-smoke", "money-path-write-benchmark"):
         definition = root / "perf/k6" / f"{scenario}.js"
