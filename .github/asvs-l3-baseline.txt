@@ -163,7 +163,7 @@ V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:85: plaintext http:
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:91: plaintext http:// env value http://product-catalog.accounts.svc:8104
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:92: plaintext http:// env value http://mcp-service.platform.svc:8150/mcp
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:116: plaintext http:// env value http://security-scanner-service.security-scanner.svc:8120
-V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:121: plaintext http:// env value http://tempo.observability.svc:3100
+V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:167: plaintext http:// env value http://tempo.observability.svc:3200
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:127: plaintext http:// env value http://clickhouse.analytics.svc:8123
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:139: plaintext http:// env value http://kube-prometheus-stack-prometheus.observability.svc:90
 V9.1 openbank-infra/gitops/components/tpp-registry/tpp-registry-service.yaml:94: plaintext http:// env value http://tempo.observability.svc:4317
