@@ -187,7 +187,7 @@ jobs:
             echo "::error::the steward produced no output — it did not run, which is not the same as having nothing to tend"
             exit 1
           fi
-          verdict=$(grep -oE '^STEWARD-VERDICT: (TENDED .*|NOTHING TO TEND|BLOCKED .*)$' /tmp/steward-output.txt | tail -1)
+          verdict=$(grep -oE '^STEWARD-VERDICT: (TENDED|NOTHING TO TEND|BLOCKED).*$' /tmp/steward-output.txt | tail -1)
           if [ -z "${verdict}" ]; then
             echo "::error::the steward never stated a verdict. Treating as NOT having run."
             tail -20 /tmp/steward-output.txt
