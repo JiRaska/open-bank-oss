@@ -37,36 +37,7 @@ class TestIntelligenceAnalysisTest {
         coEvery { llm.diagnose(any(), any()) } returns "The run proves no execution or container start."
         coEvery { repository.save(any()) } answers { firstArg() }
 
-        val findings = service.analyze(
-            TestIntelligenceAnalysisRequest(
-                snapshotId = "run-42",
-                collectedAt = Instant.parse("2026-08-22T11:00:00Z"),
-                components = listOf(
-                    TestIntelligenceComponentInput(
-                        component = "openbank-ledger-service",
-                        moneyPath = true,
-                        evidence = listOf(
-                            TestIntelligenceEvidenceInput("contract", "stale"),
-                            TestIntelligenceEvidenceInput("contract", "failed"),
-                            TestIntelligenceEvidenceInput("mutation", "failed"),
-                        ),
-                        declaredInfrastructure = listOf("postgres"),
-                        observedInfrastructureStarts = 0,
-                        flakyTests = 2,
-                        failingTests = 1,
-                        sameCommitTransitions = 3,
-                        wastedDurationMs = 4200,
-                    ),
-                    TestIntelligenceComponentInput(
-                        component = "openbank-app",
-                        moneyPath = true,
-                        evidence = listOf(TestIntelligenceEvidenceInput("visual", "passed")),
-                        declaredInfrastructure = emptyList(),
-                        observedInfrastructureStarts = 0,
-                    ),
-                ),
-            ),
-        )
+        val findings = service.analyze(analysisRequest())
 
         assertThat(findings.map { it.checkType }).containsExactlyInAnyOrder(
             FlakyTestCheckType.MISSING_EXECUTION_EVIDENCE,
@@ -93,4 +64,34 @@ class TestIntelligenceAnalysisTest {
             assertThat(it.rootCause).isNotBlank()
         }
     }
+
+    private fun analysisRequest() = TestIntelligenceAnalysisRequest(
+        snapshotId = "run-42",
+        collectedAt = Instant.parse("2026-08-22T11:00:00Z"),
+        components = listOf(
+            TestIntelligenceComponentInput(
+                component = "openbank-ledger-service",
+                moneyPath = true,
+                evidence = listOf(
+                    TestIntelligenceEvidenceInput("contract", "stale"),
+                    TestIntelligenceEvidenceInput("contract", "failed"),
+                    TestIntelligenceEvidenceInput("mutation", "failed"),
+                    TestIntelligenceEvidenceInput("trace", "passed"),
+                ),
+                declaredInfrastructure = listOf("postgres"),
+                observedInfrastructureStarts = 0,
+                flakyTests = 2,
+                failingTests = 1,
+                sameCommitTransitions = 3,
+                wastedDurationMs = 4200,
+            ),
+            TestIntelligenceComponentInput(
+                component = "openbank-app",
+                moneyPath = true,
+                evidence = listOf(TestIntelligenceEvidenceInput("visual", "passed")),
+                declaredInfrastructure = emptyList(),
+                observedInfrastructureStarts = 0,
+            ),
+        ),
+    )
 }

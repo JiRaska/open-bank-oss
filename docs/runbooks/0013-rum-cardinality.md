@@ -63,12 +63,12 @@ Measured 2026-08-20 against the sandbox, this is the state to expect:
 - It arrives in **bursts of one or two spans**, hours apart, because RUM is off by default,
   OIDC/consent-gated, and only debug builds with a logged-in session emit at all. One trace in six
   hours is the normal reading, not a fault.
-- The span carries only `party_id`; its resource carries `service.name` plus
+- The measured 2026-08-20 span carried only `party_id`; its resource carried `service.name` plus
   `redaction.redacted.count=3` — the gateway's strict allow-list dropped the app's three
   `telemetry.sdk.*` attributes. That is the redaction processor working as designed.
-- `screen.name`, `app.version` and `device.model` are **not sent by the app**, so the gateway's
-  allow-list entries for them are currently unused. Populating them is app-side work in
-  `JiRaska/openbank-app` (ADR-0088 D4a/D4c) and cannot be done from this repo.
+- Current Android and iOS source sends bounded `screen.name`, `app.version`, `os.*` and
+  `device.model` attributes (mobile PR #555). Until a newly built, consented client emits a sampled
+  trace, zero live values still means **not observed**, not that the source change is absent.
 
 ### Why `openbank-admin-ui` is absent, deliberately
 

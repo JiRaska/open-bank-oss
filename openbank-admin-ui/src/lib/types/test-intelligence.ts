@@ -19,6 +19,7 @@ export type EvidenceKind =
   | 'synthetic'
   | 'mutation'
   | 'visual'
+  | 'trace'
   | 'simulation'
 
 export interface TestCounts {
@@ -182,7 +183,7 @@ export interface ClientExperienceEvidence {
     policy: 'not-applicable' | 'rejected' | 'consent-gated'
     detail: string
     observedAt: string | null
-    source?: 'prometheus' | null
+    source?: 'prometheus' | 'tempo' | null
     sampledSpansLast7d?: number | null
     errorSpansLast7d?: number | null
   }
@@ -209,6 +210,8 @@ export interface TestIntelligenceReport {
     failingEvidence: number
     missingEvidence: number
     staleEvidence: number
+    unknownEvidence?: number
+    unresolvedEvidence?: number
   }
   warnings: string[]
 }
@@ -245,6 +248,8 @@ export interface TestIntelligenceHistoryPoint {
   failingEvidence: number
   missingEvidence: number
   staleEvidence: number
+  unknownEvidence?: number
+  unresolvedEvidence?: number
 }
 
 export interface TestAgentFinding {
