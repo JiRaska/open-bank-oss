@@ -45,9 +45,9 @@ describe('Test Intelligence agent BFF', () => {
     writeFileSync(file, JSON.stringify({
       schemaVersion: 1, collectedAt: '2026-08-22T10:00:00Z',
       components: [{ component: 'openbank-ledger-service', moneyPath: true,
-        evidence: [{ kind: 'integration', state: 'stale', source: '/private/path' }],
+        evidence: [{ kind: 'integration', state: 'passed', observedAt: '2020-01-01T00:00:00Z', source: '/private/path' }],
         testInfrastructure: { declared: ['postgres'], observed: [{ lifecycle: 'started' }] } }],
-      clientExperiences: [{ id: 'openbank-app', evidence: [{ kind: 'visual', state: 'passed', source: '/private/app/path' }],
+      clientExperiences: [{ id: 'openbank-app', evidence: [{ kind: 'visual', state: 'passed', observedAt: new Date().toISOString(), source: '/private/app/path' }],
         rum: { state: 'passed', detail: '12 sampled spans', sampledSpansLast7d: 12 } }],
       testCases: [
         { component: 'openbank-ledger-service', state: 'flaky', sameCommitTransitions: 2, wastedDurationMs: 1250, name: 'private test name', fingerprint: 'private-fingerprint' },

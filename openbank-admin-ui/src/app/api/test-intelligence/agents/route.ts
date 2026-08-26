@@ -7,6 +7,7 @@ import type { EvidenceKind, EvidenceState, TestAgentFinding } from '@/lib/types/
 import type { TestIntelligenceReport } from '@/lib/types/test-intelligence'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { runtimeFreshnessState } from '@/lib/test-intelligence-freshness'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,10 +34,12 @@ const MAX_AGENT_COUNT = 2_147_483_647
 const boundedCount = (value: unknown): number => typeof value === 'number' && Number.isFinite(value)
   ? Math.min(MAX_AGENT_COUNT, Math.max(0, Math.round(value))) : 0
 
-const safeEvidence = (items: ReadonlyArray<{ kind: string; state: string }> | undefined) =>
+const safeEvidence = (items: ReadonlyArray<{ kind: string; state: string; observedAt?: string | null }> | undefined) =>
   (items ?? []).map(item => ({
     kind: EVIDENCE_KINDS.has(item.kind) ? item.kind : 'unknown',
-    state: EVIDENCE_STATES.has(item.state) ? item.state : 'unknown',
+    state: EVIDENCE_STATES.has(item.state)
+      ? runtimeFreshnessState(item.state as EvidenceState, item.observedAt)
+      : 'unknown',
   }))
 
 const boundedText = (value: unknown): string | null => {
