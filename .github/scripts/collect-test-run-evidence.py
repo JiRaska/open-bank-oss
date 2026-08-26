@@ -492,7 +492,11 @@ def main() -> None:
             })
             assert classify("PaymentApiIT", "com.openbank.PaymentApiIT", "test", "openbank-x") == "integration"
             assert classify("UnitTest", "com.openbank.UnitTest", "test", "openbank-x") == "unit"
-            assert [item["lifecycle"] for item in observations(service)] == ["started", "started", "stopped"]
+            observed = observations(service)
+            assert [item["lifecycle"] for item in observed] == ["started", "started", "stopped"]
+            assert [item["observedAt"] for item in observed] == [
+                "2026-08-22T21:10:01Z", "2026-08-22T21:10:10Z", "2026-08-22T21:11:01Z",
+            ]
             specialized = specialized_evidence(str(performance), str(mutation))
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "passed")]
             absent = specialized_evidence(str(service / "missing-summary.json"), None, "no safe target configured")
