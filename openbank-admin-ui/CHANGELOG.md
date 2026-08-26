@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.194.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.194.2...admin-ui-v0.194.3) (2026-08-26)
+
+
+### Bug Fixes
+
+* **testing:** exclude Testcontainers from Kover agent ([#6900](https://github.com/JiRaska/open-bank-oss/issues/6900)) ([0210451](https://github.com/JiRaska/open-bank-oss/commit/02104514fc6a7d1822a77342b0e918b2b67c4853))
+
 ## [0.194.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.194.1...admin-ui-v0.194.2) (2026-08-25)
 
 
