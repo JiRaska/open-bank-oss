@@ -360,8 +360,16 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
 
-          mapfile -t SERVICES < <(find . -mindepth 2 -maxdepth 2 -name version.txt -printf '%h\n' \
-            | sed 's#^./##' | sort)
+          # Released components come from version.txt. The deterministic-simulation
+          # harness is an explicitly governed tooling component without a release
+          # version; it emits the same v1 envelope and must not disappear between
+          # producer and deployment merely because it is intentionally unreleased.
+          mapfile -t SERVICES < <(
+            {
+              find . -mindepth 2 -maxdepth 2 -name version.txt -printf '%h\n' | sed 's#^./##'
+              [ ! -d openbank-simulation ] || printf '%s\n' openbank-simulation
+            } | sort -u
+          )
 
           latest_main_artifact() {
             local artifact_name="$1" page artifact

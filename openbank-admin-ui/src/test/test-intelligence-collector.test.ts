@@ -159,6 +159,39 @@ journeys:
     })
   })
 
+  it('projects the unreleased simulation tooling envelope instead of reporting missing evidence', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-simulation-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-simulation/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'simulation-42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/simulation-42', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-simulation',
+      suites: [{ kind: 'simulation', state: 'passed', discovered: 51, executed: 51, passed: 51, failed: 0, skipped: 0, errors: 0, durationMs: 48_278 }],
+      testCases: [{ fingerprint: '0123456789abcdef01234567', kind: 'simulation', classname: 'com.openbank.simulation.DstSimulationTest', name: 'holds every invariant', state: 'passed', durationMs: 100 }],
+      coverage: { lines: { covered: 857, missed: 16, percentage: 98.17 }, branches: { covered: 106, missed: 32, percentage: 76.81 } },
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components).toHaveLength(1)
+    expect(report.components[0]).toMatchObject({
+      component: 'openbank-simulation', released: false,
+      evidence: [expect.objectContaining({
+        kind: 'simulation', state: 'passed', run: expect.objectContaining({ id: 'simulation-42' }),
+      })],
+      coverage: expect.objectContaining({
+        source: 'test-intelligence-run:v1', lines: expect.objectContaining({ percentage: 98.17 }),
+      }),
+    })
+    expect(report.testCases).toEqual([expect.objectContaining({
+      component: 'openbank-simulation', state: 'stable', observations: 1,
+    })])
+    expect(report.totals).toMatchObject({ componentsWithExecutionEvidence: 1, missingEvidence: 0 })
+  })
+
   it('projects immutable mobile CI evidence while keeping RUM runtime state independent', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-client-'))
     dirs.push(repo)
