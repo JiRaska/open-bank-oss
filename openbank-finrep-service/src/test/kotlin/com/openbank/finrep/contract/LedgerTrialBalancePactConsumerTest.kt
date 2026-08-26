@@ -5,6 +5,7 @@
 package com.openbank.finrep.contract
 
 import au.com.dius.pact.consumer.MockServer
+import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonArray
 import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonBody
 import au.com.dius.pact.consumer.dsl.PactDslWithProvider
 import au.com.dius.pact.consumer.junit5.PactConsumerTestExt
@@ -18,10 +19,12 @@ import com.openbank.finrep.application.port.out.TrialBalanceLineDto
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.F0101Mapper
 import com.openbank.finrep.domain.model.BalanceVerdict
+import com.openbank.finrep.infrastructure.client.ClosedPeriodResponse
 import com.openbank.finrep.infrastructure.client.ClosedPeriodTrialBalanceResponse
 import com.openbank.finrep.infrastructure.client.LedgerRestClient
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.QueryParam
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -81,7 +84,7 @@ import java.time.LocalDate
 @PactTestFor(providerName = "openbank-ledger-service", pactVersion = PactSpecVersion.V3)
 class LedgerTrialBalancePactConsumerTest {
 
-    private val json = jacksonObjectMapper()
+    private val json = jacksonObjectMapper().findAndRegisterModules()
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun trialBalanceWithEntriesPact(builder: PactDslWithProvider): RequestResponsePact = builder
@@ -118,6 +121,29 @@ class LedgerTrialBalancePactConsumerTest {
                     // and no fewer (the client's `currency` is non-nullable, so a provider that
                     // stopped sending it would fail deserialization at runtime, not here).
                     line.stringType("currency", "CZK")
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun closedPeriodsPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has frozen monthly trial balance for the reporting date")
+        .uponReceiving("GET closed periods available for regulatory reporting")
+        .path(LEDGER_PERIODS_PATH)
+        .query("from=$CLOSED_PERIODS_FROM&to=$CLOSED_PERIODS_TO")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonArray { a ->
+                a.`object` { period ->
+                    period.stringValue("periodType", "MONTH")
+                    period.stringValue("to", REPORTING_DATE)
+                    period.stringValue("status", "FROZEN")
+                    period.stringValue("evidenceState", "LINES_V1")
                 }
             }.build(),
         )
@@ -168,6 +194,30 @@ class LedgerTrialBalancePactConsumerTest {
         assertThat(template.balanceVerdict).isEqualTo(BalanceVerdict.SOURCES_DISAGREE)
     }
 
+    @Test
+    @PactTestFor(pactMethod = "closedPeriodsPact")
+    fun `the ledger client exposes immutable reporting period eligibility`(mockServer: MockServer) {
+        assertThat(ledgerPeriodsPath).isEqualTo(LEDGER_PERIODS_PATH)
+
+        val body = given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .queryParam(closedPeriodsFromParam, CLOSED_PERIODS_FROM)
+            .queryParam(closedPeriodsToParam, CLOSED_PERIODS_TO)
+            .get(ledgerPeriodsPath)
+            .then()
+            .statusCode(200)
+            .extract().body().asString()
+        val periods: List<ClosedPeriodResponse> = json.readValue(body)
+
+        assertThat(periods).hasSize(1)
+        val period = periods.single()
+        assertThat(period.periodType).isEqualTo("MONTH")
+        assertThat(period.to).isEqualTo(LocalDate.parse(REPORTING_DATE))
+        assertThat(period.status).isEqualTo("FROZEN")
+        assertThat(period.evidenceState).isEqualTo("LINES_V1")
+    }
+
     /** Issues the request against the path the production client is annotated with. */
     private fun fetchTrialBalance(mockServer: MockServer, asOf: String): ClosedPeriodTrialBalanceResponse {
         val body = given()
@@ -193,6 +243,9 @@ class LedgerTrialBalancePactConsumerTest {
          * the annotation is measured against.
          */
         const val LEDGER_MONTH_TRIAL_BALANCE_PATH = "/api/v1/ledger/periods/MONTH"
+        const val LEDGER_PERIODS_PATH = "/api/v1/ledger/periods"
+        const val CLOSED_PERIODS_FROM = "1970-01-01"
+        const val CLOSED_PERIODS_TO = "9999-12-31"
 
         /** Ledger's query-parameter name for the as-of date — likewise literal. */
         /** A FINREP quarter-end reference date. */
@@ -200,6 +253,11 @@ class LedgerTrialBalancePactConsumerTest {
 
         private val getTrialBalanceMethod =
             LedgerRestClient::class.java.getDeclaredMethod("getTrialBalance", String::class.java)
+        private val listClosedPeriodsMethod = LedgerRestClient::class.java.getDeclaredMethod(
+            "listClosedPeriods",
+            String::class.java,
+            String::class.java,
+        )
 
         /**
          * `@Path` on the interface + `@Path` on the method, joined the way JAX-RS resolves them.
@@ -209,6 +267,12 @@ class LedgerTrialBalancePactConsumerTest {
             LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
             getTrialBalanceMethod.getAnnotation(Path::class.java).value,
         ).joinToString("/") { it.trim('/') }.let { "/$it" }
+
+        val ledgerPeriodsPath: String = LedgerRestClient::class.java.getAnnotation(Path::class.java).value
+        val closedPeriodsFromParam: String =
+            listClosedPeriodsMethod.parameterAnnotations[0].filterIsInstance<QueryParam>().single().value
+        val closedPeriodsToParam: String =
+            listClosedPeriodsMethod.parameterAnnotations[1].filterIsInstance<QueryParam>().single().value
 
         /** The query-parameter name the production client sends the as-of date under. */
     }

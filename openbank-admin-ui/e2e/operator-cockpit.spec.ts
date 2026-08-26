@@ -108,6 +108,9 @@ test('compliance pack detail exposes exact reviewed content, not a summary only'
 })
 
 test('regulatory preview blocks fiction: it shows real FINREP cells and no submission claim', async ({ page }) => {
+  await json(page, '**/api/svc/finrep-service/api/v1/finrep/periods', {
+    latest: '2026-06-30', periods: ['2026-06-30'],
+  })
   await page.route('**/api/svc/finrep-service/api/v1/finrep/templates/**', route => {
     const path = new URL(route.request().url()).pathname
     const body = path.includes('F01.01')
