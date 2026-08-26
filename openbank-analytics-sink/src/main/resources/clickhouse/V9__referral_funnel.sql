@@ -1,0 +1,43 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+--
+-- MGM funnel derived only from referral-service's transactional-outbox facts. Kafka delivery is
+-- at-least-once, so the inner event_id grouping is the correctness boundary: sums and conversion
+-- counts must not grow when the same reward request or outcome is replayed.
+
+CREATE OR REPLACE VIEW openbank_analytics.gold_referral_funnel AS
+SELECT
+    JSONExtractString(dedup_payload, 'programId') AS program_id,
+    uniqExactIf(JSONExtractString(dedup_payload, 'inviteId'), dedup_event_type = 'Qualified') AS qualified_invites,
+    uniqExactIf(JSONExtractString(dedup_payload, 'inviteId'), dedup_event_type = 'RewardRequested') AS reward_requests,
+    uniqExactIf(
+        JSONExtractString(dedup_payload, 'inviteId'),
+        dedup_event_type = 'RewardOutcome' AND JSONExtractString(dedup_payload, 'outcome') = 'ACCEPTED'
+    ) AS rewarded_invites,
+    uniqExactIf(
+        JSONExtractString(dedup_payload, 'inviteId'),
+        dedup_event_type = 'RewardOutcome' AND JSONExtractString(dedup_payload, 'outcome') = 'REJECTED'
+    ) AS failed_rewards,
+    uniqExactIf(
+        JSONExtractString(dedup_payload, 'inviteId'),
+        dedup_event_type = 'RewardOutcome' AND JSONExtractString(dedup_payload, 'outcome') = 'REVERSED'
+    ) AS reversed_rewards,
+    sumIf(JSONExtractFloat(dedup_payload, 'amount'), dedup_event_type = 'RewardRequested') AS requested_reward_amount,
+    anyIf(JSONExtractString(dedup_payload, 'currency'), dedup_event_type = 'RewardRequested') AS currency,
+    min(observed_at) AS first_observed_at,
+    max(observed_at) AS last_observed_at
+FROM
+(
+    SELECT
+        event_id,
+        argMax(b.event_type, (b.aggregate_version, b.occurred_at, b.ingested_at)) AS dedup_event_type,
+        argMax(b.payload, (b.aggregate_version, b.occurred_at, b.ingested_at)) AS dedup_payload,
+        max(b.occurred_at) AS observed_at
+    FROM openbank_analytics.bronze_events AS b
+    WHERE upperUTF8(b.aggregate_type) = 'REFERRAL'
+      AND b.event_type IN ('Qualified', 'RewardRequested', 'RewardOutcome')
+      AND JSONExtractString(b.payload, 'programId') != ''
+      AND JSONExtractString(b.payload, 'inviteId') != ''
+    GROUP BY event_id
+)
+GROUP BY program_id;
