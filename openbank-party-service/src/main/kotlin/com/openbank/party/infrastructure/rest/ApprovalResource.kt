@@ -10,11 +10,14 @@ import com.openbank.libs.authz.Authorize
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.PATCH
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -48,6 +51,21 @@ class ApprovalResource(private val approvalStore: ApprovalStore) {
     @Inject
     lateinit var identity: SecurityIdentity
 
+    /**
+     * The checker's queue (issue #5679). Without this read, a parked `party.merge` decision is
+     * visible only to whoever received its approval id out of band, and silently expires after the
+     * shared store's 24-hour TTL. The queue is intentionally readable by the maker too: seeing a
+     * request is not authority to decide it, and [ApprovalStore.decide] still enforces four eyes.
+     */
+    @GET
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "party.approval.read", resource = "")
+    @Operation(summary = "List pending four-eyes approvals, oldest first (ADR-0227 D2)")
+    suspend fun listPending(@QueryParam("limit") @DefaultValue("50") limit: Int): Response {
+        val pending = approvalStore.findPending(limit.coerceIn(1, MAX_PENDING_LIMIT))
+        return Response.ok(pending.map { it.toApprovalResponse() }).build()
+    }
+
     @PATCH
     @Path("/{id}")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
@@ -71,6 +89,11 @@ class ApprovalResource(private val approvalStore: ApprovalStore) {
     // their own request. SecurityIdentity (not @Context SecurityContext) since this is a
     // `suspend fun` — mirrors consent-service's ApprovalResource.
     private fun checkerId(): String = identity.principal?.name ?: "anonymous"
+
+    private companion object {
+        /** The store performs a Redis scan; cap the caller-controlled amount like sibling queues. */
+        const val MAX_PENDING_LIMIT = 200
+    }
 }
 
 data class DecideApprovalRequest(val approve: Boolean)
@@ -80,6 +103,8 @@ data class ApprovalResponse(
     val action: String,
     val resourceId: String?,
     val status: String,
+    val makerId: String?,
+    val createdAt: String?,
     val decidedBy: String?,
 )
 
@@ -88,5 +113,7 @@ fun PendingApproval.toApprovalResponse() = ApprovalResponse(
     action = action,
     resourceId = resourceId,
     status = status.name,
+    makerId = makerId,
+    createdAt = createdAt.toString(),
     decidedBy = decidedBy,
 )
