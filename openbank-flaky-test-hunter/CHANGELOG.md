@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.10.1...flaky-test-hunter-v0.11.0) (2026-08-26)
+
+
+### Features
+
+* **flaky-test-hunter:** analyze bounded flake history ([#7009](https://github.com/JiRaska/open-bank-oss/issues/7009)) ([efe51b0](https://github.com/JiRaska/open-bank-oss/commit/efe51b07ab0f03ae6dd227d84ad1b8dae42fe542))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.10.0...flaky-test-hunter-v0.10.1) (2026-08-26)
 
 
