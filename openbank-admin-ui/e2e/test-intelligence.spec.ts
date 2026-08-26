@@ -31,6 +31,9 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(page.getByRole('heading', { name: /From change to confidence/ })).toBeVisible()
   await expect(page.getByRole('group', { name: /Seven Test Intelligence layers/ })).toBeVisible()
   await expect(page.getByRole('region', { name: /Testing assurance map/ })).toBeVisible()
+  // A planned, blocked customer journey is unresolved evidence. The prominent health signal
+  // must remain attention-worthy even when the ordinary component evidence is otherwise green.
+  await expect(page.getByText('NEEDS ATTENTION', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: /Intent enters/ }).click()
   await expect(page.getByText('Path-scoped CI is not per-test impact analysis; a prediction must not select a required gate yet.')).toBeVisible()
   await page.getByRole('button', { name: /Real experience/ }).click()
