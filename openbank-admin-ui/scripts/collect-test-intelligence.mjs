@@ -387,6 +387,7 @@ function syntheticJourneys() {
     const raw = parseYaml(fs.readFileSync(file, 'utf8'))
     return (raw?.journeys ?? []).map(item => ({
       id: item.id, title: item.name ?? item.title ?? item.id, status: item.status,
+      capability: item.capability ?? '',
       state: item.status === 'active' ? 'unknown' : 'blocked', severity: item.severity,
       schedule: item.schedule ?? item.target_schedule ?? null, environment: item.environment ?? null,
       covers: item.covers ?? item.covered_services ?? [],
@@ -395,6 +396,33 @@ function syntheticJourneys() {
   } catch (error) {
     warnings.push(`synthetic journey catalogue unavailable: ${error.message}`)
     return []
+  }
+}
+
+function journeyCoverage(journeys) {
+  const rules = parseYaml(fs.readFileSync(path.join(repo, 'openbank-libs', 'governance', 'rules.yaml'), 'utf8'))
+  const catalog = parseYaml(fs.readFileSync(path.join(repo, 'openbank-libs', 'governance', 'journeys.yaml'), 'utf8'))
+  const moneyPath = rules?.money_path_services ?? []
+  const activeCoverage = new Map()
+  for (const journey of journeys.filter(item => item.status === 'active')) {
+    for (const component of journey.covers) {
+      activeCoverage.set(component, [...(activeCoverage.get(component) ?? []), journey.id])
+    }
+  }
+  const accountability = catalog?.money_path_accountability ?? {}
+  const defaultReason = accountability.default_blocker ?? null
+  const reasons = new Map((accountability.services ?? []).map(item => [item.service, item.note ?? item.blocked_by ?? defaultReason]))
+  const services = moneyPath.map(component => ({
+    component,
+    state: activeCoverage.has(component) ? 'covered' : 'unwatched',
+    journeys: activeCoverage.get(component) ?? [],
+    reason: activeCoverage.has(component) ? null : reasons.get(component) ?? null,
+  }))
+  return {
+    moneyPathTotal: moneyPath.length,
+    activelyCovered: services.filter(item => item.state === 'covered').length,
+    explicitlyUnwatched: services.filter(item => item.state === 'unwatched' && item.reason).length,
+    services,
   }
 }
 
@@ -516,6 +544,7 @@ async function main() {
     })
   }
   const synthetic = syntheticJourneys()
+  const syntheticCoverage = journeyCoverage(synthetic)
   const clientExperience = await clientExperiences()
   const testCases = testCaseHistory(currentEnvelopes)
   const failingEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'failed').length
@@ -548,7 +577,7 @@ async function main() {
   const report = {
     schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
     contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence,
-    syntheticJourneys: synthetic, history, runHistory, testCases,
+    syntheticJourneys: synthetic, journeyCoverage: syntheticCoverage, history, runHistory, testCases,
     clientExperiences: clientExperience,
     totals: {
       components: components.length,

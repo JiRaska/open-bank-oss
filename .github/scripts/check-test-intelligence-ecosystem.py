@@ -99,6 +99,10 @@ def check(root: Path) -> list[str]:
                    "const envelope = runEnvelope(simulation)"):
         if needle not in collector:
             errors.append(f"admin projection ignores the simulation run envelope: {needle}")
+    for needle in ("function journeyCoverage(journeys)", "journeys.filter(item => item.status === 'active')",
+                   "journeyCoverage: syntheticCoverage"):
+        if needle not in collector:
+            errors.append(f"admin projection loses the governed synthetic coverage denominator: {needle}")
     for needle in ("openbank-app-test-intelligence-", ".get('head_branch') == 'main'", "client-test-evidence/openbank-app-${artifact_id}.json"):
         if needle not in deploy:
             errors.append(f"admin deployment lost trusted mobile evidence staging: {needle}")
