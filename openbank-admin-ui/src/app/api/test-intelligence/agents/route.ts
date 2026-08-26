@@ -26,12 +26,49 @@ const EVIDENCE_STATE_KEYS: Record<EvidenceState, true> = {
 const EVIDENCE_KINDS = new Set<string>(Object.keys(EVIDENCE_KIND_KEYS))
 const EVIDENCE_STATES = new Set<string>(Object.keys(EVIDENCE_STATE_KEYS))
 const INFRASTRUCTURE = new Set(['postgres', 'redpanda', 'valkey'])
+const AGENT_SEVERITIES = new Set<TestAgentFinding['severity']>(['WARNING', 'CRITICAL'])
+const MAX_AGENT_TEXT = 1_000
 
 const safeEvidence = (items: ReadonlyArray<{ kind: string; state: string }> | undefined) =>
   (items ?? []).map(item => ({
     kind: EVIDENCE_KINDS.has(item.kind) ? item.kind : 'unknown',
     state: EVIDENCE_STATES.has(item.state) ? item.state : 'unknown',
   }))
+
+const boundedText = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  return text.length > 0 && text.length <= MAX_AGENT_TEXT ? text : null
+}
+
+const safeProposalUrl = (value: unknown): string | null => {
+  const text = boundedText(value)
+  if (!text) return null
+  try {
+    const parsed = new URL(text)
+    return parsed.protocol === 'https:' ? parsed.toString() : null
+  } catch { return null }
+}
+
+// Agent responses are advisory, but they still cross a network boundary. Normalize them before
+// rendering: no arbitrary component identity, no executable URL scheme, and no unbounded text.
+// This intentionally does not turn a finding into evidence or alter any CI/runtime verdict.
+const safeFindings = (value: unknown): TestAgentFinding[] => !Array.isArray(value) ? [] : value.flatMap(item => {
+  if (!item || typeof item !== 'object') return []
+  const finding = item as Record<string, unknown>
+  const id = boundedText(finding.id)
+  const component = boundedText(finding.component)
+  const title = boundedText(finding.title)
+  const severity = finding.severity
+  if (!id || !component || !COMPONENT_NAME.test(component) || !title || typeof severity !== 'string' || !AGENT_SEVERITIES.has(severity as TestAgentFinding['severity'])) return []
+  return [{
+    id, component, title, severity: severity as TestAgentFinding['severity'],
+    checkType: boundedText(finding.checkType) ?? 'advisory',
+    detectedAt: boundedText(finding.detectedAt) ?? '',
+    rootCause: boundedText(finding.rootCause), proposalUrl: safeProposalUrl(finding.proposalUrl),
+    status: boundedText(finding.status) ?? 'open',
+  }]
+})
 
 function flakyHunterBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://flaky-test-hunter.flaky-test-hunter.svc:8148'
@@ -46,7 +83,7 @@ export async function GET(): Promise<NextResponse> {
       headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000),
     })
     if (!response.ok) return NextResponse.json({ findings: [], available: false })
-    return NextResponse.json({ findings: await response.json() as TestAgentFinding[], available: true })
+    return NextResponse.json({ findings: safeFindings(await response.json()), available: true })
   } catch {
     return NextResponse.json({ findings: [], available: false })
   }
@@ -90,7 +127,7 @@ export async function POST(): Promise<NextResponse> {
       body: JSON.stringify(payload), signal: AbortSignal.timeout(30_000),
     })
     if (!response.ok) return NextResponse.json({ findings: [], available: false }, { status: 502 })
-    return NextResponse.json({ findings: await response.json() as TestAgentFinding[], available: true })
+    return NextResponse.json({ findings: safeFindings(await response.json()), available: true })
   } catch {
     return NextResponse.json({ findings: [], available: false }, { status: 502 })
   }

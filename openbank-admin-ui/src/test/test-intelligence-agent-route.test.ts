@@ -12,11 +12,12 @@ describe('Test Intelligence agent BFF', () => {
   afterEach(() => { vi.restoreAllMocks(); delete process.env.OPENBANK_TEST_INTELLIGENCE })
 
   it('relays the operator token to flaky-test-hunter', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: 'f-1' }]), { status: 200 }))
+    const finding = { id: 'f-1', component: 'openbank-ledger-service', title: 'Flaky integration', severity: 'WARNING' }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([finding]), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     const { GET } = await import('@/app/api/test-intelligence/agents/route')
     const body = await (await GET()).json()
-    expect(body).toEqual({ findings: [{ id: 'f-1' }], available: true })
+    expect(body).toEqual({ findings: [{ ...finding, checkType: 'advisory', detectedAt: '', rootCause: null, proposalUrl: null, status: 'open' }], available: true })
     expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Authorization')).toBe('Bearer viewer-token')
   })
 
@@ -50,11 +51,12 @@ describe('Test Intelligence agent BFF', () => {
         rum: { state: 'passed', detail: '12 sampled spans', sampledSpansLast7d: 12 } }],
     }))
     process.env.OPENBANK_TEST_INTELLIGENCE = file
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: 'diagnosed-1' }]), { status: 200 }))
+    const agentFinding = { id: 'diagnosed-1', component: 'openbank-ledger-service', title: 'Investigate stale integration', severity: 'WARNING' }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([agentFinding]), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     const { POST } = await import('@/app/api/test-intelligence/agents/route')
     const body = await (await POST()).json()
-    expect(body.findings).toEqual([{ id: 'diagnosed-1' }])
+    expect(body.findings).toEqual([{ ...agentFinding, checkType: 'advisory', detectedAt: '', rootCause: null, proposalUrl: null, status: 'open' }])
     const outbound = JSON.parse(fetchMock.mock.calls[0][1].body as string)
     expect(outbound.components[0]).toEqual({ component: 'openbank-ledger-service', moneyPath: true,
       evidence: [{ kind: 'integration', state: 'stale' }], declaredInfrastructure: ['postgres'], observedInfrastructureStarts: 1 })
@@ -89,5 +91,21 @@ describe('Test Intelligence agent BFF', () => {
       evidence: [{ kind: 'unknown', state: 'unknown' }], declaredInfrastructure: [], observedInfrastructureStarts: 1,
     }])
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('normalizes advisory agent output before it reaches the browser', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { id: 'safe-1', component: 'openbank-ledger-service', title: 'Investigate retry', severity: 'CRITICAL', rootCause: 'timeout', proposalUrl: 'https://github.com/JiRaska/open-bank-oss/pull/1' },
+      { id: 'unsafe-link', component: 'openbank-ledger-service', title: 'Do not render a command', severity: 'WARNING', proposalUrl: 'javascript:alert(1)' },
+      { id: 'invalid-component', component: '../outside', title: 'Reject', severity: 'WARNING' },
+      { id: 'invalid-severity', component: 'openbank-ledger-service', title: 'Reject', severity: 'PASSED' },
+    ]), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET } = await import('@/app/api/test-intelligence/agents/route')
+    const body = await (await GET()).json()
+    expect(body.findings).toEqual([
+      expect.objectContaining({ id: 'safe-1', proposalUrl: 'https://github.com/JiRaska/open-bank-oss/pull/1' }),
+      expect.objectContaining({ id: 'unsafe-link', proposalUrl: null }),
+    ])
   })
 })
