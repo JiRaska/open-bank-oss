@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.203.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.203.0...admin-ui-v0.203.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **admin-ui:** keep campaign drafts single-flight ([#7178](https://github.com/JiRaska/open-bank-oss/issues/7178)) ([#7179](https://github.com/JiRaska/open-bank-oss/issues/7179)) ([87b5ba7](https://github.com/JiRaska/open-bank-oss/commit/87b5ba70cba76c1e8b856ddf28f66a57e259c1f1))
+* **admin-ui:** meet AA contrast for muted text ([#7182](https://github.com/JiRaska/open-bank-oss/issues/7182)) ([#7183](https://github.com/JiRaska/open-bank-oss/issues/7183)) ([c748318](https://github.com/JiRaska/open-bank-oss/commit/c748318ddad12b18ba60a665d92a7232a1a36d81))
+* **admin-ui:** preserve account opening idempotency closes [#7167](https://github.com/JiRaska/open-bank-oss/issues/7167) ([#7168](https://github.com/JiRaska/open-bank-oss/issues/7168)) ([0c444f0](https://github.com/JiRaska/open-bank-oss/commit/0c444f0661db2c51df6b83ef28fc59fb110e0ffe))
+* **admin-ui:** prevent duplicate audience drafts ([#7175](https://github.com/JiRaska/open-bank-oss/issues/7175)) ([#7177](https://github.com/JiRaska/open-bank-oss/issues/7177)) ([25f4342](https://github.com/JiRaska/open-bank-oss/commit/25f4342e11751380d0fbffd849999f9b41ff16e9))
+* **admin-ui:** prevent duplicate card issuance closes [#7170](https://github.com/JiRaska/open-bank-oss/issues/7170) ([#7171](https://github.com/JiRaska/open-bank-oss/issues/7171)) ([0d1482a](https://github.com/JiRaska/open-bank-oss/commit/0d1482a8b69ab47ae4be83d67bf9135ca072f37c))
+* **admin-ui:** prevent duplicate party creation closes [#7165](https://github.com/JiRaska/open-bank-oss/issues/7165) ([#7166](https://github.com/JiRaska/open-bank-oss/issues/7166)) ([9c2bba9](https://github.com/JiRaska/open-bank-oss/commit/9c2bba920e6f587f97ccdc48fc14c91892fe09bd))
+
 ## [0.203.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.202.0...admin-ui-v0.203.0) (2026-08-26)
 
 
