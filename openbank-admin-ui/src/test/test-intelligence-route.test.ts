@@ -46,14 +46,14 @@ describe('GET /api/test-intelligence', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-runtime-freshness-'))
     dirs.push(dir)
     const file = path.join(dir, 'report.json')
-    const evidence = (kind: 'unit' | 'integration', state: 'passed' | 'failed') => ({
-      kind, state, observedAt: '2020-01-01T00:00:00.000Z', source: 'run:v1', environment: 'ci',
+    const evidence = (kind: 'unit' | 'integration' | 'trace', state: 'passed' | 'failed', observedAt = '2020-01-01T00:00:00.000Z') => ({
+      kind, state, observedAt, source: 'run:v1', environment: 'ci',
     })
     writeFileSync(file, JSON.stringify({
       schemaVersion: 1, collectedAt: '2020-01-01T00:00:00.000Z',
       components: [{
         component: 'openbank-ledger-service', released: true, moneyPath: true,
-        evidence: [evidence('unit', 'passed'), evidence('integration', 'failed')],
+        evidence: [evidence('unit', 'passed'), evidence('integration', 'failed'), evidence('trace', 'passed', '2999-01-01T00:00:00.000Z')],
         coverage: { state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', source: 'kover', lines: { covered: 1, missed: 0, percentage: 100 }, branches: { covered: 1, missed: 0, percentage: 100 } },
         testInfrastructure: { declared: [], observed: [] },
       }],
@@ -73,6 +73,7 @@ describe('GET /api/test-intelligence', () => {
     expect(body.components[0].evidence).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'unit', state: 'stale' }),
       expect.objectContaining({ kind: 'integration', state: 'failed' }),
+      expect.objectContaining({ kind: 'trace', state: 'unknown' }),
     ]))
     expect(body.components[0].coverage.state).toBe('stale')
     expect(body.contracts[0].state).toBe('stale')
@@ -80,7 +81,7 @@ describe('GET /api/test-intelligence', () => {
     expect(body.performance[0].state).toBe('stale')
     expect(body.syntheticJourneys[0].ci.state).toBe('stale')
     expect(body.clientExperiences[0].evidence[0].state).toBe('stale')
-    expect(body.totals).toMatchObject({ failingEvidence: 1, missingEvidence: 0, staleEvidence: 1 })
+    expect(body.totals).toMatchObject({ failingEvidence: 1, missingEvidence: 0, staleEvidence: 1, unknownEvidence: 1, unresolvedEvidence: 1 })
   })
 
   it('keeps mobile CI separate and attaches consent-gated RUM arrival evidence', async () => {

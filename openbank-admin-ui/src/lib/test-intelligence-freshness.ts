@@ -5,6 +5,7 @@ const evidenceFreshnessMs = () => {
   const days = Number(process.env.OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS ?? 14)
   return (Number.isFinite(days) && days > 0 ? days : 14) * 86_400_000
 }
+const MAX_FUTURE_SKEW_MS = 5 * 60_000
 
 export function runtimeFreshnessState(
   state: EvidenceState,
@@ -13,6 +14,7 @@ export function runtimeFreshnessState(
   if (state === 'failed' || state === 'blocked' || state === 'unknown' || state === 'not-run' || state === 'stale') return state
   const observed = Date.parse(observedAt ?? '')
   if (!Number.isFinite(observed)) return 'not-run'
+  if (observed - Date.now() > MAX_FUTURE_SKEW_MS) return 'unknown'
   return Date.now() - observed > evidenceFreshnessMs() ? 'stale' : state
 }
 

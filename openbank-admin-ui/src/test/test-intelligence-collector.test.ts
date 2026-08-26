@@ -356,6 +356,15 @@ journeys:
       testInfrastructure: { declared: [], observed: [] },
       specializedEvidence: [{ kind: 'performance', state: 'passed', source: 'summary.json' }],
     }))
+    write(repo, 'perf/k6/future.js', 'export const options = { thresholds: { checks: ["rate>0.99"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/future-summary.json', JSON.stringify({ metrics: { checks: { value: 1, thresholds: { 'rate>0.99': false } } } }))
+    write(repo, 'openbank-admin-ui/perf-artifacts/future-run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { ...oldRun, id: 'future-42', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/future-42', observedAt: '2999-01-01T00:00:00Z' },
+      component: 'openbank-platform', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'performance', state: 'passed', source: 'summary.json' }],
+    }))
     write(repo, 'openbank-alpha-service/build/reports/pitest/mutations.xml', '<mutations><mutation status="KILLED"/></mutations>')
     write(repo, 'openbank-alpha-service/build/reports/pitest/test-intelligence-run.json', JSON.stringify({
       schemaVersion: 1, run: oldRun, component: 'openbank-alpha-service', suites: [], coverage: null,
@@ -383,7 +392,8 @@ journeys:
       expect.objectContaining({ kind: 'performance', state: 'stale' }),
     ]))
     expect(report.mutations[0]).toMatchObject({ state: 'stale' })
-    expect(report.performance[0]).toMatchObject({ state: 'stale' })
+    expect(report.performance.find(item => item.id === 'openbank-alpha-service-alpha-smoke')).toMatchObject({ state: 'stale' })
+    expect(report.performance.find(item => item.id === 'future')).toMatchObject({ state: 'unknown' })
     expect(report.syntheticJourneys[0].ci).toMatchObject({ state: 'stale' })
     expect(report.contracts[0]).toMatchObject({ state: 'stale' })
     expect(report.totals).toMatchObject({ failingEvidence: 1, staleEvidence: 5 })

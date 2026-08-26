@@ -207,7 +207,7 @@ def check(root: Path) -> list[str]:
         errors.append("Admin UI does not expose the diagnostic privacy warning")
     synthetic_route = text(root / "openbank-admin-ui/src/app/api/test-intelligence/route.ts")
     freshness = text(root / "openbank-admin-ui/src/lib/test-intelligence-freshness.ts")
-    for needle in ("function enforceRuntimeFreshness", "runtimeFreshnessState(item.state, item.observedAt)", "staleEvidence: evidence.filter"):
+    for needle in ("function enforceRuntimeFreshness", "MAX_FUTURE_SKEW_MS", "observed - Date.now() > MAX_FUTURE_SKEW_MS", "runtimeFreshnessState(item.state, item.observedAt)", "staleEvidence: evidence.filter"):
         if needle not in freshness:
             errors.append(f"running Admin UI can keep an expired successful snapshot green: {needle}")
     agent_route = text(root / "openbank-admin-ui/src/app/api/test-intelligence/agents/route.ts")

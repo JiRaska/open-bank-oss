@@ -18,6 +18,7 @@ const arg = (name, fallback) => {
 const repo = path.resolve(arg('--repo', path.resolve(here, '..', '..')))
 const out = path.resolve(arg('--out', path.resolve(here, '..', 'test-intelligence.json')))
 const staleAfterMs = Number(arg('--stale-after-days', '14')) * 86_400_000
+const maxFutureSkewMs = 5 * 60_000
 const collectedAt = new Date()
 const warnings = []
 
@@ -53,8 +54,11 @@ const observedAt = file => {
 const stateFrom = (failed, executed, at) => {
   if (!at) return 'not-run'
   if (failed > 0) return 'failed'
+  const observed = Date.parse(at)
+  if (!Number.isFinite(observed)) return 'not-run'
+  if (observed - collectedAt.getTime() > maxFutureSkewMs) return 'unknown'
   if (executed === 0) return 'skipped'
-  if (collectedAt.getTime() - new Date(at).getTime() > staleAfterMs) return 'stale'
+  if (collectedAt.getTime() - observed > staleAfterMs) return 'stale'
   return 'passed'
 }
 const freshnessAwareState = (state, at) => {
@@ -65,6 +69,7 @@ const freshnessAwareState = (state, at) => {
   if (state === 'failed' || state === 'blocked' || state === 'unknown' || state === 'not-run') return state
   const observed = Date.parse(at ?? '')
   if (!Number.isFinite(observed)) return 'not-run'
+  if (observed - collectedAt.getTime() > maxFutureSkewMs) return 'unknown'
   if (collectedAt.getTime() - observed > staleAfterMs) return 'stale'
   return state
 }

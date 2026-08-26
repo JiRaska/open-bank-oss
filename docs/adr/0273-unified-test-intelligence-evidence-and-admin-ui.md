@@ -98,6 +98,11 @@ totals. This is intentionally independent of the daily image refresh: a failed d
 an old successful snapshot green indefinitely. Immutable history retains its original verdict and
 timestamp; only the current operator projection ages.
 
+A success timestamp more than five minutes in the future is `unknown`, never fresh. This bounded
+clock-skew allowance tolerates ordinary runner drift while preventing a malformed or poisoned
+timestamp from extending a green verdict indefinitely. Invalid or missing success timestamps become
+`not-run`; recorded failures and explicit control gaps remain the stronger verdict.
+
 The fleet totals and history count both `unknown` and unresolved (`unknown`, `not-run`, `blocked`)
 observations explicitly. A component may have other passing suites and still contribute unresolved
 evidence; the assurance map remains neutral rather than turning an unresolved contract, performance
