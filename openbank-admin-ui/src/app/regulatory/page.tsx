@@ -489,10 +489,16 @@ export default function RegulatoryPage() {
 
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                  <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}
-                    onClick={(e) => openPreview(report.id, e)}>
-                    {downloadMessage === report.id ? <><Check size={11} style={{ color: '#16a34a' }} /> {t('Staženo', 'Downloaded')}</> : <><Eye size={11} /> {t('Náhled exportu', 'Preview export')}</>}
-                  </button>
+                  {source === 'implemented' ? (
+                    <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}
+                      onClick={(e) => openPreview(report.id, e)}>
+                      {downloadMessage === report.id ? <><Check size={11} style={{ color: '#16a34a' }} /> {t('Staženo', 'Downloaded')}</> : <><Eye size={11} /> {t('Náhled exportu', 'Preview export')}</>}
+                    </button>
+                  ) : (
+                    <span role="status" style={{ fontSize: '11px', padding: '5px 10px', color: 'var(--text-tertiary)' }}>
+                      {t('Náhled není dostupný', 'Preview unavailable')}
+                    </span>
+                  )}
                 </div>
               </div>
 
