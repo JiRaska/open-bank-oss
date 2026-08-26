@@ -271,7 +271,6 @@ export default function CompliancePacksPage() {
         {pending.map(p => (
           <div
             key={p.id}
-            onClick={() => setDetail(p)}
             data-testid={`proposal-${p.id}`}
             style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}
           >
@@ -283,6 +282,14 @@ export default function CompliancePacksPage() {
               <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
                 {t('Navrhl', 'Proposed by')}: {p.proposedBy} · <span className="mono">{p.contentHash.slice(0, 16)}…</span>
               </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDetail(p)}
+                style={{ fontSize: 11, marginTop: 6, padding: '2px 8px' }}
+              >
+                {t('Zobrazit detail', 'View details')}
+              </button>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <Can permission="lending:compliance:decide" fallback={<span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Rozhodnutí je pouze pro compliance principály.', 'Decisions are limited to compliance principals.')}</span>}>

@@ -177,6 +177,37 @@ describe('compliance pack activation console', () => {
     })
   })
 
+  it('editing the decision reason does not open the detail modal', async () => {
+    vi.stubGlobal('fetch', mockFetch({ pending: { status: 200, body: PENDING } }))
+    render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
+
+    await waitFor(() => expect(screen.getByTestId(`proposal-${PROPOSAL_ID}`)).toBeTruthy())
+    fireEvent.change(screen.getByLabelText('Decision reason'), { target: { value: 'looks fine' } })
+
+    expect(screen.queryByText('Exact pack content')).toBeNull()
+  })
+
+  it('clicking Approve or Reject does not open the detail modal', async () => {
+    vi.stubGlobal('fetch', mockFetch({ pending: { status: 200, body: PENDING } }))
+    render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
+
+    await waitFor(() => expect(screen.getByTestId(`proposal-${PROPOSAL_ID}`)).toBeTruthy())
+    fireEvent.click(screen.getByText('Reject'))
+
+    expect(screen.queryByText('Exact pack content')).toBeNull()
+  })
+
+  it('an explicit "View details" control opens the pending proposal detail modal', async () => {
+    vi.stubGlobal('fetch', mockFetch({ pending: { status: 200, body: PENDING } }))
+    render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
+
+    await waitFor(() => expect(screen.getByTestId(`proposal-${PROPOSAL_ID}`)).toBeTruthy())
+    fireEvent.click(screen.getByText('View details'))
+
+    expect(screen.getByText('Exact pack content')).toBeInTheDocument()
+    expect(screen.getByText(/"coolingOffDays": 14/)).toBeInTheDocument()
+  })
+
   it('refuses to propose a pack that is not valid JSON, without calling the service', async () => {
     const f = mockFetch({})
     vi.stubGlobal('fetch', f)
