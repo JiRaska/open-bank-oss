@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.204.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.203.1...admin-ui-v0.204.0) (2026-08-26)
+
+
+### Features
+
+* **test-intelligence:** retain test definition provenance ([#7211](https://github.com/JiRaska/open-bank-oss/issues/7211)) ([29dc20e](https://github.com/JiRaska/open-bank-oss/commit/29dc20e2c4e6b9c8296416db9f1ecec0bcb99abb))
+
+
+### Bug Fixes
+
+* **admin-ui:** link unresolved agent eval evidence ([#7217](https://github.com/JiRaska/open-bank-oss/issues/7217)) ([f7417cd](https://github.com/JiRaska/open-bank-oss/commit/f7417cdfd3c433aed5aae64e0993a71010a6dbee))
+
 ## [0.203.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.203.0...admin-ui-v0.203.1) (2026-08-26)
 
 
