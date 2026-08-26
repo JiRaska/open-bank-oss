@@ -26,6 +26,7 @@ import {
   ArrowRightLeft, CalendarCheck2, Play, ChevronDown, ChevronRight, History, FileClock,
 } from 'lucide-react'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
+import { claimSingleFlight, releaseSingleFlight } from '@/lib/single-flight'
 import { hasPermission } from '@/lib/auth/roles'
 import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -437,6 +438,7 @@ function EomPanel() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [failures, setFailures] = useState<Record<string, FailuresState>>({})
   const busyRef = useRef(false)
+  const triggerInFlight = useRef(false)
   // Operator-local check trail — survives reloads and (crucially) statement-service
   // outages, so a later operator/agent can see WHEN the close was checked and what
   // state it was in, even when the live run history isn't answering.
@@ -494,6 +496,7 @@ function EomPanel() {
   }, [loading, unavailable, empty, latest, runs.length, recordCheck])
 
   const trigger = useCallback(async () => {
+    if (!claimSingleFlight(triggerInFlight)) return
     setTriggering(true); setNotice(null)
     try {
       const res = await fetch('/api/closings/runs', {
@@ -513,6 +516,7 @@ function EomPanel() {
     } catch {
       setNotice({ ok: false, text: t('Spuštění catch-up uzávěrky se nezdařilo.', 'Could not start the catch-up close run.') })
     } finally {
+      releaseSingleFlight(triggerInFlight)
       setTriggering(false)
     }
   }, [t, load, recordCheck])
