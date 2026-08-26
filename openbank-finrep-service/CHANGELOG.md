@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.4...finrep-service-v0.10.0) (2026-08-26)
+
+
+### Features
+
+* **finrep:** add XBRL CSV preflight ([#7125](https://github.com/JiRaska/open-bank-oss/issues/7125)) ([5fa1c63](https://github.com/JiRaska/open-bank-oss/commit/5fa1c6351310a9d6094535522887d5cc41f9c3d6))
+
 ## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.3...finrep-service-v0.9.4) (2026-08-26)
 
 
