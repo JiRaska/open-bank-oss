@@ -196,6 +196,14 @@ export interface ClientExperienceEvidence {
     source?: 'prometheus' | 'tempo' | null
     sampledSpansLast7d?: number | null
     errorSpansLast7d?: number | null
+    /** Capability and runtime attribution are deliberately separate: an untagged mobile span
+     * proves arrival, never which OS emitted it. */
+    platforms?: Array<{
+      platform: 'android' | 'ios'
+      capability: EvidenceState
+      runtime: EvidenceState
+      detail: string
+    }>
   }
   blocker: string | null
 }

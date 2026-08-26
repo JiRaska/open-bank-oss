@@ -90,7 +90,13 @@ describe('GET /api/test-intelligence', () => {
     const file = path.join(dir, 'report.json')
     writeFileSync(file, JSON.stringify({
       schemaVersion: 1, collectedAt: '2026-08-23T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], syntheticJourneys: [], history: [], runHistory: [], testCases: [],
-      clientExperiences: [{ id: 'openbank-app', title: 'OpenBank customer app', surface: 'mobile', platforms: ['android', 'ios'], evidence: [], rum: { state: 'unknown', policy: 'consent-gated', detail: 'static capability', observedAt: null }, blocker: null }],
+      clientExperiences: [{ id: 'openbank-app', title: 'OpenBank customer app', surface: 'mobile', platforms: ['android', 'ios'], evidence: [], rum: {
+        state: 'unknown', policy: 'consent-gated', detail: 'static capability', observedAt: null,
+        platforms: [
+          { platform: 'android', capability: 'passed', runtime: 'unknown', detail: 'generic arrival is not Android proof' },
+          { platform: 'ios', capability: 'passed', runtime: 'unknown', detail: 'generic arrival is not iOS proof' },
+        ],
+      }, blocker: null }],
       totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
     }))
     process.env.OPENBANK_TEST_INTELLIGENCE = file
@@ -114,6 +120,10 @@ describe('GET /api/test-intelligence', () => {
       state: 'passed', policy: 'consent-gated', source: 'tempo', sampledSpansLast7d: 12, errorSpansLast7d: 2,
     })
     expect(body.clientExperiences[0].rum.detail).toContain('12 sampled mobile RUM trace(s)')
+    expect(body.clientExperiences[0].rum.platforms).toEqual([
+      expect.objectContaining({ platform: 'android', capability: 'passed', runtime: 'unknown' }),
+      expect.objectContaining({ platform: 'ios', capability: 'passed', runtime: 'unknown' }),
+    ])
     expect(body.clientExperiences[0].evidence).toEqual([])
   })
 

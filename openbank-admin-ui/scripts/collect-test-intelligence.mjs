@@ -521,8 +521,23 @@ async function clientExperiences() {
     }
   }
   const appSource = path.join(repo, '.app-src')
+  const appSourceAvailable = exists(appSource)
   const androidRum = exists(path.join(appSource, 'shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt'))
   const iosRum = exists(path.join(appSource, 'shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt'))
+  // Tempo's bounded arrival projection deliberately does not query `os.*`: the current
+  // gateway retains such attributes only when a newly built consented client happens to
+  // be sampled, and older clients are allowed to omit them. A generic openbank-app trace
+  // is therefore not evidence for either Android or iOS individually (ADR-0088 D4).
+  const platformRum = (platform, implemented) => ({
+    platform,
+    capability: implemented ? 'passed' : appSourceAvailable ? 'not-run' : 'unknown',
+    runtime: 'unknown',
+    detail: implemented
+      ? `${platform === 'android' ? 'Android' : 'iOS'} exporter exists in the staged client source; generic Tempo arrival cannot attribute a sampled trace to this OS.`
+      : appSourceAvailable
+        ? `${platform === 'android' ? 'Android' : 'iOS'} exporter was not found in the staged client source.`
+        : 'Client source was not staged for this deployment; platform capability is unknown.',
+  })
   const webEvidence = runEnvelope('openbank-admin-ui')?.evidence ?? await junitEvidence('openbank-admin-ui')
   const mobileEvidence = [...latestMobileSuites.values()].map(({ suite: item, run }) => {
     const provenance = safeRun(run.run, `client:${run.component ?? 'openbank-app'}`)
@@ -548,6 +563,7 @@ async function clientExperiences() {
       rum: {
         state: androidRum || iosRum ? 'unknown' : 'not-run', policy: 'consent-gated', observedAt: null,
         source: null, sampledSpansLast7d: null, errorSpansLast7d: null,
+        platforms: [platformRum('android', androidRum), platformRum('ios', iosRum)],
         detail: androidRum || iosRum
           ? `Mobile RUM is implemented in source for ${androidRum ? 'Android' : ''}${androidRum && iosRum ? ' and ' : ''}${iosRum ? 'iOS' : ''}; runtime arrival is intentionally not inferred from a CI artifact.`
           : 'openbank-app source was not staged for this deployment, so RUM implementation status is unknown.',

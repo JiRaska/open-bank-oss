@@ -298,6 +298,10 @@ scenarios:
       item.kind === 'e2e' && item.state === 'passed' && item.run?.id === '10',
     )).toBe(true)
     expect(app.rum).toMatchObject({ policy: 'consent-gated', state: 'unknown' })
+    expect(app.rum.platforms).toEqual([
+      expect.objectContaining({ platform: 'android', capability: 'passed', runtime: 'unknown' }),
+      expect.objectContaining({ platform: 'ios', capability: 'passed', runtime: 'unknown' }),
+    ])
     expect(report.runHistory.filter(item => item.component === 'openbank-app').map(item => item.run.id)).toEqual(['10', '9', '8'])
   })
 
