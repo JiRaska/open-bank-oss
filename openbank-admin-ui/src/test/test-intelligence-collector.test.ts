@@ -367,6 +367,10 @@ journeys:
       testInfrastructure: { declared: [], observed: [] },
       specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:old-journey' }],
     }))
+    write(repo, 'openbank-admin-ui/quality-report.json', JSON.stringify({ contracts: [{
+      consumer: 'openbank-alpha-service', provider: 'openbank-provider', pactFile: 'alpha-provider.json',
+      status: 'passed', verifiedAt: '2020-01-01T00:00:00Z', interactions: [{ description: 'old contract', status: 'passed' }],
+    }] }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '1'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
@@ -381,6 +385,7 @@ journeys:
     expect(report.mutations[0]).toMatchObject({ state: 'stale' })
     expect(report.performance[0]).toMatchObject({ state: 'stale' })
     expect(report.syntheticJourneys[0].ci).toMatchObject({ state: 'stale' })
-    expect(report.totals).toMatchObject({ failingEvidence: 1, staleEvidence: 4 })
+    expect(report.contracts[0]).toMatchObject({ state: 'stale' })
+    expect(report.totals).toMatchObject({ failingEvidence: 1, staleEvidence: 5 })
   })
 })

@@ -224,7 +224,7 @@ def check(root: Path) -> list[str]:
     for needle in ("unknownEvidence", "unresolvedEvidence", "['unknown', 'not-run', 'blocked']"):
         if needle not in collector:
             errors.append(f"collector can aggregate unresolved evidence as green: {needle}")
-    for needle in ("freshnessAwareState", "specialized.state, performanceRun?.run?.observedAt", "specialized.state, mutationRun?.run?.observedAt", "freshnessAwareState(evidence.state, envelope.run.observedAt)"):
+    for needle in ("freshnessAwareState", "freshnessAwareState(item.status, item.verifiedAt)", "specialized.state, performanceRun?.run?.observedAt", "specialized.state, mutationRun?.run?.observedAt", "freshnessAwareState(evidence.state, envelope.run.observedAt)"):
         if needle not in collector:
             errors.append(f"retained successful evidence can outlive the fleet freshness budget: {needle}")
     synthetic_workflow = text(root / ".github/workflows/synthetic-journeys.yml")

@@ -52,6 +52,9 @@ function enforceRuntimeFreshness(report: TestIntelligenceReport): TestIntelligen
   return {
     ...report,
     components,
+    contracts: report.contracts.map(item => ({
+      ...item, state: runtimeFreshnessState(item.state, item.observedAt),
+    })),
     mutations: report.mutations.map(item => ({
       ...item, state: runtimeFreshnessState(item.state, item.observedAt),
     })),

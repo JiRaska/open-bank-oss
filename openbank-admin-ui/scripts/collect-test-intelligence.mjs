@@ -288,7 +288,7 @@ function contracts() {
   const quality = readJson(path.join(repo, 'openbank-admin-ui', 'quality-report.json'))
   if (quality?.contracts) return quality.contracts.map(item => ({
     consumer: item.consumer, provider: item.provider, pactFile: item.pactFile,
-    state: item.status === 'pending' ? 'unknown' : item.status,
+    state: item.status === 'pending' ? 'unknown' : freshnessAwareState(item.status, item.verifiedAt),
     observedAt: item.verifiedAt ?? null, interactions: item.interactions?.length ?? 0,
     verificationDetail: item.status === 'pending'
       ? 'Pact Broker provider-verification verdict was unavailable when this immutable deployment snapshot was built. This is not a passing result.'

@@ -57,7 +57,7 @@ describe('GET /api/test-intelligence', () => {
         coverage: { state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', source: 'kover', lines: { covered: 1, missed: 0, percentage: 100 }, branches: { covered: 1, missed: 0, percentage: 100 } },
         testInfrastructure: { declared: [], observed: [] },
       }],
-      contracts: [],
+      contracts: [{ consumer: 'openbank-ledger-service', provider: 'openbank-balance-service', pactFile: 'ledger-balance.json', state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', interactions: 1 }],
       mutations: [{ component: 'openbank-ledger-service', state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', total: 1, killed: 1, survived: 0, noCoverage: 0, score: 100 }],
       performance: [{ id: 'old-perf', component: 'openbank-ledger-service', state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', source: 'perf.js', thresholds: 1 }],
       syntheticJourneys: [{ id: 'edge', title: 'Edge', status: 'active', state: 'unknown', severity: 'page', schedule: '*/5 * * * *', environment: 'sandbox', covers: [], falsifies: 'Break it', blocker: null, ci: { state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', detail: 'old pass', run: { id: '1', attempt: 1, commit: 'abc', branch: 'main', workflow: 'Synthetic', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/1' } } }],
@@ -75,6 +75,7 @@ describe('GET /api/test-intelligence', () => {
       expect.objectContaining({ kind: 'integration', state: 'failed' }),
     ]))
     expect(body.components[0].coverage.state).toBe('stale')
+    expect(body.contracts[0].state).toBe('stale')
     expect(body.mutations[0].state).toBe('stale')
     expect(body.performance[0].state).toBe('stale')
     expect(body.syntheticJourneys[0].ci.state).toBe('stale')
