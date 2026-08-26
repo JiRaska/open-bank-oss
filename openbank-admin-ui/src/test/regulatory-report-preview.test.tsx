@@ -26,6 +26,19 @@ function finrepResponse(templateId: string) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Regulatory report preview', () => {
+  it('does not offer a fake export preview for catalogue-only reports', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    const paymentsCard = screen.getByText('SDAT — Platební statistika').closest('.card')
+    expect(paymentsCard).not.toBeNull()
+    expect(within(paymentsCard as HTMLElement).queryByRole('button', { name: 'Preview export' })).not.toBeInTheDocument()
+    expect(within(paymentsCard as HTMLElement).getByRole('status')).toHaveTextContent('Preview unavailable')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('loads the two implemented FINREP templates through the authenticated BFF and renders their real cells', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/api/v1/finrep/periods')) {
