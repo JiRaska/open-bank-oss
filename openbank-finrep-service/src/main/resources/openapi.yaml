@@ -22,7 +22,7 @@ info:
     FINREP output is a bounded preview containing only the official datapoints the platform can
     currently derive without inventing regulatory classifications; it is not a complete return.
     COREP preview gaps remain explicit flagged zeroes (`isDataGap`) with reasons.
-  version: 1.3.0
+  version: 1.4.0
 tags:
   - name: FINREP
   - name: COREP
