@@ -163,6 +163,7 @@ export async function POST(): Promise<NextResponse> {
         evidence: safeEvidence(component.evidence),
         declaredInfrastructure: (component.testInfrastructure?.declared ?? []).filter(item => INFRASTRUCTURE.has(item)),
         observedInfrastructureStarts: component.testInfrastructure?.observed.filter(item => item.lifecycle === 'started').length ?? 0,
+        observedInfrastructureStops: component.testInfrastructure?.observed.filter(item => item.lifecycle === 'stopped').length ?? 0,
         ...(historyByComponent.get(component.component) ?? { flakyTests: 0, failingTests: 0, sameCommitTransitions: 0, wastedDurationMs: 0 }),
       }))
     const clientComponents = (report.clientExperiences ?? []).filter(client => COMPONENT_NAME.test(client.id)).map(client => ({
@@ -173,6 +174,7 @@ export async function POST(): Promise<NextResponse> {
       evidence: safeEvidence(client.evidence),
       declaredInfrastructure: [],
       observedInfrastructureStarts: 0,
+      observedInfrastructureStops: 0,
       ...(historyByComponent.get(client.id) ?? { flakyTests: 0, failingTests: 0, sameCommitTransitions: 0, wastedDurationMs: 0 }),
     }))
     const payload = {
