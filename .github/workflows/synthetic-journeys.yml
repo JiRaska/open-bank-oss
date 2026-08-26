@@ -11,8 +11,10 @@ on:
   pull_request:
     paths:
       - ".github/scripts/check-journey-catalog.py"
+      - ".github/scripts/check-journey-coverage.py"
       - ".github/workflows/synthetic-journeys.yml"
       - "openbank-libs/governance/journeys.yaml"
+      - "openbank-libs/governance/rules.yaml"
       - "openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml"
   push:
     branches: [main]
@@ -20,8 +22,11 @@ on:
       # Re-prove and publish main-branch evidence when the executor or envelope producer
       # changes; manifest merges remain the actual post-GitOps call site.
       - ".github/scripts/check-journey-catalog.py"
+      - ".github/scripts/check-journey-coverage.py"
       - ".github/scripts/collect-test-run-evidence.py"
       - ".github/workflows/synthetic-journeys.yml"
+      - "openbank-libs/governance/journeys.yaml"
+      - "openbank-libs/governance/rules.yaml"
       - "openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml"
   workflow_dispatch:
 
@@ -47,6 +52,8 @@ jobs:
         run: |
           python3 .github/scripts/check-journey-catalog.py --self-test
           python3 .github/scripts/check-journey-catalog.py --root . --enforce
+          python3 .github/scripts/check-journey-coverage.py --self-test
+          python3 .github/scripts/check-journey-coverage.py --root . --enforce
           mkdir -p synthetic-evidence
           python3 .github/scripts/check-journey-catalog.py \
             --root . --extract public-edge --out synthetic-evidence/journey.js
