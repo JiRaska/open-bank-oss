@@ -242,12 +242,17 @@ export default function CompliancePacksPage() {
           </thead>
           <tbody>
             {active.map(p => (
-              <tr key={`${p.jurisdiction}-${p.productType}-${p.packVersion}`} onClick={() => setDetail(p)} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer' }}>
+              <tr key={`${p.jurisdiction}-${p.productType}-${p.packVersion}`} style={{ borderTop: '1px solid var(--border)' }}>
                 <td style={cell}>{p.jurisdiction}</td>
                 <td style={cell}>{p.productType}</td>
                 <td style={cell}>v{p.packVersion}</td>
                 <td style={cell}>{p.effectiveFrom}</td>
-                <td style={{ ...cell, fontSize: 11 }} className="mono">{p.contentHash.slice(0, 16)}… · {t('detail', 'details')}</td>
+                <td style={{ ...cell, fontSize: 11 }}>
+                  <span className="mono">{p.contentHash.slice(0, 16)}…</span>{' '}
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetail(p)}>
+                    {t('Zobrazit detail', 'View details')}
+                  </button>
+                </td>
               </tr>
             ))}
             {active.length === 0 && (
@@ -271,7 +276,6 @@ export default function CompliancePacksPage() {
         {pending.map(p => (
           <div
             key={p.id}
-            onClick={() => setDetail(p)}
             data-testid={`proposal-${p.id}`}
             style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}
           >
@@ -283,6 +287,9 @@ export default function CompliancePacksPage() {
               <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
                 {t('Navrhl', 'Proposed by')}: {p.proposedBy} · <span className="mono">{p.contentHash.slice(0, 16)}…</span>
               </div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetail(p)} style={{ marginTop: 6 }}>
+                {t('Zobrazit detail', 'View details')}
+              </button>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <Can permission="lending:compliance:decide" fallback={<span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Rozhodnutí je pouze pro compliance principály.', 'Decisions are limited to compliance principals.')}</span>}>
@@ -314,7 +321,7 @@ export default function CompliancePacksPage() {
 
       {detail && <div onClick={() => setDetail(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
         <div onClick={e => e.stopPropagation()} className="card" style={{ width: 'min(820px, 100%)', maxHeight: '88vh', overflow: 'auto', padding: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><h2 style={{ margin: 0 }}>{detail.jurisdiction} / {detail.productType} · v{detail.packVersion}</h2><div className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{detail.contentHash}</div></div><button className="btn btn-secondary" onClick={() => setDetail(null)}>{t('Zavřít', 'Close')}</button></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><h2 style={{ margin: 0 }}>{detail.jurisdiction} / {detail.productType} · v{detail.packVersion}</h2><div className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{detail.contentHash}</div></div><button type="button" className="btn btn-secondary" onClick={() => setDetail(null)}>{t('Zavřít', 'Close')}</button></div>
           <dl style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '8px 12px', fontSize: 12, margin: '18px 0' }}>
             <dt>{t('Navrhl', 'Proposed by')}</dt><dd>{detail.proposedBy || '—'} · {detail.proposedAt || '—'}</dd>
             <dt>{t('Rozhodl', 'Decided by')}</dt><dd>{detail.decidedBy || '—'} · {detail.decidedAt || '—'}</dd>
