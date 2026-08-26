@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.199.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.199.2...admin-ui-v0.199.3) (2026-08-26)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize product catalog details ([#7055](https://github.com/JiRaska/open-bank-oss/issues/7055)) ([935322e](https://github.com/JiRaska/open-bank-oss/commit/935322e9fd6e285c63cad37ead5d93756f936605))
+* **admin-ui:** modernize secure sign-in experience ([#7063](https://github.com/JiRaska/open-bank-oss/issues/7063)) ([c36fcbc](https://github.com/JiRaska/open-bank-oss/commit/c36fcbcb51e5c223ec8ecc204216679ba0b3e975))
+
+
+### Performance
+
+* **admin-ui:** make party search interruptible ([#7082](https://github.com/JiRaska/open-bank-oss/issues/7082)) ([cf38be0](https://github.com/JiRaska/open-bank-oss/commit/cf38be0d692fc03cafd6bb8d4eccb1194626c57c))
+
 ## [0.199.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.199.1...admin-ui-v0.199.2) (2026-08-26)
 
 
