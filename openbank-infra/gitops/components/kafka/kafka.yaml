@@ -269,6 +269,22 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
+# Governed referral/MGM lifecycle feed. The producer remains at zero replicas until the reviewed
+# referral KafkaUser/TLS workload wiring is merged; Campaign Studio projection is tracked by #7194.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.referral.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
 # Campaign-owned commands consumed by engagement-service. A compacted key (the campaign send-log
 # id) makes the placement idempotent across Temporal/Kafka retries while keeping the current slot
 # materialisation recoverable.
