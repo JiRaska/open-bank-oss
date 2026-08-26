@@ -43,6 +43,7 @@ export function CardOperationFeedback({
       <Icon size={15} style={{ flexShrink: 0, marginTop: '1px' }} />
       <span style={{ flex: 1 }}>{feedback.text}</span>
       <button
+        type="button"
         onClick={onDismiss}
         aria-label={t('Zavřít zprávu', 'Dismiss message')}
         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', lineHeight: 1, padding: 0 }}

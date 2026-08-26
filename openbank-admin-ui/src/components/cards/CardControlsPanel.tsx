@@ -125,14 +125,16 @@ export function CardControlsPanel({
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '14px' }}>
         <button
+          type="button"
           className="btn btn-primary btn-sm"
           disabled={busy !== null || block !== null || !dirty}
+          aria-busy={saving}
           onClick={() => void onSave(draft)}
         >
           {saving
-            ? <RefreshCw size={12} style={{ animation: 'spin 0.8s linear infinite' }} />
-            : <Save size={12} />}
-          {t('Uložit kanály', 'Save channels')}
+            ? <RefreshCw size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} />
+            : <Save size={12} aria-hidden="true" />}
+          {saving ? t('Ukládám kanály…', 'Saving channels…') : t('Uložit kanály', 'Save channels')}
         </button>
       </div>
     </div>

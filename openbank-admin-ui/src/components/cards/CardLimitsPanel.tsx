@@ -127,14 +127,16 @@ export function CardLimitsPanel({
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
         <button
+          type="button"
           className="btn btn-primary btn-sm"
           disabled={busy !== null || block !== null || violations.length > 0 || !dirty}
+          aria-busy={saving}
           onClick={() => { if (dailyMinorUnits !== null && monthlyMinorUnits !== null) void onSave(dailyMinorUnits, monthlyMinorUnits) }}
         >
           {saving
-            ? <RefreshCw size={12} style={{ animation: 'spin 0.8s linear infinite' }} />
-            : <Save size={12} />}
-          {t('Uložit limity', 'Save limits')}
+            ? <RefreshCw size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} />
+            : <Save size={12} aria-hidden="true" />}
+          {saving ? t('Ukládám limity…', 'Saving limits…') : t('Uložit limity', 'Save limits')}
         </button>
       </div>
     </div>

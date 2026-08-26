@@ -66,14 +66,16 @@ export function CardTransitionButtons({
         return (
           <button
             key={tr.action}
+            type="button"
             className={`btn btn-sm ${tr.irreversible ? 'btn-danger' : 'btn-ghost'}`}
             disabled={busy !== null}
+            aria-busy={running}
             title={`${label(tr.action)} → ${tr.to}`}
             onClick={() => onSelect(tr)}
           >
             {running
-              ? <RefreshCw size={12} style={{ animation: 'spin 0.8s linear infinite' }} />
-              : <Icon size={12} />}
+              ? <RefreshCw size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} />
+              : <Icon size={12} aria-hidden="true" />}
             {label(tr.action)}
           </button>
         )
