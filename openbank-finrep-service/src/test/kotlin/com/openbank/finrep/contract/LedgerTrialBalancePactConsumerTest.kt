@@ -180,7 +180,7 @@ class LedgerTrialBalancePactConsumerTest {
             ),
             LocalDate.parse(REPORTING_DATE),
         )
-        assertThat(template.cells.map { it.rowRef }).containsExactly("r010", "r380", "r490")
+        assertThat(template.cells.map { it.rowRef }).containsExactly("r0380")
         assertThat(template.cells.first().value).isEqualByComparingTo(BigDecimal("150000.00"))
         // The pact's single ASSET line does not tie out on its own, so the contract also proves the
         // balance check runs over real contract data and can answer `false` (issue #5987) — it is

@@ -151,16 +151,17 @@ class TemplateWireFormatTest {
 
         @Suppress("UNCHECKED_CAST")
         val cells = json["cells"] as List<Map<*, *>>
-        assertThat(cells).hasSize(3)
+        assertThat(cells).hasSize(1)
         assertThat(cells.first().keys).containsExactlyInAnyOrder("rowRef", "colRef", "value", "currency")
-        assertThat(cells.map { it["rowRef"] }).containsExactly("r010", "r380", "r490")
+        assertThat(cells.map { it["rowRef"] }).containsExactly("r0380")
+        assertThat(cells.map { it["colRef"] }).containsExactly("c0010")
         assertThat(cells.first()["currency"]).isEqualTo("CZK")
-        // r010 total assets, r380 total liabilities, r490 total equity — proves the cells are
-        // really derived from the ledger trial balance, not a fixed skeleton. `value` is a JSON
+        // Official F 01.01 r0380 total assets — proves the cell is really derived from the ledger
+        // trial balance, not a fixed skeleton. `value` is a JSON
         // NUMBER (schema `type: number`), so compare numerically — an untyped parse of `150000.00`
         // yields a Double whose toString drops the scale.
         assertThat(cells.map { (it["value"] as Number).toDouble() })
-            .containsExactly(150_000.00, 125_000.00, 25_000.00)
+            .containsExactly(150_000.00)
     }
 
     @Test

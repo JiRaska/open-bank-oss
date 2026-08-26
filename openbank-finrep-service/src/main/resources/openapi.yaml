@@ -13,13 +13,15 @@ info:
   title: OpenBank FINREP / COREP Service
   description: >-
     Supervisory financial and prudential reporting (ADR-0097): renders EBA FINREP templates
-    (F01.01 Balance Sheet, F02.00 Profit & Loss) and the COREP C 01.00 Own Funds template from
+    (F01.01 Assets, F01.02 Liabilities, F01.03 Equity, F02.00 Profit & Loss) and the COREP C 01.00
+    Own Funds template from
     openbank-ledger-service's GL trial balance. Derive-only and stateless — it holds no datastore,
     moves no money, and has NO ČNB transmission channel; EBA XBRL/DPM taxonomy rendering is
     explicitly out of scope for this increment.
 
-    Cells are always fully rendered: a value the platform cannot honestly derive is an explicit
-    flagged zero (`isDataGap`), never an omitted row, so a regulatory return never has a silent gap.
+    FINREP output is a bounded preview containing only the official datapoints the platform can
+    currently derive without inventing regulatory classifications; it is not a complete return.
+    COREP preview gaps remain explicit flagged zeroes (`isDataGap`) with reasons.
   version: 1.3.0
 tags:
   - name: FINREP
@@ -51,15 +53,16 @@ paths:
       summary: Render a FINREP template as of a reporting date
       description: >-
         Derives the template from the ledger GL trial balance as of `asOf`. Supported
-        `templateId` values are `F01.01` (Balance Sheet) and `F02.00` (Profit & Loss); any other
-        value is rejected.
+        `templateId` values are `F01.01` (Assets), `F01.02` (Liabilities), `F01.03` (Equity) and
+        `F02.00` (Profit & Loss); any other value is rejected. The bounded previews expose only
+        datapoints that the current ledger can derive without inventing regulatory classifications.
       operationId: getFinrepTemplate
       parameters:
         - name: templateId
           in: path
           required: true
           description: EBA FINREP template identifier
-          schema: { type: string, enum: [F01.01, F02.00] }
+          schema: { type: string, enum: [F01.01, F01.02, F01.03, F02.00] }
         - name: asOf
           in: query
           required: false
@@ -147,21 +150,22 @@ components:
         rowRef:
           type: string
           description: EBA FINREP row reference
-          example: r010
+          example: r0380
         colRef:
           type: string
           description: EBA FINREP column reference
-          example: c010
+          example: c0010
         value: { type: number }
         currency: { type: string, example: CZK }
 
     FinrepTemplate:
       type: object
       description: >-
-        One rendered FINREP template. F01.01 populates rows r010 (total assets), r380 (total
-        liabilities) and r490 (total equity); F02.00 populates r010 (total income), r030 (total
-        expense) and r450 (net profit). All rows are reported as positive magnitudes in their
-        natural reporting sign, not in the ledger's debit-minus-credit convention.
+        One bounded FINREP preview using official EBA Reporting Framework 4.2 coordinates. F01.01
+        publishes r0380/c0010 (total assets); F01.02 publishes r0300/c0010 (total liabilities);
+        F01.03 publishes r0300/c0010 (total equity) and r0310/c0010 (total equity and liabilities);
+        F02.00 publishes r0670/c0010 (profit or loss for the year). It is not a complete regulatory
+        return or an XBRL artifact. Values are reported in their natural reporting sign.
       required: [templateId, period, cells, isBalanced, balanceVerdict]
       properties:
         templateId: { type: string, example: F01.01 }

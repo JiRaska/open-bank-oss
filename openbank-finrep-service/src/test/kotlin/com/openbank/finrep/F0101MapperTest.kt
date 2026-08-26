@@ -37,31 +37,13 @@ class F0101MapperTest {
     )
 
     @Test
-    fun `F01_01 reports assets liabilities and equity as positive magnitudes`() {
+    fun `F01_01 reports only the official total-assets datapoint`() {
         val template = F0101Mapper.map(tb(balancedTrialBalance(), ledgerSays = true), asOf)
 
         assertThat(template.templateId).isEqualTo("F01.01")
-        assertThat(cell(template.cells, "r010")).isEqualByComparingTo("500000")
-        assertThat(cell(template.cells, "r380")).isEqualByComparingTo("300000")
-        assertThat(cell(template.cells, "r490")).isEqualByComparingTo("200000")
-    }
-
-    @Test
-    fun `equity is sourced from EQUITY INCOME and EXPENSE, not from assets minus liabilities`() {
-        // The discriminating fixture: assets − liabilities is 500 000 − 300 000 = 200 000, but the
-        // P&L half says the result is only 150 000. A residual-derived r490 would report 200 000
-        // and could not tell these apart; a sourced one reports 150 000 AND flags the 50 000 gap.
-        val lines = listOf(
-            line("1000", "ASSET", "500000"),
-            line("2000", "LIABILITY", "-300000"),
-            line("4000", "INCOME", "-210000"),
-            line("5000", "EXPENSE", "60000"),
-        )
-
-        val template = F0101Mapper.map(tb(lines, ledgerSays = false), asOf)
-
-        assertThat(cell(template.cells, "r490")).isEqualByComparingTo("150000")
-        assertThat(template.isBalanced).isFalse()
+        assertThat(template.cells).hasSize(1)
+        assertThat(cell(template.cells, "r0380")).isEqualByComparingTo("500000")
+        assertThat(template.cells.single().colRef).isEqualTo("c0010")
     }
 
     @Test
@@ -81,8 +63,7 @@ class F0101MapperTest {
 
     @Test
     fun `a residual in the P&L half falsifies the BALANCE SHEET template`() {
-        // Proof the check is not implied by what F01.01 itself computes: INCOME and EXPENSE feed no
-        // row this template reports as a top-line total, yet a residual introduced there is caught.
+        // Income and expense feed no F01.01 asset row, yet a residual there is still caught.
         val lines = balancedTrialBalance() + line("5001", "EXPENSE", "12000")
 
         assertThat(F0101Mapper.map(tb(lines, ledgerSays = false), asOf).isBalanced).isFalse()
