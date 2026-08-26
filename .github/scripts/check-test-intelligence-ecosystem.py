@@ -160,7 +160,7 @@ def check(root: Path) -> list[str]:
         if needle not in ui_workflow:
             errors.append(f"Admin UI test producer is incomplete: {needle}")
     deploy_workflow = text(root / ".github/workflows/admin-ui-deploy.yml")
-    for needle in ('snapshot_count}" -lt 30', 'page}" -le 100', "awk '!seen[$0]++'"):
+    for needle in ('snapshot_count}" -lt 30', "admin-ui-deploy.yml/runs?branch=main&status=success&per_page=100", "runs/${deploy_run_id}/artifacts?per_page=100", "awk '!seen[$0]++'"):
         if needle not in deploy_workflow:
             errors.append(f"Test Intelligence history cannot reach its 30-snapshot contract: {needle}")
     synthetic_route = text(root / "openbank-admin-ui/src/app/api/test-intelligence/route.ts")

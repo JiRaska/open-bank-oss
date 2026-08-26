@@ -78,10 +78,11 @@ observations explicitly. A component may have other passing suites and still con
 evidence; the assurance map remains neutral rather than turning an unresolved contract, performance
 run or control verdict green.
 
-History discovery stops after 30 unique snapshot artifacts, not after a fixed number of repository
-artifact pages. Fleet build artifacts can make snapshot density arbitrarily sparse; a bounded
-100-page ceiling limits API cost, and any shorter history stays visibly shorter rather than being
-backfilled or inferred.
+History discovery asks the owning Admin UI deployment workflow's last 100 successful `main` runs
+for artifacts and stops after 30 unique snapshots. It never scans the noisy repository-wide
+artifact stream, where fleet builds make snapshot density arbitrarily sparse. The run ceiling
+bounds API cost, and any shorter history stays visibly shorter rather than being backfilled or
+inferred.
 
 Every reusable service build also emits `test-intelligence-run.schema.json` v1. Its run identity is
 the GitHub run id plus attempt, and it carries commit, branch, workflow, URL and observation time.
