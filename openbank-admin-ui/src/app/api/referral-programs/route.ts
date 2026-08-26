@@ -3,15 +3,19 @@
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
-import { serverSvcUrl } from '@/lib/services/bff'
 
 export const dynamic = 'force-dynamic'
+
+const referralServiceUrl = process.env.REFERRAL_SERVICE_URL ??
+  (process.env.KUBERNETES_SERVICE_HOST
+    ? 'https://referral-service.referral.svc:8443'
+    : 'http://localhost:8155')
 
 export async function GET() {
   const session = await auth()
   if (!session?.user?.accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   try {
-    const response = await fetch(serverSvcUrl('referral-service', 'campaign', 8155, '/api/v1/referrals/programs'), {
+    const response = await fetch(`${referralServiceUrl}/api/v1/referrals/programs`, {
       headers: { authorization: `Bearer ${session.user.accessToken}` },
       signal: AbortSignal.timeout(4000),
       cache: 'no-store',
