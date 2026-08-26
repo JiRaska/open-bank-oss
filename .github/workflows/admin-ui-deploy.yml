@@ -679,14 +679,27 @@ jobs:
           set -u
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-intelligence-history
-          # The repository-wide artifact list is newest-first and every services-ci run
-          # contributes two per changed service, so a single 100-item page never reaches a
-          # snapshot. The `name=` filter is exact-match and these names carry the run id, so
-          # it cannot be used either: paginate and filter on the prefix (#6614).
-          for page in 1 2 3 4 5; do
-            api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
-              | python3 -c "import json,sys; [print(x['id']) for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('test-intelligence-snapshot-') and not x['expired']]" 2>/dev/null || true
-          done | head -30 \
+          # Query the owning workflow's successful main runs, not the repository-wide artifact
+          # stream. Every services-ci run contributes many artifacts and previously pushed a
+          # snapshot beyond the fixed five-page search window. A successful Admin-UI deploy owns
+          # at most one immutable snapshot, so this route is complete without unrelated artifacts.
+          # Measured 2026-08-26: 30 retained snapshots were found in 51 runs (52 API calls).
+          # The 100-run ceiling bounds pathological missing-artifact cases;
+          # fewer results remain explicit in the rendered history (#6614).
+          snapshot_ids="${RUNNER_TEMP}/test-intelligence-snapshot-ids"
+          : > "${snapshot_ids}"
+          snapshot_count=0
+          run_ids="$(api "https://api.github.com/repos/${REPO}/actions/workflows/admin-ui-deploy.yml/runs?branch=main&status=success&per_page=100" \
+            | python3 -c "import json,sys; [print(x['id']) for x in json.load(sys.stdin).get('workflow_runs',[])]" 2>/dev/null || true)"
+          while read -r deploy_run_id; do
+            [ -n "${deploy_run_id}" ] || continue
+            [ "${snapshot_count}" -lt 30 ] || break
+            api "https://api.github.com/repos/${REPO}/actions/runs/${deploy_run_id}/artifacts?per_page=100" \
+              | python3 -c "import json,sys; [print(x['id']) for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('test-intelligence-snapshot-') and not x['expired']]" \
+              >> "${snapshot_ids}" 2>/dev/null || true
+            snapshot_count="$(awk '!seen[$0]++' "${snapshot_ids}" | wc -l | tr -d ' ')"
+          done <<< "${run_ids}"
+          awk '!seen[$0]++' "${snapshot_ids}" | head -30 \
             | while read -r artifact_id; do
                 [ -n "${artifact_id}" ] || continue
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "/tmp/test-intelligence-${artifact_id}.zip" 2>/dev/null || continue

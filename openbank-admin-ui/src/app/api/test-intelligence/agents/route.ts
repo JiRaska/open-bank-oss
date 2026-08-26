@@ -18,7 +18,7 @@ const COMPONENT_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/
 // instead of silently degrading a real observation to `unknown` on the way to the agent.
 const EVIDENCE_KIND_KEYS: Record<EvidenceKind, true> = {
   unit: true, integration: true, contract: true, e2e: true, performance: true,
-  synthetic: true, mutation: true, visual: true, simulation: true,
+  synthetic: true, mutation: true, visual: true, trace: true, simulation: true,
 }
 const EVIDENCE_STATE_KEYS: Record<EvidenceState, true> = {
   passed: true, failed: true, skipped: true, 'not-run': true, stale: true, blocked: true, unknown: true,

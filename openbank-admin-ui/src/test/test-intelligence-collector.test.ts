@@ -105,6 +105,8 @@ scenarios:
     expect(report.components[0].coverage.lines.percentage).toBe(80)
     expect(report.components[1].evidence).toEqual([])
     expect(report.totals.missingEvidence).toBe(1)
+    expect(report.totals.unknownEvidence).toBe(1)
+    expect(report.totals.unresolvedEvidence).toBe(1)
     expect(report.contracts).toEqual([expect.objectContaining({
       pactFile: 'alpha-provider.json', state: 'unknown',
       verificationDetail: expect.stringMatching(/not a passing result/i),
@@ -162,6 +164,7 @@ scenarios:
       run: { id: '42', attempt: 2, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/42', observedAt: '2026-08-22T10:00:00Z' },
       component: 'openbank-alpha-service',
       suites: [{ kind: 'integration', state: 'passed', discovered: 3, executed: 3, passed: 3, failed: 0, skipped: 0, errors: 0, durationMs: 900 }],
+      specializedEvidence: [{ kind: 'trace', state: 'passed', source: 'trace-contract:payment-booking', detail: '1 executed marker(s); JUnit suite passed' }],
       testCases: [{ fingerprint: '0123456789abcdef01234567', kind: 'integration', classname: 'com.openbank.PaymentApiIT', name: 'books payment', state: 'passed', durationMs: 400 }],
       coverage: { lines: { covered: 8, missed: 2, percentage: 80 }, branches: { covered: 3, missed: 1, percentage: 75 } },
       testInfrastructure: { declared: ['postgres'], observed: [
@@ -180,7 +183,12 @@ scenarios:
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
     expect(report.components[0].evidence[0]).toMatchObject({ kind: 'integration', run: { id: '42', attempt: 2, commit: 'abcdef012345' } })
+    expect(report.components[0].evidence[1]).toMatchObject({
+      kind: 'trace', state: 'passed', source: 'trace-contract:payment-booking',
+      detail: '1 executed marker(s); JUnit suite passed', run: { id: '42', attempt: 2 },
+    })
     expect(report.components[0].testInfrastructure.observed).toHaveLength(2)
+    expect(report.runHistory[0].states).toMatchObject({ integration: 'passed', trace: 'passed' })
     expect(report.components[0].coverage.branches.percentage).toBe(75)
     expect(report.testCases[0]).toMatchObject({
       fingerprint: '0123456789abcdef01234567', state: 'flaky', observations: 2,

@@ -62,8 +62,8 @@ The snapshot schema carries:
 
 - `schemaVersion`, `collectedAt` and source-level collection warnings;
 - every component, including components with no evidence;
-- explicit evidence kinds: unit, integration, contract, end-to-end, performance, synthetic,
-  mutation and deterministic simulation;
+- explicit evidence kinds: unit, integration, contract, end-to-end, executed trace contract,
+  performance, synthetic, mutation and deterministic simulation;
 - `passed`, `failed`, `skipped`, `not-run`, `stale`, `blocked` and `unknown` states;
 - source provenance: tool, task or artifact, observation time, commit when the producer supplies
   one, and environment; and
@@ -72,6 +72,17 @@ The snapshot schema carries:
 Absence is not zero. `0 tests executed` is a valid observed result; `not-run` means no applicable
 artifact was collected. Missing and stale required evidence are attention states, never silently
 excluded from an average.
+
+The fleet totals and history count both `unknown` and unresolved (`unknown`, `not-run`, `blocked`)
+observations explicitly. A component may have other passing suites and still contribute unresolved
+evidence; the assurance map remains neutral rather than turning an unresolved contract, performance
+run or control verdict green.
+
+History discovery asks the owning Admin UI deployment workflow's last 100 successful `main` runs
+for artifacts and stops after 30 unique snapshots. It never scans the noisy repository-wide
+artifact stream, where fleet builds make snapshot density arbitrarily sparse. The run ceiling
+bounds API cost, and any shorter history stays visibly shorter rather than being backfilled or
+inferred.
 
 Every reusable service build also emits `test-intelligence-run.schema.json` v1. Its run identity is
 the GitHub run id plus attempt, and it carries commit, branch, workflow, URL and observation time.
@@ -215,6 +226,12 @@ may become an advisory ordering or parallelism input only after full-suite prese
 it cannot be the sole required gate. Synthetic traffic must retain trusted identity and taint across
 HTTP, Kafka, traces and regulatory projections; an untrusted HTTP header is never sufficient.
 
+Test-to-trace correlation uses the existing privacy-preserving `TraceContract`. A successful test
+emits a bounded marker only after at least one trace assertion has passed; the run collector turns
+that JUnit marker into `trace` evidence with the same commit and workflow provenance. Trace ids,
+attribute values and fixtures never enter the marker or snapshot. Source presence alone remains no
+evidence, and the ordinary suite verdict stays authoritative if the enclosing JUnit suite fails.
+
 The admin route is a primary platform destination, first in Platform navigation and pinned in the
 platform persona workspace. Its E2E test navigates from the dashboard through the visible link;
 opening `/system/tests` directly is not evidence of discoverability.
@@ -229,13 +246,15 @@ provenance. Missing private-repository access or an expired artifact renders `no
 source presence is never promoted to a completed test.
 
 Mobile RUM is consent-gated runtime evidence. The deploy-time projection records Android/iOS exporter
-capability from a read-only checkout that is excluded from the Docker build context, while the BFF
-queries Tempo span-metrics through Prometheus for sampled `openbank-app` arrival over seven days. A
-non-zero observation proves that telemetry crossed the hardened gateway; it does not prove traffic
-volume, a particular OS deployment, or test success. Zero is an explicit absent observation, not a
-failure, because consent is opt-in. Operator-triggered AI analysis receives only bounded client CI
-kind/state pairs; it does not receive RUM counts, details or source paths. The agent may diagnose a
-missing mobile execution envelope, but cannot synthesize a client verdict or alter CI/RUM state.
+capability from a read-only checkout that is excluded from the Docker build context. The BFF counts
+unique `openbank-app` trace IDs from a bounded seven-day Tempo search (maximum 1,000 results), marks a
+full result page as a lower bound, and uses Tempo span-metrics through Prometheus only for the error
+signal and as a degraded fallback. A non-zero observation proves that telemetry crossed the hardened
+gateway; it does not prove traffic volume, a particular OS deployment, or test success. Zero is an
+explicit absent observation, not a failure, because consent is opt-in. Operator-triggered AI analysis
+receives only bounded client CI kind/state pairs; it does not receive RUM counts, details or source
+paths. The agent may diagnose a missing mobile execution envelope, but cannot synthesize a client
+verdict or alter CI/RUM state.
 
 ## Alternatives considered
 
@@ -313,3 +332,5 @@ missing mobile execution envelope, but cannot synthesize a client verdict or alt
 - [Launchable predictive test selection](https://help.launchableinc.com/features/predictive-test-selection/how-launchable-selects-tests/)
 - [Checkly Playwright checks](https://www.checklyhq.com/docs/detect/synthetic-monitoring/playwright-checks/overview/)
 - [Grafana Synthetic Monitoring](https://grafana.com/docs/grafana-cloud/observe-and-act/testing/synthetic-monitoring/introduction/)
+- [BrowserStack AI agents](https://www.browserstack.com/docs/test-management/browserstack-ai)
+- [BrowserStack Smart Test Selection](https://www.browserstack.com/docs/automate/selenium/smart-test-selection)

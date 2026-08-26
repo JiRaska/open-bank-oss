@@ -16,7 +16,7 @@ import tempfile
 
 SUITE_KINDS = {"unit", "integration", "contract", "e2e", "simulation"}
 SUITE_STATES = {"passed", "failed", "skipped", "not-run"}
-SPECIALIZED_KINDS = {"performance", "mutation", "synthetic"}
+SPECIALIZED_KINDS = {"performance", "mutation", "synthetic", "trace"}
 SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
 INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
 
@@ -212,6 +212,25 @@ def observations(service: Path) -> list[dict]:
     return result
 
 
+def trace_contract_evidence(service: Path) -> list[dict]:
+    """Project only markers emitted by an executed, successfully asserted TraceContract."""
+    marker = re.compile(r"(?m)^OPENBANK_TRACE_CONTRACT_V1:([a-z0-9][a-z0-9._-]{0,63})$")
+    results: dict[str, dict] = {}
+    root = service / "build" / "test-results"
+    for _, tree in junit_suites(root):
+        failed = int(tree.attrib.get("failures", 0)) + int(tree.attrib.get("errors", 0)) > 0
+        output = "\n".join(node.text or "" for node in tree.findall(".//system-out"))
+        for contract_id in marker.findall(output):
+            row = results.setdefault(contract_id, {"failed": False, "markers": 0})
+            row["failed"] = row["failed"] or failed
+            row["markers"] += 1
+    return [{
+        "kind": "trace", "state": "failed" if row["failed"] else "passed",
+        "source": f"trace-contract:{contract_id}",
+        "detail": f"{row['markers']} executed marker(s); JUnit suite {'failed' if row['failed'] else 'passed'}",
+    } for contract_id, row in sorted(results.items())]
+
+
 def specialized_evidence(
     performance_summary: str | None,
     mutation_report: str | None,
@@ -296,10 +315,13 @@ def main() -> None:
                           '<testsuite name="unit" tests="2" failures="1" errors="0" skipped="0" time="1.5">'
                           '<testcase classname="guard" name="allows" time="0.5"/>'
                           '<testcase classname="guard" name="denies" time="1.0"><failure/></testcase>'
+                          '<system-out>OPENBANK_TRACE_CONTRACT_V1:failed-contract\n'
+                          'OPENBANK_TRACE_CONTRACT_V1:customer supplied trace id</system-out>'
                           '</testsuite></testsuites>'),
                 ("e2e", '<testsuites name="playwright" tests="1" failures="0" errors="0" skipped="0" time="2">'
                         '<testsuite name="nav" tests="1" failures="0" errors="0" skipped="0" time="2">'
                         '<testcase classname="nav.spec.ts" name="loads" time="2"/>'
+                        '<system-out>OPENBANK_TRACE_CONTRACT_V1:public-edge</system-out>'
                         '</testsuite></testsuites>'),
             ):
                 directory = service / "build/test-results" / task
@@ -310,6 +332,12 @@ def main() -> None:
             assert (discovered["unit"]["discovered"], discovered["unit"]["failed"]) == (2, 1), discovered
             assert discovered["unit"]["state"] == "failed" and discovered["e2e"]["state"] == "passed"
             assert len(test_cases("openbank-admin-ui", service)) == 3
+            assert trace_contract_evidence(service) == [
+                {"kind": "trace", "state": "failed", "source": "trace-contract:failed-contract",
+                 "detail": "1 executed marker(s); JUnit suite failed"},
+                {"kind": "trace", "state": "passed", "source": "trace-contract:public-edge",
+                 "detail": "1 executed marker(s); JUnit suite passed"},
+            ]
             # An unparsable report is observed as absent, never as a build failure.
             (service / "build/test-results/test/broken.xml").write_text("<testsuite")
             assert len(suites("openbank-admin-ui", service)) == 2
@@ -366,6 +394,7 @@ def main() -> None:
         args.synthetic_summary,
         args.synthetic_journey,
     )
+    specialized.extend(trace_contract_evidence(service))
     envelope = {
         "schemaVersion": 1,
         "run": {

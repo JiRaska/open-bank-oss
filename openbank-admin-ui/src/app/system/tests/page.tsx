@@ -23,7 +23,7 @@ const STATE_COLOR: Record<EvidenceState, string> = {
   stale: '#d97706', blocked: '#7c3aed', unknown: '#64748b',
 }
 
-const KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e', 'mutation', 'simulation', 'performance', 'synthetic']
+const KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e', 'trace', 'mutation', 'simulation', 'performance', 'synthetic']
 
 function StateBadge({ state }: { state: EvidenceState }) {
   const Icon = state === 'passed' ? CheckCircle2 : state === 'failed' ? XCircle
@@ -65,7 +65,8 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
       : clientEvidence.some(client => client.rum.state === 'unknown') ? 'unknown'
         : clientEvidence.length === 0 ? 'not-run' : 'passed'
   const ciState: EvidenceState = report.totals.failingEvidence > 0 ? 'failed'
-    : report.totals.missingEvidence > 0 || report.totals.staleEvidence > 0 ? 'stale' : 'passed'
+    : (report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) > 0 ? 'unknown'
+      : report.totals.missingEvidence > 0 || report.totals.staleEvidence > 0 ? 'stale' : 'passed'
   const cards: { tab: Tab; title: string; eyebrow: string; state: EvidenceState; detail: string }[] = [
     { tab: 'posture', title: t('CI důkazy', 'CI evidence'), eyebrow: t('deterministické gate', 'deterministic gates'), state: ciState, detail: t(`${report.totals.componentsWithExecutionEvidence}/${report.totals.components} komponent s důkazem běhu`, `${report.totals.componentsWithExecutionEvidence}/${report.totals.components} components with run evidence`) },
     { tab: 'runtime', title: t('Testcontainers runtime', 'Testcontainers runtime'), eyebrow: t('skutečná topologie', 'actual topology'), state: runtimeState, detail: t(`${runtimeRows.length} deklarovaných testovacích runtime`, `${runtimeRows.length} declared test runtimes`) },
@@ -111,6 +112,7 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
         <Stat label="Failing evidence" value={report.totals.failingEvidence} tone={report.totals.failingEvidence ? '#dc2626' : '#16a34a'} />
         <Stat label="No execution evidence" value={report.totals.missingEvidence} tone={report.totals.missingEvidence ? '#d97706' : '#16a34a'} />
         <Stat label="Stale evidence" value={report.totals.staleEvidence} tone={report.totals.staleEvidence ? '#d97706' : '#16a34a'} />
+        <Stat label="Unresolved evidence" value={report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0} tone={(report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) ? '#64748b' : '#16a34a'} />
       </div>
       <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
         <table style={tableStyle}>
@@ -130,15 +132,17 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
 
 function Execution({ report }: { report: TestIntelligenceReport }) {
   const rows = report.components.flatMap(component => component.evidence
-    .filter(item => ['unit', 'integration', 'e2e', 'simulation'].includes(item.kind))
+    .filter(item => ['unit', 'integration', 'e2e', 'trace', 'simulation'].includes(item.kind))
     .map(item => ({ component: component.component, ...item })))
   return (
     <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
-      <table style={tableStyle}><thead><tr>{['Component', 'Kind', 'State', 'Discovered', 'Executed', 'Passed', 'Failed', 'Skipped', 'Observed'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
+      <table style={tableStyle}><thead><tr>{['Component', 'Kind', 'State', 'Discovered', 'Executed', 'Passed', 'Failed', 'Skipped', 'Evidence', 'Observed'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
         <tbody>{rows.map((row, index) => <tr key={`${row.component}-${row.kind}-${index}`}>
           <td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.kind}</td><td style={tdStyle}><StateBadge state={row.state} /></td>
           <td style={tdStyle}>{row.counts?.discovered ?? '—'}</td><td style={tdStyle}>{row.counts?.executed ?? '—'}</td><td style={tdStyle}>{row.counts?.passed ?? '—'}</td>
-          <td style={tdStyle}>{row.counts?.failed ?? '—'}</td><td style={tdStyle}>{row.counts?.skipped ?? '—'}</td><td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt) : '—'}</td>
+          <td style={tdStyle}>{row.counts?.failed ?? '—'}</td><td style={tdStyle}>{row.counts?.skipped ?? '—'}</td>
+          <td style={tdStyle}>{row.run?.url ? <a href={row.run.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', fontWeight: 650 }}>{row.source}</a> : row.source}<div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{row.detail ?? ''}</div></td>
+          <td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt) : '—'}</td>
         </tr>)}</tbody>
       </table>
     </div>
@@ -180,14 +184,15 @@ function History({ report }: { report: TestIntelligenceReport }) {
     <div style={{ marginBottom: 16 }}><strong>{t('Historie fleet evidence', 'Fleet evidence history')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Neměnné deployment snapshoty uchované jako CI artefakty. Sloupce nikdy neodvozují chybějící běhy.', 'Immutable deployment snapshots retained as CI artifacts. Bars never infer missing runs.')}</div></div>
     {report.history.length < 2 && <div style={{ color: '#d97706', fontSize: 12, marginBottom: 12 }}><TriangleAlert size={13} style={{ verticalAlign: 'text-bottom', marginRight: 5 }} />The first snapshot is present; a trend appears after the next admin deployment.</div>}
     <div style={{ display: 'flex', alignItems: 'end', gap: 8, minHeight: 190, overflowX: 'auto', paddingTop: 12 }}>
-      {report.history.map(point => <div key={point.collectedAt} title={`${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(point.collectedAt))} · ${point.componentsWithExecutionEvidence}/${point.components} evidenced · ${point.failingEvidence} failing`} style={{ minWidth: 38, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'end', gap: 3, height: 170 }}>
+      {report.history.map(point => <div key={point.collectedAt} title={`${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(point.collectedAt))} · ${point.componentsWithExecutionEvidence}/${point.components} evidenced · ${point.failingEvidence} failing · ${point.unresolvedEvidence ?? point.unknownEvidence ?? 0} unresolved`} style={{ minWidth: 38, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'end', gap: 3, height: 170 }}>
         <div style={{ height: `${Math.max(2, point.failingEvidence / max * 150)}px`, background: '#dc2626', borderRadius: '4px 4px 0 0' }} />
+        <div style={{ height: `${Math.max(2, (point.unresolvedEvidence ?? point.unknownEvidence ?? 0) / max * 150)}px`, background: '#64748b' }} />
         <div style={{ height: `${Math.max(2, point.missingEvidence / max * 150)}px`, background: '#d97706' }} />
         <div style={{ height: `${Math.max(2, point.componentsWithExecutionEvidence / max * 150)}px`, background: '#16a34a', borderRadius: '0 0 4px 4px' }} />
         <span style={{ fontSize: 9, color: 'var(--text-tertiary)', textAlign: 'center' }}>{new Intl.DateTimeFormat('en-GB', { month: 'short', day: 'numeric' }).format(new Date(point.collectedAt))}</span>
       </div>)}
     </div>
-    <div style={{ display: 'flex', gap: 14, marginTop: 12, fontSize: 11, color: 'var(--text-secondary)' }}><span style={{ color: '#16a34a' }}>● evidenced</span><span style={{ color: '#d97706' }}>● missing</span><span style={{ color: '#dc2626' }}>● failing</span></div>
+    <div style={{ display: 'flex', gap: 14, marginTop: 12, fontSize: 11, color: 'var(--text-secondary)' }}><span style={{ color: '#16a34a' }}>● evidenced</span><span style={{ color: '#64748b' }}>● unresolved</span><span style={{ color: '#d97706' }}>● missing</span><span style={{ color: '#dc2626' }}>● failing</span></div>
   </div><div style={{ border: '1px solid var(--border)', borderRadius: 10, overflowX: 'auto' }}>
     <div style={{ padding: '16px 18px 8px' }}><strong>{t('Neměnné pokusy služeb', 'Immutable service attempts')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Nejnovější verzované CI obálky; opakované běhy zůstávají samostatnými pokusy.', 'Latest versioned CI envelopes; reruns remain separate attempts.')}</div></div>
     <table style={tableStyle}><thead><tr><th style={thStyle}>Component</th><th style={thStyle}>Run / attempt</th><th style={thStyle}>Commit</th><th style={thStyle}>{t('Stavy evidence', 'Evidence states')}</th><th style={thStyle}>Runtime</th><th style={thStyle}>Observed</th></tr></thead>
@@ -311,7 +316,7 @@ function ClientExperiences({ report }: { report: TestIntelligenceReport }) {
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{client.title}</strong><span style={{ marginLeft: 8, color: 'var(--text-tertiary)', fontSize: 11 }}>{client.platforms.join(' · ')}</span></div><StateBadge state={client.evidence.some(item => item.state === 'failed') ? 'failed' : client.evidence.length ? 'passed' : 'not-run'} /></div>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginTop: 12 }}>{client.evidence.map((item, index) => <div key={`${item.kind}-${index}`} style={{ padding: 10, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>{item.kind}</strong><div style={{ marginTop: 6 }}><StateBadge state={item.state} /></div>{item.counts && <div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{item.counts.passed}/{item.counts.executed} passed</div>}{item.detail && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{item.detail}</div>}</div>)}</div>
     {client.evidence.length === 0 && <p style={{ fontSize: 12, color: '#d97706', margin: '12px 0 0' }}>{t('Není přibalen důkaz posledního client CI běhu; zdrojový kód se nesmí vydávat za proběhlý test.', 'No latest client-CI evidence is bundled; source code is not represented as a completed test.')}</p>}
-    <div style={{ marginTop: 12, padding: 11, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>RUM</strong><span style={{ marginLeft: 8 }}><StateBadge state={client.rum.state} /></span>{client.rum.source && <span style={{ marginLeft: 8, color: 'var(--text-tertiary)' }}>{client.rum.source} · 7d</span>}<div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{client.rum.detail}</div>{client.rum.sampledSpansLast7d !== undefined && client.rum.sampledSpansLast7d !== null && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{client.rum.sampledSpansLast7d} sampled spans · {client.rum.errorSpansLast7d ?? 'unknown'} error spans</div>}</div>
+    <div style={{ marginTop: 12, padding: 11, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>RUM</strong><span style={{ marginLeft: 8 }}><StateBadge state={client.rum.state} /></span>{client.rum.source && <span style={{ marginLeft: 8, color: 'var(--text-tertiary)' }}>{client.rum.source} · 7d</span>}<div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{client.rum.detail}</div>{client.rum.sampledSpansLast7d !== undefined && client.rum.sampledSpansLast7d !== null && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{client.rum.sampledSpansLast7d} sampled {client.rum.source === 'tempo' ? 'traces' : 'span-counter increments'} · {client.rum.errorSpansLast7d ?? 'unknown'} error span-counter increments</div>}</div>
     {client.blocker && <p style={{ fontSize: 12, color: '#7c3aed', margin: '10px 0 0' }}><strong>Blocker:</strong> {client.blocker}</p>}
   </div>)}</div>
 }
@@ -353,7 +358,7 @@ export default function TestIntelligencePage() {
       breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep" aria-hidden="true">/</span><span>{t('Systém', 'System')}</span><span className="breadcrumb-sep" aria-hidden="true">/</span><span className="breadcrumb-current">{t('Test Intelligence', 'Test Intelligence')}</span></div>}
       icon={<FlaskConical size={19} aria-hidden="true" style={{ color: 'var(--accent)' }} />}
       title={t('Test Intelligence', 'Test Intelligence')}
-      subtitle={t('Jednotný pohled na běhy, pokrytí kódu, kontrakty, mutace, výkon a sandboxové syntetické scénáře.', 'One evidence view for execution, code coverage, contracts, mutation, performance, and sandbox synthetic journeys.')}
+      subtitle={t('Jednotný pohled na běhy, pokrytí kódu, trace kontrakty, mutace, výkon a sandboxové syntetické scénáře.', 'One evidence view for execution, code coverage, trace contracts, mutation, performance, and sandbox synthetic journeys.')}
       actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
     />
     <TestIntelligenceFlow report={report} />

@@ -126,12 +126,15 @@ function runEnvelope(component) {
     branch: String(run.run.branch), workflow: String(run.run.workflow), url: String(run.run.url),
   } : undefined
   return {
-    evidence: run.suites.map(suite => ({
+    evidence: [...run.suites.map(suite => ({
       kind: suite.kind, state: suite.state, observedAt: run.run?.observedAt ?? observedAt(file),
       source: 'test-intelligence-run:v1', environment: 'ci', durationMs: suite.durationMs,
       counts: { discovered: suite.discovered, executed: suite.executed, passed: suite.passed,
         failed: suite.failed, skipped: suite.skipped, errors: suite.errors }, run: provenance,
-    })),
+    })), ...(run.specializedEvidence ?? []).map(item => ({
+      kind: item.kind, state: item.state, observedAt: run.run?.observedAt ?? observedAt(file),
+      source: item.source, environment: 'ci', detail: item.detail, run: provenance,
+    }))],
     coverage: run.coverage ? {
       state: stateFrom(0, 1, run.run?.observedAt ?? observedAt(file)),
       observedAt: run.run?.observedAt ?? observedAt(file), lines: run.coverage.lines,
@@ -563,6 +566,9 @@ async function main() {
   const testCases = testCaseHistory(currentEnvelopes)
   const failingEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'failed').length
   const staleEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'stale').length
+  const unknownEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'unknown').length
+  const unresolvedEvidence = components.flatMap(item => item.evidence)
+    .filter(item => ['unknown', 'not-run', 'blocked'].includes(item.state)).length
   const missingEvidence = components.filter(item => item.evidence.length === 0).length
   const historyDir = path.join(repo, 'openbank-admin-ui', 'test-intelligence-history')
   const historicalReports = allFiles(historyDir, file => file.endsWith('.json'))
@@ -570,15 +576,24 @@ async function main() {
     .map(item => ({ collectedAt: item.collectedAt, ...item.totals }))
   const currentPoint = { collectedAt: collectedAt.toISOString(), components: components.length,
     componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
-    failingEvidence, missingEvidence, staleEvidence }
+    failingEvidence, missingEvidence, staleEvidence, unknownEvidence, unresolvedEvidence }
   const history = [...historicalReports, currentPoint]
     .sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
     .filter((item, index, all) => index === 0 || item.collectedAt !== all[index - 1].collectedAt)
     .slice(-30)
-  const serviceRunHistory = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json'))
-    .map(readJson).filter(item => item?.schemaVersion === 1 && item?.run && item?.component)
+  const serviceRunEnvelopes = [
+    ...allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json')).map(readJson),
+    ...currentEnvelopes,
+  ].filter(item => item?.schemaVersion === 1 && item?.run && item?.component)
+  const uniqueServiceRuns = new Map(serviceRunEnvelopes.map(item => [
+    `${item.component}:${item.run.id}:${item.run.attempt}`, item,
+  ]))
+  const serviceRunHistory = [...uniqueServiceRuns.values()]
     .map(item => ({ component: item.component, run: item.run,
-      states: Object.fromEntries((item.suites ?? []).map(suite => [suite.kind, suite.state])),
+      states: Object.fromEntries([
+        ...(item.suites ?? []).map(suite => [suite.kind, suite.state]),
+        ...(item.specializedEvidence ?? []).map(evidence => [evidence.kind, evidence.state]),
+      ]),
       infrastructureStarted: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'started').length,
       infrastructureStopped: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'stopped').length }))
   const clientRunHistory = mobileClientRuns().map(item => ({
@@ -597,7 +612,7 @@ async function main() {
       components: components.length,
       componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
       moneyPathComponents: components.filter(item => item.moneyPath).length,
-      failingEvidence, missingEvidence, staleEvidence,
+      failingEvidence, missingEvidence, staleEvidence, unknownEvidence, unresolvedEvidence,
     },
     warnings,
   }

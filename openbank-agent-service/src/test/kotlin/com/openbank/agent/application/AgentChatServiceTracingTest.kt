@@ -131,6 +131,7 @@ class AgentChatServiceTracingTest {
                 .requiresSpan("agent.run")
                 .requiresAttribute("agent.run", "openbank.agent.result")
                 .hasNoErrorSpan()
+                .verifiedAs("agent-run")
         }
     }
 
