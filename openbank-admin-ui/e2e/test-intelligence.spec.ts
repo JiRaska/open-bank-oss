@@ -96,6 +96,26 @@ test('meets WCAG A and AA rules in the rendered Test Intelligence workspace', as
   ).join('\n')).toEqual([])
 })
 
+test('removes decorative motion when the operator requests reduced motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/system/tests')
+
+  const animationNames = await Promise.all([
+    page.locator('.ti-aurora'),
+    page.locator('.ti-beam i'),
+    page.locator('.ti-health i'),
+    page.locator('.ti-stage').first(),
+  ].map(locator => locator.evaluate(element => getComputedStyle(element).animationName)))
+
+  expect(animationNames).toEqual(['none', 'none', 'none', 'none'])
+  const transitionSeconds = await page.locator('.ti-stage').first().evaluate(element =>
+    Number.parseFloat(getComputedStyle(element).transitionDuration),
+  )
+  // The global reduced-motion guard deliberately uses 0.01 ms instead of a literal zero so
+  // transitionend-dependent components still settle; this is five orders below one second.
+  expect(transitionSeconds).toBeLessThanOrEqual(0.00001)
+})
+
 test('uses Test Intelligence as the only DevOps test-evidence destination', async ({ page }) => {
   await page.route('**/api/devops/dora', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
     overall: 'high', metrics: {
