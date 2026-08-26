@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.25.0...ledger-service-v1.26.0) (2026-08-26)
+
+
+### Features
+
+* **ledger:** persist trusted synthetic taint ([#7176](https://github.com/JiRaska/open-bank-oss/issues/7176)) ([aee9dd8](https://github.com/JiRaska/open-bank-oss/commit/aee9dd800af708489bd75fb9e82f131a983e6a45))
+
 ## [1.25.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.24.0...ledger-service-v1.25.0) (2026-08-24)
 
 
