@@ -242,7 +242,9 @@ jobs:
           # Services changed directly in this push.
           DIRECT_SERVICES=()
           for svc in $ALL_SERVICES; do
-            if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
+            # Keep this aligned with the push trigger: release-please changes only
+            # version.txt, and that release marker must rebuild/deploy the component.
+            if grep -qE "^${svc}/(src/main|build\.gradle\.kts|version\.txt)" <<< "$CHANGED_FILES"; then
               DIRECT_SERVICES+=("$svc")
             fi
           done
@@ -1118,6 +1120,10 @@ jobs:
           # so any generator or tool that writes into the tree earlier in the job silently becomes
           # part of the deploy. See admin-ui-deploy.yml for the three defects that caused there.
           add-paths: openbank-infra/gitops/**
+          # workflow_dispatch may run from a recovery ref. Without an explicit base,
+          # create-pull-request targets that stale ref and includes every intervening main
+          # commit in the deploy PR instead of only the rewritten GitOps manifests.
+          base: main
           branch: chore/gitops-auto-deploy-${{ github.sha }}
           delete-branch: true
           commit-message: "chore(gitops): auto-deploy sandbox-${{ github.sha && github.sha || '' }}"
