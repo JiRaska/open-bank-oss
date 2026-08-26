@@ -55,7 +55,23 @@
         "email",
         "roles"
       ],
-      "attributes": {}
+      "attributes": {},
+      "protocolMappers": [
+        {
+          "name": "realm roles (lightweight)",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "true"
+          }
+        }
+      ]
     },
     {
       "clientId": "openbank-services",
