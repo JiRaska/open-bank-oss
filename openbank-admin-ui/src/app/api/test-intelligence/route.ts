@@ -5,6 +5,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { NextResponse } from 'next/server'
 import type { EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
+import { enforceRuntimeFreshness } from '@/lib/test-intelligence-freshness'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,7 +66,12 @@ async function queryTempoMobileTraces(base: string): Promise<{ count: number; tr
 }
 
 async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>> {
-  const query = `(kube_job_status_succeeded{namespace="observability",job_name=~"${cronjob}.*"} == 1) or (kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} == 1)`
+  // Status gauges retain value 1 and their query sample timestamp advances on every scrape.
+  // Use the completion-time gauge as the value, and attach an explicit result label, otherwise
+  // a week-old retained Job is rendered as a run that happened "now" and its state depends on
+  // Prometheus retaining the implementation-specific __name__ label in a union response.
+  const completed = `kube_job_status_completion_time{namespace="observability",job_name=~"${cronjob}.*"}`
+  const query = `label_replace(max by (job_name) (${completed} and on(namespace,job_name) (kube_job_status_succeeded{namespace="observability",job_name=~"${cronjob}.*"} == 1)), "openbank_evidence_state", "passed", "job_name", ".*") or label_replace(max by (job_name) (${completed} and on(namespace,job_name) (kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} == 1)), "openbank_evidence_state", "failed", "job_name", ".*")`
   try {
     const response = await fetch(`${base}/api/v1/query?query=${encodeURIComponent(query)}`, {
       headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(2500), cache: 'no-store',
@@ -74,10 +80,11 @@ async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array
     const payload = await response.json() as PrometheusLabelVector
     return (payload.data?.result ?? []).flatMap(item => {
       const id = item.metric?.job_name
-      const timestamp = item.value?.[0]
-      const value = Number(item.value?.[1] ?? 0)
-      if (!id || timestamp === undefined || value <= 0) return []
-      return [{ id, state: item.metric?.__name__?.includes('failed') ? 'failed' as const : 'passed' as const, observedAt: new Date(timestamp * 1000).toISOString() }]
+      const completedAt = Number(item.value?.[1] ?? 0)
+      const state = item.metric?.openbank_evidence_state
+      if (!id || !Number.isFinite(completedAt) || completedAt <= 0 || (state !== 'passed' && state !== 'failed')) return []
+      const evidenceState: 'passed' | 'failed' = state === 'failed' ? 'failed' : 'passed'
+      return [{ id, state: evidenceState, observedAt: new Date(completedAt * 1000).toISOString() }]
     }).sort((left, right) => right.observedAt.localeCompare(left.observedAt)).slice(0, 10)
   } catch { return [] }
 }
@@ -113,20 +120,29 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
     if (journey.status !== 'active') return journey
     const cronjob = cronjobSelector(journey.id)
     if (!cronjob) return journey
-    const [scheduled, successful, failures, recentRuns] = await Promise.all([
+    // A failure must remain visible for the same evidence window used to judge a
+    // successful run fresh. A fixed 30-minute window made a failed hourly or daily
+    // journey look healthy again while its last successful run was still nominally fresh.
+    const failureWindowSeconds = freshnessLimitSeconds(journey.schedule)
+    const [scheduled, successful, failures, activeJobs, recentRuns] = await Promise.all([
       queryPrometheus(base, `max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="${cronjob}"})`),
       queryPrometheus(base, `max(kube_cronjob_status_last_successful_time{namespace="observability",cronjob="${cronjob}"})`),
       // kube-state-metrics continues exporting terminal Job status until the Job is garbage
       // collected. A historical failed Job therefore remains `1` forever; selecting it with
       // max_over_time makes a later successful schedule look failed. Join on completion time so
       // only a Job which both failed AND completed inside the window is a current failure.
-      queryPrometheus(base, `max((kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} > 0) and on(namespace,job_name) (time() - kube_job_status_completion_time{namespace="observability",job_name=~"${cronjob}.*"} < 1800))`),
+      // An empty vector means no failed Job in the window, not an unavailable Prometheus
+      // observation. Preserve that distinction for both the state machine and the UI count.
+      queryPrometheus(base, `max((kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} > 0) and on(namespace,job_name) (time() - kube_job_status_completion_time{namespace="observability",job_name=~"${cronjob}.*"} < ${failureWindowSeconds})) or vector(0)`),
+      // A reachable Prometheus with no active Jobs must yield zero, not an unavailable value.
+      queryPrometheus(base, `sum(kube_job_status_active{namespace="observability",job_name=~"${cronjob}.*"}) or vector(0)`),
       queryPrometheusRuns(base, cronjob),
     ])
     const observedAt = new Date().toISOString()
     const freshnessSeconds = successful === null ? null : Math.max(0, nowSeconds - successful)
     const state: EvidenceState = failures !== null && failures > 0 ? 'failed'
-      : successful === null ? 'not-run'
+      : successful === null && activeJobs !== null && activeJobs > 0 ? 'unknown'
+        : successful === null ? 'not-run'
         : freshnessSeconds !== null && freshnessSeconds > freshnessLimitSeconds(journey.schedule) ? 'stale' : 'passed'
     return {
       ...journey, state,
@@ -134,7 +150,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
         source: 'prometheus' as const, observedAt,
         lastScheduledAt: scheduled === null ? null : new Date(scheduled * 1000).toISOString(),
         lastSuccessfulAt: successful === null ? null : new Date(successful * 1000).toISOString(),
-        failuresLast30m: failures, freshnessSeconds, recentRuns,
+        failuresWithinWindow: failures, failureWindowSeconds, activeJobs, freshnessSeconds, recentRuns,
       },
     }
   }))
@@ -193,7 +209,8 @@ export async function GET(): Promise<NextResponse> {
         testInfrastructure: component.testInfrastructure ?? { declared: [], observed: [] },
       })),
     }
-    const withJourneys = await attachLiveJourneys(compatible)
+    const current = enforceRuntimeFreshness(compatible)
+    const withJourneys = await attachLiveJourneys(current)
     return NextResponse.json(await attachLiveClientExperience(withJourneys), { headers: { 'Cache-Control': 'no-store' } })
   } catch {
     return NextResponse.json(emptyReport('test-intelligence.json is not bundled'))

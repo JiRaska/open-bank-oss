@@ -32,9 +32,9 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
   const stages: Stage[] = useMemo(() => [
     {
       id: 'change', eyebrow: t('01 · ZMĚNA', '01 · CHANGE'), title: t('Záměr vstupuje', 'Intent enters'),
-      short: t('Commit, vlastník a dopad určují testovací plán.', 'Commit, ownership and impact shape the test plan.'),
+      short: t('Commit, vlastník a path scope určují CI plán.', 'Commit, ownership and path scope shape the CI plan.'),
       proves: t('Známe přesný zdroj, SHA, službu a peněžní dopad.', 'We know the exact source, SHA, service and money-path impact.'),
-      doesNotProve: t('Samotná změna neříká nic o kvalitě.', 'A change alone says nothing about quality.'),
+      doesNotProve: t('Path-scoped CI není per-test impact analýza; predikce zatím nesmí vybírat povinný gate.', 'Path-scoped CI is not per-test impact analysis; a prediction must not select a required gate yet.'),
       icon: GitPullRequest, tone: '#38bdf8',
     },
     {
@@ -54,14 +54,14 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
     {
       id: 'challenge', eyebrow: t('04 · ZÁTĚŽ', '04 · CHALLENGE'), title: t('Systém pod tlakem', 'System under pressure'),
       short: 'k6 · deterministic simulation · sandbox journeys',
-      proves: t('Prahy výkonu a známé bankovní cesty obstály v cílovém prostředí.', 'Performance thresholds and known banking journeys held in the target environment.'),
+      proves: t('Spuštěné prahy výkonu a aktivní cesty dávají důkaz jen pro konkrétní cílové prostředí.', 'Executed performance thresholds and active journeys provide evidence only for their concrete target environment.'),
       doesNotProve: t('Naplánovaný scénář bez běhu není pokrytí.', 'A planned journey without a run is not coverage.'),
       icon: Gauge, tone: '#fb923c',
     },
     {
       id: 'observe', eyebrow: t('05 · PROVOZ', '05 · OBSERVE'), title: t('Skutečná zkušenost', 'Real experience'),
       short: t('Syntetika · traces · mobilní RUM', 'Synthetics · traces · mobile RUM'),
-      proves: t('Telemetrie dorazila z runtime a lze ji spojit s backendovou cestou.', 'Runtime telemetry arrived and can be correlated with the backend journey.'),
+      proves: t('Telemetrie dorazila z runtime; korelace s backendovou cestou vyžaduje konkrétní trace důkaz.', 'Runtime telemetry arrived; correlation to a backend journey requires concrete trace evidence.'),
       doesNotProve: t('Opt-in RUM není test verdict ani reprezentativní počet uživatelů.', 'Opt-in RUM is neither a test verdict nor a representative user count.'),
       icon: Radar, tone: '#2dd4bf',
     },
@@ -84,7 +84,18 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
   const current = stages.find(stage => stage.id === selected) ?? stages[1]
   const evidenced = report?.totals.componentsWithExecutionEvidence ?? 0
   const total = report?.totals.components ?? 0
-  const attention = (report?.totals.failingEvidence ?? 0) + (report?.totals.missingEvidence ?? 0) + (report?.totals.staleEvidence ?? 0)
+  // `unknown`, `not-run` and `blocked` are unresolved evidence, never an implicit green.
+  // The collector/runtime route keeps this total disjoint from failures, missing components and
+  // stale observations, so the hero can expose every state that needs an operator's attention.
+  const componentAttention = (report?.totals.failingEvidence ?? 0) + (report?.totals.missingEvidence ?? 0)
+    + (report?.totals.staleEvidence ?? 0) + (report?.totals.unresolvedEvidence ?? report?.totals.unknownEvidence ?? 0)
+  // The fleet totals cover component evidence only. The journey catalog, performance plans and
+  // per-platform mobile runtime proof are distinct operator surfaces, so a page with only those
+  // gaps must not announce itself healthy just because the component envelope is green.
+  const crossLayerAttention = (report?.performance ?? []).filter(item => item.state !== 'passed' || item.plan?.blocker).length
+    + (report?.syntheticJourneys ?? []).filter(item => item.status === 'planned' || item.state !== 'passed').length
+    + (report?.clientExperiences ?? []).reduce((sum, client) => sum + (client.rum.platforms?.filter(platform => platform.runtime !== 'passed').length ?? 0), 0)
+  const attention = componentAttention + crossLayerAttention
   const activeJourneys = report?.syntheticJourneys.filter(item => item.status === 'active').length ?? 0
   const runtimeProofs = report?.components.reduce((sum, component) => sum + component.testInfrastructure.observed.filter(event => event.lifecycle === 'started').length, 0) ?? 0
   const traceProofs = report?.components.filter(component => component.evidence.some(evidence => evidence.kind === 'trace' && evidence.state === 'passed')).length ?? 0

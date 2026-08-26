@@ -9,6 +9,7 @@ import {
   Gauge, RefreshCw, ShieldCheck, Timer, TriangleAlert, XCircle,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
 import type {
   ComponentTestPosture, EvidenceKind, EvidenceState, TestIntelligenceReport,
 } from '@/lib/types/test-intelligence'
@@ -51,19 +52,17 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
 function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
   const { t } = useLanguage()
   const syntheticActive = report.syntheticJourneys.filter(item => item.status === 'active')
-  const syntheticState: EvidenceState = syntheticActive.some(item => item.state === 'failed') ? 'failed'
-    : syntheticActive.length === 0 ? 'unknown'
-      : syntheticActive.some(item => item.state !== 'passed') ? 'stale' : 'passed'
+  const syntheticState = aggregateEvidenceState(syntheticActive.map(item => item.state))
   const runtimeRows = report.components.filter(component => component.testInfrastructure.declared.length > 0)
   const runtimeState: EvidenceState = runtimeRows.some(component => {
     const observed = component.testInfrastructure.observed
     return observed.filter(item => item.lifecycle === 'stopped').length < observed.filter(item => item.lifecycle === 'started').length
   }) ? 'failed' : runtimeRows.some(component => component.testInfrastructure.observed.length === 0) ? 'unknown' : 'passed'
   const clientEvidence = report.clientExperiences ?? []
-  const clientState: EvidenceState = clientEvidence.some(client => client.evidence.some(item => item.state === 'failed')) ? 'failed'
-    : clientEvidence.some(client => client.rum.state === 'blocked') ? 'blocked'
-      : clientEvidence.some(client => client.rum.state === 'unknown') ? 'unknown'
-        : clientEvidence.length === 0 ? 'not-run' : 'passed'
+  const clientState = aggregateEvidenceState(
+    clientEvidence.flatMap(client => [...client.evidence.map(item => item.state), client.rum.state]),
+    'not-run',
+  )
   const ciState: EvidenceState = report.totals.failingEvidence > 0 ? 'failed'
     : (report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) > 0 ? 'unknown'
       : report.totals.missingEvidence > 0 || report.totals.staleEvidence > 0 ? 'stale' : 'passed'
@@ -83,6 +82,36 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
       <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 10 }}>{card.detail}</div>
       <div style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 650, marginTop: 11 }}>{t('Otevřít důkaz →', 'Open evidence →')}</div>
     </button>)}</div>
+  </section>
+}
+
+/**
+ * A cross-layer attention queue. It is derived from the same immutable report rather than
+ * maintained as another dashboard list: a planned schedule, generic mobile arrival or AI
+ * explanation must not hide the actual missing proof on a different tab.
+ */
+function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
+  const { t } = useLanguage()
+  const gaps: Array<{ id: string; tab: Tab; title: string; detail: string; state: EvidenceState }> = [
+    ...report.performance.filter(row => row.state !== 'passed' || row.plan?.blocker).map(row => ({
+      id: `performance-${row.id}`, tab: 'performance' as const, state: row.state,
+      title: t(`Výkon: ${row.id}`, `Performance: ${row.id}`),
+      detail: row.plan?.blocker ?? row.detail ?? t('Chybí aktuální performance evidence.', 'Current performance evidence is missing.'),
+    })),
+    ...report.syntheticJourneys.filter(row => row.status === 'planned' || row.state !== 'passed').map(row => ({
+      id: `synthetic-${row.id}`, tab: 'synthetic' as const, state: row.state,
+      title: t(`Syntetika: ${row.title}`, `Synthetic: ${row.title}`),
+      detail: row.blocker ?? row.falsifies,
+    })),
+    ...(report.clientExperiences ?? []).flatMap(client => client.rum.platforms?.filter(platform => platform.runtime !== 'passed').map(platform => ({
+      id: `rum-${client.id}-${platform.platform}`, tab: 'clients' as const, state: platform.runtime,
+      title: t(`Mobilní RUM: ${platform.platform}`, `Mobile RUM: ${platform.platform}`), detail: platform.detail,
+    })) ?? []),
+  ]
+  if (gaps.length === 0) return null
+  return <section aria-label={t('Fronta mezer důkazů', 'Evidence gap queue')} style={{ marginBottom: 18, border: '1px solid color-mix(in srgb, #d97706 40%, var(--border))', borderRadius: 14, padding: 16, background: 'linear-gradient(135deg, color-mix(in srgb, #d97706 7%, var(--surface-1)), var(--surface-1))' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', marginBottom: 10 }}><div><strong>{t('Fronta skutečných mezer důkazů', 'Real evidence-gap queue')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Odvozeno z aktuálního reportu — ne backlog podle dojmu. Otevři položku pro zdroj, plán a hranici tvrzení.', 'Derived from the current report — not an impression-based backlog. Open an item for its source, plan and claim boundary.')}</div></div><span style={{ color: '#d97706', fontWeight: 750 }}>{gaps.length}</span></div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 9 }}>{gaps.map(gap => <button key={gap.id} type="button" onClick={() => selectTab(gap.tab)} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, padding: 11, textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 9, background: 'var(--surface-1)' }}><span><strong style={{ fontSize: 12 }}>{gap.title}</strong><span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.35, marginTop: 4 }}>{gap.detail}</span></span><StateBadge state={gap.state} /></button>)}</div>
   </section>
 }
 
@@ -136,12 +165,13 @@ function Execution({ report }: { report: TestIntelligenceReport }) {
     .map(item => ({ component: component.component, ...item })))
   return (
     <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
-      <table style={tableStyle}><thead><tr>{['Component', 'Kind', 'State', 'Discovered', 'Executed', 'Passed', 'Failed', 'Skipped', 'Evidence', 'Observed'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
+      <table style={tableStyle}><thead><tr>{['Component', 'Kind', 'State', 'Discovered', 'Executed', 'Passed', 'Failed', 'Skipped', 'Evidence', 'Diagnostics', 'Observed'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
         <tbody>{rows.map((row, index) => <tr key={`${row.component}-${row.kind}-${index}`}>
           <td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.kind}</td><td style={tdStyle}><StateBadge state={row.state} /></td>
           <td style={tdStyle}>{row.counts?.discovered ?? '—'}</td><td style={tdStyle}>{row.counts?.executed ?? '—'}</td><td style={tdStyle}>{row.counts?.passed ?? '—'}</td>
           <td style={tdStyle}>{row.counts?.failed ?? '—'}</td><td style={tdStyle}>{row.counts?.skipped ?? '—'}</td>
           <td style={tdStyle}>{row.run?.url ? <a href={row.run.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', fontWeight: 650 }}>{row.source}</a> : row.source}<div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{row.detail ?? ''}</div></td>
+          <td style={tdStyle}>{row.diagnostics?.map(item => <div key={item.name}><a href={item.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', fontWeight: 650 }}>{item.kind}</a><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>GitHub-authenticated · {item.retentionDays}d · may contain sensitive browser data</div></div>) ?? '—'}</td>
           <td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt) : '—'}</td>
         </tr>)}</tbody>
       </table>
@@ -300,10 +330,12 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
     {row.live && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 12, padding: 12, borderRadius: 8, background: 'var(--surface-2)', fontSize: 11 }}>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Naposledy naplánováno', 'Last scheduled')}</span><br /><strong>{row.live.lastScheduledAt ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(row.live.lastScheduledAt)) : 'never observed'}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední úspěch', 'Last success')}</span><br /><strong>{row.live.lastSuccessfulAt ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(row.live.lastSuccessfulAt)) : 'never observed'}</strong></div>
-      <div><span style={{ color: 'var(--text-tertiary)' }}>Failures / 30m</span><br /><strong>{row.live.failuresLast30m ?? 'unavailable'}</strong></div>
+      <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Selhání v okně', 'Failures in window')}</span><br /><strong>{row.live.failuresWithinWindow ?? 'unavailable'} / {Math.round(row.live.failureWindowSeconds / 60)} min</strong></div>
+      <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Právě běží', 'Running now')}</span><br /><strong>{row.live.activeJobs ?? 'unavailable'}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Čerstvost evidence', 'Evidence freshness')}</span><br /><strong>{row.live.freshnessSeconds === null ? 'unknown' : `${Math.round(row.live.freshnessSeconds / 60)} min`}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední Kubernetes běhy', 'Recent Kubernetes runs')}</span><br /><strong>{row.live.recentRuns.length || 'none retained'}</strong></div>
     </div>}
+    {row.live?.recentRuns.length ? <div aria-label={t(`Poslední běhy ${row.title}`, `Recent runs for ${row.title}`)} style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 9 }}>{row.live.recentRuns.map(run => <span key={run.id} title={run.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 7px', border: '1px solid var(--border)', borderRadius: 999, background: 'var(--surface-2)', fontSize: 10 }}><StateBadge state={run.state} /><span>{new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(run.observedAt))}</span></span>)}</div> : null}
     {row.ci && <p style={{ fontSize: 11, color: 'var(--text-tertiary)', margin: '10px 0 0' }}><strong>CI / post-deploy:</strong> <StateBadge state={row.ci.state} /> · {row.ci.detail} · <a href={row.ci.run.url} target="_blank" rel="noreferrer">run {row.ci.run.id}</a></p>}
     {row.falsifies && <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '10px 0 0' }}><strong>Falsification:</strong> {row.falsifies}</p>}
     {row.blocker && <p style={{ fontSize: 12, color: '#7c3aed', margin: '10px 0 0' }}><strong>Blocker:</strong> {row.blocker}</p>}
@@ -313,10 +345,10 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
 function ClientExperiences({ report }: { report: TestIntelligenceReport }) {
   const { t } = useLanguage()
   return <div style={{ display: 'grid', gap: 12 }}>{(report.clientExperiences ?? []).map(client => <div key={client.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 18, background: 'var(--surface-1)' }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{client.title}</strong><span style={{ marginLeft: 8, color: 'var(--text-tertiary)', fontSize: 11 }}>{client.platforms.join(' · ')}</span></div><StateBadge state={client.evidence.some(item => item.state === 'failed') ? 'failed' : client.evidence.length ? 'passed' : 'not-run'} /></div>
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginTop: 12 }}>{client.evidence.map((item, index) => <div key={`${item.kind}-${index}`} style={{ padding: 10, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>{item.kind}</strong><div style={{ marginTop: 6 }}><StateBadge state={item.state} /></div>{item.counts && <div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{item.counts.passed}/{item.counts.executed} passed</div>}{item.detail && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{item.detail}</div>}</div>)}</div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{client.title}</strong><span style={{ marginLeft: 8, color: 'var(--text-tertiary)', fontSize: 11 }}>{client.platforms.join(' · ')}</span></div><StateBadge state={aggregateEvidenceState(client.evidence.map(item => item.state), 'not-run')} /></div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginTop: 12 }}>{client.evidence.map((item, index) => <div key={`${item.kind}-${index}`} style={{ padding: 10, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>{item.kind}</strong><div style={{ marginTop: 6 }}><StateBadge state={item.state} /></div>{item.counts && <div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{item.counts.passed}/{item.counts.executed} passed</div>}{item.detail && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{item.detail}</div>}{item.diagnostics?.map(diagnostic => <div key={diagnostic.name} style={{ marginTop: 7 }}><a href={diagnostic.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', fontWeight: 650 }}>{t('Otevřít diagnostiku běhu', 'Open run diagnostics')}</a><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t(`Chráněný GitHub artefakt · ${diagnostic.retentionDays} dní · může obsahovat citlivá browser data`, `GitHub-authenticated artifact · ${diagnostic.retentionDays} days · may contain sensitive browser data`)}</div></div>)}</div>)}</div>
     {client.evidence.length === 0 && <p style={{ fontSize: 12, color: '#d97706', margin: '12px 0 0' }}>{t('Není přibalen důkaz posledního client CI běhu; zdrojový kód se nesmí vydávat za proběhlý test.', 'No latest client-CI evidence is bundled; source code is not represented as a completed test.')}</p>}
-    <div style={{ marginTop: 12, padding: 11, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>RUM</strong><span style={{ marginLeft: 8 }}><StateBadge state={client.rum.state} /></span>{client.rum.source && <span style={{ marginLeft: 8, color: 'var(--text-tertiary)' }}>{client.rum.source} · 7d</span>}<div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{client.rum.detail}</div>{client.rum.sampledSpansLast7d !== undefined && client.rum.sampledSpansLast7d !== null && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{client.rum.sampledSpansLast7d} sampled {client.rum.source === 'tempo' ? 'traces' : 'span-counter increments'} · {client.rum.errorSpansLast7d ?? 'unknown'} error span-counter increments</div>}</div>
+    <div style={{ marginTop: 12, padding: 11, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>RUM</strong><span style={{ marginLeft: 8 }}><StateBadge state={client.rum.state} /></span>{client.rum.source && <span style={{ marginLeft: 8, color: 'var(--text-tertiary)' }}>{client.rum.source} · 7d</span>}<div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{client.rum.detail}</div>{client.rum.sampledSpansLast7d !== undefined && client.rum.sampledSpansLast7d !== null && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{client.rum.sampledSpansLast7d} sampled {client.rum.source === 'tempo' ? 'traces' : 'span-counter increments'} · {client.rum.errorSpansLast7d ?? 'unknown'} error span-counter increments</div>}{client.rum.platforms?.length ? <div aria-label={t('Důkazy mobilních RUM platforem', 'Mobile RUM platform evidence')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 8, marginTop: 10 }}>{client.rum.platforms.map(platform => <div key={platform.platform} style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 7 }}><strong>{platform.platform}</strong><div style={{ display: 'flex', gap: 10, marginTop: 5 }}><span>{t('exportér', 'exporter')} <StateBadge state={platform.capability} /></span><span>{t('runtime', 'runtime')} <StateBadge state={platform.runtime} /></span></div><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 5 }}>{platform.detail}</div></div>)}</div> : null}</div>
     {client.blocker && <p style={{ fontSize: 12, color: '#7c3aed', margin: '10px 0 0' }}><strong>Blocker:</strong> {client.blocker}</p>}
   </div>)}</div>
 }
@@ -337,7 +369,10 @@ export default function TestIntelligencePage() {
       setReport(await response.json() as TestIntelligenceReport)
     } catch { setReport(null) } finally { setLoading(false) }
   }, [])
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(timer)
+  }, [load])
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'posture', label: t('Přehled', 'Posture'), icon: <Activity size={13} /> },
@@ -363,6 +398,7 @@ export default function TestIntelligencePage() {
     />
     <TestIntelligenceFlow report={report} />
     {report && <AssuranceBoard report={report} selectTab={setTab} />}
+    {report && <EvidenceGapQueue report={report} selectTab={setTab} />}
     {report?.warnings.length ? <div style={{ marginBottom: 16, border: '1px solid #d97706', borderRadius: 8, padding: 12, color: '#d97706', fontSize: 12 }}><TriangleAlert size={14} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />{report.warnings.join(' · ')}</div> : null}
     <div role="group" aria-label={t('Přepínač pohledů kvality kódu', 'Code quality view')} style={{ display: 'flex', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>{tabs.map(tabDef => <button key={tabDef.id} type="button"
             aria-pressed={tab === tabDef.id} onClick={() => setTab(tabDef.id)} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '9px 13px', whiteSpace: 'nowrap', border: 'none', borderBottom: tab === tabDef.id ? '2px solid var(--accent)' : '2px solid transparent', background: 'none', color: tab === tabDef.id ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontWeight: tab === tabDef.id ? 650 : 450 }}><span aria-hidden="true">{tabDef.icon}</span>{tabDef.label}</button>)}</div>

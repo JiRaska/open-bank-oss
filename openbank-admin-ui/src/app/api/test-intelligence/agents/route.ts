@@ -7,6 +7,8 @@ import type { EvidenceKind, EvidenceState, TestAgentFinding } from '@/lib/types/
 import type { TestIntelligenceReport } from '@/lib/types/test-intelligence'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { runtimeFreshnessState } from '@/lib/test-intelligence-freshness'
+import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,13 +32,42 @@ const AGENT_SEVERITIES = new Set<TestAgentFinding['severity']>(['WARNING', 'CRIT
 const MAX_AGENT_TEXT = 1_000
 const MAX_AGENT_COUNT = 2_147_483_647
 
+type AgentGovernance = {
+  activePrompt: string | null
+  evalEvidence: 'recorded' | 'awaiting-recording' | 'missing-suite' | 'unavailable'
+}
+
+const stringList = (value: unknown): string[] => Array.isArray(value)
+  ? value.filter((item): item is string => typeof item === 'string')
+  : []
+
+function agentGovernance(): AgentGovernance {
+  try {
+    const facts = loadAiGovernanceSnapshot().facts as Record<string, unknown>
+    const prompts = facts.promptRegistryCoverage as Record<string, unknown> | undefined
+    const evals = facts.evals as Record<string, unknown> | undefined
+    const byCharter = prompts?.promptsByCharter as Record<string, unknown> | undefined
+    const registeredPrompts = stringList(byCharter?.['flaky-test-hunter'])
+    const hasSuite = stringList(evals?.suiteCharters).includes('flaky-test-hunter')
+    const hasRecording = stringList(evals?.recordedCharters).includes('flaky-test-hunter')
+    return {
+      activePrompt: registeredPrompts.at(-1) ?? null,
+      evalEvidence: hasRecording ? 'recorded' : hasSuite ? 'awaiting-recording' : 'missing-suite',
+    }
+  } catch {
+    return { activePrompt: null, evalEvidence: 'unavailable' }
+  }
+}
+
 const boundedCount = (value: unknown): number => typeof value === 'number' && Number.isFinite(value)
   ? Math.min(MAX_AGENT_COUNT, Math.max(0, Math.round(value))) : 0
 
-const safeEvidence = (items: ReadonlyArray<{ kind: string; state: string }> | undefined) =>
+const safeEvidence = (items: ReadonlyArray<{ kind: string; state: string; observedAt?: string | null }> | undefined) =>
   (items ?? []).map(item => ({
     kind: EVIDENCE_KINDS.has(item.kind) ? item.kind : 'unknown',
-    state: EVIDENCE_STATES.has(item.state) ? item.state : 'unknown',
+    state: EVIDENCE_STATES.has(item.state)
+      ? runtimeFreshnessState(item.state as EvidenceState, item.observedAt)
+      : 'unknown',
   }))
 
 const boundedText = (value: unknown): string | null => {
@@ -50,7 +81,18 @@ const safeProposalUrl = (value: unknown): string | null => {
   if (!text) return null
   try {
     const parsed = new URL(text)
-    return parsed.protocol === 'https:' ? parsed.toString() : null
+    const parts = parsed.pathname.split('/')
+    return parsed.protocol === 'https:'
+      && parsed.hostname === 'github.com'
+      && !parsed.search
+      && !parsed.hash
+      && parts.length === 5
+      && parts[1] === 'JiRaska'
+      && parts[2] === 'open-bank-oss'
+      && parts[3] === 'pull'
+      && /^\d+$/.test(parts[4])
+      ? parsed.toString()
+      : null
   } catch { return null }
 }
 
@@ -86,10 +128,10 @@ export async function GET(): Promise<NextResponse> {
     const response = await fetch(`${flakyHunterBase()}/api/v1/flaky-test-hunter/findings`, {
       headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000),
     })
-    if (!response.ok) return NextResponse.json({ findings: [], available: false })
-    return NextResponse.json({ findings: safeFindings(await response.json()), available: true })
+    if (!response.ok) return NextResponse.json({ findings: [], available: false, governance: agentGovernance() })
+    return NextResponse.json({ findings: safeFindings(await response.json()), available: true, governance: agentGovernance() })
   } catch {
-    return NextResponse.json({ findings: [], available: false })
+    return NextResponse.json({ findings: [], available: false, governance: agentGovernance() })
   }
 }
 
@@ -142,9 +184,9 @@ export async function POST(): Promise<NextResponse> {
       method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload), signal: AbortSignal.timeout(30_000),
     })
-    if (!response.ok) return NextResponse.json({ findings: [], available: false }, { status: 502 })
-    return NextResponse.json({ findings: safeFindings(await response.json()), available: true })
+    if (!response.ok) return NextResponse.json({ findings: [], available: false, governance: agentGovernance() }, { status: 502 })
+    return NextResponse.json({ findings: safeFindings(await response.json()), available: true, governance: agentGovernance() })
   } catch {
-    return NextResponse.json({ findings: [], available: false }, { status: 502 })
+    return NextResponse.json({ findings: [], available: false, governance: agentGovernance() }, { status: 502 })
   }
 }

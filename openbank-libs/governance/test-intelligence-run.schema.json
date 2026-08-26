@@ -15,7 +15,10 @@
         "commit": { "type": "string", "minLength": 7 },
         "branch": { "type": "string", "minLength": 1 },
         "workflow": { "type": "string", "minLength": 1 },
-        "url": { "type": "string" },
+        "url": {
+          "type": "string",
+          "pattern": "^(|https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[^/?#]+)$"
+        },
         "observedAt": { "type": "string", "format": "date-time" }
       },
       "additionalProperties": false
@@ -33,7 +36,8 @@
       },
       "additionalProperties": false
     },
-    "specializedEvidence": { "type": "array", "items": { "$ref": "#/$defs/specializedEvidence" } }
+    "specializedEvidence": { "type": "array", "items": { "$ref": "#/$defs/specializedEvidence" } },
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnosticArtifact" } }
   },
   "$defs": {
     "coverageObservation": {
@@ -104,6 +108,23 @@
         "state": { "enum": ["passed", "failed", "skipped", "not-run", "blocked", "unknown"] },
         "source": { "type": "string", "minLength": 1 },
         "detail": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "diagnosticArtifact": {
+      "type": "object",
+      "required": ["kind", "suiteKind", "name", "url", "retentionDays", "access", "mayContainSensitiveData"],
+      "properties": {
+        "kind": { "const": "playwright-report" },
+        "suiteKind": { "const": "e2e" },
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+        "url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[^/?#]+#artifacts$"
+        },
+        "retentionDays": { "const": 7 },
+        "access": { "const": "github-run-authenticated" },
+        "mayContainSensitiveData": { "const": true }
       },
       "additionalProperties": false
     }

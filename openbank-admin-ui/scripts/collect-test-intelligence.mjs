@@ -18,6 +18,7 @@ const arg = (name, fallback) => {
 const repo = path.resolve(arg('--repo', path.resolve(here, '..', '..')))
 const out = path.resolve(arg('--out', path.resolve(here, '..', 'test-intelligence.json')))
 const staleAfterMs = Number(arg('--stale-after-days', '14')) * 86_400_000
+const maxFutureSkewMs = 5 * 60_000
 const collectedAt = new Date()
 const warnings = []
 
@@ -25,15 +26,52 @@ const exists = file => fs.existsSync(file)
 const readJson = file => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return null }
 }
+const trustedRunUrl = (value, runId) => {
+  if (!value) return false
+  try {
+    const url = new URL(String(value))
+    const parts = url.pathname.split('/')
+    return url.protocol === 'https:' && url.hostname === 'github.com'
+      && !url.search && !url.hash
+      && parts.length === 6 && Boolean(parts[1]) && Boolean(parts[2])
+      && parts[3] === 'actions' && parts[4] === 'runs' && parts[5] === String(runId)
+  } catch { return false }
+}
+const unsafeRunWarnings = new Set()
+const safeRun = (run, source) => {
+  if (!run || !trustedRunUrl(run.url, run.id)) {
+    if (run && !unsafeRunWarnings.has(source)) {
+      warnings.push(`untrusted run URL omitted: ${source}`)
+      unsafeRunWarnings.add(source)
+    }
+    return undefined
+  }
+  return { ...run, id: String(run.id), attempt: Number(run.attempt), url: String(run.url) }
+}
 const observedAt = file => {
   try { return fs.statSync(file).mtime.toISOString() } catch { return null }
 }
 const stateFrom = (failed, executed, at) => {
   if (!at) return 'not-run'
   if (failed > 0) return 'failed'
+  const observed = Date.parse(at)
+  if (!Number.isFinite(observed)) return 'not-run'
+  if (observed - collectedAt.getTime() > maxFutureSkewMs) return 'unknown'
   if (executed === 0) return 'skipped'
-  if (collectedAt.getTime() - new Date(at).getTime() > staleAfterMs) return 'stale'
+  if (collectedAt.getTime() - observed > staleAfterMs) return 'stale'
   return 'passed'
+}
+const freshnessAwareState = (state, at) => {
+  // An old failure or explicit control gap remains actionable; age must never
+  // launder it into a weaker verdict. Conversely, a successful observation is
+  // not evergreen just because its signed envelope is retained longer than the
+  // fleet freshness budget.
+  if (state === 'failed' || state === 'blocked' || state === 'unknown' || state === 'not-run') return state
+  const observed = Date.parse(at ?? '')
+  if (!Number.isFinite(observed)) return 'not-run'
+  if (observed - collectedAt.getTime() > maxFutureSkewMs) return 'unknown'
+  if (collectedAt.getTime() - observed > staleAfterMs) return 'stale'
+  return state
 }
 
 function releasedComponents() {
@@ -121,18 +159,20 @@ function runEnvelope(component) {
   const file = path.join(repo, component, 'build', 'test-intelligence', 'run.json')
   const run = readJson(file)
   if (!run || run.schemaVersion !== 1 || run.component !== component || !Array.isArray(run.suites)) return null
-  const provenance = run.run ? {
-    id: String(run.run.id), attempt: Number(run.run.attempt), commit: String(run.run.commit),
-    branch: String(run.run.branch), workflow: String(run.run.workflow), url: String(run.run.url),
-  } : undefined
+  const provenance = safeRun(run.run, component)
   return {
     evidence: [...run.suites.map(suite => ({
-      kind: suite.kind, state: suite.state, observedAt: run.run?.observedAt ?? observedAt(file),
+      kind: suite.kind, state: freshnessAwareState(suite.state, run.run?.observedAt ?? observedAt(file)), observedAt: run.run?.observedAt ?? observedAt(file),
       source: 'test-intelligence-run:v1', environment: 'ci', durationMs: suite.durationMs,
       counts: { discovered: suite.discovered, executed: suite.executed, passed: suite.passed,
         failed: suite.failed, skipped: suite.skipped, errors: suite.errors }, run: provenance,
+      diagnostics: (run.diagnostics ?? []).filter(item => item.suiteKind === suite.kind
+        && provenance?.url && item.url === `${provenance.url}#artifacts`).map(item => ({
+        kind: item.kind, name: item.name, url: item.url, retentionDays: item.retentionDays,
+        access: item.access, mayContainSensitiveData: item.mayContainSensitiveData,
+      })),
     })), ...(run.specializedEvidence ?? []).map(item => ({
-      kind: item.kind, state: item.state, observedAt: run.run?.observedAt ?? observedAt(file),
+      kind: item.kind, state: freshnessAwareState(item.state, run.run?.observedAt ?? observedAt(file)), observedAt: run.run?.observedAt ?? observedAt(file),
       source: item.source, environment: 'ci', detail: item.detail, run: provenance,
     }))],
     coverage: run.coverage ? {
@@ -253,7 +293,7 @@ function contracts() {
   const quality = readJson(path.join(repo, 'openbank-admin-ui', 'quality-report.json'))
   if (quality?.contracts) return quality.contracts.map(item => ({
     consumer: item.consumer, provider: item.provider, pactFile: item.pactFile,
-    state: item.status === 'pending' ? 'unknown' : item.status,
+    state: item.status === 'pending' ? 'unknown' : freshnessAwareState(item.status, item.verifiedAt),
     observedAt: item.verifiedAt ?? null, interactions: item.interactions?.length ?? 0,
     verificationDetail: item.status === 'pending'
       ? 'Pact Broker provider-verification verdict was unavailable when this immutable deployment snapshot was built. This is not a passing result.'
@@ -285,11 +325,14 @@ async function mutations(components) {
     const at = observedAt(file)
     const mutationRun = readJson(path.join(path.dirname(file), 'test-intelligence-run.json'))
     const specialized = mutationRun?.specializedEvidence?.find(item => item.kind === 'mutation')
+    const provenance = safeRun(mutationRun?.run, `mutation:${component}`)
     result.push({
-      component, state: specialized?.state ?? stateFrom(0, items.length, at), observedAt: mutationRun?.run?.observedAt ?? at,
+      component, state: specialized
+        ? freshnessAwareState(specialized.state, mutationRun?.run?.observedAt ?? at)
+        : stateFrom(0, items.length, at), observedAt: mutationRun?.run?.observedAt ?? at,
       total: items.length, killed, survived, noCoverage,
       score: items.length ? Math.round((killed / items.length) * 10_000) / 100 : null,
-      ...(mutationRun?.run ? { run: mutationRun.run } : {}),
+      ...(provenance ? { run: provenance } : {}),
     })
   }
   return result
@@ -363,9 +406,12 @@ function performance() {
       requests: number(summary.metrics?.http_reqs?.values?.count ?? summary.metrics?.http_reqs?.count),
     } : undefined
     const at = summaryFile ? observedAt(summaryFile) : null
+    const provenance = safeRun(performanceRun?.run ?? summaryMeta?.run, `performance:${id}`)
     return {
       id, component,
-      state: specialized?.state ?? (summary ? stateFrom(failed, 1, at) : 'not-run'),
+      state: specialized
+        ? freshnessAwareState(specialized.state, performanceRun?.run?.observedAt ?? at)
+        : (summary ? stateFrom(failed, 1, at) : 'not-run'),
       observedAt: performanceRun?.run?.observedAt ?? at,
       source: path.relative(repo, file), thresholds,
       ...(plan ? { plan: {
@@ -379,7 +425,7 @@ function performance() {
       detail: specialized?.detail ?? (summary
         ? `${thresholdResults.length} threshold result(s), ${failed} breached`
         : 'Scenario is declared; the latest k6 run artifact is not bundled into this image.'),
-      ...((performanceRun?.run ?? summaryMeta?.run) ? { run: performanceRun?.run ?? summaryMeta.run } : {}),
+      ...(provenance ? { run: provenance } : {}),
     }
   })
 }
@@ -393,11 +439,13 @@ function syntheticJourneys() {
       .map(readJson).filter(item => item?.schemaVersion === 1 && item?.run)
       .sort((a, b) => Date.parse(a.run.observedAt) - Date.parse(b.run.observedAt))
     for (const envelope of history) {
+      const provenance = safeRun(envelope.run, `synthetic:${envelope.component ?? 'unknown'}`)
       for (const evidence of envelope.specializedEvidence ?? []) {
         if (evidence.kind !== 'synthetic' || !evidence.source?.startsWith('journey:')) continue
         latestCi.set(evidence.source.slice('journey:'.length), {
-          state: evidence.state, observedAt: envelope.run.observedAt,
-          detail: evidence.detail ?? 'Synthetic run retained without detail.', run: envelope.run,
+          state: freshnessAwareState(evidence.state, envelope.run.observedAt), observedAt: envelope.run.observedAt,
+          detail: evidence.detail ?? 'Synthetic run retained without detail.',
+          ...(provenance ? { run: provenance } : {}),
         })
       }
     }
@@ -455,10 +503,7 @@ function clientEvidenceState(suite, observedAt) {
   // A private-client artifact is immutable CI evidence, but it is still only
   // useful while it is recent.  Do not turn a recorded failure into "stale":
   // the failure remains the more important operator verdict.
-  if (suite.state === 'failed') return 'failed'
-  if (!observedAt) return 'not-run'
-  if (collectedAt.getTime() - new Date(observedAt).getTime() > staleAfterMs) return 'stale'
-  return suite.state
+  return freshnessAwareState(suite.state, observedAt)
 }
 
 async function clientExperiences() {
@@ -476,15 +521,33 @@ async function clientExperiences() {
     }
   }
   const appSource = path.join(repo, '.app-src')
+  const appSourceAvailable = exists(appSource)
   const androidRum = exists(path.join(appSource, 'shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt'))
   const iosRum = exists(path.join(appSource, 'shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt'))
+  // Tempo's bounded arrival projection deliberately does not query `os.*`: the current
+  // gateway retains such attributes only when a newly built consented client happens to
+  // be sampled, and older clients are allowed to omit them. A generic openbank-app trace
+  // is therefore not evidence for either Android or iOS individually (ADR-0088 D4).
+  const platformRum = (platform, implemented) => ({
+    platform,
+    capability: implemented ? 'passed' : appSourceAvailable ? 'not-run' : 'unknown',
+    runtime: 'unknown',
+    detail: implemented
+      ? `${platform === 'android' ? 'Android' : 'iOS'} exporter exists in the staged client source; generic Tempo arrival cannot attribute a sampled trace to this OS.`
+      : appSourceAvailable
+        ? `${platform === 'android' ? 'Android' : 'iOS'} exporter was not found in the staged client source.`
+        : 'Client source was not staged for this deployment; platform capability is unknown.',
+  })
   const webEvidence = runEnvelope('openbank-admin-ui')?.evidence ?? await junitEvidence('openbank-admin-ui')
-  const mobileEvidence = [...latestMobileSuites.values()].map(({ suite: item, run }) => ({
-    kind: item.kind, state: clientEvidenceState(item, run.run?.observedAt ?? null), observedAt: run.run?.observedAt ?? null,
-    source: 'openbank-app-test-intelligence:v1', environment: 'ci', durationMs: item.durationMs,
-    counts: item.counts, detail: item.detail,
-    ...(run.run ? { run: run.run } : {}),
-  }))
+  const mobileEvidence = [...latestMobileSuites.values()].map(({ suite: item, run }) => {
+    const provenance = safeRun(run.run, `client:${run.component ?? 'openbank-app'}`)
+    return {
+      kind: item.kind, state: clientEvidenceState(item, run.run?.observedAt ?? null), observedAt: run.run?.observedAt ?? null,
+      source: 'openbank-app-test-intelligence:v1', environment: 'ci', durationMs: item.durationMs,
+      counts: item.counts, detail: item.detail,
+      ...(provenance ? { run: provenance } : {}),
+    }
+  })
   if (!latestMobile) warnings.push('openbank-app execution artifact is not bundled; mobile test verdict is not inferred from source.')
   return [
     {
@@ -500,6 +563,7 @@ async function clientExperiences() {
       rum: {
         state: androidRum || iosRum ? 'unknown' : 'not-run', policy: 'consent-gated', observedAt: null,
         source: null, sampledSpansLast7d: null, errorSpansLast7d: null,
+        platforms: [platformRum('android', androidRum), platformRum('ios', iosRum)],
         detail: androidRum || iosRum
           ? `Mobile RUM is implemented in source for ${androidRum ? 'Android' : ''}${androidRum && iosRum ? ' and ' : ''}${iosRum ? 'iOS' : ''}; runtime arrival is intentionally not inferred from a CI artifact.`
           : 'openbank-app source was not staged for this deployment, so RUM implementation status is unknown.',
@@ -589,18 +653,24 @@ async function main() {
     `${item.component}:${item.run.id}:${item.run.attempt}`, item,
   ]))
   const serviceRunHistory = [...uniqueServiceRuns.values()]
-    .map(item => ({ component: item.component, run: item.run,
-      states: Object.fromEntries([
-        ...(item.suites ?? []).map(suite => [suite.kind, suite.state]),
-        ...(item.specializedEvidence ?? []).map(evidence => [evidence.kind, evidence.state]),
-      ]),
-      infrastructureStarted: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'started').length,
-      infrastructureStopped: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'stopped').length }))
-  const clientRunHistory = mobileClientRuns().map(item => ({
-    component: item.component, run: item.run,
-    states: Object.fromEntries((item.suites ?? []).map(suite => [suite.kind, suite.state])),
-    infrastructureStarted: 0, infrastructureStopped: 0,
-  }))
+    .map(item => {
+      const run = safeRun(item.run, `history:${item.component}`)
+      return run ? { component: item.component, run,
+        states: Object.fromEntries([
+          ...(item.suites ?? []).map(suite => [suite.kind, suite.state]),
+          ...(item.specializedEvidence ?? []).map(evidence => [evidence.kind, evidence.state]),
+        ]),
+        infrastructureStarted: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'started').length,
+        infrastructureStopped: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'stopped').length } : null
+    }).filter(Boolean)
+  const clientRunHistory = mobileClientRuns().map(item => {
+    const run = safeRun(item.run, `history:${item.component ?? 'openbank-app'}`)
+    return run ? {
+      component: item.component, run,
+      states: Object.fromEntries((item.suites ?? []).map(suite => [suite.kind, suite.state])),
+      infrastructureStarted: 0, infrastructureStopped: 0,
+    } : null
+  }).filter(Boolean)
   const runHistory = [...serviceRunHistory, ...clientRunHistory]
     .sort((a, b) => Date.parse(b.run.observedAt) - Date.parse(a.run.observedAt)).slice(0, 500)
   const report = {

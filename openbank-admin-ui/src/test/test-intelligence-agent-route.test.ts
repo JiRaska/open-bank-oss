@@ -17,7 +17,11 @@ describe('Test Intelligence agent BFF', () => {
     vi.stubGlobal('fetch', fetchMock)
     const { GET } = await import('@/app/api/test-intelligence/agents/route')
     const body = await (await GET()).json()
-    expect(body).toEqual({ findings: [{ ...finding, checkType: 'advisory', detectedAt: '', rootCause: null, proposalUrl: null, status: 'open' }], available: true })
+    expect(body).toEqual({
+      findings: [{ ...finding, checkType: 'advisory', detectedAt: '', rootCause: null, proposalUrl: null, status: 'open' }],
+      available: true,
+      governance: { activePrompt: 'system.v2', evalEvidence: 'missing-suite' },
+    })
     expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Authorization')).toBe('Bearer viewer-token')
   })
 
@@ -45,9 +49,9 @@ describe('Test Intelligence agent BFF', () => {
     writeFileSync(file, JSON.stringify({
       schemaVersion: 1, collectedAt: '2026-08-22T10:00:00Z',
       components: [{ component: 'openbank-ledger-service', moneyPath: true,
-        evidence: [{ kind: 'integration', state: 'stale', source: '/private/path' }],
+        evidence: [{ kind: 'integration', state: 'passed', observedAt: '2020-01-01T00:00:00Z', source: '/private/path' }],
         testInfrastructure: { declared: ['postgres'], observed: [{ lifecycle: 'started' }] } }],
-      clientExperiences: [{ id: 'openbank-app', evidence: [{ kind: 'visual', state: 'passed', source: '/private/app/path' }],
+      clientExperiences: [{ id: 'openbank-app', evidence: [{ kind: 'visual', state: 'passed', observedAt: new Date().toISOString(), source: '/private/app/path' }],
         rum: { state: 'passed', detail: '12 sampled spans', sampledSpansLast7d: 12 } }],
       testCases: [
         { component: 'openbank-ledger-service', state: 'flaky', sameCommitTransitions: 2, wastedDurationMs: 1250, name: 'private test name', fingerprint: 'private-fingerprint' },
@@ -107,6 +111,8 @@ describe('Test Intelligence agent BFF', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([
       { id: 'safe-1', component: 'openbank-ledger-service', title: 'Investigate retry', severity: 'CRITICAL', rootCause: 'timeout', proposalUrl: 'https://github.com/JiRaska/open-bank-oss/pull/1' },
       { id: 'unsafe-link', component: 'openbank-ledger-service', title: 'Do not render a command', severity: 'WARNING', proposalUrl: 'javascript:alert(1)' },
+      { id: 'phishing-link', component: 'openbank-ledger-service', title: 'Do not leave the repository boundary', severity: 'WARNING', proposalUrl: 'https://attacker.example/pull/1' },
+      { id: 'lookalike-link', component: 'openbank-ledger-service', title: 'Do not trust lookalike paths', severity: 'WARNING', proposalUrl: 'https://github.com/attacker/open-bank-oss/pull/1' },
       { id: 'invalid-component', component: '../outside', title: 'Reject', severity: 'WARNING' },
       { id: 'invalid-severity', component: 'openbank-ledger-service', title: 'Reject', severity: 'PASSED' },
     ]), { status: 200 }))
@@ -116,6 +122,8 @@ describe('Test Intelligence agent BFF', () => {
     expect(body.findings).toEqual([
       expect.objectContaining({ id: 'safe-1', proposalUrl: 'https://github.com/JiRaska/open-bank-oss/pull/1' }),
       expect.objectContaining({ id: 'unsafe-link', proposalUrl: null }),
+      expect.objectContaining({ id: 'phishing-link', proposalUrl: null }),
+      expect.objectContaining({ id: 'lookalike-link', proposalUrl: null }),
     ])
   })
 })
