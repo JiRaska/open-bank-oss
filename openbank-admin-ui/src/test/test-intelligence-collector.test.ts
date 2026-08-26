@@ -78,9 +78,10 @@ money_path_accountability:
 scenarios:
   - id: money-path-smoke
     definition: perf/k6/money-path-smoke.js
-    execution_mode: scheduled-read-only
+    execution_mode: planned-read-only-sandbox
     safety_boundary: read-only target only
     target_schedule: "0 5 * * *"
+    blocker: no safe target or runner configured
 `)
     write(repo, 'openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json', JSON.stringify({
       schemaVersion: 1,
@@ -126,7 +127,7 @@ scenarios:
     expect(report.performance.find(item => item.id === 'breached')).toMatchObject({ state: 'failed', detail: '1 threshold result(s), 1 breached' })
     expect(report.performance.find(item => item.id === 'money-path-smoke')).toMatchObject({
       state: 'not-run', detail: 'No safe money-path target is configured for this GitHub-hosted runner.', run: { id: 'baseline-7', workflow: 'Perf baseline' },
-      plan: { executionMode: 'scheduled-read-only', safetyBoundary: 'read-only target only', targetSchedule: '0 5 * * *' },
+      plan: { executionMode: 'planned-read-only-sandbox', safetyBoundary: 'read-only target only', targetSchedule: '0 5 * * *', blocker: 'no safe target or runner configured' },
     })
     expect(report.clientExperiences).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'admin-ui', rum: expect.objectContaining({ policy: 'rejected' }) }),

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const read = () => readFileSync(path.join(process.cwd(), 'src/app/system/tests/page.tsx'), 'utf8')
+const root = () => path.resolve(process.cwd(), '..')
 
 describe('Test Intelligence performance coverage scope', () => {
   it('keeps declared, executed, and undeclared performance scope visible', () => {
@@ -13,5 +14,15 @@ describe('Test Intelligence performance coverage scope', () => {
     expect(source).toContain("const undeclared = report.components.filter(component => !declaredComponents.has(component.component)).length")
     expect(source).toContain("t('Rozsah výkonnostních důkazů', 'Performance evidence scope')")
     expect(source).toContain("t('komponent bez deklarovaného scénáře', 'components without a declared scenario')")
+  })
+
+  it('does not describe the blocked money-path smoke as a running scheduled measurement', () => {
+    const scenarios = readFileSync(path.join(root(), 'perf/scenarios.yaml'), 'utf8')
+    const workflow = readFileSync(path.join(root(), '.github/workflows/perf-gate.yml'), 'utf8')
+
+    expect(scenarios).toContain('id: money-path-smoke')
+    expect(scenarios).toContain('execution_mode: planned-read-only-sandbox')
+    expect(scenarios).toContain('blocker: No isolated authenticated read-only money-path target')
+    expect(workflow).toContain('DECLARED = ["openbank-product-catalog"]')
   })
 })
