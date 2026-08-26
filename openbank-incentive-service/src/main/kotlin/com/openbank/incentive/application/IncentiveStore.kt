@@ -10,6 +10,7 @@ import java.util.UUID
 interface IncentiveStore {
     suspend fun createOffer(offer: IncentiveOffer): IncentiveOffer
     suspend fun findOffer(id: UUID): IncentiveOffer?
+    suspend fun listPublishedOffers(): List<IncentiveOffer>
     suspend fun submitOffer(id: UUID, actor: String): IncentiveOffer
     suspend fun publishOffer(id: UUID, actor: String, at: Instant): IncentiveOffer
     suspend fun addCodes(offerId: UUID, digests: Set<CodeDigest>, actor: String, at: Instant): Int

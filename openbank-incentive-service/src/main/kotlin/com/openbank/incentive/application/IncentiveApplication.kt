@@ -20,6 +20,7 @@ import java.util.UUID
 
 @ApplicationScoped
 @Startup
+@Suppress("TooManyFunctions") // One cohesive lifecycle facade; each operation remains an explicit use case.
 class IncentiveApplication(
     private val store: IncentiveStore,
     private val metrics: IncentiveMetrics,
@@ -48,6 +49,8 @@ class IncentiveApplication(
         store.publishOffer(id, actor, now).also {
             metrics.offerPublished()
         }
+    suspend fun findOffer(id: UUID) = store.findOffer(id)
+    suspend fun listPublishedOffers() = store.listPublishedOffers()
 
     suspend fun addCodes(id: UUID, codes: List<String>, actor: String, now: Instant = Instant.now()): Int {
         require(codes.isNotEmpty() && codes.none { it.isBlank() }) { "codes are required" }

@@ -9,6 +9,7 @@ import com.openbank.incentive.domain.ReservationStatus
 import com.openbank.incentive.domain.StackingPolicy
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -45,8 +46,19 @@ data class ReservationResponse(
 @Path("/api/v1/incentives")
 @ApplicationScoped
 @RolesAllowed("ROLE_OPERATOR")
+@Suppress("TooManyFunctions") // Each method is a separately governed HTTP lifecycle operation.
 class IncentiveResource(private val application: IncentiveApplication, private val identity: JsonWebToken) {
     private fun actor() = identity.name
+
+    @GET
+    @Path("/offers")
+    suspend fun listPublished(): Response = Response.ok(mapOf("items" to application.listPublishedOffers())).build()
+
+    @GET
+    @Path("/offers/{id}")
+    suspend fun getOffer(@PathParam("id") id: UUID): Response = application.findOffer(id)
+        ?.let { Response.ok(it).build() }
+        ?: Response.status(Response.Status.NOT_FOUND).build()
 
     @POST
     @Path("/offers")

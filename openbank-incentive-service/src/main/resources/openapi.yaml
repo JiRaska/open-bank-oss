@@ -1,10 +1,22 @@
 openapi: 3.0.3
 info:
   title: OpenBank Incentive Service
-  version: 1.0.0
+  version: 1.1.0
   description: Governed fixed-benefit offers and opaque promo-code reservations.
 paths:
   /api/v1/incentives/offers:
+    get:
+      summary: List immutable published incentive offers for governed catalogue selection
+      responses:
+        "200":
+          description: Published offers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Offer'}}
     post:
       summary: Create a versioned draft incentive offer
       requestBody:
@@ -15,6 +27,13 @@ paths:
       responses:
         "201": {description: Draft created, content: {application/json: {schema: {$ref: '#/components/schemas/Offer'}}}}
         "400": {description: Invalid offer}
+  /api/v1/incentives/offers/{id}:
+    get:
+      summary: Resolve an immutable incentive offer reference
+      parameters: [{$ref: '#/components/parameters/OfferId'}]
+      responses:
+        "200": {description: Offer found, content: {application/json: {schema: {$ref: '#/components/schemas/Offer'}}}}
+        "404": {description: Offer not found}
   /api/v1/incentives/offers/{id}/submit:
     post:
       summary: Submit an offer for independent approval
