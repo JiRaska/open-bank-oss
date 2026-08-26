@@ -328,8 +328,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
   // fleet's first 202/X-Approval-Id UI flow; a real approval notification channel is a separate,
   // larger piece of work). We hold the EXACT request that was paused: the retry must resend the
   // byte-identical body (the interceptor binds the approval to the request's content), and the
-  // maker relays `approvalId` to a colleague, who decides it on the Notifications page. The maker
-  // then clicks "Retry send".
+  // Approval Centre exposes the request to a different operator, who decides it in the
+  // Notifications workspace. The maker then clicks "Retry send".
   const [pendingSubmit, setPendingSubmit] = useState<{ request: ComposeMessageRequest; approvalId: string } | null>(null)
   const [retrying, setRetrying] = useState(false)
 
@@ -451,11 +451,13 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                   <RefreshCw size={13} aria-hidden="true" /> {retrying ? t('Zkouším…', 'Retrying…') : t('Zkusit znovu odeslat', 'Retry send')}
                 </button>
               </div>
-              {/* No backend endpoint lists pending approvals (ApprovalStore has no query), so the
-                  checker cannot discover this from a queue — the maker relays the id out of band. */}
               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                {t('Předejte toto ID schválení druhému operátorovi:', 'Give this approval id to a second operator:')}{' '}
+                {t('Žádost se automaticky zobrazí jinému operátorovi v Centru schvalování. ID pro dohledání:', 'The request automatically appears for another operator in the Approval Centre. Tracking ID:')}{' '}
                 <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{pendingSubmit.approvalId}</span>
+                {' · '}
+                <Link href="/approvals" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
+                  {t('Otevřít Centrum schvalování', 'Open Approval Centre')}
+                </Link>
               </div>
             </div>
           ) : (

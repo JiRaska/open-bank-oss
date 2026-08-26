@@ -138,9 +138,9 @@ export interface ApprovalDecision {
 
 export const opsMessageApi = {
   // 201 -> {status:'SENT', id}. 202 (four-eyes on) -> {status:'PENDING_APPROVAL', approvalId}:
-  // relay that id to a DIFFERENT operator to decide, then replay this exact request (same body)
-  // with `approvalId` set — the interceptor binds the approval to the request's content, so the
-  // retry must be byte-identical or it mints a fresh pending approval.
+  // a DIFFERENT operator discovers and decides it through the Approval Centre; the maker then
+  // replays this exact request (same body) with `approvalId` set. The interceptor binds the
+  // approval to the request's content, so the retry must be byte-identical or it mints a fresh one.
   compose: async (req: ComposeMessageRequest, approvalId?: string): Promise<ComposeResult> => {
     const res = await fetch(`${NOTIFICATION_SERVICE}/api/v1/notifications/messages`, {
       method: 'POST',
@@ -161,7 +161,7 @@ export const opsMessageApi = {
   // Checker decision (ApprovalResource.decide): one PATCH with an approve boolean. Self-approval
   // is refused server-side (403); an unknown/already-decided id is 404/409 — all thrown here.
   decide: (id: string, approve: boolean) =>
-    apiFetchSimple<ApprovalDecision>(`${NOTIFICATION_SERVICE}/api/v1/notifications/approvals/${id}`, {
+    apiFetchSimple<ApprovalDecision>(`${NOTIFICATION_SERVICE}/api/v1/notifications/approvals/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify({ approve }),
     }),
@@ -268,4 +268,3 @@ export async function fetchAllServiceSnapshots(): Promise<ServiceSnapshot[]> {
     return SERVICES.map(s => ({ name: s.name, port: s.port, info: null, health: null, rateLimitMax: null, rateLimitRemaining: null, apiVersion: null, latencyMs: null, reachable: false }))
   }
 }
-
