@@ -102,6 +102,9 @@ openbank:
 consent-service:
   url: http://localhost:8106
 
+incentive-service:
+  url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
+
 analytics:
   clickhouse-url: ${CLICKHOUSE_URL:http://localhost:8123}
   clickhouse-user: ${CLICKHOUSE_USER:}
