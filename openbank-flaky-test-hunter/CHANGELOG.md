@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.12.0...flaky-test-hunter-v0.13.0) (2026-08-26)
+
+
+### Features
+
+* **testing:** unify governed Test Intelligence evidence ([#7062](https://github.com/JiRaska/open-bank-oss/issues/7062)) ([c95b0be](https://github.com/JiRaska/open-bank-oss/commit/c95b0bec85ae0afee625b872c777490006534faa))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.11.0...flaky-test-hunter-v0.12.0) (2026-08-26)
 
 
