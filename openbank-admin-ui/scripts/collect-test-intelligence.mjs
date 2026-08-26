@@ -180,6 +180,7 @@ function runEnvelope(component) {
       observedAt: run.run?.observedAt ?? observedAt(file), lines: run.coverage.lines,
       branches: run.coverage.branches, source: 'test-intelligence-run:v1',
     } : null,
+    testImpact: run.testImpact ?? null,
     testInfrastructure: run.testInfrastructure ?? { declared: [], observed: [] },
   }
 }
@@ -248,6 +249,25 @@ function testCaseHistory(currentEnvelopes) {
     const priority = { flaky: 0, failing: 1, skipped: 2, stable: 3 }
     return priority[a.state] - priority[b.state] || b.wastedDurationMs - a.wastedDurationMs || a.name.localeCompare(b.name)
   }).slice(0, 2000)
+}
+
+function testImpact(currentEnvelopes) {
+  // Do not infer "unaffected" from a definition path or a passing suite. The current contract
+  // intentionally exposes exactly what is known: source provenance exists for some JVM tests,
+  // while a verified test-to-production mapping has not been collected yet (#7207).
+  const retained = currentEnvelopes.map(item => item?.testImpact)
+    .filter(item => item?.schemaVersion === 1)
+  const fullyDeclared = currentEnvelopes.length > 0 && retained.length === currentEnvelopes.length
+  return {
+    schemaVersion: 1,
+    mode: 'shadow',
+    mappingState: 'unknown',
+    selectionState: 'unavailable',
+    declaredByAllRetainedRuns: fullyDeclared,
+    detail: fullyDeclared
+      ? 'Every retained run explicitly reports that no verified test-to-production mapping was collected. Full suites remain authoritative.'
+      : 'One or more retained runs predate the impact contract. No test-to-production mapping is assumed; full suites remain authoritative.',
+  }
 }
 
 function ratio(covered, missed) {
@@ -631,6 +651,7 @@ async function main() {
   const syntheticCoverage = journeyCoverage(synthetic)
   const clientExperience = await clientExperiences()
   const testCases = testCaseHistory(currentEnvelopes)
+  const impact = testImpact(currentEnvelopes)
   const failingEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'failed').length
   const staleEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'stale').length
   const unknownEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'unknown').length
@@ -679,7 +700,7 @@ async function main() {
   const report = {
     schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
     contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence,
-    syntheticJourneys: synthetic, journeyCoverage: syntheticCoverage, history, runHistory, testCases,
+    syntheticJourneys: synthetic, journeyCoverage: syntheticCoverage, history, runHistory, testCases, testImpact: impact,
     clientExperiences: clientExperience,
     totals: {
       components: components.length,

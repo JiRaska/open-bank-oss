@@ -289,6 +289,12 @@ may become an advisory ordering or parallelism input only after full-suite prese
 it cannot be the sole required gate. Synthetic traffic must retain trusted identity and taint across
 HTTP, Kafka, traces and regulatory projections; an untrusted HTTP header is never sufficient.
 
+The v1 run envelope therefore records test impact only as an explicit `shadow` / `unknown` /
+`unavailable` observation. This is not a placeholder that consumers may reinterpret as an unaffected
+set: it is a guardrail propagated through the collector, operator UI and browser E2E test. Promotion
+requires versioned, verified test-to-production coverage or dependency edges, plus a measured
+comparison of shadow recommendations against the preserved full suite (#7207).
+
 Test-to-trace correlation uses the existing privacy-preserving `TraceContract`. A successful test
 emits a bounded marker only after at least one trace assertion has passed; the run collector turns
 that JUnit marker into `trace` evidence with the same commit and workflow provenance. Trace ids,

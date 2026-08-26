@@ -26,6 +26,7 @@
     "component": { "type": "string", "pattern": "^openbank-" },
     "suites": { "type": "array", "items": { "$ref": "#/$defs/suite" } },
     "testCases": { "type": "array", "items": { "$ref": "#/$defs/testCase" } },
+    "testImpact": { "$ref": "#/$defs/testImpact" },
     "coverage": { "oneOf": [{ "$ref": "#/$defs/coverageObservation" }, { "type": "null" }] },
     "testInfrastructure": {
       "type": "object",
@@ -87,6 +88,17 @@
         "state": { "enum": ["passed", "failed", "skipped"] },
         "durationMs": { "type": "integer", "minimum": 0 },
         "testDefinitionPath": { "type": "string", "pattern": "^(?!.*\\/(?:\\.|\\.\\.)\\/)src/test/(?:kotlin|java)/[A-Za-z0-9_./-]+\\.(?:kt|java)$" }
+      },
+      "additionalProperties": false
+    },
+    "testImpact": {
+      "type": "object",
+      "required": ["schemaVersion", "mode", "mappingState", "selectionState"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "mode": { "const": "shadow" },
+        "mappingState": { "const": "unknown" },
+        "selectionState": { "const": "unavailable" }
       },
       "additionalProperties": false
     },

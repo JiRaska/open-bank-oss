@@ -187,6 +187,7 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
   const flaky = report.testCases.filter(item => item.state === 'flaky')
   const failing = report.testCases.filter(item => item.state === 'failing')
   const wasted = report.testCases.reduce((sum, item) => sum + item.wastedDurationMs, 0)
+  const impact = report.testImpact
   const visibleTests = useMemo(() => filterTestCases(report.testCases, filter, query), [report.testCases, filter, query])
   const filters: Array<{ id: TestTriageFilter; label: string }> = [
     { id: 'all', label: t('Vše', 'All') },
@@ -205,6 +206,9 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
     <div style={{ padding: 12, border: '1px solid color-mix(in srgb, #16a34a 35%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12 }}>
       {t('Test je označen jako flaky až po úspěšném i neúspěšném pozorování stejného commitu. Vlastnictví vychází z CODEOWNERS. Triage nikdy nemění deterministický verdikt CI ani nepřeskakuje peněžní kontroly.', 'A test is marked flaky only after pass and fail observations on the same commit. Ownership comes from CODEOWNERS. Triage never changes the deterministic CI verdict or skips money-path controls.')}
     </div>
+    {impact && <div aria-label={t('Stav mapování test impactu', 'Test impact mapping state')} style={{ padding: 12, border: '1px solid color-mix(in srgb, #64748b 42%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12, background: 'var(--surface-2)' }}>
+      <strong>{t('Test impact selection: shadow only', 'Test impact selection: shadow only')}</strong><span style={{ marginLeft: 8 }}><StateBadge state="unknown" /></span><div style={{ marginTop: 5 }}>{impact.detail}</div><div style={{ marginTop: 5, color: 'var(--text-tertiary)' }}>{t('Cesta k testu není mapa závislostí do produkce. AI ji nesmí domýšlet ani vybírat povinné gate.', 'A test source path is not a production dependency map. AI must not infer it or select a required gate.')}</div>
+    </div>}
     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
       <div role="group" aria-label={t('Filtr testovací triage', 'Test triage filter')} style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
         {filters.map(item => <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)} style={{ cursor: 'pointer', padding: '5px 9px', borderRadius: 999, border: `1px solid ${filter === item.id ? 'var(--accent)' : 'var(--border)'}`, color: filter === item.id ? 'var(--accent)' : 'var(--text-secondary)', background: filter === item.id ? 'color-mix(in srgb, var(--accent) 9%, var(--surface-1))' : 'var(--surface-1)', fontSize: 11, fontWeight: filter === item.id ? 700 : 500 }}>{item.label}</button>)}

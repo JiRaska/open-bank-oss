@@ -50,7 +50,7 @@ def trusted_run_url(url: str, run_id: str) -> bool:
 def validate_envelope(envelope: dict) -> None:
     """Fail closed before CI publishes an envelope that violates the v1 contract."""
     required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
-    if set(envelope) - (required | {"specializedEvidence", "testCases", "diagnostics"}) or not required.issubset(envelope):
+    if set(envelope) - (required | {"specializedEvidence", "testCases", "diagnostics", "testImpact"}) or not required.issubset(envelope):
         raise ValueError("run envelope has missing or unknown top-level fields")
     if envelope["schemaVersion"] != 1 or not str(envelope["component"]).startswith("openbank-"):
         raise ValueError("run envelope schemaVersion/component is invalid")
@@ -115,6 +115,14 @@ def validate_envelope(envelope: dict) -> None:
                 or any(segment in {".", ".."} for segment in path.split("/"))
         )):
             raise ValueError("test case definition path is invalid")
+    impact = envelope.get("testImpact")
+    if impact is not None and impact != {
+        "schemaVersion": 1,
+        "mode": "shadow",
+        "mappingState": "unknown",
+        "selectionState": "unavailable",
+    }:
+        raise ValueError("test impact evidence must remain the explicit v1 unknown/shadow state")
     for item in envelope.get("diagnostics", []):
         if set(item) != {"kind", "suiteKind", "name", "url", "retentionDays", "access", "mayContainSensitiveData"}:
             raise ValueError("diagnostic artifact fields are invalid")
@@ -463,6 +471,7 @@ def main() -> None:
                 "testInfrastructure": {"declared": ["postgres"], "observed": observations(service)},
                 "specializedEvidence": [{"kind": "performance", "state": "passed", "source": "summary.json"}],
                 "testCases": [],
+                "testImpact": {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown", "selectionState": "unavailable"},
             }
             traversal = {**valid, "testCases": [{
                 "fingerprint": "0123456789abcdef01234567", "kind": "integration",
@@ -472,6 +481,13 @@ def main() -> None:
             try:
                 validate_envelope(traversal)
                 raise AssertionError("a traversing test definition path was accepted")
+            except ValueError:
+                pass
+            invented_impact = json.loads(json.dumps(valid))
+            invented_impact["testImpact"]["mappingState"] = "mapped"
+            try:
+                validate_envelope(invented_impact)
+                raise AssertionError("unverified test impact mapping was accepted")
             except ValueError:
                 pass
             (service / "playwright-report").mkdir()
@@ -555,6 +571,10 @@ def main() -> None:
             "observedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
         "component": component, "suites": suites(component, service), "testCases": test_cases(component, service), "coverage": coverage(service),
+        # v1 intentionally records absence rather than guessing a test-to-production mapping.
+        # A future producer may only advance this after emitting versioned, verified coverage or
+        # dependency edges and measuring recommendations against the preserved full suite (#7207).
+        "testImpact": {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown", "selectionState": "unavailable"},
         "testInfrastructure": {"declared": declared_infrastructure(service), "observed": observations(service)},
         "specializedEvidence": specialized,
         "diagnostics": browser_diagnostics(args.browser_report_dir, run_id, run_attempt, run_url),

@@ -15,6 +15,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
     history: [{ collectedAt: '2026-08-22T12:00:00.000Z', components: 1, componentsWithExecutionEvidence: 1, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }],
     runHistory: [{ component: 'openbank-ledger-service', run: { id: '4242', attempt: 1, commit: '1234567890abcdef', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/4242', observedAt: '2026-08-22T11:00:00.000Z' }, states: { integration: 'passed' }, infrastructureStarted: 1, infrastructureStopped: 1 }],
     testCases: [{ fingerprint: '0123456789abcdef01234567', component: 'openbank-ledger-service', kind: 'integration', classname: 'com.openbank.LedgerApiIT', name: 'posts balanced journal', owner: '@JiRaska', state: 'flaky', lastState: 'passed', observations: 3, failureRate: 33.33, averageDurationMs: 400, wastedDurationMs: 420, sameCommitTransitions: 1, lastObservedAt: '2026-08-22T11:00:00.000Z' }],
+    testImpact: { schemaVersion: 1, mode: 'shadow', mappingState: 'unknown', selectionState: 'unavailable', declaredByAllRetainedRuns: true, detail: 'Every retained run explicitly reports that no verified test-to-production mapping was collected. Full suites remain authoritative.' },
     totals: { components: 1, componentsWithExecutionEvidence: 1, moneyPathComponents: 1, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
   }) }))
   await page.route('**/api/test-intelligence/agents', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ findings: [], available: true }) }))
@@ -53,6 +54,8 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await page.getByRole('button', { name: /Testy a flaky|Tests & flaky/ }).click()
   await expect(page.getByText('posts balanced journal')).toBeVisible()
   await expect(page.getByText('1 same-commit pass/fail transition(s)')).toBeVisible()
+  await expect(page.getByLabel('Test impact mapping state')).toContainText('Test impact selection: shadow only')
+  await expect(page.getByText('AI must not infer it or select a required gate.')).toBeVisible()
   await page.getByRole('button', { name: /Testovací runtime|Test runtime/ }).click()
   await expect(page.getByText('1 started · 1 stopped')).toBeVisible()
   await page.getByRole('button', { name: /Historie|History/ }).click()
