@@ -11,6 +11,7 @@
 // author) is enforced by the agent.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot, UserRound } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -212,11 +213,22 @@ export default function ApprovalsPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.action}</div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                <span style={{ fontFamily: 'var(--font-mono)' }}>{item.id}</span>
+                {(item.resourceId || item.maker || item.proposedAt) && <span> · </span>}
                 {item.resourceId && <span style={{ fontFamily: 'var(--font-mono)' }}>{item.resourceId} · </span>}
                 {item.maker && <span>{t('navrhl', 'by')} {item.maker}</span>}
                 {item.proposedAt && <span> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</span>}
               </div>
             </div>
+            {item.domain === 'notification' && (
+              <Link
+                href={`/notifications?approvalId=${encodeURIComponent(item.id)}#message-approvals`}
+                className="btn btn-secondary"
+                style={{ textDecoration: 'none', flexShrink: 0 }}
+              >
+                {t('Otevřít rozhodnutí', 'Open decision')}
+              </Link>
+            )}
             <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: '#fffbeb', border: '1px solid #fcd34d', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
               {t('Čeká', 'Pending')}
             </span>

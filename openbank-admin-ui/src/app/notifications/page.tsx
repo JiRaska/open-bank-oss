@@ -4,7 +4,8 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { Suspense, useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Bell, RefreshCw, Mail, AlertTriangle, CheckCircle2, Info, Clock, Check, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useAuth } from '@/lib/auth/useAuth'
@@ -102,7 +103,7 @@ function NotificationsContent() {
         ))}
       </div>
 
-      {canApprove && <OperatorMessageApprovals />}
+      {canApprove && <Suspense fallback={null}><OperatorMessageApprovals /></Suspense>}
 
       {unavailable && (
         <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
@@ -180,14 +181,14 @@ export default function NotificationsPage() {
  * `PATCH /api/v1/notifications/approvals/{id}` endpoint. SelfApprovalNotAllowedException refuses
  * a maker deciding their own request server-side (403).
  *
- * Deliberately NOT an auto-loaded queue: the shipped backend (ApprovalStore) exposes no query to
- * enumerate pending approvals — there is no list endpoint — so the checker acts on the approval
- * id the maker relays out of band (shown on the maker's party-page banner). A backend list
- * endpoint would let this become a real queue; that is remaining ADR-0176 work.
+ * The unified Approval Centre discovers pending notification approvals through the backend list
+ * endpoint and deep-links here with the selected approval id. Direct id entry remains available
+ * for operational recovery and does not weaken the server-side maker-checker boundary.
  */
 function OperatorMessageApprovals() {
   const { t } = useLanguage()
-  const [approvalId, setApprovalId] = useState('')
+  const searchParams = useSearchParams()
+  const [approvalId, setApprovalId] = useState(() => searchParams.get('approvalId')?.trim() ?? '')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -212,7 +213,7 @@ function OperatorMessageApprovals() {
   }
 
   return (
-    <div className="card" style={{ overflow: 'hidden', marginBottom: '16px' }}>
+    <div id="message-approvals" className="card" style={{ overflow: 'hidden', marginBottom: '16px', scrollMarginTop: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
         <Clock aria-hidden="true" size={15} style={{ color: 'var(--yellow)' }} />
         <span style={{ fontWeight: 600, fontSize: '13px' }}>
@@ -222,8 +223,8 @@ function OperatorMessageApprovals() {
       <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
           {t(
-            'Zadejte ID schválení, které vám předal operátor odesílající zprávu, a rozhodněte. Vlastní zprávu schválit nelze.',
-            'Enter the approval id the composing operator gave you, then decide. You cannot approve your own message.',
+            'Vyberte čekající notifikaci v Centru schvalování; její ID se zde doplní automaticky. Pro provozní obnovu můžete ID zadat ručně. Vlastní zprávu schválit nelze.',
+            'Select a pending notification in the Approval Centre and its ID will be filled in here. You can enter an ID manually for operational recovery. You cannot approve your own message.',
           )}
         </span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
