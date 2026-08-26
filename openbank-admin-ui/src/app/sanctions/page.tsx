@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, Fragment, useRef } from 'react'
 import {
   ShieldAlert, Search, CheckCircle2, Clock, RefreshCw,
   AlertTriangle, User, Play, List, ChevronDown, ChevronUp,
@@ -15,6 +15,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatCard, type Tone } from '@/components/ui'
+import { claimSingleFlight, releaseSingleFlight } from '@/lib/single-flight'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -217,6 +218,7 @@ export default function SanctionsPage() {
   const [reviewStatus, setReviewStatus] = useState<ReviewStatus>('CLEAR')
   const [reviewNote, setReviewNote] = useState('')
   const [reviewBusy, setReviewBusy] = useState(false)
+  const reviewInFlight = useRef(false)
   const [reviewError, setReviewError] = useState('')
   // Four-eyes (ADR-0155): a 202 parks the maker's decision until a DIFFERENT operator decides it.
   // The id has to survive in the UI — it is the only way back to this exact decision, and the
@@ -228,6 +230,7 @@ export default function SanctionsPage() {
   const [pendingQueue, setPendingQueue] = useState<PendingApprovalItem[]>([])
   const [queueUnavail, setQueueUnavail] = useState(false)
   const [decideBusy, setDecideBusy] = useState(false)
+  const decisionInFlight = useRef(false)
   const [decideMsg, setDecideMsg] = useState('')
 
   const loadChecks = useCallback(async () => {
@@ -394,6 +397,7 @@ export default function SanctionsPage() {
       setReviewError(t('Poznámka je povinná — je to auditní stopa rozhodnutí.', 'A note is required — it is the audit trail for this decision.'))
       return
     }
+    if (!claimSingleFlight(reviewInFlight)) return
     setReviewBusy(true)
     setReviewError('')
     try {
@@ -434,6 +438,7 @@ export default function SanctionsPage() {
     } catch {
       setReviewError(t('Služba je nedostupná.', 'The service is unreachable.'))
     } finally {
+      releaseSingleFlight(reviewInFlight)
       setReviewBusy(false)
     }
   }
@@ -443,6 +448,7 @@ export default function SanctionsPage() {
   const decideApproval = async (approve: boolean) => {
     const id = decideId.trim()
     if (!id) return
+    if (!claimSingleFlight(decisionInFlight)) return
     setDecideBusy(true)
     setDecideMsg('')
     try {
@@ -467,6 +473,7 @@ export default function SanctionsPage() {
     } catch {
       setDecideMsg(t('Služba je nedostupná.', 'The service is unreachable.'))
     } finally {
+      releaseSingleFlight(decisionInFlight)
       setDecideBusy(false)
     }
   }
@@ -647,9 +654,9 @@ export default function SanctionsPage() {
                                     {pendingApproval.id}
                                   </code>
                                   <div style={{ display: 'flex', gap: '8px' }}>
-                                    <button onClick={() => submitReview(c.id, pendingApproval.id)} disabled={reviewBusy}
+                                    <button type="button" onClick={() => submitReview(c.id, pendingApproval.id)} disabled={reviewBusy} aria-busy={reviewBusy}
                                       style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
-                                      {reviewBusy ? <Loader2 size={12} className="spin" /> : t('Zopakovat po schválení', 'Retry once approved')}
+                                      {reviewBusy ? <Loader2 size={12} className="spin" aria-hidden="true" /> : t('Zopakovat po schválení', 'Retry once approved')}
                                     </button>
                                     <button onClick={() => { setReviewFor(null); setPendingApproval(null) }}
                                       style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '12px', cursor: 'pointer' }}>
@@ -685,9 +692,9 @@ export default function SanctionsPage() {
                                     <div style={{ fontSize: '12px', color: 'var(--danger-text)' }}>{reviewError}</div>
                                   )}
                                   <div style={{ display: 'flex', gap: '8px' }}>
-                                    <button onClick={() => submitReview(c.id)} disabled={reviewBusy}
+                                    <button type="button" onClick={() => submitReview(c.id)} disabled={reviewBusy} aria-busy={reviewBusy}
                                       style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: reviewBusy ? 'default' : 'pointer' }}>
-                                      {reviewBusy ? <Loader2 size={12} className="spin" /> : t('Odeslat rozhodnutí', 'Submit decision')}
+                                      {reviewBusy ? <Loader2 size={12} className="spin" aria-hidden="true" /> : t('Odeslat rozhodnutí', 'Submit decision')}
                                     </button>
                                     <button onClick={() => setReviewFor(null)}
                                       style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '12px', cursor: 'pointer' }}>
