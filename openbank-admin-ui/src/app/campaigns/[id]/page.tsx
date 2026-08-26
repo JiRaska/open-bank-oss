@@ -23,6 +23,7 @@ interface Campaign {
   name: string
   goal: string
   segmentRef: { name: string; version: number }
+  incentiveOfferRef?: { id: string; name: string; version: number } | null
   state: string
   createdBy: string
   approvedBy: string | null
@@ -798,6 +799,15 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               hasHoldout={(c.holdoutPercent ?? 0) > 0}
             />
           )}
+
+          <section className="space-y-2">
+            <h2 className="text-sm font-semibold">{t('Motivace', 'Incentive')}</h2>
+            <p className="text-sm text-muted-foreground">
+              {c.incentiveOfferRef
+                ? `${c.incentiveOfferRef.name}@${c.incentiveOfferRef.version}`
+                : t('Bez odměny', 'No reward')}
+            </p>
+          </section>
 
           <section className="space-y-2">
             <h2 className="text-sm font-semibold">{t('Čtyři oči', 'Four-eyes')}</h2>
