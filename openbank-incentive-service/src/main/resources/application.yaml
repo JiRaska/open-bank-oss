@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+quarkus:
+  application:
+    name: openbank-incentive-service
+  http:
+    port: 8156
+    test-port: 0
+  datasource:
+    db-kind: postgresql
+    username: ${DB_USER:openbank}
+    password: ${DB_PASSWORD:openbank_secret}
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_incentive}
+    jdbc:
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_incentive}
+  flyway:
+    migrate-at-start: true
+  hibernate-orm:
+    database:
+      generation: none
+    physical-naming-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+  oidc:
+    auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
+    client-id: openbank-services
+  management:
+    enabled: true
+    port: 8087
+    host: 0.0.0.0
+    root-path: /q
+
+openbank:
+  incentive:
+    code-pepper: ${PROMO_CODE_PEPPER:CHANGE_ME_LOCAL_DEV_ONLY}
+    reservation-ttl: ${PROMO_RESERVATION_TTL:PT15M}
+
+"%test":
+  quarkus:
+    management:
+      enabled: false
+    oidc:
+      enabled: false

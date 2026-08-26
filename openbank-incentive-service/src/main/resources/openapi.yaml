@@ -1,0 +1,147 @@
+openapi: 3.0.3
+info:
+  title: OpenBank Incentive Service
+  version: 1.0.0
+  description: Governed fixed-benefit offers and opaque promo-code reservations.
+paths:
+  /api/v1/incentives/offers:
+    post:
+      summary: Create a versioned draft incentive offer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateOffer'}
+      responses:
+        "201": {description: Draft created, content: {application/json: {schema: {$ref: '#/components/schemas/Offer'}}}}
+        "400": {description: Invalid offer}
+  /api/v1/incentives/offers/{id}/submit:
+    post:
+      summary: Submit an offer for independent approval
+      parameters: [{$ref: '#/components/parameters/OfferId'}]
+      responses:
+        "200": {description: Submitted, content: {application/json: {schema: {$ref: '#/components/schemas/Offer'}}}}
+        "404": {description: Offer not found}
+        "409": {description: Invalid lifecycle transition}
+  /api/v1/incentives/offers/{id}/publish:
+    post:
+      summary: Publish an offer as an independent checker
+      parameters: [{$ref: '#/components/parameters/OfferId'}]
+      responses:
+        "200": {description: Published, content: {application/json: {schema: {$ref: '#/components/schemas/Offer'}}}}
+        "404": {description: Offer not found}
+        "409": {description: Maker-checker or lifecycle conflict}
+  /api/v1/incentives/offers/{id}/codes:
+    post:
+      summary: Import promo codes as one-way peppered digests
+      parameters: [{$ref: '#/components/parameters/OfferId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [codes]
+              properties:
+                codes: {type: array, minItems: 1, items: {type: string, minLength: 8, maxLength: 128}, writeOnly: true}
+      responses:
+        "201": {description: Codes imported, content: {application/json: {schema: {type: object, required: [imported], properties: {imported: {type: integer}}}}}}
+        "404": {description: Offer not found}
+        "409": {description: Published inventory is immutable}
+  /api/v1/incentives/offers/{id}/reservations:
+    post:
+      summary: Atomically reserve one eligible promo code
+      parameters:
+        - {$ref: '#/components/parameters/OfferId'}
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReserveCode'}
+      responses:
+        "201": {description: Reserved or idempotently replayed, content: {application/json: {schema: {$ref: '#/components/schemas/Reservation'}}}}
+        "400": {description: Missing idempotency key or invalid code}
+        "404": {description: Offer or code not found}
+        "409": {description: Offer, inventory, or limit conflict}
+  /api/v1/incentives/reservations/{id}/commit:
+    post:
+      summary: Commit a reservation after the qualifying action succeeds
+      parameters: [{$ref: '#/components/parameters/ReservationId'}]
+      responses:
+        "200": {description: Committed, content: {application/json: {schema: {$ref: '#/components/schemas/Reservation'}}}}
+        "404": {description: Reservation not found}
+        "409": {description: Reservation expired or terminal}
+  /api/v1/incentives/reservations/{id}/release:
+    post:
+      summary: Release a reservation back to inventory
+      parameters: [{$ref: '#/components/parameters/ReservationId'}]
+      responses:
+        "200": {description: Released, content: {application/json: {schema: {$ref: '#/components/schemas/Reservation'}}}}
+        "404": {description: Reservation not found}
+        "409": {description: Reservation is committed or terminal}
+  /api/v1/incentives/maintenance/expire:
+    post:
+      summary: Expire overdue reservations idempotently
+      responses:
+        "200": {description: Expiry sweep result, content: {application/json: {schema: {type: object, required: [expired], properties: {expired: {type: integer}}}}}}
+components:
+  parameters:
+    OfferId: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    ReservationId: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+  schemas:
+    CreateOffer:
+      type: object
+      required: [name, version, productScope, effectiveFrom, expiresAt, totalLimit, perPartyLimit, stackingPolicy]
+      properties:
+        name: {type: string}
+        version: {type: integer, minimum: 1}
+        productScope: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+        effectiveFrom: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        totalLimit: {type: integer, minimum: 1}
+        perPartyLimit: {type: integer, minimum: 1}
+        stackingPolicy: {type: string, enum: [EXCLUSIVE, STACKABLE]}
+    ReserveCode:
+      type: object
+      required: [code, partyRef, productRef]
+      properties:
+        code: {type: string, minLength: 8, maxLength: 128, writeOnly: true}
+        partyRef: {type: string}
+        productRef: {type: string}
+    Offer:
+      type: object
+      required: [ref, productScope, effectiveFrom, expiresAt, totalLimit, perPartyLimit, stackingPolicy, status, maker]
+      properties:
+        ref: {$ref: '#/components/schemas/OfferRef'}
+        productScope: {type: array, items: {type: string}}
+        effectiveFrom: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        totalLimit: {type: integer}
+        perPartyLimit: {type: integer}
+        stackingPolicy: {type: string, enum: [EXCLUSIVE, STACKABLE]}
+        status: {type: string, enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]}
+        maker: {type: string}
+        checker: {type: string, nullable: true}
+    OfferRef:
+      type: object
+      required: [id, name, version]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        version: {type: integer}
+    Reservation:
+      type: object
+      required: [id, offerRef, partyRef, productRef, idempotencyKey, reservedAt, expiresAt, status]
+      properties:
+        id: {type: string, format: uuid}
+        offerRef: {$ref: '#/components/schemas/OfferRef'}
+        partyRef: {type: string}
+        productRef: {type: string}
+        idempotencyKey: {type: string}
+        reservedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        status: {type: string, enum: [RESERVED, COMMITTED, RELEASED, EXPIRED]}
