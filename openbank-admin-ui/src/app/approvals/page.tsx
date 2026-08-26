@@ -229,6 +229,15 @@ export default function ApprovalsPage() {
                 {t('Otevřít rozhodnutí', 'Open decision')}
               </Link>
             )}
+            {item.domain === 'sanctions' && (
+              <Link
+                href={`/sanctions?approvalId=${encodeURIComponent(item.id)}#sanctions-approvals`}
+                className="btn btn-secondary"
+                style={{ textDecoration: 'none', flexShrink: 0 }}
+              >
+                {t('Otevřít rozhodnutí', 'Open decision')}
+              </Link>
+            )}
             <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: '#fffbeb', border: '1px solid #fcd34d', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
               {t('Čeká', 'Pending')}
             </span>

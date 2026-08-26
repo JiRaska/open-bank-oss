@@ -3,7 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { Suspense, useState, useEffect, useCallback, Fragment } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   ShieldAlert, Search, CheckCircle2, Clock, RefreshCw,
   AlertTriangle, User, Play, List, ChevronDown, ChevronUp,
@@ -186,7 +187,8 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
   )
 }
 
-export default function SanctionsPage() {
+function SanctionsContent() {
+  const searchParams = useSearchParams()
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const dateLocale = numberLocale
@@ -222,7 +224,7 @@ export default function SanctionsPage() {
   // The id has to survive in the UI — it is the only way back to this exact decision, and the
   // retry must carry it as X-Approval-Id or the interceptor mints a fresh one and 202s forever.
   const [pendingApproval, setPendingApproval] = useState<{ id: string; checkId: string } | null>(null)
-  const [decideId, setDecideId] = useState('')
+  const [decideId, setDecideId] = useState(() => searchParams.get('approvalId')?.trim() ?? '')
   // The checker's queue (#3472). Before sanctions-service served this list, a decision parked at
   // 202 was reachable only by whoever had been handed its id out of band.
   const [pendingQueue, setPendingQueue] = useState<PendingApprovalItem[]>([])
@@ -640,8 +642,8 @@ export default function SanctionsPage() {
                                     {t('Čeká na druhého schvalovatele (čtyři oči, ADR-0155)', 'Awaiting a second approver (four-eyes, ADR-0155)')}
                                   </div>
                                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                                    {t('Předejte toto ID jinému operátorovi. Rozhodnutí schválí níže v poli „Schválit žádost“ — vlastní žádost schválit nelze.',
-                                       'Hand this id to another operator. They decide it in the "Decide an approval" box below — nobody can approve their own request.')}
+                                    {t('Žádost se automaticky zobrazí jinému oprávněnému operátorovi v Centru schvalování i ve frontě níže. Vlastní žádost schválit nelze.',
+                                       'The request automatically appears for another authorised operator in the Approval Centre and in the queue below. Nobody can approve their own request.')}
                                   </div>
                                   <code style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', wordBreak: 'break-all' }}>
                                     {pendingApproval.id}
@@ -706,12 +708,11 @@ export default function SanctionsPage() {
                 </table>
               )}
 
-              {/* Checker half of the four-eyes gate. It is an id field rather than a queue because
-                  sanctions-service exposes no pending-approvals list endpoint — ApprovalResource
-                  serves only PATCH /{id}, so the id has to be handed over out of band. The
-                  ADR-0227 inbox federates lending and agent only, and is read-only by design. */}
+              {/* Checker half of the four-eyes gate. The domain queue is authoritative and the
+                  unified Approval Centre deep-links here with the selected id. Manual id entry is
+                  retained as an operational recovery path. */}
               <Can permission="sanctions:review" fallback={<div style={{ padding: '16px', borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)', fontSize: '12px' }}>{t('Rozhodování sankčních žádostí je dostupné pouze operátorům a administrátorům.', 'Sanctions decisions are available to operators and administrators only.')}</div>}>
-              <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
+              <div id="sanctions-approvals" style={{ padding: '16px', borderTop: '1px solid var(--border)', scrollMarginTop: '16px' }}>
                 <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
                     {t('Schválit žádost (druhý pár očí)', 'Decide an approval (second pair of eyes)')}
@@ -975,4 +976,8 @@ export default function SanctionsPage() {
       </div>
     </AuthGuard>
   )
+}
+
+export default function SanctionsPage() {
+  return <Suspense fallback={null}><SanctionsContent /></Suspense>
 }
