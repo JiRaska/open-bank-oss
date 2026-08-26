@@ -1017,8 +1017,10 @@ export default function NewCampaignPage() {
         </div>
         <div className="campaign-composer-footer-actions">
         <button
+          type="button"
           onClick={submit}
           disabled={!ready || saving}
+          aria-busy={saving}
           className="btn btn-primary disabled:opacity-40"
         >
           {saving

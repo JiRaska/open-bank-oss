@@ -202,7 +202,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   // machine; whether the caller may run them is decided by OPA, and the domain re-asserts
   // maker != checker on activate. The UI renders capability, the policy decides it.
   const [actionError, setActionError] = useState<string | null>(null)
-  const [acting, setActing] = useState(false)
+  const [actingAction, setActingAction] = useState<string | null>(null)
   const [duplicating, setDuplicating] = useState(false)
 
   /**
@@ -233,7 +233,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   }
 
   const runAction = (action: string) => {
-    setActing(true)
+    setActingAction(action)
     setActionError(null)
     fetch(`/api/campaigns/${encodeURIComponent(id ?? '')}/actions`, {
       method: 'POST',
@@ -260,7 +260,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         )
       })
       .catch(() => setActionError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')))
-      .finally(() => setActing(false))
+      .finally(() => setActingAction(null))
   }
 
   const actionsFor = (state?: string): string[] => {
@@ -509,7 +509,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               <button
                 type="button"
                 onClick={() => runAction(a)}
-                disabled={acting}
+                disabled={actingAction !== null}
+                aria-busy={actingAction === a}
                 className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-40"
               >
                 {actionLabel(a)}
@@ -542,7 +543,13 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               </p>
             </div>
             <Can permission="campaign:create" fallback={<span className="text-xs text-muted-foreground">{t('Kopii může vytvořit jen oprávněný operátor', 'Only an authorized operator can create a copy')}</span>}>
-              <button type="button" className="btn btn-secondary" onClick={duplicateAsDraft} disabled={duplicating}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={duplicateAsDraft}
+                disabled={duplicating}
+                aria-busy={duplicating}
+              >
                 {duplicating ? t('Zakládám koncept…', 'Creating draft…') : t('Vytvořit kopii jako koncept', 'Create draft copy')}
               </button>
             </Can>
@@ -826,15 +833,21 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 </span>
                 <span className="flex gap-2">
                   <button
+                    type="button"
                     onClick={() => loadSends(sendPage.page - 1, outcomeFilter)}
                     disabled={sendPage.page === 0 || sendsLoading}
+                    aria-busy={sendsLoading}
+                    aria-label={t('Předchozí stránka logu odeslání', 'Previous send-log page')}
                     className="rounded-md border px-2 py-1 text-xs disabled:opacity-40"
                   >
                     {t('Předchozí', 'Previous')}
                   </button>
                   <button
+                    type="button"
                     onClick={() => loadSends(sendPage.page + 1, outcomeFilter)}
                     disabled={(sendPage.page + 1) * sendPage.size >= sendPage.total || sendsLoading}
+                    aria-busy={sendsLoading}
+                    aria-label={t('Další stránka logu odeslání', 'Next send-log page')}
                     className="rounded-md border px-2 py-1 text-xs disabled:opacity-40"
                   >
                     {t('Další', 'Next')}

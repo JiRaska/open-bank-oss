@@ -517,7 +517,7 @@ export default function CampaignsPage() {
               className="w-72 rounded-md border bg-transparent px-3 py-1.5 text-sm"
             />
             {stateFilter && (
-              <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => setStateFilter(null)} data-testid="clear-state">
+              <button type="button" className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => setStateFilter(null)} data-testid="clear-state">
                 {t('Filtr:', 'Filter:')} {label(stateFilter)} ✕
               </button>
             )}
