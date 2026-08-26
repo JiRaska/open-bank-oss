@@ -63,6 +63,20 @@ async function walkToReview() {
 }
 
 describe('issue-card flow', () => {
+  it('keeps keyboard focus inside the modal', () => {
+    mount()
+    const dialog = screen.getByRole('dialog', { name: 'Issue a card' })
+    const close = screen.getByRole('button', { name: 'Close' })
+    const search = screen.getByLabelText('Search for a client')
+
+    search.focus()
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(document.activeElement).toBe(close)
+
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(search)
+  })
+
   it('walks party → account → product and shows the entitlement context', async () => {
     mount()
     await walkToReview()
