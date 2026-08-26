@@ -48,7 +48,7 @@ type PreviewData =
   | { status: 'unavailable'; kind: BffFailure }
   | { status: 'no-periods' }
   | { status: 'unsupported' }
-  | { status: 'ready'; templates: RegulatoryTemplate[] }
+  | { status: 'ready'; templates: RegulatoryTemplate[]; evidence: 'FROZEN' | 'LIVE_PREVIEW' }
 
 type TemplateLoadResult = { template: RegulatoryTemplate } | { kind: BffFailure }
 
@@ -77,6 +77,11 @@ function money(value: number, currency: string): string {
   return new Intl.NumberFormat('cs-CZ', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value)
 }
 
+function lastCompletedMonthEnd(): string {
+  const now = new Date()
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)).toISOString().slice(0, 10)
+}
+
 function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
   const meta: ExportRow[] = [
     { field: 'ID výkazu', value: report.id },
@@ -98,7 +103,10 @@ function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
         value: `${money(cell.value, cell.currency)}${cell.isDataGap ? ' · DATOVÁ MEZERA' : ''}`,
       })),
     ])
-    return [...meta, { field: 'Zdroj', value: 'finrep-service ← ledger trial balance (ne ClickHouse)' }, ...rendered]
+    const source = data.evidence === 'FROZEN'
+      ? 'finrep-service ← zmrazená ledger předvaha (FROZEN / LINES_V1)'
+      : 'finrep-service ← živá ledger předvaha (PRACOVNÍ NÁHLED, měnitelná)'
+    return [...meta, { field: 'Zdroj', value: source }, ...rendered]
   }
   const message = data.status === 'loading' || data.status === 'idle'
     ? 'Načítám…'
@@ -244,8 +252,13 @@ export default function RegulatoryPage() {
   const [previewData, setPreviewData] = useState<PreviewData>({ status: 'idle' })
   const [reportingDate, setReportingDate] = useState('')
   const [reportingPeriods, setReportingPeriods] = useState<string[]>([])
+  const [reportingEvidence, setReportingEvidence] = useState<'FROZEN' | 'LIVE_PREVIEW'>('FROZEN')
 
-  async function loadPreview(report: Report, requestedAsOf?: string) {
+  async function loadPreview(
+    report: Report,
+    requestedAsOf?: string,
+    requestedEvidence: 'FROZEN' | 'LIVE_PREVIEW' = 'FROZEN',
+  ) {
     const paths = TEMPLATE_PATHS[report.id]
     if (!paths) {
       setPreviewData({ status: 'unsupported' })
@@ -254,6 +267,7 @@ export default function RegulatoryPage() {
     setPreviewData({ status: 'loading' })
     try {
       let asOf = requestedAsOf
+      let evidence = requestedEvidence
       if (!asOf) {
         const periodsResponse = await fetch(svcUrl('finrep-service', '/api/v1/finrep/periods'), {
           cache: 'no-store', signal: AbortSignal.timeout(15_000),
@@ -265,14 +279,19 @@ export default function RegulatoryPage() {
         const available = await periodsResponse.json() as { latest: string | null; periods: string[] }
         setReportingPeriods(available.periods)
         if (!available.latest) {
-          setPreviewData({ status: 'no-periods' })
-          return
+          asOf = lastCompletedMonthEnd()
+          evidence = 'LIVE_PREVIEW'
+          setReportingPeriods([asOf])
+          setReportingDate(asOf)
+          setReportingEvidence(evidence)
+        } else {
+          asOf = available.latest
+          setReportingDate(asOf)
+          setReportingEvidence(evidence)
         }
-        asOf = available.latest
-        setReportingDate(asOf)
       }
       const results: TemplateLoadResult[] = await Promise.all(paths.map(async (path): Promise<TemplateLoadResult> => {
-        const response = await fetch(svcUrl('finrep-service', path, { asOf }), {
+        const response = await fetch(svcUrl('finrep-service', path, { asOf, evidence }), {
           cache: 'no-store', signal: AbortSignal.timeout(15_000),
         })
         return response.ok
@@ -286,6 +305,7 @@ export default function RegulatoryPage() {
       }
       setPreviewData({
         status: 'ready',
+        evidence,
         templates: results.filter((result): result is { template: RegulatoryTemplate } => 'template' in result).map(result => result.template),
       })
     } catch {
@@ -593,7 +613,7 @@ export default function RegulatoryPage() {
                     {reportingPeriods.map(period => <option key={period} value={period}>{period}</option>)}
                   </select>
                 </label>
-                <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview, reportingDate || undefined)} disabled={previewData.status === 'loading' || !reportingDate} aria-busy={previewData.status === 'loading'} aria-label={t('Načíst data pro náhled', 'Load preview data')}>
+                <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview, reportingDate || undefined, reportingEvidence)} disabled={previewData.status === 'loading' || !reportingDate} aria-busy={previewData.status === 'loading'} aria-label={t('Načíst data pro náhled', 'Load preview data')}>
                   <RefreshCw size={13} aria-hidden="true" className={previewData.status === 'loading' ? 'animate-spin' : ''} />
                   {t('Načíst data', 'Load data')}
                 </button>
@@ -604,11 +624,14 @@ export default function RegulatoryPage() {
             <div style={{ overflowY: 'auto', padding: '0' }}>
               {previewData.status === 'unavailable' ? (
                 <DataUnavailable kind={previewData.kind} service="FINREP / COREP service" feature={t('regulatorní šablony', 'regulatory templates')} lang="cs" dense />
-              ) : previewData.status === 'no-periods' ? (
-                <div style={{ padding: '20px', color: 'var(--text-secondary)', fontSize: '13px' }}>
-                  {t('Ledger zatím nemá žádné zmrazené měsíční období s neměnnou řádkovou evidencí. Výkaz nelze správně sestavit, dokud operátor nedokončí uzávěrku.', 'The ledger has no frozen monthly period with immutable line evidence yet. A correct report cannot be rendered until an operator completes the close.')}
-                </div>
               ) : (
+                <>
+                {previewData.status === 'ready' && previewData.evidence === 'LIVE_PREVIEW' && (
+                  <div role="status" style={{ padding: '12px 20px', color: '#92400e', background: '#fffbeb', borderBottom: '1px solid #fde68a', fontSize: '12px' }}>
+                    <strong>{t('Pracovní náhled skutečných hodnot', 'Working preview of actual values')}</strong>
+                    {' — '}{t('období ještě není zapečetěné. Hodnoty se mohou změnit; finální regulatorní export zůstává zablokovaný.', 'the period is not sealed yet. Values may change; final regulatory export remains blocked.')}
+                  </div>
+                )}
                 <table className="data-table" style={{ width: '100%' }}>
                   <thead>
                     <tr>
@@ -625,6 +648,7 @@ export default function RegulatoryPage() {
                     ))}
                   </tbody>
                 </table>
+                </>
               )}
             </div>
 

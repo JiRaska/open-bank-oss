@@ -6,6 +6,7 @@ package com.openbank.finrep.application.usecase
 
 import com.openbank.finrep.application.port.inbound.FinrepUseCase
 import com.openbank.finrep.application.port.inbound.GetFinrepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.application.port.out.FinrepMetricsPort
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.RegulatoryFramework
@@ -40,7 +41,7 @@ class FinrepService(private val ledgerPort: LedgerPort, private val metrics: Fin
 
     override suspend fun getTemplate(query: GetFinrepTemplateQuery): FinrepTemplate {
         val startedAt = System.nanoTime()
-        val snapshot = trialBalance(query.asOf)
+        val snapshot = trialBalance(query.asOf, query.evidence)
         val template = when (query.templateId) {
             "F01.01" -> F0101Mapper.map(snapshot, query.asOf)
             "F01.02" -> F0102Mapper.map(snapshot, query.asOf)
@@ -72,8 +73,11 @@ class FinrepService(private val ledgerPort: LedgerPort, private val metrics: Fin
      * REST-client failure mode (connect, timeout, 5xx, deserialisation) means the same thing here.
      */
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun trialBalance(asOf: LocalDate): TrialBalanceSnapshot = try {
-        ledgerPort.getTrialBalance(asOf)
+    private suspend fun trialBalance(asOf: LocalDate, evidence: TrialBalanceEvidence): TrialBalanceSnapshot = try {
+        when (evidence) {
+            TrialBalanceEvidence.FROZEN -> ledgerPort.getTrialBalance(asOf)
+            TrialBalanceEvidence.LIVE_PREVIEW -> ledgerPort.getLiveTrialBalance(asOf)
+        }
     } catch (e: Exception) {
         metrics.templateFailed(RegulatoryFramework.FINREP, TemplateFailureReason.LEDGER_UNAVAILABLE)
         throw e
