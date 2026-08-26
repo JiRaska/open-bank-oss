@@ -233,6 +233,9 @@ function testCaseHistory(currentEnvelopes) {
     const last = rows.at(-1)
     return {
       fingerprint, component: last.component, kind: last.kind, classname: last.classname, name: last.name,
+      // This is a verified path to the test definition, when a JVM report can provide one. It
+      // is intentionally not a claimed production dependency or a test-selection recommendation.
+      testDefinitionPath: last.testDefinitionPath ?? null,
       owner: ownership.owners.get(last.component) ?? ownership.fallback,
       state: sameCommitTransitions > 0 ? 'flaky' : last.state === 'failed' ? 'failing' : last.state === 'skipped' ? 'skipped' : 'stable',
       lastState: last.state, observations: rows.length,

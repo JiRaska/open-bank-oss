@@ -3,7 +3,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, CheckCircle2, ShieldCheck, Users } from 'lucide-react'
@@ -20,8 +20,14 @@ export default function NewAudiencePage() {
   const [minDays, setMinDays] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // React state is rendered asynchronously. Keep the one operator action single-flight before a
+  // second click can observe the disabled button; audience creation otherwise allocates a new,
+  // governed version on each request.
+  const createInFlight = useRef(false)
 
   const create = async () => {
+    if (createInFlight.current) return
+    createInFlight.current = true
     setSaving(true); setError(null)
     const rules: Array<Record<string, unknown>> = [{ type: 'PARTY_STATUS_IS', status }]
     if (minDays.trim() !== '') rules.push({ type: 'TENURE_AT_LEAST_DAYS', minDays: Number(minDays) })
@@ -29,7 +35,10 @@ export default function NewAudiencePage() {
       const response = await fetch('/api/audiences', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, rules }) })
       if (!response.ok) throw new Error((await response.json()).error ?? 'Unable to create audience')
       router.push('/segments')
-    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to create audience') } finally { setSaving(false) }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to create audience') } finally {
+      createInFlight.current = false
+      setSaving(false)
+    }
   }
 
   const validName = /^[a-z0-9][a-z0-9-]*$/.test(name)

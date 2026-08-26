@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, BellRing, Clock3, Mail, Megaphone, PanelsTopLeft, Send, Sparkles, Users } from 'lucide-react'
@@ -134,6 +134,9 @@ export default function NewCampaignPage() {
   const [contentExperiment, setContentExperiment] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  // State only disables the button after React renders. Keep the network action single-flight so a
+  // rapid second submit cannot allocate another campaign draft before that render.
+  const saveInFlight = useRef(false)
 
   const templates = Object.fromEntries(contentCatalogue.map(entry => [entry.template, entry.variables])) as Record<string, string[]>
   const templateChannel = Object.fromEntries(contentCatalogue.map(entry => [entry.template, entry.channel])) as Record<string, EditorChannel>
@@ -475,6 +478,8 @@ export default function NewCampaignPage() {
   }
 
   const submit = () => {
+    if (saveInFlight.current) return
+    saveInFlight.current = true
     setSaving(true)
     setError(null)
     const [segName, segVersion] = segment.split('@')
@@ -535,7 +540,10 @@ export default function NewCampaignPage() {
         )
       })
       .catch(() => setError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')))
-      .finally(() => setSaving(false))
+      .finally(() => {
+        saveInFlight.current = false
+        setSaving(false)
+      })
   }
 
   return <AuthGuard permission="campaign:create">

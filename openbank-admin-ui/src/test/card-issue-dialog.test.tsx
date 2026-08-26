@@ -111,6 +111,23 @@ describe('issue-card flow', () => {
     expect(JSON.stringify(init.headers)).not.toContain('Operator')
   })
 
+  it('rejects a double click before React can render the issue button disabled', async () => {
+    const randomUUID = vi.fn().mockReturnValueOnce('idem-key-first').mockReturnValueOnce('idem-key-second')
+    vi.stubGlobal('crypto', { ...globalThis.crypto, randomUUID })
+    mount()
+    await walkToReview()
+    fireEvent.click(screen.getByText('Continue'))
+    await waitFor(() => expect(screen.getByText('Issue the card')).toBeTruthy())
+
+    const issueButton = screen.getByText('Issue the card').closest('button') as HTMLButtonElement
+    fireEvent.click(issueButton)
+    fireEvent.click(issueButton)
+
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect((posted[0].init.headers as Record<string, string>)['Idempotency-Key']).toBe('idem-key-first')
+    expect(randomUUID).toHaveBeenCalledTimes(1)
+  })
+
   it('refuses an exhausted quota up front and says why', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

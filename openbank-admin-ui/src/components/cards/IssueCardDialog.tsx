@@ -131,10 +131,11 @@ export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; on
   const [entitlementsUnknown, setEntitlementsUnknown] = useState(false)
   const [resolveNonce, setResolveNonce] = useState(0)
 
-  // Step 4 — the idempotency key for THIS attempt, generated once and reused on
-  // every retry so a dropped response replays the same card rather than minting
-  // a second one.
-  const [idempotencyKey, setIdempotencyKey] = useState('')
+  // Step 4 — refs update synchronously, before React can render the button disabled.
+  // Keep one key for this attempt so a dropped response replays the same card rather
+  // than minting a second one, and reject a second click in the same event turn.
+  const idempotencyKey = useRef<string | null>(null)
+  const issuingInFlight = useRef(false)
 
   const [dailyText, setDailyText] = useState('')
   const [monthlyText, setMonthlyText] = useState('')
@@ -296,10 +297,15 @@ export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; on
   const submit = async () => {
     const body = issueRequestBody(draft)
     if (!body) return
-    const key = idempotencyKey || crypto.randomUUID()
-    if (!idempotencyKey) setIdempotencyKey(key)
-    const issued = await ops.issueCard(body, key)
-    if (issued?.id) onIssued(issued)
+    if (issuingInFlight.current) return
+    issuingInFlight.current = true
+    try {
+      const key = idempotencyKey.current ??= crypto.randomUUID()
+      const issued = await ops.issueCard(body, key)
+      if (issued?.id) onIssued(issued)
+    } finally {
+      issuingInFlight.current = false
+    }
   }
 
   const stepTitle: Record<IssueStep, string> = {

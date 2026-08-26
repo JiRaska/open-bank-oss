@@ -125,6 +125,92 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET the mutable monthly GL trial balance for an internal working preview",
+      "providerStates": [
+        {
+          "name": "ledger has frozen monthly trial balance for the reporting date"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods/MONTH/2026-06-30/trial-balance"
+      },
+      "response": {
+        "body": {
+          "balanced": true,
+          "lines": [
+            {
+              "code": "1100-CASH-CLEARING-CZK",
+              "currency": "CZK",
+              "net": 150000.0,
+              "type": "ASSET"
+            }
+          ],
+          "period": "MONTH:2026-06"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.balanced": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.lines[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].net": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.lines[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
     }
   ],
   "metadata": {

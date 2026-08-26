@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Save, AlertCircle } from 'lucide-react'
@@ -43,6 +43,11 @@ export default function NewAccountPage() {
   const [errors, setErrors]   = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [apiError, setApiError]     = useState<string | null>(null)
+  // A double submit can arrive before React renders `submitting`. Keep the request key stable
+  // for this account-opening attempt so the account service can return a safe replay after an
+  // interrupted response instead of opening a second account.
+  const openingInFlight = useRef(false)
+  const idempotencyKey = useRef<string | null>(null)
   const [products, setProducts] = useState<CatalogProduct[]>([])
   const [productsLoading, setProductsLoading] = useState(true)
   const [productsUnavailable, setProductsUnavailable] = useState(false)
@@ -102,20 +107,23 @@ export default function NewAccountPage() {
     e.preventDefault()
     const errs = validate()
     if (Object.keys(errs).length) { setErrors(errs); return }
+    if (openingInFlight.current) return
+    openingInFlight.current = true
     setErrors({}); setSubmitting(true); setApiError(null)
     try {
-      const idempotencyKey = crypto.randomUUID()
+      const stableIdempotencyKey = idempotencyKey.current ??= crypto.randomUUID()
       const account = await accountApi.open({
         partyId:     form.partyId.trim(),
         productId:   form.productId.trim(),
         accountType: form.accountType,
         currencyCode: form.currencyCode,
         legalName:   form.legalName.trim(),
-      }, idempotencyKey)
+      }, stableIdempotencyKey)
       router.push(`/accounts/${account.id}`)
     } catch (err: unknown) {
       setApiError(err instanceof Error ? err.message : t('Otevření účtu selhalo', 'Failed to open account'))
     } finally {
+      openingInFlight.current = false
       setSubmitting(false)
     }
   }

@@ -26,6 +26,12 @@ const emptyReport = (error: string): TestIntelligenceReport => ({
 type PrometheusVector = { status?: string; data?: { result?: { value?: [number, string] }[] } }
 type PrometheusLabelVector = { status?: string; data?: { result?: { metric?: Record<string, string>; value?: [number, string] }[] } }
 type TempoSearch = { traces?: Array<{ traceID?: string }> }
+type TempoTrace = {
+  batches?: Array<{
+    resource?: { attributes?: Array<{ key?: string; value?: { stringValue?: string } }> }
+  }>
+}
+const RUM_CORRELATION_TRACE_LIMIT = 25
 
 // Journey ids arrive from the build-time bundled report, so they are file data reaching an
 // outbound Prometheus request. Kubernetes object names are already restricted to this
@@ -48,7 +54,7 @@ function tempoBase(): string | null {
   return process.env.TEMPO_URL ?? null
 }
 
-async function queryTempoMobileTraces(base: string): Promise<{ count: number; truncated: boolean } | null> {
+async function queryTempoMobileTraces(base: string): Promise<{ count: number; truncated: boolean; traceIds: string[] } | null> {
   const end = Math.floor(Date.now() / 1000)
   const query = new URLSearchParams({
     tags: 'service.name="openbank-app"', start: String(end - 7 * 86400), end: String(end), limit: '1000',
@@ -60,9 +66,36 @@ async function queryTempoMobileTraces(base: string): Promise<{ count: number; tr
     if (!response.ok) return null
     const payload = await response.json() as TempoSearch
     if (!Array.isArray(payload.traces)) return null
-    const count = new Set(payload.traces.flatMap(item => item.traceID ? [item.traceID] : [])).size
-    return { count, truncated: payload.traces.length >= 1000 }
+    const traceIds = [...new Set(payload.traces.flatMap(item => item.traceID ? [item.traceID] : []))]
+    return { count: traceIds.length, truncated: payload.traces.length >= 1000, traceIds }
   } catch { return null }
+}
+
+async function queryTempoMobileBackendCorrelation(base: string, traceIds: string[], truncated: boolean): Promise<{
+  inspectedTraces: number; correlatedTraces: number; backendServices: string[]; truncated: boolean
+} | null> {
+  const inspected = traceIds.slice(0, RUM_CORRELATION_TRACE_LIMIT)
+  if (inspected.length === 0) return { inspectedTraces: 0, correlatedTraces: 0, backendServices: [], truncated }
+  const observations = await Promise.all(inspected.map(async traceId => {
+    try {
+      const response = await fetch(`${base}/api/traces/${encodeURIComponent(traceId)}`, {
+        headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(3000), cache: 'no-store',
+      })
+      if (!response.ok) return null
+      const trace = await response.json() as TempoTrace
+      const services = new Set((trace.batches ?? []).flatMap(batch => (batch.resource?.attributes ?? [])
+        .flatMap(attribute => attribute.key === 'service.name' && attribute.value?.stringValue ? [attribute.value.stringValue] : [])))
+      const backendServices = [...services].filter(service => service !== 'openbank-app')
+      return backendServices
+    } catch { return null }
+  }))
+  const backendServices = [...new Set(observations.flatMap(services => services ?? []))].sort()
+  return {
+    inspectedTraces: inspected.length,
+    correlatedTraces: observations.filter(services => (services?.length ?? 0) > 0).length,
+    backendServices,
+    truncated: truncated || traceIds.length > inspected.length,
+  }
 }
 
 async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>> {
@@ -187,6 +220,9 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
   ])
   if (tempoTraces === null && spanCounterIncrements === null) return report
 
+  const backendCorrelations = tempoTraces === null ? null
+    : await queryTempoMobileBackendCorrelation(tracesBase!, tempoTraces.traceIds, tempoTraces.truncated)
+
   const observedAt = new Date().toISOString()
   const sampled = tempoTraces?.count ?? Math.max(0, Math.round(spanCounterIncrements ?? 0))
   const errors = errorSpans === null ? null : Math.max(0, Math.round(errorSpans))
@@ -201,6 +237,7 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
       observedAt,
       sampledSpansLast7d: sampled,
       errorSpansLast7d: errors,
+      backendCorrelations,
       detail: sampled > 0
         ? `${countLabel} sampled mobile RUM trace(s) reached Tempo in the last 7 days${errors === null ? '' : `; ${errors} span-metric increment(s) carried an error status`}. This proves telemetry arrival, not customer traffic volume or test success.`
         : 'No sampled mobile RUM span reached Tempo in the last 7 days. Consent is opt-in, so this is an explicit absent runtime observation rather than a failed CI test.',

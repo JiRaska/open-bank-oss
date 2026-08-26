@@ -91,16 +91,16 @@ concurrency:
   # later, far from the cause (same hazard auto-deploy.yml documents). Queueing is
   # safe: GitHub keeps only the newest pending run per group, so the latest commit
   # still wins — it just waits for the in-flight deploy to finish signing.
-  # Job-level `if:` is evaluated only after concurrency admission. A cancelled CI
-  # workflow_run therefore used to enter this shared queue, evict the valid pending push
-  # deploy, and then skip itself in deploy-source. Observed in runs 32945400498/32945568749
-  # (#7023). Give events that cannot possibly deploy a run-unique group; only eligible
-  # push/dispatch/schedule and successful main workflow_run events share the deploy queue.
+  # Job-level `if:` is evaluated only after concurrency admission. A workflow_run that is
+  # successful but belongs to an OLDER main SHA can therefore enter the shared queue, evict the
+  # pending deploy for a newer push, and only then discover that it must skip. That exact race
+  # cancelled the pending Test Intelligence deploy for 29dc20e2 in favour of a stale evidence
+  # refresh (#7211). Keep workflow-run events in a SHA-scoped queue; deploy-source independently
+  # rejects a source SHA that is no longer main before the privileged build. Push, dispatch and
+  # schedule retain one queue, so the newest operator/source-triggered deploy still wins normally.
   group: >-
     admin-ui-deploy-${{
-      github.event_name == 'workflow_run' &&
-      (github.event.workflow_run.conclusion != 'success' || github.event.workflow_run.head_branch != 'main') &&
-      github.run_id || 'eligible'
+      github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'eligible'
     }}
   cancel-in-progress: false
 
@@ -126,13 +126,20 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 1
       - id: source
-        name: Reject a self-generated GitOps refresh
+        name: Reject stale or self-generated deploy source
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" != "push" ] && [ "$EVENT_NAME" != "workflow_run" ]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          source_sha="$(git rev-parse HEAD)"
+          main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [ -z "$main_sha" ]; then
+            echo "::error::could not resolve origin/main; refusing a privileged build from an unverified source"
+            exit 1
+          fi
+          if [ "$source_sha" != "$main_sha" ]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping stale source $source_sha; main is now $main_sha. A newer push/workflow run owns deployment."
             exit 0
           fi
 
