@@ -64,6 +64,30 @@ spec:
                   key: OIDC_CLIENT_SECRET
             - name: QUARKUS_MANAGEMENT_PORT
               value: "8086"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: referral-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
           resources:
             requests:
               cpu: 100m
@@ -95,12 +119,24 @@ spec:
             - name: referral-tls
               mountPath: /mnt/referral-tls
               readOnly: true
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
         - name: referral-tls
           secret:
             secretName: referral-service-internal-tls
+        - name: kafka-keystore
+          secret:
+            secretName: referral-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
 ---
 apiVersion: v1
 kind: Service
