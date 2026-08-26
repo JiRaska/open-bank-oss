@@ -17,6 +17,7 @@ import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { claimSingleFlight, releaseSingleFlight } from '@/lib/single-flight'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -251,6 +252,7 @@ export default function DocumentTemplatesPage() {
   // so this bar is modelled on the app's own modal-overlay convention instead.
   const [pendingAction, setPendingAction] = useState<{ id: string; kind: 'publish' | 'retire' } | null>(null)
   const [actioning, setActioning] = useState(false)
+  const writeInFlight = useRef(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -405,6 +407,7 @@ export default function DocumentTemplatesPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!claimSingleFlight(writeInFlight)) return
     setSaving(true)
     setActionError(null)
     try {
@@ -425,11 +428,13 @@ export default function DocumentTemplatesPage() {
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t('Uložení šablony selhalo', 'Failed to save the template'))
     } finally {
+      releaseSingleFlight(writeInFlight)
       setSaving(false)
     }
   }
 
   const runAction = async (id: string, kind: 'publish' | 'retire') => {
+    if (!claimSingleFlight(writeInFlight)) return
     setActioning(true)
     setActionError(null)
     try {
@@ -439,6 +444,7 @@ export default function DocumentTemplatesPage() {
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t('Akci se nepodařilo provést', 'The action could not be completed'))
     } finally {
+      releaseSingleFlight(writeInFlight)
       setActioning(false)
     }
   }
@@ -775,7 +781,7 @@ export default function DocumentTemplatesPage() {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', paddingTop: '4px' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)} disabled={saving}>{t('Zavřít', 'Close')}</button>
                 {canEdit && (
-                  <button type="submit" className="btn btn-primary" disabled={saving}>
+                  <button type="submit" className="btn btn-primary" disabled={saving || actioning} aria-busy={saving}>
                     {saving ? t('Ukládám…', 'Saving…') : t('Uložit šablonu', 'Save Template')}
                   </button>
                 )}
