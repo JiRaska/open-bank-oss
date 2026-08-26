@@ -267,6 +267,22 @@ correlates probes and k6/browser checks with metrics, logs and traces. Datadog d
 unskippable tests plus full default-branch runs, and Launchable recommends a later full-suite run,
 because selection cannot observe every dependency.
 
+The comparison is capability-based rather than a claim that OpenBank is categorically "better":
+
+| Proven capability in primary product documentation | Reference platform | OpenBank position | Required next proof |
+|---|---|---|---|
+| Per-test history, flaky lifecycle, wasted CI time and AI-assisted categorisation | Datadog Test Optimization | Same-commit transitions, wasted duration and bounded diagnosis are live; automated quarantine is deliberately absent | Prove an accountable remediation lifecycle without allowing quarantine to green a money-path failure |
+| Coverage/change-driven test selection | Datadog Test Impact Analysis, Tricentis SeaLights, Launchable | Behind: path-scoped service selection exists, but per-test selection is not implemented | Run shadow recommendations against preserved full suites and measure escaped-failure recall before any gate use |
+| Scheduled browser/API journeys with retained results and observability correlation | Grafana Synthetic Monitoring, Checkly | Partially ahead on governed journey ownership, explicit planned/blocked states and banking taint boundaries; behind on globally distributed probes | Execute every active journey on its declared schedule and add region/private-probe evidence without weakening identity |
+| Browser and mobile RUM combined with synthetics and backend telemetry | Dynatrace Digital Experience Monitoring, Datadog RUM/test correlation | Partial: privacy-bounded mobile trace arrival and Admin UI browser CI are separate, honest observations; no full session analytics is claimed | Prove consented Android and iOS exporter arrivals and journey-to-backend correlation in the sandbox |
+| Performance tests as continuous SDLC evidence correlated with system telemetry | Grafana k6 | Local service performance gate executes; the money-path sandbox baseline is explicitly `not-run` without a safe reachable target | Provide an isolated authenticated target/runner, then retain repeated comparable baselines and SLO correlation |
+
+OpenBank's present differentiator is therefore the evidence contract, not feature count: released
+components that did not run stay visible, Testcontainers are split into declared and observed
+runtime, every verdict retains commit/workflow provenance, and AI cannot raise a verdict or approve a
+release. The matrix is also a backlog: any row whose next proof is missing prevents a claim of
+end-to-end completion.
+
 OpenBank combines the useful parts with a bank-specific invariant: flaky classification is triage
 metadata, never permission to make a failing money-path or control test green. Predictive selection
 may become an advisory ordering or parallelism input only after full-suite preservation is proven;
@@ -380,9 +396,12 @@ verdict or alter CI/RUM state.
 - [Datadog Test Optimization](https://docs.datadoghq.com/tests/)
 - [Datadog Test Impact Analysis](https://docs.datadoghq.com/tests/test_impact_analysis/)
 - [Datadog Flaky Test Management](https://docs.datadoghq.com/tests/flaky_management/)
+- [Tricentis SeaLights test impact analysis](https://documentation.tricentis.com/sealights/en/content/sealights/support.htm)
 - [Buildkite Test Engine](https://buildkite.com/platform/test-engine/)
 - [Launchable predictive test selection](https://help.launchableinc.com/features/predictive-test-selection/how-launchable-selects-tests/)
 - [Checkly Playwright checks](https://www.checklyhq.com/docs/detect/synthetic-monitoring/playwright-checks/overview/)
 - [Grafana Synthetic Monitoring](https://grafana.com/docs/grafana-cloud/observe-and-act/testing/synthetic-monitoring/introduction/)
+- [Grafana automated performance testing](https://grafana.com/docs/k6/latest/testing-guides/automated-performance-testing/)
+- [Dynatrace RUM and Synthetic Monitoring](https://docs.dynatrace.com/docs/license/capabilities/real-user-synthetic-monitoring)
 - [BrowserStack AI agents](https://www.browserstack.com/docs/test-management/browserstack-ai)
 - [BrowserStack Smart Test Selection](https://www.browserstack.com/docs/automate/selenium/smart-test-selection)
