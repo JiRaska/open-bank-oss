@@ -9,6 +9,7 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
+import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
@@ -88,6 +89,8 @@ class ReferralRestContractIT {
             body("rewardReference", notNullValue())
         } Extract { path<String>("rewardReference") }
 
+        assertOutbox(programId, expectedRows = 2)
+
         Given { contentType("application/json") }
             .header("Idempotency-Key", "qualify-replay-$programId")
             .body("""{"eventName":"account.opened","eventId":"event-$programId"}""")
@@ -97,11 +100,36 @@ class ReferralRestContractIT {
                 body("rewardReference", equalTo(rewardReference))
             }
 
+        // Replay returns the original reward and must not enqueue duplicate money-path events.
+        assertOutbox(programId, expectedRows = 2)
+
         Given { contentType("application/json") }
             .header("Idempotency-Key", "invite-$programId")
             .body("""{"referrerPartyId":"$referrer"}""")
             .When { post("/api/v1/referrals/programs/$programId/invites") }
             .Then { statusCode(409) }
+    }
+
+    private fun assertOutbox(programId: UUID, expectedRows: Int) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "select event_type, status, payload from referral_outbox where aggregate_id in " +
+                    "(select id from referral_reward where program_id = ?) order by event_type",
+            ).use { statement ->
+                statement.setObject(1, programId)
+                val rows = buildList {
+                    statement.executeQuery().use { result ->
+                        while (result.next()) {
+                            add(Triple(result.getString(1), result.getString(2), result.getString(3)))
+                        }
+                    }
+                }
+                assertThat(rows).hasSize(expectedRows)
+                assertThat(rows.map { it.first }).containsExactly("Qualified", "RewardRequested")
+                assertThat(rows.map { it.second }).containsOnly("PENDING")
+                assertThat(rows.map { it.third }).allMatch { it.contains("\"eventId\"") }
+            }
+        }
     }
 
     private fun seedDraft(id: UUID) {
