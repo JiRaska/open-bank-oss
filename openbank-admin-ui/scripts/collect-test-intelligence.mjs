@@ -26,6 +26,9 @@ const exists = file => fs.existsSync(file)
 const readJson = file => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return null }
 }
+const readText = file => {
+  try { return fs.readFileSync(file, 'utf8') } catch { return '' }
+}
 const trustedRunUrl = (value, runId) => {
   if (!value) return false
   try {
@@ -545,8 +548,21 @@ async function clientExperiences() {
   }
   const appSource = path.join(repo, '.app-src')
   const appSourceAvailable = exists(appSource)
-  const androidRum = exists(path.join(appSource, 'shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt'))
-  const iosRum = exists(path.join(appSource, 'shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt'))
+  // A file named RumMonitor is not evidence that it exports a useful, privacy-bounded
+  // signal. Verify the closed schema at collection time: source capability stays separate
+  // from runtime arrival, and a missing attribute cannot render as a passing exporter.
+  const androidSource = readText(path.join(appSource, 'shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt'))
+  const iosSource = readText(path.join(appSource, 'shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt'))
+  const tracePropagationSource = readText(path.join(appSource, 'shared/src/commonMain/kotlin/tech/openbank/app/telemetry/TraceparentPlugin.kt'))
+  const iosPayloadTest = readText(path.join(appSource, 'shared/src/iosTest/kotlin/tech/openbank/app/telemetry/RumMonitorIosTest.kt'))
+  const tracePropagationTest = readText(path.join(appSource, 'shared/src/commonTest/kotlin/tech/openbank/app/telemetry/TraceparentPluginTest.kt'))
+  const requiredResourceAttributes = ['app.version', 'os.type', 'os.version', 'device.model']
+  const sourceHas = (source, values) => values.every(value => source.includes(value))
+  const correlationImplemented = sourceHas(tracePropagationSource, ['traceparent', 'x-correlation-id'])
+    && sourceHas(tracePropagationTest, ['traceparent', 'x-correlation-id'])
+  const androidRum = sourceHas(androidSource, [...requiredResourceAttributes, 'screen.name']) && correlationImplemented
+  const iosRum = sourceHas(iosSource, [...requiredResourceAttributes, 'screen.name'])
+    && sourceHas(iosPayloadTest, [...requiredResourceAttributes, 'screen.name']) && correlationImplemented
   // Tempo's bounded arrival projection deliberately does not query `os.*`: the current
   // gateway retains such attributes only when a newly built consented client happens to
   // be sampled, and older clients are allowed to omit them. A generic openbank-app trace
@@ -556,9 +572,9 @@ async function clientExperiences() {
     capability: implemented ? 'passed' : appSourceAvailable ? 'not-run' : 'unknown',
     runtime: 'unknown',
     detail: implemented
-      ? `${platform === 'android' ? 'Android' : 'iOS'} exporter exists in the staged client source; generic Tempo arrival cannot attribute a sampled trace to this OS.`
+      ? `${platform === 'android' ? 'Android' : 'iOS'} exporter source contains the allow-listed attributes, screen.name and tested trace/correlation propagation; generic Tempo arrival cannot attribute a sampled trace to this OS.`
       : appSourceAvailable
-        ? `${platform === 'android' ? 'Android' : 'iOS'} exporter was not found in the staged client source.`
+        ? `${platform === 'android' ? 'Android' : 'iOS'} source does not prove the complete allow-listed exporter contract.`
         : 'Client source was not staged for this deployment; platform capability is unknown.',
   })
   const webEvidence = runEnvelope('openbank-admin-ui')?.evidence ?? await junitEvidence('openbank-admin-ui')
@@ -588,7 +604,7 @@ async function clientExperiences() {
         source: null, sampledSpansLast7d: null, errorSpansLast7d: null,
         platforms: [platformRum('android', androidRum), platformRum('ios', iosRum)],
         detail: androidRum || iosRum
-          ? `Mobile RUM is implemented in source for ${androidRum ? 'Android' : ''}${androidRum && iosRum ? ' and ' : ''}${iosRum ? 'iOS' : ''}; runtime arrival is intentionally not inferred from a CI artifact.`
+          ? `Mobile RUM source contract is verified for ${androidRum ? 'Android' : ''}${androidRum && iosRum ? ' and ' : ''}${iosRum ? 'iOS' : ''}; runtime arrival is intentionally not inferred from a CI artifact.`
           : 'openbank-app source was not staged for this deployment, so RUM implementation status is unknown.',
       }, blocker: latestMobile ? null : 'Latest private-app CI evidence artifact was not available to this deployment.',
     },
