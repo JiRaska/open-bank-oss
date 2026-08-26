@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.0...finrep-service-v0.9.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **finrep:** select immutable reporting periods ([#7001](https://github.com/JiRaska/open-bank-oss/issues/7001)) ([9302207](https://github.com/JiRaska/open-bank-oss/commit/9302207dd94677762283f4a6d87c0fdac5ce0bef))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.8.2...finrep-service-v0.9.0) (2026-08-24)
 
 

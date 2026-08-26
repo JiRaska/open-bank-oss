@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.199.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.198.0...admin-ui-v0.199.0) (2026-08-26)
+
+
+### Features
+
+* **admin-ui:** retain synthetic run history ([#7022](https://github.com/JiRaska/open-bank-oss/issues/7022)) ([ed7fc07](https://github.com/JiRaska/open-bank-oss/commit/ed7fc0701d382997154766eba2a38e03f7e2be03))
+
+
+### Bug Fixes
+
+* **admin-ui:** expose campaign action state ([#7013](https://github.com/JiRaska/open-bank-oss/issues/7013)) ([69b05d7](https://github.com/JiRaska/open-bank-oss/commit/69b05d732afcd04f805db35f78080b675d0ecfb9)), closes [#4476](https://github.com/JiRaska/open-bank-oss/issues/4476)
+* **admin-ui:** expose journey coverage state ([#7005](https://github.com/JiRaska/open-bank-oss/issues/7005)) ([66a1c94](https://github.com/JiRaska/open-bank-oss/commit/66a1c94cbe693b41cdc1190d4043b35926521575)), closes [#7003](https://github.com/JiRaska/open-bank-oss/issues/7003)
+* **finrep:** select immutable reporting periods ([#7001](https://github.com/JiRaska/open-bank-oss/issues/7001)) ([9302207](https://github.com/JiRaska/open-bank-oss/commit/9302207dd94677762283f4a6d87c0fdac5ce0bef))
+
 ## [0.198.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.197.1...admin-ui-v0.198.0) (2026-08-26)
 
 
