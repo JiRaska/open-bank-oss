@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.67.0...customer-edge-v0.68.0) (2026-08-26)
+
+
+### Features
+
+* **customer-edge:** add term deposit journey ([#6838](https://github.com/JiRaska/open-bank-oss/issues/6838)) ([c99828e](https://github.com/JiRaska/open-bank-oss/commit/c99828e110223ceebe63befda471bd9232720fad))
+
 ## [0.67.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.66.1...customer-edge-v0.67.0) (2026-08-22)
 
 

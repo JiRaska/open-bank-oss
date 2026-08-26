@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.196.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.195.0...admin-ui-v0.196.0) (2026-08-26)
+
+
+### Features
+
+* **customer-edge:** add term deposit journey ([#6838](https://github.com/JiRaska/open-bank-oss/issues/6838)) ([c99828e](https://github.com/JiRaska/open-bank-oss/commit/c99828e110223ceebe63befda471bd9232720fad))
+
+
+### Bug Fixes
+
+* **admin-ui:** project simulation test evidence ([#6976](https://github.com/JiRaska/open-bank-oss/issues/6976)) ([c6b75b3](https://github.com/JiRaska/open-bank-oss/commit/c6b75b36ecbcbff4da0ebe5082b9f3c689ebb8bb))
+
 ## [0.195.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.194.3...admin-ui-v0.195.0) (2026-08-26)
 
 
