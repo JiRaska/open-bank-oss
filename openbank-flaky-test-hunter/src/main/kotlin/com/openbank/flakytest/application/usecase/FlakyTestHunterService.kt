@@ -100,6 +100,17 @@ class FlakyTestHunterService(
                 ),
             )
         }
+        if (component.evidence.any { it.state == "failed" }) {
+            add(
+                evidenceFinding(
+                    snapshotId,
+                    component.component,
+                    FlakyTestCheckType.FAILED_TEST_EVIDENCE,
+                    severity,
+                    "${component.component} has failed test evidence",
+                ),
+            )
+        }
         if (component.evidence.any {
                 it.state == "stale"
             }
