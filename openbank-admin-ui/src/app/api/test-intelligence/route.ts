@@ -114,6 +114,10 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
     if (journey.status !== 'active') return journey
     const cronjob = cronjobSelector(journey.id)
     if (!cronjob) return journey
+    // A failure must remain visible for the same evidence window used to judge a
+    // successful run fresh. A fixed 30-minute window made a failed hourly or daily
+    // journey look healthy again while its last successful run was still nominally fresh.
+    const failureWindowSeconds = freshnessLimitSeconds(journey.schedule)
     const [scheduled, successful, failures, recentRuns] = await Promise.all([
       queryPrometheus(base, `max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="${cronjob}"})`),
       queryPrometheus(base, `max(kube_cronjob_status_last_successful_time{namespace="observability",cronjob="${cronjob}"})`),
@@ -121,7 +125,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
       // collected. A historical failed Job therefore remains `1` forever; selecting it with
       // max_over_time makes a later successful schedule look failed. Join on completion time so
       // only a Job which both failed AND completed inside the window is a current failure.
-      queryPrometheus(base, `max((kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} > 0) and on(namespace,job_name) (time() - kube_job_status_completion_time{namespace="observability",job_name=~"${cronjob}.*"} < 1800))`),
+      queryPrometheus(base, `max((kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} > 0) and on(namespace,job_name) (time() - kube_job_status_completion_time{namespace="observability",job_name=~"${cronjob}.*"} < ${failureWindowSeconds}))`),
       queryPrometheusRuns(base, cronjob),
     ])
     const observedAt = new Date().toISOString()
@@ -135,7 +139,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
         source: 'prometheus' as const, observedAt,
         lastScheduledAt: scheduled === null ? null : new Date(scheduled * 1000).toISOString(),
         lastSuccessfulAt: successful === null ? null : new Date(successful * 1000).toISOString(),
-        failuresLast30m: failures, freshnessSeconds, recentRuns,
+        failuresWithinWindow: failures, failureWindowSeconds, freshnessSeconds, recentRuns,
       },
     }
   }))

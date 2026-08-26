@@ -154,6 +154,7 @@ describe('GET /api/test-intelligence', () => {
     const body = await (await GET()).json()
     expect(body.syntheticJourneys[0].state).toBe('passed')
     expect(queries.some(query => query.includes('kube_job_status_completion_time'))).toBe(true)
+    expect(queries.some(query => query.includes('< 900'))).toBe(true)
     expect(queries.some(query => query.includes('max_over_time(kube_job_status_failed'))).toBe(false)
   })
 })

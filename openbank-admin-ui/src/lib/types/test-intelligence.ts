@@ -159,7 +159,8 @@ export interface SyntheticJourneyEvidence {
     observedAt: string
     lastScheduledAt: string | null
     lastSuccessfulAt: string | null
-    failuresLast30m: number | null
+    failuresWithinWindow: number | null
+    failureWindowSeconds: number
     freshnessSeconds: number | null
     recentRuns: Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>
   }

@@ -330,7 +330,7 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
     {row.live && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 12, padding: 12, borderRadius: 8, background: 'var(--surface-2)', fontSize: 11 }}>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Naposledy naplánováno', 'Last scheduled')}</span><br /><strong>{row.live.lastScheduledAt ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(row.live.lastScheduledAt)) : 'never observed'}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední úspěch', 'Last success')}</span><br /><strong>{row.live.lastSuccessfulAt ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(row.live.lastSuccessfulAt)) : 'never observed'}</strong></div>
-      <div><span style={{ color: 'var(--text-tertiary)' }}>Failures / 30m</span><br /><strong>{row.live.failuresLast30m ?? 'unavailable'}</strong></div>
+      <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Selhání v okně', 'Failures in window')}</span><br /><strong>{row.live.failuresWithinWindow ?? 'unavailable'} / {Math.round(row.live.failureWindowSeconds / 60)} min</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Čerstvost evidence', 'Evidence freshness')}</span><br /><strong>{row.live.freshnessSeconds === null ? 'unknown' : `${Math.round(row.live.freshnessSeconds / 60)} min`}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední Kubernetes běhy', 'Recent Kubernetes runs')}</span><br /><strong>{row.live.recentRuns.length || 'none retained'}</strong></div>
     </div>}
