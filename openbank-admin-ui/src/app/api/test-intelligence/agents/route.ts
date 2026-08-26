@@ -28,6 +28,10 @@ const EVIDENCE_STATES = new Set<string>(Object.keys(EVIDENCE_STATE_KEYS))
 const INFRASTRUCTURE = new Set(['postgres', 'redpanda', 'valkey'])
 const AGENT_SEVERITIES = new Set<TestAgentFinding['severity']>(['WARNING', 'CRITICAL'])
 const MAX_AGENT_TEXT = 1_000
+const MAX_AGENT_COUNT = 2_147_483_647
+
+const boundedCount = (value: unknown): number => typeof value === 'number' && Number.isFinite(value)
+  ? Math.min(MAX_AGENT_COUNT, Math.max(0, Math.round(value))) : 0
 
 const safeEvidence = (items: ReadonlyArray<{ kind: string; state: string }> | undefined) =>
   (items ?? []).map(item => ({
@@ -99,6 +103,16 @@ export async function POST(): Promise<NextResponse> {
   try {
     const file = process.env.OPENBANK_TEST_INTELLIGENCE ?? path.resolve(process.cwd(), 'test-intelligence.json')
     const report = JSON.parse(await fs.readFile(file, 'utf8')) as TestIntelligenceReport
+    const historyByComponent = new Map<string, { flakyTests: number; failingTests: number; sameCommitTransitions: number; wastedDurationMs: number }>()
+    for (const test of report.testCases ?? []) {
+      if (!COMPONENT_NAME.test(test.component)) continue
+      const current = historyByComponent.get(test.component) ?? { flakyTests: 0, failingTests: 0, sameCommitTransitions: 0, wastedDurationMs: 0 }
+      current.flakyTests = boundedCount(current.flakyTests + (test.state === 'flaky' ? 1 : 0))
+      current.failingTests = boundedCount(current.failingTests + (test.state === 'failing' ? 1 : 0))
+      current.sameCommitTransitions = boundedCount(current.sameCommitTransitions + boundedCount(test.sameCommitTransitions))
+      current.wastedDurationMs = boundedCount(current.wastedDurationMs + boundedCount(test.wastedDurationMs))
+      historyByComponent.set(test.component, current)
+    }
     const serviceComponents = report.components
       .filter(component => COMPONENT_NAME.test(component.component))
       .map(component => ({
@@ -107,6 +121,7 @@ export async function POST(): Promise<NextResponse> {
         evidence: safeEvidence(component.evidence),
         declaredInfrastructure: (component.testInfrastructure?.declared ?? []).filter(item => INFRASTRUCTURE.has(item)),
         observedInfrastructureStarts: component.testInfrastructure?.observed.filter(item => item.lifecycle === 'started').length ?? 0,
+        ...(historyByComponent.get(component.component) ?? { flakyTests: 0, failingTests: 0, sameCommitTransitions: 0, wastedDurationMs: 0 }),
       }))
     const clientComponents = (report.clientExperiences ?? []).filter(client => COMPONENT_NAME.test(client.id)).map(client => ({
       component: client.id,
@@ -116,6 +131,7 @@ export async function POST(): Promise<NextResponse> {
       evidence: safeEvidence(client.evidence),
       declaredInfrastructure: [],
       observedInfrastructureStarts: 0,
+      ...(historyByComponent.get(client.id) ?? { flakyTests: 0, failingTests: 0, sameCommitTransitions: 0, wastedDurationMs: 0 }),
     }))
     const payload = {
       snapshotId: `${new Date(report.collectedAt).toISOString()}:schema-${Number(report.schemaVersion)}`,

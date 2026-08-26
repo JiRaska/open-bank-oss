@@ -49,6 +49,10 @@ describe('Test Intelligence agent BFF', () => {
         testInfrastructure: { declared: ['postgres'], observed: [{ lifecycle: 'started' }] } }],
       clientExperiences: [{ id: 'openbank-app', evidence: [{ kind: 'visual', state: 'passed', source: '/private/app/path' }],
         rum: { state: 'passed', detail: '12 sampled spans', sampledSpansLast7d: 12 } }],
+      testCases: [
+        { component: 'openbank-ledger-service', state: 'flaky', sameCommitTransitions: 2, wastedDurationMs: 1250, name: 'private test name', fingerprint: 'private-fingerprint' },
+        { component: 'openbank-ledger-service', state: 'failing', sameCommitTransitions: 0, wastedDurationMs: 500, name: 'another private test', fingerprint: 'private-fingerprint-2' },
+      ],
     }))
     process.env.OPENBANK_TEST_INTELLIGENCE = file
     const agentFinding = { id: 'diagnosed-1', component: 'openbank-ledger-service', title: 'Investigate stale integration', severity: 'WARNING' }
@@ -59,12 +63,17 @@ describe('Test Intelligence agent BFF', () => {
     expect(body.findings).toEqual([{ ...agentFinding, checkType: 'advisory', detectedAt: '', rootCause: null, proposalUrl: null, status: 'open' }])
     const outbound = JSON.parse(fetchMock.mock.calls[0][1].body as string)
     expect(outbound.components[0]).toEqual({ component: 'openbank-ledger-service', moneyPath: true,
-      evidence: [{ kind: 'integration', state: 'stale' }], declaredInfrastructure: ['postgres'], observedInfrastructureStarts: 1 })
+      evidence: [{ kind: 'integration', state: 'stale' }], declaredInfrastructure: ['postgres'], observedInfrastructureStarts: 1,
+      flakyTests: 1, failingTests: 1, sameCommitTransitions: 2, wastedDurationMs: 1750 })
     expect(outbound.components[1]).toEqual({ component: 'openbank-app', moneyPath: true,
-      evidence: [{ kind: 'visual', state: 'passed' }], declaredInfrastructure: [], observedInfrastructureStarts: 0 })
+      evidence: [{ kind: 'visual', state: 'passed' }], declaredInfrastructure: [], observedInfrastructureStarts: 0,
+      flakyTests: 0, failingTests: 0, sameCommitTransitions: 0, wastedDurationMs: 0 })
+    expect(outbound.components[0]).toMatchObject({ flakyTests: 1, failingTests: 1, sameCommitTransitions: 2, wastedDurationMs: 1750 })
     expect(JSON.stringify(outbound)).not.toContain('/private/path')
     expect(JSON.stringify(outbound)).not.toContain('/private/app/path')
     expect(JSON.stringify(outbound)).not.toContain('sampledSpansLast7d')
+    expect(JSON.stringify(outbound)).not.toContain('private test name')
+    expect(JSON.stringify(outbound)).not.toContain('private-fingerprint')
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -89,6 +98,7 @@ describe('Test Intelligence agent BFF', () => {
     expect(outbound.components).toEqual([{
       component: 'openbank-ledger-service', moneyPath: true,
       evidence: [{ kind: 'unknown', state: 'unknown' }], declaredInfrastructure: [], observedInfrastructureStarts: 1,
+      flakyTests: 0, failingTests: 0, sameCommitTransitions: 0, wastedDurationMs: 0,
     }])
     rmSync(dir, { recursive: true, force: true })
   })
