@@ -204,6 +204,7 @@ locals {
     # Measured 2026-08-02 across the live fleet: 52 CNPG clusters declare
     # barmanObjectStore, 51 archive fine, and campaign was the only one broken.
     campaign         = { namespace = "campaign", sa = "campaign-db" }
+    referral         = { namespace = "referral", sa = "referral-db" }
     devops           = { namespace = "devops-agent", sa = "devops-db" }
     docstruth        = { namespace = "docs-truth-agent", sa = "docstruth-db" }
     document-service = { namespace = "documents", sa = "document-service-db" }

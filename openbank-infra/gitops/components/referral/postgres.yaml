@@ -1,0 +1,50 @@
+# Single-owner sandbox Postgres for referral attribution and audit evidence.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: referral-db
+  namespace: referral
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+      max_wal_size: "512MB"
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/referral-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+  bootstrap:
+    initdb:
+      database: openbank_referral
+      owner: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: referral-db-daily
+  namespace: referral
+spec:
+  schedule: "0 47 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: referral-db
