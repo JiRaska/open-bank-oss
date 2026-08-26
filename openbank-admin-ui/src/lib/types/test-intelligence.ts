@@ -49,6 +49,16 @@ export interface EvidenceObservation {
   counts?: TestCounts
   detail?: string
   run?: TestRunProvenance
+  diagnostics?: TestDiagnosticArtifact[]
+}
+
+export interface TestDiagnosticArtifact {
+  kind: 'playwright-report'
+  name: string
+  url: string
+  retentionDays: 7
+  access: 'github-run-authenticated'
+  mayContainSensitiveData: true
 }
 
 export interface TestRunProvenance {
@@ -149,7 +159,9 @@ export interface SyntheticJourneyEvidence {
     observedAt: string
     lastScheduledAt: string | null
     lastSuccessfulAt: string | null
-    failuresLast30m: number | null
+    failuresWithinWindow: number | null
+    failureWindowSeconds: number
+    activeJobs: number | null
     freshnessSeconds: number | null
     recentRuns: Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>
   }
@@ -186,6 +198,14 @@ export interface ClientExperienceEvidence {
     source?: 'prometheus' | 'tempo' | null
     sampledSpansLast7d?: number | null
     errorSpansLast7d?: number | null
+    /** Capability and runtime attribution are deliberately separate: an untagged mobile span
+     * proves arrival, never which OS emitted it. */
+    platforms?: Array<{
+      platform: 'android' | 'ios'
+      capability: EvidenceState
+      runtime: EvidenceState
+      detail: string
+    }>
   }
   blocker: string | null
 }

@@ -9,6 +9,7 @@ afterEach(() => {
   delete process.env.OPENBANK_TEST_INTELLIGENCE
   delete process.env.PROMETHEUS_URL
   delete process.env.TEMPO_URL
+  delete process.env.OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS
   vi.unstubAllGlobals()
   dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true }))
 })
@@ -41,13 +42,61 @@ describe('GET /api/test-intelligence', () => {
     expect(body.warnings[0]).toMatch(/not bundled/i)
   })
 
+  it('ages a deployed successful snapshot at request time while preserving failures and recomputing totals', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-runtime-freshness-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    const evidence = (kind: 'unit' | 'integration' | 'trace', state: 'passed' | 'failed', observedAt = '2020-01-01T00:00:00.000Z') => ({
+      kind, state, observedAt, source: 'run:v1', environment: 'ci',
+    })
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2020-01-01T00:00:00.000Z',
+      components: [{
+        component: 'openbank-ledger-service', released: true, moneyPath: true,
+        evidence: [evidence('unit', 'passed'), evidence('integration', 'failed'), evidence('trace', 'passed', '2999-01-01T00:00:00.000Z')],
+        coverage: { state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', source: 'kover', lines: { covered: 1, missed: 0, percentage: 100 }, branches: { covered: 1, missed: 0, percentage: 100 } },
+        testInfrastructure: { declared: [], observed: [] },
+      }],
+      contracts: [{ consumer: 'openbank-ledger-service', provider: 'openbank-balance-service', pactFile: 'ledger-balance.json', state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', interactions: 1 }],
+      mutations: [{ component: 'openbank-ledger-service', state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', total: 1, killed: 1, survived: 0, noCoverage: 0, score: 100 }],
+      performance: [{ id: 'old-perf', component: 'openbank-ledger-service', state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', source: 'perf.js', thresholds: 1 }],
+      syntheticJourneys: [{ id: 'edge', title: 'Edge', status: 'active', state: 'unknown', severity: 'page', schedule: '*/5 * * * *', environment: 'sandbox', covers: [], falsifies: 'Break it', blocker: null, ci: { state: 'passed', observedAt: '2020-01-01T00:00:00.000Z', detail: 'old pass', run: { id: '1', attempt: 1, commit: 'abc', branch: 'main', workflow: 'Synthetic', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/1' } } }],
+      clientExperiences: [{ id: 'openbank-app', title: 'App', surface: 'mobile', platforms: ['android'], evidence: [evidence('unit', 'passed')], rum: { state: 'not-run', policy: 'consent-gated', detail: 'none', observedAt: null }, blocker: null }],
+      history: [], runHistory: [], testCases: [],
+      totals: { components: 1, componentsWithExecutionEvidence: 1, moneyPathComponents: 1, failingEvidence: 99, missingEvidence: 99, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS = '1'
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+
+    expect(body.components[0].evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'unit', state: 'stale' }),
+      expect.objectContaining({ kind: 'integration', state: 'failed' }),
+      expect.objectContaining({ kind: 'trace', state: 'unknown' }),
+    ]))
+    expect(body.components[0].coverage.state).toBe('stale')
+    expect(body.contracts[0].state).toBe('stale')
+    expect(body.mutations[0].state).toBe('stale')
+    expect(body.performance[0].state).toBe('stale')
+    expect(body.syntheticJourneys[0].ci.state).toBe('stale')
+    expect(body.clientExperiences[0].evidence[0].state).toBe('stale')
+    expect(body.totals).toMatchObject({ failingEvidence: 1, missingEvidence: 0, staleEvidence: 1, unknownEvidence: 1, unresolvedEvidence: 1 })
+  })
+
   it('keeps mobile CI separate and attaches consent-gated RUM arrival evidence', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-rum-route-'))
     dirs.push(dir)
     const file = path.join(dir, 'report.json')
     writeFileSync(file, JSON.stringify({
       schemaVersion: 1, collectedAt: '2026-08-23T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], syntheticJourneys: [], history: [], runHistory: [], testCases: [],
-      clientExperiences: [{ id: 'openbank-app', title: 'OpenBank customer app', surface: 'mobile', platforms: ['android', 'ios'], evidence: [], rum: { state: 'unknown', policy: 'consent-gated', detail: 'static capability', observedAt: null }, blocker: null }],
+      clientExperiences: [{ id: 'openbank-app', title: 'OpenBank customer app', surface: 'mobile', platforms: ['android', 'ios'], evidence: [], rum: {
+        state: 'unknown', policy: 'consent-gated', detail: 'static capability', observedAt: null,
+        platforms: [
+          { platform: 'android', capability: 'passed', runtime: 'unknown', detail: 'generic arrival is not Android proof' },
+          { platform: 'ios', capability: 'passed', runtime: 'unknown', detail: 'generic arrival is not iOS proof' },
+        ],
+      }, blocker: null }],
       totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
     }))
     process.env.OPENBANK_TEST_INTELLIGENCE = file
@@ -71,6 +120,10 @@ describe('GET /api/test-intelligence', () => {
       state: 'passed', policy: 'consent-gated', source: 'tempo', sampledSpansLast7d: 12, errorSpansLast7d: 2,
     })
     expect(body.clientExperiences[0].rum.detail).toContain('12 sampled mobile RUM trace(s)')
+    expect(body.clientExperiences[0].rum.platforms).toEqual([
+      expect.objectContaining({ platform: 'android', capability: 'passed', runtime: 'unknown' }),
+      expect.objectContaining({ platform: 'ios', capability: 'passed', runtime: 'unknown' }),
+    ])
     expect(body.clientExperiences[0].evidence).toEqual([])
   })
 
@@ -90,7 +143,9 @@ describe('GET /api/test-intelligence', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
       const query = new URL(String(input)).searchParams.get('query') ?? ''
       queries.push(query)
-      const payload = query.includes('kube_job_status_completion_time')
+      const payload = query.includes('kube_job_status_failed')
+        ? { status: 'success', data: { result: [{ value: [now, '0'] }] } }
+        : query.includes('kube_job_status_completion_time')
         ? { status: 'success', data: { result: [] } }
         : query.includes('kube_cronjob_status_last_successful_time') || query.includes('kube_cronjob_status_last_schedule_time')
           ? { status: 'success', data: { result: [{ value: [now, String(now)] }] } }
@@ -100,7 +155,65 @@ describe('GET /api/test-intelligence', () => {
     const { GET } = await import('@/app/api/test-intelligence/route')
     const body = await (await GET()).json()
     expect(body.syntheticJourneys[0].state).toBe('passed')
+    expect(body.syntheticJourneys[0].live.failuresWithinWindow).toBe(0)
     expect(queries.some(query => query.includes('kube_job_status_completion_time'))).toBe(true)
+    expect(queries.some(query => query.includes('< 900'))).toBe(true)
+    expect(queries.some(query => query.includes('kube_job_status_failed') && query.includes('or vector(0)'))).toBe(true)
     expect(queries.some(query => query.includes('max_over_time(kube_job_status_failed'))).toBe(false)
+  })
+
+  it('uses Kubernetes completion time, not the Prometheus scrape time, for recent synthetic runs', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-run-history-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-25T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], history: [], runHistory: [], testCases: [], clientExperiences: [],
+      syntheticJourneys: [{ id: 'public-edge', title: 'Public edge', status: 'active', state: 'unknown', severity: 'page', schedule: '*/5 * * * *', environment: 'sandbox', covers: [], falsifies: 'Break the edge.', blocker: null }],
+      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.PROMETHEUS_URL = 'http://prometheus.test'
+    const now = Date.now() / 1000
+    const completed = Math.floor(now - 120)
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      const payload = query.includes('openbank_evidence_state')
+        ? { status: 'success', data: { result: [{ metric: { job_name: 'journey-public-edge-123', openbank_evidence_state: 'passed' }, value: [now, String(completed)] }] } }
+        : query.includes('kube_job_status_completion_time')
+          ? { status: 'success', data: { result: [] } }
+          : { status: 'success', data: { result: [{ value: [now, String(now)] }] } }
+      return new Response(JSON.stringify(payload), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+    expect(body.syntheticJourneys[0].live.recentRuns).toEqual([
+      { id: 'journey-public-edge-123', state: 'passed', observedAt: new Date(completed * 1000).toISOString() },
+    ])
+  })
+
+  it('shows a first scheduled Job still running as unresolved instead of claiming it was not run', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-running-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-25T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], history: [], runHistory: [], testCases: [], clientExperiences: [],
+      syntheticJourneys: [{ id: 'public-edge', title: 'Public edge', status: 'active', state: 'unknown', severity: 'page', schedule: '*/5 * * * *', environment: 'sandbox', covers: [], falsifies: 'Break the edge.', blocker: null }],
+      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.PROMETHEUS_URL = 'http://prometheus.test'
+    const now = Date.now() / 1000
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      const payload = query.includes('kube_job_status_active')
+        ? { status: 'success', data: { result: [{ value: [now, '1'] }] } }
+        : query.includes('kube_job_status_completion_time')
+          ? { status: 'success', data: { result: [] } }
+          : { status: 'success', data: { result: [] } }
+      return new Response(JSON.stringify(payload), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+    expect(body.syntheticJourneys[0]).toMatchObject({ state: 'unknown', live: { activeJobs: 1, lastSuccessfulAt: null } })
   })
 })

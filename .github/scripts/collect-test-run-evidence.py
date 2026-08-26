@@ -8,10 +8,11 @@ import hashlib
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import tempfile
+from urllib.parse import urlparse
 
 
 SUITE_KINDS = {"unit", "integration", "contract", "e2e", "simulation"}
@@ -19,20 +20,49 @@ SUITE_STATES = {"passed", "failed", "skipped", "not-run"}
 SPECIALIZED_KINDS = {"performance", "mutation", "synthetic", "trace"}
 SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
 INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
+DIAGNOSTIC_KINDS = {"playwright-report"}
+MAX_FUTURE_SKEW = timedelta(minutes=5)
+
+
+def parse_timestamp(value: object, field: str) -> datetime:
+    """Require an absolute ISO-8601 timestamp before publishing evidence."""
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an absolute ISO-8601 timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an absolute ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must include a timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def trusted_run_url(url: str, run_id: str) -> bool:
+    """Accept only a canonical GitHub Actions run URL for this envelope id."""
+    if not url:
+        return True  # local/offline envelopes have no outbound link
+    parsed = urlparse(url)
+    return (parsed.scheme == "https" and parsed.hostname == "github.com"
+            and not parsed.params and not parsed.query and not parsed.fragment
+            and re.fullmatch(rf"/[^/]+/[^/]+/actions/runs/{re.escape(str(run_id))}", parsed.path) is not None)
 
 
 def validate_envelope(envelope: dict) -> None:
     """Fail closed before CI publishes an envelope that violates the v1 contract."""
     required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
-    if set(envelope) - (required | {"specializedEvidence", "testCases"}) or not required.issubset(envelope):
+    if set(envelope) - (required | {"specializedEvidence", "testCases", "diagnostics"}) or not required.issubset(envelope):
         raise ValueError("run envelope has missing or unknown top-level fields")
     if envelope["schemaVersion"] != 1 or not str(envelope["component"]).startswith("openbank-"):
         raise ValueError("run envelope schemaVersion/component is invalid")
     run = envelope["run"]
     if set(run) != {"id", "attempt", "commit", "branch", "workflow", "url", "observedAt"}:
         raise ValueError("run provenance fields are incomplete")
-    if not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"] or not run["workflow"]:
+    if (not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"]
+            or not run["workflow"] or not trusted_run_url(str(run["url"]), str(run["id"]))):
         raise ValueError("run provenance values are invalid")
+    run_observed_at = parse_timestamp(run["observedAt"], "run.observedAt")
+    if run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW:
+        raise ValueError("run.observedAt exceeds the allowed clock skew")
     for suite in envelope["suites"]:
         if suite["kind"] not in SUITE_KINDS or suite["state"] not in SUITE_STATES:
             raise ValueError("suite kind/state is invalid")
@@ -63,6 +93,9 @@ def validate_envelope(envelope: dict) -> None:
             raise ValueError("runtime observation contains unsafe or incomplete fields")
         if item["resource"] not in INFRASTRUCTURE or item["lifecycle"] not in {"started", "stopped"} or not item["image"]:
             raise ValueError("runtime observation values are invalid")
+        observed_at = parse_timestamp(item["observedAt"], "testInfrastructure.observed.observedAt")
+        if observed_at - run_observed_at > MAX_FUTURE_SKEW:
+            raise ValueError("runtime observation occurs after its run beyond the allowed clock skew")
     for item in envelope.get("specializedEvidence", []):
         if set(item) - {"kind", "state", "source", "detail"} or not {"kind", "state", "source"}.issubset(item):
             raise ValueError("specialized evidence fields are invalid")
@@ -75,6 +108,32 @@ def validate_envelope(envelope: dict) -> None:
                 or item["state"] not in {"passed", "failed", "skipped"}
                 or not item["classname"] or not item["name"] or item["durationMs"] < 0):
             raise ValueError("test case values are invalid")
+    for item in envelope.get("diagnostics", []):
+        if set(item) != {"kind", "suiteKind", "name", "url", "retentionDays", "access", "mayContainSensitiveData"}:
+            raise ValueError("diagnostic artifact fields are invalid")
+        if (item["kind"] not in DIAGNOSTIC_KINDS or item["suiteKind"] != "e2e"
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", item["name"])
+                or item["url"] != f'{envelope["run"]["url"]}#artifacts' or item["retentionDays"] != 7
+                or item["access"] != "github-run-authenticated" or item["mayContainSensitiveData"] is not True):
+            raise ValueError("diagnostic artifact values are invalid")
+
+
+def browser_diagnostics(report_dir: str | None, run_id: str, attempt: int, run_url: str) -> list[dict]:
+    """Describe a retained Playwright report without copying its potentially sensitive contents."""
+    if not report_dir:
+        return []
+    report = Path(report_dir)
+    if not report.is_dir() or not any(item.is_file() for item in report.rglob("*")) or not run_url.startswith("https://"):
+        return []
+    return [{
+        "kind": "playwright-report",
+        "suiteKind": "e2e",
+        "name": f"playwright-report-{run_id}-a{attempt}",
+        "url": f"{run_url}#artifacts",
+        "retentionDays": 7,
+        "access": "github-run-authenticated",
+        "mayContainSensitiveData": True,
+    }]
 
 
 def classify(name: str, classname: str, task: str, component: str) -> str:
@@ -291,6 +350,7 @@ def main() -> None:
     parser.add_argument("--mutation-report")
     parser.add_argument("--synthetic-summary")
     parser.add_argument("--synthetic-journey")
+    parser.add_argument("--browser-report-dir")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -362,7 +422,7 @@ def main() -> None:
             assert synthetic == [{"kind": "synthetic", "state": "failed", "source": "journey:public-edge", "detail": "1 threshold result(s), 1 breached"}]
             valid = {
                 "schemaVersion": 1,
-                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "", "observedAt": "2026-08-22T00:00:00Z"},
+                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "observedAt": "2026-08-22T21:12:00Z"},
                 "component": "openbank-x",
                 "suites": [{"kind": "integration", "state": "passed", "discovered": 1, "executed": 1, "passed": 1, "failed": 0, "skipped": 0, "errors": 0, "durationMs": 1}],
                 "coverage": None,
@@ -370,12 +430,55 @@ def main() -> None:
                 "specializedEvidence": [{"kind": "performance", "state": "passed", "source": "summary.json"}],
                 "testCases": [],
             }
+            (service / "playwright-report").mkdir()
+            (service / "playwright-report/index.html").write_text("diagnostic")
+            valid["diagnostics"] = browser_diagnostics(str(service / "playwright-report"), "1", 1, "https://github.com/JiRaska/open-bank-oss/actions/runs/1")
+            assert valid["diagnostics"] == [{
+                "kind": "playwright-report", "suiteKind": "e2e", "name": "playwright-report-1-a1",
+                "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1#artifacts", "retentionDays": 7,
+                "access": "github-run-authenticated", "mayContainSensitiveData": True,
+            }]
             validate_envelope(valid)
+            untrusted_run = json.loads(json.dumps(valid))
+            untrusted_run["run"]["url"] = "https://attacker.example/actions/runs/1"
+            try:
+                validate_envelope(untrusted_run)
+                raise AssertionError("an untrusted run URL must be rejected")
+            except ValueError:
+                pass
+            untrusted_diagnostic = json.loads(json.dumps(valid))
+            untrusted_diagnostic["diagnostics"][0]["url"] = "https://attacker.example/report"
+            try:
+                validate_envelope(untrusted_diagnostic)
+                raise AssertionError("an off-run diagnostic URL must be rejected")
+            except ValueError:
+                pass
             invalid = json.loads(json.dumps(valid))
             invalid["suites"][0]["executed"] = 0
             try:
                 validate_envelope(invalid)
                 raise AssertionError("invalid suite arithmetic was accepted")
+            except ValueError:
+                pass
+            future_run = json.loads(json.dumps(valid))
+            future_run["run"]["observedAt"] = "2999-01-01T00:00:00Z"
+            try:
+                validate_envelope(future_run)
+                raise AssertionError("a future-dated run was accepted")
+            except ValueError:
+                pass
+            naive_run = json.loads(json.dumps(valid))
+            naive_run["run"]["observedAt"] = "2026-08-22T00:00:00"
+            try:
+                validate_envelope(naive_run)
+                raise AssertionError("a timezone-less run timestamp was accepted")
+            except ValueError:
+                pass
+            future_runtime = json.loads(json.dumps(valid))
+            future_runtime["testInfrastructure"]["observed"][0]["observedAt"] = "2999-01-01T00:00:00Z"
+            try:
+                validate_envelope(future_runtime)
+                raise AssertionError("a runtime observation after its run was accepted")
             except ValueError:
                 pass
         print("test-run evidence collector self-test: classification and runtime red/green paths proven")
@@ -387,6 +490,8 @@ def main() -> None:
     server = os.getenv("GITHUB_SERVER_URL", "")
     repository = os.getenv("GITHUB_REPOSITORY", "")
     run_id = os.getenv("GITHUB_RUN_ID", "local")
+    run_attempt = int(os.getenv("GITHUB_RUN_ATTEMPT", "1"))
+    run_url = f"{server}/{repository}/actions/runs/{run_id}" if server and repository else ""
     specialized = specialized_evidence(
         args.performance_summary,
         args.mutation_report,
@@ -398,16 +503,17 @@ def main() -> None:
     envelope = {
         "schemaVersion": 1,
         "run": {
-            "id": run_id, "attempt": int(os.getenv("GITHUB_RUN_ATTEMPT", "1")),
+            "id": run_id, "attempt": run_attempt,
             "commit": os.getenv("GITHUB_SHA", "local000"),
             "branch": os.getenv("GITHUB_HEAD_REF") or os.getenv("GITHUB_REF_NAME", "local"),
             "workflow": os.getenv("GITHUB_WORKFLOW", "local"),
-            "url": f"{server}/{repository}/actions/runs/{run_id}" if server and repository else "",
+            "url": run_url,
             "observedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
         "component": component, "suites": suites(component, service), "testCases": test_cases(component, service), "coverage": coverage(service),
         "testInfrastructure": {"declared": declared_infrastructure(service), "observed": observations(service)},
         "specializedEvidence": specialized,
+        "diagnostics": browser_diagnostics(args.browser_report_dir, run_id, run_attempt, run_url),
     }
     validate_envelope(envelope)
     output = Path(args.out)

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -28,6 +29,20 @@ def check(root: Path) -> list[str]:
                                 .get("properties", {}).get("kind", {}).get("enum", []))
         if "trace" not in specialized_kinds:
             errors.append("run schema cannot represent executed trace-contract evidence")
+        diagnostic = schema.get("properties", {}).get("diagnostics", {})
+        if diagnostic.get("items", {}).get("$ref") != "#/$defs/diagnosticArtifact":
+            errors.append("run schema has no typed diagnostic artifact collection")
+        run_url_pattern = schema.get("properties", {}).get("run", {}).get("properties", {}).get("url", {}).get("pattern", "")
+        diagnostic_url_pattern = schema.get("$defs", {}).get("diagnosticArtifact", {}).get("properties", {}).get("url", {}).get("pattern", "")
+        trusted_run = "https://github.com/JiRaska/open-bank-oss/actions/runs/42"
+        hostile_run = "https://github.com.attacker.example/JiRaska/open-bank-oss/actions/runs/42"
+        trusted_diagnostic = f"{trusted_run}#artifacts"
+        if (not run_url_pattern or re.fullmatch(run_url_pattern, trusted_run) is None
+                or re.fullmatch(run_url_pattern, hostile_run) is not None):
+            errors.append("run schema permits outbound provenance outside canonical GitHub Actions URLs")
+        if (not diagnostic_url_pattern or re.fullmatch(diagnostic_url_pattern, trusted_diagnostic) is None
+                or re.fullmatch(diagnostic_url_pattern, f"{hostile_run}#artifacts") is not None):
+            errors.append("run schema permits diagnostic links outside canonical GitHub run artifacts")
     except (OSError, json.JSONDecodeError) as exc:
         errors.append(f"run schema unavailable: {exc}")
 
@@ -61,7 +76,9 @@ def check(root: Path) -> list[str]:
             errors.append(f"shared trace contract cannot emit assertion-backed evidence: {needle}")
     run_collector = text(root / ".github/scripts/collect-test-run-evidence.py")
     for needle in ('"trace"', "def trace_contract_evidence", "OPENBANK_TRACE_CONTRACT_V1:",
-                   "specialized.extend(trace_contract_evidence(service))"):
+                   "specialized.extend(trace_contract_evidence(service))", "def parse_timestamp(",
+                   "run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW",
+                   "observed_at - run_observed_at > MAX_FUTURE_SKEW"):
         if needle not in run_collector:
             errors.append(f"run-envelope collector loses executed trace evidence: {needle}")
     tracing_pilot = text(root / "openbank-agent-service/src/test/kotlin/com/openbank/agent/application/AgentChatServiceTracingTest.kt")
@@ -144,6 +161,19 @@ def check(root: Path) -> list[str]:
         for needle in required:
             if needle not in workflow:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
+    perf_gate = text(root / ".github/workflows/perf-gate.yml")
+    perf_baseline = text(root / ".github/workflows/perf-baseline.yml")
+    pinned_k6 = "ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79"
+    for workflow_name, workflow in (("performance gate", perf_gate), ("performance baseline", perf_baseline)):
+        if pinned_k6 not in workflow:
+            errors.append(f"{workflow_name} does not execute its k6 runtime by immutable official digest")
+        if "github.com/grafana/k6/releases/download" in workflow or "curl -fsSL" in workflow:
+            errors.append(f"{workflow_name} still executes an unauthenticated downloaded k6 archive")
+        if "grafana/k6-action@" in workflow:
+            errors.append(f"{workflow_name} still depends on the archived legacy k6 action")
+    for needle in ('--network host', '--user "$(id -u):$(id -g)"', '--volume "$PWD:/work"'):
+        if needle not in perf_gate:
+            errors.append(f"performance gate pinned container cannot safely reach/write its subject: {needle}")
     performance_catalog = text(root / "perf/scenarios.yaml")
     for scenario in ("money-path-smoke", "money-path-write-benchmark"):
         definition = root / "perf/k6" / f"{scenario}.js"
@@ -156,14 +186,38 @@ def check(root: Path) -> list[str]:
         if needle not in collector:
             errors.append(f"admin projection ignores governed performance plans: {needle}")
     ui_workflow = text(root / ".github/workflows/ci.yml")
-    for needle in ("test-intelligence-run-openbank-admin-ui", "PLAYWRIGHT_JUNIT_OUTPUT_FILE", "outputFile.junit"):
+    for needle in ("test-intelligence-run-openbank-admin-ui", "PLAYWRIGHT_JUNIT_OUTPUT_FILE", "outputFile.junit",
+                   "--browser-report-dir", "playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}"):
         if needle not in ui_workflow:
             errors.append(f"Admin UI test producer is incomplete: {needle}")
     deploy_workflow = text(root / ".github/workflows/admin-ui-deploy.yml")
     for needle in ('snapshot_count}" -lt 30', "admin-ui-deploy.yml/runs?branch=main&status=success&per_page=100", "runs/${deploy_run_id}/artifacts?per_page=100", "awk '!seen[$0]++'"):
         if needle not in deploy_workflow:
             errors.append(f"Test Intelligence history cannot reach its 30-snapshot contract: {needle}")
+    producer = text(root / ".github/scripts/collect-test-run-evidence.py")
+    for needle in ("def browser_diagnostics(", "def trusted_run_url(", '"mayContainSensitiveData": True', '"github-run-authenticated"'):
+        if needle not in producer:
+            errors.append(f"test producer loses the browser diagnostic privacy contract: {needle}")
+    for needle in ("const trustedRunUrl =", "const safeRun =", "diagnostics: (run.diagnostics ?? [])", "mayContainSensitiveData: item.mayContainSensitiveData"):
+        if needle not in collector:
+            errors.append(f"Admin projection loses browser diagnostic metadata: {needle}")
+    tests_page = text(root / "openbank-admin-ui/src/app/system/tests/page.tsx")
+    types = text(root / "openbank-admin-ui/src/lib/types/test-intelligence.ts")
+    if "'playwright-report'" not in types:
+        errors.append("Admin UI has no typed Playwright diagnostic artifact")
+    if "may contain sensitive browser data" not in tests_page:
+        errors.append("Admin UI does not expose the diagnostic privacy warning")
     synthetic_route = text(root / "openbank-admin-ui/src/app/api/test-intelligence/route.ts")
+    freshness = text(root / "openbank-admin-ui/src/lib/test-intelligence-freshness.ts")
+    for needle in ("function enforceRuntimeFreshness", "MAX_FUTURE_SKEW_MS", "observed - Date.now() > MAX_FUTURE_SKEW_MS", "runtimeFreshnessState(item.state, item.observedAt)", "staleEvidence: evidence.filter"):
+        if needle not in freshness:
+            errors.append(f"running Admin UI can keep an expired successful snapshot green: {needle}")
+    agent_route = text(root / "openbank-admin-ui/src/app/api/test-intelligence/agents/route.ts")
+    if "runtimeFreshnessState(item.state as EvidenceState, item.observedAt)" not in agent_route:
+        errors.append("AI agent can analyze an expired successful snapshot as current evidence")
+    for needle in ("parsed.hostname === 'github.com'", "parts[1] === 'JiRaska'", "parts[2] === 'open-bank-oss'", "parts[3] === 'pull'", "!parsed.search", "!parsed.hash"):
+        if needle not in agent_route:
+            errors.append(f"AI proposal can render an untrusted outbound link: {needle}")
     for needle in ("kube_cronjob_status_last_schedule_time", "kube_cronjob_status_last_successful_time", "kube_job_status_failed"):
         if needle not in synthetic_route:
             errors.append(f"synthetic runtime projection lost its verified Kubernetes signal: {needle}")
@@ -179,6 +233,9 @@ def check(root: Path) -> list[str]:
     for needle in ("unknownEvidence", "unresolvedEvidence", "['unknown', 'not-run', 'blocked']"):
         if needle not in collector:
             errors.append(f"collector can aggregate unresolved evidence as green: {needle}")
+    for needle in ("freshnessAwareState", "freshnessAwareState(item.status, item.verifiedAt)", "specialized.state, performanceRun?.run?.observedAt", "specialized.state, mutationRun?.run?.observedAt", "freshnessAwareState(evidence.state, envelope.run.observedAt)"):
+        if needle not in collector:
+            errors.append(f"retained successful evidence can outlive the fleet freshness budget: {needle}")
     synthetic_workflow = text(root / ".github/workflows/synthetic-journeys.yml")
     for needle, message in (
         ("--extract public-edge", "synthetic CI does not execute the ConfigMap-mounted runtime artifact"),

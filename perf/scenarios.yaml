@@ -2,9 +2,10 @@ version: 1
 scenarios:
   - id: money-path-smoke
     definition: perf/k6/money-path-smoke.js
-    execution_mode: scheduled-read-only
+    execution_mode: planned-read-only-sandbox
     safety_boundary: Runs only when a safe read-only money-path target is configured for the GitHub-hosted runner.
     target_schedule: "0 5 * * *"
+    blocker: No isolated authenticated read-only money-path target and dedicated runner are configured yet; the current scheduled performance gate measures only openbank-product-catalog.
 
   - id: money-path-write-benchmark
     definition: perf/k6/money-path-write-benchmark.js

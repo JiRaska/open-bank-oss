@@ -69,9 +69,45 @@ The snapshot schema carries:
   one, and environment; and
 - separate code-coverage, performance, contract, mutation and synthetic-journey observations.
 
+Failed browser E2E attempts may also carry metadata for a retained Playwright diagnostic report.
+The envelope records only its type, exact run/attempt name, authenticated run URL, seven-day
+retention and an explicit sensitive-data warning. Trace, screenshot, video, DOM and request content
+never enter the canonical JSON. A diagnostic bundle explains a verdict; its presence is not a
+passing verdict and its absence is not rewritten as success. Producer validation and deployment
+projection both require the diagnostic URL to equal the envelope's own run URL plus `#artifacts`;
+an arbitrary HTTPS link is rejected rather than rendered to an operator.
+
+The run URL itself is also an outbound security boundary. A linked run must be an HTTPS
+`github.com/<owner>/<repository>/actions/runs/<same-run-id>` URL with no query or fragment. The
+producer rejects a mismatched host or id. The deployment projection independently keeps the test
+verdict but omits untrusted provenance and emits a collection warning, so tampered evidence cannot
+turn the operator console into a phishing link.
+
 Absence is not zero. `0 tests executed` is a valid observed result; `not-run` means no applicable
 artifact was collected. Missing and stale required evidence are attention states, never silently
 excluded from an average.
+
+Artifact retention is not evidence freshness. The projection applies the same freshness budget to
+versioned service suites and specialised mutation, performance and synthetic verdicts as it does to
+fallback reports and mobile CI. A retained success becomes `stale` after that budget; a recorded
+failure, blocker or unknown control remains the stronger operator verdict and is never laundered by
+age.
+
+The authenticated BFF enforces that budget again at request time and recomputes current posture
+totals. This is intentionally independent of the daily image refresh: a failed deploy cannot leave
+an old successful snapshot green indefinitely. Immutable history retains its original verdict and
+timestamp; only the current operator projection ages.
+
+A success timestamp more than five minutes in the future is `unknown`, never fresh. This bounded
+clock-skew allowance tolerates ordinary runner drift while preventing a malformed or poisoned
+timestamp from extending a green verdict indefinitely. Invalid or missing success timestamps become
+`not-run`; recorded failures and explicit control gaps remain the stronger verdict.
+
+The producer enforces the same causal boundary before publication: run and Testcontainers lifecycle
+timestamps must be timezone-aware ISO-8601 values, a run cannot be more than five minutes ahead of
+the producer clock, and a lifecycle event cannot occur more than five minutes after the run that
+contains it. Consumer-side ageing remains mandatory defence in depth rather than trusting the
+producer alone.
 
 The fleet totals and history count both `unknown` and unresolved (`unknown`, `not-run`, `blocked`)
 observations explicitly. A component may have other passing suites and still contribute unresolved
@@ -155,6 +191,12 @@ The consolidated page exposes:
 - declared Testcontainers topology alongside observed start/stop lifecycle proof; and
 - explicit collection warnings and observation timestamps.
 
+The rendered workspace is also scanned in Chromium with the official axe engine against WCAG 2 A,
+AA, 2.1 A and 2.1 AA rules. This is a browser-level gate, not a source-pattern assertion: its first
+red run exposed four shared-header contrast failures that the existing lint and static accessibility
+guards could not observe. Those failures are fixed at the shared header rather than suppressed or
+baselined.
+
 The existing composite quality score is retired from the primary UI. No single score may average
 away a missing required control.
 
@@ -167,7 +209,7 @@ The UI slice is complete when:
 - JUnit, Kover, Pact, Pitest, performance and governed synthetic-journey inputs are represented;
 - the active and planned synthetic journeys render with schedules and blockers;
 - `/system/tests` uses one API and legacy APIs still pass their compatibility tests;
-- focused script, route, component, type, lint and build checks pass; and
+- focused script, route, component, browser WCAG, type, lint and build checks pass; and
 - immutable deployment history is retained without a scheduler, database or new microservice.
 
 The ecosystem delivery is complete only when:
@@ -210,6 +252,11 @@ opening a ticket or PR. The UI renders the agent as unavailable without changing
 and root-cause agents may consume the same report, but they cannot rewrite a run verdict, lower a
 gate, approve their own proposal or turn missing evidence into a prediction.
 
+Agent-returned proposal links cross a separate outbound trust boundary. The BFF renders only a
+canonical pull-request URL in the OpenBank repository, with a numeric id and no query or fragment;
+an arbitrary HTTPS, lookalike-repository or executable URL is discarded while the advisory finding
+remains visible.
+
 ### D8 — Competitive benchmark and banking safety boundary
 
 The 2026-08 benchmark found no single product that closes this whole loop. Datadog provides
@@ -219,6 +266,22 @@ from change and execution history; Checkly schedules Playwright as monitoring-as
 correlates probes and k6/browser checks with metrics, logs and traces. Datadog documents tracked and
 unskippable tests plus full default-branch runs, and Launchable recommends a later full-suite run,
 because selection cannot observe every dependency.
+
+The comparison is capability-based rather than a claim that OpenBank is categorically "better":
+
+| Proven capability in primary product documentation | Reference platform | OpenBank position | Required next proof |
+|---|---|---|---|
+| Per-test history, flaky lifecycle, wasted CI time and AI-assisted categorisation | Datadog Test Optimization | Same-commit transitions, wasted duration and bounded diagnosis are live; automated quarantine is deliberately absent | Prove an accountable remediation lifecycle without allowing quarantine to green a money-path failure |
+| Coverage/change-driven test selection | Datadog Test Impact Analysis, Tricentis SeaLights, Launchable | Behind: path-scoped service selection exists, but per-test selection is not implemented | Run shadow recommendations against preserved full suites and measure escaped-failure recall before any gate use |
+| Scheduled browser/API journeys with retained results and observability correlation | Grafana Synthetic Monitoring, Checkly | Partially ahead on governed journey ownership, explicit planned/blocked states and banking taint boundaries; behind on globally distributed probes | Execute every active journey on its declared schedule and add region/private-probe evidence without weakening identity |
+| Browser and mobile RUM combined with synthetics and backend telemetry | Dynatrace Digital Experience Monitoring, Datadog RUM/test correlation | Partial: privacy-bounded mobile trace arrival and Admin UI browser CI are separate, honest observations; no full session analytics is claimed | Prove consented Android and iOS exporter arrivals and journey-to-backend correlation in the sandbox |
+| Performance tests as continuous SDLC evidence correlated with system telemetry | Grafana k6 | Local service performance gate executes; the money-path sandbox baseline is explicitly `not-run` without a safe reachable target | Provide an isolated authenticated target/runner, then retain repeated comparable baselines and SLO correlation |
+
+OpenBank's present differentiator is therefore the evidence contract, not feature count: released
+components that did not run stay visible, Testcontainers are split into declared and observed
+runtime, every verdict retains commit/workflow provenance, and AI cannot raise a verdict or approve a
+release. The matrix is also a backlog: any row whose next proof is missing prevents a claim of
+end-to-end completion.
 
 OpenBank combines the useful parts with a bank-specific invariant: flaky classification is triage
 metadata, never permission to make a failing money-path or control test green. Predictive selection
@@ -235,6 +298,11 @@ evidence, and the ordinary suite verdict stays authoritative if the enclosing JU
 The admin route is a primary platform destination, first in Platform navigation and pinned in the
 platform persona workspace. Its E2E test navigates from the dashboard through the visible link;
 opening `/system/tests` directly is not evidence of discoverability.
+
+Browser failure diagnostics remain GitHub-authenticated, expire after seven days and are linked from
+the exact E2E observation in the execution and client-experience views. Test Intelligence does not
+proxy or render their potentially sensitive contents. This preserves the existing access boundary
+while removing manual run-to-artifact rediscovery for an authorized operator.
 
 ### D9 — Client experience evidence and RUM boundary
 
@@ -328,9 +396,12 @@ verdict or alter CI/RUM state.
 - [Datadog Test Optimization](https://docs.datadoghq.com/tests/)
 - [Datadog Test Impact Analysis](https://docs.datadoghq.com/tests/test_impact_analysis/)
 - [Datadog Flaky Test Management](https://docs.datadoghq.com/tests/flaky_management/)
+- [Tricentis SeaLights test impact analysis](https://documentation.tricentis.com/sealights/en/content/sealights/support.htm)
 - [Buildkite Test Engine](https://buildkite.com/platform/test-engine/)
 - [Launchable predictive test selection](https://help.launchableinc.com/features/predictive-test-selection/how-launchable-selects-tests/)
 - [Checkly Playwright checks](https://www.checklyhq.com/docs/detect/synthetic-monitoring/playwright-checks/overview/)
 - [Grafana Synthetic Monitoring](https://grafana.com/docs/grafana-cloud/observe-and-act/testing/synthetic-monitoring/introduction/)
+- [Grafana automated performance testing](https://grafana.com/docs/k6/latest/testing-guides/automated-performance-testing/)
+- [Dynatrace RUM and Synthetic Monitoring](https://docs.dynatrace.com/docs/license/capabilities/real-user-synthetic-monitoring)
 - [BrowserStack AI agents](https://www.browserstack.com/docs/test-management/browserstack-ai)
 - [BrowserStack Smart Test Selection](https://www.browserstack.com/docs/automate/selenium/smart-test-selection)

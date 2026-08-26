@@ -130,6 +130,9 @@ jobs:
       SERVICE: ${{ matrix.service }}
       PORT: ${{ matrix.port }}
       DB: ${{ matrix.db }}
+      # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
+      # mutable; the digest is the executable supply-chain identity.
+      K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -147,14 +150,11 @@ jobs:
         with:
           cache-read-only: true
 
-      - name: Install k6
+      - name: Resolve pinned k6 runtime
         run: |
           set -euo pipefail
-          K6_VERSION=0.54.0
-          curl -fsSL "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz" \
-            | tar -xz -C /tmp
-          sudo mv "/tmp/k6-v${K6_VERSION}-linux-amd64/k6" /usr/local/bin/k6
-          k6 version
+          docker pull "${K6_IMAGE}"
+          docker run --rm "${K6_IMAGE}" version
 
       - name: Run k6 smoke test
         run: |
@@ -222,8 +222,13 @@ jobs:
           echo "==> [${SERVICE}] ${SMOKE_PATH} answered 200 — the probe reaches its subject"
 
           echo "==> [${SERVICE}] running k6 ${SCRIPT}"
-          BASE_URL="http://localhost:${PORT}" \
-            k6 run \
+          docker run --rm \
+              --network host \
+              --user "$(id -u):$(id -g)" \
+              --env "BASE_URL=http://localhost:${PORT}" \
+              --volume "$PWD:/work" \
+              --workdir /work \
+              "${K6_IMAGE}" run \
               --summary-export "perf-reports/${SERVICE}-summary.json" \
               "$SCRIPT" | tee "perf-reports/${SERVICE}-k6.log"
 
