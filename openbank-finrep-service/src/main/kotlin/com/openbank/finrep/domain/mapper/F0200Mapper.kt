@@ -51,6 +51,7 @@ object F0200Mapper {
             templateId = "F02.00",
             period = asOf,
             cells = cells,
+            dataGaps = FinrepCoverage.gapsFor("F02.00"),
             isBalanced = assessment.verdict == BalanceVerdict.AGREED_BALANCED,
             balanceVerdict = assessment.verdict,
         )

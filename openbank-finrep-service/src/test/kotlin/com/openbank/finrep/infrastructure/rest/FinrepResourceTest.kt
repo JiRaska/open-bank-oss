@@ -45,6 +45,7 @@ class FinrepResourceTest {
             templateId = "F01.01",
             period = LocalDate.now(fixedClock),
             cells = listOf(FinrepCell(rowRef = "r010", colRef = "c010", value = BigDecimal.ZERO)),
+            dataGaps = emptyList(),
             isBalanced = true,
             balanceVerdict = BalanceVerdict.AGREED_BALANCED,
         )
@@ -66,6 +67,7 @@ class FinrepResourceTest {
             templateId = "F02.00",
             period = explicitDate,
             cells = emptyList(),
+            dataGaps = emptyList(),
             isBalanced = true,
             balanceVerdict = BalanceVerdict.AGREED_BALANCED,
         )
