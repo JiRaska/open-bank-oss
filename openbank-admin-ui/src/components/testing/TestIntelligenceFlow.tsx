@@ -84,7 +84,11 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
   const current = stages.find(stage => stage.id === selected) ?? stages[1]
   const evidenced = report?.totals.componentsWithExecutionEvidence ?? 0
   const total = report?.totals.components ?? 0
-  const attention = (report?.totals.failingEvidence ?? 0) + (report?.totals.missingEvidence ?? 0) + (report?.totals.staleEvidence ?? 0)
+  // `unknown`, `not-run` and `blocked` are unresolved evidence, never an implicit green.
+  // The collector/runtime route keeps this total disjoint from failures, missing components and
+  // stale observations, so the hero can expose every state that needs an operator's attention.
+  const attention = (report?.totals.failingEvidence ?? 0) + (report?.totals.missingEvidence ?? 0)
+    + (report?.totals.staleEvidence ?? 0) + (report?.totals.unresolvedEvidence ?? report?.totals.unknownEvidence ?? 0)
   const activeJourneys = report?.syntheticJourneys.filter(item => item.status === 'active').length ?? 0
   const runtimeProofs = report?.components.reduce((sum, component) => sum + component.testInfrastructure.observed.filter(event => event.lifecycle === 'started').length, 0) ?? 0
   const traceProofs = report?.components.filter(component => component.evidence.some(evidence => evidence.kind === 'trace' && evidence.state === 'passed')).length ?? 0
