@@ -29,6 +29,7 @@ describe('Test Agent governance evidence', () => {
 
     expect(await screen.findByText('system.v2')).toBeVisible()
     expect(screen.getByText('missing-suite')).toBeVisible()
+    expect(screen.getByText('No eval suite is registered for this charter. The agent remains advisory, never an automation authority.')).toBeVisible()
     expect(screen.getByText(/agent is unavailable/i)).toBeVisible()
   })
 })

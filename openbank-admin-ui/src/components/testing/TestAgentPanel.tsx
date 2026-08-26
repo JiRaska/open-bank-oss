@@ -15,6 +15,15 @@ type AgentGovernance = {
   evalEvidence: 'recorded' | 'awaiting-recording' | 'missing-suite' | 'unavailable'
 }
 
+function evalEvidenceDetail(state: AgentGovernance['evalEvidence'], t: (cs: string, en: string) => string): string {
+  switch (state) {
+    case 'recorded': return t('Scénář i ověřený záznam odpovídají aktuálnímu promptu.', 'A scenario suite and verified recording match the current prompt.')
+    case 'awaiting-recording': return t('Scénář existuje, ale chybí skutečný záznam modelového běhu; nejde o důkaz kvality.', 'A scenario exists, but a real model-run recording is missing; this is not quality evidence.')
+    case 'missing-suite': return t('Pro tento charter není registrovaná eval suite. Agent zůstává poradní, ne automatizační autorita.', 'No eval suite is registered for this charter. The agent remains advisory, never an automation authority.')
+    case 'unavailable': return t('Governance snapshot není v tomto prostředí dostupný; stav agenta se z něj nesmí odvozovat.', 'The governance snapshot is unavailable in this environment; agent trust must not be inferred.')
+  }
+}
+
 export function TestAgentPanel() {
   const { language, t } = useLanguage()
   const persona = getAgentPersona('flaky-test-hunter', language)
@@ -35,6 +44,7 @@ export function TestAgentPanel() {
       {governance && <div aria-label={t('Evidence správy AI agenta', 'AI agent governance evidence')} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, fontSize: 11 }}>
         <span style={{ border: '1px solid var(--border)', borderRadius: 999, padding: '4px 8px', color: 'var(--text-secondary)' }}>{t('Aktivní prompt', 'Active prompt')}: <strong>{governance.activePrompt ?? t('neověřený', 'unverified')}</strong></span>
         <span style={{ border: '1px solid var(--border)', borderRadius: 999, padding: '4px 8px', color: governance.evalEvidence === 'recorded' ? '#16a34a' : '#d97706' }}>{t('Eval evidence', 'Eval evidence')}: <strong>{governance.evalEvidence}</strong></span>
+        <span style={{ flexBasis: '100%', color: 'var(--text-secondary)' }}>{evalEvidenceDetail(governance.evalEvidence, t)}</span>
       </div>}
       {canAnalyze && <button className="btn btn-secondary btn-sm" disabled={analyzing} onClick={() => {
         setAnalyzing(true)
