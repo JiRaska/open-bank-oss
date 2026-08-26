@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { isPublicSurface } from '@/lib/auth/publicSurface'
 import { Bot, Send, X, Loader2, Wrench, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react'
 
 interface ToolCall { tool: string; allowed: boolean; resultPreview: string }
@@ -41,7 +42,7 @@ export function modelLabel(id: string): string {
 
 export function AgentDock() {
   const pathname = usePathname()
-  const publicSurface = pathname.startsWith('/auth') || pathname === '/privacy'
+  const publicSurface = isPublicSurface(pathname)
   const { t } = useLanguage()
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Msg[]>([])
