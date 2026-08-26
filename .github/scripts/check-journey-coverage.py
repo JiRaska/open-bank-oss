@@ -88,7 +88,9 @@ def check(root: pathlib.Path):
     # entry is trying to reach. Read it off the journeys so the two halves cannot disagree.
     covered_by_journey = set()
     for journey in catalog.get("journeys") or []:
-        if isinstance(journey, dict):
+        # A target that exists only on paper is useful planning metadata, not coverage.
+        # Counting planned entries here would let the numerator reach 100% without a scheduler.
+        if isinstance(journey, dict) and journey.get("status") == "active":
             covered_by_journey.update(journey.get("covers") or [])
 
     block = catalog.get("money_path_accountability") or {}
@@ -201,6 +203,12 @@ def self_test():
                                   "covers: [openbank-alpha-service, openbank-beta-service]")
                          .replace("    - service: openbank-beta-service\n", ""),
         expect_finding=False)
+
+    run("a planned journey does not count as active coverage",
+        SELF_TEST_RULES,
+        SELF_TEST_CATALOG.replace("status: active", "status: planned")
+                         .replace("    falsification:", "    blocked_by: not deployed\n    falsification:"),
+        expect_finding=True)
 
     run("accounted for with no blocker anywhere",
         SELF_TEST_RULES,

@@ -128,6 +128,7 @@ export interface PerformanceEvidence {
 export interface SyntheticJourneyEvidence {
   id: string
   title: string
+  capability?: string
   status: 'active' | 'planned'
   state: EvidenceState
   severity: string
@@ -145,6 +146,18 @@ export interface SyntheticJourneyEvidence {
     freshnessSeconds: number | null
     recentRuns: Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>
   }
+}
+
+export interface JourneyCoverageSummary {
+  moneyPathTotal: number
+  activelyCovered: number
+  explicitlyUnwatched: number
+  services: Array<{
+    component: string
+    state: 'covered' | 'unwatched'
+    journeys: string[]
+    reason: string | null
+  }>
 }
 
 /**
@@ -178,6 +191,7 @@ export interface TestIntelligenceReport {
   mutations: MutationEvidence[]
   performance: PerformanceEvidence[]
   syntheticJourneys: SyntheticJourneyEvidence[]
+  journeyCoverage?: JourneyCoverageSummary
   clientExperiences: ClientExperienceEvidence[]
   history: TestIntelligenceHistoryPoint[]
   runHistory: TestRunHistoryPoint[]

@@ -25,7 +25,7 @@ describe('test-intelligence collector', () => {
       '<testsuite name="com.openbank.alpha.PaymentApiIT" tests="2" failures="0" errors="0" skipped="1" time="0.2"><testcase classname="com.openbank.alpha.integration.PaymentApiIT"/></testsuite>')
     write(repo, 'openbank-alpha-service/build/reports/kover/report.xml',
       '<report><counter type="BRANCH" missed="4" covered="6"/><counter type="LINE" missed="20" covered="80"/></report>')
-    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services:\n  - openbank-alpha-service\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services:\n  - openbank-alpha-service\n  - openbank-beta-service\n')
     write(repo, 'openbank-admin-ui/quality-report.json', JSON.stringify({ contracts: [{
       consumer: 'openbank-alpha-service', provider: 'openbank-provider-not-inventory', pactFile: 'alpha-provider.json',
       status: 'pending', verifiedAt: null, interactions: [{ description: 'create', status: 'pending' }],
@@ -36,6 +36,8 @@ journeys:
     title: Edge
     status: active
     severity: page
+    capability: proves the public edge
+    covers: [openbank-alpha-service]
     schedule: "*/5 * * * *"
     falsification: break it
   - id: mobile
@@ -43,10 +45,15 @@ journeys:
     status: planned
     severity: page
     money_moving: true
+    covers: [openbank-beta-service]
     target_schedule: "0 * * * *"
     capability: proves the mobile critical path
     falsification: break the app route
     blocked_by: needs canary devices
+money_path_accountability:
+  default_blocker: needs synthetic parties
+  services:
+    - service: openbank-beta-service
 `)
     write(repo, 'openbank-alpha-service/src/test/k6/alpha-smoke.js', 'export const options = { thresholds: { checks: ["rate>0.99"] } }')
     write(repo, 'openbank-admin-ui/perf-artifacts/openbank-alpha-service-summary.json', JSON.stringify({ metrics: {
@@ -98,6 +105,11 @@ scenarios:
     })])
     expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *' })
     expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
+    expect(report.journeyCoverage).toMatchObject({ moneyPathTotal: 2, activelyCovered: 1, explicitlyUnwatched: 1 })
+    expect(report.journeyCoverage?.services).toEqual([
+      expect.objectContaining({ component: 'openbank-alpha-service', state: 'covered', journeys: ['edge'] }),
+      expect.objectContaining({ component: 'openbank-beta-service', state: 'unwatched', reason: 'needs synthetic parties' }),
+    ])
     expect(report.performance.find(item => item.id === 'openbank-alpha-service-alpha-smoke')).toMatchObject({ state: 'passed', metrics: {
       p95Ms: 321.4, errorRatePercent: 1.25, checkPassRatePercent: 98.75, requests: 80,
     }, run: { id: 'perf-42', workflow: 'Performance gate' } })
