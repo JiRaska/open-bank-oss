@@ -91,6 +91,16 @@ describe('opsMessageApi — shipped notification-service contract', () => {
     expect(decision).toEqual(approvalResponse)
   })
 
+  it('encodes an approval id before placing it in the decision path', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, {
+      id: 'approval/with separator', action: 'opsmessage.compose', resourceId: null, status: 'REJECTED', decidedBy: 'op-2',
+    })))
+
+    await opsMessageApi.decide('approval/with separator', false)
+
+    expect(lastCall().url).toBe('/api/svc/notification-service/api/v1/notifications/approvals/approval%2Fwith%20separator')
+  })
+
   it('decide sends approve:false on a reject', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonRes(200, {
       id: 'appr-1', action: 'opsmessage.compose', resourceId: null, status: 'REJECTED', decidedBy: 'op-2',

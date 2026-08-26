@@ -161,7 +161,7 @@ export const opsMessageApi = {
   // Checker decision (ApprovalResource.decide): one PATCH with an approve boolean. Self-approval
   // is refused server-side (403); an unknown/already-decided id is 404/409 — all thrown here.
   decide: (id: string, approve: boolean) =>
-    apiFetchSimple<ApprovalDecision>(`${NOTIFICATION_SERVICE}/api/v1/notifications/approvals/${id}`, {
+    apiFetchSimple<ApprovalDecision>(`${NOTIFICATION_SERVICE}/api/v1/notifications/approvals/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify({ approve }),
     }),
@@ -268,4 +268,3 @@ export async function fetchAllServiceSnapshots(): Promise<ServiceSnapshot[]> {
     return SERVICES.map(s => ({ name: s.name, port: s.port, info: null, health: null, rateLimitMax: null, rateLimitRemaining: null, apiVersion: null, latencyMs: null, reachable: false }))
   }
 }
-
