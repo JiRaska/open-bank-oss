@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -31,6 +32,17 @@ def check(root: Path) -> list[str]:
         diagnostic = schema.get("properties", {}).get("diagnostics", {})
         if diagnostic.get("items", {}).get("$ref") != "#/$defs/diagnosticArtifact":
             errors.append("run schema has no typed diagnostic artifact collection")
+        run_url_pattern = schema.get("properties", {}).get("run", {}).get("properties", {}).get("url", {}).get("pattern", "")
+        diagnostic_url_pattern = schema.get("$defs", {}).get("diagnosticArtifact", {}).get("properties", {}).get("url", {}).get("pattern", "")
+        trusted_run = "https://github.com/JiRaska/open-bank-oss/actions/runs/42"
+        hostile_run = "https://github.com.attacker.example/JiRaska/open-bank-oss/actions/runs/42"
+        trusted_diagnostic = f"{trusted_run}#artifacts"
+        if (not run_url_pattern or re.fullmatch(run_url_pattern, trusted_run) is None
+                or re.fullmatch(run_url_pattern, hostile_run) is not None):
+            errors.append("run schema permits outbound provenance outside canonical GitHub Actions URLs")
+        if (not diagnostic_url_pattern or re.fullmatch(diagnostic_url_pattern, trusted_diagnostic) is None
+                or re.fullmatch(diagnostic_url_pattern, f"{hostile_run}#artifacts") is not None):
+            errors.append("run schema permits diagnostic links outside canonical GitHub run artifacts")
     except (OSError, json.JSONDecodeError) as exc:
         errors.append(f"run schema unavailable: {exc}")
 
@@ -168,10 +180,10 @@ def check(root: Path) -> list[str]:
         if needle not in deploy_workflow:
             errors.append(f"Test Intelligence history cannot reach its 30-snapshot contract: {needle}")
     producer = text(root / ".github/scripts/collect-test-run-evidence.py")
-    for needle in ("def browser_diagnostics(", '"mayContainSensitiveData": True', '"github-run-authenticated"'):
+    for needle in ("def browser_diagnostics(", "def trusted_run_url(", '"mayContainSensitiveData": True', '"github-run-authenticated"'):
         if needle not in producer:
             errors.append(f"test producer loses the browser diagnostic privacy contract: {needle}")
-    for needle in ("diagnostics: (run.diagnostics ?? [])", "mayContainSensitiveData: item.mayContainSensitiveData"):
+    for needle in ("const trustedRunUrl =", "const safeRun =", "diagnostics: (run.diagnostics ?? [])", "mayContainSensitiveData: item.mayContainSensitiveData"):
         if needle not in collector:
             errors.append(f"Admin projection loses browser diagnostic metadata: {needle}")
     tests_page = text(root / "openbank-admin-ui/src/app/system/tests/page.tsx")

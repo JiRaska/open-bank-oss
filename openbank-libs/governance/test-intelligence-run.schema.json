@@ -15,7 +15,10 @@
         "commit": { "type": "string", "minLength": 7 },
         "branch": { "type": "string", "minLength": 1 },
         "workflow": { "type": "string", "minLength": 1 },
-        "url": { "type": "string" },
+        "url": {
+          "type": "string",
+          "pattern": "^(|https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[^/?#]+)$"
+        },
         "observedAt": { "type": "string", "format": "date-time" }
       },
       "additionalProperties": false
@@ -115,7 +118,10 @@
         "kind": { "const": "playwright-report" },
         "suiteKind": { "const": "e2e" },
         "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
-        "url": { "type": "string", "pattern": "^https://" },
+        "url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[^/?#]+#artifacts$"
+        },
         "retentionDays": { "const": 7 },
         "access": { "const": "github-run-authenticated" },
         "mayContainSensitiveData": { "const": true }
