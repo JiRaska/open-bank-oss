@@ -259,6 +259,26 @@ journeys:
       ADR-0252 phase 3 (#4348) — requires managed Android/iOS canary devices, signed builds,
       synthetic credentials and acknowledgement/cleanup. JVM screenshot tests cannot substitute.
 
+  - id: admin-operator-access
+    title: "Admin operator sign-in and Test Intelligence access"
+    capability: >-
+      A least-privilege bank-owned operator can complete the sandbox SSO flow and reach the
+      Test Intelligence workspace with the intended role boundary. This proves the deployed
+      admin browser path, independently of the Admin UI's CI Playwright evidence.
+    status: planned
+    severity: ticket
+    money_moving: false
+    target_schedule: "*/30 * * * *"
+    falsification: >-
+      Remove the operator role mapping, break the SSO callback, or deny the Test Intelligence
+      API: the journey must fail after authentication on the missing protected workspace or its
+      authorization boundary, not pass merely because the public login page returned HTML.
+    blocked_by: >-
+      Needs a least-privilege bank-owned Keycloak canary identity plus a browser-capable,
+      digest-pinned runner isolated from the current protocol-only k6 CronJob. The existing
+      read-only k6 pod has no Chromium runtime; adding one without a separate security and
+      credential boundary would turn a monitoring gap into a privileged browser foothold.
+
 # ---------------------------------------------------------------------------------------
 # MONEY-PATH ACCOUNTABILITY (ADR-0252 phase 2, #4348)
 #
