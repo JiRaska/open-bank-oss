@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.204.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.204.0...admin-ui-v0.204.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **regulatory:** show actual values before first close ([#7228](https://github.com/JiRaska/open-bank-oss/issues/7228)) ([c700d8f](https://github.com/JiRaska/open-bank-oss/commit/c700d8fc091fd2a73547942ea5020d4ee58af959))
+
 ## [0.204.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.203.1...admin-ui-v0.204.0) (2026-08-26)
 
 

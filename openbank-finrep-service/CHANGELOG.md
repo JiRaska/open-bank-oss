@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.10.0...finrep-service-v0.10.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **regulatory:** show actual values before first close ([#7228](https://github.com/JiRaska/open-bank-oss/issues/7228)) ([c700d8f](https://github.com/JiRaska/open-bank-oss/commit/c700d8fc091fd2a73547942ea5020d4ee58af959))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.4...finrep-service-v0.10.0) (2026-08-26)
 
 
