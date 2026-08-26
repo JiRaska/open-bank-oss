@@ -6,13 +6,18 @@ const CALLBACK_ORIGIN = "https://openbank.invalid"
 const DEFAULT_CALLBACK = "/dashboard"
 
 /** Keeps post-authentication navigation on the admin UI origin. */
-export function safeCallbackPath(candidate: string | null | undefined): string {
-  if (!candidate?.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\")) return DEFAULT_CALLBACK
+export function sameOriginPath(candidate: string | null | undefined): string | null {
+  if (!candidate?.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\")) return null
   try {
     const target = new URL(candidate, CALLBACK_ORIGIN)
-    if (target.origin !== CALLBACK_ORIGIN) return DEFAULT_CALLBACK
+    if (target.origin !== CALLBACK_ORIGIN) return null
     return `${target.pathname}${target.search}${target.hash}`
   } catch {
-    return DEFAULT_CALLBACK
+    return null
   }
+}
+
+/** Keeps post-authentication navigation on the admin UI origin with a safe default. */
+export function safeCallbackPath(candidate: string | null | undefined): string {
+  return sameOriginPath(candidate) ?? DEFAULT_CALLBACK
 }
