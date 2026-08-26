@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.201.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.200.0...admin-ui-v0.201.0) (2026-08-26)
+
+
+### Features
+
+* **testing:** unify governed Test Intelligence evidence ([#7062](https://github.com/JiRaska/open-bank-oss/issues/7062)) ([c95b0be](https://github.com/JiRaska/open-bank-oss/commit/c95b0bec85ae0afee625b872c777490006534faa))
+
+
+### Bug Fixes
+
+* **admin-ui:** give MetricCard an accessible label, stop the ambiguous getByText('12') ([#7110](https://github.com/JiRaska/open-bank-oss/issues/7110)) ([9873fe2](https://github.com/JiRaska/open-bank-oss/commit/9873fe2441451b727d8c04c698792a9c24e5b0a6))
+
 ## [0.200.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.199.3...admin-ui-v0.200.0) (2026-08-26)
 
 
