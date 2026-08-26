@@ -131,7 +131,8 @@ function runEnvelope(component) {
       source: 'test-intelligence-run:v1', environment: 'ci', durationMs: suite.durationMs,
       counts: { discovered: suite.discovered, executed: suite.executed, passed: suite.passed,
         failed: suite.failed, skipped: suite.skipped, errors: suite.errors }, run: provenance,
-      diagnostics: (run.diagnostics ?? []).filter(item => item.suiteKind === suite.kind).map(item => ({
+      diagnostics: (run.diagnostics ?? []).filter(item => item.suiteKind === suite.kind
+        && provenance?.url && item.url === `${provenance.url}#artifacts`).map(item => ({
         kind: item.kind, name: item.name, url: item.url, retentionDays: item.retentionDays,
         access: item.access, mayContainSensitiveData: item.mayContainSensitiveData,
       })),

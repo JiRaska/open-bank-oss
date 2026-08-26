@@ -81,7 +81,7 @@ def validate_envelope(envelope: dict) -> None:
             raise ValueError("diagnostic artifact fields are invalid")
         if (item["kind"] not in DIAGNOSTIC_KINDS or item["suiteKind"] != "e2e"
                 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", item["name"])
-                or not item["url"].startswith("https://") or item["retentionDays"] != 7
+                or item["url"] != f'{envelope["run"]["url"]}#artifacts' or item["retentionDays"] != 7
                 or item["access"] != "github-run-authenticated" or item["mayContainSensitiveData"] is not True):
             raise ValueError("diagnostic artifact values are invalid")
 
@@ -390,7 +390,7 @@ def main() -> None:
             assert synthetic == [{"kind": "synthetic", "state": "failed", "source": "journey:public-edge", "detail": "1 threshold result(s), 1 breached"}]
             valid = {
                 "schemaVersion": 1,
-                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "", "observedAt": "2026-08-22T00:00:00Z"},
+                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://example.test/actions/runs/1", "observedAt": "2026-08-22T00:00:00Z"},
                 "component": "openbank-x",
                 "suites": [{"kind": "integration", "state": "passed", "discovered": 1, "executed": 1, "passed": 1, "failed": 0, "skipped": 0, "errors": 0, "durationMs": 1}],
                 "coverage": None,
@@ -407,6 +407,13 @@ def main() -> None:
                 "access": "github-run-authenticated", "mayContainSensitiveData": True,
             }]
             validate_envelope(valid)
+            untrusted_diagnostic = json.loads(json.dumps(valid))
+            untrusted_diagnostic["diagnostics"][0]["url"] = "https://attacker.example/report"
+            try:
+                validate_envelope(untrusted_diagnostic)
+                raise AssertionError("an off-run diagnostic URL must be rejected")
+            except ValueError:
+                pass
             invalid = json.loads(json.dumps(valid))
             invalid["suites"][0]["executed"] = 0
             try:

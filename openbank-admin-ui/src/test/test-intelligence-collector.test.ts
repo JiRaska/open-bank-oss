@@ -174,7 +174,10 @@ scenarios:
         { resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'started', observedAt: '2026-08-22T09:59:00Z' },
         { resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'stopped', observedAt: '2026-08-22T10:00:00Z' },
       ] },
-      diagnostics: [{ kind: 'playwright-report', suiteKind: 'e2e', name: 'playwright-report-42-a2', url: 'https://example.test/run/42#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true }],
+      diagnostics: [
+        { kind: 'playwright-report', suiteKind: 'e2e', name: 'playwright-report-42-a2', url: 'https://example.test/run/42#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true },
+        { kind: 'playwright-report', suiteKind: 'e2e', name: 'playwright-report-phishing', url: 'https://attacker.example/report', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true },
+      ],
     }))
     write(repo, 'openbank-admin-ui/test-run-history/previous.json', JSON.stringify({
       schemaVersion: 1,
@@ -194,6 +197,7 @@ scenarios:
     expect(report.components[0].evidence.find(item => item.kind === 'e2e')).toMatchObject({
       state: 'failed', diagnostics: [{ kind: 'playwright-report', name: 'playwright-report-42-a2', url: 'https://example.test/run/42#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true }],
     })
+    expect(report.components[0].evidence.find(item => item.kind === 'e2e')?.diagnostics).toHaveLength(1)
     expect(report.components[0].testInfrastructure.observed).toHaveLength(2)
     expect(report.runHistory[0].states).toMatchObject({ integration: 'passed', trace: 'passed' })
     expect(report.components[0].coverage.branches.percentage).toBe(75)

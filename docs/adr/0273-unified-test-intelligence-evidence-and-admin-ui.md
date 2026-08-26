@@ -73,7 +73,9 @@ Failed browser E2E attempts may also carry metadata for a retained Playwright di
 The envelope records only its type, exact run/attempt name, authenticated run URL, seven-day
 retention and an explicit sensitive-data warning. Trace, screenshot, video, DOM and request content
 never enter the canonical JSON. A diagnostic bundle explains a verdict; its presence is not a
-passing verdict and its absence is not rewritten as success.
+passing verdict and its absence is not rewritten as success. Producer validation and deployment
+projection both require the diagnostic URL to equal the envelope's own run URL plus `#artifacts`;
+an arbitrary HTTPS link is rejected rather than rendered to an operator.
 
 Absence is not zero. `0 tests executed` is a valid observed result; `not-run` means no applicable
 artifact was collected. Missing and stale required evidence are attention states, never silently
