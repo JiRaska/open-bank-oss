@@ -12,5 +12,8 @@ describe('document template workflow controls contract', () => {
     expect(source).toContain('aria-busy={loading}')
     expect(source).toContain("aria-label={t('Vyhledat dokument podle ID', 'Look up document by ID')}")
     expect(source).toContain('type="button" onClick={() => runAction(pendingAction.id, pendingAction.kind)}')
+    expect(source.match(/claimSingleFlight\(writeInFlight\)/g)).toHaveLength(2)
+    expect(source.match(/releaseSingleFlight\(writeInFlight\)/g)).toHaveLength(2)
+    expect(source).toContain('type="submit" className="btn btn-primary" disabled={saving || actioning} aria-busy={saving}')
   })
 })
