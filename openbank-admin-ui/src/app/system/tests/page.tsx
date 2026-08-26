@@ -331,6 +331,7 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Naposledy naplánováno', 'Last scheduled')}</span><br /><strong>{row.live.lastScheduledAt ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(row.live.lastScheduledAt)) : 'never observed'}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední úspěch', 'Last success')}</span><br /><strong>{row.live.lastSuccessfulAt ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(row.live.lastSuccessfulAt)) : 'never observed'}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Selhání v okně', 'Failures in window')}</span><br /><strong>{row.live.failuresWithinWindow ?? 'unavailable'} / {Math.round(row.live.failureWindowSeconds / 60)} min</strong></div>
+      <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Právě běží', 'Running now')}</span><br /><strong>{row.live.activeJobs ?? 'unavailable'}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Čerstvost evidence', 'Evidence freshness')}</span><br /><strong>{row.live.freshnessSeconds === null ? 'unknown' : `${Math.round(row.live.freshnessSeconds / 60)} min`}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední Kubernetes běhy', 'Recent Kubernetes runs')}</span><br /><strong>{row.live.recentRuns.length || 'none retained'}</strong></div>
     </div>}

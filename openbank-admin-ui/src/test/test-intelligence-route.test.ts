@@ -186,4 +186,30 @@ describe('GET /api/test-intelligence', () => {
       { id: 'journey-public-edge-123', state: 'passed', observedAt: new Date(completed * 1000).toISOString() },
     ])
   })
+
+  it('shows a first scheduled Job still running as unresolved instead of claiming it was not run', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-running-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-25T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], history: [], runHistory: [], testCases: [], clientExperiences: [],
+      syntheticJourneys: [{ id: 'public-edge', title: 'Public edge', status: 'active', state: 'unknown', severity: 'page', schedule: '*/5 * * * *', environment: 'sandbox', covers: [], falsifies: 'Break the edge.', blocker: null }],
+      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.PROMETHEUS_URL = 'http://prometheus.test'
+    const now = Date.now() / 1000
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      const payload = query.includes('kube_job_status_active')
+        ? { status: 'success', data: { result: [{ value: [now, '1'] }] } }
+        : query.includes('kube_job_status_completion_time')
+          ? { status: 'success', data: { result: [] } }
+          : { status: 'success', data: { result: [] } }
+      return new Response(JSON.stringify(payload), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+    expect(body.syntheticJourneys[0]).toMatchObject({ state: 'unknown', live: { activeJobs: 1, lastSuccessfulAt: null } })
+  })
 })

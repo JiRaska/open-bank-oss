@@ -124,7 +124,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
     // successful run fresh. A fixed 30-minute window made a failed hourly or daily
     // journey look healthy again while its last successful run was still nominally fresh.
     const failureWindowSeconds = freshnessLimitSeconds(journey.schedule)
-    const [scheduled, successful, failures, recentRuns] = await Promise.all([
+    const [scheduled, successful, failures, activeJobs, recentRuns] = await Promise.all([
       queryPrometheus(base, `max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="${cronjob}"})`),
       queryPrometheus(base, `max(kube_cronjob_status_last_successful_time{namespace="observability",cronjob="${cronjob}"})`),
       // kube-state-metrics continues exporting terminal Job status until the Job is garbage
@@ -132,12 +132,15 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
       // max_over_time makes a later successful schedule look failed. Join on completion time so
       // only a Job which both failed AND completed inside the window is a current failure.
       queryPrometheus(base, `max((kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} > 0) and on(namespace,job_name) (time() - kube_job_status_completion_time{namespace="observability",job_name=~"${cronjob}.*"} < ${failureWindowSeconds}))`),
+      // A reachable Prometheus with no active Jobs must yield zero, not an unavailable value.
+      queryPrometheus(base, `sum(kube_job_status_active{namespace="observability",job_name=~"${cronjob}.*"}) or vector(0)`),
       queryPrometheusRuns(base, cronjob),
     ])
     const observedAt = new Date().toISOString()
     const freshnessSeconds = successful === null ? null : Math.max(0, nowSeconds - successful)
     const state: EvidenceState = failures !== null && failures > 0 ? 'failed'
-      : successful === null ? 'not-run'
+      : successful === null && activeJobs !== null && activeJobs > 0 ? 'unknown'
+        : successful === null ? 'not-run'
         : freshnessSeconds !== null && freshnessSeconds > freshnessLimitSeconds(journey.schedule) ? 'stale' : 'passed'
     return {
       ...journey, state,
@@ -145,7 +148,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
         source: 'prometheus' as const, observedAt,
         lastScheduledAt: scheduled === null ? null : new Date(scheduled * 1000).toISOString(),
         lastSuccessfulAt: successful === null ? null : new Date(successful * 1000).toISOString(),
-        failuresWithinWindow: failures, failureWindowSeconds, freshnessSeconds, recentRuns,
+        failuresWithinWindow: failures, failureWindowSeconds, activeJobs, freshnessSeconds, recentRuns,
       },
     }
   }))
