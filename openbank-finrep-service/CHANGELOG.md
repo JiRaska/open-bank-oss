@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.2...finrep-service-v0.9.3) (2026-08-26)
+
+
+### Bug Fixes
+
+* **finrep:** expose official coverage gaps ([#7070](https://github.com/JiRaska/open-bank-oss/issues/7070)) ([4676ba0](https://github.com/JiRaska/open-bank-oss/commit/4676ba03068ecb6ac7004b9958f6802c6460cf94))
+
 ## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.1...finrep-service-v0.9.2) (2026-08-26)
 
 
