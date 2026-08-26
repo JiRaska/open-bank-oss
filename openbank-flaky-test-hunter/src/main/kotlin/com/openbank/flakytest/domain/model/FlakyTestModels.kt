@@ -20,6 +20,7 @@ enum class FlakyTestCheckType {
     TEST_COUNT_DRIFT,
     MISSING_EXECUTION_EVIDENCE,
     FAILED_TEST_EVIDENCE,
+    OBSERVED_FLAKY_TESTS,
     STALE_TEST_EVIDENCE,
     UNPROVEN_TEST_INFRASTRUCTURE,
 }
@@ -125,6 +126,10 @@ data class TestIntelligenceComponentInput(
     val evidence: List<TestIntelligenceEvidenceInput>,
     val declaredInfrastructure: List<String>,
     val observedInfrastructureStarts: Int,
+    val flakyTests: Int = 0,
+    val failingTests: Int = 0,
+    val sameCommitTransitions: Int = 0,
+    val wastedDurationMs: Int = 0,
 )
 
 data class TestIntelligenceEvidenceInput(val kind: String, val state: String)

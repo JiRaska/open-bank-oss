@@ -100,17 +100,7 @@ class FlakyTestHunterService(
                 ),
             )
         }
-        if (component.evidence.any { it.state == "failed" }) {
-            add(
-                evidenceFinding(
-                    snapshotId,
-                    component.component,
-                    FlakyTestCheckType.FAILED_TEST_EVIDENCE,
-                    severity,
-                    "${component.component} has failed test evidence",
-                ),
-            )
-        }
+        addAll(detectCurrentAndHistoricalFailures(snapshotId, component, severity))
         if (component.evidence.any {
                 it.state == "stale"
             }
@@ -140,6 +130,36 @@ class FlakyTestHunterService(
         }
     }
 
+    private fun detectCurrentAndHistoricalFailures(
+        snapshotId: String,
+        component: TestIntelligenceComponentInput,
+        severity: FindingSeverity,
+    ) = buildList {
+        if (component.evidence.any { it.state == "failed" }) {
+            add(
+                evidenceFinding(
+                    snapshotId,
+                    component.component,
+                    FlakyTestCheckType.FAILED_TEST_EVIDENCE,
+                    severity,
+                    "${component.component} has failed test evidence",
+                ),
+            )
+        }
+        if (component.flakyTests > 0) {
+            add(
+                evidenceFinding(
+                    snapshotId,
+                    component.component,
+                    FlakyTestCheckType.OBSERVED_FLAKY_TESTS,
+                    severity,
+                    "${component.component} has ${component.flakyTests} test(s) with same-commit flakiness",
+                    BigDecimal(component.flakyTests),
+                ),
+            )
+        }
+    }
+
     private suspend fun diagnoseEvidenceFinding(finding: FlakyTestFinding, collectedAt: Instant): FlakyTestFinding =
         findingRepository.findById(finding.id) ?: findingRepository.save(
             finding.copy(
@@ -164,6 +184,7 @@ class FlakyTestHunterService(
         type: FlakyTestCheckType,
         severity: FindingSeverity,
         title: String,
+        rawMetricValue: BigDecimal = BigDecimal.ONE,
     ): FlakyTestFinding = FlakyTestFinding(
         UUID.nameUUIDFromBytes(
             "$snapshotId:$component:$type".toByteArray(StandardCharsets.UTF_8),
@@ -172,7 +193,7 @@ class FlakyTestHunterService(
         Instant.now(
             clock,
         ),
-        title, component, "test-intelligence:$snapshotId", BigDecimal.ONE, BigDecimal.ZERO,
+        title, component, "test-intelligence:$snapshotId", rawMetricValue, BigDecimal.ZERO,
     )
 
     private fun validateEvidenceRequest(request: TestIntelligenceAnalysisRequest) {
@@ -182,8 +203,12 @@ class FlakyTestHunterService(
             require(COMPONENT.matches(component.component)) { "invalid component" }
             require(
                 component.declaredInfrastructure.all { it in INFRASTRUCTURE } &&
-                    component.observedInfrastructureStarts >= 0,
-            ) { "invalid infrastructure" }
+                    component.observedInfrastructureStarts >= 0 &&
+                    component.flakyTests >= 0 &&
+                    component.failingTests >= 0 &&
+                    component.sameCommitTransitions >= 0 &&
+                    component.wastedDurationMs >= 0,
+            ) { "invalid infrastructure or historical metric" }
             require(
                 component.evidence.size <= MAX_EVIDENCE_PER_COMPONENT &&
                     component.evidence.all {
