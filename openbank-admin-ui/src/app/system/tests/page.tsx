@@ -240,9 +240,10 @@ function RuntimeInfrastructure({ report }: { report: TestIntelligenceReport }) {
     <tbody>{rows.map(row => {
       const started = row.testInfrastructure.observed.filter(item => item.lifecycle === 'started')
       const stopped = row.testInfrastructure.observed.filter(item => item.lifecycle === 'stopped')
+      const unmatchedStarts = started.length - stopped.length
       const state: EvidenceState = started.length === 0 ? 'unknown' : stopped.length < started.length ? 'failed' : 'passed'
       const latest = row.testInfrastructure.observed.at(-1)?.observedAt
-      return <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.testInfrastructure.declared.join(' · ') || 'none'}</td><td style={tdStyle}><StateBadge state={state} /></td><td style={tdStyle}>{started.length} started · {stopped.length} stopped</td><td style={tdStyle}>{latest ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(latest)) : 'not emitted by this run'}</td></tr>
+      return <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.testInfrastructure.declared.join(' · ') || 'none'}</td><td style={tdStyle}><StateBadge state={state} /></td><td style={tdStyle}>{started.length} started · {stopped.length} stopped{unmatchedStarts > 0 && <div role="status" style={{ color: '#dc2626', fontSize: 10, marginTop: 3 }}>{t(`${unmatchedStarts} unmatched start`, `${unmatchedStarts} unmatched start${unmatchedStarts === 1 ? '' : 's'}`)}</div>}</td><td style={tdStyle}>{latest ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(latest)) : 'not emitted by this run'}</td></tr>
     })}</tbody>
   </table></div>
 }
