@@ -319,22 +319,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: admin-ui-discovery
-  namespace: referral
-  labels:
-    app.kubernetes.io/name: admin-ui
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: admin-ui-discovery
-subjects:
-  - kind: ServiceAccount
-    name: admin-ui
-    namespace: admin-ui
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: admin-ui-discovery
   namespace: payments
   labels:
     app.kubernetes.io/name: admin-ui
