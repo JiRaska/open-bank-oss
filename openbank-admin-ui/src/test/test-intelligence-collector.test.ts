@@ -163,7 +163,10 @@ scenarios:
       schemaVersion: 1,
       run: { id: '42', attempt: 2, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/42', observedAt: '2026-08-22T10:00:00Z' },
       component: 'openbank-alpha-service',
-      suites: [{ kind: 'integration', state: 'passed', discovered: 3, executed: 3, passed: 3, failed: 0, skipped: 0, errors: 0, durationMs: 900 }],
+      suites: [
+        { kind: 'integration', state: 'passed', discovered: 3, executed: 3, passed: 3, failed: 0, skipped: 0, errors: 0, durationMs: 900 },
+        { kind: 'e2e', state: 'failed', discovered: 2, executed: 2, passed: 1, failed: 1, skipped: 0, errors: 0, durationMs: 1200 },
+      ],
       specializedEvidence: [{ kind: 'trace', state: 'passed', source: 'trace-contract:payment-booking', detail: '1 executed marker(s); JUnit suite passed' }],
       testCases: [{ fingerprint: '0123456789abcdef01234567', kind: 'integration', classname: 'com.openbank.PaymentApiIT', name: 'books payment', state: 'passed', durationMs: 400 }],
       coverage: { lines: { covered: 8, missed: 2, percentage: 80 }, branches: { covered: 3, missed: 1, percentage: 75 } },
@@ -171,6 +174,7 @@ scenarios:
         { resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'started', observedAt: '2026-08-22T09:59:00Z' },
         { resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'stopped', observedAt: '2026-08-22T10:00:00Z' },
       ] },
+      diagnostics: [{ kind: 'playwright-report', suiteKind: 'e2e', name: 'playwright-report-42-a2', url: 'https://example.test/run/42#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true }],
     }))
     write(repo, 'openbank-admin-ui/test-run-history/previous.json', JSON.stringify({
       schemaVersion: 1,
@@ -183,9 +187,12 @@ scenarios:
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
     expect(report.components[0].evidence[0]).toMatchObject({ kind: 'integration', run: { id: '42', attempt: 2, commit: 'abcdef012345' } })
-    expect(report.components[0].evidence[1]).toMatchObject({
+    expect(report.components[0].evidence.find(item => item.kind === 'trace')).toMatchObject({
       kind: 'trace', state: 'passed', source: 'trace-contract:payment-booking',
       detail: '1 executed marker(s); JUnit suite passed', run: { id: '42', attempt: 2 },
+    })
+    expect(report.components[0].evidence.find(item => item.kind === 'e2e')).toMatchObject({
+      state: 'failed', diagnostics: [{ kind: 'playwright-report', name: 'playwright-report-42-a2', url: 'https://example.test/run/42#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true }],
     })
     expect(report.components[0].testInfrastructure.observed).toHaveLength(2)
     expect(report.runHistory[0].states).toMatchObject({ integration: 'passed', trace: 'passed' })

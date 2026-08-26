@@ -69,6 +69,12 @@ The snapshot schema carries:
   one, and environment; and
 - separate code-coverage, performance, contract, mutation and synthetic-journey observations.
 
+Failed browser E2E attempts may also carry metadata for a retained Playwright diagnostic report.
+The envelope records only its type, exact run/attempt name, authenticated run URL, seven-day
+retention and an explicit sensitive-data warning. Trace, screenshot, video, DOM and request content
+never enter the canonical JSON. A diagnostic bundle explains a verdict; its presence is not a
+passing verdict and its absence is not rewritten as success.
+
 Absence is not zero. `0 tests executed` is a valid observed result; `not-run` means no applicable
 artifact was collected. Missing and stale required evidence are attention states, never silently
 excluded from an average.
@@ -235,6 +241,11 @@ evidence, and the ordinary suite verdict stays authoritative if the enclosing JU
 The admin route is a primary platform destination, first in Platform navigation and pinned in the
 platform persona workspace. Its E2E test navigates from the dashboard through the visible link;
 opening `/system/tests` directly is not evidence of discoverability.
+
+Browser failure diagnostics remain GitHub-authenticated, expire after seven days and are linked from
+the exact E2E observation in the execution and client-experience views. Test Intelligence does not
+proxy or render their potentially sensitive contents. This preserves the existing access boundary
+while removing manual run-to-artifact rediscovery for an authorized operator.
 
 ### D9 — Client experience evidence and RUM boundary
 
