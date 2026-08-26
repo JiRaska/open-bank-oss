@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.1...finrep-service-v0.9.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* **finrep:** align previews with EBA 4.2 ([#7046](https://github.com/JiRaska/open-bank-oss/issues/7046)) ([72c7ff8](https://github.com/JiRaska/open-bank-oss/commit/72c7ff8a3429abe0ba7b79eda154afb3db60e97e))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.0...finrep-service-v0.9.1) (2026-08-26)
 
 
