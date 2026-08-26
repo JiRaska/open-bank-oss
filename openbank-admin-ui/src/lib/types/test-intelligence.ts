@@ -241,6 +241,7 @@ export interface TestIntelligenceReport {
   history: TestIntelligenceHistoryPoint[]
   runHistory: TestRunHistoryPoint[]
   testCases: TestCaseHistory[]
+  testImpact?: TestImpactEvidence
   totals: {
     components: number
     componentsWithExecutionEvidence: number
@@ -252,6 +253,19 @@ export interface TestIntelligenceReport {
     unresolvedEvidence?: number
   }
   warnings: string[]
+}
+
+/**
+ * Impact selection is deliberately a separate, bounded evidence surface. `unknown` means no
+ * verified test-to-production map was collected; it never means a test is unaffected.
+ */
+export interface TestImpactEvidence {
+  schemaVersion: 1
+  mode: 'shadow'
+  mappingState: 'unknown'
+  selectionState: 'unavailable'
+  declaredByAllRetainedRuns: boolean
+  detail: string
 }
 
 export interface TestCaseHistory {

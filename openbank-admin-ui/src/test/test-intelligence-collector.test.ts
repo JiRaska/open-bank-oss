@@ -207,6 +207,11 @@ scenarios:
       failureRate: 50, wastedDurationMs: 500, sameCommitTransitions: 1, owner: 'unowned',
       testDefinitionPath: 'src/test/kotlin/com/openbank/PaymentApiIT.kt',
     })
+    expect(report.testImpact).toEqual({
+      schemaVersion: 1, mode: 'shadow', mappingState: 'unknown', selectionState: 'unavailable',
+      declaredByAllRetainedRuns: false,
+      detail: expect.stringContaining('No test-to-production mapping is assumed'),
+    })
   })
 
   it('projects the unreleased simulation tooling envelope instead of reporting missing evidence', () => {

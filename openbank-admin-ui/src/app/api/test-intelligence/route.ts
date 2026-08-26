@@ -254,6 +254,7 @@ export async function GET(): Promise<NextResponse> {
     }
     const compatible = {
       ...parsed, history: parsed.history ?? [], runHistory: parsed.runHistory ?? [], testCases: parsed.testCases ?? [], clientExperiences: parsed.clientExperiences ?? [],
+      testImpact: parsed.testImpact ?? { schemaVersion: 1, mode: 'shadow', mappingState: 'unknown', selectionState: 'unavailable', declaredByAllRetainedRuns: false, detail: 'This retained report predates the impact contract. No test-to-production mapping is assumed; full suites remain authoritative.' },
       components: parsed.components.map(component => ({
         ...component,
         testInfrastructure: component.testInfrastructure ?? { declared: [], observed: [] },
