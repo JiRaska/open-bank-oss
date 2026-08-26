@@ -71,6 +71,7 @@ class TestIntelligenceAnalysisTest {
         assertThat(findings.map { it.checkType }).containsExactlyInAnyOrder(
             FlakyTestCheckType.MISSING_EXECUTION_EVIDENCE,
             FlakyTestCheckType.FAILED_TEST_EVIDENCE,
+            FlakyTestCheckType.OBSERVED_FAILING_TESTS,
             FlakyTestCheckType.OBSERVED_FLAKY_TESTS,
             FlakyTestCheckType.STALE_TEST_EVIDENCE,
             FlakyTestCheckType.UNPROVEN_TEST_INFRASTRUCTURE,
@@ -82,6 +83,10 @@ class TestIntelligenceAnalysisTest {
             .isEqualTo(FindingSeverity.WARNING)
         assertThat(findings.single { it.checkType == FlakyTestCheckType.OBSERVED_FLAKY_TESTS }.rawMetricValue)
             .isEqualByComparingTo("2")
+        assertThat(findings.single { it.checkType == FlakyTestCheckType.OBSERVED_FLAKY_TESTS }.title)
+            .contains("3 same-commit transition(s)", "4200 ms")
+        assertThat(findings.single { it.checkType == FlakyTestCheckType.OBSERVED_FAILING_TESTS }.rawMetricValue)
+            .isEqualByComparingTo("1")
         assertThat(findings).allSatisfy {
             assertThat(it.status).isEqualTo(FindingStatus.DIAGNOSED)
             assertThat(it.proposalUrl).isNull()

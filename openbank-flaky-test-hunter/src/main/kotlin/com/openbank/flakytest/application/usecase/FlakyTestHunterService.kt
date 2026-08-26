@@ -153,8 +153,22 @@ class FlakyTestHunterService(
                     component.component,
                     FlakyTestCheckType.OBSERVED_FLAKY_TESTS,
                     severity,
-                    "${component.component} has ${component.flakyTests} test(s) with same-commit flakiness",
+                    "${component.component} has ${component.flakyTests} flaky test(s), " +
+                        "${component.sameCommitTransitions} same-commit transition(s), " +
+                        "and ${component.wastedDurationMs} ms of measured wasted duration",
                     BigDecimal(component.flakyTests),
+                ),
+            )
+        }
+        if (component.failingTests > 0) {
+            add(
+                evidenceFinding(
+                    snapshotId,
+                    component.component,
+                    FlakyTestCheckType.OBSERVED_FAILING_TESTS,
+                    severity,
+                    "${component.component} has ${component.failingTests} test(s) failing in retained history",
+                    BigDecimal(component.failingTests),
                 ),
             )
         }
