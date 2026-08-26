@@ -25,13 +25,13 @@ class F0200MapperTest {
     )
 
     @Test
-    fun `F02_00 reports income and expense as positive magnitudes and derives net profit`() {
+    fun `F02_00 reports profit for the year at its official datapoint`() {
         val template = F0200Mapper.map(tb(balancedTrialBalance(), ledgerSays = true), asOf)
 
         assertThat(template.templateId).isEqualTo("F02.00")
-        assertThat(cell(template, "r010")).isEqualByComparingTo("120000")
-        assertThat(cell(template, "r030")).isEqualByComparingTo("80000")
-        assertThat(cell(template, "r450")).isEqualByComparingTo("40000")
+        assertThat(template.cells).hasSize(1)
+        assertThat(cell(template, "r0670")).isEqualByComparingTo("40000")
+        assertThat(template.cells.single().colRef).isEqualTo("c0010")
     }
 
     @Test
@@ -50,14 +50,11 @@ class F0200MapperTest {
     }
 
     @Test
-    fun `net profit stays a definition and can never falsify the flag on its own`() {
-        // Guards against the tempting vacuous check: `income − expense == netProfit` is how r450 is
-        // computed, so asserting it would always hold. This test states that r450 tracks the inputs
-        // exactly, WITHOUT that identity being what `isBalanced` reports.
+    fun `profit for the year stays a definition and can never falsify the flag on its own`() {
         val lines = balancedTrialBalance()
         val template = F0200Mapper.map(tb(lines, ledgerSays = true), asOf)
 
-        assertThat(cell(template, "r450")).isEqualByComparingTo(cell(template, "r010").subtract(cell(template, "r030")))
+        assertThat(cell(template, "r0670")).isEqualByComparingTo("40000")
     }
 
     /** Ledger's verdict is explicit per call site, never derived from `lines` (issue #6011). */

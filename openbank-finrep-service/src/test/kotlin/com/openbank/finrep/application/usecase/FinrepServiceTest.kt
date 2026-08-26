@@ -50,7 +50,9 @@ class FinrepServiceTest {
 
         assertThat(template.templateId).isEqualTo("F01.01")
         assertThat(template.period).isEqualTo(asOf)
-        assertThat(template.cells).anyMatch { it.rowRef == "r490" && it.value == BigDecimal("200000") }
+        assertThat(template.cells).containsExactly(
+            com.openbank.finrep.domain.model.FinrepCell("r0380", "c0010", BigDecimal("500000")),
+        )
         coVerify(exactly = 1) { ledgerPort.getTrialBalance(asOf) }
     }
 
@@ -67,7 +69,35 @@ class FinrepServiceTest {
         val template = service.getTemplate(GetFinrepTemplateQuery(templateId = "F02.00", asOf = asOf))
 
         assertThat(template.templateId).isEqualTo("F02.00")
-        assertThat(template.cells).anyMatch { it.rowRef == "r450" && it.value == BigDecimal("40000") }
+        assertThat(template.cells).anyMatch { it.rowRef == "r0670" && it.value == BigDecimal("40000") }
+    }
+
+    @Test
+    fun `getTemplate dispatches F01_02 and F01_03 with official coordinates and signs`(): Unit = runBlocking {
+        val asOf = LocalDate.of(2026, 6, 30)
+        val lines = listOf(
+            TrialBalanceLineDto("1000", "ASSET", BigDecimal("500000"), "CZK"),
+            TrialBalanceLineDto("2000", "LIABILITY", BigDecimal("-300000"), "CZK"),
+            TrialBalanceLineDto("4000", "INCOME", BigDecimal("-260000"), "CZK"),
+            TrialBalanceLineDto("5000", "EXPENSE", BigDecimal("60000"), "CZK"),
+        )
+        coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(lines, ledgerSays = true)
+        val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
+
+        val liabilities = service.getTemplate(GetFinrepTemplateQuery("F01.02", asOf))
+        val equity = service.getTemplate(GetFinrepTemplateQuery("F01.03", asOf))
+
+        assertThat(liabilities.cells).containsExactly(
+            com.openbank.finrep.domain.model.FinrepCell("r0300", "c0010", BigDecimal("300000")),
+        )
+        assertThat(equity.cells).containsExactly(
+            com.openbank.finrep.domain.model.FinrepCell("r0300", "c0010", BigDecimal("200000")),
+            com.openbank.finrep.domain.model.FinrepCell("r0310", "c0010", BigDecimal("500000")),
+        )
+        assertThat(registry.get("openbank.finrep.templates.rendered").tag("template", "F01.02").counter().count())
+            .isEqualTo(1.0)
+        assertThat(registry.get("openbank.finrep.templates.rendered").tag("template", "F01.03").counter().count())
+            .isEqualTo(1.0)
     }
 
     @Test

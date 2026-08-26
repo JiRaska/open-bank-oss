@@ -16,10 +16,9 @@ import java.time.LocalDate
 /**
  * Maps ledger trial balance lines to the FINREP F02.00 Profit and Loss Statement template.
  *
- * EBA FINREP F02.00 structure (simplified):
- *   r010_c010 — Total income
- *   r030_c010 — Total expense
- *   r450_c010 — Net profit (income − expense)
+ * EBA Reporting Framework 4.2 defines profit or loss for the year as r0670/c0010 (datapoint
+ * 57025). The previous r0010/r0030/r0450 claims were interest income, a financial-asset detail and
+ * other provisions respectively — not aggregate income, aggregate expense and net profit (#6980).
  *
  * Income is credit-normal, so its reporting magnitude is the negated ledger net; expense is
  * debit-normal and passes through. See `F0101Mapper` for the sign convention (issue #5987).
@@ -30,7 +29,7 @@ import java.time.LocalDate
  * and can never fail. So this template does NOT report a P&L-internal check. It reports the same
  * thing F01.01 does: whether the **trial balance it was rendered from** satisfies double entry. A
  * P&L drawn off a trial balance that does not tie out is not submittable regardless of how
- * internally consistent its three rows are, and that is a fact about this render which a consumer
+ * internally consistent its derived profit fact is, and that is a fact about this render which a consumer
  * of this template can act on.
  *
  * The alternative the issue offers — modelling the flag as not-applicable to P&L — was rejected
@@ -45,11 +44,7 @@ object F0200Mapper {
         val expense = sumNet(lines, "EXPENSE")
         val netProfit = income.subtract(expense)
 
-        val cells = listOf(
-            FinrepCell(rowRef = "r010", colRef = "c010", value = income),
-            FinrepCell(rowRef = "r030", colRef = "c010", value = expense),
-            FinrepCell(rowRef = "r450", colRef = "c010", value = netProfit),
-        )
+        val cells = listOf(FinrepCell(rowRef = "r0670", colRef = "c0010", value = netProfit))
 
         val assessment = TrialBalanceAssurance.assess(snapshot)
         return FinrepTemplate(

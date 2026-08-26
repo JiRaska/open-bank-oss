@@ -13,6 +13,8 @@ import com.openbank.finrep.application.port.out.TemplateFailureReason
 import com.openbank.finrep.application.port.out.TemplateRender
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.F0101Mapper
+import com.openbank.finrep.domain.mapper.F0102Mapper
+import com.openbank.finrep.domain.mapper.F0103Mapper
 import com.openbank.finrep.domain.mapper.F0200Mapper
 import com.openbank.finrep.domain.model.FinrepTemplate
 import jakarta.enterprise.context.ApplicationScoped
@@ -41,6 +43,8 @@ class FinrepService(private val ledgerPort: LedgerPort, private val metrics: Fin
         val snapshot = trialBalance(query.asOf)
         val template = when (query.templateId) {
             "F01.01" -> F0101Mapper.map(snapshot, query.asOf)
+            "F01.02" -> F0102Mapper.map(snapshot, query.asOf)
+            "F01.03" -> F0103Mapper.map(snapshot, query.asOf)
             "F02.00" -> F0200Mapper.map(snapshot, query.asOf)
             else -> {
                 metrics.templateFailed(RegulatoryFramework.FINREP, TemplateFailureReason.UNKNOWN_TEMPLATE)
