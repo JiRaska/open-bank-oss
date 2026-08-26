@@ -19,13 +19,14 @@
 // Shared deliberately (ADR-0208): two callers need it (Customer 360, Consents), and a copy in each
 // would be two divergent search behaviours over one endpoint.
 
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { StatusBadge } from '@/components/ui'
 
 const PARTY_SERVICE = '/api/svc/party-service'
+const SEARCH_TIMEOUT_MS = 8_000
 
 export const PARTY_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -64,26 +65,41 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
   // Only the newest search may commit its hits — otherwise a slow query for "Nov" lands after a fast
   // one for "Svoboda" and the operator picks from a list that does not match what they typed.
   const generation = useRef(0)
+  const activeRequest = useRef<AbortController | null>(null)
+
+  useEffect(() => () => {
+    generation.current += 1
+    activeRequest.current?.abort()
+  }, [])
 
   const run = async () => {
     const q = term.trim()
-    if (!q) return
+    const gen = ++generation.current
+    activeRequest.current?.abort()
+    activeRequest.current = null
+    if (!q) {
+      setSearching(false)
+      return
+    }
     // A pasted party id is not a name — skip the trigram search entirely, so an operator who already
     // has an id keeps the direct path instead of being forced through a result list of one.
-    const gen = ++generation.current
     if (PARTY_UUID_RE.test(q)) {
+      setSearching(false)
       setHits(null)
       setFailure(null)
       onSelect({ id: q })
       return
     }
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS)
+    activeRequest.current = controller
     setSearching(true)
     setFailure(null)
     setHits(null)
     try {
       const res = await fetch(
         `${PARTY_SERVICE}/api/v1/parties/search?q=${encodeURIComponent(q)}&limit=20`,
-        { cache: 'no-store' },
+        { cache: 'no-store', signal: controller.signal },
       )
       if (gen !== generation.current) return // superseded by a newer search
       if (!res.ok) {
@@ -96,13 +112,15 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
     } catch {
       if (gen === generation.current) setFailure('unreachable')
     } finally {
+      window.clearTimeout(timeout)
+      if (activeRequest.current === controller) activeRequest.current = null
       if (gen === generation.current) setSearching(false)
     }
   }
 
   return (
     <>
-      <div className="card" style={{ marginBottom: '20px', padding: '20px' }}>
+      <div className="card" role="search" aria-label={t('Vyhledání klienta nebo firmy', 'Find a customer or company')} aria-busy={searching} style={{ marginBottom: '20px', padding: '20px' }}>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
           {leading}
           <input
@@ -111,14 +129,17 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
             onKeyDown={e => { if (e.key === 'Enter') run() }}
             placeholder={placeholder ?? t('Jméno nebo název firmy (nebo UUID party)', 'Name or company name (or party UUID)')}
             aria-label={t('Vyhledat stranu', 'Search parties')}
+            aria-controls="party-search-results"
             style={{
               flex: '1 1 340px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
               background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px',
             }}
           />
           <button
+            type="button"
             onClick={run}
             disabled={searching || busy || !term.trim()}
+            aria-busy={searching}
             style={{
               display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px',
               cursor: searching || busy || !term.trim() ? 'not-allowed' : 'pointer', borderRadius: '8px',
@@ -127,34 +148,35 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
               opacity: searching || busy || !term.trim() ? 0.6 : 1,
             }}
           >
-            <Search size={15} /> {t('Vyhledat', 'Search')}
+            <Search size={15} aria-hidden="true" /> {searching ? t('Hledám…', 'Searching…') : t('Vyhledat', 'Search')}
           </button>
         </div>
         <p style={{ margin: '10px 0 0', fontSize: '11px', color: 'var(--text-tertiary)' }}>
           {t(
-            'Hledá se v party-service (ADR-0055) — jména vlastní ta služba.',
-            'Search runs against party-service (ADR-0055) — it owns names.',
+            'Začněte jménem klienta nebo názvem firmy. Pokud už máte Party ID, můžete ho vložit přímo.',
+            'Start with the customer or company name. If you already have a Party ID, paste it directly.',
           )}
         </p>
       </div>
 
-      {searching && (
-        <div style={{ color: 'var(--text-secondary)', padding: '24px', textAlign: 'center' }}>
-          {t('Hledám…', 'Searching…')}
-        </div>
-      )}
+      <div id="party-search-results" aria-live="polite">
+        {searching && (
+          <div role="status" style={{ color: 'var(--text-secondary)', padding: '24px', textAlign: 'center' }}>
+            {t('Hledám…', 'Searching…')}
+          </div>
+        )}
 
-      {!searching && failure && (
-        <DataUnavailable
-          kind={failure}
-          service="party-service"
-          feature={t('Hledání party', 'Party search')}
-          lang={language === 'cs' ? 'cs' : 'en'}
-        />
-      )}
+        {!searching && failure && (
+          <DataUnavailable
+            kind={failure}
+            service="party-service"
+            feature={t('Hledání party', 'Party search')}
+            lang={language === 'cs' ? 'cs' : 'en'}
+          />
+        )}
 
-      {!searching && hits && hits.length === 0 && (
-        <div className="card" style={{ padding: '28px', textAlign: 'center', marginBottom: '20px' }}>
+        {!searching && hits && hits.length === 0 && (
+          <div className="card" style={{ padding: '28px', textAlign: 'center', marginBottom: '20px' }}>
           {/* Stated as a search result, not as an unavailable data source: party-service answered. */}
           <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)' }}>
             {t('Žádná party neodpovídá hledání', 'No party matches that search')}
@@ -162,11 +184,11 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
           <p style={{ margin: '6px 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
             {t('party-service odpověděla — hledaný výraz nic nenašel.', 'party-service answered — the term matched nothing.')}
           </p>
-        </div>
-      )}
+          </div>
+        )}
 
-      {!searching && hits && hits.length > 0 && (
-        <div className="card" style={{ marginBottom: '20px', overflowX: 'auto', padding: '20px' }}>
+        {!searching && hits && hits.length > 0 && (
+          <div className="card" style={{ marginBottom: '20px', overflowX: 'auto', padding: '20px' }}>
           <h2 className="section-title" style={{ marginBottom: '12px' }}>
             {t('Nalezené party', 'Matching parties')} ({hits.length})
           </h2>
@@ -189,8 +211,11 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
                   <td>{p.kycStatus ? <StatusBadge status={p.kycStatus} /> : '—'}</td>
                   <td style={{ textAlign: 'right' }}>
                     <button
+                      type="button"
                       onClick={() => onSelect(p)}
                       disabled={busy}
+                      aria-pressed={selectedId === p.id}
+                      aria-label={t(`Vybrat ${partyDisplayName(p)}`, `Select ${partyDisplayName(p)}`)}
                       style={{
                         padding: '5px 12px', borderRadius: '6px', border: '1px solid var(--border)',
                         background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: '12px',
@@ -204,8 +229,9 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </>
   )
 }
