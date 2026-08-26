@@ -129,6 +129,9 @@ def check(root: Path) -> list[str]:
                    "journeyCoverage: syntheticCoverage"):
         if needle not in collector:
             errors.append(f"admin projection loses the governed synthetic coverage denominator: {needle}")
+    agent_analysis = text(root / "openbank-flaky-test-hunter/src/main/kotlin/com/openbank/flakytest/application/usecase/FlakyTestHunterService.kt")
+    if "private val EVIDENCE_KINDS" not in agent_analysis or '"trace",' not in agent_analysis:
+        errors.append("flaky-test-hunter cannot consume the trace evidence emitted by the Admin BFF")
     for needle in ("openbank-app-test-intelligence-", ".get('head_branch') == 'main'", "client-test-evidence/openbank-app-${artifact_id}.json"):
         if needle not in deploy:
             errors.append(f"admin deployment lost trusted mobile evidence staging: {needle}")

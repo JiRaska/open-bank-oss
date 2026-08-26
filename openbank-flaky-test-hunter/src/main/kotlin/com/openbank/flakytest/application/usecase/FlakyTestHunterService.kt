@@ -234,7 +234,15 @@ class FlakyTestHunterService(
 
     companion object {
         private val EXECUTION_KINDS = setOf("unit", "integration", "e2e", "visual", "simulation")
-        private val EVIDENCE_KINDS = EXECUTION_KINDS + setOf("contract", "performance", "synthetic", "mutation")
+        private val EVIDENCE_KINDS =
+            EXECUTION_KINDS +
+                setOf(
+                    "contract",
+                    "performance",
+                    "synthetic",
+                    "mutation",
+                    "trace",
+                )
         private val EVIDENCE_STATES = setOf("passed", "failed", "skipped", "not-run", "stale", "blocked", "unknown")
         private val INFRASTRUCTURE = setOf("postgres", "redpanda", "valkey")
         private val COMPONENT = Regex("^openbank-[a-z0-9-]{1,100}$")

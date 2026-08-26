@@ -49,6 +49,7 @@ class TestIntelligenceAnalysisTest {
                             TestIntelligenceEvidenceInput("contract", "stale"),
                             TestIntelligenceEvidenceInput("contract", "failed"),
                             TestIntelligenceEvidenceInput("mutation", "failed"),
+                            TestIntelligenceEvidenceInput("trace", "passed"),
                         ),
                         declaredInfrastructure = listOf("postgres"),
                         observedInfrastructureStarts = 0,
