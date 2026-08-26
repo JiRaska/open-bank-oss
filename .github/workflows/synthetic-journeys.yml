@@ -17,6 +17,11 @@ on:
   push:
     branches: [main]
     paths:
+      # Re-prove and publish main-branch evidence when the executor or envelope producer
+      # changes; manifest merges remain the actual post-GitOps call site.
+      - ".github/scripts/check-journey-catalog.py"
+      - ".github/scripts/collect-test-run-evidence.py"
+      - ".github/workflows/synthetic-journeys.yml"
       - "openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml"
   workflow_dispatch:
 
@@ -54,11 +59,30 @@ jobs:
             docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc \
             run --quiet --summary-export /evidence/summary.json /evidence/journey.js
 
+      - name: Build synthetic Test Intelligence envelope
+        if: always()
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service synthetic-evidence \
+            --component openbank-platform \
+            --synthetic-summary synthetic-evidence/summary.json \
+            --synthetic-journey public-edge \
+            --out synthetic-evidence/run.json
+
       - name: Retain immutable synthetic evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: synthetic-public-edge-${{ github.run_id }}-${{ github.run_attempt }}
           path: synthetic-evidence/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Retain immutable Test Intelligence history
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-run-openbank-platform-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: synthetic-evidence/run.json
           retention-days: 30
           if-no-files-found: error

@@ -89,6 +89,12 @@ scenarios:
       testInfrastructure: { declared: [], observed: [] },
       specializedEvidence: [{ kind: 'performance', state: 'not-run', source: 'perf-summary.json', detail: 'No safe money-path target is configured for this GitHub-hosted runner.' }],
     }))
+    write(repo, 'openbank-admin-ui/test-run-history/synthetic.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'synthetic-9', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Synthetic journeys', url: 'https://example.test/synthetic/9', observedAt: '2026-08-25T08:00:00Z' },
+      component: 'openbank-platform', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:edge', detail: '2 threshold result(s), 0 breached' }],
+    }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
@@ -103,7 +109,9 @@ scenarios:
       pactFile: 'alpha-provider.json', state: 'unknown',
       verificationDetail: expect.stringMatching(/not a passing result/i),
     })])
-    expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *' })
+    expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *', ci: {
+      state: 'passed', detail: '2 threshold result(s), 0 breached', run: { id: 'synthetic-9', workflow: 'Synthetic journeys' },
+    } })
     expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
     expect(report.journeyCoverage).toMatchObject({ moneyPathTotal: 2, activelyCovered: 1, explicitlyUnwatched: 1 })
     expect(report.journeyCoverage?.services).toEqual([

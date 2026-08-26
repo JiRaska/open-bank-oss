@@ -137,6 +137,12 @@ export interface SyntheticJourneyEvidence {
   covers: string[]
   falsifies: string
   blocker: string | null
+  ci?: {
+    state: EvidenceState
+    observedAt: string
+    detail: string
+    run: TestRunProvenance
+  }
   live?: {
     source: 'prometheus'
     observedAt: string
