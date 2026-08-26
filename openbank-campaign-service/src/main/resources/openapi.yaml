@@ -830,6 +830,8 @@ components:
         goal: { type: string }
         segmentRef:
           $ref: '#/components/schemas/SegmentRef'
+        referralProgramRef:
+          $ref: '#/components/schemas/ReferralProgramRef'
         steps:
           type: array
           items:
@@ -1032,6 +1034,14 @@ components:
         goal: { type: string }
         segmentName: { type: string }
         segmentVersion: { type: integer, minimum: 1 }
+        referralProgramId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Optional published MGM programme identity. Campaign-service resolves the programme
+            live and pins its server-owned id, name and version; callers cannot supply or override
+            reward rules. Unknown and unpublished ids are rejected with 409.
         steps:
           type: array
           items:
@@ -1107,6 +1117,16 @@ components:
           description: >-
             When the schedule stops firing, inclusive. Null runs until the campaign is paused or
             closed.
+    ReferralProgramRef:
+      type: object
+      required: [id, name, version]
+      description: >-
+        Immutable server-resolved MGM programme version attached to this campaign. Its reward,
+        attribution and anti-abuse rules remain owned by referral-service and are not copied here.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        version: { type: integer, minimum: 1 }
     StopCondition:
       type: object
       required: [maxSendsPerParty]

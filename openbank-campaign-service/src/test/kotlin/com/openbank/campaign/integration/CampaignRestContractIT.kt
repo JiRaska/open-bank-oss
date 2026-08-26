@@ -6,6 +6,8 @@ package com.openbank.campaign.integration
 
 import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.infrastructure.incentive.LiveIncentiveOfferRegistry
+import com.openbank.campaign.domain.model.ReferralProgramRef
+import com.openbank.campaign.infrastructure.referral.LiveReferralProgramCatalogAdapter
 import com.openbank.campaign.infrastructure.segment.SilverSegmentEvaluator
 import com.openbank.campaign.it.CampaignPostgresRedisTestResource
 import io.agroal.api.AgroalDataSource
@@ -61,6 +63,7 @@ class CampaignRestContractIT {
     private val audienceJwt = mockk<JsonWebToken>()
     private val segmentEvaluator = mockk<SilverSegmentEvaluator>()
     private val incentiveRegistry = mockk<LiveIncentiveOfferRegistry>()
+    private val referralPrograms = mockk<LiveReferralProgramCatalogAdapter>()
 
     @BeforeEach
     fun installAudiencePrincipal() {
@@ -70,6 +73,53 @@ class CampaignRestContractIT {
         coEvery { segmentEvaluator.evaluate(any()) } returns emptyList()
         QuarkusMock.installMockForType(segmentEvaluator, SilverSegmentEvaluator::class.java)
         QuarkusMock.installMockForType(incentiveRegistry, LiveIncentiveOfferRegistry::class.java)
+        QuarkusMock.installMockForType(incentiveRegistry, LiveIncentiveOfferRegistry::class.java)
+        coEvery { referralPrograms.resolvePublished(any()) } answers {
+            ReferralProgramRef(firstArg(), "friends-get-friends", 3)
+        }
+        QuarkusMock.installMockForType(referralPrograms, LiveReferralProgramCatalogAdapter::class.java)
+    }
+
+    @Test
+    fun `campaign pins only a published referral programme version`() {
+        val publishedId = UUID.randomUUID()
+        val unknownId = UUID.randomUUID()
+        coEvery { referralPrograms.resolvePublished(unknownId) } returns null
+
+        Given {
+            contentType("application/json")
+            body(draftBody("unknown-mgm-${UUID.randomUUID()}").dropLast(1) + ",\"referralProgramId\":\"$unknownId\"}")
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("published referral programme $unknownId not found"))
+        }
+
+        val campaignId = Given {
+            contentType("application/json")
+            body(
+                draftBody(
+                    "published-mgm-${UUID.randomUUID()}",
+                ).dropLast(1) + ",\"referralProgramId\":\"$publishedId\"}",
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("referralProgramRef.id", equalTo(publishedId.toString()))
+            body("referralProgramRef.name", equalTo("friends-get-friends"))
+            body("referralProgramRef.version", equalTo(3))
+        } Extract { path<String>("id") }
+
+        Given { contentType("application/json") }
+            .When { get("/api/v1/campaigns/$campaignId") }
+            .Then {
+                statusCode(200)
+                body("referralProgramRef.id", equalTo(publishedId.toString()))
+                body("referralProgramRef.name", equalTo("friends-get-friends"))
+                body("referralProgramRef.version", equalTo(3))
+        }
     }
 
     /**

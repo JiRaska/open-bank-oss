@@ -20,6 +20,7 @@ data class CampaignDefinition(
     val goal: String,
     val segmentRef: SegmentRef,
     val steps: List<CampaignStep>,
+    val referralProgramRef: ReferralProgramRef? = null,
     val stopCondition: StopCondition? = null,
     val conversionRule: String? = null,
     val holdoutPercent: Int = 0,
@@ -53,6 +54,8 @@ data class Campaign(
     val goal: String,
     val segmentRef: SegmentRef,
     val steps: List<CampaignStep>,
+    /** Immutable published MGM identity; reward rules remain owned by referral-service. */
+    val referralProgramRef: ReferralProgramRef? = null,
     val stopCondition: StopCondition? = null,
     /**
      * Catalogue key from [ConversionCatalog], or null (ADR-0245 D1). Null is the honest resting
@@ -139,6 +142,7 @@ data class Campaign(
             name = definition.name,
             goal = definition.goal,
             segmentRef = definition.segmentRef,
+            referralProgramRef = definition.referralProgramRef,
             steps = definition.steps.sortedBy { it.order },
             stopCondition = definition.stopCondition,
             conversionRule = definition.conversionRule,
@@ -636,5 +640,13 @@ data class SegmentRef(val name: String, val version: Int) {
     init {
         require(name.isNotBlank()) { "segment name must not be blank" }
         require(version >= 1) { "segment version must be >= 1" }
+    }
+}
+
+/** Server-resolved binding to one published MGM programme version. */
+data class ReferralProgramRef(val id: UUID, val name: String, val version: Int) {
+    init {
+        require(name.isNotBlank()) { "referral programme name must not be blank" }
+        require(version >= 1) { "referral programme version must be >= 1" }
     }
 }
