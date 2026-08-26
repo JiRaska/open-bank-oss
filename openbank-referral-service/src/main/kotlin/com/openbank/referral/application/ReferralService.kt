@@ -45,6 +45,9 @@ class ReferralService(
 
     suspend fun listPublishedPrograms(): List<ReferralProgram> = programs.listPublished()
 
+    suspend fun publishedProgram(id: UUID): ReferralProgram? =
+        programs.find(id)?.takeIf { it.status == ProgramStatus.PUBLISHED }
+
     suspend fun createProgram(
         name: String,
         version: Int,
