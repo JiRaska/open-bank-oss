@@ -143,7 +143,9 @@ describe('GET /api/test-intelligence', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
       const query = new URL(String(input)).searchParams.get('query') ?? ''
       queries.push(query)
-      const payload = query.includes('kube_job_status_completion_time')
+      const payload = query.includes('kube_job_status_failed')
+        ? { status: 'success', data: { result: [{ value: [now, '0'] }] } }
+        : query.includes('kube_job_status_completion_time')
         ? { status: 'success', data: { result: [] } }
         : query.includes('kube_cronjob_status_last_successful_time') || query.includes('kube_cronjob_status_last_schedule_time')
           ? { status: 'success', data: { result: [{ value: [now, String(now)] }] } }
@@ -153,8 +155,10 @@ describe('GET /api/test-intelligence', () => {
     const { GET } = await import('@/app/api/test-intelligence/route')
     const body = await (await GET()).json()
     expect(body.syntheticJourneys[0].state).toBe('passed')
+    expect(body.syntheticJourneys[0].live.failuresWithinWindow).toBe(0)
     expect(queries.some(query => query.includes('kube_job_status_completion_time'))).toBe(true)
     expect(queries.some(query => query.includes('< 900'))).toBe(true)
+    expect(queries.some(query => query.includes('kube_job_status_failed') && query.includes('or vector(0)'))).toBe(true)
     expect(queries.some(query => query.includes('max_over_time(kube_job_status_failed'))).toBe(false)
   })
 

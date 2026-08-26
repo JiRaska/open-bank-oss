@@ -131,7 +131,9 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
       // collected. A historical failed Job therefore remains `1` forever; selecting it with
       // max_over_time makes a later successful schedule look failed. Join on completion time so
       // only a Job which both failed AND completed inside the window is a current failure.
-      queryPrometheus(base, `max((kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} > 0) and on(namespace,job_name) (time() - kube_job_status_completion_time{namespace="observability",job_name=~"${cronjob}.*"} < ${failureWindowSeconds}))`),
+      // An empty vector means no failed Job in the window, not an unavailable Prometheus
+      // observation. Preserve that distinction for both the state machine and the UI count.
+      queryPrometheus(base, `max((kube_job_status_failed{namespace="observability",job_name=~"${cronjob}.*"} > 0) and on(namespace,job_name) (time() - kube_job_status_completion_time{namespace="observability",job_name=~"${cronjob}.*"} < ${failureWindowSeconds})) or vector(0)`),
       // A reachable Prometheus with no active Jobs must yield zero, not an unavailable value.
       queryPrometheus(base, `sum(kube_job_status_active{namespace="observability",job_name=~"${cronjob}.*"}) or vector(0)`),
       queryPrometheusRuns(base, cronjob),
