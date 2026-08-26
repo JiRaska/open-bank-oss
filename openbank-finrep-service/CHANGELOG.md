@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.3...finrep-service-v0.9.4) (2026-08-26)
+
+
+### Bug Fixes
+
+* **finrep:** restore regulatory previews at runtime ([#7043](https://github.com/JiRaska/open-bank-oss/issues/7043)) ([d688dc4](https://github.com/JiRaska/open-bank-oss/commit/d688dc4c3596bf41cf17abf7b161c4f9b6904882))
+
 ## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.2...finrep-service-v0.9.3) (2026-08-26)
 
 
