@@ -88,6 +88,17 @@ quarkus:
       incentive-outcome-projection:
         ready: true
 
+"%prod":
+  quarkus:
+    tls:
+      referral-service:
+        trust-store:
+          pem:
+            certs: ${REFERRAL_TLS_CA_CERT:/mnt/campaign-tls/ca.crt}
+    rest-client:
+      referral-service:
+        tls-configuration-name: referral-service
+
 
 openbank:
   temporal:
