@@ -87,8 +87,15 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
   // `unknown`, `not-run` and `blocked` are unresolved evidence, never an implicit green.
   // The collector/runtime route keeps this total disjoint from failures, missing components and
   // stale observations, so the hero can expose every state that needs an operator's attention.
-  const attention = (report?.totals.failingEvidence ?? 0) + (report?.totals.missingEvidence ?? 0)
+  const componentAttention = (report?.totals.failingEvidence ?? 0) + (report?.totals.missingEvidence ?? 0)
     + (report?.totals.staleEvidence ?? 0) + (report?.totals.unresolvedEvidence ?? report?.totals.unknownEvidence ?? 0)
+  // The fleet totals cover component evidence only. The journey catalog, performance plans and
+  // per-platform mobile runtime proof are distinct operator surfaces, so a page with only those
+  // gaps must not announce itself healthy just because the component envelope is green.
+  const crossLayerAttention = (report?.performance ?? []).filter(item => item.state !== 'passed' || item.plan?.blocker).length
+    + (report?.syntheticJourneys ?? []).filter(item => item.status === 'planned' || item.state !== 'passed').length
+    + (report?.clientExperiences ?? []).reduce((sum, client) => sum + (client.rum.platforms?.filter(platform => platform.runtime !== 'passed').length ?? 0), 0)
+  const attention = componentAttention + crossLayerAttention
   const activeJourneys = report?.syntheticJourneys.filter(item => item.status === 'active').length ?? 0
   const runtimeProofs = report?.components.reduce((sum, component) => sum + component.testInfrastructure.observed.filter(event => event.lifecycle === 'started').length, 0) ?? 0
   const traceProofs = report?.components.filter(component => component.evidence.some(evidence => evidence.kind === 'trace' && evidence.state === 'passed')).length ?? 0

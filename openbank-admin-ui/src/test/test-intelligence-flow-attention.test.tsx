@@ -26,4 +26,19 @@ describe('Test Intelligence flow attention', () => {
     expect(screen.getByText('NEEDS ATTENTION')).toBeVisible()
     expect(screen.getByText('signals to inspect')).toBeVisible()
   })
+
+  it('does not hide a declared but unexecuted synthetic journey behind green component totals', () => {
+    const report = {
+      components: [], performance: [], clientExperiences: [],
+      syntheticJourneys: [{ id: 'admin-operator-access', title: 'Admin access', status: 'planned', state: 'blocked' }],
+      totals: {
+        components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0,
+        failingEvidence: 0, missingEvidence: 0, staleEvidence: 0,
+      },
+    } as TestIntelligenceReport
+
+    render(<TestIntelligenceFlow report={report} />)
+
+    expect(screen.getByText('NEEDS ATTENTION')).toBeVisible()
+  })
 })
