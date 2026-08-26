@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.205.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.204.1...admin-ui-v0.205.0) (2026-08-26)
+
+
+### Features
+
+* **test-intelligence:** expose shadow impact evidence ([#7233](https://github.com/JiRaska/open-bank-oss/issues/7233)) ([964b926](https://github.com/JiRaska/open-bank-oss/commit/964b92633a2f449b43f305f4b4cbfe24ff442acb))
+
 ## [0.204.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.204.0...admin-ui-v0.204.1) (2026-08-26)
 
 
