@@ -24,6 +24,10 @@ def check(root: Path) -> list[str]:
         required = set(schema.get("required", []))
         if required != REQUIRED_SCHEMA:
             errors.append(f"run schema required fields drifted: {sorted(required)}")
+        specialized_kinds = set(schema.get("$defs", {}).get("specializedEvidence", {})
+                                .get("properties", {}).get("kind", {}).get("enum", []))
+        if "trace" not in specialized_kinds:
+            errors.append("run schema cannot represent executed trace-contract evidence")
     except (OSError, json.JSONDecodeError) as exc:
         errors.append(f"run schema unavailable: {exc}")
 
@@ -50,6 +54,19 @@ def check(root: Path) -> list[str]:
         source = text(root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/containers" / name)
         if "TestInfrastructureEvidence.record" not in source:
             errors.append(f"shared Testcontainers resource emits no lifecycle proof: {name}")
+
+    trace_contract = text(root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/trace/TraceContract.kt")
+    for needle in ("fun verifiedAs", "OPENBANK_TRACE_CONTRACT_V1:", "successfulAssertions > 0"):
+        if needle not in trace_contract:
+            errors.append(f"shared trace contract cannot emit assertion-backed evidence: {needle}")
+    run_collector = text(root / ".github/scripts/collect-test-run-evidence.py")
+    for needle in ('"trace"', "def trace_contract_evidence", "OPENBANK_TRACE_CONTRACT_V1:",
+                   "specialized.extend(trace_contract_evidence(service))"):
+        if needle not in run_collector:
+            errors.append(f"run-envelope collector loses executed trace evidence: {needle}")
+    tracing_pilot = text(root / "openbank-agent-service/src/test/kotlin/com/openbank/agent/application/AgentChatServiceTracingTest.kt")
+    if '.verifiedAs("agent-run")' not in tracing_pilot:
+        errors.append("fleet has no executed trace-contract evidence pilot")
 
     deploy = text(root / ".github/workflows/admin-ui-deploy.yml")
     for needle, message in (
@@ -101,6 +118,13 @@ def check(root: Path) -> list[str]:
                    "const envelope = runEnvelope(simulation)"):
         if needle not in collector:
             errors.append(f"admin projection ignores the simulation run envelope: {needle}")
+    for needle in ("run.specializedEvidence ?? []", "source: item.source", "detail: item.detail"):
+        if needle not in collector:
+            errors.append(f"admin projection loses specialized trace evidence: {needle}")
+    ui_types = text(root / "openbank-admin-ui/src/lib/types/test-intelligence.ts")
+    ui_page = text(root / "openbank-admin-ui/src/app/system/tests/page.tsx")
+    if "| 'trace'" not in ui_types or "'trace', 'mutation'" not in ui_page:
+        errors.append("Admin UI does not expose trace-contract evidence in fleet posture")
     for needle in ("function journeyCoverage(journeys)", "journeys.filter(item => item.status === 'active')",
                    "journeyCoverage: syntheticCoverage"):
         if needle not in collector:

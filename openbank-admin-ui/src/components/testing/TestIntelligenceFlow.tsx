@@ -39,7 +39,7 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
     },
     {
       id: 'prove', eyebrow: t('02 · DŮKAZ', '02 · PROVE'), title: t('CI rozbíjí domněnky', 'CI breaks assumptions'),
-      short: 'JUnit · Kover · Pact · mutation · Playwright',
+      short: 'JUnit · Kover · Pact · TraceContract · mutation · Playwright',
       proves: t('Deterministické kontroly proběhly na konkrétním commitu.', 'Deterministic controls ran against one concrete commit.'),
       doesNotProve: t('Zelený mock neprokazuje skutečnou infrastrukturu ani provoz.', 'A green mock proves neither real infrastructure nor production behaviour.'),
       icon: FlaskConical, tone: '#22c55e',

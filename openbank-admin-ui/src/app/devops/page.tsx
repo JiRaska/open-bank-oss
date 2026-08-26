@@ -456,7 +456,7 @@ function DevOpsContent() {
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
             <div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Test Intelligence', 'Test Intelligence')}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: 5 }}>{t('Autoritativní pohled na CI běhy, runtime Testcontainers, pokrytí, kontrakty, mutace, výkon, syntetiku, klientské E2E a RUM.', 'The authoritative view for CI runs, Testcontainers runtime, coverage, contracts, mutation, performance, synthetics, client E2E and RUM.')}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: 5 }}>{t('Autoritativní pohled na CI běhy, runtime Testcontainers, pokrytí, trace kontrakty, mutace, výkon, syntetiku, klientské E2E a RUM.', 'The authoritative view for CI runs, Testcontainers runtime, coverage, trace contracts, mutation, performance, synthetics, client E2E and RUM.')}</div>
             </div>
             <a href="/system/tests" className="btn btn-secondary btn-sm">{t('Otevřít Test Intelligence', 'Open Test Intelligence')} →</a>
           </div>

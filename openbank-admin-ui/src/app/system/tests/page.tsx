@@ -23,7 +23,7 @@ const STATE_COLOR: Record<EvidenceState, string> = {
   stale: '#d97706', blocked: '#7c3aed', unknown: '#64748b',
 }
 
-const KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e', 'mutation', 'simulation', 'performance', 'synthetic']
+const KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e', 'trace', 'mutation', 'simulation', 'performance', 'synthetic']
 
 function StateBadge({ state }: { state: EvidenceState }) {
   const Icon = state === 'passed' ? CheckCircle2 : state === 'failed' ? XCircle
@@ -130,15 +130,17 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
 
 function Execution({ report }: { report: TestIntelligenceReport }) {
   const rows = report.components.flatMap(component => component.evidence
-    .filter(item => ['unit', 'integration', 'e2e', 'simulation'].includes(item.kind))
+    .filter(item => ['unit', 'integration', 'e2e', 'trace', 'simulation'].includes(item.kind))
     .map(item => ({ component: component.component, ...item })))
   return (
     <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
-      <table style={tableStyle}><thead><tr>{['Component', 'Kind', 'State', 'Discovered', 'Executed', 'Passed', 'Failed', 'Skipped', 'Observed'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
+      <table style={tableStyle}><thead><tr>{['Component', 'Kind', 'State', 'Discovered', 'Executed', 'Passed', 'Failed', 'Skipped', 'Evidence', 'Observed'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
         <tbody>{rows.map((row, index) => <tr key={`${row.component}-${row.kind}-${index}`}>
           <td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.kind}</td><td style={tdStyle}><StateBadge state={row.state} /></td>
           <td style={tdStyle}>{row.counts?.discovered ?? '—'}</td><td style={tdStyle}>{row.counts?.executed ?? '—'}</td><td style={tdStyle}>{row.counts?.passed ?? '—'}</td>
-          <td style={tdStyle}>{row.counts?.failed ?? '—'}</td><td style={tdStyle}>{row.counts?.skipped ?? '—'}</td><td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt) : '—'}</td>
+          <td style={tdStyle}>{row.counts?.failed ?? '—'}</td><td style={tdStyle}>{row.counts?.skipped ?? '—'}</td>
+          <td style={tdStyle}>{row.run?.url ? <a href={row.run.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', fontWeight: 650 }}>{row.source}</a> : row.source}<div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{row.detail ?? ''}</div></td>
+          <td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt) : '—'}</td>
         </tr>)}</tbody>
       </table>
     </div>
@@ -353,7 +355,7 @@ export default function TestIntelligencePage() {
       breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep" aria-hidden="true">/</span><span>{t('Systém', 'System')}</span><span className="breadcrumb-sep" aria-hidden="true">/</span><span className="breadcrumb-current">{t('Test Intelligence', 'Test Intelligence')}</span></div>}
       icon={<FlaskConical size={19} aria-hidden="true" style={{ color: 'var(--accent)' }} />}
       title={t('Test Intelligence', 'Test Intelligence')}
-      subtitle={t('Jednotný pohled na běhy, pokrytí kódu, kontrakty, mutace, výkon a sandboxové syntetické scénáře.', 'One evidence view for execution, code coverage, contracts, mutation, performance, and sandbox synthetic journeys.')}
+      subtitle={t('Jednotný pohled na běhy, pokrytí kódu, trace kontrakty, mutace, výkon a sandboxové syntetické scénáře.', 'One evidence view for execution, code coverage, trace contracts, mutation, performance, and sandbox synthetic journeys.')}
       actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
     />
     <TestIntelligenceFlow report={report} />

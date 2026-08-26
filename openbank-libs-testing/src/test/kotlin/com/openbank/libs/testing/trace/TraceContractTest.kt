@@ -59,4 +59,22 @@ class TraceContractTest {
 
         provider.close()
     }
+
+    @Test
+    fun `evidence marker requires a successful assertion and bounded public id`() {
+        assertThatThrownBy { TraceContract.from(emptyList()).verifiedAs("agent-run") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+
+        val exporter = RecordingSpanExporter()
+        val provider = SdkTracerProvider.builder()
+            .addSpanProcessor(SimpleSpanProcessor.create(exporter))
+            .build()
+        provider.get("test").spanBuilder("agent.run").startSpan().end()
+
+        assertThatThrownBy {
+            exporter.contract().requiresSpan("agent.run").verifiedAs("Customer supplied / trace id")
+        }.isInstanceOf(IllegalArgumentException::class.java)
+
+        provider.close()
+    }
 }

@@ -20,10 +20,13 @@ import java.util.Collections
  * of CI output and Test Intelligence evidence.
  */
 class TraceContract private constructor(private val spans: List<SpanData>) {
+    private var successfulAssertions = 0
+
     fun requiresSpan(name: String): TraceContract {
         assertThat(spans.any { it.name == name })
             .describedAs("expected trace to contain span '%s'; observed span names only: %s", name, spanNames())
             .isTrue()
+        successfulAssertions++
         return this
     }
 
@@ -35,6 +38,7 @@ class TraceContract private constructor(private val spans: List<SpanData>) {
         assertThat(matching.any { span -> span.attributes.asMap().keys.any { it.key == attributeKey } })
             .describedAs("expected span '%s' to carry attribute key '%s'", spanName, attributeKey)
             .isTrue()
+        successfulAssertions++
         return this
     }
 
@@ -45,6 +49,7 @@ class TraceContract private constructor(private val spans: List<SpanData>) {
         assertThat(traceIds)
             .describedAs("expected named spans to share one trace; trace ids are deliberately redacted")
             .hasSize(1)
+        successfulAssertions++
         return this
     }
 
@@ -55,6 +60,7 @@ class TraceContract private constructor(private val spans: List<SpanData>) {
         assertThat(spans.none { it.status.statusCode == StatusCode.ERROR })
             .describedAs("expected no error span; error span names only: %s", errorSpanNames)
             .isTrue()
+        successfulAssertions++
         return this
     }
 
@@ -65,12 +71,33 @@ class TraceContract private constructor(private val spans: List<SpanData>) {
         assertThat(matching.all { Duration.ofNanos(it.endEpochNanos - it.startEpochNanos) <= maximum })
             .describedAs("expected span '%s' to complete within %s", name, maximum)
             .isTrue()
+        successfulAssertions++
+        return this
+    }
+
+    /**
+     * Emit a bounded JUnit marker after this contract has proved at least one assertion.
+     *
+     * The canonical run-envelope collector turns this marker into executed `trace` evidence.
+     * Only a caller-chosen low-entropy contract id leaves the JVM; trace ids, attribute values and
+     * fixture data remain private. Call this last in the assertion chain so later assertions cannot
+     * fail after evidence was emitted.
+     */
+    fun verifiedAs(contractId: String): TraceContract {
+        require(successfulAssertions > 0) { "trace evidence requires at least one successful assertion" }
+        require(TRACE_CONTRACT_ID.matches(contractId)) {
+            "trace contract id must contain only lowercase letters, digits, dots, underscores or hyphens"
+        }
+        println("$TRACE_CONTRACT_MARKER$contractId")
         return this
     }
 
     private fun spanNames(): List<String> = spans.map { it.name }.distinct().sorted()
 
     companion object {
+        private const val TRACE_CONTRACT_MARKER = "OPENBANK_TRACE_CONTRACT_V1:"
+        private val TRACE_CONTRACT_ID = Regex("[a-z0-9][a-z0-9._-]{0,63}")
+
         fun from(spans: Collection<SpanData>): TraceContract = TraceContract(spans.toList())
     }
 }

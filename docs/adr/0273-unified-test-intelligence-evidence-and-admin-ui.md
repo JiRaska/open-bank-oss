@@ -62,8 +62,8 @@ The snapshot schema carries:
 
 - `schemaVersion`, `collectedAt` and source-level collection warnings;
 - every component, including components with no evidence;
-- explicit evidence kinds: unit, integration, contract, end-to-end, performance, synthetic,
-  mutation and deterministic simulation;
+- explicit evidence kinds: unit, integration, contract, end-to-end, executed trace contract,
+  performance, synthetic, mutation and deterministic simulation;
 - `passed`, `failed`, `skipped`, `not-run`, `stale`, `blocked` and `unknown` states;
 - source provenance: tool, task or artifact, observation time, commit when the producer supplies
   one, and environment; and
@@ -215,6 +215,12 @@ may become an advisory ordering or parallelism input only after full-suite prese
 it cannot be the sole required gate. Synthetic traffic must retain trusted identity and taint across
 HTTP, Kafka, traces and regulatory projections; an untrusted HTTP header is never sufficient.
 
+Test-to-trace correlation uses the existing privacy-preserving `TraceContract`. A successful test
+emits a bounded marker only after at least one trace assertion has passed; the run collector turns
+that JUnit marker into `trace` evidence with the same commit and workflow provenance. Trace ids,
+attribute values and fixtures never enter the marker or snapshot. Source presence alone remains no
+evidence, and the ordinary suite verdict stays authoritative if the enclosing JUnit suite fails.
+
 The admin route is a primary platform destination, first in Platform navigation and pinned in the
 platform persona workspace. Its E2E test navigates from the dashboard through the visible link;
 opening `/system/tests` directly is not evidence of discoverability.
@@ -313,3 +319,5 @@ missing mobile execution envelope, but cannot synthesize a client verdict or alt
 - [Launchable predictive test selection](https://help.launchableinc.com/features/predictive-test-selection/how-launchable-selects-tests/)
 - [Checkly Playwright checks](https://www.checklyhq.com/docs/detect/synthetic-monitoring/playwright-checks/overview/)
 - [Grafana Synthetic Monitoring](https://grafana.com/docs/grafana-cloud/observe-and-act/testing/synthetic-monitoring/introduction/)
+- [BrowserStack AI agents](https://www.browserstack.com/docs/test-management/browserstack-ai)
+- [BrowserStack Smart Test Selection](https://www.browserstack.com/docs/automate/selenium/smart-test-selection)

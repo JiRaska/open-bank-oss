@@ -19,6 +19,7 @@ export type EvidenceKind =
   | 'synthetic'
   | 'mutation'
   | 'visual'
+  | 'trace'
   | 'simulation'
 
 export interface TestCounts {
