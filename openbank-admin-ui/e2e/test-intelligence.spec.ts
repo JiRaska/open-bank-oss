@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
@@ -80,6 +81,19 @@ test('keeps the evidence flow usable at the mobile breakpoint', async ({ page })
   await expect(page.getByRole('region', { name: /Testing assurance map/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /CI breaks assumptions/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /Výkon|Performance/ })).toBeVisible()
+})
+
+test('meets WCAG A and AA rules in the rendered Test Intelligence workspace', async ({ page }) => {
+  await page.goto('/system/tests')
+  await expect(page.getByRole('heading', { name: 'Test Intelligence', exact: true })).toBeVisible()
+
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze()
+
+  expect(scan.violations, scan.violations.map(violation =>
+    `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+  ).join('\n')).toEqual([])
 })
 
 test('uses Test Intelligence as the only DevOps test-evidence destination', async ({ page }) => {

@@ -163,6 +163,12 @@ The consolidated page exposes:
 - declared Testcontainers topology alongside observed start/stop lifecycle proof; and
 - explicit collection warnings and observation timestamps.
 
+The rendered workspace is also scanned in Chromium with the official axe engine against WCAG 2 A,
+AA, 2.1 A and 2.1 AA rules. This is a browser-level gate, not a source-pattern assertion: its first
+red run exposed four shared-header contrast failures that the existing lint and static accessibility
+guards could not observe. Those failures are fixed at the shared header rather than suppressed or
+baselined.
+
 The existing composite quality score is retired from the primary UI. No single score may average
 away a missing required control.
 
@@ -175,7 +181,7 @@ The UI slice is complete when:
 - JUnit, Kover, Pact, Pitest, performance and governed synthetic-journey inputs are represented;
 - the active and planned synthetic journeys render with schedules and blockers;
 - `/system/tests` uses one API and legacy APIs still pass their compatibility tests;
-- focused script, route, component, type, lint and build checks pass; and
+- focused script, route, component, browser WCAG, type, lint and build checks pass; and
 - immutable deployment history is retained without a scheduler, database or new microservice.
 
 The ecosystem delivery is complete only when:
