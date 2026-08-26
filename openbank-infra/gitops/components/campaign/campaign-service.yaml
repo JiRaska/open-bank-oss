@@ -142,7 +142,9 @@ spec:
             # Approved MGM programme lookup. The campaign stores the resolved immutable
             # id/name/version; reward execution remains owned by referral-service.
             - name: REFERRAL_SERVICE_URL
-              value: http://referral-service.campaign.svc:8155
+              value: https://referral-service.referral.svc:8443
+            - name: REFERRAL_TLS_CA_CERT
+              value: /mnt/campaign-tls/ca.crt
             # ADR-0210: read-only segment evaluation against the silver layer.
             # ClickHouse requires auth: the `analytics` user, password from the
             # Vault-backed clickhouse-auth Secret projected into this namespace
