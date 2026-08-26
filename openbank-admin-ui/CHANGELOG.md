@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.200.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.199.3...admin-ui-v0.200.0) (2026-08-26)
+
+
+### Features
+
+* **libs-testing:** project executed trace contracts ([#7032](https://github.com/JiRaska/open-bank-oss/issues/7032)) ([54a076f](https://github.com/JiRaska/open-bank-oss/commit/54a076fd7760adba467f1b53ddacb67baca73085))
+
 ## [0.199.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.199.2...admin-ui-v0.199.3) (2026-08-26)
 
 
