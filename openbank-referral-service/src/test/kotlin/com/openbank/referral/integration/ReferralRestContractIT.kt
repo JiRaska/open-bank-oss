@@ -59,6 +59,17 @@ class ReferralRestContractIT {
                 body("checker", equalTo("checker@openbank.test"))
             }
 
+        Given { contentType("application/json") }
+            .When { get("/api/v1/referrals/programs") }
+            .Then {
+                statusCode(200)
+                body("size()", equalTo(1))
+                body("[0].id", equalTo(programId.toString()))
+                body("[0].status", equalTo("PUBLISHED"))
+                body("[0].name", notNullValue())
+                body("[0].version", equalTo(1))
+            }
+
         val inviteToken = Given {
             contentType("application/json")
             header("Idempotency-Key", "invite-$programId")
