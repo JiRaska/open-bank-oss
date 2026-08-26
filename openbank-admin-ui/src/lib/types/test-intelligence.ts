@@ -49,6 +49,16 @@ export interface EvidenceObservation {
   counts?: TestCounts
   detail?: string
   run?: TestRunProvenance
+  diagnostics?: TestDiagnosticArtifact[]
+}
+
+export interface TestDiagnosticArtifact {
+  kind: 'playwright-report'
+  name: string
+  url: string
+  retentionDays: 7
+  access: 'github-run-authenticated'
+  mayContainSensitiveData: true
 }
 
 export interface TestRunProvenance {

@@ -1093,6 +1093,7 @@ coverage:
     provenance_required: [commit, workflow, run_attempt, collected_at]
     testcontainers_runtime_proof: required-when-shared-resource-is-used
     run_history: immutable-per-attempt-artifact-30-days
+    browser_failure_diagnostics: metadata-only-authenticated-artifact-7-days
     compatibility: raw-junit-and-kover-remain-readable-during-expand-migrate-verify
   floors:
     default: 39                         # current openbank-libs floor (ADR-0020)

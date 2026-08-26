@@ -19,12 +19,13 @@ SUITE_STATES = {"passed", "failed", "skipped", "not-run"}
 SPECIALIZED_KINDS = {"performance", "mutation", "synthetic", "trace"}
 SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
 INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
+DIAGNOSTIC_KINDS = {"playwright-report"}
 
 
 def validate_envelope(envelope: dict) -> None:
     """Fail closed before CI publishes an envelope that violates the v1 contract."""
     required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
-    if set(envelope) - (required | {"specializedEvidence", "testCases"}) or not required.issubset(envelope):
+    if set(envelope) - (required | {"specializedEvidence", "testCases", "diagnostics"}) or not required.issubset(envelope):
         raise ValueError("run envelope has missing or unknown top-level fields")
     if envelope["schemaVersion"] != 1 or not str(envelope["component"]).startswith("openbank-"):
         raise ValueError("run envelope schemaVersion/component is invalid")
@@ -75,6 +76,32 @@ def validate_envelope(envelope: dict) -> None:
                 or item["state"] not in {"passed", "failed", "skipped"}
                 or not item["classname"] or not item["name"] or item["durationMs"] < 0):
             raise ValueError("test case values are invalid")
+    for item in envelope.get("diagnostics", []):
+        if set(item) != {"kind", "suiteKind", "name", "url", "retentionDays", "access", "mayContainSensitiveData"}:
+            raise ValueError("diagnostic artifact fields are invalid")
+        if (item["kind"] not in DIAGNOSTIC_KINDS or item["suiteKind"] != "e2e"
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", item["name"])
+                or not item["url"].startswith("https://") or item["retentionDays"] != 7
+                or item["access"] != "github-run-authenticated" or item["mayContainSensitiveData"] is not True):
+            raise ValueError("diagnostic artifact values are invalid")
+
+
+def browser_diagnostics(report_dir: str | None, run_id: str, attempt: int, run_url: str) -> list[dict]:
+    """Describe a retained Playwright report without copying its potentially sensitive contents."""
+    if not report_dir:
+        return []
+    report = Path(report_dir)
+    if not report.is_dir() or not any(item.is_file() for item in report.rglob("*")) or not run_url.startswith("https://"):
+        return []
+    return [{
+        "kind": "playwright-report",
+        "suiteKind": "e2e",
+        "name": f"playwright-report-{run_id}-a{attempt}",
+        "url": f"{run_url}#artifacts",
+        "retentionDays": 7,
+        "access": "github-run-authenticated",
+        "mayContainSensitiveData": True,
+    }]
 
 
 def classify(name: str, classname: str, task: str, component: str) -> str:
@@ -291,6 +318,7 @@ def main() -> None:
     parser.add_argument("--mutation-report")
     parser.add_argument("--synthetic-summary")
     parser.add_argument("--synthetic-journey")
+    parser.add_argument("--browser-report-dir")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -370,6 +398,14 @@ def main() -> None:
                 "specializedEvidence": [{"kind": "performance", "state": "passed", "source": "summary.json"}],
                 "testCases": [],
             }
+            (service / "playwright-report").mkdir()
+            (service / "playwright-report/index.html").write_text("diagnostic")
+            valid["diagnostics"] = browser_diagnostics(str(service / "playwright-report"), "1", 1, "https://example.test/actions/runs/1")
+            assert valid["diagnostics"] == [{
+                "kind": "playwright-report", "suiteKind": "e2e", "name": "playwright-report-1-a1",
+                "url": "https://example.test/actions/runs/1#artifacts", "retentionDays": 7,
+                "access": "github-run-authenticated", "mayContainSensitiveData": True,
+            }]
             validate_envelope(valid)
             invalid = json.loads(json.dumps(valid))
             invalid["suites"][0]["executed"] = 0
@@ -387,6 +423,8 @@ def main() -> None:
     server = os.getenv("GITHUB_SERVER_URL", "")
     repository = os.getenv("GITHUB_REPOSITORY", "")
     run_id = os.getenv("GITHUB_RUN_ID", "local")
+    run_attempt = int(os.getenv("GITHUB_RUN_ATTEMPT", "1"))
+    run_url = f"{server}/{repository}/actions/runs/{run_id}" if server and repository else ""
     specialized = specialized_evidence(
         args.performance_summary,
         args.mutation_report,
@@ -398,16 +436,17 @@ def main() -> None:
     envelope = {
         "schemaVersion": 1,
         "run": {
-            "id": run_id, "attempt": int(os.getenv("GITHUB_RUN_ATTEMPT", "1")),
+            "id": run_id, "attempt": run_attempt,
             "commit": os.getenv("GITHUB_SHA", "local000"),
             "branch": os.getenv("GITHUB_HEAD_REF") or os.getenv("GITHUB_REF_NAME", "local"),
             "workflow": os.getenv("GITHUB_WORKFLOW", "local"),
-            "url": f"{server}/{repository}/actions/runs/{run_id}" if server and repository else "",
+            "url": run_url,
             "observedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
         "component": component, "suites": suites(component, service), "testCases": test_cases(component, service), "coverage": coverage(service),
         "testInfrastructure": {"declared": declared_infrastructure(service), "observed": observations(service)},
         "specializedEvidence": specialized,
+        "diagnostics": browser_diagnostics(args.browser_report_dir, run_id, run_attempt, run_url),
     }
     validate_envelope(envelope)
     output = Path(args.out)
