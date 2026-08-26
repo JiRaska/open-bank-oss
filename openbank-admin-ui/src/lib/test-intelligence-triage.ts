@@ -29,6 +29,7 @@ export function filterTestCases(
     .filter(testCase => !normalizedQuery || [
       testCase.name,
       testCase.classname,
+      testCase.testDefinitionPath ?? '',
       testCase.component,
       testCase.kind,
       testCase.owner,

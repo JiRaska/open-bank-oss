@@ -169,7 +169,7 @@ scenarios:
         { kind: 'e2e', state: 'failed', discovered: 2, executed: 2, passed: 1, failed: 1, skipped: 0, errors: 0, durationMs: 1200 },
       ],
       specializedEvidence: [{ kind: 'trace', state: 'passed', source: 'trace-contract:payment-booking', detail: '1 executed marker(s); JUnit suite passed' }],
-      testCases: [{ fingerprint: '0123456789abcdef01234567', kind: 'integration', classname: 'com.openbank.PaymentApiIT', name: 'books payment', state: 'passed', durationMs: 400 }],
+      testCases: [{ fingerprint: '0123456789abcdef01234567', kind: 'integration', classname: 'com.openbank.PaymentApiIT', name: 'books payment', state: 'passed', durationMs: 400, testDefinitionPath: 'src/test/kotlin/com/openbank/PaymentApiIT.kt' }],
       coverage: { lines: { covered: 8, missed: 2, percentage: 80 }, branches: { covered: 3, missed: 1, percentage: 75 } },
       testInfrastructure: { declared: ['postgres'], observed: [
         { resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'started', observedAt: '2026-08-22T09:59:00Z' },
@@ -205,6 +205,7 @@ scenarios:
     expect(report.testCases[0]).toMatchObject({
       fingerprint: '0123456789abcdef01234567', state: 'flaky', observations: 2,
       failureRate: 50, wastedDurationMs: 500, sameCommitTransitions: 1, owner: 'unowned',
+      testDefinitionPath: 'src/test/kotlin/com/openbank/PaymentApiIT.kt',
     })
   })
 
