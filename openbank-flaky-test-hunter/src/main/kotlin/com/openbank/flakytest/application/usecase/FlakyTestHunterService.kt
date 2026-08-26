@@ -128,6 +128,18 @@ class FlakyTestHunterService(
                 ),
             )
         }
+        if (component.observedInfrastructureStarts > component.observedInfrastructureStops) {
+            add(
+                evidenceFinding(
+                    snapshotId,
+                    component.component,
+                    FlakyTestCheckType.UNTERMINATED_TEST_INFRASTRUCTURE,
+                    severity,
+                    "${component.component} emitted ${component.observedInfrastructureStarts} test-infrastructure start event(s) but only ${component.observedInfrastructureStops} stop event(s)",
+                    BigDecimal(component.observedInfrastructureStarts - component.observedInfrastructureStops),
+                ),
+            )
+        }
     }
 
     private fun detectCurrentAndHistoricalFailures(
@@ -218,6 +230,8 @@ class FlakyTestHunterService(
             require(
                 component.declaredInfrastructure.all { it in INFRASTRUCTURE } &&
                     component.observedInfrastructureStarts >= 0 &&
+                    component.observedInfrastructureStops >= 0 &&
+                    component.observedInfrastructureStops <= component.observedInfrastructureStarts &&
                     component.flakyTests >= 0 &&
                     component.failingTests >= 0 &&
                     component.sameCommitTransitions >= 0 &&

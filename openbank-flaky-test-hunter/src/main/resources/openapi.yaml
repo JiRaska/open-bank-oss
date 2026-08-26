@@ -117,6 +117,7 @@ components:
           items: { $ref: '#/components/schemas/TestIntelligenceEvidenceInput' }
         declaredInfrastructure: { type: array, items: { type: string, enum: [postgres, redpanda, valkey] } }
         observedInfrastructureStarts: { type: integer, minimum: 0 }
+        observedInfrastructureStops: { type: integer, minimum: 0, description: "Observed Testcontainers stop events; cannot exceed starts." }
         flakyTests: { type: integer, minimum: 0, maximum: 2147483647, default: 0 }
         failingTests: { type: integer, minimum: 0, maximum: 2147483647, default: 0 }
         sameCommitTransitions: { type: integer, minimum: 0, maximum: 2147483647, default: 0 }

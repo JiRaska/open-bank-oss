@@ -25,4 +25,21 @@ class TestIntelligenceEvidenceContractTest {
         assertThat(properties.keys).contains("flakyTests", "failingTests", "sameCommitTransitions", "wastedDurationMs")
         assertThat(paths.keys).noneMatch { it.contains("apply") || it.contains("remediation") }
     }
+
+    @Test
+    fun `OpenAPI distinguishes Testcontainers starts from stop evidence`() {
+        val stream = requireNotNull(javaClass.getResourceAsStream("/openapi.yaml"))
+
+        @Suppress("UNCHECKED_CAST")
+        val document = Yaml().load<Map<String, Any>>(stream)
+        val components = document["components"] as Map<String, Any>
+        val schemas = components["schemas"] as Map<String, Any>
+        val input = schemas["TestIntelligenceComponentInput"] as Map<String, Any>
+        val properties = input["properties"] as Map<String, Any>
+
+        assertThat(properties)
+            .containsKey("observedInfrastructureStarts")
+            .containsKey("observedInfrastructureStops")
+        assertThat(properties["observedInfrastructureStops"].toString()).contains("cannot exceed starts")
+    }
 }
