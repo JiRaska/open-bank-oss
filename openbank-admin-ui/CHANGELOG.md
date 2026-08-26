@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.195.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.194.3...admin-ui-v0.195.0) (2026-08-26)
+
+
+### Features
+
+* **admin-ui:** enrich operator cockpit ([#5905](https://github.com/JiRaska/open-bank-oss/issues/5905)) ([9a2207a](https://github.com/JiRaska/open-bank-oss/commit/9a2207aa5e66797f7f33789df2846da049113a9d))
+
 ## [0.194.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.194.2...admin-ui-v0.194.3) (2026-08-26)
 
 
