@@ -8,19 +8,6 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `referral` service. Data domain **open-banking**,
 > classification **confidential**, datastore **PostgreSQL**.
 
-## Deployment status — NOT DEPLOYED
-
-**This service has no workload anywhere in `openbank-infra/gitops/`** — no Deployment,
-no Rollout, and therefore no namespace, no CNPG cluster, no NetworkPolicy and no
-PodMonitor coverage. It is a released component (it has a `version.txt`) that has never
-run, so **every `kubectl` command below names a namespace that does not exist** and every
-procedure here is a plan rather than a rehearsed one.
-
-The production-readiness matrix reports it as **NOT-DEPLOYED** rather than NO-GO for the
-same reason: the cells it fails are consequences of the absent workload, not controls
-someone skipped, and none of them can be closed by a repo change. Whether this service
-should be deployed is an owner decision — see the service's own `CLAUDE.md`.
-
 ## Service identity
 
 | Field | Value |
@@ -66,9 +53,8 @@ triaging an incident that starts on `referral`.
 
 ## Disaster recovery
 
-- **RPO/RTO: undefined** — no backup is configured yet (see the prerequisite below), so no recovery-point/time guarantee can be made today.
-- **⚠ Prerequisite NOT met:** this PostgreSQL cluster has **no backup configured** (`barmanObjectStore` absent — prod-readiness C5=1). **DR is not achievable today** and the RPO/RTO targets above do NOT yet apply. Enabling the CNPG backup is the blocking prerequisite (see the backup sweep). Once enabled, the procedure is:
-- **Mechanism (after enablement):** CNPG continuous WAL + base backups → PITR.
+- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
+- **Mechanism:** CloudNativePG continuous WAL archiving + base backups to S3 (`barmanObjectStore`). Point-in-time recovery (PITR).
 - **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the backup object store; CNPG replays WAL to the target time. See runbook 0003 (PG major upgrade) for the cluster-recreate mechanics.
 - **Verify:** `kubectl cnpg status <db>-rw -n <ns>` shows the recovered cluster Healthy and the `*-app` secret regenerated.
 
