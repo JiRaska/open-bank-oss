@@ -87,6 +87,7 @@ spec:
       - pid
       - platform
       - psd2
+      - referral
       - release-steward
       - sanctions
       - sca
