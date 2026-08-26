@@ -224,6 +224,16 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
 
 ## 6. Change log
 
+- **2026-08-26** — The operator approval inbox gains a bounded, read-only
+  `GET /api/v1/fees/approvals` edge. It returns pending approval workflow metadata
+  (random id, action, resource id, maker id and creation time) only to `ROLE_OPERATOR` or
+  `ROLE_ADMIN` callers behind the existing OPA boundary. Results are capped at 200 and ordered
+  oldest first; the endpoint cannot decide, post or reverse a fee. Existing maker/checker
+  separation, one-time execution and 24-hour Redis TTL controls remain unchanged. **Risk class:**
+  confidentiality of operator workflow metadata and bounded Redis read load; no new caller,
+  service edge or money mutation. Rollback: remove the GET route and let the admin UI report this
+  source unavailable; billing decisions and fee flows are unaffected.
+
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate now requires every new client to choose propagation or a reasoned external boundary.
 
 | Date | Change |
