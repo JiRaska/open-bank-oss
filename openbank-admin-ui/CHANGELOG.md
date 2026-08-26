@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.203.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.202.0...admin-ui-v0.203.0) (2026-08-26)
+
+
+### Features
+
+* **admin-ui:** add regulatory period control ([#7143](https://github.com/JiRaska/open-bank-oss/issues/7143)) ([d628407](https://github.com/JiRaska/open-bank-oss/commit/d628407b42c9a8b53d319369985ec4ea1f8adf24))
+
 ## [0.202.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.201.1...admin-ui-v0.202.0) (2026-08-26)
 
 
