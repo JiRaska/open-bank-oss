@@ -7,9 +7,10 @@ info:
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
   version: 1.7.0
   description: >-
-    Data sharing consent lifecycle — create, activate, reject, revoke, validate. PATCH
-    /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
-    gate on `consent.grant` / `consent.revoke` (maker != checker).
+    Data sharing consent lifecycle — create, activate, reject, revoke, validate. GET /approvals
+    lists pending four-eyes work for checkers; PATCH /approvals/{id} decides an approval paused by
+    the platform's ADR-0155 maker-checker gate on `consent.grant` / `consent.revoke`
+    (maker != checker).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -253,6 +254,27 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/consents/approvals:
+    get:
+      tags: [Consents]
+      summary: List pending consent approvals, oldest first (ADR-0227 D2)
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        '200':
+          description: Pending consent approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApprovalResponse' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/consents/approvals/{id}:
     patch:
       tags: [Consents]
@@ -278,6 +300,9 @@ paths:
       responses:
         '200':
           description: The decided approval
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalResponse' }
         '404':
           description: No pending approval with that id
         '403':
@@ -387,6 +412,26 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes consent approval. makerId identifies who requested the gated action; the
+        shared ApprovalStore requires a different authenticated principal to decide it.
+      required: [id, action, status]
+      properties:
+        id: { type: string }
+        action:
+          type: string
+          description: The gated consent action this approval was raised for.
+        resourceId: { type: string, nullable: true }
+        status: { type: string }
+        makerId: { type: string, nullable: true }
+        createdAt:
+          type: string
+          format: date-time
+          description: Request time; pending approvals expire after 24 hours.
+        decidedBy: { type: string, nullable: true }
+
     CreateConsentRequest:
       type: object
       required: [partyId, granteeId, scopes, expiresAt]
