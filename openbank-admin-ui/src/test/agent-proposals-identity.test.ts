@@ -2,10 +2,11 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
+import { loadAgentCharters } from '@/lib/governance/agentCharters'
 
 vi.mock('@/auth', () => ({ auth: vi.fn(async () => ({ user: { accessToken: 'operator-token' } })) }))
 vi.mock('@/lib/governance/agentCharters', () => ({
-  loadAgentCharters: vi.fn(async () => ({ agents: [{ id: 'fraud-investigator' }] })),
+  loadAgentCharters: vi.fn(async () => ({ available: true, agents: [{ id: 'fraud-investigator' }] })),
 }))
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -32,5 +33,17 @@ describe('agent proposal identity enrichment', () => {
     const body = await (await GET(new NextRequest('http://localhost/api/agent/proposals'))).json()
 
     expect(body[0].agent).toMatchObject({ id: 'alice@example.test', icon: 'user', charterKnown: false })
+  })
+
+  it('preserves upstream provenance when the charter registry is unavailable', async () => {
+    vi.mocked(loadAgentCharters).mockResolvedValueOnce({ available: false, agents: [] } as never)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{
+      id: 'proposal-3', proposedBy: 'fraud-investigator', suggestedAction: 'fraud.review',
+    }]), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const { GET } = await import('@/app/api/agent/proposals/route')
+    const body = await (await GET(new NextRequest('http://localhost/api/agent/proposals'))).json()
+
+    expect(body[0]).toMatchObject({ id: 'proposal-3', proposedBy: 'fraud-investigator' })
+    expect(body[0].agent).toBeUndefined()
   })
 })

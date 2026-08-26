@@ -38,16 +38,22 @@ export async function GET(req: NextRequest) {
     if (!res.ok) return NextResponse.json({ error: 'upstream_error' }, { status: res.status })
     const rows = await res.json() as { proposedBy?: string }[]
     const registry = await loadAgentCharters()
+    // Without a readable registry we cannot classify an author as a human. Preserve the
+    // upstream provenance so the UI can apply its conservative fallback (ADR-0080).
     const charterIds = new Set(registry.agents.map(agent => agent.id))
     const enriched = Array.isArray(rows) ? rows.map(row => {
       const id = row.proposedBy ?? 'unknown'
       const known = charterIds.has(id)
-      return { ...row, agent: {
-        id,
-        displayName: id.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
-        icon: known ? 'bot' : 'user',
-        charterKnown: known,
-      } }
+      if (!registry.available) return row
+      return {
+        ...row,
+        agent: {
+          id,
+          displayName: id.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+          icon: known ? 'bot' : 'user',
+          charterKnown: known,
+        },
+      }
     }) : rows
     return NextResponse.json(enriched, { status: res.status })
   } catch {
