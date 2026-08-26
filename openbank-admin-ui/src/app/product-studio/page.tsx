@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, Boxes, CheckCircle2, CircleAlert, Eye, FileJson, Link2, ListChecks, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { canReviewPrivateCatalogDraft, type AgentModelDescriptor } from '@/lib/catalog-review-capability'
@@ -21,6 +21,7 @@ import { proposeBundleComponents } from '@/lib/catalog-bundle-proposals'
 import { explainOfferSelection, simulateBundleImpact } from '@/lib/catalog-offer-intelligence'
 import { selectOffersForMarket } from '@/lib/catalog-offer-selection'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { claimSingleFlight, releaseSingleFlight } from '@/lib/single-flight'
 import {
   catalogV2Operation, type CatalogSchema, type Offering, type OfferingRequest, type ProductRevision,
   type RevisionRequest, type Specification, type SpecificationRequest, type ValidateCatalogResponse,
@@ -82,6 +83,8 @@ interface DraftRelationship {
   targetOfferingId: string
 }
 
+type CatalogMutation = 'create-specification' | 'create-offering' | 'create-revision' | 'save-draft' | 'publish'
+
 function isDraftRelationship(value: unknown): value is DraftRelationship {
   return Boolean(value) && typeof value === 'object' &&
     relationshipKinds.includes((value as DraftRelationship).kind) &&
@@ -101,6 +104,8 @@ export default function ProductStudioPage() {
   const [draftText, setDraftText] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [activeMutation, setActiveMutation] = useState<CatalogMutation | null>(null)
+  const mutationInFlight = useRef(false)
   const [newSpecCode, setNewSpecCode] = useState('')
   const [newOfferingCode, setNewOfferingCode] = useState('')
   const [marketContextInput, setMarketContextInput] = useState<MarketContextInput>(defaultMarketContextInput)
@@ -239,11 +244,12 @@ export default function ProductStudioPage() {
     setReview(null)
   }
 
-  const run = async (work: () => Promise<unknown>, success: string) => {
-    setBusy(true); setMessage('')
+  const run = async (operation: CatalogMutation, work: () => Promise<unknown>, success: string) => {
+    if (!claimSingleFlight(mutationInFlight)) return
+    setActiveMutation(operation); setMessage('')
     try { await work(); setMessage(success); await load(); if (offeringId) await loadRevisions(offeringId) }
     catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
-    finally { setBusy(false) }
+    finally { releaseSingleFlight(mutationInFlight); setActiveMutation(null) }
   }
 
   const createSpecification = () => {
@@ -252,7 +258,7 @@ export default function ProductStudioPage() {
     const body: SpecificationRequest = {
       code: newSpecCode.trim().toUpperCase(), schemaRef: { id: schema.id, version: schema.version },
     }
-    void run(() => catalogV2Operation('createSpecificationV2', {
+    void run('create-specification', () => catalogV2Operation('createSpecificationV2', {
       body,
     }), t('Specifikace vytvořena', 'Specification created'))
   }
@@ -263,7 +269,7 @@ export default function ProductStudioPage() {
       specificationId: selectedSpec.id, code: newOfferingCode.trim().toUpperCase(),
       market: marketContextFromInput(marketContextInput),
     }
-    void run(() => catalogV2Operation('createOfferingV2', {
+    void run('create-offering', () => catalogV2Operation('createOfferingV2', {
       body,
     }), t('Nabídka vytvořena', 'Offering created'))
   }
@@ -317,7 +323,7 @@ export default function ProductStudioPage() {
       attributes: seed(schema.document) as Record<string, unknown>,
       prices: [], eligibility: [], relationships: [], documentCodes: [],
     }
-    void run(() => catalogV2Operation('createOfferingRevisionV2', {
+    void run('create-revision', () => catalogV2Operation('createOfferingRevisionV2', {
       pathParameters: { id: selectedOffering.id }, body,
     }), t('Draft vytvořen; doplňte povinná pole schématu', 'Draft created; complete the schema-required fields'))
   }
@@ -325,7 +331,7 @@ export default function ProductStudioPage() {
   const saveDraft = () => {
     if (!selectedRevision || selectedRevision.state !== 'DRAFT') return
     if (!parsedDraft) { setMessage(t('Draft není validní JSON', 'Draft is not valid JSON')); return }
-    void run(() => catalogV2Operation('replaceOfferingRevisionV2', {
+    void run('save-draft', () => catalogV2Operation('replaceOfferingRevisionV2', {
       pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
       headers: { 'If-Match': `"${selectedRevision.revision}"` }, body: parsedDraft as RevisionRequest,
     }), t('Draft uložen', 'Draft saved'))
@@ -346,7 +352,7 @@ export default function ProductStudioPage() {
 
   const publish = () => {
     if (!selectedRevision || !publishReason.trim()) return
-    void run(() => catalogV2Operation('publishOfferingRevisionV2', {
+    void run('publish', () => catalogV2Operation('publishOfferingRevisionV2', {
       pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
       headers: { 'If-Match': `"${selectedRevision.revision}"` },
       body: { reason: publishReason.trim() },
@@ -386,7 +392,7 @@ export default function ProductStudioPage() {
             'Run the whole offer lifecycle in one place: type, market context, schema, change impact and independent approval. Intelligence advises; people decide.',
           )}</p>
         </div>
-        <button className={`btn btn-secondary ${styles.refresh}`} disabled={busy} onClick={() => void load()}><RefreshCw size={13} aria-hidden="true" />{t('Obnovit data', 'Refresh data')}</button>
+        <button type="button" className={`btn btn-secondary ${styles.refresh}`} disabled={busy || activeMutation !== null} aria-busy={busy} onClick={() => void load()}><RefreshCw size={13} aria-hidden="true" />{busy ? t('Obnovuji…', 'Refreshing…') : t('Obnovit data', 'Refresh data')}</button>
       </div>
       <div className={styles.metrics}>
         <div className={styles.metric}><div className={styles.metricLabel}>{t('Produktové typy', 'Product types')}</div><div className={styles.metricValue}>{schemas.length}</div><div className={styles.metricNote}>{t('důvěryhodná schémata', 'trusted schemas')}</div></div>
@@ -423,7 +429,7 @@ export default function ProductStudioPage() {
             <select id="studio-new-spec-schema" className="input" value={newSpecSchema} onChange={event => setNewSpecSchema(event.target.value)}>
               {schemas.map(item => <option key={`${item.id}:${item.version}`} value={`${item.id}:${item.version}`}>{item.id}:{item.version}</option>)}
             </select>
-            <div style={{ display: 'flex', gap: 7, marginTop: 7 }}><input id="studio-new-spec-code" className="input" aria-label={t('Kód nové specifikace', 'New specification code')} value={newSpecCode} onChange={e => setNewSpecCode(e.target.value)} placeholder="TERM_LIFE" /><button className="btn btn-secondary" onClick={createSpecification} aria-label={t('Vytvořit specifikaci', 'Create specification')}><Plus size={13} aria-hidden="true" /></button></div>
+            <div style={{ display: 'flex', gap: 7, marginTop: 7 }}><input id="studio-new-spec-code" className="input" aria-label={t('Kód nové specifikace', 'New specification code')} value={newSpecCode} onChange={e => setNewSpecCode(e.target.value)} placeholder="TERM_LIFE" /><button type="button" className="btn btn-secondary" disabled={activeMutation !== null || !newSpecCode.trim()} aria-busy={activeMutation === 'create-specification'} onClick={createSpecification} aria-label={activeMutation === 'create-specification' ? t('Vytvářím specifikaci', 'Creating specification') : t('Vytvořit specifikaci', 'Create specification')}><Plus size={13} aria-hidden="true" /></button></div>
           </Can>
           <div className={styles.schemaHint}>{t('Aktivní schema:', 'Active schema:')} <strong>{activeSchema ? `${activeSchema.id}:${activeSchema.version}` : '—'}</strong><br />{t('Formulář respektuje verzi schématu; publikovaný obsah se nemění.', 'The form respects its schema version; published content never mutates.')}</div>
         </div>
@@ -438,7 +444,7 @@ export default function ProductStudioPage() {
             {offerings.filter(item => !specificationId || item.specificationId === specificationId).map(item => <option key={item.id} value={item.id}>{item.code}</option>)}
           </select>
           <Can permission="catalog:author">
-            <div style={{ display: 'flex', gap: 7, marginTop: 8 }}><input id="studio-new-offering-code" className="input" aria-label={t('Kód nové nabídky', 'New offer code')} value={newOfferingCode} onChange={e => setNewOfferingCode(e.target.value)} placeholder="TERM_LIFE_CZ_WEB" /><button className="btn btn-secondary" onClick={createOffering} aria-label={t('Vytvořit nabídku', 'Create offering')}><Plus size={13} aria-hidden="true" /></button></div>
+            <div style={{ display: 'flex', gap: 7, marginTop: 8 }}><input id="studio-new-offering-code" className="input" aria-label={t('Kód nové nabídky', 'New offer code')} value={newOfferingCode} onChange={e => setNewOfferingCode(e.target.value)} placeholder="TERM_LIFE_CZ_WEB" /><button type="button" className="btn btn-secondary" disabled={activeMutation !== null || !selectedSpec || !newOfferingCode.trim()} aria-busy={activeMutation === 'create-offering'} onClick={createOffering} aria-label={activeMutation === 'create-offering' ? t('Vytvářím nabídku', 'Creating offer') : t('Vytvořit nabídku', 'Create offer')}><Plus size={13} aria-hidden="true" /></button></div>
             <div className={styles.marketContext}>
               <div className={styles.marketTitle}><LockKeyhole size={13} aria-hidden="true" /><span>{t('Dostupnost nabídky', 'Offer availability')}</span></div>
               <p>{t('Neveřejná nabídka používá obchodní segment, nikoli identitu zákazníka. Katalog neobsahuje osobní údaje.', 'A private offer uses a commercial segment, never a customer identity. The catalog contains no personal data.')}</p>
@@ -450,9 +456,9 @@ export default function ProductStudioPage() {
                 <label><span>{t('Lokality', 'Locales')}</span><input className="input" value={marketContextInput.locales} onChange={event => updateMarketContext('locales', event.target.value)} placeholder="cs-CZ, en" /></label>
               </div>
             </div>
-            <button className="btn btn-primary" style={{ width: '100%', marginTop: 8 }} disabled={!selectedOffering} onClick={createDraft}><Plus size={13} aria-hidden="true" />{t('Založit novou revizi', 'Create a new revision')}</button>
+            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 8 }} disabled={!selectedOffering || activeMutation !== null} aria-busy={activeMutation === 'create-revision'} onClick={createDraft}><Plus size={13} aria-hidden="true" />{activeMutation === 'create-revision' ? t('Zakládám revizi…', 'Creating revision…') : t('Založit novou revizi', 'Create a new revision')}</button>
           </Can>
-          <div className={styles.revisionList}>{revisions.length === 0 && <div className={styles.schemaHint}>{t('Vyberte nabídku a otevřete její rozhodovací historii.', 'Select an offer to open its decision history.')}</div>}{revisions.map(item => <button key={item.id} onClick={() => { setRevisionId(item.id); setReview(null) }} className={`${styles.revision} ${revisionId === item.id ? styles.revisionSelected : ''}`}>
+          <div className={styles.revisionList}>{revisions.length === 0 && <div className={styles.schemaHint}>{t('Vyberte nabídku a otevřete její rozhodovací historii.', 'Select an offer to open its decision history.')}</div>}{revisions.map(item => <button type="button" key={item.id} aria-pressed={revisionId === item.id} onClick={() => { setRevisionId(item.id); setReview(null) }} className={`${styles.revision} ${revisionId === item.id ? styles.revisionSelected : ''}`}>
             <span><strong>#{item.number}</strong> <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>· schema {item.schemaRef.version}</span></span><Badge state={item.state} />
           </button>)}</div>
         </div>
@@ -468,7 +474,7 @@ export default function ProductStudioPage() {
               {selectedRevision?.state === 'DRAFT' && <div className={styles.compositionControls}>
                 <label className="sr-only" htmlFor="studio-relationship-kind">{t('Typ vazby', 'Relationship type')}</label><select id="studio-relationship-kind" className="input" value={relationshipKind} onChange={event => setRelationshipKind(event.target.value as RelationshipKind)}>{relationshipKinds.map(kind => <option key={kind}>{kind}</option>)}</select>
                 <label className="sr-only" htmlFor="studio-relationship-target">{t('Cílová nabídka', 'Target offer')}</label><select id="studio-relationship-target" className="input" value={relationshipTargetId} onChange={event => setRelationshipTargetId(event.target.value)}><option value="">{t('Vyberte nabídku', 'Select an offer')}</option>{relationshipCandidates.map(item => <option key={item.id} value={item.id}>{item.code}</option>)}</select>
-                <button className="btn btn-secondary" disabled={!relationshipTargetId} onClick={addRelationship}><Plus size={13} aria-hidden="true" />{t('Přidat', 'Add')}</button>
+                <button type="button" className="btn btn-secondary" disabled={!relationshipTargetId || activeMutation !== null} onClick={addRelationship}><Plus size={13} aria-hidden="true" />{t('Přidat', 'Add')}</button>
               </div>}
               {selectedRevision?.state === 'DRAFT' && <div className={styles.bundleProposals}>
                 <div className={styles.bundleProposalsHead}>
@@ -479,12 +485,12 @@ export default function ProductStudioPage() {
                   ? <div className={styles.bundleProposalEmpty}>{t('Žádná další bezpečně kompatibilní komponenta.', 'No further safely compatible component.')}</div>
                   : <div className={styles.bundleProposalList}>{bundleProposals.slice(0, 3).map(proposal => <div className={styles.bundleProposal} key={proposal.offering.id}>
                     <div><strong>{proposal.offering.code}</strong><small>{proposal.reasons.slice(0, 2).join(' · ')}</small><em>{bundleImpacts.find(item => item.id === proposal.offering.id)?.impact.summary}</em></div>
-                    <button className="btn btn-secondary" onClick={() => applyBundleProposal(proposal.offering.id)}><Plus size={13} aria-hidden="true" />{t('Navrhnout', 'Propose')}</button>
+                    <button type="button" className="btn btn-secondary" disabled={activeMutation !== null} onClick={() => applyBundleProposal(proposal.offering.id)}><Plus size={13} aria-hidden="true" />{t('Navrhnout', 'Propose')}</button>
                   </div>)}</div>}
               </div>}
               {draftRelationships.length === 0 ? <div className={styles.compositionEmpty}>{t('Žádné vazby. Samostatná nabídka zůstává beze změny.', 'No connections. A standalone offer remains unchanged.')}</div> : <div className={styles.relationships}>{draftRelationships.map(relationship => {
                 const target = offerings.find(item => item.id === relationship.targetOfferingId)
-                return <div className={styles.relationship} key={`${relationship.kind}:${relationship.targetOfferingId}`}><span className="badge badge-info">{relationship.kind}</span><span>{target?.code ?? relationship.targetOfferingId}</span>{selectedRevision?.state === 'DRAFT' && <button aria-label={t('Odebrat vazbu', 'Remove relationship')} className={styles.removeRelationship} onClick={() => removeRelationship(relationship)}><X size={13} aria-hidden="true" /></button>}</div>
+                return <div className={styles.relationship} key={`${relationship.kind}:${relationship.targetOfferingId}`}><span className="badge badge-info">{relationship.kind}</span><span>{target?.code ?? relationship.targetOfferingId}</span>{selectedRevision?.state === 'DRAFT' && <button type="button" aria-label={t('Odebrat vazbu', 'Remove relationship')} disabled={activeMutation !== null} className={styles.removeRelationship} onClick={() => removeRelationship(relationship)}><X size={13} aria-hidden="true" /></button>}</div>
               })}</div>}
             </div>}
             {guidedFields.length > 0 && parsedDraft && <div className={styles.guidedForm}>
@@ -503,9 +509,9 @@ export default function ProductStudioPage() {
             <details className={styles.expertDetails}><summary>{t('Expert režim · úplný dokument', 'Expert mode · full document')}</summary>
               <textarea className={`input ${styles.editor}`} value={draftText} onChange={e => { setDraftText(e.target.value); setValidationState('idle'); setReview(null) }} disabled={!selectedRevision || selectedRevision.state !== 'DRAFT'} />
             </details>
-            <div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision} onClick={() => void validateDraft()}><CheckCircle2 size={13} aria-hidden="true" />{t('Ověřit schéma', 'Validate schema')}</button><button className="btn btn-primary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT'} onClick={saveDraft}><Send size={13} aria-hidden="true" />{t('Uložit draft', 'Save draft')}</button></div>
+            <div className={styles.actions}><button type="button" className="btn btn-secondary" disabled={!selectedRevision || activeMutation !== null} onClick={() => void validateDraft()}><CheckCircle2 size={13} aria-hidden="true" />{t('Ověřit schéma', 'Validate schema')}</button><button type="button" className="btn btn-primary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || activeMutation !== null} aria-busy={activeMutation === 'save-draft'} onClick={saveDraft}><Send size={13} aria-hidden="true" />{activeMutation === 'save-draft' ? t('Ukládám draft…', 'Saving draft…') : t('Uložit draft', 'Save draft')}</button></div>
           </Can>
-          <Can permission="catalog:publish"><div className={styles.approvalPanel}><div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Nezávislé schválení', 'Independent approval')}</span></div><p>{t('Publikace je nevratné rozhodnutí. Služba ověří, že autor a schvalovatel jsou rozdílné identity — tento formulář to nemůže obejít.', 'Publication is an irreversible decision. The service verifies that maker and checker are different identities — this form cannot bypass it.')}</p><div className={styles.approvalMeta}><span>{t('Autor draftu', 'Draft maker')}: <b>{selectedRevision?.makerId ?? '—'}</b></span><span>{t('Stav ověření', 'Validation')}: <b>{validationState === 'valid' ? t('ověřeno', 'verified') : t('čeká na ověření', 'awaiting validation')}</b></span></div><div style={{ display: 'flex', gap: 7 }}><label className="sr-only" htmlFor="studio-publish-reason">{t('Důvod schválení', 'Approval reason')}</label><input id="studio-publish-reason" className="input" value={publishReason} onChange={e => setPublishReason(e.target.value)} placeholder={t('Důvod schválení', 'Approval reason')} /><button className="btn btn-primary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || !publishReason.trim()} onClick={publish}><ShieldCheck size={13} aria-hidden="true" />{t('Publikovat', 'Publish')}</button></div></div></Can>
+          <Can permission="catalog:publish"><div className={styles.approvalPanel}><div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Nezávislé schválení', 'Independent approval')}</span></div><p>{t('Publikace je nevratné rozhodnutí. Služba ověří, že autor a schvalovatel jsou rozdílné identity — tento formulář to nemůže obejít.', 'Publication is an irreversible decision. The service verifies that maker and checker are different identities — this form cannot bypass it.')}</p><div className={styles.approvalMeta}><span>{t('Autor draftu', 'Draft maker')}: <b>{selectedRevision?.makerId ?? '—'}</b></span><span>{t('Stav ověření', 'Validation')}: <b>{validationState === 'valid' ? t('ověřeno', 'verified') : t('čeká na ověření', 'awaiting validation')}</b></span></div><div style={{ display: 'flex', gap: 7 }}><label className="sr-only" htmlFor="studio-publish-reason">{t('Důvod schválení', 'Approval reason')}</label><input id="studio-publish-reason" className="input" value={publishReason} onChange={e => setPublishReason(e.target.value)} placeholder={t('Důvod schválení', 'Approval reason')} /><button type="button" className="btn btn-primary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || !publishReason.trim() || activeMutation !== null} aria-busy={activeMutation === 'publish'} onClick={publish}><ShieldCheck size={13} aria-hidden="true" />{activeMutation === 'publish' ? t('Publikuji…', 'Publishing…') : t('Publikovat', 'Publish')}</button></div></div></Can>
         </div>
       </section>
     </div>
@@ -544,7 +550,7 @@ export default function ProductStudioPage() {
           </div>
           <div className={styles.selectionList} aria-live="polite">
             {offerSelections.length === 0 && <div className={styles.schemaHint}>{t('Žádná nabídka přesně neodpovídá. Rozšiřte pouze vědomě tržní kontext — neveřejné nabídky se bez shody nezobrazují.', 'No offer matches exactly. Broaden market context only deliberately — private offers never appear without a match.')}</div>}
-            {offerSelections.slice(0, 5).map((selection, index) => <button key={selection.offering.id} className={`${styles.selection} ${selection.offering.id === offeringId ? styles.selectionActive : ''}`} onClick={() => setOfferingId(selection.offering.id)}>
+            {offerSelections.slice(0, 5).map((selection, index) => <button type="button" key={selection.offering.id} aria-pressed={selection.offering.id === offeringId} className={`${styles.selection} ${selection.offering.id === offeringId ? styles.selectionActive : ''}`} onClick={() => setOfferingId(selection.offering.id)}>
               <span className={styles.selectionRank}>#{index + 1}</span><span className={styles.selectionCopy}><strong>{selection.offering.code}</strong><small>{selection.reasons.join(' · ')}</small></span><span className="badge badge-info">{selection.specificity === 0 ? t('globální', 'global') : t('shoda', 'match')}</span>
             </button>)}
           </div>

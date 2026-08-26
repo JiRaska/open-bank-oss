@@ -25,4 +25,14 @@ describe('product studio form accessibility contract', () => {
     expect(page).toContain('aria-label={t(\'Kód nové specifikace\', \'New specification code\')}')
     expect(page).toContain('aria-label={t(\'Kód nové nabídky\', \'New offer code\')}')
   })
+
+  it('exposes truthful progress and selection state for operator actions', () => {
+    expect(page).toContain("aria-busy={activeMutation === 'create-specification'}")
+    expect(page).toContain("aria-busy={activeMutation === 'create-offering'}")
+    expect(page).toContain("aria-busy={activeMutation === 'create-revision'}")
+    expect(page).toContain("aria-busy={activeMutation === 'save-draft'}")
+    expect(page).toContain("aria-busy={activeMutation === 'publish'}")
+    expect(page).toContain('aria-pressed={revisionId === item.id}')
+    expect(page).toContain('aria-pressed={selection.offering.id === offeringId}')
+  })
 })
