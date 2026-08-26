@@ -45,7 +45,11 @@ class TestIntelligenceAnalysisTest {
                     TestIntelligenceComponentInput(
                         component = "openbank-ledger-service",
                         moneyPath = true,
-                        evidence = listOf(TestIntelligenceEvidenceInput("contract", "stale")),
+                        evidence = listOf(
+                            TestIntelligenceEvidenceInput("contract", "stale"),
+                            TestIntelligenceEvidenceInput("contract", "failed"),
+                            TestIntelligenceEvidenceInput("mutation", "failed"),
+                        ),
                         declaredInfrastructure = listOf("postgres"),
                         observedInfrastructureStarts = 0,
                     ),
@@ -62,6 +66,7 @@ class TestIntelligenceAnalysisTest {
 
         assertThat(findings.map { it.checkType }).containsExactlyInAnyOrder(
             FlakyTestCheckType.MISSING_EXECUTION_EVIDENCE,
+            FlakyTestCheckType.FAILED_TEST_EVIDENCE,
             FlakyTestCheckType.STALE_TEST_EVIDENCE,
             FlakyTestCheckType.UNPROVEN_TEST_INFRASTRUCTURE,
         )
