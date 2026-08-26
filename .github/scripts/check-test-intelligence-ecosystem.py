@@ -111,6 +111,17 @@ def check(root: Path) -> list[str]:
         for needle in required:
             if needle not in workflow:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
+    performance_catalog = text(root / "perf/scenarios.yaml")
+    for scenario in ("money-path-smoke", "money-path-write-benchmark"):
+        definition = root / "perf/k6" / f"{scenario}.js"
+        if definition.exists() and f"id: {scenario}" not in performance_catalog:
+            errors.append(f"performance scenario has no governed execution plan: {scenario}")
+    for needle in ("execution_mode:", "safety_boundary:"):
+        if needle not in performance_catalog:
+            errors.append(f"performance scenario catalog is incomplete: {needle}")
+    for needle in ("'scenarios.yaml'", "executionMode: plan.execution_mode"):
+        if needle not in collector:
+            errors.append(f"admin projection ignores governed performance plans: {needle}")
     ui_workflow = text(root / ".github/workflows/ci.yml")
     for needle in ("test-intelligence-run-openbank-admin-ui", "PLAYWRIGHT_JUNIT_OUTPUT_FILE", "outputFile.junit"):
         if needle not in ui_workflow:

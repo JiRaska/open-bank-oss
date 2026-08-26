@@ -1,0 +1,14 @@
+version: 1
+scenarios:
+  - id: money-path-smoke
+    definition: perf/k6/money-path-smoke.js
+    execution_mode: scheduled-read-only
+    safety_boundary: Runs only when a safe read-only money-path target is configured for the GitHub-hosted runner.
+    target_schedule: "0 5 * * *"
+
+  - id: money-path-write-benchmark
+    definition: perf/k6/money-path-write-benchmark.js
+    execution_mode: manual-local-isolated
+    safety_boundary: Mutates accounts and ledger journals; run only against an isolated disposable docker-compose stack, never the shared sandbox.
+    baseline_report: perf/reports/2026-07-10-money-path-write-benchmark.md
+    blocker: A repeatable isolated target and synthetic-data teardown are required before this can become a scheduled run.

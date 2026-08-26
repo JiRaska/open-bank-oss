@@ -67,6 +67,14 @@ journeys:
       checks: { value: 0.9, thresholds: { 'rate==1.0': true } },
     } }))
     write(repo, 'perf/k6/money-path-smoke.js', 'export const options = { thresholds: { checks: ["rate>0.99"] } }')
+    write(repo, 'perf/scenarios.yaml', `version: 1
+scenarios:
+  - id: money-path-smoke
+    definition: perf/k6/money-path-smoke.js
+    execution_mode: scheduled-read-only
+    safety_boundary: read-only target only
+    target_schedule: "0 5 * * *"
+`)
     write(repo, 'openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json', JSON.stringify({
       schemaVersion: 1,
       run: { id: 'baseline-7', attempt: 1, commit: 'fedcba987654', branch: 'main', workflow: 'Perf baseline', url: 'https://example.test/perf/baseline-7', observedAt: '2026-08-25T07:00:00Z' },
@@ -96,6 +104,7 @@ journeys:
     expect(report.performance.find(item => item.id === 'breached')).toMatchObject({ state: 'failed', detail: '1 threshold result(s), 1 breached' })
     expect(report.performance.find(item => item.id === 'money-path-smoke')).toMatchObject({
       state: 'not-run', detail: 'No safe money-path target is configured for this GitHub-hosted runner.', run: { id: 'baseline-7', workflow: 'Perf baseline' },
+      plan: { executionMode: 'scheduled-read-only', safetyBoundary: 'read-only target only', targetSchedule: '0 5 * * *' },
     })
     expect(report.clientExperiences).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'admin-ui', rum: expect.objectContaining({ policy: 'rejected' }) }),

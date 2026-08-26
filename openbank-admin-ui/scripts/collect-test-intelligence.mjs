@@ -293,6 +293,11 @@ async function mutations(components) {
 }
 
 function performance() {
+  const catalogFile = path.join(repo, 'perf', 'scenarios.yaml')
+  const catalog = fs.existsSync(catalogFile)
+    ? parseYaml(fs.readFileSync(catalogFile, 'utf8'))?.scenarios ?? []
+    : []
+  const plans = new Map(catalog.map(item => [item.id, item]))
   const definitions = [
     ...allFiles(path.join(repo, 'perf', 'k6'), file => file.endsWith('.js')),
     ...fs.readdirSync(repo, { withFileTypes: true })
@@ -315,6 +320,7 @@ function performance() {
     const relative = path.relative(repo, file).split(path.sep)
     const component = relative[0].startsWith('openbank-') ? relative[0] : null
     const localId = path.basename(file, '.js')
+    const plan = plans.get(localId)
     const id = component ? `${component}-${localId.replace(/^openbank-/, '')}` : localId
     const matchesScenario = candidate => {
       const name = path.basename(candidate)
@@ -359,6 +365,13 @@ function performance() {
       state: specialized?.state ?? (summary ? stateFrom(failed, 1, at) : 'not-run'),
       observedAt: performanceRun?.run?.observedAt ?? at,
       source: path.relative(repo, file), thresholds,
+      ...(plan ? { plan: {
+        executionMode: plan.execution_mode,
+        safetyBoundary: plan.safety_boundary,
+        targetSchedule: plan.target_schedule ?? null,
+        baselineReport: plan.baseline_report ?? null,
+        blocker: plan.blocker ?? null,
+      } } : {}),
       ...(metrics ? { metrics } : {}),
       detail: specialized?.detail ?? (summary
         ? `${thresholdResults.length} threshold result(s), ${failed} breached`
