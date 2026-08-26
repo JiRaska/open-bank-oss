@@ -682,8 +682,9 @@ jobs:
           # Query the owning workflow's successful main runs, not the repository-wide artifact
           # stream. Every services-ci run contributes many artifacts and previously pushed a
           # snapshot beyond the fixed five-page search window. A successful Admin-UI deploy owns
-          # at most one immutable snapshot, so this route is both complete and normally needs only
-          # 1 + 30 API calls. The 100-run ceiling bounds pathological missing-artifact cases;
+          # at most one immutable snapshot, so this route is complete without unrelated artifacts.
+          # Measured 2026-08-26: 30 retained snapshots were found in 51 runs (52 API calls).
+          # The 100-run ceiling bounds pathological missing-artifact cases;
           # fewer results remain explicit in the rendered history (#6614).
           snapshot_ids="${RUNNER_TEMP}/test-intelligence-snapshot-ids"
           : > "${snapshot_ids}"
