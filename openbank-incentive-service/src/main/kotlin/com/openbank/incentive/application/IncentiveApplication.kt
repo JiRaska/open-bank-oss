@@ -44,9 +44,9 @@ class IncentiveApplication(
     suspend fun submit(id: UUID, actor: String) = store.submitOffer(id, actor)
     suspend fun publish(id: UUID, actor: String, now: Instant = Instant.now()) = store.publishOffer(id, actor, now)
 
-    suspend fun addCodes(id: UUID, codes: List<String>, now: Instant = Instant.now()): Int {
+    suspend fun addCodes(id: UUID, codes: List<String>, actor: String, now: Instant = Instant.now()): Int {
         require(codes.isNotEmpty() && codes.none { it.isBlank() }) { "codes are required" }
-        return store.addCodes(id, codes.map(::digest).toSet(), now)
+        return store.addCodes(id, codes.map(::digest).toSet(), actor, now)
     }
 
     suspend fun reserve(
@@ -55,6 +55,7 @@ class IncentiveApplication(
         partyRef: String,
         productRef: String,
         key: String,
+        actor: String,
         now: Instant = Instant.now(),
     ): PromoReservation = store.reserve(
         offerId,
@@ -62,6 +63,7 @@ class IncentiveApplication(
         partyRef,
         productRef,
         key,
+        actor,
         now,
         now.plus(reservationTtl),
     )

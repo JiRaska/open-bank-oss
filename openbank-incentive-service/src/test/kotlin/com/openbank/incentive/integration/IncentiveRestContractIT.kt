@@ -30,14 +30,22 @@ class IncentiveRestContractIT {
     @Suppress("LongMethod")
     @Test
     fun `published inventory reserves once under concurrency then releases commits and expires`() {
+        val effectiveFrom = Instant.now().minusSeconds(60)
+        val expiresAt = Instant.now().plusSeconds(86_400)
         val offerId = Given {
             contentType("application/json")
             body(
-                """{"name":"summer-current-account","version":1,"productScope":["current-account"],"effectiveFrom":"${Instant.now().minusSeconds(
-                    60,
-                )}","expiresAt":"${Instant.now().plusSeconds(
-                    86_400,
-                )}","totalLimit":10,"perPartyLimit":2,"stackingPolicy":"EXCLUSIVE"}""",
+                """{
+                    "name":"summer-current-account",
+                    "version":1,
+                    "productScope":["current-account"],
+                    "effectiveFrom":"$effectiveFrom",
+                    "expiresAt":"$expiresAt",
+                    "totalLimit":10,
+                    "perPartyLimit":2,
+                    "stackingPolicy":"EXCLUSIVE"
+                }
+                """.trimIndent(),
             )
         } When { post("/api/v1/incentives/offers") } Then {
             statusCode(201)
@@ -143,13 +151,32 @@ class IncentiveRestContractIT {
         } Extract { path<String>("id") }
         execute("update promo_reservation set expires_at = now() - interval '1 second' where id = '$expiringId'")
 
-        Given { contentType("application/json") }
-            .When { post("/api/v1/incentives/maintenance/expire") }
-            .Then {
-                statusCode(200)
-                body("expired", equalTo(1))
-            }
+        val expiryStart = CountDownLatch(1)
+        val expiryPool = Executors.newFixedThreadPool(2)
+        val expiryResults = (1..2).map {
+            expiryPool.submit(
+                Callable {
+                    expiryStart.await()
+                    Given { contentType("application/json") }
+                        .When { post("/api/v1/incentives/maintenance/expire") }
+                        .Then { statusCode(200) }
+                        .Extract { path<Int>("expired") }
+                },
+            )
+        }
+        expiryStart.countDown()
+        assertThat(expiryResults.sumOf { it.get() }).isEqualTo(1)
+        expiryPool.shutdown()
         assertThat(string("select status from promo_reservation where id = '$expiringId'")).isEqualTo("EXPIRED")
+        assertThat(
+            count(
+                """select count(*) from incentive_audit_event
+                    where aggregate_id = '$expiringId' and event_type = 'incentive.reservation.expired.v1'
+                """.trimIndent(),
+            ),
+        ).isEqualTo(1)
+        assertThat(count("select count(*) from incentive_audit_event where actor in ('inventory','party-1','party-2')"))
+            .isZero()
         assertThat(count("select count(*) from incentive_audit_event")).isGreaterThanOrEqualTo(7)
         assertThat(
             count("select count(*) from incentive_outbox"),

@@ -12,13 +12,14 @@ interface IncentiveStore {
     suspend fun findOffer(id: UUID): IncentiveOffer?
     suspend fun submitOffer(id: UUID, actor: String): IncentiveOffer
     suspend fun publishOffer(id: UUID, actor: String, at: Instant): IncentiveOffer
-    suspend fun addCodes(offerId: UUID, digests: Set<CodeDigest>, at: Instant): Int
+    suspend fun addCodes(offerId: UUID, digests: Set<CodeDigest>, actor: String, at: Instant): Int
     suspend fun reserve(
         offerId: UUID,
         digest: CodeDigest,
         partyRef: String,
         productRef: String,
         idempotencyKey: String,
+        actor: String,
         now: Instant,
         expiresAt: Instant,
     ): PromoReservation

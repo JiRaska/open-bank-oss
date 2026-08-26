@@ -78,7 +78,7 @@ class IncentiveResource(private val application: IncentiveApplication, private v
     @Path("/offers/{id}/codes")
     suspend fun importCodes(@PathParam("id") id: UUID, request: ImportCodesRequest): Response = Response.status(
         Response.Status.CREATED,
-    ).entity(mapOf("imported" to application.addCodes(id, request.codes))).build()
+    ).entity(mapOf("imported" to application.addCodes(id, request.codes, actor()))).build()
 
     @POST
     @Path("/offers/{id}/reservations")
@@ -90,7 +90,7 @@ class IncentiveResource(private val application: IncentiveApplication, private v
         require(!key.isNullOrBlank()) { "Idempotency-Key is required" }
         return Response.status(Response.Status.CREATED)
             .entity(
-                application.reserve(id, request.code, request.partyRef, request.productRef, key).toResponse(),
+                application.reserve(id, request.code, request.partyRef, request.productRef, key, actor()).toResponse(),
             ).build()
     }
 

@@ -23,6 +23,7 @@ import jakarta.persistence.Id
 import jakarta.persistence.LockModeType
 import jakarta.persistence.Table
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 
 @Entity
@@ -141,26 +142,31 @@ class PanacheIncentiveStore(
         }
     }.awaitSuspending()
 
-    override suspend fun addCodes(offerId: UUID, digests: Set<CodeDigest>, at: Instant): Int = Panache.withTransaction {
-        lockedOffer(offerId).flatMap { offer ->
-            if (offer == null) throw IncentiveNotFound("offer not found")
-            if (offer.status == OfferStatus.PUBLISHED.name) throw IncentiveConflict("published inventory is immutable")
-            val entities = digests.map { digest ->
-                CodeEntity().apply {
-                    this.digest = digest.value
-                    this.offerId = offerId
-                    status = "AVAILABLE"
-                    createdAt = at
-                    retainedUntil = offer.expiresAt.plusSeconds(RETENTION_SECONDS)
+    override suspend fun addCodes(offerId: UUID, digests: Set<CodeDigest>, actor: String, at: Instant): Int =
+        Panache.withTransaction {
+            lockedOffer(offerId).flatMap { offer ->
+                if (offer == null) throw IncentiveNotFound("offer not found")
+                if (offer.status ==
+                    OfferStatus.PUBLISHED.name
+                ) {
+                    throw IncentiveConflict("published inventory is immutable")
                 }
+                val entities = digests.map { digest ->
+                    CodeEntity().apply {
+                        this.digest = digest.value
+                        this.offerId = offerId
+                        status = "AVAILABLE"
+                        createdAt = at
+                        retainedUntil = offer.expiresAt.atZone(ZoneOffset.UTC).plusMonths(RETENTION_MONTHS).toInstant()
+                    }
+                }
+                codes.persist(entities).flatMap { evidence(offerId, "incentive.codes.imported.v1", actor) }
+                    .replaceWith(entities.size)
             }
-            codes.persist(entities).flatMap { evidence(offerId, "incentive.codes.imported.v1", "inventory") }
-                .replaceWith(entities.size)
-        }
-    }.awaitSuspending()
+        }.awaitSuspending()
 
     private companion object {
-        const val RETENTION_SECONDS = 31_536_000L
+        const val RETENTION_MONTHS = 13L
     }
 
     override suspend fun reserve(
@@ -169,6 +175,7 @@ class PanacheIncentiveStore(
         partyRef: String,
         productRef: String,
         idempotencyKey: String,
+        actor: String,
         now: Instant,
         expiresAt: Instant,
     ): PromoReservation = Panache.withTransaction {
@@ -216,7 +223,7 @@ class PanacheIncentiveStore(
                                 expiresAt,
                             )
                             reservations.persist(reservation.toEntity()).flatMap {
-                                evidence(reservation.id, "incentive.reservation.created.v1", partyRef)
+                                evidence(reservation.id, "incentive.reservation.created.v1", actor)
                             }.replaceWith(reservation)
                         }
                 }
@@ -229,22 +236,27 @@ class PanacheIncentiveStore(
     override suspend fun release(id: UUID, actor: String, at: Instant): PromoReservation =
         transition(id, actor, at, ReservationStatus.RELEASED)
 
-    override suspend fun expireDue(at: Instant): Int = Panache.withTransaction {
-        reservations.find("status = ?1 and expiresAt <= ?2", "RESERVED", at).list<ReservationEntity>().flatMap { due ->
-            due.fold(Uni.createFrom().item(0)) { chain, candidate ->
-                chain.flatMap { count ->
-                    lockedReservation(candidate.id).flatMap { locked ->
-                        if (
-                            locked == null ||
-                            locked.status != ReservationStatus.RESERVED.name ||
-                            locked.expiresAt.isAfter(at)
-                        ) {
-                            Uni.createFrom().item(count)
-                        } else {
-                            expireEntity(locked, at).replaceWith(count + 1)
-                        }
-                    }
-                }
+    override suspend fun expireDue(at: Instant): Int {
+        val ids = Panache.withSession {
+            reservations.find("status = ?1 and expiresAt <= ?2", "RESERVED", at)
+                .list<ReservationEntity>()
+                .map { candidates -> candidates.map { it.id } }
+        }.awaitSuspending()
+        var expired = 0
+        ids.forEach { id -> expired += expireOne(id, at) }
+        return expired
+    }
+
+    private suspend fun expireOne(id: UUID, at: Instant): Int = Panache.withTransaction {
+        lockedReservation(id).flatMap { locked ->
+            if (
+                locked == null ||
+                locked.status != ReservationStatus.RESERVED.name ||
+                locked.expiresAt.isAfter(at)
+            ) {
+                Uni.createFrom().item(0)
+            } else {
+                expireEntity(locked, at).replaceWith(1)
             }
         }
     }.awaitSuspending()
@@ -293,7 +305,7 @@ class PanacheIncentiveStore(
             details = "{}"
         }
         val eventId = UUID.randomUUID()
-        val correlationId = UUID.randomUUID()
+        val correlationId = id
         val event = OutboxEntity().apply {
             this.id = eventId
             aggregateId = id
