@@ -103,6 +103,12 @@ clock-skew allowance tolerates ordinary runner drift while preventing a malforme
 timestamp from extending a green verdict indefinitely. Invalid or missing success timestamps become
 `not-run`; recorded failures and explicit control gaps remain the stronger verdict.
 
+The producer enforces the same causal boundary before publication: run and Testcontainers lifecycle
+timestamps must be timezone-aware ISO-8601 values, a run cannot be more than five minutes ahead of
+the producer clock, and a lifecycle event cannot occur more than five minutes after the run that
+contains it. Consumer-side ageing remains mandatory defence in depth rather than trusting the
+producer alone.
+
 The fleet totals and history count both `unknown` and unresolved (`unknown`, `not-run`, `blocked`)
 observations explicitly. A component may have other passing suites and still contribute unresolved
 evidence; the assurance map remains neutral rather than turning an unresolved contract, performance

@@ -76,7 +76,9 @@ def check(root: Path) -> list[str]:
             errors.append(f"shared trace contract cannot emit assertion-backed evidence: {needle}")
     run_collector = text(root / ".github/scripts/collect-test-run-evidence.py")
     for needle in ('"trace"', "def trace_contract_evidence", "OPENBANK_TRACE_CONTRACT_V1:",
-                   "specialized.extend(trace_contract_evidence(service))"):
+                   "specialized.extend(trace_contract_evidence(service))", "def parse_timestamp(",
+                   "run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW",
+                   "observed_at - run_observed_at > MAX_FUTURE_SKEW"):
         if needle not in run_collector:
             errors.append(f"run-envelope collector loses executed trace evidence: {needle}")
     tracing_pilot = text(root / "openbank-agent-service/src/test/kotlin/com/openbank/agent/application/AgentChatServiceTracingTest.kt")

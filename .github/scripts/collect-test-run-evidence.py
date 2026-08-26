@@ -8,7 +8,7 @@ import hashlib
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import tempfile
@@ -21,6 +21,20 @@ SPECIALIZED_KINDS = {"performance", "mutation", "synthetic", "trace"}
 SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
 INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
 DIAGNOSTIC_KINDS = {"playwright-report"}
+MAX_FUTURE_SKEW = timedelta(minutes=5)
+
+
+def parse_timestamp(value: object, field: str) -> datetime:
+    """Require an absolute ISO-8601 timestamp before publishing evidence."""
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an absolute ISO-8601 timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an absolute ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must include a timezone")
+    return parsed.astimezone(timezone.utc)
 
 
 def trusted_run_url(url: str, run_id: str) -> bool:
@@ -46,6 +60,9 @@ def validate_envelope(envelope: dict) -> None:
     if (not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"]
             or not run["workflow"] or not trusted_run_url(str(run["url"]), str(run["id"]))):
         raise ValueError("run provenance values are invalid")
+    run_observed_at = parse_timestamp(run["observedAt"], "run.observedAt")
+    if run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW:
+        raise ValueError("run.observedAt exceeds the allowed clock skew")
     for suite in envelope["suites"]:
         if suite["kind"] not in SUITE_KINDS or suite["state"] not in SUITE_STATES:
             raise ValueError("suite kind/state is invalid")
@@ -76,6 +93,9 @@ def validate_envelope(envelope: dict) -> None:
             raise ValueError("runtime observation contains unsafe or incomplete fields")
         if item["resource"] not in INFRASTRUCTURE or item["lifecycle"] not in {"started", "stopped"} or not item["image"]:
             raise ValueError("runtime observation values are invalid")
+        observed_at = parse_timestamp(item["observedAt"], "testInfrastructure.observed.observedAt")
+        if observed_at - run_observed_at > MAX_FUTURE_SKEW:
+            raise ValueError("runtime observation occurs after its run beyond the allowed clock skew")
     for item in envelope.get("specializedEvidence", []):
         if set(item) - {"kind", "state", "source", "detail"} or not {"kind", "state", "source"}.issubset(item):
             raise ValueError("specialized evidence fields are invalid")
@@ -402,7 +422,7 @@ def main() -> None:
             assert synthetic == [{"kind": "synthetic", "state": "failed", "source": "journey:public-edge", "detail": "1 threshold result(s), 1 breached"}]
             valid = {
                 "schemaVersion": 1,
-                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "observedAt": "2026-08-22T00:00:00Z"},
+                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "observedAt": "2026-08-22T21:12:00Z"},
                 "component": "openbank-x",
                 "suites": [{"kind": "integration", "state": "passed", "discovered": 1, "executed": 1, "passed": 1, "failed": 0, "skipped": 0, "errors": 0, "durationMs": 1}],
                 "coverage": None,
@@ -438,6 +458,27 @@ def main() -> None:
             try:
                 validate_envelope(invalid)
                 raise AssertionError("invalid suite arithmetic was accepted")
+            except ValueError:
+                pass
+            future_run = json.loads(json.dumps(valid))
+            future_run["run"]["observedAt"] = "2999-01-01T00:00:00Z"
+            try:
+                validate_envelope(future_run)
+                raise AssertionError("a future-dated run was accepted")
+            except ValueError:
+                pass
+            naive_run = json.loads(json.dumps(valid))
+            naive_run["run"]["observedAt"] = "2026-08-22T00:00:00"
+            try:
+                validate_envelope(naive_run)
+                raise AssertionError("a timezone-less run timestamp was accepted")
+            except ValueError:
+                pass
+            future_runtime = json.loads(json.dumps(valid))
+            future_runtime["testInfrastructure"]["observed"][0]["observedAt"] = "2999-01-01T00:00:00Z"
+            try:
+                validate_envelope(future_runtime)
+                raise AssertionError("a runtime observation after its run was accepted")
             except ValueError:
                 pass
         print("test-run evidence collector self-test: classification and runtime red/green paths proven")
