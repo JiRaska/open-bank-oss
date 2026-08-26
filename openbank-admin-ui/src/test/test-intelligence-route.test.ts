@@ -191,6 +191,66 @@ describe('GET /api/test-intelligence', () => {
     ])
   })
 
+  it('projects k6 remote-write performance as bounded supplementary evidence', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-performance-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-26T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], history: [], runHistory: [], testCases: [], clientExperiences: [],
+      syntheticJourneys: [{ id: 'public-edge', title: 'Public edge', status: 'active', state: 'unknown', severity: 'page', schedule: '*/5 * * * *', environment: 'sandbox', covers: [], falsifies: 'Break the edge.', blocker: null }],
+      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.PROMETHEUS_URL = 'http://prometheus.test'
+    const now = Date.now() / 1000
+    const queries: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      queries.push(query)
+      const value = query.includes('k6_http_req_duration_p95') ? '1834.8'
+        : query.includes('k6_checks_rate') ? '0.997'
+          : query.includes('kube_job_status_completion_time') ? undefined : String(now)
+      return new Response(JSON.stringify({ status: 'success', data: { result: value === undefined ? [] : [{ value: [now, value] }] } }), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+    expect(body.syntheticJourneys[0]).toMatchObject({
+      state: 'passed',
+      live: { performance: { source: 'prometheus', windowSeconds: 900, worstP95Ms: 1834.8, worstCheckPassRatePercent: 99.7 } },
+    })
+    expect(queries.some(query => query.includes('max_over_time(k6_http_req_duration_p95{journey="public-edge"}[900s])'))).toBe(true)
+    expect(queries.some(query => query.includes('min_over_time(k6_checks_rate{journey="public-edge"}[900s])'))).toBe(true)
+  })
+
+  it('keeps an unavailable k6 metric explicit rather than converting it into performance success', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-performance-absent-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-26T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], history: [], runHistory: [], testCases: [], clientExperiences: [],
+      syntheticJourneys: [{ id: 'public-edge', title: 'Public edge', status: 'active', state: 'unknown', severity: 'page', schedule: '*/5 * * * *', environment: 'sandbox', covers: [], falsifies: 'Break the edge.', blocker: null }],
+      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.PROMETHEUS_URL = 'http://prometheus.test'
+    const now = Date.now() / 1000
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      const result = query.includes('k6_http_req_duration_p95') || query.includes('k6_checks_rate')
+        ? []
+        : query.includes('kube_job_status_failed')
+          ? [{ value: [now, '0'] }]
+          : [{ value: [now, String(now)] }]
+      return new Response(JSON.stringify({ status: 'success', data: { result } }), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+    expect(body.syntheticJourneys[0]).toMatchObject({
+      state: 'passed',
+      live: { performance: { worstP95Ms: null, worstCheckPassRatePercent: null } },
+    })
+  })
+
   it('shows a first scheduled Job still running as unresolved instead of claiming it was not run', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-running-'))
     dirs.push(dir)

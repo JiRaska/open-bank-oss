@@ -124,7 +124,8 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
     // successful run fresh. A fixed 30-minute window made a failed hourly or daily
     // journey look healthy again while its last successful run was still nominally fresh.
     const failureWindowSeconds = freshnessLimitSeconds(journey.schedule)
-    const [scheduled, successful, failures, activeJobs, recentRuns] = await Promise.all([
+    const journeyTag = cronjob.slice('journey-'.length)
+    const [scheduled, successful, failures, activeJobs, recentRuns, worstP95Ms, worstChecksRate] = await Promise.all([
       queryPrometheus(base, `max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="${cronjob}"})`),
       queryPrometheus(base, `max(kube_cronjob_status_last_successful_time{namespace="observability",cronjob="${cronjob}"})`),
       // kube-state-metrics continues exporting terminal Job status until the Job is garbage
@@ -137,6 +138,12 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
       // A reachable Prometheus with no active Jobs must yield zero, not an unavailable value.
       queryPrometheus(base, `sum(kube_job_status_active{namespace="observability",job_name=~"${cronjob}.*"}) or vector(0)`),
       queryPrometheusRuns(base, cronjob),
+      // The journey CronJob explicitly enables k6 Prometheus remote-write with p(95).
+      // Grafana k6 maps that Trend stat to k6_http_req_duration_p95 and maps its checks
+      // Rate to k6_checks_rate.  Take the worst published value inside the same freshness
+      // window rather than pretending an absent short-lived k6 series is a zero or a pass.
+      queryPrometheus(base, `max(max_over_time(k6_http_req_duration_p95{journey="${journeyTag}"}[${failureWindowSeconds}s]))`),
+      queryPrometheus(base, `min(min_over_time(k6_checks_rate{journey="${journeyTag}"}[${failureWindowSeconds}s]))`),
     ])
     const observedAt = new Date().toISOString()
     const freshnessSeconds = successful === null ? null : Math.max(0, nowSeconds - successful)
@@ -151,6 +158,12 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
         lastScheduledAt: scheduled === null ? null : new Date(scheduled * 1000).toISOString(),
         lastSuccessfulAt: successful === null ? null : new Date(successful * 1000).toISOString(),
         failuresWithinWindow: failures, failureWindowSeconds, activeJobs, freshnessSeconds, recentRuns,
+        performance: {
+          source: 'prometheus' as const,
+          windowSeconds: failureWindowSeconds,
+          worstP95Ms,
+          worstCheckPassRatePercent: worstChecksRate === null ? null : Math.round(worstChecksRate * 10_000) / 100,
+        },
       },
     }
   }))

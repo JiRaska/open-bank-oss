@@ -164,6 +164,16 @@ export interface SyntheticJourneyEvidence {
     activeJobs: number | null
     freshnessSeconds: number | null
     recentRuns: Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>
+    /**
+     * k6 remote-write measurements from the same journey window.  They are supplementary
+     * performance evidence only: the CronJob outcome remains the availability verdict.
+     */
+    performance: {
+      source: 'prometheus'
+      windowSeconds: number
+      worstP95Ms: number | null
+      worstCheckPassRatePercent: number | null
+    }
   }
 }
 
