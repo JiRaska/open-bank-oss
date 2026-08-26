@@ -277,8 +277,11 @@ scenarios:
     dirs.push(repo)
     write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
     write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
-    write(repo, '.app-src/shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt', 'actual object RumMonitor')
-    write(repo, '.app-src/shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt', 'actual object RumMonitor')
+    write(repo, '.app-src/shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt', 'actual object RumMonitor { val keys = "app.version os.type os.version device.model screen.name" }')
+    write(repo, '.app-src/shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt', 'actual object RumMonitor { val keys = "app.version os.type os.version device.model screen.name" }')
+    write(repo, '.app-src/shared/src/commonMain/kotlin/tech/openbank/app/telemetry/TraceparentPlugin.kt', 'traceparent x-correlation-id')
+    write(repo, '.app-src/shared/src/commonTest/kotlin/tech/openbank/app/telemetry/TraceparentPluginTest.kt', 'traceparent x-correlation-id')
+    write(repo, '.app-src/shared/src/iosTest/kotlin/tech/openbank/app/telemetry/RumMonitorIosTest.kt', 'app.version os.type os.version device.model screen.name')
     write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-unit.json', JSON.stringify({
       schemaVersion: 1, component: 'openbank-app',
       run: { id: '9', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://github.com/JiRaska/open-bank-app/actions/runs/9', observedAt: '2026-08-23T10:00:00Z' },
@@ -310,6 +313,26 @@ scenarios:
       expect.objectContaining({ platform: 'ios', capability: 'passed', runtime: 'unknown' }),
     ])
     expect(report.runHistory.filter(item => item.component === 'openbank-app').map(item => item.run.id)).toEqual(['10', '9', '8'])
+  })
+
+  it('does not promote a mobile RUM source file missing its closed attribute contract', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-rum-contract-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, '.app-src/shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt', 'app.version os.type screen.name')
+    write(repo, '.app-src/shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt', 'app.version os.type os.version device.model screen.name')
+    write(repo, '.app-src/shared/src/commonMain/kotlin/tech/openbank/app/telemetry/TraceparentPlugin.kt', 'traceparent x-correlation-id')
+    write(repo, '.app-src/shared/src/commonTest/kotlin/tech/openbank/app/telemetry/TraceparentPluginTest.kt', 'traceparent x-correlation-id')
+    write(repo, '.app-src/shared/src/iosTest/kotlin/tech/openbank/app/telemetry/RumMonitorIosTest.kt', 'app.version os.type os.version device.model screen.name')
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const platforms = report.clientExperiences.find(item => item.id === 'openbank-app')!.rum.platforms!
+    expect(platforms).toEqual(expect.arrayContaining([
+      expect.objectContaining({ platform: 'android', capability: 'not-run', runtime: 'unknown' }),
+      expect.objectContaining({ platform: 'ios', capability: 'passed', runtime: 'unknown' }),
+    ]))
   })
 
   it('marks old mobile CI evidence stale without hiding a recorded failure', () => {
