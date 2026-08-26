@@ -260,6 +260,8 @@ export interface TestCaseHistory {
   kind: Extract<EvidenceKind, 'unit' | 'integration' | 'contract' | 'e2e' | 'simulation'>
   classname: string
   name: string
+  /** Verified path to the test definition; never a claimed production dependency. */
+  testDefinitionPath?: string | null
   owner: string
   state: 'stable' | 'flaky' | 'failing' | 'skipped'
   lastState: 'passed' | 'failed' | 'skipped'

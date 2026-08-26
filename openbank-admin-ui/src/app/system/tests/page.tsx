@@ -216,10 +216,11 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
     </div>
     <div aria-live="polite" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t(`${visibleTests.length}/${report.testCases.length} testových definic odpovídá aktuální triage.`, `${visibleTests.length}/${report.testCases.length} test definitions match the active triage.`)}</div>
     <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
-      <thead><tr>{['State', 'Test definition', 'Component', 'Kind', 'Owner', 'Runs', 'Failure rate', 'Avg duration', 'Failed runtime', 'Fingerprint'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
+      <thead><tr>{['State', 'Test definition', 'Test source', 'Component', 'Kind', 'Owner', 'Runs', 'Failure rate', 'Avg duration', 'Failed runtime', 'Fingerprint'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
       <tbody>{visibleTests.map(item => <tr key={item.fingerprint}>
         <td style={tdStyle}><StateBadge state={item.state === 'stable' ? 'passed' : item.state === 'failing' ? 'failed' : item.state === 'skipped' ? 'skipped' : 'stale'} /></td>
         <td style={{ ...tdStyle, minWidth: 230 }}><strong>{item.name}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div>{item.sameCommitTransitions > 0 && <div style={{ color: '#d97706', fontSize: 10, marginTop: 3 }}>{item.sameCommitTransitions} same-commit pass/fail transition(s)</div>}</td>
+        <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10, maxWidth: 260, overflowWrap: 'anywhere' }}>{item.testDefinitionPath ?? 'not reported'}</td>
         <td style={tdStyle}>{item.component}</td><td style={tdStyle}>{item.kind}</td><td style={tdStyle}>{item.owner}</td><td style={tdStyle}>{item.observations}</td>
         <td style={tdStyle}>{item.failureRate === null ? '—' : `${item.failureRate}%`}</td><td style={tdStyle}>{item.averageDurationMs} ms</td><td style={tdStyle}>{item.wastedDurationMs} ms</td>
         <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10 }}>{item.fingerprint}</td>
