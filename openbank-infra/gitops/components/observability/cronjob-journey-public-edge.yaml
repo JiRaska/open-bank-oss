@@ -144,7 +144,7 @@ spec:
               # (measured with `docker run grafana/k6:0.58.0 version`), so that pin runs a
               # release candidate in a production monitor while reading as the last stable
               # 0.x. `1.2.0` reports `k6 v1.2.0`.
-              image: docker.io/grafana/k6:1.2.0
+              image: docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

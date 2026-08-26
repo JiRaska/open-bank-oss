@@ -73,6 +73,7 @@ on:
       - "Pact drift check"
       - "Product Catalog Native Build (T1 enabler smoke test)"
       - "Schema registry apply (document-service pilot)"
+      - "Synthetic journeys"
     types: [completed]
   pull_request:
     paths:

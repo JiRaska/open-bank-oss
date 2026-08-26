@@ -46,6 +46,7 @@
 #   2 — findings (with --enforce; without it they are ::warning and the exit is 0)
 #
 # Run:  python3 .github/scripts/check-journey-catalog.py --root . [--enforce]
+#       python3 .github/scripts/check-journey-catalog.py --root . --extract public-edge --out /tmp/journey.js
 #       python3 .github/scripts/check-journey-catalog.py --self-test
 
 import argparse
@@ -159,6 +160,35 @@ def cronjob_facts(root: pathlib.Path, rel_path: str, journey_id: str):
             )
         return spec.get("schedule"), defined_configmaps, None
     return None, defined_configmaps, f"{rel_path} defines no CronJob named {CRONJOB_PREFIX}{journey_id}"
+
+
+def extract_script(root: pathlib.Path, journey_id: str) -> str:
+    """Return the exact ConfigMap-mounted k6 program for one active catalog journey.
+
+    The manifest is the runtime artifact applied by Argo CD. CI extracts that same scalar
+    instead of keeping a sibling .js file which can drift from what the CronJob executes.
+    """
+    catalog = yaml.safe_load((root / CATALOG).read_text(encoding="utf-8")) or {}
+    matches = [item for item in catalog.get("journeys", []) if item.get("id") == journey_id]
+    if len(matches) != 1 or matches[0].get("status") != "active":
+        raise ValueError(f"{journey_id}: expected exactly one active catalog entry")
+    rel_path = matches[0].get("cronjob")
+    docs = load_docs(root / rel_path)
+    cronjob_name = f"{CRONJOB_PREFIX}{journey_id}"
+    cronjob = next((d for d in docs if d.get("kind") == "CronJob" and
+                    (d.get("metadata") or {}).get("name") == cronjob_name), None)
+    if cronjob is None:
+        raise ValueError(f"{journey_id}: manifest defines no {cronjob_name} CronJob")
+    pod = (((cronjob.get("spec") or {}).get("jobTemplate") or {}).get("spec") or {}).get("template") or {}
+    pod_spec = pod.get("spec") or {}
+    mounted = {(volume.get("configMap") or {}).get("name") for volume in pod_spec.get("volumes", [])
+               if isinstance(volume, dict) and volume.get("configMap")}
+    scripts = [((doc.get("data") or {}).get("journey.js")) for doc in docs
+               if doc.get("kind") == "ConfigMap" and (doc.get("metadata") or {}).get("name") in mounted]
+    scripts = [script for script in scripts if isinstance(script, str) and script.strip()]
+    if len(scripts) != 1:
+        raise ValueError(f"{journey_id}: expected one mounted non-empty journey.js, found {len(scripts)}")
+    return scripts[0]
 
 
 def alerted_journeys(root: pathlib.Path):
@@ -422,6 +452,18 @@ def self_test():
         SELF_TEST_CRONJOB.replace("name: journey-demo-script\ndata:", "name: some-other-name\ndata:"),
         SELF_TEST_RULES, expect_finding=True)
 
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        write_tree(root, SELF_TEST_CATALOG_OK, SELF_TEST_CRONJOB, SELF_TEST_RULES)
+        extracted = extract_script(root, "demo")
+        cases.append(("control: CI extracts the exact mounted runtime script",
+                      extracted == "export default function () {}", [repr(extracted)]))
+        try:
+            extract_script(root, "later")
+            cases.append(("planned journey cannot be executed", False, []))
+        except ValueError:
+            cases.append(("planned journey cannot be executed", True, []))
+
     run("empty catalog is fatal, not a pass",
         "version: 1\njourneys: []\n", SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
 
@@ -458,12 +500,25 @@ def main():
     parser.add_argument("--root", default=".")
     parser.add_argument("--enforce", action="store_true")
     parser.add_argument("--self-test", action="store_true", dest="selftest")
+    parser.add_argument("--extract", metavar="JOURNEY_ID")
+    parser.add_argument("--out")
     args = parser.parse_args()
 
     if args.selftest:
         return self_test()
 
     root = pathlib.Path(args.root).resolve()
+    if args.extract:
+        if not args.out:
+            parser.error("--extract requires --out")
+        try:
+            script = extract_script(root, args.extract)
+        except (OSError, yaml.YAMLError, ValueError) as exc:
+            print(f"::error::check-journey-catalog: cannot extract {args.extract}: {exc}")
+            return 1
+        pathlib.Path(args.out).write_text(script, encoding="utf-8")
+        print(f"check-journey-catalog: extracted {args.extract} runtime script to {args.out}")
+        return 0
     findings, fatal, subjects = check(root)
     # Printed unconditionally, including on the failure path: a gate that found its corpus and
     # then failed on it must not also be reported as having lost the corpus.

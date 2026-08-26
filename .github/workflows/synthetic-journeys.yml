@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+# One executable journey, three call sites (ADR-0252 phase 2, #4348).
+#
+# The k6 program is not copied into this workflow. It is extracted from the ConfigMap that
+# Argo CD applies and the sandbox CronJob mounts. A PR therefore proves the proposed runtime
+# artifact, a GitOps merge proves the newly desired sandbox state, and the CronJob keeps
+# falsifying it every five minutes. The post-merge lane is watched by main-red-watch.
+name: Synthetic journeys
+
+on:
+  pull_request:
+    paths:
+      - ".github/scripts/check-journey-catalog.py"
+      - ".github/workflows/synthetic-journeys.yml"
+      - "openbank-libs/governance/journeys.yaml"
+      - "openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: synthetic-public-edge-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-edge:
+    name: public-edge / exact runtime artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PyYAML
+        run: bash .github/scripts/install-pyyaml-hash-pinned.sh
+
+      - name: Validate catalog and extract the mounted k6 program
+        run: |
+          python3 .github/scripts/check-journey-catalog.py --self-test
+          python3 .github/scripts/check-journey-catalog.py --root . --enforce
+          mkdir -p synthetic-evidence
+          python3 .github/scripts/check-journey-catalog.py \
+            --root . --extract public-edge --out synthetic-evidence/journey.js
+
+      - name: Run the exact sandbox journey
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --volume "$PWD/synthetic-evidence:/evidence" \
+            docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc \
+            run --quiet --summary-export /evidence/summary.json /evidence/journey.js
+
+      - name: Retain immutable synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: synthetic-public-edge-${{ github.run_id }}-${{ github.run_attempt }}
+          path: synthetic-evidence/
+          retention-days: 30
+          if-no-files-found: error
