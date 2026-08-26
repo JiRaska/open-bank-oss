@@ -10,7 +10,6 @@ CREATE TABLE referral_outbox (
     attempt_count INTEGER NOT NULL DEFAULT 0,
     sent_at TIMESTAMPTZ,
     last_error TEXT,
-    synthetic BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     claimed_at TIMESTAMPTZ
