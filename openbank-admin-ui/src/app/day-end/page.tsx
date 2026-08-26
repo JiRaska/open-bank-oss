@@ -26,6 +26,7 @@ import {
   ArrowRightLeft, CalendarCheck2, Play, ChevronDown, ChevronRight, History, FileClock,
 } from 'lucide-react'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
+import { claimSingleFlight, releaseSingleFlight } from '@/lib/single-flight'
 import { hasPermission } from '@/lib/auth/roles'
 import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -130,6 +131,7 @@ function EodPanel() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const busyRef = useRef(false)
+  const triggerInFlight = useRef(false)
 
   const refresh = useCallback(async (spinner = false) => {
     if (busyRef.current) return
@@ -494,6 +496,7 @@ function EomPanel() {
   }, [loading, unavailable, empty, latest, runs.length, recordCheck])
 
   const trigger = useCallback(async () => {
+    if (!claimSingleFlight(triggerInFlight)) return
     setTriggering(true); setNotice(null)
     try {
       const res = await fetch('/api/closings/runs', {
@@ -513,6 +516,7 @@ function EomPanel() {
     } catch {
       setNotice({ ok: false, text: t('Spuštění catch-up uzávěrky se nezdařilo.', 'Could not start the catch-up close run.') })
     } finally {
+      releaseSingleFlight(triggerInFlight)
       setTriggering(false)
     }
   }, [t, load, recordCheck])
