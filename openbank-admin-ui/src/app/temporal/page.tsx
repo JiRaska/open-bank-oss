@@ -183,7 +183,7 @@ function MetricCard({ label, value, unit, status }: {
   }
   const color = status ? colors[status] : 'var(--text)'
   return (
-    <div style={{
+    <div aria-label={`${label}: ${value === null ? 'unavailable' : value}${unit && value !== null ? ` ${unit}` : ''}`} style={{
       background: 'var(--card-bg)',
       border: '1px solid var(--border)',
       borderRadius: '12px',
