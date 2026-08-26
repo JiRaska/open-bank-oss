@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.197.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.197.0...admin-ui-v0.197.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **admin-ui:** isolate compliance pack detail action ([#6987](https://github.com/JiRaska/open-bank-oss/issues/6987)) ([d36da51](https://github.com/JiRaska/open-bank-oss/commit/d36da518ad7842ddd40de95919aefe46e749c6fd))
+* **flaky-test-hunter:** surface failed evidence ([#6998](https://github.com/JiRaska/open-bank-oss/issues/6998)) ([f849536](https://github.com/JiRaska/open-bank-oss/commit/f8495368790c39002b481e5d3d5c156e85d4744e))
+
 ## [0.197.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.196.0...admin-ui-v0.197.0) (2026-08-26)
 
 
