@@ -17,8 +17,9 @@
 
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { claimSingleFlight, releaseSingleFlight } from '@/lib/single-flight'
 import { svcUrl } from '@/lib/services/bff'
 import { classifyMutation, type MutationFailure } from './mutations'
 import type { CardTransition } from './lifecycle'
@@ -49,6 +50,7 @@ export function useCardOperations(onChanged?: () => void): CardOperations {
   const { t } = useLanguage()
   const [busy, setBusy] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
+  const writeInFlight = useRef(false)
 
   const failureCopy = useCallback((kind: MutationFailure): string => {
     switch (kind) {
@@ -137,6 +139,7 @@ export function useCardOperations(onChanged?: () => void): CardOperations {
     init: RequestInit,
     okText: string,
   ): Promise<unknown | 'parked' | null> => {
+    if (!claimSingleFlight(writeInFlight)) return null
     setBusy(busyKey)
     setFeedback(null)
     try {
@@ -162,6 +165,7 @@ export function useCardOperations(onChanged?: () => void): CardOperations {
       setFeedback({ tone: 'error', text: failureCopy('unreachable') })
       return null
     } finally {
+      releaseSingleFlight(writeInFlight)
       setBusy(null)
     }
   }, [failureCopy, fourEyesCopy, onChanged])
