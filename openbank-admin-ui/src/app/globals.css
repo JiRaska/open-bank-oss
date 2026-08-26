@@ -10,7 +10,9 @@
   --sidebar-active-bg:    rgba(99,102,241,0.12);
   --sidebar-active-text:  #c7d2fe;
   --sidebar-text:         #8b9cb6;
-  --sidebar-text-muted:   #475569;
+  /* Muted navigation is still operational text. #94a3b8 reaches 7.54:1 against the
+     sidebar, whereas the previous #475569 was 2.55:1 and unreadable at its shipped size. */
+  --sidebar-text-muted:   #94a3b8;
   --sidebar-border:       rgba(255,255,255,0.04);
   --sidebar-accent:       #6366f1;
 
@@ -32,8 +34,10 @@
   /* ── Text ── */
   --text-primary:         #0f172a;
   --text-secondary:       #475569;
-  --text-tertiary:        #94a3b8;
-  --text-muted:           #94a3b8;
+  /* Used for labels, metadata and empty-state guidance across the operator console. #64748b
+     keeps a clear hierarchy while meeting AA on both white (4.76:1) and surface-2 (4.55:1). */
+  --text-tertiary:        #64748b;
+  --text-muted:           var(--text-tertiary);
 
   /* ── Shorthand semantic aliases ── */
   --green:  #10b981;

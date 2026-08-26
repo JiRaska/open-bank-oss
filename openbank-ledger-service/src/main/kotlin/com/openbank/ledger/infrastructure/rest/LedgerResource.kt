@@ -24,6 +24,7 @@ import com.openbank.ledger.domain.model.TrialBalance
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
@@ -33,6 +34,8 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.container.ContainerRequestContext
+import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -130,7 +133,11 @@ class LedgerResource(
     @RolesAllowed(Roles.OPERATOR)
     @Authorize(action = "ledger.create", resource = "")
     @Operation(summary = "Post a balanced journal entry")
-    suspend fun postJournal(request: PostJournalRequest): Response {
+    suspend fun postJournal(
+        request: PostJournalRequest,
+        @Context
+        requestContext: ContainerRequestContext,
+    ): Response {
         val command = PostJournalCommand(
             idempotencyKey = request.idempotencyKey,
             transactionId = request.transactionId,
@@ -139,6 +146,9 @@ class LedgerResource(
             description = request.description,
             lines = request.lines.map { it.toCommand() },
             postedBy = request.createdBy,
+            // The filter sets this property only after authenticating a configured canary
+            // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
+            synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
         )
         val entry = ledgerUseCase.postJournal(command)
         return Response.created(URI.create("/api/v1/journals/${entry.id}"))

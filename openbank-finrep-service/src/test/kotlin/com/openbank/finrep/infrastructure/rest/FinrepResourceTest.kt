@@ -6,6 +6,7 @@ package com.openbank.finrep.infrastructure.rest
 
 import com.openbank.finrep.application.port.inbound.FinrepUseCase
 import com.openbank.finrep.application.port.inbound.GetFinrepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.domain.model.BalanceVerdict
 import com.openbank.finrep.domain.model.FinrepCell
 import com.openbank.finrep.domain.model.FinrepTemplate
@@ -58,6 +59,25 @@ class FinrepResourceTest {
         assertThat(resp.entity).isEqualTo(expected)
         assertThat(captured.captured.asOf).isEqualTo(LocalDate.now(fixedClock))
         assertThat(captured.captured.templateId).isEqualTo("F01.01")
+        assertThat(captured.captured.evidence).isEqualTo(TrialBalanceEvidence.FROZEN)
+    }
+
+    @Test
+    fun `getTemplate exposes live preview only when explicitly requested`(): Unit = runBlocking {
+        val expected = FinrepTemplate(
+            templateId = "F01.01",
+            period = LocalDate.of(2026, 7, 31),
+            cells = emptyList(),
+            dataGaps = emptyList(),
+            isBalanced = true,
+            balanceVerdict = BalanceVerdict.AGREED_BALANCED,
+        )
+        val captured = slot<GetFinrepTemplateQuery>()
+        coEvery { finrepUseCase.getTemplate(capture(captured)) } returns expected
+
+        resource.getTemplate("F01.01", "2026-07-31", "LIVE_PREVIEW")
+
+        assertThat(captured.captured.evidence).isEqualTo(TrialBalanceEvidence.LIVE_PREVIEW)
     }
 
     @Test

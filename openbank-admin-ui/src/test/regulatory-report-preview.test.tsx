@@ -74,7 +74,7 @@ describe('Regulatory report preview', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('/api/svc/finrep-service/api/v1/finrep/periods')
     expect(String(fetchMock.mock.calls[1][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F01.01?asOf=2026-06-30')
     expect(String(fetchMock.mock.calls[2][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F02.00?asOf=2026-06-30')
-    expect(screen.getByText('finrep-service ← ledger trial balance (ne ClickHouse)')).toBeInTheDocument()
+    expect(screen.getByText('finrep-service ← zmrazená ledger předvaha (FROZEN / LINES_V1)')).toBeInTheDocument()
     expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Ready for internal export/)
     expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeEnabled()
   })
@@ -99,21 +99,24 @@ describe('Regulatory report preview', () => {
     expect(screen.queryByText('Dostupnost dat')).not.toBeInTheDocument()
   })
 
-  it('explains and blocks export when no immutable closed period exists', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ latest: null, periods: [] }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }))
+  it('shows actual working-preview values but blocks regulatory export when no immutable period exists', async () => {
+    const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.includes('/api/v1/finrep/periods')
+        ? { latest: null, periods: [] }
+        : finrepResponse(url.includes('F01.01') ? 'F01.01' : 'F02.00'),
+    ), { status: 200, headers: { 'content-type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
     const finrepCard = screen.getByText('CNB — Finanční výkazy (FINREP)').closest('.card')
     fireEvent.click(within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
-    expect(await screen.findByText(/A correct report cannot be rendered/i)).toBeInTheDocument()
-    expect(screen.getByTestId('export-blocked')).toHaveAttribute('data-block-reason', 'no_closed_periods')
+    expect(await screen.findByText(/Working preview of actual values/i)).toBeInTheDocument()
+    expect(screen.getByText(/Celková aktiva/)).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(String(fetchMock.mock.calls[1][0])).toContain('evidence=LIVE_PREVIEW')
+    expect(screen.getByTestId('export-blocked')).toHaveAttribute('data-block-reason', 'provisional_data')
     expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeDisabled()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('blocks export when COREP honestly reports a data gap', async () => {

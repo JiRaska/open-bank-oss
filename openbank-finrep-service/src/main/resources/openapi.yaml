@@ -23,7 +23,7 @@ info:
     FINREP output is a bounded preview containing only the official datapoints the platform can
     currently derive without inventing regulatory classifications; it is not a complete return.
     COREP preview gaps remain explicit flagged zeroes (`isDataGap`) with reasons.
-  version: 1.6.0
+  version: 1.7.0
 tags:
   - name: FINREP
   - name: COREP
@@ -94,6 +94,9 @@ paths:
         `templateId` values are `F01.01` (Assets), `F01.02` (Liabilities), `F01.03` (Equity) and
         `F02.00` (Profit & Loss); any other value is rejected. The bounded previews expose only
         datapoints that the current ledger can derive without inventing regulatory classifications.
+        `FROZEN` (the default) requires immutable FROZEN / LINES_V1 evidence. `LIVE_PREVIEW`
+        explicitly reads the mutable period aggregate for internal review only; callers must label
+        it provisional and must not export or submit it as a regulatory artefact.
       operationId: getFinrepTemplate
       parameters:
         - name: templateId
@@ -106,6 +109,11 @@ paths:
           required: false
           description: Reporting reference date, ISO yyyy-MM-dd. Defaults to today when omitted.
           schema: { type: string, format: date }
+        - name: evidence
+          in: query
+          required: false
+          description: Evidence source. LIVE_PREVIEW is mutable and for internal review only.
+          schema: { type: string, enum: [FROZEN, LIVE_PREVIEW], default: FROZEN }
       responses:
         '200':
           description: The rendered FINREP template
@@ -134,7 +142,9 @@ paths:
 
         The ledger's chart of accounts has no capital-structure GL accounts today, so every
         capital row comes back as an explicit zero with `isDataGap: true` and a `gapReason` — a
-        documented gap, never to be read as an attested zero balance.
+        documented gap, never to be read as an attested zero balance. `FROZEN` (the default)
+        requires immutable evidence; `LIVE_PREVIEW` is a mutable internal working view that must
+        never be exported or submitted as a regulatory artefact.
       operationId: getCorepTemplate
       parameters:
         - name: templateId
@@ -147,6 +157,11 @@ paths:
           required: false
           description: Reporting reference date, ISO yyyy-MM-dd. Defaults to today when omitted.
           schema: { type: string, format: date }
+        - name: evidence
+          in: query
+          required: false
+          description: Evidence source. LIVE_PREVIEW is mutable and for internal review only.
+          schema: { type: string, enum: [FROZEN, LIVE_PREVIEW], default: FROZEN }
       responses:
         '200':
           description: The rendered COREP template

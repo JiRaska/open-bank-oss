@@ -6,6 +6,7 @@ package com.openbank.finrep.infrastructure.rest
 
 import com.openbank.finrep.application.port.inbound.CorepUseCase
 import com.openbank.finrep.application.port.inbound.GetCorepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.domain.model.CorepTemplate
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
@@ -46,10 +47,15 @@ class CorepResource(private val corepUseCase: CorepUseCase, private val clock: C
     suspend fun getTemplate(
         @PathParam("templateId") templateId: String,
         @QueryParam("asOf") @DefaultValue("") asOf: String,
+        @QueryParam("evidence") @DefaultValue("FROZEN") evidence: String = "FROZEN",
     ): Response {
         val date = if (asOf.isBlank()) LocalDate.now(clock) else LocalDate.parse(asOf)
         val template: CorepTemplate = corepUseCase.getTemplate(
-            GetCorepTemplateQuery(templateId = templateId, asOf = date),
+            GetCorepTemplateQuery(
+                templateId = templateId,
+                asOf = date,
+                evidence = TrialBalanceEvidence.valueOf(evidence.uppercase()),
+            ),
         )
         return Response.ok(template).build()
     }

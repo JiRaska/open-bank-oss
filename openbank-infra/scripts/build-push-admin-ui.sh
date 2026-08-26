@@ -28,6 +28,7 @@
 #   AWS_REGION    eu-north-1
 #   AWS_PROFILE   openbank
 #   ADMIN_UI_IMAGE_TAG_SUFFIX  optional immutable CI retry suffix (`run<id>`)
+#   ADMIN_UI_BUILDX_TIMEOUT_SECONDS  CI-only upper bound for the image build (default: 1440)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -346,7 +347,7 @@ else
   echo "    sourcemaps: no GLITCHTIP_AUTH_TOKEN — upload skipped"
 fi
 
-docker buildx build \
+buildx_args=(
   "${SECRET_ARGS[@]}" \
   --platform "${PLATFORM}" \
   --file openbank-admin-ui/Dockerfile \
@@ -356,6 +357,25 @@ docker buildx build \
   --tag "${IMAGE}" \
   --push \
   .
+)
+
+# The GitHub job has a 30-minute ceiling, but an unbounded BuildKit invocation can consume the
+# entire deploy slot and leave no time for a useful failure or cleanup signal. GNU timeout is
+# available on the Linux CI runner; keep the local macOS path portable and unbounded, because
+# macOS does not ship that command. 24 minutes leaves time inside the job for attestation and the
+# GitOps handoff while making a hung daemon observable as an ordinary failed build.
+if command -v timeout >/dev/null 2>&1; then
+  BUILDX_TIMEOUT_SECONDS="${ADMIN_UI_BUILDX_TIMEOUT_SECONDS:-1440}"
+  if ! [[ "${BUILDX_TIMEOUT_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: ADMIN_UI_BUILDX_TIMEOUT_SECONDS must be a positive integer." >&2
+    exit 2
+  fi
+  echo "    buildx timeout: ${BUILDX_TIMEOUT_SECONDS}s (CI fail-fast guard)"
+  timeout --foreground --kill-after=30s "${BUILDX_TIMEOUT_SECONDS}s" docker buildx build "${buildx_args[@]}"
+else
+  echo "    buildx timeout: unavailable on this host; relying on the caller's process limit"
+  docker buildx build "${buildx_args[@]}"
+fi
 
 echo "==> pushed ${IMAGE}"
 

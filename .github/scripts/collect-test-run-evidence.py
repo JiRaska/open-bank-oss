@@ -102,12 +102,19 @@ def validate_envelope(envelope: dict) -> None:
         if item["kind"] not in SPECIALIZED_KINDS or item["state"] not in SPECIALIZED_STATES or not item["source"]:
             raise ValueError("specialized evidence values are invalid")
     for item in envelope.get("testCases", []):
-        if set(item) != {"fingerprint", "kind", "classname", "name", "state", "durationMs"}:
+        required_case_fields = {"fingerprint", "kind", "classname", "name", "state", "durationMs"}
+        if set(item) - (required_case_fields | {"testDefinitionPath"}) or not required_case_fields.issubset(item):
             raise ValueError("test case fields are invalid")
         if (not re.fullmatch(r"[0-9a-f]{24}", item["fingerprint"]) or item["kind"] not in SUITE_KINDS
                 or item["state"] not in {"passed", "failed", "skipped"}
                 or not item["classname"] or not item["name"] or item["durationMs"] < 0):
             raise ValueError("test case values are invalid")
+        path = item.get("testDefinitionPath")
+        if (path is not None and (
+                not re.fullmatch(r"src/test/(?:kotlin|java)/[A-Za-z0-9_./-]+\.(?:kt|java)", path)
+                or any(segment in {".", ".."} for segment in path.split("/"))
+        )):
+            raise ValueError("test case definition path is invalid")
     for item in envelope.get("diagnostics", []):
         if set(item) != {"kind", "suiteKind", "name", "url", "retentionDays", "access", "mayContainSensitiveData"}:
             raise ValueError("diagnostic artifact fields are invalid")
@@ -204,8 +211,26 @@ def suites(component: str, service: Path) -> list[dict]:
     return sorted(totals.values(), key=lambda row: row["kind"])
 
 
+def test_definition_path(service: Path, classname: str) -> str | None:
+    """Return a directly verified test source path, never an inferred production dependency.
+
+    JUnit's classname normally names the compiled Kotlin/Java test class. Nested classes map to
+    their enclosing source file. Non-JVM reporters (for example Playwright) deliberately return
+    no path: guessing would turn missing provenance into false impact-analysis evidence.
+    """
+    top_level = classname.split("$", 1)[0]
+    if not re.fullmatch(r"(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z_][A-Za-z0-9_]*", top_level):
+        return None
+    relative = Path(*top_level.split("."))
+    for language, suffix in (("kotlin", ".kt"), ("java", ".java")):
+        candidate = service / "src" / "test" / language / relative.with_suffix(suffix)
+        if candidate.is_file():
+            return candidate.relative_to(service).as_posix()
+    return None
+
+
 def test_cases(component: str, service: Path) -> list[dict]:
-    """Emit secret-free observations with a stable test-definition identity."""
+    """Emit secret-free observations with stable identity and verified test-source provenance."""
     result = []
     root = service / "build" / "test-results"
     for task, tree in junit_suites(root):
@@ -218,11 +243,15 @@ def test_cases(component: str, service: Path) -> list[dict]:
             state = "skipped" if case.find("skipped") is not None else "failed" if (
                 case.find("failure") is not None or case.find("error") is not None
             ) else "passed"
-            result.append({
+            item = {
                 "fingerprint": hashlib.sha256(identity.encode()).hexdigest()[:24],
                 "kind": kind, "classname": classname, "name": definition, "state": state,
                 "durationMs": max(0, round(float(case.attrib.get("time", 0)) * 1000)),
-            })
+            }
+            source_path = test_definition_path(service, classname)
+            if source_path is not None:
+                item["testDefinitionPath"] = source_path
+            result.append(item)
     return sorted(result, key=lambda item: (item["fingerprint"], item["state"]))
 
 
@@ -373,8 +402,8 @@ def main() -> None:
             for task, payload in (
                 ("test", '<testsuites name="vitest" tests="2" failures="1" errors="0" skipped="0" time="1.5">'
                           '<testsuite name="unit" tests="2" failures="1" errors="0" skipped="0" time="1.5">'
-                          '<testcase classname="guard" name="allows" time="0.5"/>'
-                          '<testcase classname="guard" name="denies" time="1.0"><failure/></testcase>'
+                          '<testcase classname="com.openbank.GuardTest" name="allows" time="0.5"/>'
+                          '<testcase classname="com.openbank.GuardTest" name="denies" time="1.0"><failure/></testcase>'
                           '<system-out>OPENBANK_TRACE_CONTRACT_V1:failed-contract\n'
                           'OPENBANK_TRACE_CONTRACT_V1:customer supplied trace id</system-out>'
                           '</testsuite></testsuites>'),
@@ -387,11 +416,16 @@ def main() -> None:
                 directory = service / "build/test-results" / task
                 directory.mkdir(parents=True, exist_ok=True)
                 (directory / f"{task}.xml").write_text(payload)
+            source = service / "src/test/kotlin/com/openbank/GuardTest.kt"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("package com.openbank\nclass GuardTest\n")
             discovered = {row["kind"]: row for row in suites("openbank-admin-ui", service)}
             assert set(discovered) == {"unit", "e2e"}, discovered
             assert (discovered["unit"]["discovered"], discovered["unit"]["failed"]) == (2, 1), discovered
             assert discovered["unit"]["state"] == "failed" and discovered["e2e"]["state"] == "passed"
-            assert len(test_cases("openbank-admin-ui", service)) == 3
+            cases = test_cases("openbank-admin-ui", service)
+            assert len(cases) == 3
+            assert {item.get("testDefinitionPath") for item in cases} == {"src/test/kotlin/com/openbank/GuardTest.kt", None}
             assert trace_contract_evidence(service) == [
                 {"kind": "trace", "state": "failed", "source": "trace-contract:failed-contract",
                  "detail": "1 executed marker(s); JUnit suite failed"},
@@ -430,6 +464,16 @@ def main() -> None:
                 "specializedEvidence": [{"kind": "performance", "state": "passed", "source": "summary.json"}],
                 "testCases": [],
             }
+            traversal = {**valid, "testCases": [{
+                "fingerprint": "0123456789abcdef01234567", "kind": "integration",
+                "classname": "com.openbank.GuardTest", "name": "guards", "state": "passed",
+                "durationMs": 1, "testDefinitionPath": "src/test/kotlin/../../outside.kt",
+            }]}
+            try:
+                validate_envelope(traversal)
+                raise AssertionError("a traversing test definition path was accepted")
+            except ValueError:
+                pass
             (service / "playwright-report").mkdir()
             (service / "playwright-report/index.html").write_text("diagnostic")
             valid["diagnostics"] = browser_diagnostics(str(service / "playwright-report"), "1", 1, "https://github.com/JiRaska/open-bank-oss/actions/runs/1")
