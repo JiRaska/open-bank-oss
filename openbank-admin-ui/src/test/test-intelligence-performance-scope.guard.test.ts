@@ -34,5 +34,7 @@ describe('Test Intelligence performance coverage scope', () => {
     expect(source).toContain("row.plan?.blocker")
     expect(source).toContain("platform.runtime !== 'passed'")
     expect(source).toContain('<EvidenceGapQueue report={report} selectTab={setTab} />')
+    expect(source).toContain("{gaps.map(gap =>")
+    expect(source).not.toContain('gaps.slice(0, 12)')
   })
 })
