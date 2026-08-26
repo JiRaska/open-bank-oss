@@ -682,11 +682,22 @@ jobs:
           # The repository-wide artifact list is newest-first and every services-ci run
           # contributes two per changed service, so a single 100-item page never reaches a
           # snapshot. The `name=` filter is exact-match and these names carry the run id, so
-          # it cannot be used either: paginate and filter on the prefix (#6614).
-          for page in 1 2 3 4 5; do
+          # it cannot be used either. Snapshot density is measured as low as one per 1,000
+          # repository artifacts, so stop on the 30-snapshot product requirement rather than an
+          # arbitrary page count. The 100-page ceiling bounds GitHub API cost under pathological
+          # artifact churn; fewer results remain explicit in the rendered history (#6614).
+          snapshot_ids="${RUNNER_TEMP}/test-intelligence-snapshot-ids"
+          : > "${snapshot_ids}"
+          page=1
+          snapshot_count=0
+          while [ "${page}" -le 100 ] && [ "${snapshot_count}" -lt 30 ]; do
             api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
-              | python3 -c "import json,sys; [print(x['id']) for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('test-intelligence-snapshot-') and not x['expired']]" 2>/dev/null || true
-          done | head -30 \
+              | python3 -c "import json,sys; [print(x['id']) for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('test-intelligence-snapshot-') and not x['expired']]" \
+              >> "${snapshot_ids}" 2>/dev/null || true
+            snapshot_count="$(awk '!seen[$0]++' "${snapshot_ids}" | wc -l | tr -d ' ')"
+            page=$((page + 1))
+          done
+          awk '!seen[$0]++' "${snapshot_ids}" | head -30 \
             | while read -r artifact_id; do
                 [ -n "${artifact_id}" ] || continue
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "/tmp/test-intelligence-${artifact_id}.zip" 2>/dev/null || continue

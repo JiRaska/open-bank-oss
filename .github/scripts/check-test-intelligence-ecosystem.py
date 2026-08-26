@@ -159,6 +159,10 @@ def check(root: Path) -> list[str]:
     for needle in ("test-intelligence-run-openbank-admin-ui", "PLAYWRIGHT_JUNIT_OUTPUT_FILE", "outputFile.junit"):
         if needle not in ui_workflow:
             errors.append(f"Admin UI test producer is incomplete: {needle}")
+    deploy_workflow = text(root / ".github/workflows/admin-ui-deploy.yml")
+    for needle in ('snapshot_count}" -lt 30', 'page}" -le 100', "awk '!seen[$0]++'"):
+        if needle not in deploy_workflow:
+            errors.append(f"Test Intelligence history cannot reach its 30-snapshot contract: {needle}")
     synthetic_route = text(root / "openbank-admin-ui/src/app/api/test-intelligence/route.ts")
     for needle in ("kube_cronjob_status_last_schedule_time", "kube_cronjob_status_last_successful_time", "kube_job_status_failed"):
         if needle not in synthetic_route:
