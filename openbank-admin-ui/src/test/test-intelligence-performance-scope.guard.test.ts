@@ -25,4 +25,14 @@ describe('Test Intelligence performance coverage scope', () => {
     expect(scenarios).toContain('blocker: No isolated authenticated read-only money-path target')
     expect(workflow).toContain('DECLARED = ["openbank-product-catalog"]')
   })
+
+  it('keeps cross-layer evidence gaps visible from the primary operator view', () => {
+    const source = read()
+
+    expect(source).toContain("function EvidenceGapQueue")
+    expect(source).toContain("t('Fronta skutečných mezer důkazů', 'Real evidence-gap queue')")
+    expect(source).toContain("row.plan?.blocker")
+    expect(source).toContain("platform.runtime !== 'passed'")
+    expect(source).toContain('<EvidenceGapQueue report={report} selectTab={setTab} />')
+  })
 })

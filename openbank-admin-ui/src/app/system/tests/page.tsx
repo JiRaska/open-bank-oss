@@ -85,6 +85,37 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
   </section>
 }
 
+/**
+ * A cross-layer attention queue. It is derived from the same immutable report rather than
+ * maintained as another dashboard list: a planned schedule, generic mobile arrival or AI
+ * explanation must not hide the actual missing proof on a different tab.
+ */
+function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
+  const { t } = useLanguage()
+  const gaps: Array<{ id: string; tab: Tab; title: string; detail: string; state: EvidenceState }> = [
+    ...report.performance.filter(row => row.state !== 'passed' || row.plan?.blocker).map(row => ({
+      id: `performance-${row.id}`, tab: 'performance' as const, state: row.state,
+      title: t(`Výkon: ${row.id}`, `Performance: ${row.id}`),
+      detail: row.plan?.blocker ?? row.detail ?? t('Chybí aktuální performance evidence.', 'Current performance evidence is missing.'),
+    })),
+    ...report.syntheticJourneys.filter(row => row.status === 'planned' || row.state !== 'passed').map(row => ({
+      id: `synthetic-${row.id}`, tab: 'synthetic' as const, state: row.state,
+      title: t(`Syntetika: ${row.title}`, `Synthetic: ${row.title}`),
+      detail: row.blocker ?? row.falsifies,
+    })),
+    ...(report.clientExperiences ?? []).flatMap(client => client.rum.platforms?.filter(platform => platform.runtime !== 'passed').map(platform => ({
+      id: `rum-${client.id}-${platform.platform}`, tab: 'clients' as const, state: platform.runtime,
+      title: t(`Mobilní RUM: ${platform.platform}`, `Mobile RUM: ${platform.platform}`), detail: platform.detail,
+    })) ?? []),
+  ]
+  if (gaps.length === 0) return null
+  return <section aria-label={t('Fronta mezer důkazů', 'Evidence gap queue')} style={{ marginBottom: 18, border: '1px solid color-mix(in srgb, #d97706 40%, var(--border))', borderRadius: 14, padding: 16, background: 'linear-gradient(135deg, color-mix(in srgb, #d97706 7%, var(--surface-1)), var(--surface-1))' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', marginBottom: 10 }}><div><strong>{t('Fronta skutečných mezer důkazů', 'Real evidence-gap queue')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Odvozeno z aktuálního reportu — ne backlog podle dojmu. Otevři položku pro zdroj, plán a hranici tvrzení.', 'Derived from the current report — not an impression-based backlog. Open an item for its source, plan and claim boundary.')}</div></div><span style={{ color: '#d97706', fontWeight: 750 }}>{gaps.length}</span></div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 9 }}>{gaps.slice(0, 12).map(gap => <button key={gap.id} type="button" onClick={() => selectTab(gap.tab)} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, padding: 11, textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 9, background: 'var(--surface-1)' }}><span><strong style={{ fontSize: 12 }}>{gap.title}</strong><span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.35, marginTop: 4 }}>{gap.detail}</span></span><StateBadge state={gap.state} /></button>)}</div>
+    {gaps.length > 12 && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 10 }}>{t(`Zobrazeno prvních 12 z ${gaps.length} mezer; detailní inventář je v odpovídajících tabech.`, `Showing the first 12 of ${gaps.length} gaps; the detailed inventory is in the corresponding tabs.`)}</div>}
+  </section>
+}
+
 function EvidenceCell({ component, kind }: { component: ComponentTestPosture; kind: EvidenceKind }) {
   const evidence = component.evidence.find(item => item.kind === kind)
   if (!evidence) return <StateBadge state="not-run" />
@@ -363,6 +394,7 @@ export default function TestIntelligencePage() {
     />
     <TestIntelligenceFlow report={report} />
     {report && <AssuranceBoard report={report} selectTab={setTab} />}
+    {report && <EvidenceGapQueue report={report} selectTab={setTab} />}
     {report?.warnings.length ? <div style={{ marginBottom: 16, border: '1px solid #d97706', borderRadius: 8, padding: 12, color: '#d97706', fontSize: 12 }}><TriangleAlert size={14} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />{report.warnings.join(' · ')}</div> : null}
     <div role="group" aria-label={t('Přepínač pohledů kvality kódu', 'Code quality view')} style={{ display: 'flex', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>{tabs.map(tabDef => <button key={tabDef.id} type="button"
             aria-pressed={tab === tabDef.id} onClick={() => setTab(tabDef.id)} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '9px 13px', whiteSpace: 'nowrap', border: 'none', borderBottom: tab === tabDef.id ? '2px solid var(--accent)' : '2px solid transparent', background: 'none', color: tab === tabDef.id ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontWeight: tab === tabDef.id ? 650 : 450 }}><span aria-hidden="true">{tabDef.icon}</span>{tabDef.label}</button>)}</div>
