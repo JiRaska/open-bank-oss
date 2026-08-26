@@ -101,7 +101,7 @@ test('compliance pack detail exposes exact reviewed content, not a summary only'
   await json(page, '**/api/svc/lending-service/api/v1/lending/compliance-packs/proposals/pending', [])
 
   await page.goto('/lending/compliance-packs')
-  await page.getByText('CONSUMER_CREDIT').click()
+  await page.getByRole('button', { name: /Zobrazit detail|View details/ }).click()
   await expect(page.getByText(/Přesný obsah packu|Exact pack content/)).toBeVisible()
   await expect(page.getByText('"coolingOffDays": 14')).toBeVisible()
   await expect(page.getByText('checker@openbank.test')).toBeVisible()
