@@ -10,7 +10,7 @@
 // recorded sign-off; the agent never executes. Segregation of duties (approver ≠
 // author) is enforced by the agent.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot, UserRound } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -18,6 +18,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
 import { resolveAgentIdentity, type AgentIdentityRegistry } from '@/lib/governance/agentIdentity'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { claimSingleFlight, releaseSingleFlight } from '@/lib/single-flight'
 
 interface Proposal {
   id: string
@@ -60,6 +61,7 @@ export default function ApprovalsPage() {
   const [domainSources, setDomainSources] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const decisionInFlight = useRef(false)
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   // The enforced charter registry (agents.yaml). `null` while it is still being fetched or
@@ -112,6 +114,7 @@ export default function ApprovalsPage() {
   }, [])
 
   const decide = async (p: Proposal, approve: boolean) => {
+    if (!claimSingleFlight(decisionInFlight)) return
     setBusyId(p.id)
     try {
       const res = await fetch('/api/agent/proposals', {
@@ -129,6 +132,7 @@ export default function ApprovalsPage() {
     } catch {
       setError('unreachable')
     } finally {
+      releaseSingleFlight(decisionInFlight)
       setBusyId(null)
     }
   }
@@ -282,11 +286,11 @@ export default function ApprovalsPage() {
                     onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}
                     style={{ flex: 1, minWidth: 180, fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}
                   />
-                  <button type="button" aria-label={t(`Schválit návrh ${p.title}`, `Approve proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, true)} disabled={busyId === p.id}
+                  <button type="button" aria-label={t(`Schválit návrh ${p.title}`, `Approve proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, true)} disabled={busyId !== null}
                     style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #6ee7b7', background: '#ecfdf5', color: '#059669', cursor: 'pointer' }}>
                     <CheckCircle2 aria-hidden="true" size={14} /> {t('Schválit', 'Approve')}
                   </button>
-                  <button type="button" aria-label={t(`Zamítnout návrh ${p.title}`, `Reject proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, false)} disabled={busyId === p.id}
+                  <button type="button" aria-label={t(`Zamítnout návrh ${p.title}`, `Reject proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, false)} disabled={busyId !== null}
                     style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
                     <XCircle aria-hidden="true" size={14} /> {t('Zamítnout', 'Reject')}
                   </button>
