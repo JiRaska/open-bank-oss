@@ -8,6 +8,7 @@ import com.openbank.incentive.domain.OfferStatus
 import com.openbank.incentive.domain.PromoReservation
 import com.openbank.incentive.domain.StackingPolicy
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.observability.DomainMetrics
 import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -22,6 +23,7 @@ import java.util.UUID
 @Startup
 class IncentiveApplication(
     private val store: IncentiveStore,
+    private val metrics: DomainMetrics,
     @ConfigProperty(name = "openbank.incentive.code-pepper") configuredPepper: Optional<String>,
     @ConfigProperty(name = "openbank.incentive.reservation-ttl") private val reservationTtl: Duration,
 ) {
@@ -43,7 +45,10 @@ class IncentiveApplication(
         )
 
     suspend fun submit(id: UUID, actor: String) = store.submitOffer(id, actor)
-    suspend fun publish(id: UUID, actor: String, now: Instant = Instant.now()) = store.publishOffer(id, actor, now)
+    suspend fun publish(id: UUID, actor: String, now: Instant = Instant.now()): IncentiveOffer =
+        store.publishOffer(id, actor, now).also {
+            metrics.authzFourEyes(action = "incentive_offer_publish", outcome = "approved")
+        }
 
     suspend fun addCodes(id: UUID, codes: List<String>, actor: String, now: Instant = Instant.now()): Int {
         require(codes.isNotEmpty() && codes.none { it.isBlank() }) { "codes are required" }
