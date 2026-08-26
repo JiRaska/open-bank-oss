@@ -46,6 +46,7 @@ interface RegulatoryTemplate {
 type PreviewData =
   | { status: 'idle' | 'loading' }
   | { status: 'unavailable'; kind: BffFailure }
+  | { status: 'no-periods' }
   | { status: 'unsupported' }
   | { status: 'ready'; templates: RegulatoryTemplate[] }
 
@@ -66,12 +67,6 @@ const CELL_LABELS: Record<string, string> = {
   'F02.00:r010:c010': 'Celkové výnosy',
   'F02.00:r030:c010': 'Celkové náklady',
   'F02.00:r450:c010': 'Čistý zisk / ztráta',
-}
-
-/** The latest fully completed calendar quarter, never a moving live-date report. */
-function defaultReportingDate(now = new Date()): string {
-  const quarterStart = Math.floor(now.getUTCMonth() / 3) * 3
-  return new Date(Date.UTC(now.getUTCFullYear(), quarterStart, 0)).toISOString().slice(0, 10)
 }
 
 function cellLabel(template: RegulatoryTemplate, cell: RegulatoryCell): string {
@@ -247,9 +242,10 @@ export default function RegulatoryPage() {
   // export is being inspected.
   const [preview, setPreview] = useState<Report | null>(null)
   const [previewData, setPreviewData] = useState<PreviewData>({ status: 'idle' })
-  const [reportingDate, setReportingDate] = useState(() => defaultReportingDate())
+  const [reportingDate, setReportingDate] = useState('')
+  const [reportingPeriods, setReportingPeriods] = useState<string[]>([])
 
-  async function loadPreview(report: Report, asOf = reportingDate) {
+  async function loadPreview(report: Report, requestedAsOf?: string) {
     const paths = TEMPLATE_PATHS[report.id]
     if (!paths) {
       setPreviewData({ status: 'unsupported' })
@@ -257,6 +253,24 @@ export default function RegulatoryPage() {
     }
     setPreviewData({ status: 'loading' })
     try {
+      let asOf = requestedAsOf
+      if (!asOf) {
+        const periodsResponse = await fetch(svcUrl('finrep-service', '/api/v1/finrep/periods'), {
+          cache: 'no-store', signal: AbortSignal.timeout(15_000),
+        })
+        if (!periodsResponse.ok) {
+          setPreviewData({ status: 'unavailable', kind: await classifyBffFailure(periodsResponse) })
+          return
+        }
+        const available = await periodsResponse.json() as { latest: string | null; periods: string[] }
+        setReportingPeriods(available.periods)
+        if (!available.latest) {
+          setPreviewData({ status: 'no-periods' })
+          return
+        }
+        asOf = available.latest
+        setReportingDate(asOf)
+      }
       const results: TemplateLoadResult[] = await Promise.all(paths.map(async (path): Promise<TemplateLoadResult> => {
         const response = await fetch(svcUrl('finrep-service', path, { asOf }), {
           cache: 'no-store', signal: AbortSignal.timeout(15_000),
@@ -565,14 +579,15 @@ export default function RegulatoryPage() {
               <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', background: 'var(--surface-2)' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
                   {t('Referenční datum', 'Reference date')}
-                  <input
-                    type="date"
+                  <select
                     value={reportingDate}
                     onChange={e => setReportingDate(e.target.value)}
                     style={{ font: 'inherit', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 6px', background: 'var(--surface-1)' }}
-                  />
+                  >
+                    {reportingPeriods.map(period => <option key={period} value={period}>{period}</option>)}
+                  </select>
                 </label>
-                <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview)} disabled={previewData.status === 'loading'} aria-busy={previewData.status === 'loading'} aria-label={t('Načíst data pro náhled', 'Load preview data')}>
+                <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview, reportingDate || undefined)} disabled={previewData.status === 'loading' || !reportingDate} aria-busy={previewData.status === 'loading'} aria-label={t('Načíst data pro náhled', 'Load preview data')}>
                   <RefreshCw size={13} aria-hidden="true" className={previewData.status === 'loading' ? 'animate-spin' : ''} />
                   {t('Načíst data', 'Load data')}
                 </button>
@@ -583,6 +598,10 @@ export default function RegulatoryPage() {
             <div style={{ overflowY: 'auto', padding: '0' }}>
               {previewData.status === 'unavailable' ? (
                 <DataUnavailable kind={previewData.kind} service="FINREP / COREP service" feature={t('regulatorní šablony', 'regulatory templates')} lang="cs" dense />
+              ) : previewData.status === 'no-periods' ? (
+                <div style={{ padding: '20px', color: 'var(--text-secondary)', fontSize: '13px' }}>
+                  {t('Ledger zatím nemá žádné zmrazené měsíční období s neměnnou řádkovou evidencí. Výkaz nelze správně sestavit, dokud operátor nedokončí uzávěrku.', 'The ledger has no frozen monthly period with immutable line evidence yet. A correct report cannot be rendered until an operator completes the close.')}
+                </div>
               ) : (
                 <table className="data-table" style={{ width: '100%' }}>
                   <thead>

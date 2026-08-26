@@ -54,6 +54,7 @@
 export type PreviewLike =
   | { status: 'idle' | 'loading' }
   | { status: 'unavailable'; kind: string }
+  | { status: 'no-periods' }
   | { status: 'unsupported' }
   | { status: 'ready'; templates: ReadonlyArray<TemplateLike> }
 
@@ -83,6 +84,8 @@ export type ExportBlockReason =
   | 'no_data_source'
   /** The fetch to finrep-service failed (unreachable, unauthorized, …). */
   | 'source_unavailable'
+  /** Ledger has no immutable frozen month evidence from which a return may be rendered. */
+  | 'no_closed_periods'
   /** A template came back with no cells — malformed against the contract. */
   | 'missing_cells'
   /** At least one cell is a flagged data gap (`isDataGap`). */
@@ -109,6 +112,9 @@ export function evaluateExportReadiness(data: PreviewLike): ExportReadiness {
   }
   if (data.status === 'unavailable') {
     return { ok: false, reason: 'source_unavailable', templateIds: [] }
+  }
+  if (data.status === 'no-periods') {
+    return { ok: false, reason: 'no_closed_periods', templateIds: [] }
   }
   // Everything that is not `ready` is data we do not have: idle or still in flight. Tested via
   // `!== 'ready'` rather than by listing the two so that a future PreviewData variant defaults to
@@ -181,6 +187,10 @@ export function blockReasonCopy(
       return cs
         ? { title: 'Export je zablokován: zdroj dat není dostupný', detail: 'finrep-service neodpověděla, takže hodnoty nelze ověřit. Zkuste načtení zopakovat.' }
         : { title: 'Export blocked: data source unavailable', detail: 'finrep-service did not answer, so the values cannot be verified. Try loading again.' }
+    case 'no_closed_periods':
+      return cs
+        ? { title: 'Export je zablokován: chybí uzavřené období', detail: 'Ledger nemá žádné zmrazené měsíční období s neměnnou řádkovou evidencí (FROZEN / LINES_V1). Dokončete uzávěrku; živá předvaha se pro regulatorní výkaz nikdy nepoužije.' }
+        : { title: 'Export blocked: no closed reporting period', detail: 'The ledger has no frozen monthly period with immutable line evidence (FROZEN / LINES_V1). Complete the close; a live trial balance is never used for a regulatory return.' }
     case 'missing_cells':
       return cs
         ? { title: 'Export je zablokován: šablona je prázdná', detail: `Šablona ${list} se vrátila bez buněk. Podle kontraktu se vykresluje vždy každý řádek, takže jde o vadnou odpověď.` }

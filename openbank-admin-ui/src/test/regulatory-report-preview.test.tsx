@@ -28,6 +28,12 @@ afterEach(() => vi.unstubAllGlobals())
 describe('Regulatory report preview', () => {
   it('loads the two implemented FINREP templates through the authenticated BFF and renders their real cells', async () => {
     const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/v1/finrep/periods')) {
+        return new Response(JSON.stringify({ latest: '2026-06-30', periods: ['2026-06-30', '2026-05-31'] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
       const templateId = url.includes('F01.01') ? 'F01.01' : 'F02.00'
       return new Response(JSON.stringify(finrepResponse(templateId)), {
         status: 200,
@@ -45,15 +51,16 @@ describe('Regulatory report preview', () => {
     expect(finrepCard).not.toBeNull()
     fireEvent.click(within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
     await waitFor(() => {
       expect(screen.queryByText(/FINREP \/ COREP service/)).not.toBeInTheDocument()
       expect(screen.getByText(/Celková aktiva/)).toBeInTheDocument()
       expect(screen.getByText(/Čistý zisk \/ ztráta/)).toBeInTheDocument()
     })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F01.01?asOf=')
-    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F02.00?asOf=')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/svc/finrep-service/api/v1/finrep/periods')
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F01.01?asOf=2026-06-30')
+    expect(String(fetchMock.mock.calls[2][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F02.00?asOf=2026-06-30')
     expect(screen.getByText('finrep-service ← ledger trial balance (ne ClickHouse)')).toBeInTheDocument()
     expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Ready for internal export/)
     expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeEnabled()
@@ -73,17 +80,38 @@ describe('Regulatory report preview', () => {
     expect(finrepCard).not.toBeNull()
     fireEvent.click(within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     expect(screen.queryByText('Celková aktiva')).not.toBeInTheDocument()
     expect(screen.queryByText('Živý datový náhled')).not.toBeInTheDocument()
     expect(screen.queryByText('Dostupnost dat')).not.toBeInTheDocument()
   })
 
+  it('explains and blocks export when no immutable closed period exists', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ latest: null, periods: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    const finrepCard = screen.getByText('CNB — Finanční výkazy (FINREP)').closest('.card')
+    fireEvent.click(within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
+
+    expect(await screen.findByText(/A correct report cannot be rendered/i)).toBeInTheDocument()
+    expect(screen.getByTestId('export-blocked')).toHaveAttribute('data-block-reason', 'no_closed_periods')
+    expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeDisabled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('blocks export when COREP honestly reports a data gap', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-      templateId: 'C_01.00', period: '2026-06-30', hasDataGaps: true,
-      cells: [{ rowRef: 'r010', colRef: 'c010', value: 0, currency: 'CZK', isDataGap: true, gapReason: 'capital accounts unavailable' }],
-    }), { status: 200, headers: { 'content-type': 'application/json' } })))
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.includes('/api/v1/finrep/periods')
+        ? { latest: '2026-06-30', periods: ['2026-06-30'] }
+        : {
+            templateId: 'C_01.00', period: '2026-06-30', hasDataGaps: true,
+            cells: [{ rowRef: 'r010', colRef: 'c010', value: 0, currency: 'CZK', isDataGap: true, gapReason: 'capital accounts unavailable' }],
+          },
+    ), { status: 200, headers: { 'content-type': 'application/json' } })))
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
     const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
