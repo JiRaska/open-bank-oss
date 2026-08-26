@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
+import { filterTestCases, type TestTriageFilter } from '@/lib/test-intelligence-triage'
 import type {
   ComponentTestPosture, EvidenceKind, EvidenceState, TestIntelligenceReport,
 } from '@/lib/types/test-intelligence'
@@ -181,9 +182,19 @@ function Execution({ report }: { report: TestIntelligenceReport }) {
 
 function TestCases({ report }: { report: TestIntelligenceReport }) {
   const { t } = useLanguage()
+  const [filter, setFilter] = useState<TestTriageFilter>('all')
+  const [query, setQuery] = useState('')
   const flaky = report.testCases.filter(item => item.state === 'flaky')
   const failing = report.testCases.filter(item => item.state === 'failing')
   const wasted = report.testCases.reduce((sum, item) => sum + item.wastedDurationMs, 0)
+  const visibleTests = useMemo(() => filterTestCases(report.testCases, filter, query), [report.testCases, filter, query])
+  const filters: Array<{ id: TestTriageFilter; label: string }> = [
+    { id: 'all', label: t('Vše', 'All') },
+    { id: 'failing', label: t('Selhává', 'Failing') },
+    { id: 'flaky', label: t('Flaky', 'Flaky') },
+    { id: 'unstable', label: t('Nestabilní commit', 'Unstable commit') },
+    { id: 'skipped', label: t('Přeskočeno', 'Skipped') },
+  ]
   return <div style={{ display: 'grid', gap: 18 }}>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
       <Stat label="Tracked test definitions" value={report.testCases.length} />
@@ -194,16 +205,26 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
     <div style={{ padding: 12, border: '1px solid color-mix(in srgb, #16a34a 35%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12 }}>
       {t('Test je označen jako flaky až po úspěšném i neúspěšném pozorování stejného commitu. Vlastnictví vychází z CODEOWNERS. Triage nikdy nemění deterministický verdikt CI ani nepřeskakuje peněžní kontroly.', 'A test is marked flaky only after pass and fail observations on the same commit. Ownership comes from CODEOWNERS. Triage never changes the deterministic CI verdict or skips money-path controls.')}
     </div>
+    <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
+      <div role="group" aria-label={t('Filtr testovací triage', 'Test triage filter')} style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+        {filters.map(item => <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)} style={{ cursor: 'pointer', padding: '5px 9px', borderRadius: 999, border: `1px solid ${filter === item.id ? 'var(--accent)' : 'var(--border)'}`, color: filter === item.id ? 'var(--accent)' : 'var(--text-secondary)', background: filter === item.id ? 'color-mix(in srgb, var(--accent) 9%, var(--surface-1))' : 'var(--surface-1)', fontSize: 11, fontWeight: filter === item.id ? 700 : 500 }}>{item.label}</button>)}
+      </div>
+      <label style={{ display: 'grid', gap: 3, minWidth: 230, fontSize: 11, color: 'var(--text-secondary)' }}>
+        {t('Hledat v testech a provenance', 'Search tests and provenance')}
+        <input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('název, komponenta, owner, fingerprint…', 'name, component, owner, fingerprint…')} style={{ border: '1px solid var(--border)', borderRadius: 7, padding: '7px 9px', color: 'var(--text-primary)', background: 'var(--surface-1)' }} />
+      </label>
+    </div>
+    <div aria-live="polite" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t(`${visibleTests.length}/${report.testCases.length} testových definic odpovídá aktuální triage.`, `${visibleTests.length}/${report.testCases.length} test definitions match the active triage.`)}</div>
     <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
       <thead><tr>{['State', 'Test definition', 'Component', 'Kind', 'Owner', 'Runs', 'Failure rate', 'Avg duration', 'Failed runtime', 'Fingerprint'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
-      <tbody>{report.testCases.map(item => <tr key={item.fingerprint}>
+      <tbody>{visibleTests.map(item => <tr key={item.fingerprint}>
         <td style={tdStyle}><StateBadge state={item.state === 'stable' ? 'passed' : item.state === 'failing' ? 'failed' : item.state === 'skipped' ? 'skipped' : 'stale'} /></td>
         <td style={{ ...tdStyle, minWidth: 230 }}><strong>{item.name}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div>{item.sameCommitTransitions > 0 && <div style={{ color: '#d97706', fontSize: 10, marginTop: 3 }}>{item.sameCommitTransitions} same-commit pass/fail transition(s)</div>}</td>
         <td style={tdStyle}>{item.component}</td><td style={tdStyle}>{item.kind}</td><td style={tdStyle}>{item.owner}</td><td style={tdStyle}>{item.observations}</td>
         <td style={tdStyle}>{item.failureRate === null ? '—' : `${item.failureRate}%`}</td><td style={tdStyle}>{item.averageDurationMs} ms</td><td style={tdStyle}>{item.wastedDurationMs} ms</td>
         <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10 }}>{item.fingerprint}</td>
       </tr>)}</tbody>
-    </table>{report.testCases.length === 0 && <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Zatím nejsou uchovány žádné per-test obálky běhů. Verdikty sad zůstávají autoritativní.', 'No per-test run envelopes have been retained yet. Suite verdicts remain authoritative.')}</div>}</div>
+    </table>{report.testCases.length === 0 ? <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Zatím nejsou uchovány žádné per-test obálky běhů. Verdikty sad zůstávají autoritativní.', 'No per-test run envelopes have been retained yet. Suite verdicts remain authoritative.')}</div> : visibleTests.length === 0 ? <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Žádná testová definice neodpovídá vybrané triage. Filtr neznamená změnu CI verdiktu.', 'No test definition matches the selected triage. Filtering does not change the CI verdict.')}</div> : null}</div>
   </div>
 }
 
