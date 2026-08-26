@@ -208,6 +208,14 @@ export interface ClientExperienceEvidence {
     source?: 'prometheus' | 'tempo' | null
     sampledSpansLast7d?: number | null
     errorSpansLast7d?: number | null
+    /** A bounded inspection of sampled mobile traces.  This proves trace-context
+     * continuity only for the listed sampled traces; it is never a traffic estimate. */
+    backendCorrelations?: {
+      inspectedTraces: number
+      correlatedTraces: number
+      backendServices: string[]
+      truncated: boolean
+    } | null
     /** Capability and runtime attribution are deliberately separate: an untagged mobile span
      * proves arrival, never which OS emitted it. */
     platforms?: Array<{
@@ -252,6 +260,8 @@ export interface TestCaseHistory {
   kind: Extract<EvidenceKind, 'unit' | 'integration' | 'contract' | 'e2e' | 'simulation'>
   classname: string
   name: string
+  /** Verified path to the test definition; never a claimed production dependency. */
+  testDefinitionPath?: string | null
   owner: string
   state: 'stable' | 'flaky' | 'failing' | 'skipped'
   lastState: 'passed' | 'failed' | 'skipped'

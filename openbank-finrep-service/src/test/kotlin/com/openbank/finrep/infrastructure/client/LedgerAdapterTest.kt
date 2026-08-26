@@ -10,9 +10,31 @@ import io.smallrye.mutiny.Uni
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.time.LocalDate
 
 class LedgerAdapterTest {
+
+    @Test
+    fun `live preview uses the explicit mutable period endpoint and preserves the balance verdict`(): Unit =
+        runBlocking {
+            val client = mockk<LedgerRestClient>()
+            val asOf = LocalDate.parse("2026-07-31")
+            every { client.getLiveTrialBalance(asOf.toString()) } returns Uni.createFrom().item(
+                ClosedPeriodTrialBalanceResponse(
+                    period = "2026-07",
+                    balanced = true,
+                    lines = listOf(TrialBalanceLineResponse("1000", "ASSET", BigDecimal("1250.50"), "CZK")),
+                ),
+            )
+
+            val snapshot = LedgerAdapter(client).getLiveTrialBalance(asOf)
+
+            assertThat(snapshot.ledgerReportsBalanced).isTrue()
+            assertThat(snapshot.lines.single().net).isEqualByComparingTo("1250.50")
+            verify(exactly = 1) { client.getLiveTrialBalance("2026-07-31") }
+            verify(exactly = 0) { client.getTrialBalance(any()) }
+        }
 
     @Test
     fun `closed periods use the complete date range and preserve ledger evidence`(): Unit = runBlocking {

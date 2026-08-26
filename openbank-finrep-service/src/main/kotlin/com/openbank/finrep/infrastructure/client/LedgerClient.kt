@@ -52,6 +52,10 @@ interface LedgerRestClient {
     fun getTrialBalance(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
 
     @GET
+    @Path("/MONTH/{asOf}/trial-balance")
+    fun getLiveTrialBalance(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
+
+    @GET
     fun listClosedPeriods(
         @QueryParam("from") from: String,
         @QueryParam("to") to: String,
@@ -95,18 +99,25 @@ class LedgerAdapter(@RestClient private val client: LedgerRestClient) : LedgerPo
      */
     override suspend fun getTrialBalance(asOf: LocalDate): TrialBalanceSnapshot {
         val response = client.getTrialBalance(asOf.toString()).awaitSuspending()
-        return TrialBalanceSnapshot(
-            lines = response.lines.map { line ->
-                TrialBalanceLineDto(
-                    code = line.code,
-                    accountType = line.type,
-                    net = line.net,
-                    currency = line.currency,
-                )
-            },
-            ledgerReportsBalanced = response.balanced,
-        )
+        return response.toSnapshot()
     }
+
+    override suspend fun getLiveTrialBalance(asOf: LocalDate): TrialBalanceSnapshot {
+        val response = client.getLiveTrialBalance(asOf.toString()).awaitSuspending()
+        return response.toSnapshot()
+    }
+
+    private fun ClosedPeriodTrialBalanceResponse.toSnapshot(): TrialBalanceSnapshot = TrialBalanceSnapshot(
+        lines = lines.map { line ->
+            TrialBalanceLineDto(
+                code = line.code,
+                accountType = line.type,
+                net = line.net,
+                currency = line.currency,
+            )
+        },
+        ledgerReportsBalanced = balanced,
+    )
 
     override suspend fun listClosedPeriods(): List<ClosedPeriodDto> =
         client.listClosedPeriods(CLOSED_PERIODS_FROM, CLOSED_PERIODS_TO).awaitSuspending().map {

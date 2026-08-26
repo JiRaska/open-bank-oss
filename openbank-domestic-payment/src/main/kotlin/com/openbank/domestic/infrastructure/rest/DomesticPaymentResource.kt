@@ -14,6 +14,7 @@ import com.openbank.domestic.infrastructure.rest.dto.TransitionDomesticPaymentSt
 import com.openbank.domestic.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -27,6 +28,8 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.container.ContainerRequestContext
+import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
@@ -64,6 +67,7 @@ class DomesticPaymentResource(
     suspend fun createPayment(
         request: CreateDomesticPaymentRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @Context requestContext: ContainerRequestContext,
     ): Response {
         // #3104 — the guard below could not run when the header was ABSENT: JAX-RS injected null,
         // and `null.isNotBlank()` threw NPE, so the very case it exists for answered 500. `suspend`
@@ -79,7 +83,16 @@ class DomesticPaymentResource(
                 .build()
         }
 
-        val payment = paymentUseCase.createPayment(request.toCommand(idempotencyKey, actorId))
+        // SyntheticTaintRequestFilter accepts this flag only after authenticating a configured
+        // canary principal. Read its request property, never the caller's header or coroutine MDC,
+        // then persist it through the outbox boundary for asynchronous consumers.
+        val payment = paymentUseCase.createPayment(
+            request.toCommand(
+                idempotencyKey,
+                actorId,
+                requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
+            ),
+        )
         val responseBody = payment.toResponse()
         idempotencyStore.save(idempotencyKey, 201, objectMapper.writeValueAsString(responseBody))
 

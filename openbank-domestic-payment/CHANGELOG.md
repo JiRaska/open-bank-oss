@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.18.0...domestic-payment-v0.19.0) (2026-08-26)
+
+
+### Features
+
+* **domestic-payment:** persist trusted synthetic taint ([#7155](https://github.com/JiRaska/open-bank-oss/issues/7155)) ([536c84e](https://github.com/JiRaska/open-bank-oss/commit/536c84e741687963af055e23590a7c685004b675))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.17.0...domestic-payment-v0.18.0) (2026-08-24)
 
 

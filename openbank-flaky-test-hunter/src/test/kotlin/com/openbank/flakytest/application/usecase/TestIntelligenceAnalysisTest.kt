@@ -65,6 +65,36 @@ class TestIntelligenceAnalysisTest {
         }
     }
 
+    @Test
+    fun `started Testcontainers without matching stops is a distinct evidence finding`(): Unit = runBlocking {
+        coEvery { repository.findById(any()) } returns null
+        coEvery { llm.diagnose(any(), any()) } returns "The retained lifecycle evidence is incomplete."
+        coEvery { repository.save(any()) } answers { firstArg() }
+
+        val findings = service.analyze(
+            TestIntelligenceAnalysisRequest(
+                snapshotId = "run-lifecycle",
+                collectedAt = Instant.parse("2026-08-22T11:00:00Z"),
+                components = listOf(
+                    TestIntelligenceComponentInput(
+                        component = "openbank-ledger-service",
+                        moneyPath = true,
+                        evidence = listOf(TestIntelligenceEvidenceInput("integration", "passed")),
+                        declaredInfrastructure = listOf("postgres"),
+                        observedInfrastructureStarts = 2,
+                        observedInfrastructureStops = 1,
+                    ),
+                ),
+            ),
+        )
+
+        val finding = findings.single()
+        assertThat(finding.checkType).isEqualTo(FlakyTestCheckType.UNTERMINATED_TEST_INFRASTRUCTURE)
+        assertThat(finding.severity).isEqualTo(FindingSeverity.CRITICAL)
+        assertThat(finding.rawMetricValue).isEqualByComparingTo("1")
+        assertThat(finding.title).contains("2 test-infrastructure start", "1 stop")
+    }
+
     private fun analysisRequest() = TestIntelligenceAnalysisRequest(
         snapshotId = "run-42",
         collectedAt = Instant.parse("2026-08-22T11:00:00Z"),

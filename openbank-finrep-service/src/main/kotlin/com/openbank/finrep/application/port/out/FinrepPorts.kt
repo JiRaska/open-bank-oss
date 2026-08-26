@@ -46,5 +46,8 @@ data class ClosedPeriodDto(val periodType: String, val to: LocalDate, val status
 interface LedgerPort {
     suspend fun getTrialBalance(asOf: LocalDate): TrialBalanceSnapshot
 
+    /** Mutable period aggregate for an explicitly labelled internal working preview only. */
+    suspend fun getLiveTrialBalance(asOf: LocalDate): TrialBalanceSnapshot
+
     suspend fun listClosedPeriods(): List<ClosedPeriodDto>
 }

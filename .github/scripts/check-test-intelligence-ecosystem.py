@@ -104,8 +104,9 @@ def check(root: Path) -> list[str]:
         ("cron: '17 3 * * *'", "admin deployment refresh cadence drifted from the governed daily schedule"),
         ("github.event_name }}\" = \"schedule\"", "scheduled snapshot refresh does not use a unique immutable image tag"),
         ("github.event_name }}\" = \"workflow_run\"", "event-driven snapshot refresh does not use a unique immutable image tag"),
-        ("github.event.workflow_run.conclusion != 'success'", "ineligible workflow-run events can evict a valid pending Admin UI deploy"),
-        ("github.run_id || 'eligible'", "ineligible Admin UI deploy events do not use an isolated concurrency group"),
+        ("github.event.workflow_run.head_sha || 'eligible'", "workflow-run events can evict the current push/dispatch Admin UI deploy queue"),
+        ("git ls-remote origin refs/heads/main", "admin deployment does not reject a source commit that is stale before privileged build"),
+        ("Skipping stale source", "admin deployment does not make stale-source rejection observable"),
     ):
         if needle not in deploy:
             errors.append(message)

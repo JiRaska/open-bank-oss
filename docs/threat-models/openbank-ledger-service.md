@@ -238,6 +238,16 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-08-26** — `POST /api/v1/journals` now copies the trusted synthetic classification from
+  `SyntheticTaintRequestFilter` into the `JournalPosted` and derived `AccountBookedChanged` outbox
+  rows for that posting. The REST resource reads only the server-side request property after the
+  filter authenticates a configured canary principal; it does not trust a request header, JWT
+  claim, coroutine MDC value or unconfigured caller. **STRIDE-S/T:** a normal caller cannot label
+  a real ledger event synthetic, because the default is false and only the filter's fail-closed
+  decision is copied. No principal is configured and no regulatory consumer is changed here; this
+  neither activates a money-moving synthetic journey nor claims FINREP/COREP/AML exclusion.
+  Rollback: revert propagation, restoring false on newly written rows.
+
 - **2026-08-24** — Synthetic-journey taint now reaches this service over its existing internal FX REST edge through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or ledger-control bypass. It is the prerequisite for correctly classifying synthetic postings at a later persistence-backed ledger boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a `ledger.reverse`

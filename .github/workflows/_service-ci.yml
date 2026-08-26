@@ -64,6 +64,14 @@ on:
         required: false
         default: ""
         type: string
+      require_provider_pact_test:
+        # A targeted historical provider re-verification has a different contract from an
+        # ordinary fleet build: success must mean a provider result was actually published.
+        # Leave ordinary consumer-only/service-less modules unaffected.
+        description: "Fail when this targeted verification has no providerPactTest."
+        required: false
+        default: false
+        type: boolean
     secrets:
       PACT_BROKER_PASSWORD:
         # Must be declared here for the caller to pass it explicitly: an undeclared
@@ -751,6 +759,9 @@ jobs:
             echo "${SERVICE} exposes providerPactTest — provider verification will run."
           elif [ -n "$provider_test" ]; then
             echo "::error::${SERVICE} has ${provider_test} but does not expose providerPactTest. Apply the service convention or register an equivalent provider task."
+            exit 1
+          elif [ "${{ inputs.require_provider_pact_test }}" = "true" ]; then
+            echo "::error::${SERVICE} at ${PACT_PROVIDER_VERSION} has no providerPactTest. No Pact provider verification was published; do not treat this targeted run as deployment evidence."
             exit 1
           else
             echo "available=false" >> "$GITHUB_OUTPUT"

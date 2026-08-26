@@ -6,6 +6,7 @@ package com.openbank.finrep.infrastructure.rest
 
 import com.openbank.finrep.application.port.inbound.CorepUseCase
 import com.openbank.finrep.application.port.inbound.GetCorepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.domain.model.CorepCell
 import com.openbank.finrep.domain.model.CorepTemplate
 import io.mockk.coEvery
@@ -63,6 +64,7 @@ class CorepResourceTest {
         assertThat(resp.entity).isEqualTo(expected)
         assertThat(captured.captured.asOf).isEqualTo(LocalDate.now(fixedClock))
         assertThat(captured.captured.templateId).isEqualTo("C_01.00")
+        assertThat(captured.captured.evidence).isEqualTo(TrialBalanceEvidence.FROZEN)
     }
 
     @Test
