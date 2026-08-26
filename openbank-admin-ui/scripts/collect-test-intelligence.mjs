@@ -29,9 +29,11 @@ const trustedRunUrl = (value, runId) => {
   if (!value) return false
   try {
     const url = new URL(String(value))
+    const parts = url.pathname.split('/')
     return url.protocol === 'https:' && url.hostname === 'github.com'
       && !url.search && !url.hash
-      && new RegExp(`^/[^/]+/[^/]+/actions/runs/${String(runId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`).test(url.pathname)
+      && parts.length === 6 && Boolean(parts[1]) && Boolean(parts[2])
+      && parts[3] === 'actions' && parts[4] === 'runs' && parts[5] === String(runId)
   } catch { return false }
 }
 const unsafeRunWarnings = new Set()
