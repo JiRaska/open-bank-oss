@@ -17,7 +17,11 @@ describe('Test Intelligence agent BFF', () => {
     vi.stubGlobal('fetch', fetchMock)
     const { GET } = await import('@/app/api/test-intelligence/agents/route')
     const body = await (await GET()).json()
-    expect(body).toEqual({ findings: [{ ...finding, checkType: 'advisory', detectedAt: '', rootCause: null, proposalUrl: null, status: 'open' }], available: true })
+    expect(body).toEqual({
+      findings: [{ ...finding, checkType: 'advisory', detectedAt: '', rootCause: null, proposalUrl: null, status: 'open' }],
+      available: true,
+      governance: { activePrompt: 'system.v2', evalEvidence: 'missing-suite' },
+    })
     expect(new Headers(fetchMock.mock.calls[0][1].headers).get('Authorization')).toBe('Bearer viewer-token')
   })
 

@@ -218,7 +218,7 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "81928b131b4bf83d",
+      "sha256": "2a5250af4a6d24c1",
       "counts": {
         "external": 2,
         "not-applicable": 2,
@@ -249,6 +249,55 @@
           "flaky-test-hunter",
           "case-coordinator"
         ]
+      },
+      "promptsByCharter": {
+        "compliance-officer": [
+          "oversight.v1"
+        ],
+        "ui-assistant": [
+          "system.v1",
+          "system.v2",
+          "system.v3",
+          "catalog-review.v1"
+        ],
+        "customer-copilot": [
+          "system.v1"
+        ],
+        "devops-agent": [
+          "diagnosis.v1",
+          "remediation.v1"
+        ],
+        "control-liveness-sentinel": [
+          "system.v1",
+          "system.v2",
+          "system.v3"
+        ],
+        "rca-investigator": [],
+        "ledger-domain-engineer": [],
+        "mcp-anonymous": [],
+        "ap2-anonymous": [],
+        "finops-agent": [
+          "system.v1"
+        ],
+        "governance-auditor": [
+          "system.v1"
+        ],
+        "release-steward": [
+          "system.v1"
+        ],
+        "docs-truth-agent": [
+          "system.v1"
+        ],
+        "authz-policy-auditor": [
+          "system.v1"
+        ],
+        "flaky-test-hunter": [
+          "system.v1",
+          "system.v2"
+        ],
+        "case-coordinator": [
+          "system.v1"
+        ]
       }
     },
     "evals": {
@@ -257,7 +306,31 @@
       "baselinePresent": true,
       "defaultMinPassRate": 1.0,
       "overrideCount": 0,
-      "overrideCharters": []
+      "overrideCharters": [],
+      "suiteCharters": [
+        "compliance-officer",
+        "control-liveness-sentinel",
+        "customer-copilot",
+        "devops-agent",
+        "ui-assistant"
+      ],
+      "recordedCharters": [
+        "compliance-officer",
+        "control-liveness-sentinel",
+        "customer-copilot",
+        "devops-agent",
+        "ui-assistant"
+      ],
+      "missingSuiteCharters": [
+        "authz-policy-auditor",
+        "case-coordinator",
+        "docs-truth-agent",
+        "finops-agent",
+        "flaky-test-hunter",
+        "governance-auditor",
+        "release-steward"
+      ],
+      "missingRecordingCharters": []
     },
     "registryPromptLoaders": {
       "services": [
