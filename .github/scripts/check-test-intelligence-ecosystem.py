@@ -169,11 +169,12 @@ def check(root: Path) -> list[str]:
     if 'traces_spanmetrics_calls_total{service=~"openbank-app.*"}' not in synthetic_route:
         errors.append("mobile RUM projection lost its Prometheus error/fallback signal")
     testing_page = text(root / "openbank-admin-ui/src/app/system/tests/page.tsx")
-    for needle in ("report.totals.unknownEvidence", "point.unknownEvidence", "Unknown evidence"):
+    for needle in ("report.totals.unknownEvidence", "report.totals.unresolvedEvidence", "point.unresolvedEvidence", "Unresolved evidence"):
         if needle not in testing_page:
             errors.append(f"Admin UI can render unknown evidence as healthy: {needle}")
-    if "unknownEvidence" not in collector:
-        errors.append("collector does not total unknown evidence separately from green execution")
+    for needle in ("unknownEvidence", "unresolvedEvidence", "['unknown', 'not-run', 'blocked']"):
+        if needle not in collector:
+            errors.append(f"collector can aggregate unresolved evidence as green: {needle}")
     synthetic_workflow = text(root / ".github/workflows/synthetic-journeys.yml")
     for needle, message in (
         ("--extract public-edge", "synthetic CI does not execute the ConfigMap-mounted runtime artifact"),

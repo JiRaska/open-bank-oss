@@ -73,9 +73,10 @@ Absence is not zero. `0 tests executed` is a valid observed result; `not-run` me
 artifact was collected. Missing and stale required evidence are attention states, never silently
 excluded from an average.
 
-The fleet totals and history count `unknown` observations explicitly. A component may have other
-passing suites and still contribute unknown evidence; the assurance map remains neutral rather than
-turning an unresolved contract or control verdict green.
+The fleet totals and history count both `unknown` and unresolved (`unknown`, `not-run`, `blocked`)
+observations explicitly. A component may have other passing suites and still contribute unresolved
+evidence; the assurance map remains neutral rather than turning an unresolved contract, performance
+run or control verdict green.
 
 Every reusable service build also emits `test-intelligence-run.schema.json` v1. Its run identity is
 the GitHub run id plus attempt, and it carries commit, branch, workflow, URL and observation time.
