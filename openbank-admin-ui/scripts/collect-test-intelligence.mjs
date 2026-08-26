@@ -25,6 +25,26 @@ const exists = file => fs.existsSync(file)
 const readJson = file => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return null }
 }
+const trustedRunUrl = (value, runId) => {
+  if (!value) return false
+  try {
+    const url = new URL(String(value))
+    return url.protocol === 'https:' && url.hostname === 'github.com'
+      && !url.search && !url.hash
+      && new RegExp(`^/[^/]+/[^/]+/actions/runs/${String(runId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`).test(url.pathname)
+  } catch { return false }
+}
+const unsafeRunWarnings = new Set()
+const safeRun = (run, source) => {
+  if (!run || !trustedRunUrl(run.url, run.id)) {
+    if (run && !unsafeRunWarnings.has(source)) {
+      warnings.push(`untrusted run URL omitted: ${source}`)
+      unsafeRunWarnings.add(source)
+    }
+    return undefined
+  }
+  return { ...run, id: String(run.id), attempt: Number(run.attempt), url: String(run.url) }
+}
 const observedAt = file => {
   try { return fs.statSync(file).mtime.toISOString() } catch { return null }
 }
@@ -121,10 +141,7 @@ function runEnvelope(component) {
   const file = path.join(repo, component, 'build', 'test-intelligence', 'run.json')
   const run = readJson(file)
   if (!run || run.schemaVersion !== 1 || run.component !== component || !Array.isArray(run.suites)) return null
-  const provenance = run.run ? {
-    id: String(run.run.id), attempt: Number(run.run.attempt), commit: String(run.run.commit),
-    branch: String(run.run.branch), workflow: String(run.run.workflow), url: String(run.run.url),
-  } : undefined
+  const provenance = safeRun(run.run, component)
   return {
     evidence: [...run.suites.map(suite => ({
       kind: suite.kind, state: suite.state, observedAt: run.run?.observedAt ?? observedAt(file),
@@ -290,11 +307,12 @@ async function mutations(components) {
     const at = observedAt(file)
     const mutationRun = readJson(path.join(path.dirname(file), 'test-intelligence-run.json'))
     const specialized = mutationRun?.specializedEvidence?.find(item => item.kind === 'mutation')
+    const provenance = safeRun(mutationRun?.run, `mutation:${component}`)
     result.push({
       component, state: specialized?.state ?? stateFrom(0, items.length, at), observedAt: mutationRun?.run?.observedAt ?? at,
       total: items.length, killed, survived, noCoverage,
       score: items.length ? Math.round((killed / items.length) * 10_000) / 100 : null,
-      ...(mutationRun?.run ? { run: mutationRun.run } : {}),
+      ...(provenance ? { run: provenance } : {}),
     })
   }
   return result
@@ -368,6 +386,7 @@ function performance() {
       requests: number(summary.metrics?.http_reqs?.values?.count ?? summary.metrics?.http_reqs?.count),
     } : undefined
     const at = summaryFile ? observedAt(summaryFile) : null
+    const provenance = safeRun(performanceRun?.run ?? summaryMeta?.run, `performance:${id}`)
     return {
       id, component,
       state: specialized?.state ?? (summary ? stateFrom(failed, 1, at) : 'not-run'),
@@ -384,7 +403,7 @@ function performance() {
       detail: specialized?.detail ?? (summary
         ? `${thresholdResults.length} threshold result(s), ${failed} breached`
         : 'Scenario is declared; the latest k6 run artifact is not bundled into this image.'),
-      ...((performanceRun?.run ?? summaryMeta?.run) ? { run: performanceRun?.run ?? summaryMeta.run } : {}),
+      ...(provenance ? { run: provenance } : {}),
     }
   })
 }
@@ -398,11 +417,13 @@ function syntheticJourneys() {
       .map(readJson).filter(item => item?.schemaVersion === 1 && item?.run)
       .sort((a, b) => Date.parse(a.run.observedAt) - Date.parse(b.run.observedAt))
     for (const envelope of history) {
+      const provenance = safeRun(envelope.run, `synthetic:${envelope.component ?? 'unknown'}`)
       for (const evidence of envelope.specializedEvidence ?? []) {
         if (evidence.kind !== 'synthetic' || !evidence.source?.startsWith('journey:')) continue
         latestCi.set(evidence.source.slice('journey:'.length), {
           state: evidence.state, observedAt: envelope.run.observedAt,
-          detail: evidence.detail ?? 'Synthetic run retained without detail.', run: envelope.run,
+          detail: evidence.detail ?? 'Synthetic run retained without detail.',
+          ...(provenance ? { run: provenance } : {}),
         })
       }
     }
@@ -484,12 +505,15 @@ async function clientExperiences() {
   const androidRum = exists(path.join(appSource, 'shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt'))
   const iosRum = exists(path.join(appSource, 'shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt'))
   const webEvidence = runEnvelope('openbank-admin-ui')?.evidence ?? await junitEvidence('openbank-admin-ui')
-  const mobileEvidence = [...latestMobileSuites.values()].map(({ suite: item, run }) => ({
-    kind: item.kind, state: clientEvidenceState(item, run.run?.observedAt ?? null), observedAt: run.run?.observedAt ?? null,
-    source: 'openbank-app-test-intelligence:v1', environment: 'ci', durationMs: item.durationMs,
-    counts: item.counts, detail: item.detail,
-    ...(run.run ? { run: run.run } : {}),
-  }))
+  const mobileEvidence = [...latestMobileSuites.values()].map(({ suite: item, run }) => {
+    const provenance = safeRun(run.run, `client:${run.component ?? 'openbank-app'}`)
+    return {
+      kind: item.kind, state: clientEvidenceState(item, run.run?.observedAt ?? null), observedAt: run.run?.observedAt ?? null,
+      source: 'openbank-app-test-intelligence:v1', environment: 'ci', durationMs: item.durationMs,
+      counts: item.counts, detail: item.detail,
+      ...(provenance ? { run: provenance } : {}),
+    }
+  })
   if (!latestMobile) warnings.push('openbank-app execution artifact is not bundled; mobile test verdict is not inferred from source.')
   return [
     {
@@ -594,18 +618,24 @@ async function main() {
     `${item.component}:${item.run.id}:${item.run.attempt}`, item,
   ]))
   const serviceRunHistory = [...uniqueServiceRuns.values()]
-    .map(item => ({ component: item.component, run: item.run,
-      states: Object.fromEntries([
-        ...(item.suites ?? []).map(suite => [suite.kind, suite.state]),
-        ...(item.specializedEvidence ?? []).map(evidence => [evidence.kind, evidence.state]),
-      ]),
-      infrastructureStarted: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'started').length,
-      infrastructureStopped: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'stopped').length }))
-  const clientRunHistory = mobileClientRuns().map(item => ({
-    component: item.component, run: item.run,
-    states: Object.fromEntries((item.suites ?? []).map(suite => [suite.kind, suite.state])),
-    infrastructureStarted: 0, infrastructureStopped: 0,
-  }))
+    .map(item => {
+      const run = safeRun(item.run, `history:${item.component}`)
+      return run ? { component: item.component, run,
+        states: Object.fromEntries([
+          ...(item.suites ?? []).map(suite => [suite.kind, suite.state]),
+          ...(item.specializedEvidence ?? []).map(evidence => [evidence.kind, evidence.state]),
+        ]),
+        infrastructureStarted: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'started').length,
+        infrastructureStopped: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'stopped').length } : null
+    }).filter(Boolean)
+  const clientRunHistory = mobileClientRuns().map(item => {
+    const run = safeRun(item.run, `history:${item.component ?? 'openbank-app'}`)
+    return run ? {
+      component: item.component, run,
+      states: Object.fromEntries((item.suites ?? []).map(suite => [suite.kind, suite.state])),
+      infrastructureStarted: 0, infrastructureStopped: 0,
+    } : null
+  }).filter(Boolean)
   const runHistory = [...serviceRunHistory, ...clientRunHistory]
     .sort((a, b) => Date.parse(b.run.observedAt) - Date.parse(a.run.observedAt)).slice(0, 500)
   const report = {

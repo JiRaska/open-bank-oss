@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import tempfile
+from urllib.parse import urlparse
 
 
 SUITE_KINDS = {"unit", "integration", "contract", "e2e", "simulation"}
@@ -20,6 +21,16 @@ SPECIALIZED_KINDS = {"performance", "mutation", "synthetic", "trace"}
 SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
 INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
 DIAGNOSTIC_KINDS = {"playwright-report"}
+
+
+def trusted_run_url(url: str, run_id: str) -> bool:
+    """Accept only a canonical GitHub Actions run URL for this envelope id."""
+    if not url:
+        return True  # local/offline envelopes have no outbound link
+    parsed = urlparse(url)
+    return (parsed.scheme == "https" and parsed.hostname == "github.com"
+            and not parsed.params and not parsed.query and not parsed.fragment
+            and re.fullmatch(rf"/[^/]+/[^/]+/actions/runs/{re.escape(str(run_id))}", parsed.path) is not None)
 
 
 def validate_envelope(envelope: dict) -> None:
@@ -32,7 +43,8 @@ def validate_envelope(envelope: dict) -> None:
     run = envelope["run"]
     if set(run) != {"id", "attempt", "commit", "branch", "workflow", "url", "observedAt"}:
         raise ValueError("run provenance fields are incomplete")
-    if not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"] or not run["workflow"]:
+    if (not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"]
+            or not run["workflow"] or not trusted_run_url(str(run["url"]), str(run["id"]))):
         raise ValueError("run provenance values are invalid")
     for suite in envelope["suites"]:
         if suite["kind"] not in SUITE_KINDS or suite["state"] not in SUITE_STATES:
@@ -390,7 +402,7 @@ def main() -> None:
             assert synthetic == [{"kind": "synthetic", "state": "failed", "source": "journey:public-edge", "detail": "1 threshold result(s), 1 breached"}]
             valid = {
                 "schemaVersion": 1,
-                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://example.test/actions/runs/1", "observedAt": "2026-08-22T00:00:00Z"},
+                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "observedAt": "2026-08-22T00:00:00Z"},
                 "component": "openbank-x",
                 "suites": [{"kind": "integration", "state": "passed", "discovered": 1, "executed": 1, "passed": 1, "failed": 0, "skipped": 0, "errors": 0, "durationMs": 1}],
                 "coverage": None,
@@ -400,13 +412,20 @@ def main() -> None:
             }
             (service / "playwright-report").mkdir()
             (service / "playwright-report/index.html").write_text("diagnostic")
-            valid["diagnostics"] = browser_diagnostics(str(service / "playwright-report"), "1", 1, "https://example.test/actions/runs/1")
+            valid["diagnostics"] = browser_diagnostics(str(service / "playwright-report"), "1", 1, "https://github.com/JiRaska/open-bank-oss/actions/runs/1")
             assert valid["diagnostics"] == [{
                 "kind": "playwright-report", "suiteKind": "e2e", "name": "playwright-report-1-a1",
-                "url": "https://example.test/actions/runs/1#artifacts", "retentionDays": 7,
+                "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1#artifacts", "retentionDays": 7,
                 "access": "github-run-authenticated", "mayContainSensitiveData": True,
             }]
             validate_envelope(valid)
+            untrusted_run = json.loads(json.dumps(valid))
+            untrusted_run["run"]["url"] = "https://attacker.example/actions/runs/1"
+            try:
+                validate_envelope(untrusted_run)
+                raise AssertionError("an untrusted run URL must be rejected")
+            except ValueError:
+                pass
             untrusted_diagnostic = json.loads(json.dumps(valid))
             untrusted_diagnostic["diagnostics"][0]["url"] = "https://attacker.example/report"
             try:

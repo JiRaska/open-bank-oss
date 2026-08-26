@@ -64,7 +64,7 @@ money_path_accountability:
     } }))
     write(repo, 'openbank-admin-ui/perf-artifacts/openbank-alpha-service-run.json', JSON.stringify({
       schemaVersion: 1,
-      run: { id: 'perf-42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Performance gate', url: 'https://example.test/perf/42', observedAt: '2026-08-25T06:00:00Z' },
+      run: { id: 'perf-42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Performance gate', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/perf-42', observedAt: '2026-08-25T06:00:00Z' },
       component: 'openbank-alpha-service', suites: [], coverage: null,
       testInfrastructure: { declared: [], observed: [] },
       specializedEvidence: [{ kind: 'performance', state: 'passed', source: 'summary.json', detail: '3 threshold result(s), 0 breached' }],
@@ -84,14 +84,14 @@ scenarios:
 `)
     write(repo, 'openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json', JSON.stringify({
       schemaVersion: 1,
-      run: { id: 'baseline-7', attempt: 1, commit: 'fedcba987654', branch: 'main', workflow: 'Perf baseline', url: 'https://example.test/perf/baseline-7', observedAt: '2026-08-25T07:00:00Z' },
+      run: { id: 'baseline-7', attempt: 1, commit: 'fedcba987654', branch: 'main', workflow: 'Perf baseline', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/baseline-7', observedAt: '2026-08-25T07:00:00Z' },
       component: 'openbank-money-path', suites: [], coverage: null,
       testInfrastructure: { declared: [], observed: [] },
       specializedEvidence: [{ kind: 'performance', state: 'not-run', source: 'perf-summary.json', detail: 'No safe money-path target is configured for this GitHub-hosted runner.' }],
     }))
     write(repo, 'openbank-admin-ui/test-run-history/synthetic.json', JSON.stringify({
       schemaVersion: 1,
-      run: { id: 'synthetic-9', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Synthetic journeys', url: 'https://example.test/synthetic/9', observedAt: '2026-08-25T08:00:00Z' },
+      run: { id: 'synthetic-9', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Synthetic journeys', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/synthetic-9', observedAt: '2026-08-25T08:00:00Z' },
       component: 'openbank-platform', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
       specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:edge', detail: '2 threshold result(s), 0 breached' }],
     }))
@@ -161,7 +161,7 @@ scenarios:
     write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
     write(repo, 'openbank-alpha-service/build/test-intelligence/run.json', JSON.stringify({
       schemaVersion: 1,
-      run: { id: '42', attempt: 2, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/42', observedAt: '2026-08-22T10:00:00Z' },
+      run: { id: '42', attempt: 2, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/42', observedAt: '2026-08-22T10:00:00Z' },
       component: 'openbank-alpha-service',
       suites: [
         { kind: 'integration', state: 'passed', discovered: 3, executed: 3, passed: 3, failed: 0, skipped: 0, errors: 0, durationMs: 900 },
@@ -175,13 +175,13 @@ scenarios:
         { resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'stopped', observedAt: '2026-08-22T10:00:00Z' },
       ] },
       diagnostics: [
-        { kind: 'playwright-report', suiteKind: 'e2e', name: 'playwright-report-42-a2', url: 'https://example.test/run/42#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true },
+        { kind: 'playwright-report', suiteKind: 'e2e', name: 'playwright-report-42-a2', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/42#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true },
         { kind: 'playwright-report', suiteKind: 'e2e', name: 'playwright-report-phishing', url: 'https://attacker.example/report', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true },
       ],
     }))
     write(repo, 'openbank-admin-ui/test-run-history/previous.json', JSON.stringify({
       schemaVersion: 1,
-      run: { id: '41', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/41', observedAt: '2026-08-22T09:00:00Z' },
+      run: { id: '41', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/41', observedAt: '2026-08-22T09:00:00Z' },
       component: 'openbank-alpha-service', suites: [], coverage: null,
       testCases: [{ fingerprint: '0123456789abcdef01234567', kind: 'integration', classname: 'com.openbank.PaymentApiIT', name: 'books payment', state: 'failed', durationMs: 500 }],
       testInfrastructure: { declared: [], observed: [] },
@@ -195,7 +195,7 @@ scenarios:
       detail: '1 executed marker(s); JUnit suite passed', run: { id: '42', attempt: 2 },
     })
     expect(report.components[0].evidence.find(item => item.kind === 'e2e')).toMatchObject({
-      state: 'failed', diagnostics: [{ kind: 'playwright-report', name: 'playwright-report-42-a2', url: 'https://example.test/run/42#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true }],
+      state: 'failed', diagnostics: [{ kind: 'playwright-report', name: 'playwright-report-42-a2', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/42#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true }],
     })
     expect(report.components[0].evidence.find(item => item.kind === 'e2e')?.diagnostics).toHaveLength(1)
     expect(report.components[0].testInfrastructure.observed).toHaveLength(2)
@@ -214,7 +214,7 @@ scenarios:
     write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
     write(repo, 'openbank-simulation/build/test-intelligence/run.json', JSON.stringify({
       schemaVersion: 1,
-      run: { id: 'simulation-42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/simulation-42', observedAt: '2026-08-22T10:00:00Z' },
+      run: { id: 'simulation-42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/simulation-42', observedAt: '2026-08-22T10:00:00Z' },
       component: 'openbank-simulation',
       suites: [{ kind: 'simulation', state: 'passed', discovered: 51, executed: 51, passed: 51, failed: 0, skipped: 0, errors: 0, durationMs: 48_278 }],
       testCases: [{ fingerprint: '0123456789abcdef01234567', kind: 'simulation', classname: 'com.openbank.simulation.DstSimulationTest', name: 'holds every invariant', state: 'passed', durationMs: 100 }],
@@ -240,6 +240,31 @@ scenarios:
     expect(report.totals).toMatchObject({ componentsWithExecutionEvidence: 1, missingEvidence: 0 })
   })
 
+  it('keeps verdicts but omits outbound provenance from an untrusted run host', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-untrusted-run-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: '42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://attacker.example/actions/runs/42', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-alpha-service',
+      suites: [{ kind: 'unit', state: 'passed', discovered: 1, executed: 1, passed: 1, failed: 0, skipped: 0, errors: 0, durationMs: 10 }],
+      coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.components[0].evidence[0]).toMatchObject({ kind: 'unit', state: 'passed' })
+    expect(report.components[0].evidence[0].run).toBeUndefined()
+    expect(report.runHistory).toEqual([])
+    expect(report.warnings).toContain('untrusted run URL omitted: openbank-alpha-service')
+    expect(report.warnings).toContain('untrusted run URL omitted: history:openbank-alpha-service')
+  })
+
   it('projects immutable mobile CI evidence while keeping RUM runtime state independent', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-client-'))
     dirs.push(repo)
@@ -249,17 +274,17 @@ scenarios:
     write(repo, '.app-src/shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt', 'actual object RumMonitor')
     write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-unit.json', JSON.stringify({
       schemaVersion: 1, component: 'openbank-app',
-      run: { id: '9', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://example.test/9', observedAt: '2026-08-23T10:00:00Z' },
+      run: { id: '9', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://github.com/JiRaska/open-bank-app/actions/runs/9', observedAt: '2026-08-23T10:00:00Z' },
       suites: [{ kind: 'unit', state: 'passed', durationMs: 100, counts: { discovered: 2, executed: 2, passed: 2, failed: 0, skipped: 0, errors: 0 } }],
     }))
     write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-older.json', JSON.stringify({
       schemaVersion: 1, component: 'openbank-app',
-      run: { id: '8', attempt: 1, commit: 'older', branch: 'main', workflow: 'app build', url: 'https://example.test/8', observedAt: '2026-08-22T10:00:00Z' },
+      run: { id: '8', attempt: 1, commit: 'older', branch: 'main', workflow: 'app build', url: 'https://github.com/JiRaska/open-bank-app/actions/runs/8', observedAt: '2026-08-22T10:00:00Z' },
       suites: [{ kind: 'unit', state: 'failed', durationMs: 100, counts: { discovered: 2, executed: 2, passed: 1, failed: 1, skipped: 0, errors: 0 } }],
     }))
     write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-e2e.json', JSON.stringify({
       schemaVersion: 1, component: 'openbank-app',
-      run: { id: '10', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://example.test/10', observedAt: '2026-08-23T11:00:00Z' },
+      run: { id: '10', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://github.com/JiRaska/open-bank-app/actions/runs/10', observedAt: '2026-08-23T11:00:00Z' },
       suites: [{ kind: 'e2e', state: 'passed', durationMs: 200, counts: { discovered: 2, executed: 2, passed: 2, failed: 0, skipped: 0, errors: 0 } }],
     }))
     const out = path.join(repo, 'report.json')
@@ -283,12 +308,12 @@ scenarios:
     write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
     write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-unit.json', JSON.stringify({
       schemaVersion: 1, component: 'openbank-app',
-      run: { id: 'old-pass', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://example.test/old-pass', observedAt: '2020-01-01T00:00:00Z' },
+      run: { id: 'old-pass', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://github.com/JiRaska/open-bank-app/actions/runs/old-pass', observedAt: '2020-01-01T00:00:00Z' },
       suites: [{ kind: 'unit', state: 'passed', durationMs: 100, counts: { discovered: 1, executed: 1, passed: 1, failed: 0, skipped: 0, errors: 0 } }],
     }))
     write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-e2e.json', JSON.stringify({
       schemaVersion: 1, component: 'openbank-app',
-      run: { id: 'old-fail', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://example.test/old-fail', observedAt: '2020-01-01T00:00:00Z' },
+      run: { id: 'old-fail', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://github.com/JiRaska/open-bank-app/actions/runs/old-fail', observedAt: '2020-01-01T00:00:00Z' },
       suites: [{ kind: 'e2e', state: 'failed', durationMs: 100, counts: { discovered: 1, executed: 1, passed: 0, failed: 1, skipped: 0, errors: 0 } }],
     }))
     const out = path.join(repo, 'report.json')

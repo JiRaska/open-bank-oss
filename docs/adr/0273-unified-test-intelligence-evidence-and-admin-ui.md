@@ -77,6 +77,12 @@ passing verdict and its absence is not rewritten as success. Producer validation
 projection both require the diagnostic URL to equal the envelope's own run URL plus `#artifacts`;
 an arbitrary HTTPS link is rejected rather than rendered to an operator.
 
+The run URL itself is also an outbound security boundary. A linked run must be an HTTPS
+`github.com/<owner>/<repository>/actions/runs/<same-run-id>` URL with no query or fragment. The
+producer rejects a mismatched host or id. The deployment projection independently keeps the test
+verdict but omits untrusted provenance and emits a collection warning, so tampered evidence cannot
+turn the operator console into a phishing link.
+
 Absence is not zero. `0 tests executed` is a valid observed result; `not-run` means no applicable
 artifact was collected. Missing and stale required evidence are attention states, never silently
 excluded from an average.
