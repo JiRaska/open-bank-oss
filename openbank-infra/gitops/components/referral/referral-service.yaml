@@ -33,9 +33,17 @@ spec:
           ports:
             - name: http
               containerPort: 8155
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8086
           env:
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/referral-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/referral-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://referral-db-rw.referral.svc:5432/openbank_referral
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -84,9 +92,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: referral-tls
+              mountPath: /mnt/referral-tls
+              readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: referral-tls
+          secret:
+            secretName: referral-service-internal-tls
 ---
 apiVersion: v1
 kind: Service
@@ -103,6 +117,9 @@ spec:
     - name: http
       port: 8155
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
     - name: management
       port: 8086
       targetPort: management
