@@ -4,13 +4,14 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { Fingerprint, RefreshCw, ShieldAlert, Users, Check } from 'lucide-react'
+import { claimSingleFlight, releaseSingleFlight } from '@/lib/single-flight'
 
 const SVC = 'pid-service'
 
@@ -75,10 +76,12 @@ function DecisionForm({
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const mutationInFlight = useRef(false)
 
   const isSecond = c.status === 'AWAITING_SECOND_APPROVAL'
 
   const submit = useCallback(async () => {
+    if (!claimSingleFlight(mutationInFlight)) return
     setBusy(true)
     setError(null)
     try {
@@ -106,11 +109,13 @@ function DecisionForm({
     } catch {
       setError(t('Služba je nedostupná.', 'Service unavailable.'))
     } finally {
+      releaseSingleFlight(mutationInFlight)
       setBusy(false)
     }
   }, [verdict, linkPartyId, notes, c.id, onDecided, t])
 
   const reopen = useCallback(async () => {
+    if (!claimSingleFlight(mutationInFlight)) return
     setBusy(true)
     setError(null)
     try {
@@ -126,6 +131,7 @@ function DecisionForm({
     } catch {
       setError(t('Služba je nedostupná.', 'Service unavailable.'))
     } finally {
+      releaseSingleFlight(mutationInFlight)
       setBusy(false)
     }
   }, [c.id, onDecided, t])
@@ -198,12 +204,14 @@ function DecisionForm({
 
         <button type="button" aria-busy={busy} className="btn btn-primary" onClick={submit} disabled={busy} style={{ fontSize: '13px' }}>
           <Check size={14} aria-hidden="true" style={{ marginRight: '4px' }} />
-          {isSecond ? t('Potvrdit a rozhodnout', 'Confirm & decide') : t('Odeslat hlas', 'Submit vote')}
+          {busy
+            ? t('Odesílám…', 'Submitting…')
+            : isSecond ? t('Potvrdit a rozhodnout', 'Confirm & decide') : t('Odeslat hlas', 'Submit vote')}
         </button>
 
         {isSecond && (
           <button type="button" aria-busy={busy} className="btn btn-secondary" onClick={reopen} disabled={busy} style={{ fontSize: '13px' }}>
-            {t('Znovu otevřít', 'Reopen')}
+            {busy ? t('Pracuji…', 'Working…') : t('Znovu otevřít', 'Reopen')}
           </button>
         )}
       </div>
