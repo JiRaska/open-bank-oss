@@ -15,6 +15,8 @@ type AgentGovernance = {
   evalEvidence: 'recorded' | 'awaiting-recording' | 'missing-suite' | 'unavailable'
 }
 
+const FLAKY_HUNTER_EVAL_BACKLOG_URL = 'https://github.com/JiRaska/open-bank-oss/issues/7040'
+
 function evalEvidenceDetail(state: AgentGovernance['evalEvidence'], t: (cs: string, en: string) => string): string {
   switch (state) {
     case 'recorded': return t('Scénář i ověřený záznam odpovídají aktuálnímu promptu.', 'A scenario suite and verified recording match the current prompt.')
@@ -45,6 +47,9 @@ export function TestAgentPanel() {
         <span style={{ border: '1px solid var(--border)', borderRadius: 999, padding: '4px 8px', color: 'var(--text-secondary)' }}>{t('Aktivní prompt', 'Active prompt')}: <strong>{governance.activePrompt ?? t('neověřený', 'unverified')}</strong></span>
         <span style={{ border: '1px solid var(--border)', borderRadius: 999, padding: '4px 8px', color: governance.evalEvidence === 'recorded' ? '#16a34a' : '#d97706' }}>{t('Eval evidence', 'Eval evidence')}: <strong>{governance.evalEvidence}</strong></span>
         <span style={{ flexBasis: '100%', color: 'var(--text-secondary)' }}>{evalEvidenceDetail(governance.evalEvidence, t)}</span>
+        {governance.evalEvidence !== 'recorded' && governance.evalEvidence !== 'unavailable' && <a href={FLAKY_HUNTER_EVAL_BACKLOG_URL} target="_blank" rel="noreferrer" style={{ color: persona.accent, fontWeight: 650 }}>
+          {t('Otevřít backlog evalů', 'Open evaluation backlog')} <ExternalLink size={12} aria-hidden="true" />
+        </a>}
       </div>}
       {canAnalyze && <button className="btn btn-secondary btn-sm" disabled={analyzing} onClick={() => {
         setAnalyzing(true)
