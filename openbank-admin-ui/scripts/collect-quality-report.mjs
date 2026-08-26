@@ -8,6 +8,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import { execFileSync } from 'child_process'
 import { parseStringPromise } from 'xml2js'
 import { moneyPathServices } from './lib/service-inventory.mjs'
 
@@ -63,6 +64,25 @@ async function collectMutation(service) {
 
 // ── Pact contracts ────────────────────────────────────────────────────────────
 
+function pactConsumerVersion(pactFile) {
+  // `_service-ci.yml` publishes a consumer pact with the exact Git SHA of the
+  // build that generated it. Pin the broker query to the last committed version
+  // of this particular file; "latest" would otherwise let an unrelated, newer
+  // consumer build turn an older contract green in the Admin UI.
+  try {
+    const version = execFileSync('git', ['log', '-1', '--format=%H', '--', `pacts/${pactFile}`], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    return /^[0-9a-f]{40}$/.test(version) ? version : null
+  } catch {
+    // A source archive or intentionally shallow checkout without the file's
+    // history cannot prove provenance. Keep the contract pending, never latest.
+    return null
+  }
+}
+
 function collectContracts() {
   const pactsDir = path.join(REPO_ROOT, 'pacts')
   if (!fs.existsSync(pactsDir)) return []
@@ -76,6 +96,7 @@ function collectContracts() {
           consumer: pact.consumer?.name ?? 'unknown',
           provider: pact.provider?.name ?? 'unknown',
           pactFile: f,
+          consumerVersion: pactConsumerVersion(f),
           // Default to pending; enrichWithVerification() overwrites this with the
           // real provider-verification verdict from the Pact Broker when reachable.
           status: 'pending',
@@ -107,12 +128,15 @@ function brokerAuthHeader() {
   return 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64')
 }
 
-async function fetchPairVerification(baseUrl, auth, consumer, provider) {
-  // Matrix API — the same source can-i-deploy reasons over. Latest version of each
-  // pacticipant, joined cvpv (consumer-version × provider-version).
+async function fetchPairVerification(baseUrl, auth, consumer, consumerVersion, provider) {
+  if (!consumerVersion) return { status: 'pending', verifiedAt: null, providerVersion: null }
+  // Matrix API — pin the consumer to the commit that authored this exact pact
+  // file. The provider remains latest because it is the provider replay asked
+  // to validate that consumer version. Pact Broker documents `version` as a
+  // pacticipant build/version selector, normally a Git SHA.
   const qs = new URLSearchParams()
   qs.append('q[][pacticipant]', consumer)
-  qs.append('q[][latest]', 'true')
+  qs.append('q[][version]', consumerVersion)
   qs.append('q[][pacticipant]', provider)
   qs.append('q[][latest]', 'true')
   qs.append('latestby', 'cvpv')
@@ -122,21 +146,22 @@ async function fetchPairVerification(baseUrl, auth, consumer, provider) {
   if (auth) headers.Authorization = auth
 
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) })
-  if (!res.ok) return { status: 'pending', verifiedAt: null }
+  if (!res.ok) return { status: 'pending', verifiedAt: null, providerVersion: null }
 
   const body = await res.json()
   const rows = Array.isArray(body?.matrix) ? body.matrix : []
   const verifs = rows.map(r => r?.verificationResult).filter(Boolean)
+  const providerVersion = rows.map(r => r?.providerVersion?.number).find(version => typeof version === 'string') ?? null
 
   if (verifs.some(v => v.success === false)) {
     const at = verifs.filter(v => v.verifiedAt).map(v => v.verifiedAt).sort().pop() ?? null
-    return { status: 'failed', verifiedAt: at }
+    return { status: 'failed', verifiedAt: at, providerVersion }
   }
   if (verifs.length > 0 && verifs.every(v => v.success === true)) {
     const at = verifs.map(v => v.verifiedAt).filter(Boolean).sort().pop() ?? null
-    return { status: 'passed', verifiedAt: at }
+    return { status: 'passed', verifiedAt: at, providerVersion }
   }
-  return { status: 'pending', verifiedAt: null }
+  return { status: 'pending', verifiedAt: null, providerVersion: null }
 }
 
 async function enrichWithVerification(contracts) {
@@ -149,9 +174,10 @@ async function enrichWithVerification(contracts) {
   let resolved = 0
   for (const c of contracts) {
     try {
-      const v = await fetchPairVerification(baseUrl, auth, c.consumer, c.provider)
+      const v = await fetchPairVerification(baseUrl, auth, c.consumer, c.consumerVersion, c.provider)
       c.status = v.status
       c.verifiedAt = v.verifiedAt
+      c.providerVersion = v.providerVersion
       c.interactions = c.interactions.map(i => ({ ...i, status: v.status }))
       if (v.status !== 'pending') resolved++
     } catch (e) {

@@ -93,6 +93,10 @@ export interface ContractEvidence {
   consumer: string
   provider: string
   pactFile: string
+  /** Consumer commit that authored the committed Pact used in the broker query. */
+  consumerVersion?: string | null
+  /** Provider build whose replay produced the broker verdict. */
+  providerVersion?: string | null
   state: EvidenceState
   observedAt: string | null
   interactions: number
