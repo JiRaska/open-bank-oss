@@ -116,6 +116,13 @@ export interface PerformanceEvidence {
   }
   detail?: string
   run?: TestRunProvenance
+  plan?: {
+    executionMode: string
+    safetyBoundary: string
+    targetSchedule: string | null
+    baselineReport: string | null
+    blocker: string | null
+  }
 }
 
 export interface SyntheticJourneyEvidence {
