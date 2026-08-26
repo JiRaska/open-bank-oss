@@ -3,111 +3,125 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 "use client"
+
+import { ArrowRight, CheckCircle2, KeyRound, Languages, Loader2, ShieldCheck, Sparkles } from "lucide-react"
 import { signIn } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
-import { Suspense } from "react"
+import { Suspense, useState } from "react"
+import { useLanguage } from "@/lib/i18n/LanguageContext"
+import { safeCallbackPath } from "@/lib/auth/safeCallbackPath"
+import styles from "./login.module.css"
+
+const COPY = {
+  en: {
+    skip: "Skip to sign in",
+    eyebrow: "OpenBank Operations",
+    headline: "Operate with confidence.",
+    intro: "One calm, governed workspace for the people who keep a bank moving.",
+    benefits: ["A shared operational picture", "Decisions with context", "Security built into every action"],
+    secure: "Secure access",
+    welcome: "Welcome back",
+    guidance: "Continue with your bank identity. Your access is limited to the roles and responsibilities assigned to you.",
+    signIn: "Continue with Keycloak SSO",
+    signingIn: "Connecting securely…",
+    trustTitle: "Protected by zero-trust controls",
+    trustBody: "Role-based access, four-eyes approvals and audit evidence remain active throughout your session.",
+    help: "Need access? Contact your bank administrator.",
+    privacy: "Privacy and data protection",
+    sessionExpired: "Your session expired. Sign in again to continue safely.",
+    genericError: "We could not complete sign-in. Please try again or contact your administrator.",
+    switchLanguage: "Přepnout do češtiny",
+    locale: "Čeština",
+  },
+  cs: {
+    skip: "Přeskočit k přihlášení",
+    eyebrow: "OpenBank Operations",
+    headline: "Řiďte banku s jistotou.",
+    intro: "Jedno klidné a řízené pracovní prostředí pro všechny, kdo zajišťují chod banky.",
+    benefits: ["Společný provozní přehled", "Rozhodnutí v souvislostech", "Bezpečnost v každém kroku"],
+    secure: "Zabezpečený přístup",
+    welcome: "Vítejte zpět",
+    guidance: "Pokračujte pomocí bankovní identity. Uvidíte pouze agendy odpovídající vašim rolím a odpovědnostem.",
+    signIn: "Pokračovat přes Keycloak SSO",
+    signingIn: "Navazuji zabezpečené spojení…",
+    trustTitle: "Chráněno principy zero trust",
+    trustBody: "Řízení přístupu podle rolí, čtyřočkové schvalování a auditní stopa zůstávají aktivní po celou relaci.",
+    help: "Potřebujete přístup? Obraťte se na administrátora banky.",
+    privacy: "Soukromí a ochrana dat",
+    sessionExpired: "Vaše relace vypršela. Pro bezpečné pokračování se znovu přihlaste.",
+    genericError: "Přihlášení se nepodařilo dokončit. Zkuste to znovu nebo kontaktujte administrátora.",
+    switchLanguage: "Switch to English",
+    locale: "English",
+  },
+} as const
 
 function LoginContent() {
   const params = useSearchParams()
+  const { language, setLanguage } = useLanguage()
+  const [pending, setPending] = useState(false)
+  const copy = COPY[language]
   const error = params.get("error")
-  const callbackUrl = params.get("callbackUrl") || "/dashboard"
+  const callbackUrl = safeCallbackPath(params.get("callbackUrl"))
+
+  const handleSignIn = async () => {
+    if (pending) return
+    setPending(true)
+    try {
+      await signIn("keycloak", { callbackUrl })
+    } catch {
+      setPending(false)
+    }
+  }
 
   return (
-    <div style={{
-      minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-    background: "var(--bg, #f8fafc)", fontFamily: "var(--font-sans, 'Inter', system-ui, sans-serif)",
-    }}>
-      <a
-        href="#main"
-        style={{
-          position: "absolute", left: "-9999px", top: "0", zIndex: 100,
-          // #4f46e5, not --sidebar-accent (#6366f1) — same contrast fix as the sign-in button below.
-          padding: "10px 16px", background: "#4f46e5", color: "#fff",
-          borderRadius: "0 0 8px 0", fontSize: "13px", fontWeight: 600,
-        }}
-        onFocus={e => { e.currentTarget.style.left = "0" }}
-        onBlur={e => { e.currentTarget.style.left = "-9999px" }}
-      >
-        Přeskočit na obsah
-      </a>
-      <main id="main" style={{
-        width: "380px", background: "var(--surface, #ffffff)", border: "1px solid var(--border, #e2e8f0)",
-        borderRadius: "16px", padding: "40px", boxShadow: "var(--shadow-lg, 0 10px 15px -3px rgba(0,0,0,0.1))",
-      }}>
-        {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "32px" }}>
-          <div style={{
-            width: "40px", height: "40px", background: "var(--sidebar-accent, #6366f1)", borderRadius: "10px",
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2"/>
-              <path d="M3 9h18M9 21V9"/>
-            </svg>
-          </div>
-          <div>
-            <div style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary, #0f172a)" }}>OpenBank Admin</div>
-            <div style={{ fontSize: "11px", color: "var(--text-tertiary, #94a3b8)" }}>Operations Portal</div>
-          </div>
+    <main className={styles.page}>
+      <a className={styles.skipLink} href="#sign-in-panel">{copy.skip}</a>
+      <section className={styles.story} aria-labelledby="login-story-title">
+        <div className={styles.storyGlow} aria-hidden="true" />
+        <div className={styles.brand}>
+          <span className={styles.brandMark} aria-hidden="true"><Sparkles size={20} /></span>
+          <span><strong>OpenBank</strong><small>Admin</small></span>
         </div>
-
-        <h1 style={{ margin: "0 0 8px", fontSize: "20px", fontWeight: 700, color: "var(--text-primary, #0f172a)" }}>
-          Přihlášení
-        </h1>
-        <div style={{ marginBottom: "28px", fontSize: "13px", color: "var(--text-secondary, #475569)" }}>
-          Přihlaste se pomocí firemního účtu Keycloak
+        <div className={styles.storyBody}>
+          <p className={styles.eyebrow}>{copy.eyebrow}</p>
+          <h1 id="login-story-title">{copy.headline}</h1>
+          <p className={styles.intro}>{copy.intro}</p>
+          <ul className={styles.benefits}>
+            {copy.benefits.map(benefit => <li key={benefit}><CheckCircle2 size={18} aria-hidden="true" />{benefit}</li>)}
+          </ul>
         </div>
+        <p className={styles.storyFootnote}>Governed banking operations · Built for clarity</p>
+      </section>
 
-        {error && (
-          <div style={{
-            marginBottom: "20px", padding: "12px 14px", borderRadius: "8px",
-            background: "#fef2f2", border: "1px solid #fecaca",
-            fontSize: "13px", color: "#dc2626",
-          }}>
-            {error === "SessionExpired" ? "Vaše relace vypršela. Přihlaste se znovu." : "Chyba přihlášení. Zkuste to znovu."}
+      <section className={styles.access}>
+        <header className={styles.accessHeader}>
+          <div className={styles.secureBadge}><ShieldCheck size={16} aria-hidden="true" />{copy.secure}</div>
+          <button type="button" className={styles.languageButton} onClick={() => setLanguage(language === "en" ? "cs" : "en")} aria-label={copy.switchLanguage}>
+            <Languages size={16} aria-hidden="true" />{copy.locale}
+          </button>
+        </header>
+        <div id="sign-in-panel" className={styles.panel} tabIndex={-1}>
+          <span className={styles.keyIcon} aria-hidden="true"><KeyRound size={23} /></span>
+          <h2>{copy.welcome}</h2>
+          <p className={styles.guidance}>{copy.guidance}</p>
+          {error && <div className={styles.error} role="alert">{error === "SessionExpired" ? copy.sessionExpired : copy.genericError}</div>}
+          <button type="button" className={styles.signInButton} onClick={handleSignIn} disabled={pending} aria-busy={pending}>
+            {pending ? <Loader2 className={styles.spinner} size={18} aria-hidden="true" /> : <KeyRound size={18} aria-hidden="true" />}
+            <span>{pending ? copy.signingIn : copy.signIn}</span>
+            {!pending && <ArrowRight className={styles.arrow} size={18} aria-hidden="true" />}
+          </button>
+          <div className={styles.trustNote}>
+            <ShieldCheck size={20} aria-hidden="true" />
+            <div><strong>{copy.trustTitle}</strong><p>{copy.trustBody}</p></div>
           </div>
-        )}
-
-        <button
-          onClick={() => signIn("keycloak", { callbackUrl })}
-          style={{
-            width: "100%", padding: "12px", borderRadius: "8px",
-            // Darker than --sidebar-accent (#6366f1) on purpose: white-on-#6366f1
-            // measures ~4.47:1, just under WCAG 2.1 AA's 4.5:1 for normal text.
-            // #4f46e5 (~6.5:1) keeps the same hue with margin to spare.
-            background: "#4f46e5", border: "none", color: "#ffffff",
-            fontSize: "14px", fontWeight: 600, cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
-            transition: "opacity 0.15s, background-color 0.15s",
-          }}
-          onMouseEnter={e => (e.currentTarget.style.opacity = "0.9")}
-          onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
-            <polyline points="10 17 15 12 10 7"/>
-            <line x1="15" y1="12" x2="3" y2="12"/>
-          </svg>
-          Přihlásit se přes Keycloak SSO
-        </button>
-
-        <div style={{ marginTop: "24px", padding: "12px", background: "var(--surface-2, #f8fafc)", borderRadius: "8px", fontSize: "11px", color: "var(--text-tertiary, #94a3b8)" }}>
-          <strong style={{ color: "var(--text-secondary, #475569)" }}>Zero-Trust Security</strong><br/>
-          Přístup je řízen rolemi (RBAC). Všechny akce jsou auditovány dle EBA ICT Risk a PSD2 požadavků.
+          <p className={styles.help}>{copy.help}</p>
+          <a className={styles.privacy} href="/privacy">{copy.privacy}</a>
         </div>
-      </main>
-      <footer style={{ marginTop: "20px", fontSize: "11px" }}>
-        {/* var(--text-tertiary) fails contrast at this size (~2.4:1) — use --text-secondary (~7.2:1). */}
-        <a href="/privacy" style={{ color: "var(--text-secondary, #475569)" }}>Ochrana osobních údajů</a>
-      </footer>
-    </div>
+      </section>
+    </main>
   )
 }
 
 export default function LoginPage() {
-  return (
-    <Suspense>
-      <LoginContent />
-    </Suspense>
-  )
+  return <Suspense><LoginContent /></Suspense>
 }

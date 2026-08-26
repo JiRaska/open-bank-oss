@@ -41,6 +41,7 @@ export function modelLabel(id: string): string {
 
 export function AgentDock() {
   const pathname = usePathname()
+  const publicSurface = pathname.startsWith('/auth') || pathname === '/privacy'
   const { t } = useLanguage()
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Msg[]>([])
@@ -51,16 +52,18 @@ export function AgentDock() {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!open || models.length) return
+    if (publicSurface || !open || models.length) return
     fetch('/api/agent/chat')
       .then(r => r.json())
       .then(d => { setModels(d.models ?? []); setModel(d.default ?? '') })
       .catch(() => {})
-  }, [open, models.length])
+  }, [open, models.length, publicSurface])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, busy])
+
+  if (publicSurface) return null
 
   async function send() {
     const text = input.trim()
