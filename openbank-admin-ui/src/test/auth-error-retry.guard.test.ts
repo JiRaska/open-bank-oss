@@ -4,9 +4,13 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
 describe('auth error recovery contract', () => {
-  it('keeps retry sign-in an explicit accessible button', () => {
+  it('keeps retry sign-in explicit, stateful, and callback-scoped', () => {
     const source = readFileSync(path.resolve(__dirname, '../app/auth/error/page.tsx'), 'utf8')
-    expect(source).toContain('<button type="button" aria-label="Retry sign-in / Zkusit přihlášení znovu"')
-    expect(source).toContain('signIn("keycloak")')
+    expect(source).toContain('type="button"')
+    expect(source).toContain('onClick={retry}')
+    expect(source).toContain('aria-busy={pending}')
+    expect(source).toContain('disabled={pending}')
+    expect(source).toContain('{pending ? copy.retrying : copy.retry}')
+    expect(source).toContain('signIn("keycloak", { callbackUrl })')
   })
 })
