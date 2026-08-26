@@ -24,6 +24,7 @@ const emptyReport = (error: string): TestIntelligenceReport => ({
 
 type PrometheusVector = { status?: string; data?: { result?: { value?: [number, string] }[] } }
 type PrometheusLabelVector = { status?: string; data?: { result?: { metric?: Record<string, string>; value?: [number, string] }[] } }
+type TempoSearch = { traces?: Array<{ traceID?: string }> }
 
 // Journey ids arrive from the build-time bundled report, so they are file data reaching an
 // outbound Prometheus request. Kubernetes object names are already restricted to this
@@ -39,6 +40,28 @@ function cronjobSelector(journeyId: string): string | null {
 function prometheusBase(): string | null {
   if (process.env.SERVICES_HOST === 'container') return 'http://prometheus:9090'
   return process.env.PROMETHEUS_URL ?? null
+}
+
+function tempoBase(): string | null {
+  if (process.env.SERVICES_HOST === 'container') return 'http://tempo:3200'
+  return process.env.TEMPO_URL ?? null
+}
+
+async function queryTempoMobileTraces(base: string): Promise<{ count: number; truncated: boolean } | null> {
+  const end = Math.floor(Date.now() / 1000)
+  const query = new URLSearchParams({
+    tags: 'service.name="openbank-app"', start: String(end - 7 * 86400), end: String(end), limit: '1000',
+  })
+  try {
+    const response = await fetch(`${base}/api/search?${query}`, {
+      headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000), cache: 'no-store',
+    })
+    if (!response.ok) return null
+    const payload = await response.json() as TempoSearch
+    if (!Array.isArray(payload.traces)) return null
+    const count = new Set(payload.traces.flatMap(item => item.traceID ? [item.traceID] : [])).size
+    return { count, truncated: payload.traces.length >= 1000 }
+  } catch { return null }
 }
 
 async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>> {
@@ -119,34 +142,38 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
 }
 
 async function attachLiveClientExperience(report: TestIntelligenceReport): Promise<TestIntelligenceReport> {
-  const base = prometheusBase()
-  if (!base) return report
+  const metricsBase = prometheusBase()
+  const tracesBase = tempoBase()
+  if (!metricsBase && !tracesBase) return report
   const mobile = report.clientExperiences.find(client => client.id === 'openbank-app')
   if (!mobile) return report
 
   // Tempo's span-metrics prove arrival after the hardened, consent-gated RUM gateway.
   // `or vector(0)` distinguishes a reachable Prometheus with no sampled mobile signal
   // from an unavailable query. Zero is normal and must not become a failed CI verdict.
-  const [sampledSpans, errorSpans] = await Promise.all([
-    queryPrometheus(base, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*"}[7d])) or vector(0)'),
-    queryPrometheus(base, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)'),
+  const [tempoTraces, spanCounterIncrements, errorSpans] = await Promise.all([
+    tracesBase ? queryTempoMobileTraces(tracesBase) : Promise.resolve(null),
+    metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*"}[7d])) or vector(0)') : Promise.resolve(null),
+    metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)') : Promise.resolve(null),
   ])
-  if (sampledSpans === null) return report
+  if (tempoTraces === null && spanCounterIncrements === null) return report
 
   const observedAt = new Date().toISOString()
-  const sampled = Math.max(0, Math.round(sampledSpans))
+  const sampled = tempoTraces?.count ?? Math.max(0, Math.round(spanCounterIncrements ?? 0))
   const errors = errorSpans === null ? null : Math.max(0, Math.round(errorSpans))
+  const source = tempoTraces === null ? 'prometheus' as const : 'tempo' as const
+  const countLabel = tempoTraces?.truncated ? `at least ${sampled}` : String(sampled)
   const clientExperiences = report.clientExperiences.map(client => client.id !== mobile.id ? client : ({
     ...client,
     rum: {
       ...client.rum,
       state: sampled > 0 ? 'passed' as const : 'not-run' as const,
-      source: 'prometheus' as const,
+      source,
       observedAt,
       sampledSpansLast7d: sampled,
       errorSpansLast7d: errors,
       detail: sampled > 0
-        ? `${sampled} sampled mobile RUM span(s) reached Tempo in the last 7 days${errors === null ? '' : `; ${errors} carried an error status`}. This proves telemetry arrival, not customer traffic volume or test success.`
+        ? `${countLabel} sampled mobile RUM trace(s) reached Tempo in the last 7 days${errors === null ? '' : `; ${errors} span-metric increment(s) carried an error status`}. This proves telemetry arrival, not customer traffic volume or test success.`
         : 'No sampled mobile RUM span reached Tempo in the last 7 days. Consent is opt-in, so this is an explicit absent runtime observation rather than a failed CI test.',
     },
   }))

@@ -100,7 +100,7 @@
       "type": "object",
       "required": ["kind", "state", "source"],
       "properties": {
-        "kind": { "enum": ["performance", "mutation", "synthetic"] },
+        "kind": { "enum": ["performance", "mutation", "synthetic", "trace"] },
         "state": { "enum": ["passed", "failed", "skipped", "not-run", "blocked", "unknown"] },
         "source": { "type": "string", "minLength": 1 },
         "detail": { "type": "string" }

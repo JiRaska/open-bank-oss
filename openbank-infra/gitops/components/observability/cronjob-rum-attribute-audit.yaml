@@ -102,9 +102,10 @@ spec:
                     echo "{\"event\":\"rum-attribute-audit\",\"attribute\":\"${attr}\",\"unique_value_count\":${count},\"sample\":$(echo "$result" | head -c 512)}"
                   done
                   # RUM-INGEST LIVENESS. The attribute audit above verifies the redaction
-                  # allow-list, but app.version, device.model and screen.name are optional
-                  # mobile SDK attributes. The current app deliberately does not set all of
-                  # them, so their absence cannot prove that no trace arrived. service.name is
+                  # allow-list, but app.version, device.model and screen.name are client-version
+                  # dependent mobile SDK attributes. Current Android/iOS source sets them, but
+                  # their absence in the lookback cannot prove that no trace arrived: deployed,
+                  # consented clients may predate that source. service.name is
                   # the canonical OTel resource identity set by the app and retained through
                   # the gateway; query it separately to distinguish no signal from sparse
                   # attribute coverage without widening the collected data.
