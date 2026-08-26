@@ -4,6 +4,7 @@
 
 package com.openbank.securityscanner.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -35,6 +36,7 @@ class SecurityScannerPostgresTestResource : QuarkusTestResourceLifecycleManager 
             .withDatabaseName(DB)
         pg.start()
         postgres = pg
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
 
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
@@ -48,10 +50,14 @@ class SecurityScannerPostgresTestResource : QuarkusTestResourceLifecycleManager 
     }
 
     override fun stop() {
-        postgres?.stop()
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
     }
 
     private companion object {
         const val DB = "openbank_security_it"
+        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
     }
 }
