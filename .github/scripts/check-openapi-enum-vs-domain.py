@@ -62,8 +62,6 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
-    "openbank-account-service:ACTIVE,CLOSED,FROZEN,PENDING":
-        "#5962 — AccountStatus: spec-only PENDING; undeclared DORMANT/PENDING_ACTIVATION",
     "openbank-account-service:APPROVED,CANCELLED,PENDING,REJECTED":
         "#5962 — WithdrawalProposalStatus: undeclared EXPIRED",
     "openbank-campaign-service:BANNER,PUSH":
@@ -217,6 +215,11 @@ def best_match(
     best: tuple[str, frozenset[str]] | None = None
     best_n = 0
     for name, vals in domain.items():
+        # An exact vocabulary is authoritative. Without this fast path, declaration order can
+        # make a shorter enum (for example PocketStatus) tie with a longer superset
+        # (AccountStatus) and be reported as drift even though its real domain enum matches.
+        if vals == spec:
+            return name, vals
         n = len(spec & vals)
         if n > best_n:
             best, best_n = (name, vals), n
@@ -262,6 +265,8 @@ def self_test() -> int:
     domain = {
         "CheckType": frozenset({"IDENTITY", "ADDRESS", "PEP_SCREENING", "SANCTIONS_SCREENING", "ADVERSE_MEDIA"}),
         "CaseStatus": frozenset({"OPEN", "UNDER_REVIEW", "APPROVED", "REJECTED"}),
+        "LifecycleStatus": frozenset({"ACTIVE", "DORMANT", "FROZEN", "CLOSED"}),
+        "PocketStatus": frozenset({"ACTIVE", "FROZEN", "CLOSED"}),
     }
     cases: list[tuple[str, frozenset[str], bool]] = [
         # (name, spec values, must be reported as drift)
@@ -279,6 +284,8 @@ def self_test() -> int:
          frozenset({"IDENTITY", "ADDRESS", "AAA", "BBB", "CCC", "DDD", "EEE", "FFF"}), False),
         ("a different domain enum in the same service pairs with ITS OWN match",
          domain["CaseStatus"], False),
+        ("an exact enum wins over an earlier overlapping superset",
+         domain["PocketStatus"], False),
         ("drift in the second enum is still found",
          frozenset({"OPEN", "UNDER_REVIEW", "APPROVED", "DECLINED"}), True),
     ]
