@@ -5,6 +5,7 @@
 package com.openbank.finrep.contract
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.finrep.application.port.out.ClosedPeriodDto
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.infrastructure.client.LedgerAdapter
@@ -104,7 +105,26 @@ class TemplateWireFormatTest {
             // Ledger's own verdict for this fixture, passed explicitly: it ties out (issue #6011).
             ledgerReportsBalanced = true,
         )
+        coEvery { ledger.listClosedPeriods() } returns listOf(
+            ClosedPeriodDto("MONTH", LocalDate.of(2026, 6, 30), "FROZEN", "LINES_V1"),
+            ClosedPeriodDto("MONTH", LocalDate.of(2026, 5, 31), "DRAFT", "LINES_V1"),
+        )
         QuarkusMock.installMockForType(ledger, LedgerAdapter::class.java)
+    }
+
+    @Test
+    fun `reporting periods expose only immutable evidence`() {
+        val body = given()
+            .accept("application/json")
+            .get("/api/v1/finrep/periods")
+            .then()
+            .statusCode(200)
+            .extract().body().asString()
+        val json = mapper.readValue(body, Map::class.java)
+
+        assertThat(json.keys).containsExactlyInAnyOrder("latest", "periods")
+        assertThat(json["latest"]).isEqualTo("2026-06-30")
+        assertThat(json["periods"]).isEqualTo(listOf("2026-06-30"))
     }
 
     private fun getJson(path: String, asOf: LocalDate): Map<*, *> {

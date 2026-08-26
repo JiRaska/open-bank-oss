@@ -4,6 +4,43 @@
   },
   "interactions": [
     {
+      "description": "GET closed periods available for regulatory reporting",
+      "providerStates": [
+        {
+          "name": "ledger has frozen monthly trial balance for the reporting date"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/ledger/periods",
+        "query": {
+          "from": [
+            "1970-01-01"
+          ],
+          "to": [
+            "9999-12-31"
+          ]
+        }
+      },
+      "response": {
+        "body": [
+          {
+            "evidenceState": "LINES_V1",
+            "periodType": "MONTH",
+            "status": "FROZEN",
+            "to": "2026-06-30"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET the GL trial balance for a FINREP reporting date",
       "providerStates": [
         {

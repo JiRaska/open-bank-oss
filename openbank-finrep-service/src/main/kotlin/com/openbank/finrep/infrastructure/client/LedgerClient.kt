@@ -4,6 +4,7 @@
 
 package com.openbank.finrep.infrastructure.client
 
+import com.openbank.finrep.application.port.out.ClosedPeriodDto
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
@@ -17,6 +18,7 @@ import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
@@ -40,14 +42,20 @@ import java.time.LocalDate
 @RegisterRestClient(configKey = "ledger-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
-@Path("/api/v1/ledger/periods/MONTH")
+@Path("/api/v1/ledger/periods")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 interface LedgerRestClient {
 
     @GET
-    @Path("/{asOf}/frozen-trial-balance")
+    @Path("/MONTH/{asOf}/frozen-trial-balance")
     fun getTrialBalance(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
+
+    @GET
+    fun listClosedPeriods(
+        @QueryParam("from") from: String,
+        @QueryParam("to") to: String,
+    ): Uni<List<ClosedPeriodResponse>>
 }
 
 data class TrialBalanceLineResponse(val code: String, val type: String, val net: BigDecimal, val currency: String)
@@ -67,6 +75,13 @@ data class ClosedPeriodTrialBalanceResponse(
     val period: String,
     val balanced: Boolean?,
     val lines: List<TrialBalanceLineResponse>,
+)
+
+data class ClosedPeriodResponse(
+    val periodType: String,
+    val to: LocalDate,
+    val status: String,
+    val evidenceState: String,
 )
 
 @ApplicationScoped
@@ -91,5 +106,20 @@ class LedgerAdapter(@RestClient private val client: LedgerRestClient) : LedgerPo
             },
             ledgerReportsBalanced = response.balanced,
         )
+    }
+
+    override suspend fun listClosedPeriods(): List<ClosedPeriodDto> =
+        client.listClosedPeriods(CLOSED_PERIODS_FROM, CLOSED_PERIODS_TO).awaitSuspending().map {
+            ClosedPeriodDto(
+                periodType = it.periodType,
+                to = it.to,
+                status = it.status,
+                evidenceState = it.evidenceState,
+            )
+        }
+
+    private companion object {
+        const val CLOSED_PERIODS_FROM = "1970-01-01"
+        const val CLOSED_PERIODS_TO = "9999-12-31"
     }
 }

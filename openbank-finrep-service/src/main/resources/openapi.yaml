@@ -20,11 +20,31 @@ info:
 
     Cells are always fully rendered: a value the platform cannot honestly derive is an explicit
     flagged zero (`isDataGap`), never an omitted row, so a regulatory return never has a silent gap.
-  version: 1.2.0
+  version: 1.3.0
 tags:
   - name: FINREP
   - name: COREP
 paths:
+  /api/v1/finrep/periods:
+    get:
+      tags: [FINREP]
+      summary: List reporting dates backed by immutable ledger evidence
+      description: >-
+        Returns only MONTH closes whose status is FROZEN and evidence state is LINES_V1. DRAFT,
+        legacy HASH_ONLY, quarter/year and missing closes are excluded; clients must not guess a
+        reporting date or fall back to a mutable trial balance.
+      operationId: listFinrepReportingPeriods
+      responses:
+        '200':
+          description: Available dates, newest first; latest is null when none are available
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportingPeriods' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
   /api/v1/finrep/templates/{templateId}:
     get:
       tags: [FINREP]
@@ -107,6 +127,18 @@ paths:
 
 components:
   schemas:
+    ReportingPeriods:
+      type: object
+      required: [periods]
+      properties:
+        latest:
+          type: string
+          format: date
+          nullable: true
+        periods:
+          type: array
+          items: { type: string, format: date }
+
     FinrepCell:
       type: object
       description: One FINREP template cell — an (row, column) coordinate with its monetary value.
