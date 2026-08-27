@@ -186,6 +186,25 @@ scenarios:
     ]))
   })
 
+  it('recognizes a named JVM E2E suite under the ordinary Gradle test task in fallback evidence', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-jvm-e2e-fallback-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-results/test/TEST-com.openbank.alpha.PaymentJourneyE2E.xml',
+      '<testsuite name="com.openbank.alpha.PaymentJourneyE2E" tests="2" failures="0" errors="0" skipped="0" time="1"><testcase classname="com.openbank.alpha.e2e.PaymentJourneyE2E" name="books payment"/><testcase classname="com.openbank.alpha.e2e.PaymentJourneyE2E" name="reads booking"/></testsuite>')
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components[0].evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'e2e', state: 'passed', source: 'JUnit:test', counts: expect.objectContaining({ discovered: 2, executed: 2, passed: 2 }) }),
+    ]))
+    expect(report.components[0].evidence).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'unit', source: 'JUnit:test' }),
+    ]))
+  })
+
   it('prefers the versioned run envelope and preserves provenance plus Testcontainers runtime proof', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-envelope-'))
     dirs.push(repo)
