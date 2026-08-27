@@ -37,6 +37,7 @@ jobs:
           python3 .github/scripts/collect-test-run-evidence.py \
             --service openbank-admin-ui --component openbank-admin-ui \
             --synthetic-journey admin-ui-sso-boundary \
+            --browser-vitals openbank-admin-ui/build/test-intelligence/browser-vitals.json \
             --out openbank-admin-ui/build/test-intelligence/run.json
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

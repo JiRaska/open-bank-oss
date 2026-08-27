@@ -6,6 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 
 const target = process.env.ADMIN_UI_SYNTHETIC_URL ?? 'https://admin.open-bank.tech/system/tests'
 const report = process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? 'build/test-results/e2e/admin-login-synthetic.xml'
+const vitalsReport = process.env.OPENBANK_BROWSER_VITALS_OUTPUT ?? 'build/test-intelligence/browser-vitals.json'
 // Deliberately forgiving public-edge budgets. These are synthetic availability guards, not an
 // authenticated operator-flow SLO or a substitute for RUM. Together they prevent a page that
 // eventually renders after a multi-second upstream or client-side stall from reading as healthy.
@@ -19,6 +20,7 @@ let latencyFailure = null
 let renderFailure = null
 let fcpFailure = null
 let clsFailure = null
+let measuredVitals = null
 let browser
 try {
   browser = await chromium.launch({ headless: true })
@@ -61,6 +63,9 @@ try {
     const firstContentfulPaint = performance.getEntriesByName('first-contentful-paint')[0]?.startTime
     return { firstContentfulPaint, ...(window.__openbankSyntheticVitals ?? {}) }
   })
+  if (Number.isFinite(vitals.firstContentfulPaint) && vitals.clsAvailable && Number.isFinite(vitals.cls)) {
+    measuredVitals = { fcpMs: Math.round(vitals.firstContentfulPaint), cls: Math.round(vitals.cls * 1000) / 1000 }
+  }
   if (!Number.isFinite(vitals.firstContentfulPaint) || vitals.firstContentfulPaint > FCP_BUDGET_MS) {
     fcpFailure = `SSO boundary FCP ${Number.isFinite(vitals.firstContentfulPaint) ? Math.round(vitals.firstContentfulPaint) : 'unavailable'}ms exceeds ${FCP_BUDGET_MS}ms budget`
   }
@@ -77,6 +82,7 @@ try {
   await browser?.close()
 }
 await mkdir(report.slice(0, report.lastIndexOf('/')), { recursive: true })
+await mkdir(vitalsReport.slice(0, vitalsReport.lastIndexOf('/')), { recursive: true })
 const seconds = ((Date.now() - started) / 1000).toFixed(3)
 const escape = value => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char])
 const boundary = boundaryFailure && `<failure message="${escape(boundaryFailure)}"/>`
@@ -87,4 +93,5 @@ const cls = clsFailure && `<failure message="${escape(clsFailure)}"/>`
 const failures = [boundaryFailure, latencyFailure, renderFailure, fcpFailure, clsFailure]
 const failureCount = failures.filter(Boolean).length
 await writeFile(report, `<testsuites><testsuite name="admin-login-synthetic" tests="5" failures="${failureCount}" errors="0" skipped="0" time="${seconds}"><testcase classname="admin-login-synthetic" name="renders SSO boundary" time="${seconds}">${boundary ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary responds within public latency budget" time="${seconds}">${latency ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary DOMContentLoaded within public render budget" time="${seconds}">${render ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary FCP is within public Web Vitals budget" time="${seconds}">${fcp ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary CLS is within public Web Vitals budget" time="${seconds}">${cls ?? ''}</testcase></testsuite></testsuites>\n`)
+if (measuredVitals) await writeFile(vitalsReport, `${JSON.stringify({ schemaVersion: 1, journey: 'admin-ui-sso-boundary', browser: 'chromium', metrics: measuredVitals })}\n`)
 if (failureCount) throw new Error(failures.filter(Boolean).join('; '))
