@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey product-catalog-read → product-catalog (:8104), read-only synthetic edge.
+#
+# HAND-MAINTAINED and deliberately not named network-policies.yaml: that file is derived
+# from long-lived Deployment callers by gen-network-policies.py. The journey is a CronJob,
+# so adding this edge there would be overwritten. NetworkPolicies are additive; this
+# narrow rule leaves the generated allow-list intact while admitting only the labelled
+# one-shot k6 pod, never the rest of the observability namespace.
+#
+# The journey performs exactly one unauthenticated GET /api/v1/products and carries no
+# credentials or ServiceAccount token. Port 8104 is the catalog HTTP API; management
+# port 8085 remains governed by the generated Prometheus rule. Removing this file rolls
+# back the edge and makes the journey fail closed with a connection timeout.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: product-catalog-ingress-synthetic-read-journey
+  namespace: accounts
+  labels:
+    app.kubernetes.io/part-of: accounts
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: product-catalog
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: journey
+              openbank.tech/journey: product-catalog-read
+      ports:
+        - protocol: TCP
+          port: 8104
