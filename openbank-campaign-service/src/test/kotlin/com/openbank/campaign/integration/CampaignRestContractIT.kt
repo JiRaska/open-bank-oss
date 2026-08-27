@@ -5,8 +5,8 @@
 package com.openbank.campaign.integration
 
 import com.openbank.campaign.domain.model.IncentiveOfferRef
-import com.openbank.campaign.infrastructure.incentive.LiveIncentiveOfferRegistry
 import com.openbank.campaign.domain.model.ReferralProgramRef
+import com.openbank.campaign.infrastructure.incentive.LiveIncentiveOfferRegistry
 import com.openbank.campaign.infrastructure.referral.LiveReferralProgramCatalogAdapter
 import com.openbank.campaign.infrastructure.segment.SilverSegmentEvaluator
 import com.openbank.campaign.it.CampaignPostgresRedisTestResource
@@ -119,7 +119,7 @@ class CampaignRestContractIT {
                 body("referralProgramRef.id", equalTo(publishedId.toString()))
                 body("referralProgramRef.name", equalTo("friends-get-friends"))
                 body("referralProgramRef.version", equalTo(3))
-        }
+            }
     }
 
     /**
