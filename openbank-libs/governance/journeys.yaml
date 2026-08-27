@@ -72,9 +72,10 @@ journeys:
       (or scale the customer-edge Rollout to zero) and the run must exit non-zero within one
       schedule interval. The script reads API_BASE / CUSTOMER_BASE / ADMIN_BASE from __ENV
       with the production hosts as defaults, so this is executable rather than a description.
-      The checks assert status < 500, so a backend outage fails the run while an auth
-      challenge does not. Measured against grafana/k6:1.2.0: a failing threshold exits 99, a
-      passing run exits 0.
+      The checks assert the actual edge contracts: 401 for protected API routes and an explicit
+      SSO redirect for Admin UI. A removed route returning 404 therefore fails rather than
+      reading as availability. Measured against grafana/k6:1.2.0: a failing threshold exits 99,
+      a passing run exits 0.
 
   - id: product-catalog-read
     title: "Product catalog read path"
