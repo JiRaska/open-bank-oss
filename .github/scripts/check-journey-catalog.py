@@ -162,6 +162,18 @@ def cronjob_facts(root: pathlib.Path, rel_path: str, journey_id: str):
     return None, defined_configmaps, f"{rel_path} defines no CronJob named {CRONJOB_PREFIX}{journey_id}"
 
 
+def workflow_facts(root: pathlib.Path, rel_path: str, schedule: str):
+    """Validate a GitHub Actions-backed journey from its committed schedule, not prose."""
+    path = root / rel_path
+    if not path.is_file():
+        return f"workflow not found: {rel_path}"
+    text = path.read_text(encoding="utf-8")
+    # The literal scheduled trigger is the executable cadence. Quotes are optional in Actions YAML.
+    if not re.search(rf"(?m)^\s*-\s*cron:\s*['\"]?{re.escape(schedule)}['\"]?\s*$", text):
+        return f"workflow {rel_path} does not schedule {schedule!r}"
+    return None
+
+
 def extract_script(root: pathlib.Path, journey_id: str) -> str:
     """Return the exact ConfigMap-mounted k6 program for one active catalog journey.
 
@@ -192,7 +204,12 @@ def extract_script(root: pathlib.Path, journey_id: str) -> str:
 
 
 def active_ids(root: pathlib.Path) -> list[str]:
-    """Return active journey ids only after the catalog has passed its structural checks."""
+    """Return active Kubernetes journey ids whose mounted k6 program CI can extract.
+
+    The catalog also admits active GitHub Actions browser synthetics. They have no ConfigMap
+    script by design, so including them here would ask the k6 workflow to execute an artifact
+    that does not exist. Their workflow is independently validated by ``workflow_facts``.
+    """
     findings, fatal, _ = check(root)
     if fatal:
         raise ValueError(fatal)
@@ -200,7 +217,7 @@ def active_ids(root: pathlib.Path) -> list[str]:
         raise ValueError("catalog is not consistent: " + "; ".join(findings))
     catalog = yaml.safe_load((root / CATALOG).read_text(encoding="utf-8")) or {}
     return sorted(str(item["id"]) for item in (catalog.get("journeys") or [])
-                  if isinstance(item, dict) and item.get("status") == "active")
+                  if isinstance(item, dict) and item.get("status") == "active" and item.get("cronjob"))
 
 
 def alerted_journeys(root: pathlib.Path):
@@ -303,6 +320,18 @@ def check(root: pathlib.Path):
         if runtime_note is not None and (not isinstance(runtime_note, str) or not runtime_note.strip()):
             findings.append(f"{jid}: runtime_note must be a non-empty string when declared")
 
+        if entry.get("workflow"):
+            if entry.get("cronjob"):
+                findings.append(f"{jid}: an active journey declares one executor, not both workflow and cronjob")
+            if not entry.get("schedule"):
+                findings.append(f"{jid}: workflow-backed active journeys need `schedule`")
+            elif not CRON_EXPRESSION.match(str(entry.get("schedule"))):
+                findings.append(f"{jid}: schedule is not a five-field cron expression")
+            else:
+                error = workflow_facts(root, str(entry["workflow"]), str(entry["schedule"]))
+                if error:
+                    findings.append(f"{jid}: {error}")
+            continue
         for field in REQUIRED_ACTIVE:
             if entry.get(field) in (None, ""):
                 findings.append(f"{jid}: active journeys need `{field}`")

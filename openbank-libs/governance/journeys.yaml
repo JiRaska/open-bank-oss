@@ -97,6 +97,25 @@ journeys:
       CATALOG_BASE to a route that returns 5xx. The exact mounted k6 program must fail its
       status, JSON-shape, and latency thresholds within one scheduled interval.
 
+  - id: admin-ui-sso-boundary
+    title: "Admin UI SSO boundary"
+    capability: >-
+      The public Admin UI reaches and renders its Keycloak SSO boundary in a real browser. This
+      proves the unauthenticated hand-off only; it does not claim an authenticated operator flow.
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    schedule: "13 */2 * * *"
+    environment: sandbox
+    falsification: >-
+      Return a 5xx from the Admin UI, remove the Keycloak SSO boundary, or point the browser
+      target at a host that cannot render it. The scheduled Chromium run must fail and retain
+      its immutable evidence envelope.
+    runtime_note: >-
+      This is deliberately credential-free. A separate least-privilege canary identity is still
+      required before an authenticated operator journey can be claimed.
+
   # ---------------------------------------------------------------------------------------
   # PLANNED — the journeys that would have caught the two reported outages. Both need a
   # synthetic party that can hold an account and a device, which is ADR-0252 phase 1.

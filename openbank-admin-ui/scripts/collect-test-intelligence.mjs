@@ -487,6 +487,7 @@ function syntheticJourneys() {
       id: item.id, title: item.name ?? item.title ?? item.id, status: item.status,
       capability: item.capability ?? '',
       state: item.status === 'active' ? 'unknown' : 'blocked', severity: item.severity,
+      executor: item.workflow ? 'github-actions' : 'kubernetes-cronjob',
       schedule: item.schedule ?? item.target_schedule ?? null, environment: item.environment ?? null,
       covers: item.covers ?? item.covered_services ?? [],
       falsifies: item.falsification ?? '', blocker: item.blocked_by ?? null,
