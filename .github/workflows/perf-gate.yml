@@ -253,6 +253,18 @@ jobs:
           path: perf-reports/
           retention-days: 30
 
+      # The Admin UI deploy collector intentionally reads only immutable, provenance-complete
+      # `test-intelligence-run-*` artifacts. Keep the human-facing report bundle above, but
+      # publish this same versioned envelope under the fleet-wide projection contract too.
+      - name: Upload immutable Test Intelligence performance envelope
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-run-${{ matrix.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: perf-reports/${{ matrix.service }}-run.json
+          retention-days: 30
+          if-no-files-found: error
+
   # ── The alarm (ADR-0243 decision 2, issue #3768) ──────────────────────────────
   # ADR-0243 and this file's own header both promise that an advisory-phase threshold
   # breach "creates issues rather than blocking merges". Until now nothing did: a breach
