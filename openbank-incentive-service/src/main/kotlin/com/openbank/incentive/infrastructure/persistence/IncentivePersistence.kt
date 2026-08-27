@@ -315,6 +315,7 @@ class PanacheIncentiveStore(
 
     private companion object {
         const val RETENTION_MONTHS = 13L
+        val ATTRIBUTED_FINALIZATION_GRACE: Duration = Duration.ofHours(24)
     }
 
     override suspend fun reserve(command: ReserveIncentive): PromoReservation = Panache.withTransaction {
@@ -420,10 +421,13 @@ class PanacheIncentiveStore(
 
     private suspend fun expireOne(id: UUID, at: Instant): Int = Panache.withTransaction {
         lockedReservation(id).flatMap { locked ->
+            val finalizationDeadline = locked?.expiresAt?.let { expiry ->
+                if (locked.attributionRef == null) expiry else expiry.plus(ATTRIBUTED_FINALIZATION_GRACE)
+            }
             if (
                 locked == null ||
                 locked.status != ReservationStatus.RESERVED.name ||
-                locked.expiresAt.isAfter(at)
+                requireNotNull(finalizationDeadline).isAfter(at)
             ) {
                 Uni.createFrom().item(0)
             } else {

@@ -250,7 +250,27 @@ class IncentiveRestContractIT {
             body("id", equalTo(attributedId))
         }
 
-        val qualifiedAt = Instant.now()
+        execute(
+            """
+            update promo_reservation
+            set reserved_at = now() - interval '3 seconds', expires_at = now() - interval '1 second'
+            where id = '$attributedId'
+            """.trimIndent(),
+        )
+        Given { contentType("application/json") }
+            .When { post("/api/v1/incentives/maintenance/expire") }
+            .Then { statusCode(200) }
+        assertThat(string("select status from promo_reservation where id = '$attributedId'"))
+            .isEqualTo("RESERVED")
+        assertThat(
+            count(
+                """select count(*) from incentive_outbox where aggregate_id = '$attributedId'
+                    and event_type = 'incentive.reservation.expired.v2'
+                """.trimIndent(),
+            ),
+        ).isZero()
+
+        val qualifiedAt = Instant.now().minusSeconds(2)
         Given {
             contentType("application/json")
             header("X-Customer-Party-Id", customerParty.toString())
