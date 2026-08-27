@@ -149,6 +149,11 @@ class AgentChatServiceTracingTest {
             assertThat(a["openbank.agent.result"]).isEqualTo("DENIED")
             assertThat(a["openbank.agent.detail"]).isEqualTo("kill_switch")
             assertThat(a["openbank.agent.tool_calls"]).isEqualTo(0L)
+            TraceContract.from(exported)
+                .requiresSpan("agent.run")
+                .requiresAttribute("agent.run", "openbank.agent.detail")
+                .hasNoErrorSpan()
+                .verifiedAs("agent-denied-run")
         }
     }
 }
