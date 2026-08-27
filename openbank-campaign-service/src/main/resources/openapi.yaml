@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.40.0
+  version: 1.41.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -54,8 +54,9 @@ paths:
       summary: Resolve server-owned attribution for an opaque app interaction reference
       description: >-
         Additive internal customer-edge capability. Only after ownership, app channel and handoff
-        are established does the trusted response return campaign/step/channel context for the edge
-        to attach to the downstream event. The app never receives or supplies these fields.
+        are established does the trusted response return campaign/step/channel context and the
+        campaign's immutable incentive reference for the edge to attach to a downstream claim.
+        The app never receives or supplies campaign or offer identity.
       parameters:
         - name: interactionRef
           in: path
@@ -77,6 +78,10 @@ paths:
                   campaignId: { type: string, format: uuid }
                   stepOrder: { type: integer, minimum: 0 }
                   channel: { type: string, enum: [PUSH, BANNER] }
+                  incentiveOfferRef:
+                    oneOf:
+                      - $ref: '#/components/schemas/IncentiveOfferRef'
+                      - type: 'null'
         "400":
           description: Missing or malformed caller party header
         "404":

@@ -434,14 +434,15 @@ class CampaignRestContractIT {
      * /api/v1/campaigns/planning` — then answers 400 for the entire portfolio because of one row the
      * HTTP API could never have created (#4825).
      */
-    private fun insertCampaignForSendLog(campaignId: UUID) {
+    private fun insertCampaignForSendLog(campaignId: UUID, incentiveOfferRef: IncentiveOfferRef? = null) {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """
                 INSERT INTO campaigns (
                     id, name, goal, segment_name, segment_version, steps_json, holdout_percent,
-                    state, created_by, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    state, created_by, created_at, updated_at,
+                    incentive_offer_id, incentive_offer_name, incentive_offer_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { statement ->
                 statement.setObject(1, campaignId)
@@ -455,6 +456,13 @@ class CampaignRestContractIT {
                 statement.setString(9, "fixture")
                 statement.setObject(10, OffsetDateTime.now())
                 statement.setObject(11, OffsetDateTime.now())
+                statement.setObject(12, incentiveOfferRef?.id)
+                statement.setString(13, incentiveOfferRef?.name)
+                if (incentiveOfferRef == null) {
+                    statement.setNull(14, java.sql.Types.INTEGER)
+                } else {
+                    statement.setInt(14, incentiveOfferRef.version)
+                }
                 statement.executeUpdate()
             }
         }
@@ -493,7 +501,8 @@ class CampaignRestContractIT {
         // durable parent directly, so this test runs entirely under the edge's ROLE_API identity
         // rather than borrowing an operator token to create a draft.
         val campaignId = UUID.randomUUID()
-        insertCampaignForSendLog(campaignId)
+        val offer = IncentiveOfferRef(UUID.randomUUID(), "term-deposit-welcome", 2)
+        insertCampaignForSendLog(campaignId, offer)
         val owner = UUID.randomUUID()
         val interactionRef = insertPushSend(campaignId, owner)
 
@@ -514,15 +523,37 @@ class CampaignRestContractIT {
             body("campaignId", equalTo(campaignId.toString()))
             body("stepOrder", equalTo(0))
             body("channel", equalTo("PUSH"))
+            body("incentiveOfferRef.id", equalTo(offer.id.toString()))
+            body("incentiveOfferRef.name", equalTo(offer.name))
+            body("incentiveOfferRef.version", equalTo(offer.version))
             body("partyId", nullValue())
         }
 
         Given {
             header("X-Customer-Party-Id", UUID.randomUUID().toString())
         } When {
-            get("/api/v1/campaigns/interactions/$interactionRef")
+            get("/api/v1/campaigns/interactions/$interactionRef/attribution")
         } Then {
             statusCode(404)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    fun `legacy campaign attribution keeps an explicit null incentive reference`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        val owner = UUID.randomUUID()
+        val interactionRef = insertPushSend(campaignId, owner)
+
+        Given {
+            header("X-Customer-Party-Id", owner.toString())
+        } When {
+            get("/api/v1/campaigns/interactions/$interactionRef/attribution")
+        } Then {
+            statusCode(200)
+            body("campaignId", equalTo(campaignId.toString()))
+            body("incentiveOfferRef", nullValue())
         }
     }
 
