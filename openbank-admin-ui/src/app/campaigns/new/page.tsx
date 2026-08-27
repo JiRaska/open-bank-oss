@@ -65,6 +65,41 @@ interface CampaignTrigger {
   humanForm: string
 }
 
+interface IncentiveOffer {
+  ref: { id: string; name: string; version: number }
+  productScope: string[]
+  effectiveFrom: string
+  expiresAt: string
+  stackingPolicy: 'EXCLUSIVE' | 'STACKABLE'
+}
+
+function isIncentiveOffer(value: unknown): value is IncentiveOffer {
+  if (!value || typeof value !== 'object') return false
+  const offer = value as Partial<IncentiveOffer>
+  const ref = offer.ref as Partial<IncentiveOffer['ref']> | undefined
+  const effectiveFrom = typeof offer.effectiveFrom === 'string' ? Date.parse(offer.effectiveFrom) : Number.NaN
+  const expiresAt = typeof offer.expiresAt === 'string' ? Date.parse(offer.expiresAt) : Number.NaN
+  return Boolean(
+    ref
+    && typeof ref.id === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref.id)
+    && typeof ref.name === 'string'
+    && ref.name.trim().length > 0
+    && typeof ref.version === 'number'
+    && Number.isInteger(ref.version)
+    && ref.version > 0
+    && Array.isArray(offer.productScope)
+    && offer.productScope.length > 0
+    && offer.productScope.every(scope => typeof scope === 'string' && scope.trim().length > 0)
+    && Number.isFinite(effectiveFrom)
+    && Number.isFinite(expiresAt)
+    && expiresAt > effectiveFrom
+    && (offer.stackingPolicy === 'EXCLUSIVE' || offer.stackingPolicy === 'STACKABLE'),
+  )
+}
+
+type IncentiveCatalogueState = 'loading' | 'ok' | 'not_deployed' | 'unauthorized' | 'unreachable'
+
 /** The reviewed content choice served by campaign-service, rather than a second client-side copy. */
 interface CampaignTemplate {
   template: string
@@ -107,6 +142,9 @@ export default function NewCampaignPage() {
   const [goal, setGoal] = useState('')
   const [segment, setSegment] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
+  const [incentiveOffers, setIncentiveOffers] = useState<IncentiveOffer[]>([])
+  const [incentiveOfferRef, setIncentiveOfferRef] = useState<IncentiveOffer['ref'] | null>(null)
+  const [incentiveCatalogueState, setIncentiveCatalogueState] = useState<IncentiveCatalogueState>('loading')
   const [segmentSource, setSegmentSource] = useState<'audiences' | 'segments' | null>(null)
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
@@ -184,6 +222,30 @@ export default function NewCampaignPage() {
       .catch(() => undefined)
   }, [])
 
+  useEffect(() => {
+    fetch('/api/incentives')
+      .then(r => r.json())
+      .then((response: { items?: IncentiveOffer[]; state?: string }) => {
+        if (response.state === 'ok') {
+          const items = response.items
+          if (!Array.isArray(items) || !items.every(isIncentiveOffer)) {
+            setIncentiveOffers([])
+            setIncentiveCatalogueState('unreachable')
+            return
+          }
+          setIncentiveOffers(items)
+          setIncentiveCatalogueState('ok')
+          return
+        }
+        setIncentiveCatalogueState(
+          response.state === 'not_deployed' || response.state === 'unauthorized'
+            ? response.state
+            : 'unreachable',
+        )
+      })
+      .catch(() => setIncentiveCatalogueState('unreachable'))
+  }, [])
+
   // The reach is the segment's own preview, run by the service — the same evaluation enrolment runs.
   // A number computed here from a different query would agree with the send only by luck.
   function previewReach(ref: string) {
@@ -212,6 +274,7 @@ export default function NewCampaignPage() {
           confirmedStepOrder: number; notConfirmedStepOrder: number
         }>; stopCondition?: { maxSendsPerParty: number } | null; conversionRule?: string | null
         holdoutPercent?: number; schedule?: { cadence: string } | null; trigger?: string | null
+        incentiveOfferRef?: { id: string; name: string; version: number } | null
       }; sources?: { campaign?: string } }) => {
         const campaign = d.campaign
         if (d.sources?.campaign !== 'ok' || !campaign || campaign.state !== 'DRAFT') {
@@ -268,6 +331,7 @@ export default function NewCampaignPage() {
         setStopAfter(campaign.stopCondition?.maxSendsPerParty ?? null)
         setConversionRule(campaign.conversionRule ?? null)
         setHoldoutPercent(campaign.holdoutPercent ?? 0)
+        setIncentiveOfferRef(campaign.incentiveOfferRef ?? null)
         setContentExperiment(campaign.steps?.some(step => step.variantBVariables !== undefined) ?? false)
         if (campaign.schedule) {
           setEntryMode('SCHEDULE')
@@ -433,8 +497,11 @@ export default function NewCampaignPage() {
     entryMode === 'MANUAL' ||
     (entryMode === 'SCHEDULE' && cadence !== '') ||
     (entryMode === 'TRIGGER' && trigger !== '')
+  const pinnedIncentiveUnavailable = incentiveOfferRef !== null &&
+    !incentiveOffers.some(offer => offer.ref.id === incentiveOfferRef.id)
   const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 &&
-    contentCatalogueState === 'ok' && !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null)
+    contentCatalogueState === 'ok' && !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null) &&
+    !pinnedIncentiveUnavailable
   // A campaign is an experience across surfaces, not a list of transport rows. Keep this compact
   // overview next to the canvas so a marketer can scan the whole customer footprint without
   // opening every node. It is derived solely from the steps that will be sent to campaign-service.
@@ -494,6 +561,7 @@ export default function NewCampaignPage() {
         ...(stopAfter !== null ? { stopCondition: { maxSendsPerParty: stopAfter } } : {}),
         ...(conversionRule ? { conversionRule } : {}),
         ...(holdoutPercent > 0 ? { holdoutPercent } : {}),
+        ...(incentiveOfferRef ? { incentiveOfferRef } : {}),
         ...(entryMode === 'SCHEDULE' && cadence ? { schedule: { cadence } } : {}),
         ...(entryMode === 'TRIGGER' && trigger ? { trigger } : {}),
         ...(decisions.length > 0 ? {
@@ -655,6 +723,64 @@ export default function NewCampaignPage() {
             {t(
               'Segmenty jsou definované v kódu a verzované. Nový segment je pull request, ne akce v UI.',
               'Segments are defined in code and versioned. A new segment is a pull request, not a UI action.',
+            )}
+          </p>
+        </div>
+
+        <div className="campaign-audience-card" data-incentive-selection>
+          <div className="campaign-section-heading">
+            <div>
+              <p>{t('Motivace', 'Incentive')}</p>
+              <h2>{t('Volitelná odměna', 'Optional reward')}</h2>
+            </div>
+          </div>
+          <label htmlFor="c-incentive" className="text-sm font-medium">
+            {t('Publikovaná nabídka', 'Published offer')}
+          </label>
+          <select
+            id="c-incentive"
+            className="input w-full"
+            value={incentiveOfferRef?.id ?? ''}
+            disabled={incentiveCatalogueState !== 'ok'}
+            onChange={event => setIncentiveOfferRef(
+              incentiveOffers.find(offer => offer.ref.id === event.target.value)?.ref ?? null,
+            )}
+          >
+            <option value="">{t('Bez odměny', 'No reward')}</option>
+            {pinnedIncentiveUnavailable && incentiveOfferRef && (
+              <option value={incentiveOfferRef.id}>
+                {incentiveOfferRef.name}@{incentiveOfferRef.version} · {t('již není dostupná', 'no longer available')}
+              </option>
+            )}
+            {incentiveOffers.map(offer => (
+              <option key={offer.ref.id} value={offer.ref.id}>
+                {offer.ref.name}@{offer.ref.version} · {offer.productScope.join(', ')}
+              </option>
+            ))}
+          </select>
+          {incentiveCatalogueState !== 'ok' && (
+            <p role="status" className="text-xs text-muted-foreground" style={{ marginTop: '0.5rem' }}>
+              {incentiveCatalogueState === 'not_deployed'
+                ? t('Incentive service není v tomto prostředí nasazená.', 'Incentive service is not deployed in this environment.')
+                : incentiveCatalogueState === 'unauthorized'
+                  ? t('Katalog odměn nemáte oprávnění zobrazit.', 'You are not authorized to view the incentive catalogue.')
+                  : incentiveCatalogueState === 'loading'
+                    ? t('Načítám katalog odměn…', 'Loading incentive catalogue…')
+                    : t('Katalog odměn teď není dostupný.', 'The incentive catalogue is currently unavailable.')}
+            </p>
+          )}
+          {incentiveCatalogueState === 'ok' && pinnedIncentiveUnavailable && incentiveOfferRef && (
+            <p role="alert" className="text-xs text-muted-foreground" style={{ marginTop: '0.5rem' }}>
+              {t(
+                `Připnutá nabídka ${incentiveOfferRef.name}@${incentiveOfferRef.version} už není publikovaná. Vyberte jinou nebo odměnu výslovně odeberte.`,
+                `Pinned offer ${incentiveOfferRef.name}@${incentiveOfferRef.version} is no longer published. Choose another offer or explicitly remove the reward.`,
+              )}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground" style={{ marginTop: '0.5rem' }}>
+            {t(
+              'Kampaň uloží přesnou publikovanou verzi. Rezervaci kódu a hodnotu odměny řídí Incentive service.',
+              'The campaign pins the exact published revision. Incentive service owns code reservation and reward value.',
             )}
           </p>
         </div>
