@@ -320,6 +320,21 @@ describe('campaign studio', () => {
     expect(document.getElementById('c-incentive')).toBeDisabled()
   }, 15000)
 
+  it('fails closed when the incentive catalogue returns a malformed item', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/api/segments': SEGMENTS,
+      '/api/incentives': {
+        state: 'ok',
+        items: [{ name: 'legacy-segment-shaped-item', version: 1 }],
+      },
+    }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/catalogue is currently unavailable/))
+    expect(document.getElementById('c-incentive')).toBeDisabled()
+    expect(screen.queryByRole('option', { name: /legacy-segment-shaped-item/ })).toBeNull()
+  }, 15000)
+
   it('authors both content arms and submits a measurable A/B experiment', async () => {
     let createBody: Record<string, unknown> | undefined
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

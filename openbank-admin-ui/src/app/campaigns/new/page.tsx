@@ -73,6 +73,24 @@ interface IncentiveOffer {
   stackingPolicy: 'EXCLUSIVE' | 'STACKABLE'
 }
 
+function isIncentiveOffer(value: unknown): value is IncentiveOffer {
+  if (!value || typeof value !== 'object') return false
+  const offer = value as Partial<IncentiveOffer>
+  const ref = offer.ref as Partial<IncentiveOffer['ref']> | undefined
+  return Boolean(
+    ref
+    && typeof ref.id === 'string'
+    && ref.id.length > 0
+    && typeof ref.name === 'string'
+    && ref.name.length > 0
+    && typeof ref.version === 'number'
+    && Number.isInteger(ref.version)
+    && ref.version > 0
+    && Array.isArray(offer.productScope)
+    && offer.productScope.every(scope => typeof scope === 'string'),
+  )
+}
+
 type IncentiveCatalogueState = 'loading' | 'ok' | 'not_deployed' | 'unauthorized' | 'unreachable'
 
 /** The reviewed content choice served by campaign-service, rather than a second client-side copy. */
@@ -202,7 +220,13 @@ export default function NewCampaignPage() {
       .then(r => r.json())
       .then((response: { items?: IncentiveOffer[]; state?: string }) => {
         if (response.state === 'ok') {
-          setIncentiveOffers(response.items ?? [])
+          const items = response.items ?? []
+          if (!Array.isArray(items) || !items.every(isIncentiveOffer)) {
+            setIncentiveOffers([])
+            setIncentiveCatalogueState('unreachable')
+            return
+          }
+          setIncentiveOffers(items)
           setIncentiveCatalogueState('ok')
           return
         }
