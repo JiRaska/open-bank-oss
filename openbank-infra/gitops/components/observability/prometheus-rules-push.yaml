@@ -97,41 +97,35 @@ spec:
         # create a fallback request, otherwise the policy is configured but inert.
         - alert: PushFallbackConfiguredButInert
           expr: |
-            max(openbank_notification_push_fallback_enabled) == 1
-            and on (template) (
+            (
               (
-                sum by (template) (openbank_notification_push_fanouts_total{
+                sum by (template) (increase(openbank_notification_push_fanouts_total{
                   devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
-                })
-                -
-                (
+                }[15m]))
+                or on (template) (
                   sum by (template) (openbank_notification_push_fanouts_total{
                     devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
+                  }) unless on (template) sum by (template) (openbank_notification_push_fanouts_total{
+                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
                   } offset 15m)
-                  or on (template) (
-                    sum by (template) (openbank_notification_push_fanouts_total{
-                      devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
-                    }) * 0
-                  )
                 )
               )
               >
               (
                 (
-                  sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"})
-                  -
-                  (
-                    sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"} offset 15m)
-                    or on (template) (sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"}) * 0)
+                  sum by (template) (increase(openbank_notification_fallback_routed_total{outcome="REROUTED"}[15m]))
+                  or on (template) (
+                    sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"})
+                    unless on (template) sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"} offset 15m)
                   )
-                )
-                or on (template) (
+                ) or on (template) (
                   sum by (template) (openbank_notification_push_fanouts_total{
                     devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
                   }) * 0
                 )
               )
             )
+            and on () (max(openbank_notification_push_fallback_enabled) == 1)
           for: 0m
           labels:
             severity: warning
