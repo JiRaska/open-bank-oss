@@ -27,6 +27,7 @@ import org.eclipse.microprofile.reactive.messaging.Message
 import org.eclipse.microprofile.reactive.messaging.spi.Connector
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasKey
+import org.hamcrest.Matchers.hasSize
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
@@ -87,6 +88,11 @@ class IncentiveRestContractIT {
             body("status", equalTo("DRAFT"))
         } Extract { path<String>("ref.id") }
 
+        When { get("/api/v1/incentives/offers") } Then {
+            statusCode(200)
+            body("items", hasSize<Any>(0))
+        }
+
         Given { contentType("application/json") }
             .When { post("/api/v1/incentives/offers/$offerId/publish") }
             .Then { statusCode(409) }
@@ -122,6 +128,20 @@ class IncentiveRestContractIT {
             }
         assertThat(meterRegistry.counter("openbank.incentive.offers.published").count())
             .isEqualTo(publicationsBefore + 1.0)
+
+        When { get("/api/v1/incentives/offers/$offerId") } Then {
+            statusCode(200)
+            body("ref.id", equalTo(offerId))
+            body("ref.name", equalTo("summer-current-account"))
+            body("ref.version", equalTo(1))
+            body("status", equalTo("PUBLISHED"))
+        }
+        When { get("/api/v1/incentives/offers") } Then {
+            statusCode(200)
+            body("items", hasSize<Any>(1))
+            body("items[0].ref.id", equalTo(offerId))
+            body("items[0].status", equalTo("PUBLISHED"))
+        }
 
         val start = CountDownLatch(1)
         val pool = Executors.newFixedThreadPool(6)

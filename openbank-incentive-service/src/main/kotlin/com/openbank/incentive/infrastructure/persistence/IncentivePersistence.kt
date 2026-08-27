@@ -260,6 +260,10 @@ class PanacheIncentiveStore(
     override suspend fun findOffer(id: UUID): IncentiveOffer? =
         Panache.withSession { offers.find("id", id).firstResult<OfferEntity>() }.awaitSuspending()?.toDomain()
 
+    override suspend fun listPublishedOffers(): List<IncentiveOffer> = Panache.withSession {
+        offers.list("status = ?1 order by name asc, version desc", OfferStatus.PUBLISHED.name)
+    }.awaitSuspending().map { it.toDomain() }
+
     override suspend fun submitOffer(id: UUID, actor: String): IncentiveOffer = Panache.withTransaction {
         lockedOffer(id).flatMap { entity ->
             val current = entity?.toDomain() ?: throw IncentiveNotFound("offer not found")
