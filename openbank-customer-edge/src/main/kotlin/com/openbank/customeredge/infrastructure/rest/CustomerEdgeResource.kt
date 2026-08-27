@@ -463,6 +463,7 @@ class CustomerEdgeResource(
     @Blocking
     fun claimIncentive(body: String, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        require(idempotencyKey.length <= MAX_IDEMPOTENCY_KEY_LENGTH) { "Idempotency-Key is too long" }
         val customer = customer()
         val request = runCatching { objectMapper.readTree(body) }.getOrNull()?.takeIf { it.isObject }
             ?: return badRequest("Malformed incentive claim")
@@ -473,8 +474,9 @@ class CustomerEdgeResource(
             ?: return badRequest("interactionRef must be a UUID")
         val productId = request.uuidField("productId")
             ?: return badRequest("productId must be a UUID")
-        val code = request.path("code").asText().takeIf { it.isNotBlank() }
-            ?: return badRequest("code is required")
+        val code = request.path("code").takeIf { it.isTextual }?.textValue()?.trim()
+            ?.takeIf { it.length in MIN_PROMO_CODE_LENGTH..MAX_PROMO_CODE_LENGTH }
+            ?: return badRequest("code must be a string between 8 and 128 characters")
 
         when (resolvePublicTermDeposit(customer, productId)) {
             is TermDepositResolution.Found -> Unit
@@ -4647,6 +4649,9 @@ class CustomerEdgeResource(
             "REWARDS_HUB",
         )
         private val INCENTIVE_CLAIM_FIELDS = setOf("interactionRef", "code", "productId")
+        private const val MIN_PROMO_CODE_LENGTH = 8
+        private const val MAX_PROMO_CODE_LENGTH = 128
+        private const val MAX_IDEMPOTENCY_KEY_LENGTH = 255
 
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
