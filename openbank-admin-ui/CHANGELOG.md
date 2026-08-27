@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.208.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.207.0...admin-ui-v0.208.0) (2026-08-27)
+
+
+### Features
+
+* **admin-ui:** surface RUM platform evidence ([#7340](https://github.com/JiRaska/open-bank-oss/issues/7340)) ([03ed9c9](https://github.com/JiRaska/open-bank-oss/commit/03ed9c995d319d9029a686c00678f598c6299084))
+* **campaign:** project incentive outcomes ([#7289](https://github.com/JiRaska/open-bank-oss/issues/7289)) ([3a89e9a](https://github.com/JiRaska/open-bank-oss/commit/3a89e9a2c4c809f1bc6edfb155bf3c67bbcebb73))
+* **testing:** add admin UI browser synthetic ([#7343](https://github.com/JiRaska/open-bank-oss/issues/7343)) ([4d8e4ef](https://github.com/JiRaska/open-bank-oss/commit/4d8e4ef35d1349cc54ede6fbf6d1953b6368fe26))
+* **testing:** expose synthetic runtime prerequisites ([#7332](https://github.com/JiRaska/open-bank-oss/issues/7332)) ([7bd4135](https://github.com/JiRaska/open-bank-oss/commit/7bd4135bf1601a3bf3d875db8d0d4806e1312df7))
+
+
+### Bug Fixes
+
+* **admin-ui:** expose Explorer brand asset ([#7336](https://github.com/JiRaska/open-bank-oss/issues/7336)) ([e501e48](https://github.com/JiRaska/open-bank-oss/commit/e501e483dea0b6f91daa8e79733d457343d71edd)), closes [#7335](https://github.com/JiRaska/open-bank-oss/issues/7335)
+* **admin-ui:** serialize audience lifecycle writes ([#7325](https://github.com/JiRaska/open-bank-oss/issues/7325)) ([94ed998](https://github.com/JiRaska/open-bank-oss/commit/94ed998758eb3bc83272320e54fdc789c4bca498)), closes [#7100](https://github.com/JiRaska/open-bank-oss/issues/7100)
+
 ## [0.207.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.206.0...admin-ui-v0.207.0) (2026-08-27)
 
 
