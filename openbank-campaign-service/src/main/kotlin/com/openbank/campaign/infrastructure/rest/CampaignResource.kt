@@ -13,6 +13,7 @@ import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.InAppSurface
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StepCondition
@@ -49,7 +50,11 @@ data class CreateCampaignRequest(
     val trigger: String? = null,
     /** Bounded, explicit yes/no delivery branches. Absent preserves a linear campaign. */
     val decisions: List<DecisionRequest> = emptyList(),
+    /** Exact published incentive revision; redemption remains owned by incentive-service. */
+    val incentiveOfferRef: IncentiveOfferRefRequest? = null,
 )
+
+data class IncentiveOfferRefRequest(val id: UUID, val name: String, val version: Int)
 
 /** Optional on create (ADR-0200 D1, #3585): absent means the journey runs every step, as before. */
 data class StopConditionRequest(val maxSendsPerParty: Int)
@@ -178,6 +183,7 @@ private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignD
     schedule = schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
     trigger = trigger,
     decisions = toDecisions(),
+    incentiveOfferRef = incentiveOfferRef?.let { IncentiveOfferRef(it.id, it.name, it.version) },
 )
 
 /**
@@ -216,6 +222,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
             request.trigger,
             request.toDecisions(),
+            request.incentiveOfferRef?.let { IncentiveOfferRef(it.id, it.name, it.version) },
         )
         Response.status(Response.Status.CREATED).entity(campaign).build()
     } catch (e: CampaignReferenceNotFoundException) {

@@ -4,6 +4,8 @@
 
 package com.openbank.campaign.integration
 
+import com.openbank.campaign.domain.model.IncentiveOfferRef
+import com.openbank.campaign.infrastructure.incentive.LiveIncentiveOfferRegistry
 import com.openbank.campaign.infrastructure.segment.SilverSegmentEvaluator
 import com.openbank.campaign.it.CampaignPostgresRedisTestResource
 import io.agroal.api.AgroalDataSource
@@ -58,6 +60,7 @@ class CampaignRestContractIT {
 
     private val audienceJwt = mockk<JsonWebToken>()
     private val segmentEvaluator = mockk<SilverSegmentEvaluator>()
+    private val incentiveRegistry = mockk<LiveIncentiveOfferRegistry>()
 
     @BeforeEach
     fun installAudiencePrincipal() {
@@ -66,6 +69,7 @@ class CampaignRestContractIT {
         QuarkusMock.installMockForType(audienceJwt, JsonWebToken::class.java)
         coEvery { segmentEvaluator.evaluate(any()) } returns emptyList()
         QuarkusMock.installMockForType(segmentEvaluator, SilverSegmentEvaluator::class.java)
+        QuarkusMock.installMockForType(incentiveRegistry, LiveIncentiveOfferRegistry::class.java)
     }
 
     /**
@@ -89,6 +93,13 @@ class CampaignRestContractIT {
         {"name":"$name","goal":"prove the HTTP contract","segmentName":"$segmentName","segmentVersion":1,
          "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                    "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+    """.trimIndent()
+
+    private fun draftBodyWithIncentive(name: String, ref: IncentiveOfferRef) = """
+        {"name":"$name","goal":"prove immutable incentive selection","segmentName":"actives","segmentVersion":1,
+         "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                   "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
+         "incentiveOfferRef":{"id":"${ref.id}","name":"${ref.name}","version":${ref.version}}}
     """.trimIndent()
 
     private fun audienceBody(name: String) = """
@@ -203,6 +214,49 @@ class CampaignRestContractIT {
         } Then {
             statusCode(200)
             body("name", equalTo(revisedName))
+        }
+    }
+
+    @Test
+    fun `campaign pins and reloads the exact published incentive revision`() {
+        val ref = IncentiveOfferRef(UUID.randomUUID(), "summer-current-account", 3)
+        coEvery { incentiveRegistry.resolvePublished(ref) } returns ref
+
+        val id = Given {
+            contentType("application/json")
+            body(draftBodyWithIncentive("incentive-${UUID.randomUUID()}", ref))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("incentiveOfferRef.id", equalTo(ref.id.toString()))
+            body("incentiveOfferRef.name", equalTo(ref.name))
+            body("incentiveOfferRef.version", equalTo(ref.version))
+        } Extract {
+            path<String>("id")
+        }
+
+        When { get("/api/v1/campaigns/$id") } Then {
+            statusCode(200)
+            body("incentiveOfferRef.id", equalTo(ref.id.toString()))
+            body("incentiveOfferRef.name", equalTo(ref.name))
+            body("incentiveOfferRef.version", equalTo(ref.version))
+        }
+    }
+
+    @Test
+    fun `campaign rejects an incentive revision that is not published exactly`() {
+        val ref = IncentiveOfferRef(UUID.randomUUID(), "retired-reward", 1)
+        coEvery { incentiveRegistry.resolvePublished(ref) } returns null
+
+        Given {
+            contentType("application/json")
+            body(draftBodyWithIncentive("rejected-${UUID.randomUUID()}", ref))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("published incentive offer ${ref.name}@${ref.version} (${ref.id}) not found"))
         }
     }
 

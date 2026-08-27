@@ -40,6 +40,7 @@ import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.InAppSurface
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentCatalog
 import com.openbank.campaign.domain.model.SegmentRef
@@ -121,6 +122,15 @@ class CampaignEntity : PanacheEntityBase() {
     /** Percentage assigned to the durable no-contact control cohort (V8). */
     @Column(nullable = false)
     var holdoutPercent: Int = 0
+
+    @Column
+    var incentiveOfferId: UUID? = null
+
+    @Column(length = 160)
+    var incentiveOfferName: String? = null
+
+    @Column
+    var incentiveOfferVersion: Int? = null
 
     @Column(nullable = false)
     lateinit var state: String
@@ -311,6 +321,9 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         scheduleEndAt = this@toEntity.schedule?.endAt
         triggerEvent = this@toEntity.trigger
         holdoutPercent = this@toEntity.holdoutPercent
+        incentiveOfferId = this@toEntity.incentiveOfferRef?.id
+        incentiveOfferName = this@toEntity.incentiveOfferRef?.name
+        incentiveOfferVersion = this@toEntity.incentiveOfferRef?.version
         state = this@toEntity.state.name
         createdBy = this@toEntity.createdBy
         approvedBy = this@toEntity.approvedBy
@@ -337,6 +350,9 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         approvedBy = approvedBy,
         createdAt = createdAt,
         updatedAt = updatedAt,
+        incentiveOfferRef = incentiveOfferId?.let { offerId ->
+            IncentiveOfferRef(offerId, requireNotNull(incentiveOfferName), requireNotNull(incentiveOfferVersion))
+        },
     )
 }
 

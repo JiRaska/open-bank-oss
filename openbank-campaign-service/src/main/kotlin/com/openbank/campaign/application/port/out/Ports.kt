@@ -12,6 +12,7 @@ import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.InAppSurface
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -32,6 +33,11 @@ interface CampaignRepository {
      * guard in the service — a DRAFT campaign has not passed four-eyes and must not enrol anyone.
      */
     suspend fun findActiveByTrigger(trigger: String): List<Campaign>
+}
+
+/** Resolve only immutable published offers; reservation and redemption never cross this port. */
+interface IncentiveOfferRegistry {
+    suspend fun resolvePublished(ref: IncentiveOfferRef): IncentiveOfferRef?
 }
 
 interface EnrolmentRepository {
