@@ -15,6 +15,7 @@ import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
 import { DevicesPanel } from '@/components/party/DevicesPanel'
 import { DocumentsPanel } from '@/components/party/DocumentsPanel'
 import { CustomerPortfolioPanel } from '@/components/party/CustomerPortfolioPanel'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
 
 // ADR-0210: a lookup over the analytics silver layer, not a customer list. There is no
 // crm-service and no "list all customers" surface here — party-service owns that.
@@ -85,6 +86,15 @@ export default function Customer360Page() {
           'A derived view over the analytics silver layer (ADR-0210) — no crm-service, no second database. Figures are NOT authoritative: balances and individual transactions belong to the owning services (ADR-0089). This shows counts, recency and state.',
         )}
       />
+
+      {!selected && (
+        <ExplorerGuide compact title={t('Začněte člověkem, ne UUID', 'Start with a person, not a UUID')}>
+          {t(
+            'Hledejte přirozeně podle jména nebo e-mailu a vyberte správnou party. Explorer pak poskládá odvozený pohled napříč doménami — autoritativní detail vždy zůstává ve zdrojové službě.',
+            'Search naturally by name or email, then select the right party. Explorer will assemble the derived cross-domain view — authoritative detail always remains in the source service.',
+          )}
+        </ExplorerGuide>
+      )}
 
       <PartySearch onSelect={load360} selectedId={selected?.id} busy={loading} />
 

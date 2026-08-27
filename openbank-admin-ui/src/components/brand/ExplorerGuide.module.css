@@ -1,0 +1,122 @@
+.guide {
+  position: relative;
+  min-height: 176px;
+  margin-bottom: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 209, 255, 0.24);
+  border-radius: var(--r-xl);
+  background:
+    radial-gradient(circle at 82% 12%, rgba(0, 209, 255, 0.2), transparent 30%),
+    linear-gradient(118deg, #071b43 0%, #0a3d91 60%, #1262b7 100%);
+  box-shadow: 0 16px 36px rgba(10, 61, 145, 0.14);
+  color: #fff;
+}
+
+.guide::before {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.18) 1px, transparent 1px);
+  background-size: 18px 18px;
+  content: '';
+  opacity: 0.14;
+  mask-image: linear-gradient(90deg, #000, transparent 72%);
+}
+
+.copy {
+  position: relative;
+  z-index: 1;
+  max-width: min(68%, 760px);
+  padding: 25px 30px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  margin-bottom: 8px;
+  color: #63e7ff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0 0 7px;
+  color: #fff;
+  font-size: 19px;
+  line-height: 1.25;
+}
+
+.body {
+  max-width: 640px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.action {
+  margin-top: 14px;
+}
+
+.action a,
+.action button {
+  color: #fff;
+}
+
+.portrait {
+  position: absolute;
+  right: -12px;
+  bottom: -150px;
+  width: 300px;
+  height: 450px;
+  overflow: hidden;
+  border-radius: 48% 0 0 0;
+  background: #06152f;
+  box-shadow: -18px 0 45px rgba(0, 0, 0, 0.16);
+}
+
+.image {
+  object-fit: cover;
+  object-position: 50% 10%;
+}
+
+.compact {
+  min-height: 126px;
+  margin-bottom: 16px;
+}
+
+.compact .copy {
+  max-width: calc(100% - 160px);
+  padding: 20px 24px;
+}
+
+.compact .title {
+  font-size: 16px;
+}
+
+.compact .portrait {
+  right: -8px;
+  bottom: -108px;
+  width: 168px;
+  height: 252px;
+}
+
+@media (max-width: 720px) {
+  .guide,
+  .compact {
+    min-height: 220px;
+  }
+
+  .copy,
+  .compact .copy {
+    max-width: 100%;
+    padding: 22px 22px 118px;
+  }
+
+  .portrait,
+  .compact .portrait {
+    right: -18px;
+    bottom: -112px;
+    width: 172px;
+    height: 258px;
+  }
+}

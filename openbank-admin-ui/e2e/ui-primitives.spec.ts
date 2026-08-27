@@ -104,7 +104,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
 
     // The shell is part of the operator experience, not decorative page chrome: the
     // navigation rail and command bar must retain their deliberate working geometry.
-    expect(Math.round((await page.locator('aside').boundingBox())!.width)).toBe(264)
+    expect(Math.round((await page.locator('#admin-sidebar').boundingBox())!.width)).toBe(264)
     expect(Math.round((await page.locator('header').boundingBox())!.height)).toBe(60)
     expect(await page.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
   })
