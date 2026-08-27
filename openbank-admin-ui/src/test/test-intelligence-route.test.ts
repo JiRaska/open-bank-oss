@@ -113,6 +113,9 @@ describe('GET /api/test-intelligence', () => {
           expect(url.searchParams.get('limit')).toBe('1000')
           return new Response(JSON.stringify({ traces: Array.from({ length: 12 }, (_, index) => ({ traceID: `trace-${index}` })) }), { status: 200 })
         }
+        if (url.pathname === '/api/v2/search/tag/.os.type/values') {
+          return new Response(JSON.stringify({ tagValues: [{ value: 'ios' }, { value: 'linux' }] }), { status: 200 })
+        }
         return new Response(JSON.stringify({ batches: [] }), { status: 200 })
       }
       const query = url.searchParams.get('query') ?? ''
@@ -126,8 +129,8 @@ describe('GET /api/test-intelligence', () => {
     })
     expect(body.clientExperiences[0].rum.detail).toContain('12 sampled mobile RUM trace(s)')
     expect(body.clientExperiences[0].rum.platforms).toEqual([
-      expect.objectContaining({ platform: 'android', capability: 'passed', runtime: 'unknown' }),
-      expect.objectContaining({ platform: 'ios', capability: 'passed', runtime: 'unknown' }),
+      expect.objectContaining({ platform: 'android', capability: 'passed', runtime: 'not-run' }),
+      expect.objectContaining({ platform: 'ios', capability: 'passed', runtime: 'passed' }),
     ])
     expect(body.clientExperiences[0].rum.backendCorrelations).toEqual({ inspectedTraces: 12, correlatedTraces: 0, backendServices: [], truncated: false })
     expect(body.clientExperiences[0].evidence).toEqual([])
