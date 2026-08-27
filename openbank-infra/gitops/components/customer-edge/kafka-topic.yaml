@@ -65,3 +65,29 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# Credit-journey funnel topic (ADR-0269 rule 8), produced by customer-edge's CreditFunnelPublisher
+# and consumed by analytics-sink into the ClickHouse bronze layer.
+#
+# A SEPARATE topic from openbank.onboarding.funnel.events, not a widened one. That stream is written
+# from an ANONYMOUS public endpoint; these events say "this customer is looking at borrowing money"
+# and are written only from an authenticated request. Putting them on a stream anyone can post to
+# would make an interest-in-credit signal both forgeable and probeable.
+#
+# Declared explicitly because the broker does not auto-create: a missing topic is how the
+# sepa-instant/swift submits hung — the produce never lands and the caller waits on a broker that
+# will not accept it. Retention 7 days like the other telemetry streams; the durable copy is
+# ClickHouse bronze (≥10y).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.credit.funnel.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
