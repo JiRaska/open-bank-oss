@@ -21,10 +21,9 @@
  *   - INCOMPLETE  — `CorepCell.isDataGap` / `CorepTemplate.hasDataGaps`. Contract-REQUIRED
  *                   fields (openbank-finrep-service/src/main/resources/openapi.yaml
  *                   `required: [templateId, period, cells, hasDataGaps]`), genuinely computed
- *                   by `C0100Mapper`, and documented there as "MUST NOT be read as an attested
- *                   zero balance". This is the reason that actually fires today: the ledger's
- *                   chart of accounts has no capital-structure GL accounts, so every C 01.00
- *                   capital row is a flagged zero.
+ *                   by the backend mappers, and documented there as "MUST NOT be read as an
+ *                   attested zero balance". It fires for an unclassified active FINREP account
+ *                   or a COREP trial balance with no recognised capital source.
  *   - UNBALANCED  — `FinrepTemplate.isBalanced === false`, refined by the optional
  *                   `balanceVerdict` into the three distinct defects below.
  *
