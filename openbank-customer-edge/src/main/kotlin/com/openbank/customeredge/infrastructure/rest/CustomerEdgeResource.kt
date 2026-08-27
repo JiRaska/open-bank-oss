@@ -4717,7 +4717,7 @@ class CustomerEdgeResource(
         )
         private val INCENTIVE_CLAIM_FIELDS = setOf("interactionRef", "code", "productId")
         private val TERM_DEPOSIT_OPEN_FIELDS = setOf("productId", "incentiveReservationId")
-        private val TERMINAL_ACCOUNT_REJECTION_STATUSES = setOf(409, 422)
+        private val TERMINAL_ACCOUNT_REJECTION_STATUSES = setOf(422)
         private const val MIN_PROMO_CODE_LENGTH = 8
         private const val MAX_PROMO_CODE_LENGTH = 128
         private const val MAX_IDEMPOTENCY_KEY_LENGTH = 255

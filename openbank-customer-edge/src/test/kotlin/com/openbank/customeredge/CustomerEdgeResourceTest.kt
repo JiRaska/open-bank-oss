@@ -348,7 +348,7 @@ class CustomerEdgeResourceTest {
 
     @Test
     fun `unknown auth routing and transient failures leave reservation retryable`() {
-        listOf(401, 403, 404, 408, 425, 429, 500, 502).forEach { status ->
+        listOf(401, 403, 404, 408, 409, 425, 429, 500, 502).forEach { status ->
             val caller = UUID.randomUUID()
             val product = UUID.randomUUID()
             val reservation = UUID.randomUUID()
