@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.214.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.213.0...admin-ui-v0.214.0) (2026-08-27)
+
+
+### Features
+
+* **admin-ui:** surface AI eval assurance ([#7469](https://github.com/JiRaska/open-bank-oss/issues/7469)) ([eff3dc1](https://github.com/JiRaska/open-bank-oss/commit/eff3dc1bc0d70e6359531724e67d9b5db4a668c1))
+
 ## [0.213.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.212.0...admin-ui-v0.213.0) (2026-08-27)
 
 
