@@ -4,10 +4,9 @@
 # real start AND stop lifecycle pair, not merely the recorder's name in the file (#7246):
 # a start-only resource leaves teardown unobservable while reading as migrated.
 #
-# NEXT SAFE CANDIDATES (non-money-path, single-container, no shared topology to preserve):
-#   openbank-agent-service, openbank-authz-policy-auditor, openbank-case-coordinator-agent,
-#   openbank-control-liveness-sentinel, openbank-devops-agent, openbank-docs-truth-agent,
-#   openbank-finops-agent, openbank-governance-auditor, openbank-release-steward.
+# Select the next migration from the remaining entries below, after classifying its topology
+# and money-path status. Do not maintain a second candidate list here: it drifts as paths are
+# migrated and can send an operator back to already-recorded resources.
 # Money-path entries (ledger, transaction, account, balance, sepa-*, domestic-payment,
 # clearing, swift, fx, lending, sdd, interest, sca, consent) are tracked separately: they
 # need the two-approval + threat-model process before their topology is touched.
