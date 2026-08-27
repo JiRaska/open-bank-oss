@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { hasPermission, permissionForPath } from "@/lib/auth/roles"
+import { isPublicSurface } from "@/lib/auth/publicSurface"
 
 // ADR-0080 P1 (F-AUTH-06): per-request CSP with a nonce + 'strict-dynamic' instead of
 // 'unsafe-inline' on script-src. A static next.config header can't carry a fresh nonce, so the
@@ -57,7 +58,12 @@ export default auth((req) => {
   // auth gate (it would loop /auth/login → /auth/login, or make the incident
   // contact unreachable without an account). Matched by middleware only so the
   // CSP still reaches them (ADR-0080 P1: CSP must cover pre-auth pages too).
-  if (pathname.startsWith("/auth") || pathname === "/privacy" || pathname.startsWith("/.well-known/")) {
+  //
+  // Uses the SAME predicate as the provider boundary (#7073) so the two cannot drift.
+  // This was startsWith("/auth"), a loose prefix that would serve any future
+  // /auth*-named route (e.g. /authorization) with no auth gate, while publicSurface
+  // called it protected. No such route exists today — the hole was latent, not live.
+  if (isPublicSurface(pathname) || pathname.startsWith("/.well-known/")) {
     return nextWithNonce()
   }
 
