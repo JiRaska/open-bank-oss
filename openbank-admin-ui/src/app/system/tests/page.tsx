@@ -340,6 +340,21 @@ function Mutations({ report }: { report: TestIntelligenceReport }) {
   </div>)}</div>
 }
 
+function PerformanceTrend({ points, t }: { points: TestIntelligenceReport['performanceHistory']; t: (cs: string, en: string) => string }) {
+  const measured = points.filter(point => point.metrics.p95Ms !== null).slice(-12)
+  if (measured.length === 0) return null
+  const maximum = Math.max(...measured.map(point => point.metrics.p95Ms ?? 0), 1)
+  return <div aria-label={t('Historie p95 výkonu', 'Performance p95 history')} style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+    <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginBottom: 6 }}><strong>{t('Neměnná historie p95', 'Immutable p95 history')}</strong> · {t('zobrazeny jsou pouze uchované k6 metriky, nikoli odhad baseline', 'only retained k6 metrics are shown; no baseline is inferred')}</div>
+    <div style={{ display: 'flex', alignItems: 'end', gap: 5, minHeight: 52 }}>
+      {measured.map(point => <div key={`${point.id}-${point.collectedAt}`} title={`${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(point.collectedAt))} · p95 ${Math.round(point.metrics.p95Ms ?? 0)} ms · ${point.state}`} style={{ flex: 1, minWidth: 10, display: 'grid', gap: 3 }}>
+        <div style={{ height: `${Math.max(3, (point.metrics.p95Ms ?? 0) / maximum * 42)}px`, borderRadius: '3px 3px 0 0', background: STATE_COLOR[point.state] }} />
+        <span style={{ color: 'var(--text-tertiary)', fontSize: 9, textAlign: 'center' }}>{Math.round(point.metrics.p95Ms ?? 0)}</span>
+      </div>)}
+    </div>
+  </div>
+}
+
 function Performance({ report }: { report: TestIntelligenceReport }) {
   const { t } = useLanguage()
   const declaredComponents = new Set(report.performance.flatMap(row => row.component ? [row.component] : []))
@@ -355,9 +370,12 @@ function Performance({ report }: { report: TestIntelligenceReport }) {
       </div>
       <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '10px 0 0' }}>{t('Absence scénáře není zelený výsledek. Tento panel odděluje měřený rozsah od neprovedeného či dosud nedefinovaného výkonového pokrytí.', 'An absent scenario is not a green result. This panel separates measured scope from performance coverage that is not run or not yet declared.')}</p>
     </section>
-    {report.performance.map(row => <div key={row.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-    <div><strong>{row.id}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 5 }}>{row.source} · {row.thresholds} threshold group(s)</div>{row.plan && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, fontSize: 11 }}><span style={{ padding: '3px 7px', borderRadius: 999, background: 'var(--surface-2)' }}>{row.plan.executionMode}</span><span>{row.plan.targetSchedule ? `${t('Cílový plán', 'Target schedule')}: ${row.plan.targetSchedule}` : t('Bez automatického plánu', 'No automated schedule')}</span>{row.plan.baselineReport && <span>{t('Zdokumentovaný baseline', 'Documented baseline')}: {row.plan.baselineReport}</span>}</div>}{row.metrics && <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 9, fontSize: 12 }}><span><strong>p95</strong> {row.metrics.p95Ms === null ? '—' : `${Math.round(row.metrics.p95Ms)} ms`}</span><span><strong>{t('Chybovost', 'Error rate')}</strong> {row.metrics.errorRatePercent === null ? '—' : `${row.metrics.errorRatePercent}%`}</span><span><strong>{t('Kontroly', 'Checks')}</strong> {row.metrics.checkPassRatePercent === null ? '—' : `${row.metrics.checkPassRatePercent}%`}</span><span><strong>{t('Požadavky', 'Requests')}</strong> {row.metrics.requests === null ? '—' : row.metrics.requests}</span></div>}{row.run && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>run {row.run.id} · {row.run.commit.slice(0, 8)} · {row.run.branch}</div>}{row.detail && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>{row.detail}</div>}{row.plan?.safetyBoundary && <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginTop: 5 }}><strong>{t('Bezpečnostní hranice', 'Safety boundary')}:</strong> {row.plan.safetyBoundary}</div>}{row.plan?.blocker && <div style={{ color: '#7c3aed', fontSize: 11, marginTop: 5 }}><strong>Blocker:</strong> {row.plan.blocker}</div>}</div><StateBadge state={row.state} />
-    </div>)}
+    {report.performance.map(row => {
+      const trend = report.performanceHistory.filter(point => point.id === row.id)
+      return <div key={row.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+        <div><strong>{row.id}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 5 }}>{row.source} · {row.thresholds} threshold group(s)</div>{row.plan && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, fontSize: 11 }}><span style={{ padding: '3px 7px', borderRadius: 999, background: 'var(--surface-2)' }}>{row.plan.executionMode}</span><span>{row.plan.targetSchedule ? `${t('Cílový plán', 'Target schedule')}: ${row.plan.targetSchedule}` : t('Bez automatického plánu', 'No automated schedule')}</span>{row.plan.baselineReport && <span>{t('Zdokumentovaný baseline', 'Documented baseline')}: {row.plan.baselineReport}</span>}</div>}{row.metrics && <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 9, fontSize: 12 }}><span><strong>p95</strong> {row.metrics.p95Ms === null ? '—' : `${Math.round(row.metrics.p95Ms)} ms`}</span><span><strong>{t('Chybovost', 'Error rate')}</strong> {row.metrics.errorRatePercent === null ? '—' : `${row.metrics.errorRatePercent}%`}</span><span><strong>{t('Kontroly', 'Checks')}</strong> {row.metrics.checkPassRatePercent === null ? '—' : `${row.metrics.checkPassRatePercent}%`}</span><span><strong>{t('Požadavky', 'Requests')}</strong> {row.metrics.requests === null ? '—' : row.metrics.requests}</span></div>}<PerformanceTrend points={trend} t={t} />{row.run && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>run {row.run.id} · {row.run.commit.slice(0, 8)} · {row.run.branch}</div>}{row.detail && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>{row.detail}</div>}{row.plan?.safetyBoundary && <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginTop: 5 }}><strong>{t('Bezpečnostní hranice', 'Safety boundary')}:</strong> {row.plan.safetyBoundary}</div>}{row.plan?.blocker && <div style={{ color: '#7c3aed', fontSize: 11, marginTop: 5 }}><strong>Blocker:</strong> {row.plan.blocker}</div>}</div><StateBadge state={row.state} />
+      </div>
+    })}
   </div>
 }
 

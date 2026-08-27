@@ -136,6 +136,19 @@ export interface PerformanceEvidence {
   }
 }
 
+/**
+ * Immutable performance observation copied from a retained deployment snapshot. A point exists
+ * only when k6 emitted metrics; absent/blocked scenarios never become a zero-valued datapoint.
+ */
+export interface PerformanceHistoryPoint {
+  id: string
+  collectedAt: string
+  state: EvidenceState
+  observedAt: string | null
+  metrics: NonNullable<PerformanceEvidence['metrics']>
+  run?: TestRunProvenance
+}
+
 export interface SyntheticJourneyEvidence {
   id: string
   title: string
@@ -238,6 +251,7 @@ export interface TestIntelligenceReport {
   contracts: ContractEvidence[]
   mutations: MutationEvidence[]
   performance: PerformanceEvidence[]
+  performanceHistory: PerformanceHistoryPoint[]
   syntheticJourneys: SyntheticJourneyEvidence[]
   journeyCoverage?: JourneyCoverageSummary
   clientExperiences: ClientExperienceEvidence[]

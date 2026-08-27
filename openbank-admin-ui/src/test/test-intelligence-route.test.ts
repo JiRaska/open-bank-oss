@@ -32,6 +32,7 @@ describe('GET /api/test-intelligence', () => {
     expect(body.schemaVersion).toBe(1)
     expect(body.components[0].coverage.state).toBe('not-run')
     expect(body.totals.missingEvidence).toBe(1)
+    expect(body.performanceHistory).toEqual([])
     expect(body.testImpact).toMatchObject({
       mode: 'shadow', mappingState: 'unknown', selectionState: 'unavailable', declaredByAllRetainedRuns: false,
     })

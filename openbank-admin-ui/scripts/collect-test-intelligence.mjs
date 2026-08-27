@@ -694,8 +694,9 @@ async function main() {
     .filter(item => ['unknown', 'not-run', 'blocked'].includes(item.state)).length
   const missingEvidence = components.filter(item => item.evidence.length === 0).length
   const historyDir = path.join(repo, 'openbank-admin-ui', 'test-intelligence-history')
-  const historicalReports = allFiles(historyDir, file => file.endsWith('.json'))
+  const historicalSnapshots = allFiles(historyDir, file => file.endsWith('.json'))
     .map(readJson).filter(item => item?.collectedAt && item?.totals)
+  const historicalReports = historicalSnapshots
     .map(item => ({ collectedAt: item.collectedAt, ...item.totals }))
   const currentPoint = { collectedAt: collectedAt.toISOString(), components: components.length,
     componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
@@ -704,6 +705,34 @@ async function main() {
     .sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
     .filter((item, index, all) => index === 0 || item.collectedAt !== all[index - 1].collectedAt)
     .slice(-30)
+  const performanceHistoryByScenario = new Map()
+  for (const snapshot of [...historicalSnapshots, { collectedAt: collectedAt.toISOString(), performance: performanceEvidence }]) {
+    if (!Number.isFinite(Date.parse(snapshot.collectedAt))) continue
+    for (const item of snapshot.performance ?? []) {
+      const metrics = item?.metrics
+      if (!item?.id || !metrics || !Object.values(metrics).some(value => typeof value === 'number' && Number.isFinite(value))) continue
+      const normalized = {
+        p95Ms: typeof metrics.p95Ms === 'number' && Number.isFinite(metrics.p95Ms) ? metrics.p95Ms : null,
+        errorRatePercent: typeof metrics.errorRatePercent === 'number' && Number.isFinite(metrics.errorRatePercent) ? metrics.errorRatePercent : null,
+        checkPassRatePercent: typeof metrics.checkPassRatePercent === 'number' && Number.isFinite(metrics.checkPassRatePercent) ? metrics.checkPassRatePercent : null,
+        requests: typeof metrics.requests === 'number' && Number.isFinite(metrics.requests) ? metrics.requests : null,
+      }
+      const key = `${item.id}:${snapshot.collectedAt}`
+      const rows = performanceHistoryByScenario.get(item.id) ?? new Map()
+      const run = safeRun(item.run, `performance-history:${item.id}`)
+      rows.set(key, {
+        id: item.id, collectedAt: snapshot.collectedAt,
+        state: ['passed', 'failed', 'skipped', 'not-run', 'stale', 'blocked', 'unknown'].includes(item.state) ? item.state : 'unknown',
+        observedAt: typeof item.observedAt === 'string' ? item.observedAt : null,
+        metrics: normalized,
+        ...(run ? { run } : {}),
+      })
+      performanceHistoryByScenario.set(item.id, rows)
+    }
+  }
+  const performanceHistory = [...performanceHistoryByScenario.values()]
+    .flatMap(rows => [...rows.values()].sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt)).slice(-30))
+    .sort((a, b) => a.id.localeCompare(b.id) || Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
   const serviceRunEnvelopes = [
     ...allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json')).map(readJson),
     ...currentEnvelopes,
@@ -734,7 +763,7 @@ async function main() {
     .sort((a, b) => Date.parse(b.run.observedAt) - Date.parse(a.run.observedAt)).slice(0, 500)
   const report = {
     schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
-    contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence,
+    contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence, performanceHistory,
     syntheticJourneys: synthetic, journeyCoverage: syntheticCoverage, history, runHistory, testCases, testImpact: impact,
     clientExperiences: clientExperience,
     totals: {
