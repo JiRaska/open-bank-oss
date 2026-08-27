@@ -35,6 +35,7 @@ class DetectFindingsActivityImpl(private val config: DevOpsConfig, private val t
      * Its span contains only the bounded detector enum and result count — never raw signals, titles,
      * resource names, or remediation payloads.
      */
+    @Suppress("TooGenericExceptionCaught") // Trace every detector failure before it propagates unchanged.
     override fun detect(detectorId: DetectorId, signals: Map<String, Double>): List<DevOpsFinding> {
         val span = tracer.spanBuilder("devops-agent.detector.evaluate")
             .setSpanKind(SpanKind.INTERNAL)
