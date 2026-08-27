@@ -23,7 +23,7 @@ describe('Test Intelligence performance coverage scope', () => {
     expect(scenarios).toContain('id: money-path-smoke')
     expect(scenarios).toContain('execution_mode: planned-read-only-sandbox')
     expect(scenarios).toContain('blocker: No isolated money-path target, dedicated runner, and verified least-privilege read identity')
-    expect(workflow).toContain('DECLARED = ["openbank-product-catalog"]')
+    expect(workflow).toContain('DECLARED = ["openbank-product-catalog", "openbank-flaky-test-hunter"]')
   })
 
   it('refuses to turn an authorization rejection into money-path latency evidence', () => {
