@@ -434,13 +434,38 @@ spec:
           expr: absent(kube_cronjob_status_last_successful_time{cronjob="journey-demo"})
 """
 
+SELF_TEST_CATALOG_WORKFLOW = """
+version: 1
+journeys:
+  - id: browser-boundary
+    title: Browser boundary
+    capability: proves the public browser hand-off
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/browser-synthetic.yml
+    schedule: "13 */2 * * *"
+    falsification: remove the SSO boundary
+"""
 
-def write_tree(root: pathlib.Path, catalog: str, cronjob: str, rules: str, cronjob_name="cronjob-journey-demo.yaml"):
+SELF_TEST_WORKFLOW = """
+name: Browser synthetic
+on:
+  schedule:
+    - cron: '13 */2 * * *'
+"""
+
+
+def write_tree(root: pathlib.Path, catalog: str, cronjob: str, rules: str, cronjob_name="cronjob-journey-demo.yaml", workflow=None):
     (root / "openbank-libs/governance").mkdir(parents=True, exist_ok=True)
     (root / COMPONENTS / "observability").mkdir(parents=True, exist_ok=True)
     (root / CATALOG).write_text(catalog, encoding="utf-8")
     if cronjob is not None:
         (root / COMPONENTS / "observability" / cronjob_name).write_text(cronjob, encoding="utf-8")
+    if workflow is not None:
+        target = root / ".github/workflows/browser-synthetic.yml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(workflow, encoding="utf-8")
     (root / RULES).write_text(rules, encoding="utf-8")
 
 
@@ -451,10 +476,10 @@ def self_test():
     """
     cases = []
 
-    def run(label, catalog, cronjob, rules, expect_finding, cronjob_name="cronjob-journey-demo.yaml"):
+    def run(label, catalog, cronjob, rules, expect_finding, cronjob_name="cronjob-journey-demo.yaml", workflow=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
-            write_tree(root, catalog, cronjob, rules, cronjob_name)
+            write_tree(root, catalog, cronjob, rules, cronjob_name, workflow)
             findings, fatal, _ = check(root)
             got = bool(findings) or bool(fatal)
             ok = got == expect_finding
@@ -462,6 +487,14 @@ def self_test():
 
     run("control: a consistent catalog is clean",
         SELF_TEST_CATALOG_OK, SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=False)
+
+    run("control: a workflow-backed active journey is schedule-verified",
+        SELF_TEST_CATALOG_WORKFLOW, None, SELF_TEST_RULES, expect_finding=False,
+        workflow=SELF_TEST_WORKFLOW)
+
+    run("workflow-backed journey schedule drift is detected",
+        SELF_TEST_CATALOG_WORKFLOW, None, SELF_TEST_RULES, expect_finding=True,
+        workflow=SELF_TEST_WORKFLOW.replace("13 */2 * * *", "0 * * * *"))
 
     run("catalog entry whose manifest does not exist",
         SELF_TEST_CATALOG_OK.replace("cronjob-journey-demo.yaml", "cronjob-journey-ghost.yaml"),
