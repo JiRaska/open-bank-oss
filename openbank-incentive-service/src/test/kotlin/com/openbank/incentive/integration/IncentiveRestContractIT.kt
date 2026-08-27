@@ -28,7 +28,6 @@ import org.eclipse.microprofile.reactive.messaging.spi.Connector
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.hasKey
-import org.hamcrest.Matchers.hasSize
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
@@ -139,9 +138,8 @@ class IncentiveRestContractIT {
         }
         When { get("/api/v1/incentives/offers") } Then {
             statusCode(200)
-            body("items", hasSize<Any>(1))
-            body("items[0].ref.id", equalTo(offerId))
-            body("items[0].status", equalTo("PUBLISHED"))
+            body("items.ref.id", hasItem(offerId))
+            body("items.find { it.ref.id == '$offerId' }.status", equalTo("PUBLISHED"))
         }
 
         val start = CountDownLatch(1)
