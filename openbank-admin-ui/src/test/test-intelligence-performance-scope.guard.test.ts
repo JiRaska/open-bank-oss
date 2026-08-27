@@ -22,8 +22,20 @@ describe('Test Intelligence performance coverage scope', () => {
 
     expect(scenarios).toContain('id: money-path-smoke')
     expect(scenarios).toContain('execution_mode: planned-read-only-sandbox')
-    expect(scenarios).toContain('blocker: No isolated authenticated read-only money-path target')
+    expect(scenarios).toContain('blocker: No isolated money-path target, dedicated runner, and verified least-privilege read identity')
     expect(workflow).toContain('DECLARED = ["openbank-product-catalog"]')
+  })
+
+  it('refuses to turn an authorization rejection into money-path latency evidence', () => {
+    const smoke = readFileSync(path.join(root(), 'perf/k6/money-path-smoke.js'), 'utf8')
+
+    expect(smoke).toContain('http.expectedStatuses(200)')
+    expect(smoke).not.toContain('http.expectedStatuses(200, 401)')
+    expect(smoke).toContain('"checks": ["rate==1.0"]')
+    expect(smoke).toContain('"ledger journals 200"')
+    expect(smoke).toContain('"txn list 200"')
+    expect(smoke).not.toContain('"ledger journals 200|401"')
+    expect(smoke).not.toContain('"txn list 200|401"')
   })
 
   it('keeps cross-layer evidence gaps visible from the primary operator view', () => {
