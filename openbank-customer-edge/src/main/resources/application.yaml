@@ -148,6 +148,7 @@ openbank:
     notification-service-url: ${NOTIFICATION_SERVICE_URL:http://notification-service.notifications.svc:8112}
     engagement-service-url: ${ENGAGEMENT_SERVICE_URL:http://engagement-service.engagement.svc:8153}
     campaign-service-url: ${CAMPAIGN_SERVICE_URL:https://campaign-service.campaign.svc:8443}
+    incentive-service-url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
     statement-service-url: ${STATEMENT_SERVICE_URL:http://statement-service.statements.svc:8136}
     standing-order-service-url: ${STANDING_ORDER_SERVICE_URL:http://standing-order-service.payments.svc:8121}
     fx-service-url:      ${FX_SERVICE_URL:http://fx-service.fx.svc:8119}

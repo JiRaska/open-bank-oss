@@ -49,6 +49,8 @@ class CustomerEdgeResourceTest {
         balanceServiceUrl = "http://balance"
         engagementServiceUrl = "http://engagement"
         campaignServiceUrl = "http://campaign"
+        productCatalogUrl = "http://catalog"
+        incentiveServiceUrl = "http://incentive"
     }
 
     private fun accountJson(accountId: UUID, ownerParty: UUID) =
@@ -62,6 +64,89 @@ class CustomerEdgeResourceTest {
         "earlyWithdrawalNoticeDays":0}, "termsAndConditions":[]
     }
     """.trimIndent()
+
+    private fun termDepositAccount(caller: UUID, product: UUID, openedAt: String): String = """{
+        "id":"${UUID.randomUUID()}","partyId":"$caller","productId":"$product",
+        "accountType":"TERM_DEPOSIT","status":"ACTIVE","openedAt":"$openedAt"
+    }
+    """.trimIndent()
+
+    @Test
+    fun `claimIncentive derives party and offer from trusted sources and forwards exact idempotency`() {
+        val caller = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val offerId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val forwarded = slot<String>()
+        every { upstream.get("http://catalog/api/v1/products/$productId", caller.toString()) } returns
+            Response.ok(termDepositProduct(productId)).build()
+        every {
+            upstream.get(
+                "http://campaign/api/v1/campaigns/interactions/$interactionRef/attribution",
+                caller.toString(),
+            )
+        } returns Response.ok(
+            """{"campaignId":"${UUID.randomUUID()}","stepOrder":0,"channel":"PUSH","incentiveOfferRef":{"id":"$offerId","name":"WELCOME","version":1}}""",
+        ).build()
+        every {
+            upstream.post(
+                "http://incentive/api/v1/customer-incentives/offers/$offerId/reservations",
+                caller.toString(),
+                capture(forwarded),
+                "claim-once",
+            )
+        } returns Response.status(201).entity("{\"status\":\"RESERVED\"}").build()
+
+        val response = resourceFor(upstream, caller).claimIncentive(
+            """{"interactionRef":"$interactionRef","code":"WELCOME10","productId":"$productId"}""",
+            "claim-once",
+        )
+
+        assertThat(response.status).isEqualTo(201)
+        val request = ObjectMapper().readTree(forwarded.captured)
+        assertThat(request.path("productRef").asText()).isEqualTo(productId.toString())
+        assertThat(request.path("attributionRef").asText()).isEqualTo(interactionRef.toString())
+        assertThat(request.path("code").asText()).isEqualTo("WELCOME10")
+        assertThat(request.has("partyRef")).isFalse()
+        assertThat(request.has("offerId")).isFalse()
+    }
+
+    @Test
+    fun `claimIncentive rejects client supplied party or offer identity before any upstream call`() {
+        val caller = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val response = resourceFor(upstream, caller).claimIncentive(
+            """{"interactionRef":"${UUID.randomUUID()}","code":"WELCOME10","productId":"${UUID.randomUUID()}","partyRef":"${UUID.randomUUID()}"}""",
+            "claim-once",
+        )
+
+        assertThat(response.status).isEqualTo(400)
+        verify(exactly = 0) { upstream.get(any(), any()) }
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `claimIncentive rejects foreign interaction before calling Incentive Service`() {
+        val caller = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://catalog/api/v1/products/$productId", caller.toString()) } returns
+            Response.ok(termDepositProduct(productId)).build()
+        every {
+            upstream.get(match { it.contains("/interactions/$interactionRef/attribution") }, caller.toString())
+        } returns
+            Response.status(404).build()
+
+        val response = resourceFor(upstream, caller).claimIncentive(
+            """{"interactionRef":"$interactionRef","code":"WELCOME10","productId":"$productId"}""",
+            "claim-once",
+        )
+
+        assertThat(response.status).isEqualTo(400)
+        verify(exactly = 0) { upstream.post(match { it.startsWith("http://incentive/") }, any(), any(), any()) }
+    }
 
     @Test
     fun `getBalance rejects an account owned by another party and does not proxy (IDOR guard)`() {
@@ -145,16 +230,149 @@ class CustomerEdgeResourceTest {
         every { upstream.post(match { it.contains("/api/v1/accounts") }, any(), capture(sent), "retry-key") } returns
             Response.status(201).entity("""{"id":"${UUID.randomUUID()}"}""").build()
 
-        val response = resourceFor(upstream, caller).apply {
+        val resource = resourceFor(upstream, caller).apply {
             productCatalogUrl = "http://catalog"
             partyServiceUrl = "http://party"
-        }.openTermDeposit("""{"productId":"$product","accountType":"CURRENT","currencyCode":"EUR"}""", "retry-key")
+        }
+        assertThat(
+            resource.openTermDeposit(
+                """{"productId":"$product","accountType":"CURRENT","currencyCode":"EUR"}""",
+                "retry-key",
+            ).status,
+        ).isEqualTo(400)
+        val response = resource.openTermDeposit("""{"productId":"$product"}""", "retry-key")
 
         assertThat(response.status).isEqualTo(201)
         val body = ObjectMapper().readTree(sent.captured)
         assertThat(body.path("accountType").asText()).isEqualTo("TERM_DEPOSIT")
         assertThat(body.path("currencyCode").asText()).isEqualTo("CZK")
         assertThat(body.path("legalName").asText()).isEqualTo("Ada Customer")
+    }
+
+    @Test
+    fun `term deposit success commits the matching reservation with authoritative openedAt`() {
+        val caller = UUID.randomUUID()
+        val product = UUID.randomUUID()
+        val reservation = UUID.randomUUID()
+        val openedAt = "2026-08-27T03:00:00Z"
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.endsWith("/products/$product") }, any()) } returns
+            Response.ok(termDepositProduct(product)).build()
+        every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
+            Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
+        every { upstream.post("http://account/api/v1/accounts", caller.toString(), any(), "open-once") } returns
+            Response.status(201).entity(termDepositAccount(caller, product, openedAt)).build()
+        val commitBody = slot<String>()
+        every {
+            upstream.post(
+                "http://incentive/api/v1/customer-incentives/reservations/$reservation/commit",
+                caller.toString(),
+                capture(commitBody),
+                "open-once",
+            )
+        } returns Response.ok("""{"id":"$reservation","status":"COMMITTED"}""").build()
+
+        val response = resourceFor(upstream, caller).apply {
+            productCatalogUrl = "http://catalog"
+            partyServiceUrl = "http://party"
+        }.openTermDeposit(
+            """{"productId":"$product","incentiveReservationId":"$reservation"}""",
+            "open-once",
+        )
+
+        assertThat(response.status).isEqualTo(201)
+        val responseJson = ObjectMapper().readTree(response.entity.toString())
+        assertThat(responseJson.path("incentiveReservation").path("status").asText()).isEqualTo("COMMITTED")
+        val evidence = ObjectMapper().readTree(commitBody.captured)
+        assertThat(evidence.path("productRef").asText()).isEqualTo(product.toString())
+        assertThat(evidence.path("qualifiedAt").asText()).isEqualTo(openedAt)
+    }
+
+    @Test
+    fun `term deposit success without matching authoritative account evidence does not commit`() {
+        val caller = UUID.randomUUID()
+        val product = UUID.randomUUID()
+        val reservation = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.endsWith("/products/$product") }, any()) } returns
+            Response.ok(termDepositProduct(product)).build()
+        every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
+            Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
+        every { upstream.post("http://account/api/v1/accounts", caller.toString(), any(), "mismatch") } returns
+            Response.status(201).entity(
+                termDepositAccount(caller, UUID.randomUUID(), "2026-08-27T03:00:00Z"),
+            ).build()
+
+        val response = resourceFor(upstream, caller).apply {
+            productCatalogUrl = "http://catalog"
+            partyServiceUrl = "http://party"
+        }.openTermDeposit("""{"productId":"$product","incentiveReservationId":"$reservation"}""", "mismatch")
+
+        assertThat(response.status).isEqualTo(502)
+        verify(exactly = 0) {
+            upstream.post(match { it.contains("/customer-incentives/reservations/") }, any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `deterministic term deposit rejection releases the matching reservation`() {
+        val caller = UUID.randomUUID()
+        val product = UUID.randomUUID()
+        val reservation = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.endsWith("/products/$product") }, any()) } returns
+            Response.ok(termDepositProduct(product)).build()
+        every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
+            Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
+        every { upstream.post("http://account/api/v1/accounts", caller.toString(), any(), "reject-once") } returns
+            Response.status(422).entity("""{"error":"rejected"}""").build()
+        every {
+            upstream.post(
+                "http://incentive/api/v1/customer-incentives/reservations/$reservation/release",
+                caller.toString(),
+                match { ObjectMapper().readTree(it).path("productRef").asText() == product.toString() },
+                "reject-once",
+            )
+        } returns Response.ok("""{"id":"$reservation","status":"RELEASED"}""").build()
+
+        val response = resourceFor(upstream, caller).apply {
+            productCatalogUrl = "http://catalog"
+            partyServiceUrl = "http://party"
+        }.openTermDeposit(
+            """{"productId":"$product","incentiveReservationId":"$reservation"}""",
+            "reject-once",
+        )
+
+        assertThat(response.status).isEqualTo(422)
+    }
+
+    @Test
+    fun `unknown auth routing and transient failures leave reservation retryable`() {
+        listOf(401, 403, 404, 408, 409, 425, 429, 500, 502).forEach { status ->
+            val caller = UUID.randomUUID()
+            val product = UUID.randomUUID()
+            val reservation = UUID.randomUUID()
+            val upstream = mockk<UpstreamClient>()
+            every { upstream.get(match { it.endsWith("/products/$product") }, any()) } returns
+                Response.ok(termDepositProduct(product)).build()
+            every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
+                Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
+            every { upstream.post("http://account/api/v1/accounts", caller.toString(), any(), "retry-$status") } returns
+                Response.status(status).entity("""{"error":"unavailable"}""").build()
+
+            val response = resourceFor(upstream, caller).apply {
+                productCatalogUrl = "http://catalog"
+                partyServiceUrl = "http://party"
+            }.openTermDeposit(
+                """{"productId":"$product","incentiveReservationId":"$reservation"}""",
+                "retry-$status",
+            )
+
+            assertThat(response.status).isEqualTo(status)
+            verify(exactly = 0) {
+                upstream.post(match { it.contains("/customer-incentives/reservations/") }, any(), any(), any())
+            }
+        }
     }
 
     // ── party_id claim resolution (B1 fix, ADR-0069 §2) ─────────────────────
