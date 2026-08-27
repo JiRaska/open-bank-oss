@@ -52,7 +52,6 @@ openbank-party-service/src/test/kotlin/com/openbank/party/it/PostgresRedpandaTes
 openbank-pid-service/src/test/kotlin/com/openbank/pid/it/PostgresTestResource.kt
 openbank-psd2-service/src/test/kotlin/com/openbank/psd2/it/PostgresRedisTestResource.kt
 openbank-referral-service/src/test/kotlin/com/openbank/referral/it/ReferralPostgresTestResource.kt
-openbank-release-steward/src/test/kotlin/com/openbank/releasesteward/PostgresTestResource.kt
 openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/it/PostgresTestResource.kt
 openbank-sca-service/src/test/kotlin/com/openbank/sca/it/PostgresRedisTestResource.kt
 openbank-sdd-service/src/test/kotlin/com/openbank/sdd/it/PostgresTestResource.kt
