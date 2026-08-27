@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.215.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.214.0...admin-ui-v0.215.0) (2026-08-27)
+
+
+### Features
+
+* **admin-ui:** correlate browser RUM evidence ([#7482](https://github.com/JiRaska/open-bank-oss/issues/7482)) ([c15addc](https://github.com/JiRaska/open-bank-oss/commit/c15addc8296fd749373e86e3ec6b1d458586df01))
+
 ## [0.214.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.213.0...admin-ui-v0.214.0) (2026-08-27)
 
 
