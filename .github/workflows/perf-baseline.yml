@@ -8,10 +8,12 @@
 # uploaded, never fails the run or blocks a deploy (issue #334). Money-path perf gating
 # is a deliberate later step, not a surprise red build.
 #
-# Target: the services must already be reachable. Set the repo/environment variables
-# PERF_LEDGER_URL and PERF_TXN_URL (e.g. a sandbox internal URL reached via a
-# self-hosted runner, or a port-forward). If unset, the job SKIPS with a notice rather
-# than pretending to have measured something — no silent green.
+# Target: the services must already be reachable AND the runner must carry a dedicated,
+# least-privilege read identity. Set the repo/environment variables PERF_LEDGER_URL and
+# PERF_TXN_URL (e.g. a sandbox internal URL reached via a self-hosted runner, or a
+# port-forward). If unset, the job SKIPS with a notice rather than pretending to have
+# measured something — no silent green. An authenticated 200 is required; a 401 is retained
+# as failed evidence because it did not execute the handler.
 name: Perf baseline
 
 on:
