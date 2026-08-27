@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.209.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.208.0...admin-ui-v0.209.0) (2026-08-27)
+
+
+### Features
+
+* **testing:** govern browser synthetic journeys ([#7351](https://github.com/JiRaska/open-bank-oss/issues/7351)) ([1b2747e](https://github.com/JiRaska/open-bank-oss/commit/1b2747e50af53a04fd93f1f660d7ae94991c39b9))
+
 ## [0.208.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.207.0...admin-ui-v0.208.0) (2026-08-27)
 
 
