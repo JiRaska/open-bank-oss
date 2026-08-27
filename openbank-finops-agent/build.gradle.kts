@@ -43,6 +43,7 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(project(":openbank-libs-testing"))
 }
 
 // Package the ADR-0148 prompt registry onto the classpath so LlmDiagnosisAdapter loads its
