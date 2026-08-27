@@ -99,18 +99,18 @@ spec:
           expr: |
             max(openbank_notification_push_fallback_enabled) == 1
             and (
-              (sum(openbank_notification_push_fanouts_total{
+              (sum by (template) (openbank_notification_push_fanouts_total{
                 devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
               }) or vector(0))
               -
-              (sum(openbank_notification_push_fanouts_total{
+              (sum by (template) (openbank_notification_push_fanouts_total{
                 devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
               } offset 15m) or vector(0)) > 0
             )
-            unless (
-              (sum(openbank_notification_fallback_routed_total{outcome="REROUTED"}) or vector(0))
+            unless on (template) (
+              (sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"}) or vector(0))
               -
-              (sum(openbank_notification_fallback_routed_total{outcome="REROUTED"} offset 15m) or vector(0)) > 0
+              (sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"} offset 15m) or vector(0)) > 0
             )
           for: 0m
           labels:
@@ -118,8 +118,8 @@ spec:
           annotations:
             summary: "Enabled no-device push fallback did not create a routed request"
             description: >-
-              A policy-approved PUSH found no active device while fallback was enabled, but no
-              separate EMAIL fallback was recorded. Check notification-service logs and the
+              A policy-approved PUSH template found no active device while fallback was enabled, but
+              that template has no separate EMAIL fallback record. Check notification-service logs and the
               openbank_notification_fallback_routed_total counter; this says nothing about e-mail
               delivery, only that the handoff was not created.
 
