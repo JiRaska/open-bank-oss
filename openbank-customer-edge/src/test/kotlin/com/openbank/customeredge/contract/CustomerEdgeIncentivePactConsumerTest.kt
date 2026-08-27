@@ -229,8 +229,11 @@ class CustomerEdgeIncentivePactConsumerTest {
         const val IDEMPOTENCY_KEY = "claim-pact-once"
         const val OPEN_IDEMPOTENCY_KEY = "open-pact-once"
         const val QUALIFIED_AT = "2026-08-27T03:00:00Z"
-        const val ACCOUNT_OPENED =
-            """{"id":"77777777-7777-4777-8777-777777777777","openedAt":"$QUALIFIED_AT"}"""
+        val ACCOUNT_OPENED =
+            """
+            {"id":"77777777-7777-4777-8777-777777777777","partyId":"$PARTY_ID","productId":"$PRODUCT_ID",
+            "accountType":"TERM_DEPOSIT","status":"ACTIVE","openedAt":"$QUALIFIED_AT"}
+            """.trimIndent()
         val TERM_DEPOSIT_PRODUCT = """
             {"id":"$PRODUCT_ID","code":"TERM_6M","name":"Term deposit","type":"TERM_DEPOSIT",
             "currency":"CZK","status":"ACTIVE","isPublic":true,

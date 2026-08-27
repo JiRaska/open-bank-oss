@@ -65,6 +65,12 @@ class CustomerEdgeResourceTest {
     }
     """.trimIndent()
 
+    private fun termDepositAccount(caller: UUID, product: UUID, openedAt: String): String = """{
+        "id":"${UUID.randomUUID()}","partyId":"$caller","productId":"$product",
+        "accountType":"TERM_DEPOSIT","status":"ACTIVE","openedAt":"$openedAt"
+    }
+    """.trimIndent()
+
     @Test
     fun `claimIncentive derives party and offer from trusted sources and forwards exact idempotency`() {
         val caller = UUID.randomUUID()
@@ -255,7 +261,7 @@ class CustomerEdgeResourceTest {
         every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
             Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
         every { upstream.post("http://account/api/v1/accounts", caller.toString(), any(), "open-once") } returns
-            Response.status(201).entity("""{"id":"${UUID.randomUUID()}","openedAt":"$openedAt"}""").build()
+            Response.status(201).entity(termDepositAccount(caller, product, openedAt)).build()
         val commitBody = slot<String>()
         every {
             upstream.post(
@@ -280,6 +286,32 @@ class CustomerEdgeResourceTest {
         val evidence = ObjectMapper().readTree(commitBody.captured)
         assertThat(evidence.path("productRef").asText()).isEqualTo(product.toString())
         assertThat(evidence.path("qualifiedAt").asText()).isEqualTo(openedAt)
+    }
+
+    @Test
+    fun `term deposit success without matching authoritative account evidence does not commit`() {
+        val caller = UUID.randomUUID()
+        val product = UUID.randomUUID()
+        val reservation = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.endsWith("/products/$product") }, any()) } returns
+            Response.ok(termDepositProduct(product)).build()
+        every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
+            Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
+        every { upstream.post("http://account/api/v1/accounts", caller.toString(), any(), "mismatch") } returns
+            Response.status(201).entity(
+                termDepositAccount(caller, UUID.randomUUID(), "2026-08-27T03:00:00Z"),
+            ).build()
+
+        val response = resourceFor(upstream, caller).apply {
+            productCatalogUrl = "http://catalog"
+            partyServiceUrl = "http://party"
+        }.openTermDeposit("""{"productId":"$product","incentiveReservationId":"$reservation"}""", "mismatch")
+
+        assertThat(response.status).isEqualTo(502)
+        verify(exactly = 0) {
+            upstream.post(match { it.contains("/customer-incentives/reservations/") }, any(), any(), any())
+        }
     }
 
     @Test
@@ -315,29 +347,31 @@ class CustomerEdgeResourceTest {
     }
 
     @Test
-    fun `transient term deposit failure leaves reservation retryable`() {
-        val caller = UUID.randomUUID()
-        val product = UUID.randomUUID()
-        val reservation = UUID.randomUUID()
-        val upstream = mockk<UpstreamClient>()
-        every { upstream.get(match { it.endsWith("/products/$product") }, any()) } returns
-            Response.ok(termDepositProduct(product)).build()
-        every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
-            Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
-        every { upstream.post("http://account/api/v1/accounts", caller.toString(), any(), "retry-later") } returns
-            Response.status(502).entity("""{"error":"unavailable"}""").build()
+    fun `unknown auth routing and transient failures leave reservation retryable`() {
+        listOf(401, 403, 404, 408, 425, 429, 500, 502).forEach { status ->
+            val caller = UUID.randomUUID()
+            val product = UUID.randomUUID()
+            val reservation = UUID.randomUUID()
+            val upstream = mockk<UpstreamClient>()
+            every { upstream.get(match { it.endsWith("/products/$product") }, any()) } returns
+                Response.ok(termDepositProduct(product)).build()
+            every { upstream.get(match { it.contains("/parties/$caller") }, any()) } returns
+                Response.ok("""{"status":"ACTIVE","legalName":"Ada Customer"}""").build()
+            every { upstream.post("http://account/api/v1/accounts", caller.toString(), any(), "retry-$status") } returns
+                Response.status(status).entity("""{"error":"unavailable"}""").build()
 
-        val response = resourceFor(upstream, caller).apply {
-            productCatalogUrl = "http://catalog"
-            partyServiceUrl = "http://party"
-        }.openTermDeposit(
-            """{"productId":"$product","incentiveReservationId":"$reservation"}""",
-            "retry-later",
-        )
+            val response = resourceFor(upstream, caller).apply {
+                productCatalogUrl = "http://catalog"
+                partyServiceUrl = "http://party"
+            }.openTermDeposit(
+                """{"productId":"$product","incentiveReservationId":"$reservation"}""",
+                "retry-$status",
+            )
 
-        assertThat(response.status).isEqualTo(502)
-        verify(exactly = 0) {
-            upstream.post(match { it.contains("/customer-incentives/reservations/") }, any(), any(), any())
+            assertThat(response.status).isEqualTo(status)
+            verify(exactly = 0) {
+                upstream.post(match { it.contains("/customer-incentives/reservations/") }, any(), any(), any())
+            }
         }
     }
 

@@ -110,7 +110,10 @@ class CustomerIncentiveClaimIT {
         StubUpstreamResource.stub(
             ACCOUNT_PATH,
             status = 201,
-            body = """{"id":"77777777-7777-4777-8777-777777777777","openedAt":"$OPENED_AT"}""",
+            body = """
+                {"id":"77777777-7777-4777-8777-777777777777","partyId":"$CLAIM_PARTY_ID","productId":"$PRODUCT_ID",
+                "accountType":"TERM_DEPOSIT","status":"ACTIVE","openedAt":"$OPENED_AT"}
+            """.trimIndent(),
         )
         StubUpstreamResource.stub(
             COMMIT_PATH,

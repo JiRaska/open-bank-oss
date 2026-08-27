@@ -591,8 +591,7 @@ class CustomerEdgeResource(
             val account = parseJson(accountResponse)?.takeIf { it.isObject }
                 ?: return Response.status(Response.Status.BAD_GATEWAY)
                     .entity("{\"error\":\"Account outcome lacked qualifying evidence\"}").build()
-            val qualifiedAt = account.path("openedAt").asText().takeIf { it.isNotBlank() }
-                ?.let { runCatching { Instant.parse(it) }.getOrNull() }
+            val qualifiedAt = qualifyingAccountOpenedAt(account, customer.partyId, productId)
                 ?: return Response.status(Response.Status.BAD_GATEWAY)
                     .entity("{\"error\":\"Account outcome lacked qualifying evidence\"}").build()
             val commitBody = objectMapper.createObjectNode()
@@ -611,7 +610,7 @@ class CustomerEdgeResource(
             return Response.status(accountResponse.status).entity(result).type(MediaType.APPLICATION_JSON).build()
         }
 
-        if (accountResponse.status >= TRANSIENT_UPSTREAM_STATUS_MIN || accountResponse.status in TRANSIENT_STATUSES) {
+        if (accountResponse.status !in TERMINAL_ACCOUNT_REJECTION_STATUSES) {
             return accountResponse
         }
         val releaseBody = objectMapper.createObjectNode().put("productRef", productId.toString())
@@ -622,6 +621,16 @@ class CustomerEdgeResource(
             idempotencyKey,
         )
         return if (release.statusInfo.family == Response.Status.Family.SUCCESSFUL) accountResponse else release
+    }
+
+    private fun qualifyingAccountOpenedAt(account: JsonNode, partyId: UUID, productId: UUID): Instant? {
+        val authoritative = account.path("partyId").asText() == partyId.toString() &&
+            account.path("productId").asText() == productId.toString() &&
+            account.path("accountType").asText() == "TERM_DEPOSIT" &&
+            account.path("status").asText() == "ACTIVE"
+        if (!authoritative) return null
+        return account.path("openedAt").takeIf { it.isTextual }?.textValue()
+            ?.let { runCatching { Instant.parse(it) }.getOrNull() }
     }
 
     // --- KYC / identity verification status (AML Act §8, ADR-0116) ---
@@ -4708,8 +4717,7 @@ class CustomerEdgeResource(
         )
         private val INCENTIVE_CLAIM_FIELDS = setOf("interactionRef", "code", "productId")
         private val TERM_DEPOSIT_OPEN_FIELDS = setOf("productId", "incentiveReservationId")
-        private val TRANSIENT_STATUSES = setOf(408, 425, 429)
-        private const val TRANSIENT_UPSTREAM_STATUS_MIN = 500
+        private val TERMINAL_ACCOUNT_REJECTION_STATUSES = setOf(409, 422)
         private const val MIN_PROMO_CODE_LENGTH = 8
         private const val MAX_PROMO_CODE_LENGTH = 128
         private const val MAX_IDEMPOTENCY_KEY_LENGTH = 255
