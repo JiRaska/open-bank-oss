@@ -3,6 +3,11 @@
 #
 # Journey product-catalog-read → product-catalog (:8104), read-only synthetic edge.
 #
+# This policy deliberately lives with the observability component because that is the
+# ArgoCD Application that owns and renders the journey CronJob. It selects a target in
+# accounts, which Kubernetes permits; putting it beside the target workload left this
+# manifest outside every sandbox application's rendered source.
+#
 # HAND-MAINTAINED and deliberately not named network-policies.yaml: that file is derived
 # from long-lived Deployment callers by gen-network-policies.py. The journey is a CronJob,
 # so adding this edge there would be overwritten. NetworkPolicies are additive; this
@@ -19,7 +24,7 @@ metadata:
   name: product-catalog-ingress-synthetic-read-journey
   namespace: accounts
   labels:
-    app.kubernetes.io/part-of: accounts
+    app.kubernetes.io/part-of: observability
 spec:
   podSelector:
     matchLabels:
