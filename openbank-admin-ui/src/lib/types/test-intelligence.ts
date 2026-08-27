@@ -273,6 +273,12 @@ export interface TestIntelligenceReport {
   syntheticJourneys: SyntheticJourneyEvidence[]
   journeyCoverage?: JourneyCoverageSummary
   clientExperiences: ClientExperienceEvidence[]
+  /**
+   * Build-time derived ADR-0148 record/replay posture. This is deliberately neither a CI
+   * test result nor a runtime agent-health signal: it says which registered charters have a
+   * versioned eval suite and a real recorded baseline.
+   */
+  aiEvalAssurance?: AiEvalAssurance
   history: TestIntelligenceHistoryPoint[]
   runHistory: TestRunHistoryPoint[]
   testCases: TestCaseHistory[]
@@ -288,6 +294,18 @@ export interface TestIntelligenceReport {
     unresolvedEvidence?: number
   }
   warnings: string[]
+}
+
+export interface AiEvalAssurance {
+  state: EvidenceState
+  source: string
+  defaultMinPassRate: number
+  registeredCharters: string[]
+  suiteCharters: string[]
+  recordedCharters: string[]
+  missingSuiteCharters: string[]
+  missingRecordingCharters: string[]
+  detail: string
 }
 
 /**

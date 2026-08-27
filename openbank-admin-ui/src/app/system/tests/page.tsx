@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Activity, BarChart3, CheckCircle2, CircleHelp, Dna, FlaskConical,
-  Gauge, RefreshCw, ShieldCheck, Timer, TriangleAlert, XCircle,
+  Bot, Gauge, RefreshCw, ShieldCheck, Timer, TriangleAlert, XCircle,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
@@ -18,7 +18,7 @@ import { TestIntelligenceFlow } from '@/components/testing/TestIntelligenceFlow'
 import { TestAgentPanel } from '@/components/testing/TestAgentPanel'
 import { PageHeader } from '@/components/ui/PageHeader'
 
-type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients'
+type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients' | 'ai-assurance'
 
 const STATE_COLOR: Record<EvidenceState, string> = {
   passed: '#16a34a', failed: '#dc2626', skipped: '#d97706', 'not-run': '#64748b',
@@ -439,6 +439,19 @@ function ClientExperiences({ report }: { report: TestIntelligenceReport }) {
   </div>)}</div>
 }
 
+function AiAssurance({ report }: { report: TestIntelligenceReport }) {
+  const { t } = useLanguage()
+  const assurance = report.aiEvalAssurance
+  if (!assurance) return <div style={{ padding: 18, border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text-secondary)' }}>{t('AI eval evidence není v tomto snapshotu dostupná.', 'AI eval evidence is unavailable in this snapshot.')}</div>
+  return <section aria-label={t('AI eval assurance', 'AI eval assurance')} style={{ border: '1px solid color-mix(in srgb, #7c3aed 35%, var(--border))', borderRadius: 12, padding: 18, background: 'linear-gradient(135deg, color-mix(in srgb, #7c3aed 8%, var(--surface-1)), var(--surface-1))' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{t('AI eval assurance', 'AI eval assurance')}</strong><p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '7px 0 0' }}>{t('Versionované offline replaye. Nejde o runtime zdraví agenta ani o výsledek customer testu.', 'Versioned offline replays. This is neither agent runtime health nor a customer-test verdict.')}</p></div><StateBadge state={assurance.state} /></div>
+    <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginTop: 14, fontSize: 13 }}><span><strong>{assurance.recordedCharters.length}/{assurance.registeredCharters.length}</strong> {t('charterů s nahraným baseline', 'charters with recorded baselines')}</span><span><strong>{assurance.suiteCharters.length}</strong> {t('versionovaných suites', 'versioned suites')}</span><span><strong>{Math.round(assurance.defaultMinPassRate * 100)}%</strong> {t('minimální pass rate', 'minimum pass rate')}</span></div>
+    <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '12px 0 0' }}>{assurance.detail}</p>
+    {assurance.missingSuiteCharters.length > 0 && <div style={{ marginTop: 12, color: '#7c3aed', fontSize: 12 }}><strong>{t('Chybějící eval suite:', 'Missing eval suites:')}</strong> {assurance.missingSuiteCharters.join(', ')}</div>}
+    {assurance.missingRecordingCharters.length > 0 && <div style={{ marginTop: 8, color: '#d97706', fontSize: 12 }}><strong>{t('Suite bez recording:', 'Suites without recordings:')}</strong> {assurance.missingRecordingCharters.join(', ')}</div>}
+  </section>
+}
+
 export default function TestIntelligencePage() {
   const { language, t } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -472,6 +485,7 @@ export default function TestIntelligencePage() {
     { id: 'performance', label: t('Výkon', 'Performance'), icon: <Gauge size={13} /> },
     { id: 'synthetic', label: t('Syntetika', 'Synthetics'), icon: <Timer size={13} /> },
     { id: 'clients', label: t('Client experience', 'Client experience'), icon: <Activity size={13} /> },
+    { id: 'ai-assurance', label: t('AI assurance', 'AI assurance'), icon: <Bot size={13} /> },
   ]
 
   return <div style={{ padding: '28px 32px', maxWidth: 1600, animation: 'fadeIn 0.2s ease-out' }}>
@@ -492,6 +506,7 @@ export default function TestIntelligencePage() {
       {tab === 'posture' && <Posture report={report} />}{tab === 'tests' && <TestCases report={report} />}{tab === 'history' && <History report={report} />}{tab === 'execution' && <Execution report={report} />}{tab === 'runtime' && <RuntimeInfrastructure report={report} />}{tab === 'coverage' && <Coverage report={report} />}
       {tab === 'contracts' && <Contracts report={report} />}{tab === 'mutation' && <Mutations report={report} />}{tab === 'performance' && <Performance report={report} />}{tab === 'synthetic' && <Synthetics report={report} />}
       {tab === 'clients' && <ClientExperiences report={report} />}
+      {tab === 'ai-assurance' && <AiAssurance report={report} />}
     </> : <div style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Report není dostupný.', 'Report is unavailable.')}</div>}
     {report && <TestAgentPanel />}
     {report && <div style={{ marginTop: 18, color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Schéma', 'Schema')} v{report.schemaVersion} · {t('sesbíráno', 'collected')} {new Intl.DateTimeFormat(dateLocale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.collectedAt))} · {t('absence se nikdy nevykresluje jako nula', 'absence is never rendered as zero')}</div>}
