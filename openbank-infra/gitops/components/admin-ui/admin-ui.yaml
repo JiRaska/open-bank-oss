@@ -826,25 +826,6 @@ subjects:
   - kind: ServiceAccount
     name: admin-ui
     namespace: admin-ui
----
-# referral (MGM / ADR-0266). The catalogue BFF calls referral-service directly,
-# while discovery also reports its live workload health to operators.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: admin-ui-discovery
-  namespace: referral
-  labels:
-    app.kubernetes.io/name: admin-ui
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: admin-ui-discovery
-subjects:
-  - kind: ServiceAccount
-    name: admin-ui
-    namespace: admin-ui
----
 # engagement (ADR-0220). The service landed in #4025 and grew in #4054 without a
 # governance.yaml, so it was invisible to the manifest and to this guard. Adding the
 # manifest makes it a discovered module, which is what surfaced the missing pair here:
