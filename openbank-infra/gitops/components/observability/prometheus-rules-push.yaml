@@ -98,19 +98,39 @@ spec:
         - alert: PushFallbackConfiguredButInert
           expr: |
             max(openbank_notification_push_fallback_enabled) == 1
-            and (
-              (sum by (template) (openbank_notification_push_fanouts_total{
-                devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
-              }) or vector(0))
-              -
-              (sum by (template) (openbank_notification_push_fanouts_total{
-                devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
-              } offset 15m) or vector(0)) > 0
-            )
-            unless on (template) (
-              (sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"}) or vector(0))
-              -
-              (sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"} offset 15m) or vector(0)) > 0
+            and on (template) (
+              (
+                sum by (template) (openbank_notification_push_fanouts_total{
+                  devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
+                })
+                -
+                (
+                  sum by (template) (openbank_notification_push_fanouts_total{
+                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
+                  } offset 15m)
+                  or on (template) (
+                    sum by (template) (openbank_notification_push_fanouts_total{
+                      devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
+                    }) * 0
+                  )
+                )
+              )
+              >
+              (
+                (
+                  sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"})
+                  -
+                  (
+                    sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"} offset 15m)
+                    or on (template) (sum by (template) (openbank_notification_fallback_routed_total{outcome="REROUTED"}) * 0)
+                  )
+                )
+                or on (template) (
+                  sum by (template) (openbank_notification_push_fanouts_total{
+                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
+                  }) * 0
+                )
+              )
             )
           for: 0m
           labels:
