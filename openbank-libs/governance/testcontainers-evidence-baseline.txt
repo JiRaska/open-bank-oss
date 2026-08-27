@@ -12,7 +12,6 @@
 # clearing, swift, fx, lending, sdd, interest, sca, consent) are tracked separately: they
 # need the two-approval + threat-model process before their topology is touched.
 openbank-account-service/src/test/kotlin/com/openbank/account/it/PostgresRedpandaRedisTestResource.kt
-openbank-agent-service/src/test/kotlin/com/openbank/agent/it/PostgresTestResource.kt
 openbank-aml-service/src/test/kotlin/com/openbank/aml/it/PostgresRedisTestResource.kt
 openbank-anacredit-service/src/test/kotlin/com/openbank/anacredit/it/PostgresRedpandaTestResource.kt
 openbank-anacredit-service/src/test/kotlin/com/openbank/anacredit/it/PostgresTestResource.kt
