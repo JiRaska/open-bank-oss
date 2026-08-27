@@ -34,8 +34,41 @@ class CampaignInteractionQueryTest {
         coEvery { sendLog.attributionForAppInteraction(interactionRef, partyId) } returns attribution
         coEvery { campaigns.findById(attribution.campaignId) } returns campaign
 
-        assertThat(query.resolve(interactionRef, partyId)).isEqualTo(attribution.copy(incentiveOfferRef = offer))
+        assertThat(query.resolveAttribution(interactionRef, partyId))
+            .isEqualTo(attribution.copy(incentiveOfferRef = offer))
         coVerify(exactly = 1) { sendLog.attributionForAppInteraction(interactionRef, partyId) }
         coVerify(exactly = 1) { campaigns.findById(attribution.campaignId) }
+    }
+
+    @Test
+    fun `invalid interaction never reads a campaign`(): Unit = runBlocking {
+        val interactionRef = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
+        coEvery { sendLog.attributionForAppInteraction(interactionRef, partyId) } returns null
+
+        assertThat(query.resolveAttribution(interactionRef, partyId)).isNull()
+        coVerify(exactly = 0) { campaigns.findById(any()) }
+    }
+
+    @Test
+    fun `attribution fails closed when its campaign is missing`(): Unit = runBlocking {
+        val interactionRef = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
+        val attribution = CampaignInteractionAttribution(UUID.randomUUID(), 0, Channel.PUSH)
+        coEvery { sendLog.attributionForAppInteraction(interactionRef, partyId) } returns attribution
+        coEvery { campaigns.findById(attribution.campaignId) } returns null
+
+        assertThat(query.resolveAttribution(interactionRef, partyId)).isNull()
+    }
+
+    @Test
+    fun `validation remains independent of campaign hydration`(): Unit = runBlocking {
+        val interactionRef = UUID.randomUUID()
+        val partyId = UUID.randomUUID()
+        coEvery { sendLog.attributionForAppInteraction(interactionRef, partyId) } returns
+            CampaignInteractionAttribution(UUID.randomUUID(), 0, Channel.BANNER)
+
+        assertThat(query.validate(interactionRef, partyId)).isTrue()
+        coVerify(exactly = 0) { campaigns.findById(any()) }
     }
 }

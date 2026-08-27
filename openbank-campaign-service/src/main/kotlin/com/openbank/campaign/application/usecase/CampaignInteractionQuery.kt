@@ -19,7 +19,10 @@ import java.util.UUID
  */
 @ApplicationScoped
 class CampaignInteractionQuery(private val sendLog: SendLogRepository, private val campaigns: CampaignRepository) {
-    suspend fun resolve(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? {
+    suspend fun validate(interactionRef: UUID, partyId: UUID): Boolean =
+        sendLog.attributionForAppInteraction(interactionRef, partyId) != null
+
+    suspend fun resolveAttribution(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? {
         val attribution = sendLog.attributionForAppInteraction(interactionRef, partyId) ?: return null
         val campaign = campaigns.findById(attribution.campaignId) ?: return null
         return attribution.copy(incentiveOfferRef = campaign.incentiveOfferRef)

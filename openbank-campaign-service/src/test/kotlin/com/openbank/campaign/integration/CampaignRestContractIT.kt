@@ -532,9 +532,28 @@ class CampaignRestContractIT {
         Given {
             header("X-Customer-Party-Id", UUID.randomUUID().toString())
         } When {
-            get("/api/v1/campaigns/interactions/$interactionRef")
+            get("/api/v1/campaigns/interactions/$interactionRef/attribution")
         } Then {
             statusCode(404)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    fun `legacy campaign attribution keeps an explicit null incentive reference`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        val owner = UUID.randomUUID()
+        val interactionRef = insertPushSend(campaignId, owner)
+
+        Given {
+            header("X-Customer-Party-Id", owner.toString())
+        } When {
+            get("/api/v1/campaigns/interactions/$interactionRef/attribution")
+        } Then {
+            statusCode(200)
+            body("campaignId", equalTo(campaignId.toString()))
+            body("incentiveOfferRef", nullValue())
         }
     }
 
