@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.211.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.210.0...admin-ui-v0.211.0) (2026-08-27)
+
+
+### Features
+
+* **admin-ui:** retain performance evidence history ([#7408](https://github.com/JiRaska/open-bank-oss/issues/7408)) ([d9531a3](https://github.com/JiRaska/open-bank-oss/commit/d9531a368141c8ad04aa1f76eecd110e3977d2c9))
+
 ## [0.210.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.209.1...admin-ui-v0.210.0) (2026-08-27)
 
 
