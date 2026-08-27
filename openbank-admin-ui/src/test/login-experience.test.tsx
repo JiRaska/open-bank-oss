@@ -42,7 +42,8 @@ describe('login experience', () => {
     vi.mocked(signIn).mockResolvedValue(undefined)
     renderPage()
 
-    expect(screen.getByRole('heading', { name: 'Operate with confidence.' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Explore operations with confidence.' })).toBeInTheDocument()
+    expect(screen.getByText(/Your OpenBank Explorer is ready/)).toBeInTheDocument()
     expect(screen.getByText('Decisions with context')).toBeInTheDocument()
     const button = screen.getByRole('button', { name: 'Continue with Keycloak SSO' })
     fireEvent.click(button)
@@ -57,7 +58,8 @@ describe('login experience', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Your session expired')
     fireEvent.click(screen.getByRole('button', { name: 'Přepnout do češtiny' }))
-    expect(screen.getByRole('heading', { name: 'Řiďte banku s jistotou.' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Prozkoumejte provoz s jistotou.' })).toBeInTheDocument()
+    expect(screen.getByText(/OpenBank Explorer vás provede/)).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('Vaše relace vypršela')
   })
 })
