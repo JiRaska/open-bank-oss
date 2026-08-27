@@ -22,6 +22,11 @@ SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
 INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
 DIAGNOSTIC_KINDS = {"playwright-report"}
 MAX_FUTURE_SKEW = timedelta(minutes=5)
+# Shared resources write their readiness-aware lifecycle directly while the CI
+# Docker event stream sees the same container at daemon start/stop time. Keep
+# one observation when the two sources describe that same lifecycle, without
+# collapsing genuinely separate container cycles.
+RUNTIME_OBSERVATION_DUPLICATE_WINDOW = timedelta(seconds=5)
 
 
 def parse_timestamp(value: object, field: str) -> datetime:
@@ -299,13 +304,37 @@ def observations(service: Path) -> list[dict]:
                     resource = "postgres" if "postgres" in image else "redpanda" if "redpanda" in image else "valkey" if re.search(r"valkey|redis", image, re.I) else None
                     lifecycle = {"start": "started", "die": "stopped"}.get(item.get("lifecycle"))
                     if resource and lifecycle:
-                        result.append({"resource": resource, "image": image, "lifecycle": lifecycle,
-                                       "observedAt": datetime.fromtimestamp(int(item["observedAtUnix"]), timezone.utc).isoformat().replace("+00:00", "Z")})
+                        result.append((1, {"resource": resource, "image": image, "lifecycle": lifecycle,
+                                          "observedAt": datetime.fromtimestamp(int(item["observedAtUnix"]), timezone.utc).isoformat().replace("+00:00", "Z")}))
                 else:
-                    result.append(item)
+                    # A resource's own recorder marks readiness and carries the
+                    # stronger lifecycle observation than Docker's raw daemon
+                    # stream. Keep that provenance only while deduplicating;
+                    # the published schema deliberately contains no host data.
+                    result.append((0 if file.name == "testcontainers.jsonl" else 1, item))
             except json.JSONDecodeError:
                 continue
-    return result
+    normalized = []
+    for priority, item in result:
+        try:
+            observed_at = parse_timestamp(item["observedAt"], "testInfrastructure.observed.observedAt")
+        except (KeyError, ValueError):
+            continue
+        normalized.append((priority, observed_at, item))
+    normalized.sort(key=lambda entry: (entry[0], entry[1]))
+
+    deduplicated = []
+    for _, observed_at, item in normalized:
+        duplicate = any(
+            item["resource"] == previous["resource"]
+            and item["image"] == previous["image"]
+            and item["lifecycle"] == previous["lifecycle"]
+            and abs(observed_at - previous_at) <= RUNTIME_OBSERVATION_DUPLICATE_WINDOW
+            for previous_at, previous in deduplicated
+        )
+        if not duplicate:
+            deduplicated.append((observed_at, item))
+    return [item for _, item in sorted(deduplicated, key=lambda entry: entry[0])]
 
 
 def trace_contract_evidence(service: Path) -> list[dict]:
@@ -399,6 +428,14 @@ def main() -> None:
                 '{"image":"postgres:16.3-alpine","lifecycle":"start","observedAtUnix":1787433000}\n'
                 '{"image":"postgres:16.3-alpine","lifecycle":"die","observedAtUnix":1787433060}\n'
             )
+            # The shared recorder and daemon event stream observe the same
+            # lifecycle at slightly different instants. Keep one event per
+            # lifecycle rather than inflating the UI's runtime evidence count.
+            (runtime / "testcontainers.jsonl").write_text(
+                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z"}\n'
+                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:11:01Z"}\n'
+                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:10Z"}\n'
+            )
             performance = service / "perf.json"
             # This is k6's actual summary-export form: true means the threshold was crossed.
             performance.write_text('{"metrics":{"http_req_duration":{"thresholds":{"p(95)<500":true}}}}')
@@ -455,7 +492,11 @@ def main() -> None:
             })
             assert classify("PaymentApiIT", "com.openbank.PaymentApiIT", "test", "openbank-x") == "integration"
             assert classify("UnitTest", "com.openbank.UnitTest", "test", "openbank-x") == "unit"
-            assert [item["lifecycle"] for item in observations(service)] == ["started", "stopped"]
+            observed = observations(service)
+            assert [item["lifecycle"] for item in observed] == ["started", "started", "stopped"]
+            assert [item["observedAt"] for item in observed] == [
+                "2026-08-22T21:10:01Z", "2026-08-22T21:10:10Z", "2026-08-22T21:11:01Z",
+            ]
             specialized = specialized_evidence(str(performance), str(mutation))
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "passed")]
             absent = specialized_evidence(str(service / "missing-summary.json"), None, "no safe target configured")
