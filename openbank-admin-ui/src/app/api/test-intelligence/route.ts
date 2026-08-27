@@ -26,6 +26,7 @@ const emptyReport = (error: string): TestIntelligenceReport => ({
 type PrometheusVector = { status?: string; data?: { result?: { value?: [number, string] }[] } }
 type PrometheusLabelVector = { status?: string; data?: { result?: { metric?: Record<string, string>; value?: [number, string] }[] } }
 type TempoSearch = { traces?: Array<{ traceID?: string }> }
+type TempoTagValues = { tagValues?: Array<{ value?: string }> }
 type TempoTrace = {
   batches?: Array<{
     resource?: { attributes?: Array<{ key?: string; value?: { stringValue?: string } }> }
@@ -68,6 +69,26 @@ async function queryTempoMobileTraces(base: string): Promise<{ count: number; tr
     if (!Array.isArray(payload.traces)) return null
     const traceIds = [...new Set(payload.traces.flatMap(item => item.traceID ? [item.traceID] : []))]
     return { count: traceIds.length, truncated: payload.traces.length >= 1000, traceIds }
+  } catch { return null }
+}
+
+/**
+ * A generic `openbank-app` trace proves arrival only. Platform attribution needs the
+ * SDK's resource attribute, read from Tempo's tag-values endpoint over the same bounded
+ * seven-day window. The response contains only the low-cardinality OS values, never a
+ * device, party or trace identifier.
+ */
+async function queryTempoMobilePlatforms(base: string): Promise<Set<'android' | 'ios'> | null> {
+  const end = Math.floor(Date.now() / 1000)
+  const query = new URLSearchParams({ start: String(end - 7 * 86400), end: String(end) })
+  try {
+    const response = await fetch(`${base}/api/v2/search/tag/.os.type/values?${query}`, {
+      headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000), cache: 'no-store',
+    })
+    if (!response.ok) return null
+    const payload = await response.json() as TempoTagValues
+    if (!Array.isArray(payload.tagValues)) return null
+    return new Set(payload.tagValues.flatMap(item => item.value === 'android' || item.value === 'ios' ? [item.value] : []))
   } catch { return null }
 }
 
@@ -236,8 +257,9 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
   // Tempo's span-metrics prove arrival after the hardened, consent-gated RUM gateway.
   // `or vector(0)` distinguishes a reachable Prometheus with no sampled mobile signal
   // from an unavailable query. Zero is normal and must not become a failed CI verdict.
-  const [tempoTraces, spanCounterIncrements, errorSpans] = await Promise.all([
+  const [tempoTraces, mobilePlatforms, spanCounterIncrements, errorSpans] = await Promise.all([
     tracesBase ? queryTempoMobileTraces(tracesBase) : Promise.resolve(null),
+    tracesBase ? queryTempoMobilePlatforms(tracesBase) : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*"}[7d])) or vector(0)') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)') : Promise.resolve(null),
   ])
@@ -261,6 +283,17 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
       sampledSpansLast7d: sampled,
       errorSpansLast7d: errors,
       backendCorrelations,
+      platforms: client.rum.platforms?.map(platform => {
+        if (mobilePlatforms === null) return platform
+        const runtime = mobilePlatforms.has(platform.platform) ? 'passed' as const : 'not-run' as const
+        return {
+          ...platform,
+          runtime,
+          detail: runtime === 'passed'
+            ? `${platform.platform} resource attributes reached Tempo in the last 7 days; this is runtime arrival evidence, not a customer-volume estimate or a test verdict.`
+            : `No ${platform.platform} resource attribute reached Tempo in the last 7 days; the SDK capability remains separate from runtime arrival.`,
+        }
+      }),
       detail: sampled > 0
         ? `${countLabel} sampled mobile RUM trace(s) reached Tempo in the last 7 days${errors === null ? '' : `; ${errors} span-metric increment(s) carried an error status`}. This proves telemetry arrival, not customer traffic volume or test success.`
         : 'No sampled mobile RUM span reached Tempo in the last 7 days. Consent is opt-in, so this is an explicit absent runtime observation rather than a failed CI test.',
