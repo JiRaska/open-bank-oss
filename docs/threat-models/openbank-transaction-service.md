@@ -293,3 +293,10 @@ what the catalogue may hold.
   Risk class = **integrity** (segregation of duties + auditability of a correction), mitigated by
   `MergeSweepDescriptionTest` and `TransactionResourceMergeSweepTest`. `authz.four-eyes.enforce`
   remains `false`; the verb is inert until that flip.
+- **2026-08-27** — Transaction-initiation trace contract. `TransactionService` emits the internal
+  `transaction.initiate` span only with the terminal transaction status. It deliberately excludes
+  amount, account/party identifiers, description, idempotency key and payment metadata. Risk class
+  = **confidentiality** (telemetry data minimisation) and **availability** (a trace exporter must not
+  alter initiation); the span is assertion-backed by `TransactionApiIT`, which drives the real HTTP
+  endpoint against PostgreSQL/Redpanda Testcontainers and the test Temporal terminal-write workflow.
+  The contract proves this service boundary only — it does not claim a distributed downstream trace.
