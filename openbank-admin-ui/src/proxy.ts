@@ -23,8 +23,8 @@ function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
     "img-src 'self' data: blob:",
     `connect-src 'self' ${KC_URL} ${GLITCHTIP_ORIGIN}`,
     "frame-src 'self'",
