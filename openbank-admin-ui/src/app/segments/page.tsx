@@ -243,11 +243,6 @@ export default function SegmentsPage() {
                     {t('Použít v kampani', 'Use in campaign')} <ArrowRight className="h-3.5 w-3.5" />
                   </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => lifecycle(s, 'submit')} disabled={lifecycleAction !== null} aria-busy={lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit'} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60">{lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit' ? t('Odesílám…', 'Submitting…') : t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={() => lifecycle(s, 'approve')} disabled={lifecycleAction !== null} aria-busy={lifecycleAction?.key === key(s) && lifecycleAction.action === 'approve'} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">{lifecycleAction?.key === key(s) && lifecycleAction.action === 'approve' ? t('Schvaluji…', 'Approving…') : t('Schválit publikum', 'Approve audience')}</button></Can>}
                 </div>
-                {lifecycleError === key(s) && (
-                  <p role="alert" className="mt-2 text-xs font-medium text-red-600">
-                    {t('Akci se nepodařilo provést. Zkuste to znovu.', 'The action could not be completed. Please try again.')}
-                  </p>
-                )}
                 <p className="mt-3 flex items-center gap-1.5 text-[.68rem] text-slate-400"><Clock3 className="h-3 w-3" />{t('Dosah se mění s aktuálním stavem; verze pravidel zůstává stejná.', 'Reach changes with current state; the rule version stays fixed.')}</p>
               </article>
             ))}
