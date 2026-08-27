@@ -357,6 +357,9 @@ function PerformanceTrend({ points, t }: { points: TestIntelligenceReport['perfo
 
 function Performance({ report }: { report: TestIntelligenceReport }) {
   const { t } = useLanguage()
+  // A retained snapshot predating the additive history field must remain renderable.
+  // The API normalizes it, but this protects independently versioned API fixtures too.
+  const performanceHistory = report.performanceHistory ?? []
   const declaredComponents = new Set(report.performance.flatMap(row => row.component ? [row.component] : []))
   const executed = report.performance.filter(row => row.state === 'passed' || row.state === 'failed').length
   const undeclared = report.components.filter(component => !declaredComponents.has(component.component)).length
@@ -371,7 +374,7 @@ function Performance({ report }: { report: TestIntelligenceReport }) {
       <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '10px 0 0' }}>{t('Absence scénáře není zelený výsledek. Tento panel odděluje měřený rozsah od neprovedeného či dosud nedefinovaného výkonového pokrytí.', 'An absent scenario is not a green result. This panel separates measured scope from performance coverage that is not run or not yet declared.')}</p>
     </section>
     {report.performance.map(row => {
-      const trend = report.performanceHistory.filter(point => point.id === row.id)
+      const trend = performanceHistory.filter(point => point.id === row.id)
       return <div key={row.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
         <div><strong>{row.id}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 5 }}>{row.source} · {row.thresholds} threshold group(s)</div>{row.plan && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, fontSize: 11 }}><span style={{ padding: '3px 7px', borderRadius: 999, background: 'var(--surface-2)' }}>{row.plan.executionMode}</span><span>{row.plan.targetSchedule ? `${t('Cílový plán', 'Target schedule')}: ${row.plan.targetSchedule}` : t('Bez automatického plánu', 'No automated schedule')}</span>{row.plan.baselineReport && <span>{t('Zdokumentovaný baseline', 'Documented baseline')}: {row.plan.baselineReport}</span>}</div>}{row.metrics && <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 9, fontSize: 12 }}><span><strong>p95</strong> {row.metrics.p95Ms === null ? '—' : `${Math.round(row.metrics.p95Ms)} ms`}</span><span><strong>{t('Chybovost', 'Error rate')}</strong> {row.metrics.errorRatePercent === null ? '—' : `${row.metrics.errorRatePercent}%`}</span><span><strong>{t('Kontroly', 'Checks')}</strong> {row.metrics.checkPassRatePercent === null ? '—' : `${row.metrics.checkPassRatePercent}%`}</span><span><strong>{t('Požadavky', 'Requests')}</strong> {row.metrics.requests === null ? '—' : row.metrics.requests}</span></div>}<PerformanceTrend points={trend} t={t} />{row.run && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>run {row.run.id} · {row.run.commit.slice(0, 8)} · {row.run.branch}</div>}{row.detail && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>{row.detail}</div>}{row.plan?.safetyBoundary && <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginTop: 5 }}><strong>{t('Bezpečnostní hranice', 'Safety boundary')}:</strong> {row.plan.safetyBoundary}</div>}{row.plan?.blocker && <div style={{ color: '#7c3aed', fontSize: 11, marginTop: 5 }}><strong>Blocker:</strong> {row.plan.blocker}</div>}</div><StateBadge state={row.state} />
       </div>
