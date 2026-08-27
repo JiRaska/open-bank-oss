@@ -20,6 +20,9 @@ import com.openbank.flakytest.domain.model.RunTrigger
 import com.openbank.flakytest.domain.model.TestIntelligenceAnalysisRequest
 import com.openbank.flakytest.domain.model.TestIntelligenceComponentInput
 import com.openbank.libs.temporal.TemporalConfig
+import io.opentelemetry.api.trace.SpanKind
+import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.api.trace.Tracer
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
@@ -40,6 +43,7 @@ class FlakyTestHunterService(
     private val findingRepository: FindingRepository,
     private val llmDiagnosis: LlmDiagnosisPort,
     private val clock: Clock,
+    private val tracer: Tracer,
 ) : RunFlakyTestCheckUseCase,
     GetFindingsUseCase,
     AnalyzeTestIntelligenceUseCase {
@@ -74,7 +78,27 @@ class FlakyTestHunterService(
         return workflowId
     }
 
-    override suspend fun getActive(): List<FlakyTestFinding> = findingRepository.findActive()
+    /**
+     * A read of the evidence-backed operator queue is a control-plane operation, not merely an
+     * HTTP transport event.  Emit a bounded semantic span so an executable trace contract can
+     * prove the operation reached its repository without putting findings, IDs or prompt data in
+     * telemetry.
+     */
+    override suspend fun getActive(): List<FlakyTestFinding> {
+        val span = tracer.spanBuilder("flaky-test-hunter.findings.read")
+            .setSpanKind(SpanKind.INTERNAL)
+            .startSpan()
+        return runCatching {
+            findingRepository.findActive().also { findings ->
+                span.setAttribute("openbank.flaky.findings.count", findings.size.toLong())
+            }
+        }.onFailure { failure ->
+            span.recordException(failure)
+            span.setStatus(StatusCode.ERROR)
+        }.also {
+            span.end()
+        }.getOrThrow()
+    }
 
     override suspend fun getById(id: String): FlakyTestFinding? = findingRepository.findById(id)
 
