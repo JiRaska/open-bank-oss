@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.209.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.209.0...admin-ui-v0.209.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **admin-ui:** keep Explorer head visible ([#7362](https://github.com/JiRaska/open-bank-oss/issues/7362)) ([4bb2f11](https://github.com/JiRaska/open-bank-oss/commit/4bb2f115eba4a9d02ebb97f5286836f28c22ec64)), closes [#7361](https://github.com/JiRaska/open-bank-oss/issues/7361)
+
 ## [0.209.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.208.0...admin-ui-v0.209.0) (2026-08-27)
 
 
