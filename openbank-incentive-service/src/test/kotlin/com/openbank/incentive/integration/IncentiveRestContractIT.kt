@@ -41,7 +41,7 @@ import javax.sql.DataSource
 @QuarkusTest
 @QuarkusTestResource(IncentivePostgresTestResource::class)
 @QuarkusTestResource(IncentiveRestContractIT.InMemoryKafkaResource::class)
-@TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR"])
+@TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR", "ROLE_API"])
 class IncentiveRestContractIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
@@ -101,10 +101,10 @@ class IncentiveRestContractIT {
 
         Given {
             contentType("application/json")
-            body("""{"codes":["SUMMER-0001","SUMMER-0002","SUMMER-0003"]}""")
+            body("""{"codes":["SUMMER-0001","SUMMER-0002","SUMMER-0003","SUMMER-0004"]}""")
         } When { post("/api/v1/incentives/offers/$offerId/codes") } Then {
             statusCode(201)
-            body("imported", equalTo(3))
+            body("imported", equalTo(4))
         }
 
         Given { contentType("application/json") }
@@ -165,6 +165,107 @@ class IncentiveRestContractIT {
         pool.shutdown()
         assertThat(ids.toSet()).hasSize(1)
         assertThat(count("select count(*) from promo_reservation where offer_id = '$offerId'")).isEqualTo(1)
+
+        val customerParty = java.util.UUID.randomUUID()
+        val attributionRef = java.util.UUID.randomUUID()
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", "customer-claim-$offerId")
+            body(
+                """{
+                    "code":"SUMMER-0004",
+                    "productRef":"current-account",
+                    "attributionRef":"$attributionRef"
+                }
+                """.trimIndent(),
+            )
+        } When { post("/api/v1/customer-incentives/offers/$offerId/reservations") } Then {
+            statusCode(400)
+        }
+
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", customerParty.toString())
+            header("Idempotency-Key", "spoofed-party-$offerId")
+            body(
+                """{
+                    "code":"SUMMER-0004",
+                    "productRef":"current-account",
+                    "attributionRef":"$attributionRef",
+                    "partyRef":"spoofed-party"
+                }
+                """.trimIndent(),
+            )
+        } When { post("/api/v1/customer-incentives/offers/$offerId/reservations") } Then {
+            statusCode(400)
+        }
+
+        val attributedId = Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", customerParty.toString())
+            header("Idempotency-Key", "customer-claim-$offerId")
+            body(
+                """{
+                    "code":"SUMMER-0004",
+                    "productRef":"current-account",
+                    "attributionRef":"$attributionRef"
+                }
+                """.trimIndent(),
+            )
+        } When { post("/api/v1/customer-incentives/offers/$offerId/reservations") } Then {
+            statusCode(201)
+            body("attributionRef", equalTo(attributionRef.toString()))
+            body("$", not(hasKey("partyRef")))
+            body("$", not(hasKey("idempotencyKey")))
+            body("$", not(hasKey("codeDigest")))
+        } Extract { path<String>("id") }
+        assertThat(string("select party_ref from promo_reservation where id = '$attributedId'"))
+            .isEqualTo(customerParty.toString())
+        assertThat(string("select attribution_ref::text from promo_reservation where id = '$attributedId'"))
+            .isEqualTo(attributionRef.toString())
+        assertThat(
+            count(
+                """select count(*) from incentive_outbox where aggregate_id = '$attributedId'
+                    and event_type = 'incentive.reservation.created.v2'
+                    and payload::jsonb ->> 'attributionRef' = '$attributionRef'
+                    and payload::jsonb -> 'offerRef' ->> 'id' = '$offerId'
+                    and not (payload::jsonb ?| array['partyRef','code','codeDigest'])
+                """.trimIndent(),
+            ),
+        ).isEqualTo(1)
+
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", customerParty.toString())
+            header("Idempotency-Key", "customer-claim-$offerId")
+            body(
+                """{
+                    "code":"SUMMER-0004",
+                    "productRef":"current-account",
+                    "attributionRef":"$attributionRef"
+                }
+                """.trimIndent(),
+            )
+        } When { post("/api/v1/customer-incentives/offers/$offerId/reservations") } Then {
+            statusCode(201)
+            body("id", equalTo(attributedId))
+        }
+
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", customerParty.toString())
+            header("Idempotency-Key", "second-key-$offerId")
+            body(
+                """{
+                    "code":"SUMMER-0004",
+                    "productRef":"current-account",
+                    "attributionRef":"$attributionRef"
+                }
+                """.trimIndent(),
+            )
+        } When { post("/api/v1/customer-incentives/offers/$offerId/reservations") } Then {
+            statusCode(409)
+        }
         assertThat(string("select digest from promo_code_inventory where offer_id = '$offerId' limit 1"))
             .doesNotContain("SUMMER")
 
@@ -175,7 +276,7 @@ class IncentiveRestContractIT {
         } When { post("/api/v1/incentives/offers/$offerId/reservations") } Then {
             statusCode(409)
         }
-        assertThat(count("select count(*) from promo_reservation where offer_id = '$offerId'")).isEqualTo(1)
+        assertThat(count("select count(*) from promo_reservation where offer_id = '$offerId'")).isEqualTo(2)
 
         val firstId = ids.toSet().single()
         Given { contentType("application/json") }
@@ -210,7 +311,13 @@ class IncentiveRestContractIT {
         } When { post("/api/v1/incentives/offers/$offerId/reservations") } Then {
             statusCode(201)
         } Extract { path<String>("id") }
-        execute("update promo_reservation set expires_at = now() - interval '1 second' where id = '$expiringId'")
+        execute(
+            """
+            update promo_reservation
+            set reserved_at = now() - interval '2 seconds', expires_at = now() - interval '1 second'
+            where id = '$expiringId'
+            """.trimIndent(),
+        )
 
         val expiryStart = CountDownLatch(1)
         val expiryPool = Executors.newFixedThreadPool(2)
@@ -303,6 +410,31 @@ class IncentiveRestContractIT {
     private fun header(metadata: OutgoingKafkaRecordMetadata<*>, name: String): String =
         String(metadata.headers.lastHeader(name).value(), StandardCharsets.UTF_8)
 
+    @Test
+    @TestSecurity(user = "other-service", roles = ["ROLE_API"])
+    fun `customer reservation refuses a different api workload principal`() {
+        customerReservationRequest(java.util.UUID.randomUUID().toString()).Then { statusCode(403) }
+    }
+
+    @Test
+    fun `customer reservation refuses the nil party uuid`() {
+        customerReservationRequest("00000000-0000-0000-0000-000000000000").Then { statusCode(400) }
+    }
+
+    private fun customerReservationRequest(partyId: String) = Given {
+        contentType("application/json")
+        header("X-Customer-Party-Id", partyId)
+        header("Idempotency-Key", "trust-boundary-check")
+        body(
+            """{
+                "code":"SUMMER-0001",
+                "productRef":"current-account",
+                "attributionRef":"${java.util.UUID.randomUUID()}"
+            }
+            """.trimIndent(),
+        )
+    } When { post("/api/v1/customer-incentives/offers/${java.util.UUID.randomUUID()}/reservations") }
+
     companion object {
         private val CONTRACTED_EVENT_TYPES =
             setOf(
@@ -314,6 +446,10 @@ class IncentiveRestContractIT {
                 "incentive.reservation.committed.v1",
                 "incentive.reservation.released.v1",
                 "incentive.reservation.expired.v1",
+                "incentive.reservation.created.v2",
+                "incentive.reservation.committed.v2",
+                "incentive.reservation.released.v2",
+                "incentive.reservation.expired.v2",
             )
     }
 

@@ -62,18 +62,22 @@ class IncentiveApplication(
         code: String,
         partyRef: String,
         productRef: String,
+        attributionRef: UUID?,
         key: String,
         actor: String,
         now: Instant = Instant.now(),
     ): PromoReservation = store.reserve(
-        offerId,
-        digest(code),
-        partyRef,
-        productRef,
-        key,
-        actor,
-        now,
-        now.plus(reservationTtl),
+        ReserveIncentive(
+            offerId,
+            digest(code),
+            partyRef,
+            productRef,
+            attributionRef,
+            key,
+            actor,
+            now,
+            now.plus(reservationTtl),
+        ),
     )
 
     suspend fun commit(id: UUID, actor: String, now: Instant = Instant.now()) = store.commit(id, actor, now)

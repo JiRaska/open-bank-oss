@@ -1,9 +1,39 @@
 openapi: 3.0.3
 info:
   title: OpenBank Incentive Service
-  version: 1.1.0
+  version: 1.2.0
   description: Governed fixed-benefit offers and opaque promo-code reservations.
 paths:
+  /api/v1/customer-incentives/offers/{id}/reservations:
+    post:
+      summary: Reserve an attributed offer for an authenticated customer through customer-edge
+      description: >-
+        Internal ROLE_API boundary. The caller derives X-Customer-Party-Id from the customer JWT
+        and resolves the immutable offer and attribution reference from trusted server state.
+      parameters:
+        - {$ref: '#/components/parameters/OfferId'}
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CustomerReserveCode'}
+      responses:
+        "201":
+          description: Reserved or idempotently replayed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CustomerReservation'}
+        "400": {description: Missing trusted party, idempotency key, or invalid request}
+        "404": {description: Offer or code not found}
+        "409": {description: Replay mismatch, inventory, offer, attribution, or limit conflict}
   /api/v1/incentives/offers:
     get:
       summary: List immutable published incentive offers for governed catalogue selection
@@ -131,6 +161,29 @@ components:
         code: {type: string, minLength: 8, maxLength: 128, writeOnly: true}
         partyRef: {type: string}
         productRef: {type: string}
+    CustomerReserveCode:
+      type: object
+      additionalProperties: false
+      required: [code, productRef, attributionRef]
+      properties:
+        code: {type: string, minLength: 8, maxLength: 128, writeOnly: true}
+        productRef: {type: string, minLength: 1}
+        attributionRef:
+          type: string
+          format: uuid
+          description: Opaque campaign interaction reference resolved by customer-edge.
+    CustomerReservation:
+      type: object
+      additionalProperties: false
+      required: [id, offerRef, productRef, attributionRef, reservedAt, expiresAt, status]
+      properties:
+        id: {type: string, format: uuid}
+        offerRef: {$ref: '#/components/schemas/OfferRef'}
+        productRef: {type: string}
+        attributionRef: {type: string, format: uuid}
+        reservedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        status: {type: string, enum: [RESERVED, COMMITTED, RELEASED, EXPIRED]}
     Offer:
       type: object
       required: [ref, productScope, effectiveFrom, expiresAt, totalLimit, perPartyLimit, stackingPolicy, status, maker]

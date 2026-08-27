@@ -4,7 +4,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Incentive Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Lifecycle evidence emitted from the incentive transactional outbox. This topic does not
     authorize pricing, settlement, account mutation or cash rewards; consumers treat it as an
@@ -31,6 +31,10 @@ channels:
       reservationCommitted: {$ref: '#/components/messages/reservationCommitted'}
       reservationReleased: {$ref: '#/components/messages/reservationReleased'}
       reservationExpired: {$ref: '#/components/messages/reservationExpired'}
+      attributedReservationCreated: {$ref: '#/components/messages/attributedReservationCreated'}
+      attributedReservationCommitted: {$ref: '#/components/messages/attributedReservationCommitted'}
+      attributedReservationReleased: {$ref: '#/components/messages/attributedReservationReleased'}
+      attributedReservationExpired: {$ref: '#/components/messages/attributedReservationExpired'}
 
 operations:
   publishIncentiveEvidence:
@@ -46,6 +50,10 @@ operations:
       - $ref: '#/channels/incentiveEvents/messages/reservationCommitted'
       - $ref: '#/channels/incentiveEvents/messages/reservationReleased'
       - $ref: '#/channels/incentiveEvents/messages/reservationExpired'
+      - $ref: '#/channels/incentiveEvents/messages/attributedReservationCreated'
+      - $ref: '#/channels/incentiveEvents/messages/attributedReservationCommitted'
+      - $ref: '#/channels/incentiveEvents/messages/attributedReservationReleased'
+      - $ref: '#/channels/incentiveEvents/messages/attributedReservationExpired'
 
 components:
   schemas:
@@ -75,6 +83,10 @@ components:
         - incentive.reservation.committed.v1
         - incentive.reservation.released.v1
         - incentive.reservation.expired.v1
+        - incentive.reservation.created.v2
+        - incentive.reservation.committed.v2
+        - incentive.reservation.released.v2
+        - incentive.reservation.expired.v2
     lifecycleEnvelope:
       type: object
       additionalProperties: false
@@ -85,6 +97,45 @@ components:
         aggregateId: {type: string, format: uuid}
         eventType: {type: string}
         occurredAt: {type: string, format: date-time}
+    attributedReservationLifecycle:
+      type: object
+      additionalProperties: false
+      required:
+        - eventId
+        - correlationId
+        - aggregateId
+        - eventType
+        - occurredAt
+        - reservationId
+        - offerRef
+        - attributionRef
+        - status
+      properties:
+        eventId: {type: string, format: uuid}
+        correlationId: {type: string, format: uuid}
+        aggregateId: {type: string, format: uuid}
+        eventType:
+          type: string
+          enum:
+            - incentive.reservation.created.v2
+            - incentive.reservation.committed.v2
+            - incentive.reservation.released.v2
+            - incentive.reservation.expired.v2
+        occurredAt: {type: string, format: date-time}
+        reservationId: {type: string, format: uuid}
+        offerRef:
+          type: object
+          additionalProperties: false
+          required: [id, name, version]
+          properties:
+            id: {type: string, format: uuid}
+            name: {type: string, minLength: 1}
+            version: {type: integer, minimum: 1}
+        attributionRef:
+          type: string
+          format: uuid
+          description: Opaque campaign interaction reference; never a party identifier or promo code.
+        status: {type: string, enum: [RESERVED, COMMITTED, RELEASED, EXPIRED]}
 
   messages:
     offerCreated:
@@ -193,3 +244,55 @@ components:
         allOf:
           - $ref: '#/components/schemas/lifecycleEnvelope'
           - properties: {eventType: {const: incentive.reservation.expired.v1}}
+    attributedReservationCreated:
+      <<: *lifecycleEvidence
+      name: incentive.reservation.created.v2
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.reservation.created.v2}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/attributedReservationLifecycle'
+          - properties: {eventType: {const: incentive.reservation.created.v2}}
+    attributedReservationCommitted:
+      <<: *lifecycleEvidence
+      name: incentive.reservation.committed.v2
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.reservation.committed.v2}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/attributedReservationLifecycle'
+          - properties: {eventType: {const: incentive.reservation.committed.v2}}
+    attributedReservationReleased:
+      <<: *lifecycleEvidence
+      name: incentive.reservation.released.v2
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.reservation.released.v2}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/attributedReservationLifecycle'
+          - properties: {eventType: {const: incentive.reservation.released.v2}}
+    attributedReservationExpired:
+      <<: *lifecycleEvidence
+      name: incentive.reservation.expired.v2
+      headers:
+        allOf:
+          - $ref: '#/components/schemas/outboxHeaders'
+          - type: object
+            required: [ce-type]
+            properties: {ce-type: {const: incentive.reservation.expired.v2}}
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/attributedReservationLifecycle'
+          - properties: {eventType: {const: incentive.reservation.expired.v2}}

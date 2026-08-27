@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.incentive.infrastructure.persistence
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.incentive.application.IncentiveStore
+import com.openbank.incentive.application.ReserveIncentive
 import com.openbank.incentive.domain.CodeDigest
 import com.openbank.incentive.domain.IncentiveConflict
 import com.openbank.incentive.domain.IncentiveNotFound
@@ -72,6 +74,7 @@ class ReservationEntity : PanacheEntityBase() {
     lateinit var codeDigest: String
     lateinit var partyRef: String
     lateinit var productRef: String
+    var attributionRef: UUID? = null
     lateinit var idempotencyKey: String
     lateinit var status: String
     lateinit var reservedAt: Instant
@@ -249,6 +252,7 @@ class PanacheIncentiveStore(
     private val reservations: ReservationEntities,
     private val audits: AuditEntities,
     private val outbox: OutboxEntities,
+    private val objectMapper: ObjectMapper,
 ) : IncentiveStore {
     override suspend fun createOffer(offer: IncentiveOffer): IncentiveOffer = Panache.withTransaction {
         offers.persist(offer.toEntity()).flatMap {
@@ -313,70 +317,73 @@ class PanacheIncentiveStore(
         const val RETENTION_MONTHS = 13L
     }
 
-    override suspend fun reserve(
-        offerId: UUID,
-        digest: CodeDigest,
-        partyRef: String,
-        productRef: String,
-        idempotencyKey: String,
-        actor: String,
-        now: Instant,
-        expiresAt: Instant,
-    ): PromoReservation = Panache.withTransaction {
-        lockedOffer(offerId).flatMap { offerEntity ->
-            reservations.find("offerId = ?1 and idempotencyKey = ?2", offerId, idempotencyKey)
+    override suspend fun reserve(command: ReserveIncentive): PromoReservation = Panache.withTransaction {
+        lockedOffer(command.offerId).flatMap { offerEntity ->
+            reservations.find("offerId = ?1 and idempotencyKey = ?2", command.offerId, command.idempotencyKey)
                 .firstResult<ReservationEntity>().flatMap { replay ->
                     if (replay != null) {
-                        if (
-                            replay.codeDigest != digest.value ||
-                            replay.partyRef != partyRef ||
-                            replay.productRef != productRef
-                        ) {
+                        if (!replay.matches(command)) {
                             throw IncentiveConflict("idempotency key was already used for a different request")
                         }
                         return@flatMap Uni.createFrom().item(replay.toDomain())
                     }
-                    val offer = offerEntity?.toDomain() ?: throw IncentiveNotFound("offer not found")
-                    if (!offer.accepts(productRef, now)) throw IncentiveConflict("offer is not redeemable")
-                    reservations.count("offerId = ?1 and status in (?2, ?3)", offerId, "RESERVED", "COMMITTED")
-                        .flatMap { total ->
-                            if (total >= offer.totalLimit) throw IncentiveConflict("offer total limit reached")
-                            reservations.count(
-                                "offerId = ?1 and partyRef = ?2 and status in (?3, ?4)",
-                                offerId,
-                                partyRef,
-                                "RESERVED",
-                                "COMMITTED",
-                            )
-                        }.flatMap { partyCount ->
-                            if (partyCount >= offer.perPartyLimit) throw IncentiveConflict("party limit reached")
-                            lockedCode(digest.value)
-                        }.flatMap { code ->
-                            if (code == null || code.offerId != offerId || code.status != "AVAILABLE") {
-                                throw IncentiveConflict("code is unavailable")
-                            }
-                            code.status = "RESERVED"
-                            val reservation = PromoReservation(
-                                Ids.newId(),
-                                offer.ref,
-                                digest,
-                                partyRef,
-                                productRef,
-                                idempotencyKey,
-                                now,
-                                expiresAt,
-                            )
-                            reservations.persist(reservation.toEntity()).flatMap {
-                                evidence(
-                                    reservation.id,
-                                    eventType = "incentive.reservation.created.v1",
-                                    actor = actor,
+                    existingAttribution(command.attributionRef).flatMap { attributed ->
+                        if (attributed != null) throw IncentiveConflict("attribution was already reserved")
+                        val offer = redeemableOffer(offerEntity, command)
+                        reservations.count(
+                            "offerId = ?1 and status in (?2, ?3)",
+                            command.offerId,
+                            "RESERVED",
+                            "COMMITTED",
+                        )
+                            .flatMap { total ->
+                                if (total >= offer.totalLimit) throw IncentiveConflict("offer total limit reached")
+                                reservations.count(
+                                    "offerId = ?1 and partyRef = ?2 and status in (?3, ?4)",
+                                    command.offerId,
+                                    command.partyRef,
+                                    "RESERVED",
+                                    "COMMITTED",
                                 )
-                            }.replaceWith(reservation)
-                        }
+                            }.flatMap { partyCount ->
+                                if (partyCount >= offer.perPartyLimit) throw IncentiveConflict("party limit reached")
+                                lockedCode(command.digest.value)
+                            }.flatMap { code ->
+                                if (code == null || code.offerId != command.offerId || code.status != "AVAILABLE") {
+                                    throw IncentiveConflict("code is unavailable")
+                                }
+                                code.status = "RESERVED"
+                                val reservation = PromoReservation(
+                                    Ids.newId(),
+                                    offer.ref,
+                                    command.digest,
+                                    command.partyRef,
+                                    command.productRef,
+                                    command.idempotencyKey,
+                                    command.now,
+                                    command.expiresAt,
+                                    command.attributionRef,
+                                )
+                                reservations.persist(reservation.toEntity()).flatMap {
+                                    reservationEvidence(reservation, ReservationStatus.RESERVED, command.actor)
+                                }.replaceWith(reservation)
+                            }
+                    }
                 }
         }
     }.awaitSuspending()
+
+    private fun redeemableOffer(entity: OfferEntity?, command: ReserveIncentive): IncentiveOffer {
+        val offer = entity?.toDomain() ?: throw IncentiveNotFound("offer not found")
+        if (!offer.accepts(command.productRef, command.now)) throw IncentiveConflict("offer is not redeemable")
+        return offer
+    }
+
+    private fun existingAttribution(attributionRef: UUID?): Uni<ReservationEntity?> = if (attributionRef == null) {
+        Uni.createFrom().nullItem()
+    } else {
+        reservations.find("attributionRef", attributionRef).firstResult()
+    }
 
     override suspend fun commit(id: UUID, actor: String, at: Instant): PromoReservation =
         transition(id, actor, at, ReservationStatus.COMMITTED)
@@ -426,16 +433,8 @@ class PanacheIncentiveStore(
                     requireNotNull(code)
                     code.status = if (target == ReservationStatus.COMMITTED) "REDEEMED" else "AVAILABLE"
                     when (target) {
-                        ReservationStatus.COMMITTED -> evidence(
-                            id,
-                            eventType = "incentive.reservation.committed.v1",
-                            actor = actor,
-                        )
-                        ReservationStatus.RELEASED -> evidence(
-                            id,
-                            eventType = "incentive.reservation.released.v1",
-                            actor = actor,
-                        )
+                        ReservationStatus.COMMITTED -> reservationEvidence(updated, target, actor)
+                        ReservationStatus.RELEASED -> reservationEvidence(updated, target, actor)
                         else -> error("unsupported transition")
                     }
                         .replaceWith(updated)
@@ -448,8 +447,49 @@ class PanacheIncentiveStore(
             entity.status = ReservationStatus.EXPIRED.name
             entity.releasedAt = at
             requireNotNull(code).status = "AVAILABLE"
-            evidence(entity.id, eventType = "incentive.reservation.expired.v1", actor = "expiry")
+            reservationEvidence(
+                entity.toDomain().copy(status = ReservationStatus.EXPIRED),
+                ReservationStatus.EXPIRED,
+                "expiry",
+            )
         }
+
+    private fun reservationEvidence(
+        reservation: PromoReservation,
+        status: ReservationStatus,
+        actor: String,
+    ): Uni<Void> {
+        val attributionRef = reservation.attributionRef
+        if (attributionRef == null) {
+            return evidence(
+                reservation.id,
+                eventType = ReservationEventTypes.forStatus(status, attributed = false),
+                actor = actor,
+            )
+        }
+        val eventType = ReservationEventTypes.forStatus(status, attributed = true)
+        val at = Instant.now()
+        val audit = AuditEntity().apply {
+            id = Ids.newId()
+            aggregateId = reservation.id
+            this.eventType = eventType
+            this.actor = actor
+            occurredAt = at
+            details = "{}"
+        }
+        val eventId = Ids.newId()
+        val payload = attributedEvidence(eventId, reservation, attributionRef, status, at)
+        val event = OutboxEntity().apply {
+            id = eventId
+            aggregateId = reservation.id
+            this.eventType = eventType
+            this.payload = objectMapper.writeValueAsString(payload)
+            occurredAt = at
+            this.status = OutboxStatus.PENDING.name
+            updatedAt = at
+        }
+        return audits.persist(audit).flatMap { outbox.persist(event) }.replaceWithVoid()
+    }
 
     private fun evidence(id: UUID, eventType: String, actor: String): Uni<Void> {
         val at = Instant.now()
@@ -522,6 +562,7 @@ private fun PromoReservation.toEntity() = ReservationEntity().also { entity ->
     entity.offerVersion = offerRef.version
     entity.partyRef = partyRef
     entity.productRef = productRef
+    entity.attributionRef = attributionRef
     entity.idempotencyKey = idempotencyKey
     entity.status = status.name
     entity.reservedAt = reservedAt
@@ -530,5 +571,191 @@ private fun PromoReservation.toEntity() = ReservationEntity().also { entity ->
 
 private fun ReservationEntity.toDomain() = PromoReservation(
     id, OfferRef(offerId, offerName, offerVersion), CodeDigest(codeDigest), partyRef, productRef,
-    idempotencyKey, reservedAt, expiresAt, ReservationStatus.valueOf(status),
+    idempotencyKey, reservedAt, expiresAt, attributionRef, ReservationStatus.valueOf(status),
 )
+
+private fun ReservationEntity.matches(command: ReserveIncentive): Boolean = codeDigest == command.digest.value &&
+    partyRef == command.partyRef &&
+    productRef == command.productRef &&
+    attributionRef == command.attributionRef
+
+private object ReservationEventTypes {
+    const val CREATED_V1 = "incentive.reservation.created.v1"
+    const val COMMITTED_V1 = "incentive.reservation.committed.v1"
+    const val RELEASED_V1 = "incentive.reservation.released.v1"
+    const val EXPIRED_V1 = "incentive.reservation.expired.v1"
+    const val CREATED_V2 = "incentive.reservation.created.v2"
+    const val COMMITTED_V2 = "incentive.reservation.committed.v2"
+    const val RELEASED_V2 = "incentive.reservation.released.v2"
+    const val EXPIRED_V2 = "incentive.reservation.expired.v2"
+
+    fun forStatus(status: ReservationStatus, attributed: Boolean): String = when (status) {
+        ReservationStatus.RESERVED -> if (attributed) CREATED_V2 else CREATED_V1
+        ReservationStatus.COMMITTED -> if (attributed) COMMITTED_V2 else COMMITTED_V1
+        ReservationStatus.RELEASED -> if (attributed) RELEASED_V2 else RELEASED_V1
+        ReservationStatus.EXPIRED -> if (attributed) EXPIRED_V2 else EXPIRED_V1
+    }
+}
+
+private fun attributedEvidence(
+    eventId: UUID,
+    reservation: PromoReservation,
+    attributionRef: UUID,
+    status: ReservationStatus,
+    occurredAt: Instant,
+): AttributedReservationEvidence = when (status) {
+    ReservationStatus.RESERVED -> ReservationCreatedV2(
+        eventId,
+        reservation.id,
+        reservation.id,
+        occurredAt,
+        reservation.id,
+        reservation.offerRef,
+        attributionRef,
+        status,
+    )
+    ReservationStatus.COMMITTED -> ReservationCommittedV2(
+        eventId,
+        reservation.id,
+        reservation.id,
+        occurredAt,
+        reservation.id,
+        reservation.offerRef,
+        attributionRef,
+        status,
+    )
+    ReservationStatus.RELEASED -> ReservationReleasedV2(
+        eventId,
+        reservation.id,
+        reservation.id,
+        occurredAt,
+        reservation.id,
+        reservation.offerRef,
+        attributionRef,
+        status,
+    )
+    ReservationStatus.EXPIRED -> ReservationExpiredV2(
+        eventId,
+        reservation.id,
+        reservation.id,
+        occurredAt,
+        reservation.id,
+        reservation.offerRef,
+        attributionRef,
+        status,
+    )
+}
+
+private sealed interface AttributedReservationEvidence
+
+private data class ReservationCreatedV2(
+    val eventId: UUID,
+    val correlationId: UUID,
+    val aggregateId: UUID,
+    val occurredAt: Instant,
+    val reservationId: UUID,
+    val offerRef: OfferRef,
+    val attributionRef: UUID,
+    val status: ReservationStatus,
+    val eventType: String = EVENT_TYPE,
+) : AttributedReservationEvidence {
+    companion object {
+        const val EVENT_TYPE = "incentive.reservation.created.v2"
+    }
+}
+
+private data class ReservationCommittedV2(
+    val eventId: UUID,
+    val correlationId: UUID,
+    val aggregateId: UUID,
+    val occurredAt: Instant,
+    val reservationId: UUID,
+    val offerRef: OfferRef,
+    val attributionRef: UUID,
+    val status: ReservationStatus,
+    val eventType: String = EVENT_TYPE,
+) : AttributedReservationEvidence {
+    companion object {
+        const val EVENT_TYPE = "incentive.reservation.committed.v2"
+    }
+}
+
+private data class ReservationReleasedV2(
+    val eventId: UUID,
+    val correlationId: UUID,
+    val aggregateId: UUID,
+    val occurredAt: Instant,
+    val reservationId: UUID,
+    val offerRef: OfferRef,
+    val attributionRef: UUID,
+    val status: ReservationStatus,
+    val eventType: String = EVENT_TYPE,
+) : AttributedReservationEvidence {
+    companion object {
+        const val EVENT_TYPE = "incentive.reservation.released.v2"
+    }
+}
+
+private data class ReservationExpiredV2(
+    val eventId: UUID,
+    val correlationId: UUID,
+    val aggregateId: UUID,
+    val occurredAt: Instant,
+    val reservationId: UUID,
+    val offerRef: OfferRef,
+    val attributionRef: UUID,
+    val status: ReservationStatus,
+    val eventType: String = EVENT_TYPE,
+) : AttributedReservationEvidence {
+    companion object {
+        const val EVENT_TYPE = "incentive.reservation.expired.v2"
+    }
+}
+
+internal data class ReservationCreatedV1(
+    val eventId: UUID,
+    val correlationId: UUID,
+    val aggregateId: UUID,
+    val eventType: String,
+    val occurredAt: Instant,
+) {
+    companion object {
+        const val EVENT_TYPE = "incentive.reservation.created.v1"
+    }
+}
+
+internal data class ReservationCommittedV1(
+    val eventId: UUID,
+    val correlationId: UUID,
+    val aggregateId: UUID,
+    val eventType: String,
+    val occurredAt: Instant,
+) {
+    companion object {
+        const val EVENT_TYPE = "incentive.reservation.committed.v1"
+    }
+}
+
+internal data class ReservationReleasedV1(
+    val eventId: UUID,
+    val correlationId: UUID,
+    val aggregateId: UUID,
+    val eventType: String,
+    val occurredAt: Instant,
+) {
+    companion object {
+        const val EVENT_TYPE = "incentive.reservation.released.v1"
+    }
+}
+
+internal data class ReservationExpiredV1(
+    val eventId: UUID,
+    val correlationId: UUID,
+    val aggregateId: UUID,
+    val eventType: String,
+    val occurredAt: Instant,
+) {
+    companion object {
+        const val EVENT_TYPE = "incentive.reservation.expired.v1"
+    }
+}

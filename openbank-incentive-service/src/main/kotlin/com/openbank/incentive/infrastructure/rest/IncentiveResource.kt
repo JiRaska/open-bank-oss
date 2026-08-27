@@ -102,7 +102,8 @@ class IncentiveResource(private val application: IncentiveApplication, private v
         require(!key.isNullOrBlank()) { "Idempotency-Key is required" }
         return Response.status(Response.Status.CREATED)
             .entity(
-                application.reserve(id, request.code, request.partyRef, request.productRef, key, actor()).toResponse(),
+                application.reserve(id, request.code, request.partyRef, request.productRef, null, key, actor())
+                    .toResponse(),
             ).build()
     }
 
