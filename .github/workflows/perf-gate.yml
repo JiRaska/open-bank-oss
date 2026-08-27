@@ -6,8 +6,8 @@
 # PR gate during the pilot: it runs weekly on openbank-batch and on manual
 # dispatch, and its failures create issues rather than blocking merges.
 #
-# v1 scope: openbank-product-catalog only. Money-path services follow once the
-# harness is proven (issue #3348).
+# v1 scope: read-only Product Catalog and Flaky Test Hunter paths. Money-path services follow
+# only once the isolated harness and synthetic-data boundary are proven (issue #3348).
 name: Performance gate
 
 on:
@@ -46,7 +46,10 @@ jobs:
           import json, os, pathlib, re
           # The declared v1 scope (ADR-0243, issue #3348). Kept as a named constant so the
           # summary can say what the run was SUPPOSED to measure, not only what it did.
-          DECLARED = ["openbank-product-catalog"]
+          # Both subjects are non-mutating reads booted against disposable PostgreSQL.  Keep
+          # money-path flows out of this GitHub-hosted lane until their isolated target and
+          # synthetic identities exist (perf/scenarios.yaml).
+          DECLARED = ["openbank-product-catalog", "openbank-flaky-test-hunter"]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
           matrix, skipped = [], []
