@@ -96,6 +96,17 @@ function allFiles(dir, predicate) {
   return result
 }
 
+export function classifyJUnitEvidence(task, identity, component) {
+  const integrationIdentity = /(?:\.integration\.|\.it\.|IT(?:$|\$|\.))/i.test(identity)
+  // JVM services commonly keep true end-to-end HTTP tests in the ordinary Gradle `test`
+  // task. The task name alone cannot distinguish them from unit tests, so retain the
+  // explicit suite/class convention used by the CI run-envelope collector.
+  const e2eIdentity = /(?:\.e2e\.|E2E(?:$|\$|\.))/i.test(identity)
+  if (/integration|inttest/i.test(task) || integrationIdentity) return 'integration'
+  if (/e2e|playwright/i.test(task) || e2eIdentity) return 'e2e'
+  return component === 'openbank-simulation' ? 'simulation' : 'unit'
+}
+
 async function junitEvidence(component) {
   const root = path.join(repo, component, 'build', 'test-results')
   // Gradle's TEST-*.xml convention is not universal: Vitest and Playwright emit
@@ -126,10 +137,7 @@ async function junitEvidence(component) {
       const attributes = suite.$ ?? {}
       const cases = suite.testcase ?? []
       const identity = [attributes.name, ...cases.map(item => item.$?.classname)].filter(Boolean).join(' ')
-      const integrationIdentity = /(?:\.integration\.|\.it\.|IT(?:$|\$|\.))/i.test(identity)
-      const kind = /integration|inttest/i.test(task) || integrationIdentity ? 'integration'
-        : /e2e|playwright/i.test(task) ? 'e2e'
-          : component === 'openbank-simulation' ? 'simulation' : 'unit'
+      const kind = classifyJUnitEvidence(task, identity, component)
       const bucket = buckets.get(kind) ?? {
         kind, source: `JUnit:${task}`, environment: 'ci', durationMs: 0,
         counts: { discovered: 0, executed: 0, passed: 0, failed: 0, skipped: 0, errors: 0 },
@@ -730,4 +738,15 @@ async function main() {
   console.log(`[collect-test-intelligence] ${report.totals.componentsWithExecutionEvidence}/${report.totals.components} components with execution evidence -> ${out}`)
 }
 
-main().catch(error => { console.error(error); process.exit(1) })
+if (args.includes('--self-test')) {
+  const assert = (actual, expected, label) => {
+    if (actual !== expected) throw new Error(`${label}: expected ${expected}, got ${actual}`)
+  }
+  assert(classifyJUnitEvidence('test', 'com.openbank.payment.PaymentApiIT', 'openbank-payment-service'), 'integration', 'IT precedence')
+  assert(classifyJUnitEvidence('test', 'com.openbank.customer.OnboardingE2E', 'openbank-customer-edge'), 'e2e', 'named E2E suite')
+  assert(classifyJUnitEvidence('test', 'com.openbank.UnitTest', 'openbank-service'), 'unit', 'ordinary suite')
+  assert(classifyJUnitEvidence('test', 'com.openbank.simulation.DstSimulationTest', 'openbank-simulation'), 'simulation', 'simulation suite')
+  console.log('collect-test-intelligence self-test: classification evidence is preserved')
+} else {
+  main().catch(error => { console.error(error); process.exit(1) })
+}
