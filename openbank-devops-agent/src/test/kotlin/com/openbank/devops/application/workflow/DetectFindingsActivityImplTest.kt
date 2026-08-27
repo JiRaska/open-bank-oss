@@ -9,8 +9,12 @@ import com.openbank.devops.domain.model.DetectorId
 import com.openbank.devops.domain.model.DoraMetric
 import com.openbank.devops.domain.model.FindingSeverity
 import com.openbank.devops.infrastructure.config.DevOpsConfig
+import com.openbank.libs.testing.trace.RecordingSpanExporter
+import com.openbank.libs.testing.trace.TraceContract
 import io.mockk.every
 import io.mockk.mockk
+import io.opentelemetry.sdk.trace.SdkTracerProvider
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -23,6 +27,8 @@ import org.junit.jupiter.api.Test
 class DetectFindingsActivityImplTest {
 
     private lateinit var detect: DetectFindingsActivityImpl
+    private lateinit var exporter: RecordingSpanExporter
+    private lateinit var tracerProvider: SdkTracerProvider
 
     @BeforeEach
     fun setUp() {
@@ -32,7 +38,9 @@ class DetectFindingsActivityImplTest {
         every { config.runnerQueuePressureThreshold() } returns 0.80
         every { config.ssdlcDriftThreshold() } returns 3
         every { config.incidentRecurrenceThreshold() } returns 3
-        detect = DetectFindingsActivityImpl(config)
+        exporter = RecordingSpanExporter()
+        tracerProvider = SdkTracerProvider.builder().addSpanProcessor(SimpleSpanProcessor.create(exporter)).build()
+        detect = DetectFindingsActivityImpl(config, tracerProvider.get("test"))
     }
 
     @Test
@@ -123,5 +131,17 @@ class DetectFindingsActivityImplTest {
         )
         assertThat(findings).hasSize(1)
         assertThat(findings.single().doraMetricImpacted).isEqualTo(DoraMetric.TIME_TO_RESTORE)
+    }
+
+    @Test
+    fun `detector evaluation emits an assertion-backed trace contract`() {
+        detect.detect(DetectorId.D3_RUNNER_CAPACITY, mapOf("arc_assigned_runners" to 3.0, "arc_running_runners" to 0.0))
+
+        exporter.contract()
+            .requiresSpan("devops-agent.detector.evaluate")
+            .requiresAttribute("devops-agent.detector.evaluate", "openbank.devops.detector")
+            .requiresAttribute("devops-agent.detector.evaluate", "openbank.devops.findings.count")
+            .hasNoErrorSpan()
+            .verifiedAs("devops-detector-evaluate")
     }
 }

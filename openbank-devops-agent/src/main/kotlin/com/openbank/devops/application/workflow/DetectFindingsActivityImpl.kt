@@ -13,6 +13,9 @@ import com.openbank.devops.domain.model.FindingStatus
 import com.openbank.devops.domain.model.RemediationKind
 import com.openbank.devops.infrastructure.config.DevOpsConfig
 import com.openbank.libs.domain.identifiers.Ids
+import io.opentelemetry.api.trace.SpanKind
+import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.api.trace.Tracer
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
 import java.time.Instant
@@ -24,15 +27,39 @@ import java.time.Instant
  * would fix it (the agent's whole purpose: a permanent fix, not a band-aid).
  */
 @ApplicationScoped
-class DetectFindingsActivityImpl(private val config: DevOpsConfig) : DetectFindingsActivity {
+class DetectFindingsActivityImpl(
+    private val config: DevOpsConfig,
+    private val tracer: Tracer,
+) : DetectFindingsActivity {
 
-    override fun detect(detectorId: DetectorId, signals: Map<String, Double>): List<DevOpsFinding> = when (detectorId) {
-        DetectorId.D1_CI_PIPELINE_HEALTH -> detectCiPipeline(signals)
-        DetectorId.D2_DORA_REGRESSION -> detectDoraRegression(signals)
-        DetectorId.D3_RUNNER_CAPACITY -> detectRunnerCapacity(signals)
-        DetectorId.D4_DEPLOY_HEALTH -> detectDeployHealth(signals)
-        DetectorId.D5_SSDLC_HYGIENE -> detectSsdlcHygiene(signals)
-        DetectorId.D6_INCIDENT_RECURRENCE -> detectIncidentRecurrence(signals)
+    /**
+     * The detector boundary is where collected observability signals become an actionable finding.
+     * Its span contains only the bounded detector enum and result count — never raw signals, titles,
+     * resource names, or remediation payloads.
+     */
+    override fun detect(detectorId: DetectorId, signals: Map<String, Double>): List<DevOpsFinding> {
+        val span = tracer.spanBuilder("devops-agent.detector.evaluate")
+            .setSpanKind(SpanKind.INTERNAL)
+            .startSpan()
+        return try {
+            val findings = when (detectorId) {
+                DetectorId.D1_CI_PIPELINE_HEALTH -> detectCiPipeline(signals)
+                DetectorId.D2_DORA_REGRESSION -> detectDoraRegression(signals)
+                DetectorId.D3_RUNNER_CAPACITY -> detectRunnerCapacity(signals)
+                DetectorId.D4_DEPLOY_HEALTH -> detectDeployHealth(signals)
+                DetectorId.D5_SSDLC_HYGIENE -> detectSsdlcHygiene(signals)
+                DetectorId.D6_INCIDENT_RECURRENCE -> detectIncidentRecurrence(signals)
+            }
+            span.setAttribute("openbank.devops.detector", detectorId.name)
+            span.setAttribute("openbank.devops.findings.count", findings.size.toLong())
+            findings
+        } catch (failure: Exception) {
+            span.recordException(failure)
+            span.setStatus(StatusCode.ERROR)
+            throw failure
+        } finally {
+            span.end()
+        }
     }
 
     @Suppress("MagicNumber")
