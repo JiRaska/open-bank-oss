@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.212.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.211.0...admin-ui-v0.212.0) (2026-08-27)
+
+
+### Features
+
+* **admin-ui:** surface RUM audit freshness ([#7142](https://github.com/JiRaska/open-bank-oss/issues/7142)) ([beb5860](https://github.com/JiRaska/open-bank-oss/commit/beb58603ad6586d91926246c49f0bc3fc005f48f))
+* **testing:** retain browser Web Vitals evidence ([#7444](https://github.com/JiRaska/open-bank-oss/issues/7444)) ([fdb3fb4](https://github.com/JiRaska/open-bank-oss/commit/fdb3fb414ad3d2a20ef54309ace0a8202cf5c307))
+
 ## [0.211.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.210.0...admin-ui-v0.211.0) (2026-08-27)
 
 
