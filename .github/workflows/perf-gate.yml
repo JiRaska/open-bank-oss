@@ -196,8 +196,12 @@ jobs:
             > "perf-reports/${SERVICE}-boot.log" 2>&1 &
           DEV_PID=$!
 
+          # A cold Quarkus dev boot of the Flaky Test Hunter was measured at 188 seconds on
+          # the hosted runner (run 33070206256). The former 180-second probe window killed a
+          # still-starting process and incorrectly published performance as `not-run`. Keep a
+          # finite, visible five-minute ceiling: this is a smoke gate, not an unbounded build.
           UP=0
-          for _ in $(seq 1 90); do
+          for _ in $(seq 1 150); do
             code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health/ready" || true)"
             if [ "$code" = "200" ]; then UP=1; break; fi
             kill -0 "$DEV_PID" 2>/dev/null || break
