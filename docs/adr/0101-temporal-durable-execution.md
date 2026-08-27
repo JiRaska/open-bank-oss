@@ -63,7 +63,7 @@ activity implementations; Temporal replaces only the orchestration layer.**
 │  Temporal Server (self-hosted, openbank-infra GitOps)        │
 │  Namespace: openbank-payments  |  openbank-settlement        │
 └────────────────────┬────────────────────────────────────────┘
-                     │ gRPC (mTLS, OPA-gated — ADR-0034)
+                     │ gRPC (no transport auth — see correction below)
         ┌────────────┼────────────┐
         ▼            ▼            ▼
   sepa-payment  domestic-pmt  settlement
@@ -75,6 +75,17 @@ activity implementations; Temporal replaces only the orchestration layer.**
   → DB write + outbox publish (libs/outbox, ADR-0049)
   → external REST (SEPA CSM, FX feed) via port/adapter
 ```
+
+*(Corrected 2026-08-27, #6066: this edge previously read `gRPC (mTLS, OPA-gated —
+ADR-0034)`. Neither control was built. `TemporalClientProducer` — the single fleet-wide
+`WorkflowClient` producer since ADR-0209 D1 — sets a target and an optional metrics scope and
+no SSL context; the Temporal HelmRelease configures no frontend TLS; and no API key or
+namespace token is configured, so the edge has no transport authentication of any kind, not
+just no mTLS. The `OpaActivityInterceptor` named in the P0 row below occurs in no Kotlin source
+in this repository (#6055). `openbank-libs-temporal` contains `TemporalClientProducer` and
+`TemporalConfig` and nothing else — of P0's three deliverables only the bootstrap exists, so
+this ADR's `delivery-status: shipped` overstates P0. Whether this edge should get transport
+authentication beyond its NetworkPolicy is the open decision in #6066.)*
 
 **Temporal server deployment**: single-namespace, PostgreSQL backend (CNPG cluster, separate
 from application DBs), deployed as a Helm release in `openbank-infra`. Initial sizing: 2
