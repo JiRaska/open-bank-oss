@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.5.0...incentive-service-v0.6.0) (2026-08-27)
+
+
+### Features
+
+* **customer-edge:** add campaign incentive claims ([#7281](https://github.com/JiRaska/open-bank-oss/issues/7281)) ([e8a1d6c](https://github.com/JiRaska/open-bank-oss/commit/e8a1d6c0cbb8b203666822650c0d0a9f95d26203))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.4.0...incentive-service-v0.5.0) (2026-08-27)
 
 

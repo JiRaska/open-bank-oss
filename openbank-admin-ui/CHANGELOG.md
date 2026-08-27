@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.207.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.206.0...admin-ui-v0.207.0) (2026-08-27)
+
+
+### Features
+
+* **admin-ui:** add Explorer brand guide ([#7215](https://github.com/JiRaska/open-bank-oss/issues/7215)) ([53d9bad](https://github.com/JiRaska/open-bank-oss/commit/53d9bad38528baae1af961cd11c35e8753082c16))
+* **admin-ui:** explain testcontainer lifecycles ([#7322](https://github.com/JiRaska/open-bank-oss/issues/7322)) ([886b77c](https://github.com/JiRaska/open-bank-oss/commit/886b77c528fcb98cc82713d09a192dbb01e86345))
+* **admin-ui:** project runtime synthetic performance ([#7298](https://github.com/JiRaska/open-bank-oss/issues/7298)) ([c004a6a](https://github.com/JiRaska/open-bank-oss/commit/c004a6a5cc899d8c2059a41d0711e3fad5602f36))
+* **admin-ui:** surface assurance evidence gaps ([#7312](https://github.com/JiRaska/open-bank-oss/issues/7312)) ([9aebaba](https://github.com/JiRaska/open-bank-oss/commit/9aebaba2f00167fb31ee75400b6d06d7b52bb197))
+
+
+### Bug Fixes
+
+* **regulatory:** complete FINREP and COREP previews ([#7296](https://github.com/JiRaska/open-bank-oss/issues/7296)) ([d387b3e](https://github.com/JiRaska/open-bank-oss/commit/d387b3ea51293416dc15a243d248564c2eeacf84))
+* **test-intelligence:** retain named E2E evidence ([#7302](https://github.com/JiRaska/open-bank-oss/issues/7302)) ([61775c0](https://github.com/JiRaska/open-bank-oss/commit/61775c08e61eca5805c04758b6091552374a2db3))
+
+
+### Performance
+
+* **admin-ui:** self-host operator shell fonts, drop Google Fonts requests ([#7274](https://github.com/JiRaska/open-bank-oss/issues/7274)) ([44dc805](https://github.com/JiRaska/open-bank-oss/commit/44dc8053201a149d0054ded17206c048da5c15cf)), closes [#7184](https://github.com/JiRaska/open-bank-oss/issues/7184)
+
 ## [0.206.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.205.1...admin-ui-v0.206.0) (2026-08-27)
 
 

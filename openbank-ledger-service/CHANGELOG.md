@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.0...ledger-service-v1.26.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **regulatory:** complete FINREP and COREP previews ([#7296](https://github.com/JiRaska/open-bank-oss/issues/7296)) ([d387b3e](https://github.com/JiRaska/open-bank-oss/commit/d387b3ea51293416dc15a243d248564c2eeacf84))
+
 ## [1.26.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.25.0...ledger-service-v1.26.0) (2026-08-26)
 
 
