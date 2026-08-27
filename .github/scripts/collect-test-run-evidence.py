@@ -292,6 +292,21 @@ def declared_infrastructure(service: Path) -> list[str]:
     return values
 
 
+def runtime_image_identity(image: str) -> str:
+    """Collapse Docker's canonical-library spelling for lifecycle deduplication only.
+
+    Testcontainers records the image requested by the test (normally ``postgres:tag``),
+    while Docker's event stream expands the same reference to
+    ``docker.io/library/postgres:tag``.  These are one container, not two observations.
+    Keep the original image in the published event for provenance; only the comparison key
+    is normalized, and do not rewrite arbitrary registry names.
+    """
+    for prefix in ("docker.io/library/", "index.docker.io/library/"):
+        if image.startswith(prefix):
+            return image[len(prefix):]
+    return image
+
+
 def observations(service: Path) -> list[dict]:
     result = []
     for file in (service / "build" / "test-intelligence" / "runtime").glob("*.jsonl"):
@@ -327,7 +342,7 @@ def observations(service: Path) -> list[dict]:
     for _, observed_at, item in normalized:
         duplicate = any(
             item["resource"] == previous["resource"]
-            and item["image"] == previous["image"]
+            and runtime_image_identity(item["image"]) == runtime_image_identity(previous["image"])
             and item["lifecycle"] == previous["lifecycle"]
             and abs(observed_at - previous_at) <= RUNTIME_OBSERVATION_DUPLICATE_WINDOW
             for previous_at, previous in deduplicated
@@ -425,8 +440,8 @@ def main() -> None:
             runtime = service / "build/test-intelligence/runtime"
             runtime.mkdir(parents=True)
             (runtime / "docker-events.jsonl").write_text(
-                '{"image":"postgres:16.3-alpine","lifecycle":"start","observedAtUnix":1787433000}\n'
-                '{"image":"postgres:16.3-alpine","lifecycle":"die","observedAtUnix":1787433060}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","lifecycle":"start","observedAtUnix":1787433000}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","lifecycle":"die","observedAtUnix":1787433060}\n'
             )
             # The shared recorder and daemon event stream observe the same
             # lifecycle at slightly different instants. Keep one event per
