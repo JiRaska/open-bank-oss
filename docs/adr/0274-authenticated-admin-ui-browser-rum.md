@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [testing, observability, admin-ui, privacy-gdpr]
 summary: "OpenBank emits privacy-bounded browser RUM only from authenticated Admin UI routes through a same-origin relay, so web E2E, RUM and backend traces can be correlated without exposing collector access or operator identifiers."
-followup: "Sandbox proof requires a deployed bundle, an authenticated navigation and a Tempo observation; customer mobile RUM remains separately consent-gated."
+followup: "#7483 — deployed sandbox navigation and Tempo-backed browser-to-backend proof remain required; customer mobile RUM stays separately consent-gated."
 ---
 
 # ADR-0274 — Authenticated Admin UI browser RUM
