@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.42.0
+  version: 1.43.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -128,6 +128,40 @@ paths:
           description: Product is not an active public term-deposit offer, or party is absent
         '422':
           description: KYC not approved
+
+  /incentives/claims:
+    post:
+      tags: [Engagement]
+      summary: Reserve the fixed reward attached to an authenticated campaign treatment
+      description: >-
+        Party identity comes only from the customer Keycloak JWT. The opaque interaction reference
+        is resolved against Campaign Service and supplies the immutable offer reference; the phone
+        cannot choose either value. The product must be an active public term-deposit offer.
+        Reservation is not redemption: only a later authoritative product outcome may commit it.
+      operationId: claimCampaignIncentive
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimCampaignIncentiveRequest'
+      responses:
+        '201':
+          description: Reward inventory reserved; this is not yet redeemed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncentiveReservation'}
+        '400': {description: Malformed or foreign interaction reference}
+        '404': {description: Product is not an active public term-deposit offer}
+        '409': {description: Campaign treatment has no claimable incentive, or reservation conflicts}
+        '502': {description: Campaign, catalogue or Incentive Service unavailable}
 
   /feedback:
     post:
@@ -4247,6 +4281,44 @@ components:
           type: string
           format: uuid
           description: ID returned by /products/term-deposits
+
+    ClaimCampaignIncentiveRequest:
+      type: object
+      additionalProperties: false
+      required: [interactionRef, code, productId]
+      properties:
+        interactionRef:
+          type: string
+          format: uuid
+          description: Opaque PUSH/BANNER interaction reference supplied with the treatment.
+        code:
+          type: string
+          minLength: 8
+          maxLength: 128
+          writeOnly: true
+        productId:
+          type: string
+          format: uuid
+          description: Active public term-deposit catalogue product selected by the customer.
+
+    IncentiveReservation:
+      type: object
+      additionalProperties: false
+      required: [id, offerRef, productRef, attributionRef, reservedAt, expiresAt, status]
+      properties:
+        id: {type: string, format: uuid}
+        offerRef:
+          type: object
+          required: [id, name, version]
+          properties:
+            id: {type: string, format: uuid}
+            name: {type: string}
+            version: {type: integer, minimum: 1}
+        productRef: {type: string}
+        attributionRef: {type: string, format: uuid}
+        reservedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        status: {type: string, enum: [RESERVED]}
 
     TermDepositOfferList:
       type: object
