@@ -6,6 +6,7 @@ import path from 'path'
 import { NextResponse } from 'next/server'
 import type { EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
 import { enforceRuntimeFreshness } from '@/lib/test-intelligence-freshness'
+import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
 
 export const dynamic = 'force-dynamic'
 
@@ -329,6 +330,39 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
   return { ...report, clientExperiences }
 }
 
+function attachAiEvalAssurance(report: TestIntelligenceReport): TestIntelligenceReport {
+  try {
+    const facts = loadAiGovernanceSnapshot().facts as Record<string, unknown>
+    const promptCoverage = facts.promptRegistryCoverage as { idsByStatus?: { registered?: unknown } } | undefined
+    const evals = facts.evals as Record<string, unknown> | undefined
+    const strings = (value: unknown): string[] => Array.isArray(value) && value.every(item => typeof item === 'string') ? value : []
+    const registeredCharters = strings(promptCoverage?.idsByStatus?.registered)
+    const suiteCharters = strings(evals?.suiteCharters)
+    const recordedCharters = strings(evals?.recordedCharters)
+    const missingSuiteCharters = strings(evals?.missingSuiteCharters)
+    const missingRecordingCharters = strings(evals?.missingRecordingCharters)
+    const defaultMinPassRate = typeof evals?.defaultMinPassRate === 'number' ? evals.defaultMinPassRate : 1
+    const state: EvidenceState = registeredCharters.length === 0 ? 'unknown'
+      : missingSuiteCharters.length || missingRecordingCharters.length ? 'not-run' : 'passed'
+    return {
+      ...report,
+      aiEvalAssurance: {
+        state,
+        source: typeof evals?.source === 'string' ? evals.source : 'AI governance snapshot',
+        defaultMinPassRate,
+        registeredCharters,
+        suiteCharters,
+        recordedCharters,
+        missingSuiteCharters,
+        missingRecordingCharters,
+        detail: state === 'passed'
+          ? 'Every registered charter has a versioned eval suite and a recorded offline replay baseline.'
+          : 'Eval coverage is incomplete. Missing suites or recordings are explicit governance gaps, not agent runtime failures or CI test results.',
+      },
+    }
+  } catch { return report }
+}
+
 export async function GET(): Promise<NextResponse> {
   try {
     const parsed = JSON.parse(await fs.readFile(reportFile(), 'utf8')) as TestIntelligenceReport
@@ -345,7 +379,7 @@ export async function GET(): Promise<NextResponse> {
     }
     const current = enforceRuntimeFreshness(compatible)
     const withJourneys = await attachLiveJourneys(current)
-    return NextResponse.json(await attachLiveClientExperience(withJourneys), { headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json(attachAiEvalAssurance(await attachLiveClientExperience(withJourneys)), { headers: { 'Cache-Control': 'no-store' } })
   } catch {
     return NextResponse.json(emptyReport('test-intelligence.json is not bundled'))
   }
