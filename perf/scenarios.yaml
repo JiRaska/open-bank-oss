@@ -5,7 +5,7 @@ scenarios:
     execution_mode: planned-read-only-sandbox
     safety_boundary: Runs only when a safe read-only money-path target is configured for the GitHub-hosted runner.
     target_schedule: "0 5 * * *"
-    blocker: No isolated money-path target, dedicated runner, and verified least-privilege read identity are configured yet; a 401 is rejection evidence, not a handler performance baseline. The current scheduled performance gate measures only openbank-product-catalog.
+    blocker: No isolated money-path target, dedicated runner, and verified least-privilege read identity are configured yet; a 401 is rejection evidence, not a handler performance baseline. The current scheduled performance gate measures the non-money-path openbank-product-catalog and openbank-flaky-test-hunter subjects only.
 
   - id: money-path-write-benchmark
     definition: perf/k6/money-path-write-benchmark.js
