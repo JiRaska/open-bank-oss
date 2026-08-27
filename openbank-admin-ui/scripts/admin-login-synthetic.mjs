@@ -8,6 +8,7 @@ const target = process.env.ADMIN_UI_SYNTHETIC_URL ?? 'https://admin.open-bank.te
 const report = process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? 'build/test-results/e2e/admin-login-synthetic.xml'
 const vitalsReport = process.env.OPENBANK_BROWSER_VITALS_OUTPUT ?? 'build/test-intelligence/browser-vitals.json'
 const engine = process.env.OPENBANK_BROWSER ?? 'chromium'
+const expectedBuildSha = process.env.ADMIN_UI_EXPECTED_BUILD_SHA?.trim().toLowerCase() || null
 const launchers = { chromium, firefox }
 if (!Object.hasOwn(launchers, engine)) throw new Error(`Unsupported browser engine: ${engine}`)
 // Deliberately forgiving public-edge budgets. These are synthetic availability guards, not an
@@ -24,10 +25,13 @@ let renderFailure = null
 let fcpFailure = null
 let clsFailure = null
 let measuredVitals = null
+let attestationFailure = null
+let buildAttestation = null
 let browser
 try {
   browser = await launchers[engine].launch({ headless: true })
   const page = await browser.newPage()
+  if (expectedBuildSha && !/^[0-9a-f]{7,40}$/.test(expectedBuildSha)) throw new Error('ADMIN_UI_EXPECTED_BUILD_SHA must be a git SHA')
   // Install observers before navigation. An unavailable measurement is a failed check, not a
   // numeric zero: zero CLS is valid, while absent FCP/LCP evidence is not.
   await page.addInitScript(() => {
@@ -46,6 +50,16 @@ try {
   if (!response || response.status() >= 500) boundaryFailure = `Admin UI returned ${response?.status() ?? 'no response'}`
   const signIn = page.getByRole('button', { name: 'Continue with Keycloak SSO' })
   if (!await signIn.isVisible({ timeout: 10_000 })) boundaryFailure ??= 'SSO boundary was not rendered'
+  if (expectedBuildSha) {
+    const attestationUrl = new URL('/.well-known/openbank-build-attestation', target).toString()
+    const attestationResponse = await page.request.get(attestationUrl, { timeout: 10_000 })
+    const attestation = attestationResponse.ok() ? await attestationResponse.json() : null
+    const observedBuildSha = typeof attestation?.gitSha === 'string' ? attestation.gitSha.toLowerCase() : null
+    buildAttestation = { requestedSha: expectedBuildSha, observedSha: observedBuildSha }
+    if (!observedBuildSha || !expectedBuildSha.startsWith(observedBuildSha)) {
+      attestationFailure = `deployed build attestation ${observedBuildSha ?? 'unavailable'} does not match requested ${expectedBuildSha}`
+    }
+  }
   const timing = await page.evaluate(() => {
     const navigation = performance.getEntriesByType('navigation')[0]
     return {
@@ -81,6 +95,7 @@ try {
   renderFailure ??= boundaryFailure
   fcpFailure ??= boundaryFailure
   clsFailure ??= boundaryFailure
+  attestationFailure ??= boundaryFailure
 } finally {
   await browser?.close()
 }
@@ -93,10 +108,11 @@ const latency = latencyFailure && `<failure message="${escape(latencyFailure)}"/
 const render = renderFailure && `<failure message="${escape(renderFailure)}"/>`
 const fcp = fcpFailure && `<failure message="${escape(fcpFailure)}"/>`
 const cls = clsFailure && `<failure message="${escape(clsFailure)}"/>`
-const failures = [boundaryFailure, latencyFailure, renderFailure, fcpFailure, clsFailure]
-const failureCount = failures.filter(Boolean).length
-await writeFile(report, `<testsuites><testsuite name="admin-login-synthetic" tests="5" failures="${failureCount}" errors="0" skipped="0" time="${seconds}"><testcase classname="admin-login-synthetic" name="renders SSO boundary" time="${seconds}">${boundary ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary responds within public latency budget" time="${seconds}">${latency ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary DOMContentLoaded within public render budget" time="${seconds}">${render ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary FCP is within public Web Vitals budget" time="${seconds}">${fcp ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary CLS is within public Web Vitals budget" time="${seconds}">${cls ?? ''}</testcase></testsuite></testsuites>\n`)
+const attestation = attestationFailure && `<failure message="${escape(attestationFailure)}"/>`
+const checks = [boundaryFailure, latencyFailure, renderFailure, fcpFailure, clsFailure, ...(expectedBuildSha ? [attestationFailure] : [])]
+const failureCount = checks.filter(Boolean).length
+await writeFile(report, `<testsuites><testsuite name="admin-login-synthetic" tests="${checks.length}" failures="${failureCount}" errors="0" skipped="0" time="${seconds}"><testcase classname="admin-login-synthetic" name="renders SSO boundary" time="${seconds}">${boundary ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary responds within public latency budget" time="${seconds}">${latency ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary DOMContentLoaded within public render budget" time="${seconds}">${render ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary FCP is within public Web Vitals budget" time="${seconds}">${fcp ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary CLS is within public Web Vitals budget" time="${seconds}">${cls ?? ''}</testcase>${expectedBuildSha ? `<testcase classname="admin-login-synthetic" name="deployed build matches requested source" time="${seconds}">${attestation ?? ''}</testcase>` : ''}</testsuite></testsuites>\n`)
 // Preserve the engine identity even when the browser-native metrics are unavailable. The collector
 // then reports `not-run`, never a made-up zero or a passing Web Vitals result.
-await writeFile(vitalsReport, `${JSON.stringify({ schemaVersion: 1, journey: 'admin-ui-sso-boundary', browser: engine, ...(measuredVitals ? { metrics: measuredVitals } : {}) })}\n`)
-if (failureCount) throw new Error(failures.filter(Boolean).join('; '))
+await writeFile(vitalsReport, `${JSON.stringify({ schemaVersion: 1, journey: 'admin-ui-sso-boundary', browser: engine, ...(measuredVitals ? { metrics: measuredVitals } : {}), ...(buildAttestation ? { buildAttestation } : {}) })}\n`)
+if (failureCount) throw new Error(checks.filter(Boolean).join('; '))
