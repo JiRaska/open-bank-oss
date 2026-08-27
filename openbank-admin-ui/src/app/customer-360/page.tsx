@@ -88,7 +88,7 @@ export default function Customer360Page() {
       />
 
       {!selected && (
-        <ExplorerGuide compact title={t('Začněte člověkem, ne UUID', 'Start with a person, not a UUID')}>
+        <ExplorerGuide compact mascot="lioness" title={t('Začněte člověkem, ne UUID', 'Start with a person, not a UUID')}>
           {t(
             'Hledejte přirozeně podle jména nebo e-mailu a vyberte správnou party. Explorer pak poskládá odvozený pohled napříč doménami — autoritativní detail vždy zůstává ve zdrojové službě.',
             'Search naturally by name or email, then select the right party. Explorer will assemble the derived cross-domain view — authoritative detail always remains in the source service.',

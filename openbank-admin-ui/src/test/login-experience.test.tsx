@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { signIn } from 'next-auth/react'
 import LoginPage from '@/app/auth/login/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
@@ -21,6 +21,7 @@ afterEach(() => {
   localStorage.clear()
   query = new URLSearchParams()
   vi.clearAllMocks()
+  vi.useRealTimers()
 })
 
 describe('safeCallbackPath', () => {
@@ -45,6 +46,11 @@ describe('login experience', () => {
     expect(screen.getByRole('heading', { name: 'Explore operations with confidence.' })).toBeInTheDocument()
     expect(screen.getByText(/Your OpenBank Explorer is ready/)).toBeInTheDocument()
     expect(screen.getByText('Decisions with context')).toBeInTheDocument()
+    const lionScene = screen.getByRole('button', { name: 'OpenBank Explorer over Prague' })
+    const lionessScene = screen.getByRole('button', { name: 'OpenBank Explorer lioness over Prague' })
+    expect(lionScene).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(lionessScene)
+    expect(lionessScene).toHaveAttribute('aria-pressed', 'true')
     const button = screen.getByRole('button', { name: 'Continue with Keycloak SSO' })
     fireEvent.click(button)
 
@@ -61,5 +67,15 @@ describe('login experience', () => {
     expect(screen.getByRole('heading', { name: 'Prozkoumejte provoz s jistotou.' })).toBeInTheDocument()
     expect(screen.getByText(/OpenBank Explorer vás provede/)).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('Vaše relace vypršela')
+  })
+
+  it('rotates between the Prague Explorer scenes', () => {
+    vi.useFakeTimers()
+    renderPage()
+
+    const lionessScene = screen.getByRole('button', { name: 'OpenBank Explorer lioness over Prague' })
+    expect(lionessScene).toHaveAttribute('aria-pressed', 'false')
+    act(() => vi.advanceTimersByTime(8_000))
+    expect(lionessScene).toHaveAttribute('aria-pressed', 'true')
   })
 })

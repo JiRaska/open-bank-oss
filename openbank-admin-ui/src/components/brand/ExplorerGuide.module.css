@@ -80,6 +80,10 @@
   object-position: 50% 10%;
 }
 
+.lioness {
+  object-position: 74% 13%;
+}
+
 .compact {
   min-height: 126px;
   margin-bottom: 16px;
