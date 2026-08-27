@@ -156,8 +156,13 @@ def browser_diagnostics(report_dir: str | None, run_id: str, attempt: int, run_u
     }]
 
 
-def classify(name: str, classname: str, task: str, component: str) -> str:
-    identity = f"{name} {classname} {task}"
+def classify(name: str, classname: str, task: str, component: str, service: Path | None = None) -> str:
+    # A testcase name is assertion prose and often embeds domain fixture data (for
+    # example ``LOAN_PACK_E2E``). It is not a stable declaration of test topology;
+    # using it here can manufacture end-to-end evidence from a unit/integration test.
+    # The JUnit suite classname and Gradle/Playwright task are the producer-owned
+    # identity used for categorisation instead.
+    identity = f"{classname} {task}"
     if re.search(r"integration|inttest", identity, re.I) or re.search(r"IT(?:$|[.$\s])", identity):
         return "integration"
     if re.search(r"pact|contract", identity, re.I):
@@ -166,6 +171,8 @@ def classify(name: str, classname: str, task: str, component: str) -> str:
         return "e2e"
     if component == "openbank-simulation":
         return "simulation"
+    if service is not None and source_declared_kind(service, classname) == "integration":
+        return "integration"
     return "unit"
 
 
@@ -203,7 +210,7 @@ def suites(component: str, service: Path) -> list[dict]:
     for task, tree in junit_suites(root):
         cases = tree.findall(".//testcase")
         sample = cases[0] if cases else None
-        kind = classify(tree.attrib.get("name", ""), sample.attrib.get("classname", "") if sample is not None else "", task, component)
+        kind = classify(tree.attrib.get("name", ""), sample.attrib.get("classname", "") if sample is not None else "", task, component, service)
         row = totals.setdefault(kind, {"kind": kind, "discovered": 0, "executed": 0, "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "durationMs": 0})
         discovered = int(tree.attrib.get("tests", len(cases)))
         failed = int(tree.attrib.get("failures", 0))
@@ -242,6 +249,21 @@ def test_definition_path(service: Path, classname: str) -> str | None:
     return None
 
 
+def source_declared_kind(service: Path, classname: str) -> str | None:
+    """Read a producer-owned test annotation when JUnit naming alone is insufficient.
+
+    Many Quarkus HTTP tests intentionally keep a concise ``*ResourceTest`` classname.
+    Their runtime topology is declared by ``@QuarkusTest``, not their assertion prose or
+    filename convention. Missing/unreadable source remains unknown to this helper so the
+    conservative caller can retain its existing unit classification.
+    """
+    source_path = test_definition_path(service, classname)
+    if source_path is None:
+        return None
+    source = (service / source_path).read_text(errors="replace")
+    return "integration" if re.search(r"@Quarkus(?:Integration)?Test\b", source) else None
+
+
 def test_cases(component: str, service: Path) -> list[dict]:
     """Emit secret-free observations with stable identity and verified test-source provenance."""
     result = []
@@ -250,7 +272,7 @@ def test_cases(component: str, service: Path) -> list[dict]:
         for case in tree.findall(".//testcase"):
             name = case.attrib.get("name", "unknown")
             classname = case.attrib.get("classname", tree.attrib.get("name", "unknown"))
-            kind = classify(name, classname, task, component)
+            kind = classify(name, classname, task, component, service)
             definition = re.sub(r"\s*(?:\[[^]]*]|\([^)]*\))\s*$", "", name).strip() or name
             identity = f"{component}\0{kind}\0{classname}\0{definition}"
             state = "skipped" if case.find("skipped") is not None else "failed" if (
@@ -479,6 +501,8 @@ def main() -> None:
             source = service / "src/test/kotlin/com/openbank/GuardTest.kt"
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text("package com.openbank\nclass GuardTest\n")
+            quarkus_source = service / "src/test/kotlin/com/openbank/CatalogPlatformResourceTest.kt"
+            quarkus_source.write_text("package com.openbank\n@QuarkusTest\nclass CatalogPlatformResourceTest\n")
             discovered = {row["kind"]: row for row in suites("openbank-admin-ui", service)}
             assert set(discovered) == {"unit", "e2e"}, discovered
             assert (discovered["unit"]["discovered"], discovered["unit"]["failed"]) == (2, 1), discovered
@@ -507,6 +531,8 @@ def main() -> None:
             })
             assert classify("PaymentApiIT", "com.openbank.PaymentApiIT", "test", "openbank-x") == "integration"
             assert classify("UnitTest", "com.openbank.UnitTest", "test", "openbank-x") == "unit"
+            assert classify("creates LOAN_PACK_E2E", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x") == "unit"
+            assert classify("reads products", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x", service) == "integration"
             observed = observations(service)
             assert [item["lifecycle"] for item in observed] == ["started", "started", "stopped"]
             assert [item["observedAt"] for item in observed] == [
