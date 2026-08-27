@@ -169,6 +169,14 @@ export interface SyntheticJourneyEvidence {
     observedAt: string
     detail: string
     run: TestRunProvenance
+    /** Browser engines declared by the journey. Missing evidence remains explicitly not-run. */
+    variants?: Array<{
+      browser: 'chromium' | 'firefox' | 'webkit'
+      state: EvidenceState
+      observedAt: string | null
+      detail: string
+      run?: TestRunProvenance
+    }>
   }
   live?: {
     source: 'prometheus'
