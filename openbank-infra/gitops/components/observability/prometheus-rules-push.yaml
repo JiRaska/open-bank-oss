@@ -130,6 +130,9 @@ spec:
           labels:
             severity: warning
           annotations:
+            # Subject: inbound PUSH traffic is continuous rather than a scheduled batch. The
+            # window therefore measures live request handoffs, not a periodic invocation.
+            subject_period: continuous
             summary: "Enabled no-device push fallback did not create a routed request"
             description: >-
               A policy-approved PUSH template found no active device while fallback was enabled, but
