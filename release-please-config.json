@@ -125,6 +125,10 @@
     "openbank-campaign-service": {
       "release-type": "simple"
     },
+    "openbank-incentive-service": {
+      "component": "incentive-service",
+      "exclude-paths": ["openbank-incentive-service/src/test"]
+    },
     "openbank-referral-service": {
       "component": "referral-service",
       "exclude-paths": ["openbank-referral-service/src/test"]
