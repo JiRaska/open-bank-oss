@@ -399,6 +399,7 @@ def specialized_evidence(
     performance_not_run_detail: str | None = None,
     synthetic_summary: str | None = None,
     synthetic_journey: str | None = None,
+    suite_evidence: list[dict] | None = None,
 ) -> list[dict]:
     specialized = []
     if performance_summary:
@@ -440,6 +441,15 @@ def specialized_evidence(
             "detail": "synthetic summary absent" if summary is None else
                       f"{len(thresholds)} threshold result(s), {failed} breached",
         })
+    elif synthetic_journey:
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", synthetic_journey):
+            raise ValueError("--synthetic-journey must be a valid journey id")
+        e2e = next((item for item in (suite_evidence or []) if item["kind"] == "e2e"), None)
+        state = e2e["state"] if e2e else "not-run"
+        detail = (f"{e2e['executed']}/{e2e['discovered']} browser E2E checks executed"
+                  if e2e else "browser E2E JUnit report absent")
+        specialized.append({"kind": "synthetic", "state": state,
+                            "source": f"journey:{synthetic_journey}", "detail": detail})
     return specialized
 
 
@@ -544,6 +554,8 @@ def main() -> None:
             assert absent == [{"kind": "performance", "state": "not-run", "source": str(service / "missing-summary.json"), "detail": "no safe target configured"}]
             synthetic = specialized_evidence(None, None, synthetic_summary=str(performance), synthetic_journey="public-edge")
             assert synthetic == [{"kind": "synthetic", "state": "failed", "source": "journey:public-edge", "detail": "1 threshold result(s), 1 breached"}]
+            browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]])
+            assert browser_synthetic == [{"kind": "synthetic", "state": "passed", "source": "journey:admin-ui-sso-boundary", "detail": "1/1 browser E2E checks executed"}]
             valid = {
                 "schemaVersion": 1,
                 "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "observedAt": "2026-08-22T21:12:00Z"},
@@ -634,12 +646,14 @@ def main() -> None:
     run_id = os.getenv("GITHUB_RUN_ID", "local")
     run_attempt = int(os.getenv("GITHUB_RUN_ATTEMPT", "1"))
     run_url = f"{server}/{repository}/actions/runs/{run_id}" if server and repository else ""
+    suite_evidence = suites(component, service)
     specialized = specialized_evidence(
         args.performance_summary,
         args.mutation_report,
         args.performance_not_run_detail,
         args.synthetic_summary,
         args.synthetic_journey,
+        suite_evidence,
     )
     specialized.extend(trace_contract_evidence(service))
     envelope = {
@@ -652,7 +666,7 @@ def main() -> None:
             "url": run_url,
             "observedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
-        "component": component, "suites": suites(component, service), "testCases": test_cases(component, service), "coverage": coverage(service),
+        "component": component, "suites": suite_evidence, "testCases": test_cases(component, service), "coverage": coverage(service),
         # v1 intentionally records absence rather than guessing a test-to-production mapping.
         # A future producer may only advance this after emitting versioned, verified coverage or
         # dependency edges and measuring recommendations against the preserved full suite (#7207).
