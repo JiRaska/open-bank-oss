@@ -28,6 +28,7 @@ describe('Test Intelligence performance coverage scope', () => {
 
   it('refuses to turn an authorization rejection into money-path latency evidence', () => {
     const smoke = readFileSync(path.join(root(), 'perf/k6/money-path-smoke.js'), 'utf8')
+    const workflow = readFileSync(path.join(root(), '.github/workflows/perf-baseline.yml'), 'utf8')
 
     expect(smoke).toContain('http.expectedStatuses(200)')
     expect(smoke).not.toContain('http.expectedStatuses(200, 401)')
@@ -36,6 +37,10 @@ describe('Test Intelligence performance coverage scope', () => {
     expect(smoke).toContain('"txn list 200"')
     expect(smoke).not.toContain('"ledger journals 200|401"')
     expect(smoke).not.toContain('"txn list 200|401"')
+    expect(smoke).toContain('Authorization: `Bearer ${__ENV.PERF_READ_TOKEN || ""}`')
+    expect(workflow).toContain('PERF_READ_TOKEN: ${{ secrets.PERF_READ_TOKEN }}')
+    expect(workflow).toContain('--env PERF_READ_TOKEN')
+    expect(workflow).toContain('No safe authenticated money-path target')
   })
 
   it('keeps cross-layer evidence gaps visible from the primary operator view', () => {

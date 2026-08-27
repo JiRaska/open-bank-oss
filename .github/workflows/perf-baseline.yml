@@ -11,9 +11,10 @@
 # Target: the services must already be reachable AND the runner must carry a dedicated,
 # least-privilege read identity. Set the repo/environment variables PERF_LEDGER_URL and
 # PERF_TXN_URL (e.g. a sandbox internal URL reached via a self-hosted runner, or a
-# port-forward). If unset, the job SKIPS with a notice rather than pretending to have
-# measured something — no silent green. An authenticated 200 is required; a 401 is retained
-# as failed evidence because it did not execute the handler.
+# port-forward), and the PERF_READ_TOKEN environment secret. If any are absent, the job
+# SKIPS with a notice rather than pretending to have measured something — no silent green.
+# An authenticated 200 is required; a 401 is retained as failed evidence because it did not
+# execute the handler.
 name: Perf baseline
 
 on:
@@ -39,6 +40,9 @@ jobs:
     env:
       # Keep both performance lanes on one immutable, independently verified executor.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
+      # A dedicated, read-only client credential. GitHub masks the value and the workflow
+      # never prints it; URL variables alone cannot make an authenticated handler measurable.
+      PERF_READ_TOKEN: ${{ secrets.PERF_READ_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -53,10 +57,10 @@ jobs:
           set -euo pipefail
           ledger="${IN_LEDGER:-$VAR_LEDGER}"
           txn="${IN_TXN:-$VAR_TXN}"
-          if [ -z "$ledger" ] || [ -z "$txn" ]; then
-            echo "::notice::PERF_LEDGER_URL / PERF_TXN_URL not configured — skipping the perf baseline (no target to measure)."
+          if [ -z "$ledger" ] || [ -z "$txn" ] || [ -z "${PERF_READ_TOKEN:-}" ]; then
+            echo "::notice::PERF_LEDGER_URL, PERF_TXN_URL, or PERF_READ_TOKEN is not configured — skipping the perf baseline (no authenticated target to measure)."
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "reason=No safe money-path target is configured for this GitHub-hosted runner." >> "$GITHUB_OUTPUT"
+            echo "reason=No safe authenticated money-path target is configured for this GitHub-hosted runner." >> "$GITHUB_OUTPUT"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "ledger=$ledger" >> "$GITHUB_OUTPUT"
@@ -75,12 +79,14 @@ jobs:
         env:
           LEDGER_URL: ${{ steps.target.outputs.ledger }}
           TXN_URL: ${{ steps.target.outputs.txn }}
+          PERF_READ_TOKEN: ${{ env.PERF_READ_TOKEN }}
         run: |
           set -euo pipefail
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             --env LEDGER_URL \
             --env TXN_URL \
+            --env PERF_READ_TOKEN \
             --volume "$PWD:/work" \
             --workdir /work \
             "${K6_IMAGE}" run \
