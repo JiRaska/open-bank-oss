@@ -44,6 +44,7 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.rest.assured.kotlin)
 }
 

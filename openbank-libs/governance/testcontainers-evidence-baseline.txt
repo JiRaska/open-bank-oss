@@ -27,7 +27,6 @@ openbank-consent-service/src/test/kotlin/com/openbank/consent/it/PostgresTestRes
 openbank-control-liveness-sentinel/src/test/kotlin/com/openbank/liveness/PostgresTestResource.kt
 openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/it/RedpandaRedisTestResource.kt
 openbank-delegation-service/src/test/kotlin/com/openbank/delegation/it/PostgresTestResource.kt
-openbank-devops-agent/src/test/kotlin/com/openbank/devops/PostgresTestResource.kt
 openbank-dispute-service/src/test/kotlin/com/openbank/dispute/it/PostgresTestResource.kt
 openbank-docs-truth-agent/src/test/kotlin/com/openbank/docstruth/PostgresTestResource.kt
 openbank-document-service/src/test/kotlin/com/openbank/document/it/PostgresRedisTestResource.kt
