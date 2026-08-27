@@ -91,7 +91,7 @@ journeys:
       The in-cluster network edge is live, but this protected endpoint requires a dedicated
       read-only client-credentials identity. Until the identity owner provisions that separate
       Vault-backed secret, failed runs mean missing authentication evidence — not a green
-      catalog or network result.
+      catalog or network result. Tracked by #7324.
     falsification: >-
       Scale the product-catalog Deployment to zero, break its database connectivity, or set
       CATALOG_BASE to a route that returns 5xx. The exact mounted k6 program must fail its
