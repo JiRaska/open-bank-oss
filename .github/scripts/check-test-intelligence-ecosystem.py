@@ -154,6 +154,8 @@ def check(root: Path) -> list[str]:
         ("github.event.workflow_run.head_sha || 'eligible'", "workflow-run events can evict the current push/dispatch Admin UI deploy queue"),
         ("git ls-remote origin refs/heads/main", "admin deployment does not reject a source commit that is stale before privileged build"),
         ("Skipping stale source", "admin deployment does not make stale-source rejection observable"),
+        ('"openbank-libs/governance/journeys.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the journey catalog changes"),
+        ('"openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when a synthetic runtime manifest changes"),
     ):
         if needle not in deploy:
             errors.append(message)

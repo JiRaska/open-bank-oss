@@ -60,6 +60,10 @@ on:
       - "openbank-libs/governance/agents.yaml"
       - "openbank-libs/governance/compliance-controls.yaml"
       - "openbank-libs/governance/rules.yaml"
+      # Test Intelligence snapshot inputs. A journey catalog/manifest change must rebuild
+      # the image: the sandbox CronJob alone proves runtime, but the operator's bundled
+      # inventory and blockers would otherwise remain stale until an unrelated UI edit.
+      - "openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"
       - "openbank-libs/governance/journeys.yaml"
       # openbank-libs/docs is the ONLY docs tree baked into the image: the Dockerfile's
       # docs-collector copies /repo/openbank-*/docs, and src/lib/services/docs.ts serves the
