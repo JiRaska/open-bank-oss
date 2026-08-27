@@ -103,4 +103,21 @@ class NotificationModelTest {
         assertThat(MobileDeepLink.isAllowed("https://example.invalid/redirect")).isFalse()
         assertThat(MobileDeepLink.isAllowed("openbank://savings?next=https://evil.invalid")).isFalse()
     }
+
+    @Test
+    fun `no-device fallback is a closed reviewed template policy`() {
+        assertThat(
+            NotificationTemplate.entries.filter { it.noDeviceFallbackChannel == NotificationChannel.EMAIL },
+        ).containsExactlyInAnyOrder(
+            NotificationTemplate.ACCOUNT_FROZEN,
+            NotificationTemplate.KYC_REJECTED,
+            NotificationTemplate.KYC_DOCUMENT_REQUIRED,
+            NotificationTemplate.TRANSACTION_FAILED,
+        )
+        assertThat(NotificationTemplate.SCA_APPROVAL.noDeviceFallbackChannel).isNull()
+        assertThat(NotificationTemplate.OTP_CODE.noDeviceFallbackChannel).isNull()
+        assertThat(NotificationTemplate.PASSWORD_RESET.noDeviceFallbackChannel).isNull()
+        assertThat(NotificationTemplate.MARKETING_PRODUCT_OFFER.noDeviceFallbackChannel).isNull()
+        assertThat(NotificationTemplate.TRANSACTION_COMPLETED.noDeviceFallbackChannel).isNull()
+    }
 }
