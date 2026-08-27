@@ -18,6 +18,26 @@ def text(path: Path) -> str:
     return path.read_text(errors="ignore") if path.exists() else ""
 
 
+RECORD_CALL = re.compile(
+    r"""TestInfrastructureEvidence\.record\s*\((?:[^()"']|\((?:[^()]*)\)|"[^"]*"|'[^']*')*?["'](started|stopped)["']\s*[,)]""",
+    re.DOTALL,
+)
+
+
+def recorded_lifecycles(source: str) -> set[str]:
+    """Lifecycle literals a file really passes to the shared recorder, ignoring comments.
+
+    The mere PRESENCE of the identifier is not evidence of a lifecycle: an import line, a
+    KDoc sentence, or a resource that records only `started` all contain it. #7246's
+    acceptance is start AND stop, and a substring test cannot tell those apart — the same
+    shape as scoring a service "contract tested" off a comment containing the word
+    (check-pact-provider-replay.py's KNOWN_UNCOVERED note).
+    """
+    stripped = re.sub(r"/\*.*?\*/", " ", source, flags=re.DOTALL)
+    stripped = "\n".join(line.split("//")[0] for line in stripped.splitlines())
+    return set(RECORD_CALL.findall(stripped))
+
+
 def unrecorded_service_testcontainers_resources(root: Path) -> set[str]:
     """Find service-owned Testcontainers lifecycle managers without shared evidence."""
     resources = set()
@@ -25,7 +45,7 @@ def unrecorded_service_testcontainers_resources(root: Path) -> set[str]:
         source = text(path)
         if ("QuarkusTestResourceLifecycleManager" in source
                 and re.search(r"org\.testcontainers|PostgreSQLContainer|GenericContainer|KafkaContainer|RedpandaContainer", source)
-                and "TestInfrastructureEvidence.record" not in source):
+                and recorded_lifecycles(source) != {"started", "stopped"}):
             resources.add(path.relative_to(root).as_posix())
     return resources
 
@@ -327,6 +347,38 @@ def self_test() -> int:
         baseline.write_text(f"{new_resource}\n")
         if any(new_resource in failure for failure in check(root)):
             print("self-test failed: baseline did not account for existing migration debt")
+            return 1
+        # A half-migrated resource must not clear the ratchet. Recording only `started`
+        # leaves teardown unobservable while the identifier is present, so a substring
+        # test would accept it and its baseline entry would have to be deleted --
+        # permanently declaring the migration done (#7246).
+        baseline.write_text("")
+        prefix = (
+            "import com.openbank.libs.testing.evidence.TestInfrastructureEvidence\n"
+            "import io.quarkus.test.common.QuarkusTestResourceLifecycleManager\n"
+            "import org.testcontainers.containers.PostgreSQLContainer\n"
+            "class PostgresTestResource : QuarkusTestResourceLifecycleManager {\n"
+        )
+        started_only = prefix + '  fun start() { TestInfrastructureEvidence.record("postgres", IMG, "started") }\n}\n'
+        resource.write_text(started_only)
+        if not any(new_resource in failure for failure in check(root)):
+            print("self-test failed: start-only lifecycle evidence was accepted as migrated")
+            return 1
+        # A file that only NAMES the recorder in prose or an import is not evidence either.
+        resource.write_text(
+            prefix + '  // TestInfrastructureEvidence.record("postgres", IMG, "started") and "stopped"\n}\n'
+        )
+        if not any(new_resource in failure for failure in check(root)):
+            print("self-test failed: commented-out lifecycle evidence was accepted as migrated")
+            return 1
+        # ...and the honest start+stop pair must PASS, or the check is red for everyone.
+        resource.write_text(
+            prefix
+            + '  fun start() { TestInfrastructureEvidence.record("postgres", IMG.asCanonicalNameString(), "started") }\n'
+            + '  fun stop() { TestInfrastructureEvidence.record("postgres", IMG.asCanonicalNameString(), "stopped") }\n}\n'
+        )
+        if any(new_resource in failure for failure in check(root)):
+            print("self-test failed: a genuine start/stop lifecycle pair was rejected")
             return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0

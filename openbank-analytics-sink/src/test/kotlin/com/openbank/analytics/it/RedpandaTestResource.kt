@@ -4,6 +4,7 @@
 
 package com.openbank.analytics.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -27,7 +28,7 @@ class RedpandaTestResource : QuarkusTestResourceLifecycleManager {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
         val rp = RedpandaContainer(
-            DockerImageName.parse("redpandadata/redpanda:v24.1.2")
+            DockerImageName.parse(REDPANDA_IMAGE)
                 .asCompatibleSubstituteFor("docker.redpanda.com/redpandadata/redpanda"),
         )
         try {
@@ -36,6 +37,7 @@ class RedpandaTestResource : QuarkusTestResourceLifecycleManager {
             throw TestAbortedException("Redpanda failed to start — skipping IT: ${e.message}", e)
         }
         redpanda = rp
+        TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started")
         lastBootstrapServers = rp.bootstrapServers
 
         return mapOf(
@@ -55,10 +57,15 @@ class RedpandaTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        redpanda?.stop()
+        redpanda?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped")
+        }
     }
 
     companion object {
+        const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
+
         /**
          * Set by [start] and read by test classes that need to talk to the broker directly (e.g.
          * [com.openbank.analytics.integration.AnalyticsEventsConsumerGroupIdBootIT]'s `AdminClient`).
