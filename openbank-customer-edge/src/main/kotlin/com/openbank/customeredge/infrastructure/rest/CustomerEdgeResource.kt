@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.customeredge.domain.model.CustomerIdentity
 import com.openbank.customeredge.infrastructure.audit.EdgeAuditPublisher
 import com.openbank.customeredge.infrastructure.cnb.CnbBanksClient
+import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
@@ -108,6 +109,9 @@ class CustomerEdgeResource(
     // detekt tolerates here and every test constructs this resource positionally.
     @Inject
     lateinit var partyMergeResolver: PartyMergeResolver
+
+    @Inject
+    lateinit var creditFunnel: com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 
     @ConfigProperty(name = "openbank.edge.account-service-url")
     lateinit var accountServiceUrl: String
@@ -751,6 +755,90 @@ class CustomerEdgeResource(
     }
 
     /**
+     * One credit-journey funnel event (ADR-0269 rule 8's metrics).
+     *
+     * Authenticated on purpose — see [CreditFunnelPublisher] for why this is not the onboarding
+     * funnel's public endpoint. The party is taken from the JWT and never from the body, so a
+     * caller can only ever describe their own journey.
+     *
+     * Always 202, even for a rejected value: telemetry must not teach a client anything, and a 400
+     * here would turn the allow-list into an oracle for what the bank tracks. Rejected values are
+     * counted, not answered.
+     */
+    @POST
+    @Path("/credit/events")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun trackCreditEvent(body: String): Response {
+        val customer = customer()
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+        val step = node?.get("step")?.asText()
+        val action = node?.get("action")?.asText()
+        if (step in CreditFunnelPublisher.VALID_STEPS && action in CreditFunnelPublisher.VALID_ACTIONS) {
+            creditFunnel.emit(customer.partyId, step!!, action!!)
+        }
+        return Response.accepted().build()
+    }
+
+    /**
+     * The caller's own four-pillar financial health (ADR-0269 / APP-ADR-0001 rule 5).
+     *
+     * Assembled by lending-service, which already reaches the credit profile and the loan book;
+     * this route only scopes it to the caller. No score, no rating, no eligibility — and no path
+     * into a credit decision.
+     *
+     * Fail-soft to an empty list. An unreachable upstream means the app shows no pillars rather
+     * than four invented ones, and each pillar can independently answer UNKNOWN, so a partial
+     * answer is the normal case rather than an error.
+     */
+    @GET
+    @Path("/financial-health")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun getFinancialHealth(): Response {
+        val customer = customer()
+        val resp = upstream.get(
+            "$lendingServiceUrl/api/v1/lending/intake/financial-health",
+            customer.partyId.toString(),
+        )
+        if (resp.status != 200) return Response.ok("[]").type(MediaType.APPLICATION_JSON).build()
+        return Response.ok(resp.entity ?: "[]").type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * An indicative, non-binding price for an amount and term (ADR-0269 rule 4).
+     *
+     * The ONLY route by which the app may learn what a loan costs. The client computes no price:
+     * rate, instalment, APRC and total come from lending-service, which resolves them from the
+     * pinned catalog revision. The body carries amount and term and nothing else — a
+     * customer-supplied rate would let the applicant price their own loan.
+     *
+     * Deliberately NOT fail-soft, and deliberately passes the upstream status through. A 409 means
+     * lending's distress floor suppressed pricing and carries a reason code; turning that into an
+     * empty 200 would leave the app rendering a quote-shaped hole, which is exactly how a client
+     * ends up showing "0".
+     */
+    @POST
+    @Path("/credit/quotes")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun quoteCredit(request: Map<String, Any?>): Response {
+        val customer = customer()
+        val body = objectMapper.writeValueAsString(
+            mapOf("amount" to request["amount"], "termMonths" to request["termMonths"]),
+        )
+        val resp = upstream.post(
+            "$lendingServiceUrl/api/v1/lending/intake/quotes",
+            customer.partyId.toString(),
+            body,
+        )
+        return Response.status(resp.status)
+            .entity(resp.entity ?: "{}")
+            .type(MediaType.APPLICATION_JSON)
+            .build()
+    }
+
+    /**
      * The caller's OWN credit applications, as customer-readable journeys (ADR-0269 rule 3).
      *
      * The read half of the intake pair: `applyForLoan` above files an application, this says where
@@ -1014,6 +1102,113 @@ class CustomerEdgeResource(
             body,
         )
         return Response.status(resp.status).entity(resp.entity).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * The caller's own ADR-0269 credit consents, as three booleans.
+     *
+     * ## Why this route exists at all
+     *
+     * consent-service could already grant these scopes, and the edge could already list and revoke
+     * consents — but there was no way for a CUSTOMER to switch one ON. The app's existing marketing
+     * toggle goes somewhere else entirely (party-service's `marketingConsent` boolean), so without
+     * this route the credit consents were grantable only by an operator, which is the opposite of
+     * what "the customer decides" means.
+     *
+     * ## Why booleans and not the consent objects
+     *
+     * The app renders three switches. Handing it consent aggregates would make every client
+     * re-derive "is CREDIT_OFFERS on" from a list, and the first client to write that filter
+     * slightly differently gets a different answer — the same reasoning ADR-0210 D2 gives for the
+     * party key. The derivation happens once, here.
+     */
+    @GET
+    @Path("/credit/consents")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun getCreditConsents(): Response {
+        val customer = customer()
+        val party = customer.partyId.toString()
+        val resp = upstream.get("$consentServiceUrl/api/v1/consents/party/$party", party)
+        val arr = if (resp.status == 200) {
+            runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") as? ArrayNode }.getOrNull()
+        } else {
+            null
+        }
+        // An unreadable consent list answers "everything off", which is the SAFE default and the
+        // true one for every customer who has never granted anything. It is not fail-soft
+        // convenience: the client uses this to decide whether to fetch offers at all, so an
+        // optimistic default here would fetch offers for a customer whose consent we cannot read.
+        val active = arr?.filter { it.get("status")?.asText() == "ACTIVE" }?.flatMap { c ->
+            c.get("scopes")?.mapNotNull { it.asText() } ?: emptyList()
+        }?.toSet().orEmpty()
+        val out = objectMapper.createObjectNode()
+        CREDIT_SCOPES.forEach { (field, scope) -> out.put(field, scope in active) }
+        return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * Set the caller's credit consents to exactly the state in the body (ADR-0269 rule 1).
+     *
+     * A full-state PUT, not a partial patch: "turn offers off" and "leave offers alone" must not be
+     * the same request. Anything the body sets to false is revoked, immediately and for every
+     * channel — the ADR's requirement that switching offers off takes effect at once rather than at
+     * the next batch.
+     *
+     * These scopes are GDPR Art. 7 data-processing consents, so consent-service activates them
+     * without an SCA ceremony; an SCA designed for payment authorisation is a disproportionate
+     * burden on a data-processing opt-in (ADR-0205 D1). Granting still requires the customer's own
+     * authenticated session — the party comes from the JWT, never the body.
+     */
+    @PUT
+    @Path("/credit/consents")
+    @Authorize(action = "customer.profile.consent.update", resource = "")
+    @Blocking
+    fun putCreditConsents(body: String): Response {
+        val customer = customer()
+        val requested = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+            ?: return badRequest("Malformed credit consent body")
+        val desired = CREDIT_SCOPES.mapValues { (field, _) -> requested.get(field)?.asBoolean() ?: false }
+        val party = customer.partyId.toString()
+
+        val existing = upstream.get("$consentServiceUrl/api/v1/consents/party/$party", party)
+        if (existing.status != 200) return Response.status(existing.status).entity(existing.entity).build()
+        val consents = runCatching { objectMapper.readTree(existing.entity?.toString() ?: "") as? ArrayNode }
+            .getOrNull() ?: objectMapper.createArrayNode()
+
+        desired.forEach { (field, wanted) ->
+            val scope = CREDIT_SCOPES.getValue(field)
+            val held = consents.firstOrNull { c ->
+                c.get("status")?.asText() == "ACTIVE" &&
+                    c.get("scopes")?.any { it.asText() == scope } == true
+            }
+            when {
+                wanted && held == null -> grantCreditScope(customer.partyId, scope)
+                !wanted && held != null -> revokeHeldConsent(customer.partyId, held.get("id")?.asText())
+                else -> Unit // already in the requested state; granting again would churn the audit trail
+            }
+        }
+        return getCreditConsents()
+    }
+
+    private fun grantCreditScope(partyId: UUID, scope: String) {
+        val body = objectMapper.createObjectNode().apply {
+            put("partyId", partyId.toString())
+            put("granteeId", BANK_GRANTEE)
+            put("granteeType", "INTERNAL_SERVICE")
+            put("granteeName", "OpenBank")
+            putArray("scopes").add(scope)
+            // 365 days: the non-AISP bucket's maximum. It is a ceiling, not a promise — the customer
+            // can revoke at any time, and nothing re-arms the consent when it lapses.
+            put("validTo", java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(CONSENT_DAYS).toString())
+        }.toString()
+        upstream.post("$consentServiceUrl/api/v1/consents", partyId.toString(), body)
+    }
+
+    private fun revokeHeldConsent(partyId: UUID, consentId: String?) {
+        if (consentId.isNullOrBlank()) return
+        val body = objectMapper.createObjectNode().put("reason", "Revoked by customer").toString()
+        upstream.delete("$consentServiceUrl/api/v1/consents/$consentId?partyId=$partyId", partyId.toString(), body)
     }
 
     private fun projectConsent(c: com.fasterxml.jackson.databind.JsonNode): ObjectNode {
@@ -4707,6 +4902,24 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+        /**
+         * The ADR-0269 credit consents, as the app's field name → the consent-service scope.
+         *
+         * One map, so the read and the write cannot disagree about which switch means which scope —
+         * the failure that would look like a customer turning offers off and still being offered.
+         */
+        private val CREDIT_SCOPES: Map<String, String> = linkedMapOf(
+            "offers" to "CREDIT_OFFERS",
+            "profileUse" to "CREDIT_PROFILE_USE",
+            "aiAgent" to "CREDIT_AI_AGENT",
+        )
+
+        /** First-party consent: the bank itself is the grantee, not a TPP. */
+        private const val BANK_GRANTEE = "openbank"
+
+        /** The non-AISP validity ceiling. A ceiling, not a promise — revocation is immediate. */
+        private const val CONSENT_DAYS = 365L
+
         /** Closed at the edge as well as upstream: a path is never an app-controlled URL. */
         private val SURFACE_SLOTS: Set<String> = setOf(
             "HOME_BANNER",

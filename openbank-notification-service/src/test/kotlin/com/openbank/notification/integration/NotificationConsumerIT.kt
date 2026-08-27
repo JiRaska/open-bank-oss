@@ -4,6 +4,7 @@
 package com.openbank.notification.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.notification.application.NotificationConsumer.Companion.GENERIC_FALLBACK_EMAIL_BODY
 import com.openbank.notification.application.NotificationConsumer.Companion.GENERIC_PUSH_BODY
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushSender
@@ -72,7 +73,10 @@ class NotificationConsumerIT {
                 // alias, so the outgoing channel's kafka connector is unconfigured and the emitter
                 // fails with "has no downstream" — killing consume() before the oversight side-channel
                 // (OversightWebhookIT). Switching outgoing to in-memory keeps the out event flowing.
-                InMemoryConnector.switchOutgoingChannelsToInMemory("notification-events-out")
+                InMemoryConnector.switchOutgoingChannelsToInMemory("notification-events-out") +
+                // Exercise #4363 through the real consumer. The service config remains default-off;
+                // production activation is a separately reviewed GitOps decision.
+                mapOf("openbank.notification.push-fallback.enabled" to "true")
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -119,6 +123,10 @@ class NotificationConsumerIT {
     private fun correlationIdFor(partyId: UUID): UUID? = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.correlationId
+
+    private fun notificationsFor(partyId: UUID) = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).list() }
+    }
 
     /** Drive one request through the in-memory inbound channel and wait for the ack. */
     private fun consumeAndAwait(request: NotificationRequest) {
@@ -496,6 +504,42 @@ class NotificationConsumerIT {
         assertThat(countFor(partyId)).isEqualTo(1)
         assertThat(statusFor(partyId)).isEqualTo("FAILED")
         assertThat(failureReasonFor(partyId)).isEqualTo(NotificationOutcomeEvent.REASON_NO_DEVICE)
+    }
+
+    @Test
+    fun `approved no-device template creates a separate generic EMAIL fallback`() {
+        val partyId = UUID.randomUUID()
+        mailbox.clear()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.ACCOUNT_FROZEN,
+                recipient = "fallback@example.com",
+                variables = mapOf("accountNumber" to "synthetic-account-token", "reason" to "synthetic-reason"),
+            ),
+        )
+
+        val rows = notificationsFor(partyId)
+        assertThat(rows).hasSize(2)
+        val original = rows.single { it.channel == NotificationChannel.PUSH.name }
+        val fallback = rows.single { it.channel == NotificationChannel.EMAIL.name }
+        // The original never claims a different-channel success; the generic fallback has its own row.
+        assertThat(original.status).isEqualTo("FAILED")
+        assertThat(original.failureReason).isEqualTo(NotificationOutcomeEvent.REASON_REROUTED_NO_DEVICE)
+        assertThat(fallback.status).isEqualTo("SUPPRESSED")
+        assertThat(fallback.failureReason).isEqualTo(NotificationOutcomeEvent.REASON_MAILER_MOCKED)
+        assertThat(fallback.body)
+            .isEqualTo(GENERIC_FALLBACK_EMAIL_BODY)
+            .doesNotContain("synthetic-account-token")
+            .doesNotContain("synthetic-reason")
+        assertThat(mailbox.getMailMessagesSentTo("fallback@example.com")).hasSize(1)
+
+        val originalEvent = objectMapper.readTree(outcomeRowsFor(original.notificationId).single().payload)
+        assertThat(originalEvent.path("outcome").asText()).isEqualTo("REROUTED")
+        assertThat(originalEvent.path("reason").asText())
+            .isEqualTo(NotificationOutcomeEvent.REASON_REROUTED_NO_DEVICE)
     }
 
     /**

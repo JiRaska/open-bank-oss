@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.44.0
+  version: 1.46.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1001,6 +1001,7 @@ paths:
                           - MARKETING_COMMS_INAPP
                           - CREDIT_OFFERS
                           - CREDIT_PROFILE_USE
+                          - CREDIT_AI_AGENT
                     accountIbans: {type: array, items: {type: string}, nullable: true}
                     validFrom: {type: string, format: date-time}
                     validTo: {type: string, format: date-time}
@@ -1205,6 +1206,134 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Loan'}
+
+  /financial-health:
+    get:
+      tags: [Lending]
+      summary: The caller's four-pillar financial health (no score)
+      description: >-
+        ADR-0269 / APP-ADR-0001 rule 5. Reserve, cashflow, obligations and habits, each with its own
+        zone. There is deliberately no aggregate: a single grade invites the customer to optimise it
+        and the bank to act on it, and neither is what this exists for. Any pillar may answer
+        UNKNOWN — the bank not having seen something is a fact about the bank, not a verdict about
+        the customer. Fails soft to an empty list.
+      operationId: getFinancialHealth
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The pillars (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/HealthPillar'}
+
+  /credit/events:
+    post:
+      tags: [Lending]
+      summary: One credit-journey funnel event
+      description: >-
+        ADR-0269 rule 8's metrics. AUTHENTICATED, unlike the onboarding funnel's public endpoint —
+        these events say "this person is looking at borrowing", which must not ride a stream anyone
+        can post to. The party comes from the JWT and a partyId in the body is ignored.
+
+        Always 202, including for a value outside the allow-list: a 400 would make the allow-list an
+        oracle for what the bank tracks, and telemetry has no business teaching a client anything.
+
+        The action vocabulary deliberately cannot express a conversion. The programme measures
+        self-activation and opt-out, not how many customers borrowed.
+      operationId: trackCreditEvent
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step, action]
+              properties:
+                step: {type: string, enum: [CONSENT, HEALTH, FINANCING, QUOTE, APPLICATION]}
+                action:
+                  type: string
+                  enum: [VIEWED, CONSENT_GRANTED, CONSENT_WITHDRAWN, QUOTE_REQUESTED,
+                         QUOTE_SUPPRESSED, APPLICATION_STARTED, APPLICATION_ABANDONED]
+      responses:
+        '202':
+          description: Accepted (or silently dropped — the caller cannot tell, by design)
+
+  /credit/consents:
+    get:
+      tags: [Consents]
+      summary: The caller's own credit consents, as three switches
+      description: >-
+        ADR-0269 rule 1. Derived once here rather than by every client filtering a consent list —
+        the first client to write that filter differently gets a different answer. An unreadable
+        consent list answers "everything off", which is both the safe default and the true state
+        for anyone who has never granted these.
+      operationId: getCreditConsents
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The three switches
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditConsents'}
+    put:
+      tags: [Consents]
+      summary: Set the caller's credit consents to exactly this state
+      description: >-
+        Full-state PUT, not a partial patch: "turn offers off" and "leave offers alone" must not be
+        the same request. Anything false is revoked immediately and for every channel. These are
+        GDPR Art. 7 data-processing consents, so no SCA ceremony is required (ADR-0205 D1); the
+        party comes from the JWT, never the body.
+      operationId: putCreditConsents
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreditConsents'}
+      responses:
+        '200':
+          description: The resulting state, re-read after the change
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditConsents'}
+        '400': {description: Malformed body}
+
+  /credit/quotes:
+    post:
+      tags: [Lending]
+      summary: Indicative, non-binding price for an amount and term
+      description: >-
+        ADR-0269 rule 4 — the only route by which the app may learn what a loan costs. The client
+        computes no price. Not fail-soft: a 409 (distress floor suppressed pricing, with a reason
+        code) passes through rather than becoming an empty 200, which a client renders as zero.
+      operationId: quoteCredit
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, termMonths]
+              properties:
+                amount: {type: string}
+                termMonths: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: The indicative quote
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditQuote'}
+        '400': {description: Amount or term outside the product bounds}
+        '409': {description: Pricing suppressed; body carries reasonCode}
 
   /credit-applications:
     get:
@@ -3300,6 +3429,70 @@ components:
 
     # Edge's projected view of lending-service's Loan (internal fields dropped — see
     # CustomerEdgeResource.projectLoan).
+    HealthPillar:
+      type: object
+      required: [code, zone]
+      properties:
+        code: {type: string, enum: [RESERVE, CASHFLOW, OBLIGATIONS, HABITS]}
+        zone:
+          type: string
+          enum: [HEALTHY, STRETCHED, AT_RISK, UNKNOWN]
+          description: UNKNOWN means not enough data — never render it as a middling verdict.
+        value:
+          type: string
+          nullable: true
+          description: The working behind the zone (months of cover, net, DSTI). Null when UNKNOWN.
+        target:
+          type: string
+          nullable: true
+          description: What the pillar is measured against, where one exists.
+
+    CreditConsents:
+      type: object
+      description: >-
+        ADR-0269's three credit consents. All default FALSE — absence of consent is denial, and no
+        path re-arms one on the customer's behalf.
+      required: [offers, profileUse, aiAgent]
+      properties:
+        offers:
+          type: boolean
+          description: May the bank show this customer a credit offer it was not asked for.
+        profileUse:
+          type: boolean
+          description: >-
+            May the 360 profile be used to work out WHICH offer. Separate from `offers` because a
+            customer may want an affordability answer they asked for without their spending being
+            mined for eligibility.
+        aiAgent:
+          type: boolean
+          description: >-
+            May the assistant watch and PREPARE on the customer's behalf. Never extends to
+            submitting, accepting, raising a limit or drawing funds.
+
+    CreditQuote:
+      type: object
+      description: >-
+        An indicative price. Structurally not an offer: no id, no accept path, and `binding` is
+        always false.
+      required: [amount, currency, termMonths, monthlyPayment, totalPayable, totalCostOfCredit,
+                 validUntil, binding]
+      properties:
+        amount: {type: string}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        termMonths: {type: integer}
+        nominalAnnualRatePercent: {type: string}
+        monthlyPayment: {type: string}
+        totalPayable: {type: string}
+        totalCostOfCredit: {type: string}
+        aprcPercent:
+          type: string
+          nullable: true
+          description: >-
+            RPSN/APRC. NULL means "could not be computed" and must render as an absent figure, never
+            as 0% — which reads to a customer as free credit.
+        validUntil: {type: string, format: date-time}
+        binding: {type: boolean}
+
     CreditJourney:
       type: object
       description: >-

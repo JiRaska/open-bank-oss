@@ -279,6 +279,10 @@ openbank:
   # from Vault via ExternalSecret (never in git). Only anonymized, allow-listed
   # oversight signals egress — see com.openbank.notification.application.OversightWebhook.
   notification:
+    push-fallback:
+      # #4363: a reviewed policy exists, but e-mail fallback is off until a separate GitOps
+      # activation proves a real transport and address-quality gate. Never treat this as live.
+      enabled: ${PUSH_FALLBACK_ENABLED:false}
     webhook:
       slack:
         enabled: ${SLACK_WEBHOOK_ENABLED:false}
