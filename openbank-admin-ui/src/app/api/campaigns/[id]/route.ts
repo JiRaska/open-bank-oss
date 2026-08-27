@@ -124,7 +124,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
 
-  const [campaign, enrolments, sends, sendSummary, journey, engagement, experiment] = await Promise.all([
+  const [campaign, enrolments, sends, sendSummary, journey, engagement, incentives, experiment] = await Promise.all([
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}`, null),
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/enrolments`, []),
     // First page only. Paging and filtering go through /api/campaigns/[id]/sends so turning a
@@ -146,6 +146,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     // App attention is a separate, privacy-minimised projection.  It is never inferred from a
     // banner handoff, so a missing/lagging source remains visible as unavailable in Campaign Studio.
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/engagement`, []),
+    // Authoritative reward outcomes are independent from attention. Keeping this positional read
+    // adjacent to engagement makes the two funnels visible without ever equating a click to value.
+    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/incentives`, null),
     readExperiment(headers, id),
   ])
 
@@ -184,6 +187,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     sendSummary: sendSummary.data,
     journey: journey.data,
     engagement: engagement.data,
+    incentives: incentives.data,
     experiment: experiment.data,
     contentExperiment: contentExperiment.data,
     entryCatalogues: { cadences: cadences.data, triggers: triggers.data },
@@ -197,6 +201,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       sendSummary: sendSummary.state,
       journey: journey.state,
       engagement: engagement.state,
+      incentives: incentives.state,
       experiment: experiment.state,
       contentExperiment: contentExperiment.state,
       cadences: cadences.state,

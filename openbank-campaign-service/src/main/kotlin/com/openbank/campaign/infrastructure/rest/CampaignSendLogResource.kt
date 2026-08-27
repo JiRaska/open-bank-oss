@@ -5,6 +5,7 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignEngagementQuery
+import com.openbank.campaign.application.usecase.CampaignIncentiveOutcomeProjector
 import com.openbank.campaign.application.usecase.CampaignSendLogQuery
 import com.openbank.campaign.application.usecase.CampaignSummaryQuery
 import com.openbank.campaign.domain.model.SendOutcome
@@ -28,6 +29,7 @@ class CampaignSendLogResource(
     private val query: CampaignSendLogQuery,
     private val summaries: CampaignSummaryQuery,
     private val engagement: CampaignEngagementQuery,
+    private val incentives: CampaignIncentiveOutcomeProjector,
 ) {
 
     /**
@@ -106,6 +108,12 @@ class CampaignSendLogResource(
     @Path("/{id}/engagement")
     @Authorize(action = "campaign.read", resource = "#id")
     suspend fun engagement(@PathParam("id") id: UUID): Response = Response.ok(engagement.metrics(id)).build()
+
+    /** Reward lifecycle funnel. Only `committed` is an authoritative redemption. */
+    @GET
+    @Path("/{id}/incentives")
+    @Authorize(action = "campaign.read", resource = "#id")
+    suspend fun incentives(@PathParam("id") id: UUID): Response = Response.ok(incentives.funnel(id)).build()
 
     private fun badOutcome(cause: Throwable): Response = Response.status(Response.Status.BAD_REQUEST)
         .entity(

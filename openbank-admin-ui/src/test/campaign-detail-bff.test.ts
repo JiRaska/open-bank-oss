@@ -31,6 +31,8 @@ describe('campaign detail bundle', () => {
             ? { from: 'summary' }
             : u.includes('/journey')
               ? [{ from: 'journey' }]
+              : u.includes('/incentives')
+                ? { from: 'incentives' }
               : u.includes('/sends')
                 ? [{ from: 'sends' }]
                 : { from: 'campaign' }
@@ -47,6 +49,8 @@ describe('campaign detail bundle', () => {
     expect(d.sends.items).toEqual([{ from: 'sends' }])
     expect(d.sendSummary).toEqual({ from: 'summary' })
     expect(d.journey).toEqual([{ from: 'journey' }])
+    expect(d.incentives).toEqual({ from: 'incentives' })
+    expect(d.sources.incentives).toBe('ok')
   })
 
   /**

@@ -494,6 +494,31 @@ class CampaignRestContractIT {
         }
     }
 
+    private fun insertIncentiveOutcome(campaignId: UUID, status: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaign_incentive_outcome (
+                    event_id, reservation_id, campaign_id, step_order, attribution_ref,
+                    offer_id, offer_name, offer_version, status, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, UUID.randomUUID())
+                statement.setObject(3, campaignId)
+                statement.setInt(4, 0)
+                statement.setObject(5, UUID.randomUUID())
+                statement.setObject(6, UUID.randomUUID())
+                statement.setString(7, "term-deposit-welcome")
+                statement.setInt(8, 2)
+                statement.setString(9, status)
+                statement.setObject(10, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
     fun `interaction validation resolves only server-owned context for the owning party`() {
@@ -572,6 +597,24 @@ class CampaignRestContractIT {
             body("[0].surface", equalTo("STORIES"))
             body("[0].type", equalTo("IMPRESSION"))
             body("[0].count", equalTo(1))
+        }
+    }
+
+    @Test
+    fun `campaign incentive funnel distinguishes held inventory from redemption`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        insertIncentiveOutcome(campaignId, "RESERVED")
+        insertIncentiveOutcome(campaignId, "COMMITTED")
+
+        When {
+            get("/api/v1/campaigns/$campaignId/incentives")
+        } Then {
+            statusCode(200)
+            body("reserved", equalTo(1))
+            body("committed", equalTo(1))
+            body("released", equalTo(0))
+            body("expired", equalTo(0))
         }
     }
 

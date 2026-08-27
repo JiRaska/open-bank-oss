@@ -114,6 +114,7 @@ type Detail = {
   sendSummary: Record<string, number>
   journey: StepFunnel[]
   engagement: CampaignAttentionMetric[]
+  incentives: { reserved: number; committed: number; released: number; expired: number } | null
   experiment: Experiment | null
   contentExperiment: ContentExperiment | null
   entryCatalogues?: {
@@ -313,6 +314,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   }
   const summary = detail?.sendSummary ?? {}
   const engagement = Array.isArray(detail?.engagement) ? detail.engagement : []
+  const incentiveFunnel = detail?.incentives
   const experiment = detail?.experiment
   const contentExperiment = detail?.contentExperiment
   const cadence = c?.schedule
@@ -807,6 +809,29 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 ? `${c.incentiveOfferRef.name}@${c.incentiveOfferRef.version}`
                 : t('Bez odměny', 'No reward')}
             </p>
+            {c.incentiveOfferRef && detail?.sources?.incentives !== 'ok' ? (
+              <DataUnavailable
+                kind={detail?.sources?.incentives === 'unauthorized' ? 'unauthorized' : detail?.sources?.incentives === 'not_deployed' ? 'not_deployed' : 'unreachable'}
+                service="Campaign-service"
+                feature={t('Výsledky odměn', 'Reward outcomes')}
+                dense
+              />
+            ) : c.incentiveOfferRef && incentiveFunnel ? (
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4" data-testid="campaign-incentive-funnel">
+                {[
+                  [t('Rezervováno', 'Reserved'), incentiveFunnel.reserved, t('Držená odměna, ne uplatnění', 'Held, not redeemed')],
+                  [t('Uplatněno', 'Redeemed'), incentiveFunnel.committed, t('Pouze potvrzené splnění', 'Committed only')],
+                  [t('Uvolněno', 'Released'), incentiveFunnel.released, t('Nesplněná podmínka', 'Qualification not completed')],
+                  [t('Expirováno', 'Expired'), incentiveFunnel.expired, t('Rezervace vypršela', 'Reservation expired')],
+                ].map(([label, value, hint]) => (
+                  <div key={String(label)} className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-xl font-semibold tabular-nums">{value}</p>
+                    <p className="text-xs text-muted-foreground">{hint}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </section>
 
           <section className="space-y-2">

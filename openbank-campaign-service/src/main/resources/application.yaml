@@ -129,6 +129,21 @@ mp:
         value:
           serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
+      # Producer-owned, no-PII reservation outcomes. Earliest is deliberate: this derived funnel
+      # must rebuild retained attributed history when the consumer is first rolled out.
+      incentive-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.campaign.incentive-events-in
+        connector: smallrye-kafka
+        topic: openbank.incentive.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-incentive-events
+        auto:
+          offset:
+            reset: earliest
       # Attributable in-app attention events emitted by engagement-service.  This is aggregate-only
       # reporting: lag can make a metric temporarily unavailable, but can never affect delivery or
       # enrolment.  Start at latest so enabling the projection cannot reprocess historic, pre-
