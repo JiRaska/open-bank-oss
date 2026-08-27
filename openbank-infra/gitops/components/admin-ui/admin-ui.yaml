@@ -105,6 +105,10 @@ spec:
             # Adding a service *inside* an existing namespace is fully automatic.
             - name: OPENBANK_NAMESPACES
               value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement,referral
+            - name: REFERRAL_SERVICE_URL
+              value: https://referral-service.referral.svc:8443
+            - name: NODE_EXTRA_CA_CERTS
+              value: /mnt/referral-ca/ca.crt
             # agent-service (MCP) is NOT reached via the discovery proxy: the
             # /api/agent/mcp and /api/agent/chat routes resolve it from this env
             # directly. Unset, they fall back to localhost:8109 (the admin-ui pod
@@ -210,6 +214,9 @@ spec:
             - name: sbom-drift
               mountPath: /config/sbom-drift
               readOnly: true
+            - name: referral-ca
+              mountPath: /mnt/referral-ca
+              readOnly: true
           readinessProbe:
             tcpSocket:
               port: http
@@ -232,6 +239,9 @@ spec:
           emptyDir: {}
         - name: next-cache
           emptyDir: {}
+        - name: referral-ca
+          secret:
+            secretName: admin-ui-referral-ca
         # Daily AWS Cost Explorer snapshot written by the cost-collector CronJob
         # (cost-collector.yaml). optional: tolerate its absence before the first run.
         - name: cost-report

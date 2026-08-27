@@ -82,6 +82,17 @@ quarkus:
   authz:
     enforce: false
 
+"%prod":
+  quarkus:
+    tls:
+      referral-service:
+        trust-store:
+          pem:
+            certs: ${REFERRAL_TLS_CA_CERT:/mnt/campaign-tls/ca.crt}
+    rest-client:
+      referral-service:
+        tls-configuration-name: referral-service
+
 
 openbank:
   temporal:
@@ -104,6 +115,8 @@ consent-service:
 
 incentive-service:
   url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
+referral-service:
+  url: ${REFERRAL_SERVICE_URL:http://localhost:8155}
 
 analytics:
   clickhouse-url: ${CLICKHOUSE_URL:http://localhost:8123}

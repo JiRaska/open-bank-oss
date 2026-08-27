@@ -12,6 +12,7 @@ import java.util.UUID
 interface ReferralProgramRepository {
     suspend fun create(program: ReferralProgram): ReferralProgram
     suspend fun find(id: UUID): ReferralProgram?
+    suspend fun listPublished(): List<ReferralProgram>
     suspend fun publish(id: UUID, maker: String, checker: String, at: java.time.Instant): ReferralProgram
 }
 

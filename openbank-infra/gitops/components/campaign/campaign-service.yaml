@@ -139,6 +139,12 @@ spec:
             # explicit svc URL so gen-network-policies.py sees the edge.
             - name: CONSENT_SERVICE_URL
               value: http://consent-service.consent.svc:8106
+            # Approved MGM programme lookup. The campaign stores the resolved immutable
+            # id/name/version; reward execution remains owned by referral-service.
+            - name: REFERRAL_SERVICE_URL
+              value: https://referral-service.referral.svc:8443
+            - name: REFERRAL_TLS_CA_CERT
+              value: /mnt/campaign-tls/ca.crt
             # ADR-0210: read-only segment evaluation against the silver layer.
             # ClickHouse requires auth: the `analytics` user, password from the
             # Vault-backed clickhouse-auth Secret projected into this namespace
