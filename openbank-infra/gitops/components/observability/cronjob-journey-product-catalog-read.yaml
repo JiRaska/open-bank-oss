@@ -40,6 +40,13 @@ data:
       const response = http.get(`${CATALOG_BASE}/api/v1/products`, {
         tags: { endpoint: 'products-list', service: 'product-catalog' },
       });
+      // A threshold exit proves the journey is red but does not say whether its first
+      // boundary was authentication, routing, or the service itself. Status and content type
+      // are operational metadata only: never log response bodies or request headers because
+      // a future read-only identity must remain secret-free in retained Job logs.
+      if (response.status !== 200) {
+        console.error(`product-catalog-read unexpected response: status=${response.status} content_type=${response.headers['Content-Type'] || 'absent'}`);
+      }
       const contentType = response.headers['Content-Type'] || '';
       let isArray = false;
       try { isArray = Array.isArray(response.json()); } catch (_) { /* checked below */ }
