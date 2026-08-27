@@ -2,6 +2,7 @@
 package com.openbank.incentive.integration
 
 import com.openbank.incentive.it.IncentivePostgresTestResource
+import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -27,9 +28,12 @@ import javax.sql.DataSource
 class IncentiveRestContractIT {
     @Inject lateinit var dataSource: DataSource
 
+    @Inject lateinit var meterRegistry: MeterRegistry
+
     @Suppress("LongMethod")
     @Test
     fun `published inventory reserves once under concurrency then releases commits and expires`() {
+        val publicationsBefore = meterRegistry.counter("openbank.incentive.offers.published").count()
         val effectiveFrom = Instant.now().minusSeconds(60)
         val expiresAt = Instant.now().plusSeconds(86_400)
         val offerId = Given {
@@ -55,6 +59,8 @@ class IncentiveRestContractIT {
         Given { contentType("application/json") }
             .When { post("/api/v1/incentives/offers/$offerId/publish") }
             .Then { statusCode(409) }
+        assertThat(meterRegistry.counter("openbank.incentive.offers.published").count())
+            .isEqualTo(publicationsBefore)
 
         Given {
             contentType("application/json")
@@ -73,6 +79,8 @@ class IncentiveRestContractIT {
         Given { contentType("application/json") }
             .When { post("/api/v1/incentives/offers/$offerId/publish") }
             .Then { statusCode(409) }
+        assertThat(meterRegistry.counter("openbank.incentive.offers.published").count())
+            .isEqualTo(publicationsBefore)
 
         TestJsonWebToken.actor = "checker@openbank.test"
         Given { contentType("application/json") }
@@ -81,6 +89,8 @@ class IncentiveRestContractIT {
                 statusCode(200)
                 body("status", equalTo("PUBLISHED"))
             }
+        assertThat(meterRegistry.counter("openbank.incentive.offers.published").count())
+            .isEqualTo(publicationsBefore + 1.0)
 
         val start = CountDownLatch(1)
         val pool = Executors.newFixedThreadPool(6)
