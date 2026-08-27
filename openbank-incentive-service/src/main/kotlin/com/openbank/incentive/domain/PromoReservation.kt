@@ -22,6 +22,7 @@ data class PromoReservation(
     val idempotencyKey: String,
     val reservedAt: Instant,
     val expiresAt: Instant,
+    val attributionRef: UUID? = null,
     val status: ReservationStatus = ReservationStatus.RESERVED,
 ) {
     init {

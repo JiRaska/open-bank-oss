@@ -14,17 +14,20 @@ interface IncentiveStore {
     suspend fun submitOffer(id: UUID, actor: String): IncentiveOffer
     suspend fun publishOffer(id: UUID, actor: String, at: Instant): IncentiveOffer
     suspend fun addCodes(offerId: UUID, digests: Set<CodeDigest>, actor: String, at: Instant): Int
-    suspend fun reserve(
-        offerId: UUID,
-        digest: CodeDigest,
-        partyRef: String,
-        productRef: String,
-        idempotencyKey: String,
-        actor: String,
-        now: Instant,
-        expiresAt: Instant,
-    ): PromoReservation
+    suspend fun reserve(command: ReserveIncentive): PromoReservation
     suspend fun commit(id: UUID, actor: String, at: Instant): PromoReservation
     suspend fun release(id: UUID, actor: String, at: Instant): PromoReservation
     suspend fun expireDue(at: Instant): Int
 }
+
+data class ReserveIncentive(
+    val offerId: UUID,
+    val digest: CodeDigest,
+    val partyRef: String,
+    val productRef: String,
+    val attributionRef: UUID?,
+    val idempotencyKey: String,
+    val actor: String,
+    val now: Instant,
+    val expiresAt: Instant,
+)

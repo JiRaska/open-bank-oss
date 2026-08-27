@@ -61,11 +61,15 @@ openbank:
   incentive:
     code-pepper: ${PROMO_CODE_PEPPER:}
     reservation-ttl: ${PROMO_RESERVATION_TTL:PT15M}
+    # Fail closed: only customer-edge's configured workload principal may assert a customer party.
+    customer-caller-principal: ${INCENTIVE_CUSTOMER_CALLER_PRINCIPAL:}
 
 "%test":
   openbank:
     outbox:
       dispatch-enabled: false
+    incentive:
+      customer-caller-principal: maker@openbank.test
   quarkus:
     management:
       enabled: false
