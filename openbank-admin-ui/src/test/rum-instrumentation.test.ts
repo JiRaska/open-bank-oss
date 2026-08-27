@@ -71,4 +71,13 @@ describe('authenticated Admin UI browser RUM', () => {
     expect(forwarded.headers.get('x-rum-relay')).toBe('forwarded')
     expect(calls).toEqual([`${TEST_COLLECTOR}/v1/traces`])
   })
+
+  it('enforces the relay budget in bytes so Unicode cannot bypass it', async () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = TEST_COLLECTOR
+    const { POST } = await import('@/app/api/telemetry/traces/route')
+    const oversized = await POST(new Request('http://localhost/api/telemetry/traces', {
+      method: 'POST', body: '😀'.repeat(131_073),
+    }))
+    expect(oversized.status).toBe(413)
+  })
 })

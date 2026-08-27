@@ -19,8 +19,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     return new NextResponse(null, { status: 204, headers: { 'x-rum-relay': 'disabled' } })
   }
 
-  const body = await request.text()
-  if (body.length > MAX_BODY_BYTES) {
+  // Measure the encoded request body, not JavaScript characters: multi-byte Unicode must not
+  // bypass the ingress budget intended to bound relay memory and collector load.
+  const body = await request.arrayBuffer()
+  if (body.byteLength > MAX_BODY_BYTES) {
     return NextResponse.json({ error: 'payload too large' }, { status: 413 })
   }
 
