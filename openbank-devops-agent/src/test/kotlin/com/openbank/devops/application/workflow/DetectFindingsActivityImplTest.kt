@@ -10,7 +10,6 @@ import com.openbank.devops.domain.model.DoraMetric
 import com.openbank.devops.domain.model.FindingSeverity
 import com.openbank.devops.infrastructure.config.DevOpsConfig
 import com.openbank.libs.testing.trace.RecordingSpanExporter
-import com.openbank.libs.testing.trace.TraceContract
 import io.mockk.every
 import io.mockk.mockk
 import io.opentelemetry.sdk.trace.SdkTracerProvider

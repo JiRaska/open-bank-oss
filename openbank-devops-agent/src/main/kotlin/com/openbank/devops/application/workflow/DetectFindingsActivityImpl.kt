@@ -27,10 +27,8 @@ import java.time.Instant
  * would fix it (the agent's whole purpose: a permanent fix, not a band-aid).
  */
 @ApplicationScoped
-class DetectFindingsActivityImpl(
-    private val config: DevOpsConfig,
-    private val tracer: Tracer,
-) : DetectFindingsActivity {
+class DetectFindingsActivityImpl(private val config: DevOpsConfig, private val tracer: Tracer) :
+    DetectFindingsActivity {
 
     /**
      * The detector boundary is where collected observability signals become an actionable finding.
