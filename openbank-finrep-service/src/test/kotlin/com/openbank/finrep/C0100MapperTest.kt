@@ -50,13 +50,15 @@ class C0100MapperTest {
     }
 
     @Test
-    fun `C 01_00 sums real EQUITY lines and clears the data-gap flag once the ledger has capital accounts`() {
-        // Forward-looking fixture: the day the ledger's chart of accounts gains real
-        // capital-structure accounts (EQUITY-typed lines), the mapper must pick them up
-        // automatically without code changes, and stop flagging the rows as gaps.
+    fun `C 01_00 derives each own-funds subtotal from its explicit capital source accounts`() {
         val lines = listOf(
-            TrialBalanceLineDto(code = "3900", accountType = "EQUITY", net = BigDecimal("1000000"), currency = "CZK"),
-            TrialBalanceLineDto(code = "3901", accountType = "EQUITY", net = BigDecimal("250000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "6000", accountType = "EQUITY", net = BigDecimal("-10000000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "6010", accountType = "EQUITY", net = BigDecimal("-2000000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "6020", accountType = "EQUITY", net = BigDecimal("-500000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "6030", accountType = "EQUITY", net = BigDecimal("-1000000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "6040", accountType = "EQUITY", net = BigDecimal("250000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "6050", accountType = "EQUITY", net = BigDecimal("-1000000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "6060", accountType = "EQUITY", net = BigDecimal("-2000000"), currency = "CZK"),
         )
 
         val template = C0100Mapper.map(lines, LocalDate.of(2026, 6, 30))
@@ -65,7 +67,34 @@ class C0100MapperTest {
         template.cells.forEach { cell ->
             assertThat(cell.isDataGap).isFalse()
             assertThat(cell.gapReason).isNull()
-            assertThat(cell.value).isEqualByComparingTo(BigDecimal("1250000"))
+        }
+        assertThat(template.cells.associate { it.rowRef to it.value }).containsExactlyInAnyOrderEntriesOf(
+            mapOf(
+                "r010" to BigDecimal("16250000"),
+                "r015" to BigDecimal("14250000"),
+                "r020" to BigDecimal("13250000"),
+                "r030" to BigDecimal("12000000"),
+                "r130" to BigDecimal("500000"),
+                "r160" to BigDecimal("1000000"),
+                "r300" to BigDecimal("250000"),
+                "r530" to BigDecimal("1000000"),
+                "r750" to BigDecimal("2000000"),
+            ),
+        )
+    }
+
+    @Test
+    fun `C 01_00 ignores unrelated equity accounts instead of silently treating them as regulatory capital`() {
+        val lines = listOf(
+            TrialBalanceLineDto(code = "6999", accountType = "EQUITY", net = BigDecimal("-999999"), currency = "CZK"),
+        )
+
+        val template = C0100Mapper.map(lines, LocalDate.of(2026, 6, 30))
+
+        assertThat(template.hasDataGaps).isTrue()
+        assertThat(template.cells).allSatisfy { cell ->
+            assertThat(cell.value).isEqualByComparingTo(BigDecimal.ZERO)
+            assertThat(cell.isDataGap).isTrue()
         }
     }
 
