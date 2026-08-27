@@ -136,7 +136,13 @@ data class CampaignEnrolmentCount(val campaignId: UUID, val count: Long)
 data class ConversionContext(val firstSentAt: Instant?, val alreadyConverted: Boolean)
 
 /** Server-owned campaign context for one opaque app interaction reference. */
-data class CampaignInteractionAttribution(val campaignId: UUID, val stepOrder: Int, val channel: Channel)
+data class CampaignInteractionAttribution(
+    val campaignId: UUID,
+    val stepOrder: Int,
+    val channel: Channel,
+    /** Immutable treatment selected on the reviewed campaign; null means the campaign has no reward. */
+    val incentiveOfferRef: IncentiveOfferRef? = null,
+)
 
 @Suppress("TooManyFunctions") // One aggregate port; see PanacheSendLogRepository's matching rationale.
 interface SendLogRepository {

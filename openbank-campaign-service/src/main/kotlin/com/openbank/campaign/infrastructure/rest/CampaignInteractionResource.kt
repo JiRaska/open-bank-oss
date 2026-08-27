@@ -5,6 +5,7 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignInteractionQuery
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -53,6 +54,7 @@ class CampaignInteractionResource(private val query: CampaignInteractionQuery) {
                 campaignId = attribution.campaignId,
                 stepOrder = attribution.stepOrder,
                 channel = attribution.channel.name,
+                incentiveOfferRef = attribution.incentiveOfferRef,
             ),
         ).build()
     }
@@ -69,4 +71,9 @@ class CampaignInteractionResource(private val query: CampaignInteractionQuery) {
         }
 }
 
-data class CampaignInteractionAttributionResponse(val campaignId: UUID, val stepOrder: Int, val channel: String)
+data class CampaignInteractionAttributionResponse(
+    val campaignId: UUID,
+    val stepOrder: Int,
+    val channel: String,
+    val incentiveOfferRef: IncentiveOfferRef?,
+)
