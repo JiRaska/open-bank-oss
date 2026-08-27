@@ -224,6 +224,16 @@ export interface ClientExperienceEvidence {
     source?: 'prometheus' | 'tempo' | null
     sampledSpansLast7d?: number | null
     errorSpansLast7d?: number | null
+    /** Scheduled audit freshness is separate from telemetry arrival. */
+    audit?: {
+      state: EvidenceState
+      lastScheduledAt: string | null
+      lastSuccessfulAt: string | null
+      /** A one-off audit never substitutes the regular schedule. */
+      lastManualSuccessfulAt?: string | null
+      freshnessSeconds: number | null
+      detail: string
+    }
     /** A bounded inspection of sampled mobile traces.  This proves trace-context
      * continuity only for the listed sampled traces; it is never a traffic estimate. */
     backendCorrelations?: {
