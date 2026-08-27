@@ -24,7 +24,6 @@ openbank-card-issuance-service/src/test/kotlin/com/openbank/cardissuance/it/Post
 openbank-clearing-service/src/test/kotlin/com/openbank/clearing/it/PostgresRedpandaRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/ConsentPostgresRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/PostgresTestResource.kt
-openbank-control-liveness-sentinel/src/test/kotlin/com/openbank/liveness/PostgresTestResource.kt
 openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/it/RedpandaRedisTestResource.kt
 openbank-delegation-service/src/test/kotlin/com/openbank/delegation/it/PostgresTestResource.kt
 openbank-dispute-service/src/test/kotlin/com/openbank/dispute/it/PostgresTestResource.kt
