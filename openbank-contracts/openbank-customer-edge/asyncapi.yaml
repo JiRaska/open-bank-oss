@@ -105,6 +105,8 @@ channels:
         $ref: '#/components/messages/auditEvent_CUSTOMER_POCKET_EXCHANGED'
       customerregistered:
         $ref: '#/components/messages/auditEvent_CUSTOMER_REGISTERED'
+      customertermdepositopened:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_TERM_DEPOSIT_OPENED'
       customertransferinitiated:
         $ref: '#/components/messages/auditEvent_CUSTOMER_TRANSFER_INITIATED'
       loanapplicationsubmitted:
@@ -271,6 +273,15 @@ components:
       description: |
         Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
         Carries the envelope below with `eventType: CUSTOMER_REGISTERED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_TERM_DEPOSIT_OPENED:
+      name: CUSTOMER_TERM_DEPOSIT_OPENED
+      title: Customer audit event CUSTOMER_TERM_DEPOSIT_OPENED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_TERM_DEPOSIT_OPENED`.
       payload:
         $ref: '#/components/schemas/AnalyticsEnvelope'
     auditEvent_CUSTOMER_TRANSFER_INITIATED:
