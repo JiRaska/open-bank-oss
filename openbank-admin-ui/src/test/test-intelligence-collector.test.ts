@@ -51,6 +51,15 @@ journeys:
     capability: proves the mobile critical path
     falsification: break the app route
     blocked_by: needs canary devices
+  - id: admin-ui-sso-boundary
+    title: Admin UI SSO boundary
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    schedule: "13 */2 * * *"
+    capability: proves the public SSO hand-off
+    falsification: remove the SSO boundary
 money_path_accountability:
   default_blocker: needs synthetic parties
   services:
@@ -95,7 +104,10 @@ scenarios:
       schemaVersion: 1,
       run: { id: 'synthetic-9', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Synthetic journeys', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/synthetic-9', observedAt: '2026-08-25T08:00:00Z' },
       component: 'openbank-platform', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
-      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:edge', detail: '2 threshold result(s), 0 breached' }],
+      specializedEvidence: [
+        { kind: 'synthetic', state: 'passed', source: 'journey:edge', detail: '2 threshold result(s), 0 breached' },
+        { kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: '1/1 browser E2E checks executed' },
+      ],
     }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
@@ -117,6 +129,9 @@ scenarios:
       state: 'passed', detail: '2 threshold result(s), 0 breached', run: { id: 'synthetic-9', workflow: 'Synthetic journeys' },
     } })
     expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
+    expect(report.syntheticJourneys.find(item => item.id === 'admin-ui-sso-boundary')).toMatchObject({
+      status: 'active', executor: 'github-actions', ci: { state: 'passed', detail: '1/1 browser E2E checks executed' },
+    })
     expect(report.journeyCoverage).toMatchObject({ moneyPathTotal: 2, activelyCovered: 1, explicitlyUnwatched: 1 })
     expect(report.journeyCoverage?.services).toEqual([
       expect.objectContaining({ component: 'openbank-alpha-service', state: 'covered', journeys: ['edge'] }),

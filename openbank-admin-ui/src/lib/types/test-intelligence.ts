@@ -143,6 +143,7 @@ export interface SyntheticJourneyEvidence {
   status: 'active' | 'planned'
   state: EvidenceState
   severity: string
+  executor?: 'kubernetes-cronjob' | 'github-actions'
   schedule: string | null
   environment: string | null
   covers: string[]
