@@ -125,3 +125,16 @@ spec:
               named per journey on purpose: a regex cannot detect the absence of something, so
               every `active` journey in openbank-libs/governance/journeys.yaml needs its own
               instance of this rule, and check-journey-catalog.py enforces that.
+        - alert: JourneyProductCatalogReadMissing
+          expr: |
+            absent(kube_cronjob_status_last_successful_time{namespace="observability", cronjob="journey-product-catalog-read"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The product-catalog-read journey has never succeeded, or its CronJob is gone"
+            description: >-
+              No kube-state-metrics series exists for journey-product-catalog-read. The
+              non-mutating Product Catalog journey is deleted, renamed, or has never completed
+              successfully. This is separate from the public-edge probe: it exercises the
+              catalog HTTP handler and its backing datastore path.
