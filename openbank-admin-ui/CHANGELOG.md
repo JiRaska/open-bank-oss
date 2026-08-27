@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.210.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.209.1...admin-ui-v0.210.0) (2026-08-27)
+
+
+### Features
+
+* **admin-ui:** rotate Prague Explorer duo ([#7389](https://github.com/JiRaska/open-bank-oss/issues/7389)) ([9b7d20c](https://github.com/JiRaska/open-bank-oss/commit/9b7d20ce89033f5191ced3c0fa5980ed26b2a684)), closes [#7385](https://github.com/JiRaska/open-bank-oss/issues/7385)
+
 ## [0.209.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.209.0...admin-ui-v0.209.1) (2026-08-27)
 
 
