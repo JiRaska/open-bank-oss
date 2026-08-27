@@ -4,6 +4,10 @@
 # Journey: product-catalog-read (ADR-0252). It is intentionally non-mutating: the
 # direct in-cluster Service route exercises the deployed REST handler and its Postgres
 # projection without creating a customer, identity, payment, or catalog revision.
+# Its availability verdict comes from the Job exit code through kube-state-metrics. Unlike
+# public-edge it does not remote-write k6 trends: adding another plaintext in-cluster
+# Prometheus edge before the observability mTLS work would make a test monitor weaken the
+# transport posture it is meant to help verify.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -90,16 +94,7 @@ spec:
               args:
                 - run
                 - --quiet
-                - -o
-                - experimental-prometheus-rw
-                - --tag
-                - journey=product-catalog-read
                 - /scripts/journey.js
-              env:
-                - name: K6_PROMETHEUS_RW_SERVER_URL
-                  value: http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write
-                - name: K6_PROMETHEUS_RW_TREND_STATS
-                  value: "p(95),p(99),avg,max"
               volumeMounts:
                 - name: script
                   mountPath: /scripts
