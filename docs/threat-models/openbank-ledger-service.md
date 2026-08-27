@@ -383,3 +383,15 @@ set) apply equally to the new `ledger.approval.decide` action.
   line inserts occur only during an operator four-eyes freeze, not on the posting path. **Rollback:**
   before FINREP depends on the source, stop writers and archive frozen evidence, then remove the
   trigger/function/table; never delete attested evidence as a convenience rollback.
+
+- **2026-08-27** — Journal posting now emits the bounded internal span
+  `ledger.journal.post`, asserted against an SDK exporter while the real reactive repository writes
+  a balanced journal and transactional outbox rows in `LedgerOutboxProjectionIT` (issue #7383).
+  **Information disclosure:** the span has one allow-listed attribute only,
+  `openbank.ledger.journal.status`; it carries no journal/account/transaction IDs, actor,
+  idempotency key, amount, currency, description, or payload. **Tampering:** telemetry is
+  observational and cannot alter the posting, its balance validation, day/period locks,
+  idempotency, or transactional outbox. **Availability:** tracing failure is not caught or
+  translated into a financial success; an application failure remains an error span and propagates
+  unchanged. Rollback: revert the instrumentation and its contract test; no stored financial data,
+  schema, caller, endpoint, role, or policy changes.
