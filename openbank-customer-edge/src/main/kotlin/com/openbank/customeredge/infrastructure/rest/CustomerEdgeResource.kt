@@ -40,6 +40,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -530,10 +531,20 @@ class CustomerEdgeResource(
     fun openTermDeposit(body: String, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
         requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header must not be blank" }
+        require(idempotencyKey.length <= MAX_IDEMPOTENCY_KEY_LENGTH) { "Idempotency-Key is too long" }
         val customer = customer()
-        val productId = extractTextField(objectMapper, body, "productId")
-            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val request = runCatching { objectMapper.readTree(body) }.getOrNull()?.takeIf { it.isObject }
+            ?: return badRequest("Malformed term-deposit request")
+        if (request.fieldNames().asSequence().any { it !in TERM_DEPOSIT_OPEN_FIELDS }) {
+            return badRequest("Term-deposit request contains unsupported fields")
+        }
+        val productId = request.uuidField("productId")
             ?: return Response.status(400).entity("{\"error\":\"productId must be a UUID\"}").build()
+        val reservationId = request.get("incentiveReservationId")?.takeUnless { it.isNull }?.let {
+            it.takeIf { node -> node.isTextual }?.textValue()?.let { value ->
+                runCatching { UUID.fromString(value) }.getOrNull()
+            } ?: return badRequest("incentiveReservationId must be a UUID")
+        }
         val offer = when (val result = resolvePublicTermDeposit(customer, productId)) {
             is TermDepositResolution.Found -> result.offer
             TermDepositResolution.NotFound -> return termDepositNotFound()
@@ -563,7 +574,54 @@ class CustomerEdgeResource(
             resourceId = extractTextField(objectMapper, (response.entity as? String).orEmpty(), "id"),
             details = mapOf("productId" to productId.toString(), "currency" to offer.path("currency").asText()),
         )
+        if (reservationId != null) {
+            return reconcileTermDepositIncentive(response, customer, productId, reservationId, idempotencyKey)
+        }
         return response
+    }
+
+    private fun reconcileTermDepositIncentive(
+        accountResponse: Response,
+        customer: CustomerIdentity,
+        productId: UUID,
+        reservationId: UUID,
+        idempotencyKey: String,
+    ): Response {
+        if (accountResponse.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
+            val account = parseJson(accountResponse)?.takeIf { it.isObject }
+                ?: return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity("{\"error\":\"Account outcome lacked qualifying evidence\"}").build()
+            val qualifiedAt = account.path("openedAt").asText().takeIf { it.isNotBlank() }
+                ?.let { runCatching { Instant.parse(it) }.getOrNull() }
+                ?: return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity("{\"error\":\"Account outcome lacked qualifying evidence\"}").build()
+            val commitBody = objectMapper.createObjectNode()
+                .put("productRef", productId.toString())
+                .put("qualifiedAt", qualifiedAt.toString())
+            val commit = upstream.post(
+                "$incentiveServiceUrl/api/v1/customer-incentives/reservations/$reservationId/commit",
+                customer.partyId.toString(),
+                objectMapper.writeValueAsString(commitBody),
+                idempotencyKey,
+            )
+            if (commit.statusInfo.family != Response.Status.Family.SUCCESSFUL) return commit
+            val incentive = parseJson(commit)?.takeIf { it.isObject }
+                ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            val result = (account.deepCopy<JsonNode>() as ObjectNode).set<JsonNode>("incentiveReservation", incentive)
+            return Response.status(accountResponse.status).entity(result).type(MediaType.APPLICATION_JSON).build()
+        }
+
+        if (accountResponse.status >= TRANSIENT_UPSTREAM_STATUS_MIN || accountResponse.status in TRANSIENT_STATUSES) {
+            return accountResponse
+        }
+        val releaseBody = objectMapper.createObjectNode().put("productRef", productId.toString())
+        val release = upstream.post(
+            "$incentiveServiceUrl/api/v1/customer-incentives/reservations/$reservationId/release",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(releaseBody),
+            idempotencyKey,
+        )
+        return if (release.statusInfo.family == Response.Status.Family.SUCCESSFUL) accountResponse else release
     }
 
     // --- KYC / identity verification status (AML Act §8, ADR-0116) ---
@@ -4649,6 +4707,9 @@ class CustomerEdgeResource(
             "REWARDS_HUB",
         )
         private val INCENTIVE_CLAIM_FIELDS = setOf("interactionRef", "code", "productId")
+        private val TERM_DEPOSIT_OPEN_FIELDS = setOf("productId", "incentiveReservationId")
+        private val TRANSIENT_STATUSES = setOf(408, 425, 429)
+        private const val TRANSIENT_UPSTREAM_STATUS_MIN = 500
         private const val MIN_PROMO_CODE_LENGTH = 8
         private const val MAX_PROMO_CODE_LENGTH = 128
         private const val MAX_IDEMPOTENCY_KEY_LENGTH = 255
