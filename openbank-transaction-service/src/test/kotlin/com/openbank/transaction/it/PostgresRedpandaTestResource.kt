@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.jboss.logging.Logger
 import org.opentest4j.TestAbortedException
@@ -34,15 +35,16 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
-        val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
+        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
             .withUsername("openbank")
             .withPassword("openbank_secret")
             .withDatabaseName("openbank_transactions_it")
         pg.start()
         postgres = pg
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
 
         val rp = RedpandaContainer(
-            DockerImageName.parse("redpandadata/redpanda:v24.1.2")
+            DockerImageName.parse(REDPANDA_IMAGE)
                 .asCompatibleSubstituteFor("docker.redpanda.com/redpandadata/redpanda"),
         )
         try {
@@ -51,10 +53,12 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
             throw TestAbortedException("Redpanda failed to start — skipping IT: ${e.message}", e)
         }
         redpanda = rp
+        TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started")
 
-        val rd = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine")).withExposedPorts(6379)
+        val rd = GenericContainer(DockerImageName.parse(VALKEY_IMAGE)).withExposedPorts(6379)
         rd.start()
         redis = rd
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
 
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
@@ -85,15 +89,27 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
                 rp.bootstrapServers,
             )
         }
-        redis?.stop()
-        redpanda?.stop()
-        postgres?.stop()
+        redis?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
+        }
+        redpanda?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped")
+        }
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
         redis = null
         redpanda = null
         postgres = null
     }
 
     private companion object {
+        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+        const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
+        const val VALKEY_IMAGE = "valkey/valkey:7.2-alpine"
         private val LOG: Logger = Logger.getLogger(PostgresRedpandaTestResource::class.java)
     }
 }
