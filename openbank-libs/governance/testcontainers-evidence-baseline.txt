@@ -38,7 +38,6 @@ openbank-finops-agent/src/test/kotlin/com/openbank/finops/PostgresTestResource.k
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisRedpandaTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisTestResource.kt
 openbank-fx-service/src/test/kotlin/com/openbank/fx/it/PostgresRedisTestResource.kt
-openbank-governance-auditor/src/test/kotlin/com/openbank/govaudit/PostgresTestResource.kt
 openbank-interest-service/src/test/kotlin/com/openbank/interest/it/PostgresRedisTestResource.kt
 openbank-kyc-service/src/test/kotlin/com/openbank/kyc/it/PostgresTestResource.kt
 openbank-ledger-service/src/test/kotlin/com/openbank/ledger/it/PostgresRedpandaTestResource.kt
