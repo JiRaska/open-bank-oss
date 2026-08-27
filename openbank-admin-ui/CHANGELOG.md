@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.213.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.212.0...admin-ui-v0.213.0) (2026-08-27)
+
+
+### Features
+
+* **admin-ui:** retain browser matrix evidence ([#7449](https://github.com/JiRaska/open-bank-oss/issues/7449)) ([d687627](https://github.com/JiRaska/open-bank-oss/commit/d6876279bccbc94a1ff98ff9940bd6480df4f81e))
+
 ## [0.212.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.211.0...admin-ui-v0.212.0) (2026-08-27)
 
 
