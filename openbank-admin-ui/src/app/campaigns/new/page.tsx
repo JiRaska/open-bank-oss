@@ -77,17 +77,24 @@ function isIncentiveOffer(value: unknown): value is IncentiveOffer {
   if (!value || typeof value !== 'object') return false
   const offer = value as Partial<IncentiveOffer>
   const ref = offer.ref as Partial<IncentiveOffer['ref']> | undefined
+  const effectiveFrom = typeof offer.effectiveFrom === 'string' ? Date.parse(offer.effectiveFrom) : Number.NaN
+  const expiresAt = typeof offer.expiresAt === 'string' ? Date.parse(offer.expiresAt) : Number.NaN
   return Boolean(
     ref
     && typeof ref.id === 'string'
-    && ref.id.length > 0
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref.id)
     && typeof ref.name === 'string'
-    && ref.name.length > 0
+    && ref.name.trim().length > 0
     && typeof ref.version === 'number'
     && Number.isInteger(ref.version)
     && ref.version > 0
     && Array.isArray(offer.productScope)
-    && offer.productScope.every(scope => typeof scope === 'string'),
+    && offer.productScope.length > 0
+    && offer.productScope.every(scope => typeof scope === 'string' && scope.trim().length > 0)
+    && Number.isFinite(effectiveFrom)
+    && Number.isFinite(expiresAt)
+    && expiresAt > effectiveFrom
+    && (offer.stackingPolicy === 'EXCLUSIVE' || offer.stackingPolicy === 'STACKABLE'),
   )
 }
 
@@ -220,7 +227,7 @@ export default function NewCampaignPage() {
       .then(r => r.json())
       .then((response: { items?: IncentiveOffer[]; state?: string }) => {
         if (response.state === 'ok') {
-          const items = response.items ?? []
+          const items = response.items
           if (!Array.isArray(items) || !items.every(isIncentiveOffer)) {
             setIncentiveOffers([])
             setIncentiveCatalogueState('unreachable')
