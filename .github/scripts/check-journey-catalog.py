@@ -276,6 +276,11 @@ def check(root: pathlib.Path):
             findings.append(f"{jid}: severity must be one of {VALID_SEVERITY}")
 
         if status == "planned":
+            if entry.get("runtime_note"):
+                findings.append(
+                    f"{jid}: planned journeys use `blocked_by`, not `runtime_note` — "
+                    "a runtime prerequisite belongs to a scheduled journey with a live verdict"
+                )
             if not entry.get("blocked_by"):
                 findings.append(
                     f"{jid}: planned journeys must name what blocks them (`blocked_by`) — "
@@ -293,6 +298,10 @@ def check(root: pathlib.Path):
             continue
         if status != "active":
             continue
+
+        runtime_note = entry.get("runtime_note")
+        if runtime_note is not None and (not isinstance(runtime_note, str) or not runtime_note.strip()):
+            findings.append(f"{jid}: runtime_note must be a non-empty string when declared")
 
         for field in REQUIRED_ACTIVE:
             if entry.get(field) in (None, ""):
@@ -453,6 +462,10 @@ def self_test():
 
     run("planned journey with no target schedule",
         SELF_TEST_CATALOG_OK.replace('    target_schedule: "0 * * * *"\n', ""),
+        SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
+
+    run("planned journey cannot mislabel its blocker as a runtime prerequisite",
+        SELF_TEST_CATALOG_OK.replace('    blocked_by: "#4348 — needs synthetic parties"\n', '    runtime_note: needs synthetic parties\n    blocked_by: "#4348 — needs synthetic parties"\n'),
         SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
 
     run("journey with no falsification",

@@ -48,6 +48,9 @@
 #                  in Test Intelligence but never interpreted as proof that a scheduler exists.
 #   falsification  how to make this journey go red on purpose. A journey that has only ever
 #                  been green is unfalsified — the same rule gates.yaml applies to CI gates.
+#   runtime_note    an active journey's known, evidence-backed runtime prerequisite. It is
+#                  rendered beside the live Kubernetes verdict; it never turns a red run
+#                  into a planned or passing one.
 #   blocked_by     what prevents this from running (planned only).
 
 version: 1
@@ -84,6 +87,11 @@ journeys:
     money_moving: false
     cronjob: openbank-infra/gitops/components/observability/cronjob-journey-product-catalog-read.yaml
     schedule: "*/10 * * * *"
+    runtime_note: >-
+      The in-cluster network edge is live, but this protected endpoint requires a dedicated
+      read-only client-credentials identity. Until the identity owner provisions that separate
+      Vault-backed secret, failed runs mean missing authentication evidence — not a green
+      catalog or network result.
     falsification: >-
       Scale the product-catalog Deployment to zero, break its database connectivity, or set
       CATALOG_BASE to a route that returns 5xx. The exact mounted k6 program must fail its

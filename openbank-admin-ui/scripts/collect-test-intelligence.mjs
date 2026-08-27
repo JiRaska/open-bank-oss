@@ -490,6 +490,7 @@ function syntheticJourneys() {
       schedule: item.schedule ?? item.target_schedule ?? null, environment: item.environment ?? null,
       covers: item.covers ?? item.covered_services ?? [],
       falsifies: item.falsification ?? '', blocker: item.blocked_by ?? null,
+      runtimeNote: item.runtime_note ?? null,
       ...(latestCi.has(item.id) ? { ci: latestCi.get(item.id) } : {}),
     }))
   } catch (error) {
