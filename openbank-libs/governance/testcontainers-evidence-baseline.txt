@@ -34,7 +34,6 @@ openbank-docs-truth-agent/src/test/kotlin/com/openbank/docstruth/PostgresTestRes
 openbank-document-service/src/test/kotlin/com/openbank/document/it/PostgresRedisTestResource.kt
 openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/it/PostgresRedisTestResource.kt
 openbank-engagement-service/src/test/kotlin/com/openbank/engagement/integration/EngagementPostgresTestResource.kt
-openbank-finops-agent/src/test/kotlin/com/openbank/finops/PostgresTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisRedpandaTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisTestResource.kt
 openbank-fx-service/src/test/kotlin/com/openbank/fx/it/PostgresRedisTestResource.kt
