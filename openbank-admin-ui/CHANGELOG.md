@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.215.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.215.0...admin-ui-v0.215.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove remote font build dependency ([#7490](https://github.com/JiRaska/open-bank-oss/issues/7490)) ([1019b4a](https://github.com/JiRaska/open-bank-oss/commit/1019b4aae75c4bc434ee0b380452c24b9cec7878))
+
 ## [0.215.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.214.0...admin-ui-v0.215.0) (2026-08-27)
 
 
