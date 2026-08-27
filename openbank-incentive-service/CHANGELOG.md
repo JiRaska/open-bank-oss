@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.3.0...incentive-service-v0.4.0) (2026-08-27)
+
+
+### Features
+
+* **incentive:** expose published offer catalogue ([#7253](https://github.com/JiRaska/open-bank-oss/issues/7253)) ([31fa6ce](https://github.com/JiRaska/open-bank-oss/commit/31fa6ced4e3f8db0117ff5e7c06954fee988a263))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.2.0...incentive-service-v0.3.0) (2026-08-27)
 
 
