@@ -155,6 +155,8 @@ def check(root: Path) -> list[str]:
         ("git ls-remote origin refs/heads/main", "admin deployment does not reject a source commit that is stale before privileged build"),
         ("Skipping stale source", "admin deployment does not make stale-source rejection observable"),
         ('"openbank-libs/governance/journeys.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the journey catalog changes"),
+        ('"perf/scenarios.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the performance catalog changes"),
+        ('"perf/k6/**"', "admin deployment does not rebuild the Test Intelligence snapshot when a performance definition changes"),
         ('"openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when a synthetic runtime manifest changes"),
     ):
         if needle not in deploy:
