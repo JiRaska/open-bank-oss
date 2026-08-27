@@ -134,6 +134,12 @@ class CustomerEdgeResource(
     )
     lateinit var productCatalogUrl: String
 
+    @ConfigProperty(
+        name = "openbank.edge.incentive-service-url",
+        defaultValue = "http://localhost:8156",
+    )
+    lateinit var incentiveServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.transaction-service-url")
     lateinit var transactionServiceUrl: String
 
@@ -444,6 +450,68 @@ class CustomerEdgeResource(
             TermDepositResolution.NotFound -> termDepositNotFound()
             TermDepositResolution.Unavailable -> termDepositCatalogueUnavailable()
         }
+
+    /**
+     * Reserve the fixed reward attached to a campaign treatment the signed-in customer received.
+     * The phone supplies only the opaque interaction reference, promo code and intended product.
+     * Party and offer identity are resolved server-side; the product must still be an ACTIVE,
+     * public term-deposit offer before Incentive Service sees the request.
+     */
+    @POST
+    @Path("/incentives/claims")
+    @Authorize(action = "customer.incentives.claim")
+    @Blocking
+    fun claimIncentive(body: String, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val customer = customer()
+        val request = runCatching { objectMapper.readTree(body) }.getOrNull()?.takeIf { it.isObject }
+            ?: return badRequest("Malformed incentive claim")
+        if (request.fieldNames().asSequence().any { it !in INCENTIVE_CLAIM_FIELDS }) {
+            return badRequest("Incentive claim contains unsupported fields")
+        }
+        val interactionRef = request.uuidField("interactionRef")
+            ?: return badRequest("interactionRef must be a UUID")
+        val productId = request.uuidField("productId")
+            ?: return badRequest("productId must be a UUID")
+        val code = request.path("code").asText().takeIf { it.isNotBlank() }
+            ?: return badRequest("code is required")
+
+        when (resolvePublicTermDeposit(customer, productId)) {
+            is TermDepositResolution.Found -> Unit
+            TermDepositResolution.NotFound -> return termDepositNotFound()
+            TermDepositResolution.Unavailable -> return termDepositCatalogueUnavailable()
+        }
+
+        val attributionResponse = upstream.get(
+            "$campaignServiceUrl/api/v1/campaigns/interactions/$interactionRef/attribution",
+            customer.partyId.toString(),
+        )
+        if (attributionResponse.status != Response.Status.OK.statusCode) {
+            return if (attributionResponse.status >= UPSTREAM_SERVER_ERROR_MIN) {
+                Response.status(Response.Status.BAD_GATEWAY).build()
+            } else {
+                badRequest("Invalid interaction reference")
+            }
+        }
+        val attribution = parseJson(attributionResponse)
+            ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+        val offerId = attribution.path("incentiveOfferRef").uuidField("id")
+            ?: return Response.status(Response.Status.CONFLICT)
+                .entity("{\"error\":\"Campaign treatment has no claimable incentive\"}")
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+
+        val trustedRequest = objectMapper.createObjectNode()
+            .put("code", code)
+            .put("productRef", productId.toString())
+            .put("attributionRef", interactionRef.toString())
+        return upstream.post(
+            "$incentiveServiceUrl/api/v1/customer-incentives/offers/$offerId/reservations",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(trustedRequest),
+            idempotencyKey,
+        )
+    }
 
     /**
      * Opens a term-deposit account selected from [listTermDepositOffers]. The app intentionally
@@ -4578,6 +4646,7 @@ class CustomerEdgeResource(
             "PRODUCT_FEED",
             "REWARDS_HUB",
         )
+        private val INCENTIVE_CLAIM_FIELDS = setOf("interactionRef", "code", "productId")
 
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).

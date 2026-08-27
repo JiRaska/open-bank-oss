@@ -49,6 +49,8 @@ class CustomerEdgeResourceTest {
         balanceServiceUrl = "http://balance"
         engagementServiceUrl = "http://engagement"
         campaignServiceUrl = "http://campaign"
+        productCatalogUrl = "http://catalog"
+        incentiveServiceUrl = "http://incentive"
     }
 
     private fun accountJson(accountId: UUID, ownerParty: UUID) =
@@ -62,6 +64,83 @@ class CustomerEdgeResourceTest {
         "earlyWithdrawalNoticeDays":0}, "termsAndConditions":[]
     }
     """.trimIndent()
+
+    @Test
+    fun `claimIncentive derives party and offer from trusted sources and forwards exact idempotency`() {
+        val caller = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val offerId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val forwarded = slot<String>()
+        every { upstream.get("http://catalog/api/v1/products/$productId", caller.toString()) } returns
+            Response.ok(termDepositProduct(productId)).build()
+        every {
+            upstream.get(
+                "http://campaign/api/v1/campaigns/interactions/$interactionRef/attribution",
+                caller.toString(),
+            )
+        } returns Response.ok(
+            """{"campaignId":"${UUID.randomUUID()}","stepOrder":0,"channel":"PUSH","incentiveOfferRef":{"id":"$offerId","name":"WELCOME","version":1}}""",
+        ).build()
+        every {
+            upstream.post(
+                "http://incentive/api/v1/customer-incentives/offers/$offerId/reservations",
+                caller.toString(),
+                capture(forwarded),
+                "claim-once",
+            )
+        } returns Response.status(201).entity("{\"status\":\"RESERVED\"}").build()
+
+        val response = resourceFor(upstream, caller).claimIncentive(
+            """{"interactionRef":"$interactionRef","code":"WELCOME10","productId":"$productId"}""",
+            "claim-once",
+        )
+
+        assertThat(response.status).isEqualTo(201)
+        val request = ObjectMapper().readTree(forwarded.captured)
+        assertThat(request.path("productRef").asText()).isEqualTo(productId.toString())
+        assertThat(request.path("attributionRef").asText()).isEqualTo(interactionRef.toString())
+        assertThat(request.path("code").asText()).isEqualTo("WELCOME10")
+        assertThat(request.has("partyRef")).isFalse()
+        assertThat(request.has("offerId")).isFalse()
+    }
+
+    @Test
+    fun `claimIncentive rejects client supplied party or offer identity before any upstream call`() {
+        val caller = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val response = resourceFor(upstream, caller).claimIncentive(
+            """{"interactionRef":"${UUID.randomUUID()}","code":"WELCOME10","productId":"${UUID.randomUUID()}","partyRef":"${UUID.randomUUID()}"}""",
+            "claim-once",
+        )
+
+        assertThat(response.status).isEqualTo(400)
+        verify(exactly = 0) { upstream.get(any(), any()) }
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `claimIncentive rejects foreign interaction before calling Incentive Service`() {
+        val caller = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://catalog/api/v1/products/$productId", caller.toString()) } returns
+            Response.ok(termDepositProduct(productId)).build()
+        every {
+            upstream.get(match { it.contains("/interactions/$interactionRef/attribution") }, caller.toString())
+        } returns
+            Response.status(404).build()
+
+        val response = resourceFor(upstream, caller).claimIncentive(
+            """{"interactionRef":"$interactionRef","code":"WELCOME10","productId":"$productId"}""",
+            "claim-once",
+        )
+
+        assertThat(response.status).isEqualTo(400)
+        verify(exactly = 0) { upstream.post(match { it.startsWith("http://incentive/") }, any(), any(), any()) }
+    }
 
     @Test
     fun `getBalance rejects an account owned by another party and does not proxy (IDOR guard)`() {
