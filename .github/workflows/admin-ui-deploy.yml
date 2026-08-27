@@ -59,6 +59,11 @@ on:
       - "openbank-infra/gitops/components/*/feature-flags.yaml"
       - "openbank-libs/governance/agents.yaml"
       - "openbank-libs/governance/compliance-controls.yaml"
+      # Test Intelligence's governed performance plans are baked into
+      # test-intelligence.json. Without these inputs a GitOps manifest can be Synced
+      # while the running UI still presents the prior plan/blocker snapshot.
+      - "perf/scenarios.yaml"
+      - "perf/k6/**"
       - "openbank-libs/governance/rules.yaml"
       # Test Intelligence snapshot inputs. A journey catalog/manifest change must rebuild
       # the image: the sandbox CronJob alone proves runtime, but the operator's bundled
