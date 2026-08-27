@@ -826,6 +826,7 @@ subjects:
   - kind: ServiceAccount
     name: admin-ui
     namespace: admin-ui
+---
 # engagement (ADR-0220). The service landed in #4025 and grew in #4054 without a
 # governance.yaml, so it was invisible to the manifest and to this guard. Adding the
 # manifest makes it a discovered module, which is what surfaced the missing pair here:
