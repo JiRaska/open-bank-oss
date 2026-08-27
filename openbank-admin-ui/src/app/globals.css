@@ -44,10 +44,9 @@
   --blue:   #3b82f6;
 
   /* ── Typography ── */
-  /* Self-hosted via next/font (src/app/layout.tsx) — these custom properties are the
-     generated local font-family names, not the literal Google Fonts names. */
-  --font-sans: var(--font-plus-jakarta-sans), system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), monospace;
+  /* Platform stack: no build-time network fetch or runtime third-party font origin. */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --text-inverse:         #ffffff;
 
   /* ── Brand / Accent ── */
