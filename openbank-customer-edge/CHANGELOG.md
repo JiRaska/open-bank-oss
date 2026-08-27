@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.70.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.69.0...customer-edge-v0.70.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
 ## [0.69.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.68.0...customer-edge-v0.69.0) (2026-08-27)
 
 
