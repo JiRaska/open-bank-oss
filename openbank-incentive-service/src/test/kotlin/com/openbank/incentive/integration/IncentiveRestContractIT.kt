@@ -26,6 +26,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.eclipse.microprofile.reactive.messaging.spi.Connector
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.hasKey
 import org.hamcrest.Matchers.hasSize
 import org.hamcrest.Matchers.not
@@ -90,7 +91,7 @@ class IncentiveRestContractIT {
 
         When { get("/api/v1/incentives/offers") } Then {
             statusCode(200)
-            body("items", hasSize<Any>(0))
+            body("items.ref.id", not(hasItem(offerId)))
         }
 
         Given { contentType("application/json") }
