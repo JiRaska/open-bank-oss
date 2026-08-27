@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey: product-catalog-read (ADR-0252). It is intentionally non-mutating: the
+# direct in-cluster Service route exercises the deployed REST handler and its Postgres
+# projection without creating a customer, identity, payment, or catalog revision.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: journey-product-catalog-read-script
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: product-catalog-read
+data:
+  journey.js: |
+    import http from 'k6/http';
+    import { check } from 'k6';
+
+    export const options = {
+      vus: 1,
+      iterations: 1,
+      thresholds: {
+        checks: ['rate==1.0'],
+        http_req_duration: ['p(95)<1000'],
+      },
+      tags: { journey: 'product-catalog-read' },
+    };
+
+    // This has no credentials and performs one GET only. Override it only for the
+    // catalog's documented falsification; the normal target is the real sandbox Service.
+    const CATALOG_BASE = __ENV.CATALOG_BASE || 'http://product-catalog.accounts.svc:8104';
+
+    export default function () {
+      const response = http.get(`${CATALOG_BASE}/api/v1/products`, {
+        tags: { endpoint: 'products-list', service: 'product-catalog' },
+      });
+      const contentType = response.headers['Content-Type'] || '';
+      let isArray = false;
+      try { isArray = Array.isArray(response.json()); } catch (_) { /* checked below */ }
+      check(response, {
+        'product catalog answers 200': (r) => r.status === 200,
+        'product catalog returns JSON': () => contentType.includes('application/json'),
+        'product catalog response is an array': () => isArray,
+      });
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: journey-product-catalog-read
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: product-catalog-read
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 180
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: journey
+            openbank.tech/journey: product-catalog-read
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              image: docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              args:
+                - run
+                - --quiet
+                - -o
+                - experimental-prometheus-rw
+                - --tag
+                - journey=product-catalog-read
+                - /scripts/journey.js
+              env:
+                - name: K6_PROMETHEUS_RW_SERVER_URL
+                  value: http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write
+                - name: K6_PROMETHEUS_RW_TREND_STATS
+                  value: "p(95),p(99),avg,max"
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+          volumes:
+            - name: script
+              configMap:
+                name: journey-product-catalog-read-script
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule

@@ -191,6 +191,18 @@ def extract_script(root: pathlib.Path, journey_id: str) -> str:
     return scripts[0]
 
 
+def active_ids(root: pathlib.Path) -> list[str]:
+    """Return active journey ids only after the catalog has passed its structural checks."""
+    findings, fatal, _ = check(root)
+    if fatal:
+        raise ValueError(fatal)
+    if findings:
+        raise ValueError("catalog is not consistent: " + "; ".join(findings))
+    catalog = yaml.safe_load((root / CATALOG).read_text(encoding="utf-8")) or {}
+    return sorted(str(item["id"]) for item in (catalog.get("journeys") or [])
+                  if isinstance(item, dict) and item.get("status") == "active")
+
+
 def alerted_journeys(root: pathlib.Path):
     """
     Journey ids covered by a per-journey `absent(...)` alert in the rules file.
@@ -502,12 +514,20 @@ def main():
     parser.add_argument("--self-test", action="store_true", dest="selftest")
     parser.add_argument("--extract", metavar="JOURNEY_ID")
     parser.add_argument("--out")
+    parser.add_argument("--active-ids", action="store_true")
     args = parser.parse_args()
 
     if args.selftest:
         return self_test()
 
     root = pathlib.Path(args.root).resolve()
+    if args.active_ids:
+        try:
+            print("\n".join(active_ids(root)))
+        except (OSError, yaml.YAMLError, ValueError) as exc:
+            print(f"::error::check-journey-catalog: cannot enumerate active journeys: {exc}")
+            return 1
+        return 0
     if args.extract:
         if not args.out:
             parser.error("--extract requires --out")
