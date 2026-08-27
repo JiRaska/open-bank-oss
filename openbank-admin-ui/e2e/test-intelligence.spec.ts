@@ -32,6 +32,10 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(page.getByRole('heading', { name: /From change to confidence/ })).toBeVisible()
   await expect(page.getByRole('group', { name: /Seven Test Intelligence layers/ })).toBeVisible()
   await expect(page.getByRole('region', { name: /Testing assurance map/ })).toBeVisible()
+  // The queue must expose absent layers as evidence gaps instead of silently
+  // treating the fixture's missing simulation evidence as a pass.
+  await expect(page.getByText('Deterministic simulations', { exact: true })).toBeVisible()
+  await expect(page.getByText(/0\/1 components published current simulation evidence/)).toBeVisible()
   // A planned, blocked customer journey is unresolved evidence. The prominent health signal
   // must remain attention-worthy even when the ordinary component evidence is otherwise green.
   await expect(page.getByText('NEEDS ATTENTION', { exact: true })).toBeVisible()

@@ -93,7 +93,30 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
  */
 function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
   const { t } = useLanguage()
+  // A component that has never emitted a particular test layer is not a green result.
+  // Do not infer that every component *must* own every layer: this is a visibility and
+  // prioritisation signal, while governed journey coverage remains the obligation source.
+  const layerVisibility = ([
+    { kind: 'e2e' as const, tab: 'execution' as const, title: t('E2E důkazy', 'E2E evidence') },
+    { kind: 'trace' as const, tab: 'execution' as const, title: t('Trace kontrakty', 'Trace contracts') },
+    { kind: 'simulation' as const, tab: 'execution' as const, title: t('Deterministické simulace', 'Deterministic simulations') },
+  ]).flatMap(layer => {
+    const observations = report.components.flatMap(component => component.evidence.filter(item => item.kind === layer.kind))
+    const componentsWithEvidence = new Set(report.components.filter(component => component.evidence.some(item => item.kind === layer.kind)).map(component => component.component))
+    const missing = report.components.length - componentsWithEvidence.size
+    if (missing === 0 && observations.every(item => item.state === 'passed')) return []
+    const state: EvidenceState = observations.some(item => item.state === 'failed') ? 'failed'
+      : missing > 0 ? 'not-run' : aggregateEvidenceState(observations.map(item => item.state), 'unknown')
+    return [{
+      id: `layer-${layer.kind}`, tab: layer.tab, state, title: layer.title,
+      detail: t(
+        `${componentsWithEvidence.size}/${report.components.length} komponent publikovalo aktuální ${layer.kind} důkaz; ${missing} jej zatím nepublikovalo. Jde o viditelnost evidence, ne o tvrzení, že každá komponenta musí mít tento typ testu.`,
+        `${componentsWithEvidence.size}/${report.components.length} components published current ${layer.kind} evidence; ${missing} have not published it yet. This is evidence visibility, not a claim that every component must own this test type.`,
+      ),
+    }]
+  })
   const gaps: Array<{ id: string; tab: Tab; title: string; detail: string; state: EvidenceState }> = [
+    ...layerVisibility,
     ...report.performance.filter(row => row.state !== 'passed' || row.plan?.blocker).map(row => ({
       id: `performance-${row.id}`, tab: 'performance' as const, state: row.state,
       title: t(`Výkon: ${row.id}`, `Performance: ${row.id}`),
