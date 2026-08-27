@@ -11,8 +11,12 @@
 .skipLink { position: fixed; z-index: 20; top: 12px; left: 12px; transform: translateY(-180%); padding: 10px 14px; border-radius: 10px; background: #fff; color: #172554; font-weight: 700; box-shadow: 0 8px 30px rgba(10, 27, 58, .2); transition: transform .16s ease; }
 .skipLink:focus { transform: translateY(0); }
 
-.story { position: relative; isolation: isolate; overflow: hidden; display: flex; min-height: 100%; flex-direction: column; padding: clamp(32px, 5vw, 72px); color: #fff; background: linear-gradient(180deg, rgba(2, 14, 42, .08) 18%, rgba(2, 18, 52, .88) 76%), url('/brand/openbank-explorer.webp') center 18% / cover no-repeat, #0a3d91; }
+.story { position: relative; isolation: isolate; overflow: hidden; display: flex; min-height: 100%; flex-direction: column; padding: clamp(32px, 5vw, 72px); color: #fff; background: #0a3d91; }
+.story::before { content: ""; position: absolute; z-index: -1; inset: 0; background: linear-gradient(180deg, rgba(2, 14, 42, .12) 12%, rgba(2, 18, 52, .34) 48%, rgba(2, 18, 52, .94) 86%); }
 .story::after { content: ""; position: absolute; z-index: -1; right: -14%; bottom: -21%; width: min(38vw, 540px); aspect-ratio: 1; border: 1px solid rgba(255,255,255,.13); border-radius: 50%; box-shadow: 0 0 0 68px rgba(255,255,255,.025), 0 0 0 136px rgba(255,255,255,.018); }
+.scenes { position: absolute; z-index: -2; inset: 0; background: #0a3d91; }
+.scene { top: 4% !important; height: 96% !important; object-fit: cover; object-position: 82% center; opacity: 0; transform: scale(1.018); transform-origin: center bottom; transition: opacity 1.1s ease, transform 8s ease; }
+.sceneActive { opacity: 1; transform: scale(1); }
 .storyGlow { position: absolute; z-index: -1; top: 40%; left: 65%; width: 380px; height: 380px; border-radius: 50%; background: rgba(30, 197, 174, .09); filter: blur(50px); }
 .brand { display: flex; align-items: center; gap: 12px; letter-spacing: -.01em; }
 .brand > span:last-child { display: grid; }
@@ -26,7 +30,12 @@
 .benefits { display: grid; gap: 13px; margin: 0; padding: 0; list-style: none; color: #edf5ff; font-size: .92rem; }
 .benefits li { display: flex; align-items: center; gap: 11px; }
 .benefits svg { flex: none; color: #7ce2cf; }
-.storyFootnote { margin: 0; color: #9fb2ca; font-size: .72rem; letter-spacing: .06em; }
+.storyFooter { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.storyFootnote { margin: 0; color: #b8c8da; font-size: .72rem; letter-spacing: .06em; }
+.sceneControls { display: flex; gap: 8px; }
+.sceneControls button { width: 24px; height: 7px; padding: 0; border: 0; border-radius: 999px; background: rgba(255,255,255,.34); cursor: pointer; transition: width .2s ease, background .2s ease; }
+.sceneControls button[aria-pressed="true"] { width: 42px; background: #63e7ff; }
+.sceneControls button:focus-visible { outline: 3px solid rgba(99,231,255,.45); outline-offset: 4px; }
 
 .access { display: flex; min-height: 100%; flex-direction: column; padding: clamp(24px, 4vw, 56px) clamp(28px, 7vw, 104px); }
 .accessHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -61,6 +70,7 @@
   .storyBody { padding: 52px 0 42px; }
   .story h1 { font-size: clamp(2.5rem, 10vw, 4.5rem); }
   .storyFootnote { display: none; }
+  .storyFooter { justify-content: flex-end; }
   .access { min-height: auto; padding: 24px clamp(24px, 8vw, 72px) 48px; }
   .panel { padding: 58px 0 20px; }
 }
@@ -78,5 +88,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .skipLink, .languageButton, .signInButton { transition: none; }
+  .scene, .sceneControls button { transition: none; }
   .spinner { animation-duration: 1.6s; }
 }
