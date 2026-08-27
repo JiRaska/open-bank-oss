@@ -102,10 +102,12 @@ def validate_envelope(envelope: dict) -> None:
         if observed_at - run_observed_at > MAX_FUTURE_SKEW:
             raise ValueError("runtime observation occurs after its run beyond the allowed clock skew")
     for item in envelope.get("specializedEvidence", []):
-        if set(item) - {"kind", "state", "source", "detail"} or not {"kind", "state", "source"}.issubset(item):
+        if set(item) - {"kind", "state", "source", "detail", "variant"} or not {"kind", "state", "source"}.issubset(item):
             raise ValueError("specialized evidence fields are invalid")
         if item["kind"] not in SPECIALIZED_KINDS or item["state"] not in SPECIALIZED_STATES or not item["source"]:
             raise ValueError("specialized evidence values are invalid")
+        if "variant" in item and (item["kind"] != "synthetic" or item["variant"] not in {"chromium", "firefox", "webkit"}):
+            raise ValueError("synthetic evidence variant is invalid")
     for item in envelope.get("testCases", []):
         required_case_fields = {"fingerprint", "kind", "classname", "name", "state", "durationMs"}
         if set(item) - (required_case_fields | {"testDefinitionPath"}) or not required_case_fields.issubset(item):
@@ -401,6 +403,7 @@ def specialized_evidence(
     synthetic_journey: str | None = None,
     suite_evidence: list[dict] | None = None,
     browser_vitals: str | None = None,
+    synthetic_variant: str | None = None,
 ) -> list[dict]:
     specialized = []
     if performance_summary:
@@ -452,12 +455,20 @@ def specialized_evidence(
         except json.JSONDecodeError:
             vitals = None
         metrics = (vitals or {}).get("metrics") if (vitals or {}).get("schemaVersion") == 1 and (vitals or {}).get("journey") == synthetic_journey else None
-        valid = isinstance(metrics, dict) and all(isinstance(metrics.get(key), (int, float)) and metrics[key] >= 0 for key in ("fcpMs", "cls"))
+        sidecar_variant = (vitals or {}).get("browser")
+        if synthetic_variant and synthetic_variant not in {"chromium", "firefox", "webkit"}:
+            raise ValueError("--synthetic-variant must be a supported browser engine")
+        if synthetic_variant and sidecar_variant and sidecar_variant != synthetic_variant:
+            raise ValueError("browser vitals sidecar does not match --synthetic-variant")
+        variant = synthetic_variant or sidecar_variant
+        valid = (variant in {"chromium", "firefox", "webkit"} and isinstance(metrics, dict)
+                 and all(isinstance(metrics.get(key), (int, float)) and metrics[key] >= 0 for key in ("fcpMs", "cls")))
         state = e2e["state"] if e2e and e2e["state"] == "failed" else "passed" if e2e and valid else "not-run"
         detail = (f"{e2e['executed']}/{e2e['discovered']} browser E2E checks; FCP {round(metrics['fcpMs'])}ms, CLS {metrics['cls']:.3f}"
                   if e2e and valid else "browser Web Vitals sample absent or unattributable" if e2e else "browser E2E JUnit report absent")
         specialized.append({"kind": "synthetic", "state": state,
-                            "source": f"journey:{synthetic_journey}", "detail": detail})
+                            "source": f"journey:{synthetic_journey}", "detail": detail,
+                            **({"variant": variant} if variant else {})})
     return specialized
 
 
@@ -471,6 +482,7 @@ def main() -> None:
     parser.add_argument("--mutation-report")
     parser.add_argument("--synthetic-summary")
     parser.add_argument("--synthetic-journey")
+    parser.add_argument("--synthetic-variant")
     parser.add_argument("--browser-vitals")
     parser.add_argument("--browser-report-dir")
     parser.add_argument("--self-test", action="store_true")
@@ -568,7 +580,7 @@ def main() -> None:
             browser_vitals = service / "browser-vitals.json"
             browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004}}')
             browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
-            assert browser_synthetic == [{"kind": "synthetic", "state": "passed", "source": "journey:admin-ui-sso-boundary", "detail": "1/1 browser E2E checks; FCP 321ms, CLS 0.004"}]
+            assert browser_synthetic == [{"kind": "synthetic", "state": "passed", "source": "journey:admin-ui-sso-boundary", "detail": "1/1 browser E2E checks; FCP 321ms, CLS 0.004", "variant": "chromium"}]
             valid = {
                 "schemaVersion": 1,
                 "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "observedAt": "2026-08-22T21:12:00Z"},
@@ -668,6 +680,7 @@ def main() -> None:
         args.synthetic_journey,
         suite_evidence,
         args.browser_vitals,
+        args.synthetic_variant,
     )
     specialized.extend(trace_contract_evidence(service))
     envelope = {

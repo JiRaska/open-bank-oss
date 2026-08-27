@@ -321,6 +321,13 @@ def check(root: pathlib.Path):
         runtime_note = entry.get("runtime_note")
         if runtime_note is not None and (not isinstance(runtime_note, str) or not runtime_note.strip()):
             findings.append(f"{jid}: runtime_note must be a non-empty string when declared")
+        browser_variants = entry.get("browser_variants")
+        if browser_variants is not None:
+            allowed_browsers = {"chromium", "firefox", "webkit"}
+            if (not isinstance(browser_variants, list) or not browser_variants
+                    or len(browser_variants) != len(set(browser_variants))
+                    or not set(browser_variants).issubset(allowed_browsers)):
+                findings.append(f"{jid}: browser_variants must be a non-empty unique subset of {sorted(allowed_browsers)}")
 
         if entry.get("workflow"):
             if entry.get("cronjob"):

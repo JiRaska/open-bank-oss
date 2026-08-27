@@ -469,6 +469,7 @@ function syntheticJourneys() {
   try {
     const raw = parseYaml(fs.readFileSync(file, 'utf8'))
     const latestCi = new Map()
+    const latestVariants = new Map()
     const workflowByJourney = new Map((raw?.journeys ?? [])
       .filter(item => item?.workflow && item?.workflow_name)
       .map(item => [item.id, item.workflow_name]))
@@ -485,14 +486,40 @@ function syntheticJourneys() {
           warnings.push(`synthetic evidence workflow mismatch omitted: ${journeyId}`)
           continue
         }
-        latestCi.set(journeyId, {
+        const observation = {
           state: freshnessAwareState(evidence.state, envelope.run.observedAt), observedAt: envelope.run.observedAt,
           detail: evidence.detail ?? 'Synthetic run retained without detail.',
           ...(provenance ? { run: provenance } : {}),
-        })
+        }
+        if (evidence.variant) {
+          const variants = latestVariants.get(journeyId) ?? new Map()
+          variants.set(evidence.variant, observation)
+          latestVariants.set(journeyId, variants)
+        } else {
+          latestCi.set(journeyId, observation)
+        }
       }
     }
-    return (raw?.journeys ?? []).map(item => ({
+    return (raw?.journeys ?? []).map(item => {
+      const expectedVariants = Array.isArray(item.browser_variants) ? item.browser_variants : []
+      const observedVariants = latestVariants.get(item.id)
+      const variants = expectedVariants.map(browser => ({
+        browser,
+        ...(observedVariants?.get(browser) ?? {
+          state: 'not-run', observedAt: null,
+          detail: 'No retained immutable envelope for this declared browser variant.',
+        }),
+      }))
+      const variantState = variants.some(variant => variant.state === 'failed') ? 'failed'
+        : variants.some(variant => variant.state !== 'passed') ? 'not-run' : 'passed'
+      const variantCi = variants.length ? {
+        state: variantState,
+        observedAt: variants.map(variant => variant.observedAt).filter(Boolean).sort().at(-1) ?? new Date(0).toISOString(),
+        detail: `${variants.filter(variant => variant.state === 'passed').length}/${variants.length} declared browser variants passed.`,
+        run: variants.find(variant => variant.run)?.run,
+        variants,
+      } : null
+      return {
       id: item.id, title: item.name ?? item.title ?? item.id, status: item.status,
       capability: item.capability ?? '',
       state: item.status === 'active' ? 'unknown' : 'blocked', severity: item.severity,
@@ -501,8 +528,9 @@ function syntheticJourneys() {
       covers: item.covers ?? item.covered_services ?? [],
       falsifies: item.falsification ?? '', blocker: item.blocked_by ?? null,
       runtimeNote: item.runtime_note ?? null,
-      ...(latestCi.has(item.id) ? { ci: latestCi.get(item.id) } : {}),
-    }))
+      ...(variantCi?.run ? { ci: variantCi } : latestCi.has(item.id) ? { ci: latestCi.get(item.id) } : {}),
+    }
+    })
   } catch (error) {
     warnings.push(`synthetic journey catalogue unavailable: ${error.message}`)
     return []

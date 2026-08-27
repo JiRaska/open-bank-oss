@@ -108,11 +108,12 @@ journeys:
     money_moving: false
     workflow: .github/workflows/admin-ui-browser-synthetic.yml
     workflow_name: Admin UI browser synthetic
+    browser_variants: [chromium, firefox]
     schedule: "13 */2 * * *"
     environment: sandbox
     falsification: >-
       Return a 5xx from the Admin UI, remove the Keycloak SSO boundary, or point the browser
-      target at a host that cannot render it. The scheduled Chromium run must fail and retain
+      target at a host that cannot render it. Each scheduled browser variant must fail and retain
       its immutable evidence envelope.
     runtime_note: >-
       This is deliberately credential-free. A separate least-privilege canary identity is still

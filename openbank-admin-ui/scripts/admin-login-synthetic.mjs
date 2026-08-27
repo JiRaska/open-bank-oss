@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // A credential-free browser synthetic. It proves the public Admin UI reaches its SSO boundary;
 // it deliberately does not authenticate or claim an authorised operator journey.
-import { chromium } from 'playwright'
+import { chromium, firefox } from 'playwright'
 import { mkdir, writeFile } from 'node:fs/promises'
 
 const target = process.env.ADMIN_UI_SYNTHETIC_URL ?? 'https://admin.open-bank.tech/system/tests'
 const report = process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? 'build/test-results/e2e/admin-login-synthetic.xml'
 const vitalsReport = process.env.OPENBANK_BROWSER_VITALS_OUTPUT ?? 'build/test-intelligence/browser-vitals.json'
+const engine = process.env.OPENBANK_BROWSER ?? 'chromium'
+const launchers = { chromium, firefox }
+if (!Object.hasOwn(launchers, engine)) throw new Error(`Unsupported browser engine: ${engine}`)
 // Deliberately forgiving public-edge budgets. These are synthetic availability guards, not an
 // authenticated operator-flow SLO or a substitute for RUM. Together they prevent a page that
 // eventually renders after a multi-second upstream or client-side stall from reading as healthy.
@@ -23,7 +26,7 @@ let clsFailure = null
 let measuredVitals = null
 let browser
 try {
-  browser = await chromium.launch({ headless: true })
+  browser = await launchers[engine].launch({ headless: true })
   const page = await browser.newPage()
   // Install observers before navigation. An unavailable measurement is a failed check, not a
   // numeric zero: zero CLS is valid, while absent FCP/LCP evidence is not.
@@ -93,5 +96,7 @@ const cls = clsFailure && `<failure message="${escape(clsFailure)}"/>`
 const failures = [boundaryFailure, latencyFailure, renderFailure, fcpFailure, clsFailure]
 const failureCount = failures.filter(Boolean).length
 await writeFile(report, `<testsuites><testsuite name="admin-login-synthetic" tests="5" failures="${failureCount}" errors="0" skipped="0" time="${seconds}"><testcase classname="admin-login-synthetic" name="renders SSO boundary" time="${seconds}">${boundary ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary responds within public latency budget" time="${seconds}">${latency ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary DOMContentLoaded within public render budget" time="${seconds}">${render ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary FCP is within public Web Vitals budget" time="${seconds}">${fcp ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary CLS is within public Web Vitals budget" time="${seconds}">${cls ?? ''}</testcase></testsuite></testsuites>\n`)
-if (measuredVitals) await writeFile(vitalsReport, `${JSON.stringify({ schemaVersion: 1, journey: 'admin-ui-sso-boundary', browser: 'chromium', metrics: measuredVitals })}\n`)
+// Preserve the engine identity even when the browser-native metrics are unavailable. The collector
+// then reports `not-run`, never a made-up zero or a passing Web Vitals result.
+await writeFile(vitalsReport, `${JSON.stringify({ schemaVersion: 1, journey: 'admin-ui-sso-boundary', browser: engine, ...(measuredVitals ? { metrics: measuredVitals } : {}) })}\n`)
 if (failureCount) throw new Error(failures.filter(Boolean).join('; '))
