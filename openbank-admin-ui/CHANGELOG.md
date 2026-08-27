@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.206.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.205.1...admin-ui-v0.206.0) (2026-08-27)
+
+
+### Features
+
+* **admin-ui:** select published incentive offers ([#7255](https://github.com/JiRaska/open-bank-oss/issues/7255)) ([e20d375](https://github.com/JiRaska/open-bank-oss/commit/e20d375b0efdf3c5444e897f21d9adde56383619))
+
 ## [0.205.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.205.0...admin-ui-v0.205.1) (2026-08-26)
 
 
