@@ -106,6 +106,7 @@ journeys:
     severity: ticket
     money_moving: false
     workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
     schedule: "13 */2 * * *"
     environment: sandbox
     falsification: >-

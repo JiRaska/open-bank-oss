@@ -162,12 +162,14 @@ def cronjob_facts(root: pathlib.Path, rel_path: str, journey_id: str):
     return None, defined_configmaps, f"{rel_path} defines no CronJob named {CRONJOB_PREFIX}{journey_id}"
 
 
-def workflow_facts(root: pathlib.Path, rel_path: str, schedule: str):
+def workflow_facts(root: pathlib.Path, rel_path: str, schedule: str, workflow_name: str):
     """Validate a GitHub Actions-backed journey from its committed schedule, not prose."""
     path = root / rel_path
     if not path.is_file():
         return f"workflow not found: {rel_path}"
     text = path.read_text(encoding="utf-8")
+    if not re.search(rf"(?m)^name:\s*{re.escape(workflow_name)}\s*$", text):
+        return f"workflow {rel_path} does not declare name {workflow_name!r}"
     # The literal scheduled trigger is the executable cadence. Quotes are optional in Actions YAML.
     if not re.search(rf"(?m)^\s*-\s*cron:\s*['\"]?{re.escape(schedule)}['\"]?\s*$", text):
         return f"workflow {rel_path} does not schedule {schedule!r}"
@@ -325,10 +327,12 @@ def check(root: pathlib.Path):
                 findings.append(f"{jid}: an active journey declares one executor, not both workflow and cronjob")
             if not entry.get("schedule"):
                 findings.append(f"{jid}: workflow-backed active journeys need `schedule`")
+            if not entry.get("workflow_name"):
+                findings.append(f"{jid}: workflow-backed active journeys need `workflow_name`")
             elif not CRON_EXPRESSION.match(str(entry.get("schedule"))):
                 findings.append(f"{jid}: schedule is not a five-field cron expression")
             else:
-                error = workflow_facts(root, str(entry["workflow"]), str(entry["schedule"]))
+                error = workflow_facts(root, str(entry["workflow"]), str(entry["schedule"]), str(entry["workflow_name"]))
                 if error:
                     findings.append(f"{jid}: {error}")
             continue
@@ -444,6 +448,7 @@ journeys:
     severity: ticket
     money_moving: false
     workflow: .github/workflows/browser-synthetic.yml
+    workflow_name: Browser synthetic
     schedule: "13 */2 * * *"
     falsification: remove the SSO boundary
 """

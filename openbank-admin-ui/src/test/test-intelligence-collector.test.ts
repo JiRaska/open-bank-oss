@@ -57,6 +57,7 @@ journeys:
     severity: ticket
     money_moving: false
     workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
     schedule: "13 */2 * * *"
     capability: proves the public SSO hand-off
     falsification: remove the SSO boundary
@@ -106,8 +107,13 @@ scenarios:
       component: 'openbank-platform', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
       specializedEvidence: [
         { kind: 'synthetic', state: 'passed', source: 'journey:edge', detail: '2 threshold result(s), 0 breached' },
-        { kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: '1/1 browser E2E checks executed' },
       ],
+    }))
+    write(repo, 'openbank-admin-ui/test-run-history/browser-synthetic.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'browser-10', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Admin UI browser synthetic', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/browser-10', observedAt: '2026-08-25T08:10:00Z' },
+      component: 'openbank-admin-ui', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: '1/1 browser E2E checks executed' }],
     }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
