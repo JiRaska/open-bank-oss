@@ -811,9 +811,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             </p>
             {c.incentiveOfferRef && detail?.sources?.incentives !== 'ok' ? (
               <DataUnavailable
-                kind={detail?.sources?.incentives === 'unauthorized' ? 'unauthorized' : detail?.sources?.incentives === 'not_deployed' ? 'not_deployed' : 'unreachable'}
+                kind={detail?.sources?.incentives === 'not_ready' ? 'no_data' : detail?.sources?.incentives === 'unauthorized' ? 'unauthorized' : detail?.sources?.incentives === 'not_deployed' ? 'not_deployed' : 'unreachable'}
                 service="Campaign-service"
                 feature={t('Výsledky odměn', 'Reward outcomes')}
+                title={detail?.sources?.incentives === 'not_ready' ? t('Projekce výsledků se připravuje', 'Outcome projection is preparing') : undefined}
+                detail={detail?.sources?.incentives === 'not_ready' ? t('Kafka projekce se po nasazení ještě ověřuje; nuly by nebyly spolehlivý výsledek.', 'The Kafka projection is still being verified after rollout; zeroes would not be reliable outcomes.') : undefined}
                 dense
               />
             ) : c.incentiveOfferRef && incentiveFunnel ? (

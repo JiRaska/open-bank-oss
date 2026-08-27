@@ -13,7 +13,7 @@ import { resolvePartyNames } from '@/lib/campaigns/party-names'
 
 export const dynamic = 'force-dynamic'
 
-type PartState = 'ok' | 'unauthorized' | 'not_deployed' | 'unreachable' | 'not_configured'
+type PartState = 'ok' | 'unauthorized' | 'not_deployed' | 'unreachable' | 'not_configured' | 'not_ready'
 type Part = { data: unknown; state: PartState }
 
 const EMPTY_SENDS = { items: [], total: 0, page: 0, size: 0 }
@@ -116,6 +116,26 @@ async function readContentExperiment(headers: HeadersInit, id: string): Promise<
   }
 }
 
+/** A 503 here means the separately activated Kafka projection has not caught up, never zero. */
+async function readIncentives(headers: HeadersInit, id: string): Promise<Part> {
+  try {
+    const res = await fetch(
+      serverSvcUrl('campaign-service', 'campaign', 8128, `/api/v1/campaigns/${encodeURIComponent(id)}/incentives`),
+      { headers, signal: AbortSignal.timeout(4000), cache: 'no-store' },
+    )
+    if (res.status === 503) return { data: null, state: 'not_ready' }
+    if (!res.ok) {
+      return {
+        data: null,
+        state: res.status === 401 || res.status === 403 ? 'unauthorized' : res.status === 404 ? 'not_deployed' : 'unreachable',
+      }
+    }
+    return { data: await res.json(), state: 'ok' }
+  } catch {
+    return { data: null, state: 'unreachable' }
+  }
+}
+
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const session = await auth()
   if (!session?.user?.accessToken) {
@@ -148,7 +168,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/engagement`, []),
     // Authoritative reward outcomes are independent from attention. Keeping this positional read
     // adjacent to engagement makes the two funnels visible without ever equating a click to value.
-    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/incentives`, null),
+    readIncentives(headers, id),
     readExperiment(headers, id),
   ])
 

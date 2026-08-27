@@ -81,6 +81,12 @@ quarkus:
   # policy is covered by the OPA gate and the rego tests, neither of which needs the app running.
   authz:
     enforce: false
+  openbank:
+    campaign:
+      # HTTP contract tests exercise a seeded, complete local projection. Production stays
+      # fail-closed until a reviewed rollout/catch-up confirmation enables this read model.
+      incentive-outcome-projection:
+        ready: true
 
 
 openbank:
@@ -90,6 +96,10 @@ openbank:
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-campaign}
   campaign:
+    # Never render an empty local read model as an authoritative zero during the first Kafka
+    # catch-up. A reviewed operational step enables this only after the consumer is usable.
+    incentive-outcome-projection:
+      ready: ${CAMPAIGN_INCENTIVE_OUTCOME_PROJECTION_READY:false}
     decision-task-queue: ${OPENBANK_CAMPAIGN_DECISION_TASK_QUEUE:openbank-campaign-decision}
     worker:
       enabled: ${CAMPAIGN_WORKER_ENABLED:true}

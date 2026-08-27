@@ -553,6 +553,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CampaignIncentiveFunnel'
+        '503':
+          description: >-
+            Incentive outcome projection has not completed its reviewed initial catch-up. Clients
+            must show the funnel as unavailable rather than treating it as zero.
 
   /api/v1/campaigns/{id}/sends/summary:
     get:

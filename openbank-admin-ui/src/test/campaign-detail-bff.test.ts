@@ -77,6 +77,24 @@ describe('campaign detail bundle', () => {
     expect(Array.isArray(d.journey)).toBe(true)
   })
 
+  it('keeps an uninitialised incentive projection unavailable instead of reporting zero outcomes', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const u = String(url)
+        if (u.includes('/incentives')) return { ok: false, status: 503, json: async () => ({ error: 'projection not ready' }), headers: new Headers() }
+        return { ok: true, status: 200, json: async () => ({}), headers: new Headers() }
+      }),
+    )
+
+    const { GET } = await import('@/app/api/campaigns/[id]/route')
+    const res = await GET(new Request('http://x/api/campaigns/abc'), { params: Promise.resolve({ id: 'abc' }) })
+    const d = await res.json()
+
+    expect(d.incentives).toBeNull()
+    expect(d.sources.incentives).toBe('not_ready')
+  })
+
   it('reads A/B measurement only for a campaign that configured variant B', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const u = String(url)

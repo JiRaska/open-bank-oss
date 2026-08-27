@@ -12,7 +12,6 @@ import com.openbank.campaign.application.usecase.CampaignIncentiveOutcomeProject
 import com.openbank.campaign.domain.model.IncentiveOfferRef
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
-import org.jboss.logging.Logger
 import java.time.Instant
 import java.util.UUID
 
@@ -22,30 +21,38 @@ class CampaignIncentiveOutcomeConsumer(
     private val mapper: ObjectMapper,
     private val projector: CampaignIncentiveOutcomeProjector,
 ) {
-    private val log = Logger.getLogger(CampaignIncentiveOutcomeConsumer::class.java)
-
     @Incoming("incentive-events-in")
     suspend fun onEvent(payload: String) {
-        val node = runCatching { mapper.readTree(payload) }.getOrElse {
-            log.errorf(it, "Unparseable incentive event — dropped from campaign projection")
-            return
-        }
-        node.toOutcome()?.let { projector.project(it) }
+        val node = runCatching { mapper.readTree(payload) }
+            .getOrElse { throw IllegalArgumentException("Invalid incentive event JSON", it) }
+        val eventType = node.path("eventType").asText()
+        // This topic also carries legacy/operator evidence.  Only the four v2 lifecycle events are
+        // this projection's contract; unknown types must not poison their shared partition.
+        val expectedStatus = expectedStatus(eventType) ?: return
+        projector.project(node.toOutcome(expectedStatus, eventType))
     }
 
-    private fun JsonNode.toOutcome(): CampaignIncentiveOutcomeEvent? {
-        val expectedStatus = expectedStatus(path("eventType").asText()) ?: return null
-        val status = named("status", CampaignIncentiveOutcomeStatus.entries) ?: return null
-        if (status != expectedStatus) return null
+    /** A recognized v2 event is all-or-nothing: malformed evidence must reach the configured DLQ. */
+    private fun JsonNode.toOutcome(
+        expectedStatus: CampaignIncentiveOutcomeStatus,
+        eventType: String,
+    ): CampaignIncentiveOutcomeEvent {
+        val status = named("status", CampaignIncentiveOutcomeStatus.entries)
+            ?: invalid(eventType, "status is absent or unknown")
+        if (status != expectedStatus) invalid(eventType, "status $status does not match $expectedStatus")
         return CampaignIncentiveOutcomeEvent(
-            eventId = uuid("eventId") ?: return null,
-            reservationId = uuid("reservationId") ?: return null,
-            attributionRef = uuid("attributionRef") ?: return null,
-            offerRef = path("offerRef").toOfferRef() ?: return null,
+            eventId = uuid("eventId") ?: invalid(eventType, "eventId is invalid"),
+            reservationId = uuid("reservationId") ?: invalid(eventType, "reservationId is invalid"),
+            attributionRef = uuid("attributionRef") ?: invalid(eventType, "attributionRef is invalid"),
+            offerRef = path("offerRef").toOfferRef() ?: invalid(eventType, "offerRef is invalid"),
             status = status,
-            occurredAt = runCatching { Instant.parse(path("occurredAt").asText()) }.getOrNull() ?: return null,
+            occurredAt = runCatching { Instant.parse(path("occurredAt").asText()) }.getOrNull()
+                ?: invalid(eventType, "occurredAt is invalid"),
         )
     }
+
+    private fun invalid(eventType: String, reason: String): Nothing =
+        throw IllegalArgumentException("Malformed supported incentive event $eventType: $reason")
 
     private fun expectedStatus(eventType: String): CampaignIncentiveOutcomeStatus? = when (eventType) {
         "incentive.reservation.created.v2" -> CampaignIncentiveOutcomeStatus.RESERVED

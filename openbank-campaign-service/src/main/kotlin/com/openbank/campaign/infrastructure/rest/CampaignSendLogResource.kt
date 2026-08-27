@@ -17,6 +17,7 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.util.UUID
 
 /**
@@ -30,6 +31,8 @@ class CampaignSendLogResource(
     private val summaries: CampaignSummaryQuery,
     private val engagement: CampaignEngagementQuery,
     private val incentives: CampaignIncentiveOutcomeProjector,
+    @ConfigProperty(name = "openbank.campaign.incentive-outcome-projection.ready", defaultValue = "false")
+    private val incentiveOutcomeProjectionReady: Boolean,
 ) {
 
     /**
@@ -113,7 +116,14 @@ class CampaignSendLogResource(
     @GET
     @Path("/{id}/incentives")
     @Authorize(action = "campaign.read", resource = "#id")
-    suspend fun incentives(@PathParam("id") id: UUID): Response = Response.ok(incentives.funnel(id)).build()
+    suspend fun incentives(@PathParam("id") id: UUID): Response {
+        if (!incentiveOutcomeProjectionReady) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                .entity(mapOf("error" to "incentive outcome projection is not initialized"))
+                .build()
+        }
+        return Response.ok(incentives.funnel(id)).build()
+    }
 
     private fun badOutcome(cause: Throwable): Response = Response.status(Response.Status.BAD_REQUEST)
         .entity(

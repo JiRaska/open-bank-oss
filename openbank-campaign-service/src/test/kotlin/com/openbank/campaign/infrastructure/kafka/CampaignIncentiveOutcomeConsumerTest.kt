@@ -14,6 +14,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -32,13 +33,25 @@ class CampaignIncentiveOutcomeConsumerTest {
     }
 
     @Test
-    fun `v1 malformed and unknown lifecycle events never enter campaign reporting`(): Unit = runBlocking {
+    fun `unknown or legacy events never enter campaign reporting`(): Unit = runBlocking {
         consumer().onEvent(event("incentive.reservation.committed.v1", "COMMITTED"))
-        consumer().onEvent(event("incentive.reservation.created.v2", "CLICKED"))
-        consumer().onEvent(event("incentive.reservation.created.v2", "COMMITTED"))
-        consumer().onEvent("not-json")
 
         coVerify(exactly = 0) { projector.project(any()) }
+    }
+
+    @Test
+    fun `malformed supported event fails so the connector parks it in its DLQ`() {
+        assertThatThrownBy {
+            runBlocking { consumer().onEvent(event("incentive.reservation.created.v2", "COMMITTED")) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("Malformed supported incentive event")
+    }
+
+    @Test
+    fun `invalid JSON fails so the connector parks it in its DLQ`() {
+        assertThatThrownBy { runBlocking { consumer().onEvent("not-json") } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("Invalid incentive event JSON")
     }
 
     private fun consumer() = CampaignIncentiveOutcomeConsumer(ObjectMapper(), projector)
