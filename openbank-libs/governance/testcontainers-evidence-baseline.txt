@@ -1,13 +1,21 @@
 # Service-owned Testcontainers resources awaiting migration to
 # TestInfrastructureEvidence. This is a ratchet: a new unrecorded resource
-# fails CI, and a migrated path must be removed from this list.
+# fails CI, and a migrated path must be removed from this list. The gate also requires a
+# real start AND stop lifecycle pair, not merely the recorder's name in the file (#7246):
+# a start-only resource leaves teardown unobservable while reading as migrated.
+#
+# NEXT SAFE CANDIDATES (non-money-path, single-container, no shared topology to preserve):
+#   openbank-agent-service, openbank-authz-policy-auditor, openbank-case-coordinator-agent,
+#   openbank-control-liveness-sentinel, openbank-devops-agent, openbank-docs-truth-agent,
+#   openbank-finops-agent, openbank-governance-auditor, openbank-release-steward.
+# Money-path entries (ledger, transaction, account, balance, sepa-*, domestic-payment,
+# clearing, swift, fx, lending, sdd, interest, sca, consent) are tracked separately: they
+# need the two-approval + threat-model process before their topology is touched.
 openbank-account-service/src/test/kotlin/com/openbank/account/it/PostgresRedpandaRedisTestResource.kt
 openbank-agent-service/src/test/kotlin/com/openbank/agent/it/PostgresTestResource.kt
 openbank-aml-service/src/test/kotlin/com/openbank/aml/it/PostgresRedisTestResource.kt
 openbank-anacredit-service/src/test/kotlin/com/openbank/anacredit/it/PostgresRedpandaTestResource.kt
 openbank-anacredit-service/src/test/kotlin/com/openbank/anacredit/it/PostgresTestResource.kt
-openbank-analytics-sink/src/test/kotlin/com/openbank/analytics/it/RedpandaTestResource.kt
-openbank-audit-service/src/test/kotlin/com/openbank/audit/it/PostgresTestResource.kt
 openbank-authz-policy-auditor/src/test/kotlin/com/openbank/authzaudit/PostgresTestResource.kt
 openbank-balance-service/src/test/kotlin/com/openbank/balance/it/PostgresRedpandaTestResource.kt
 openbank-billing-service/src/test/kotlin/com/openbank/billing/it/PostgresRedisTestResource.kt
