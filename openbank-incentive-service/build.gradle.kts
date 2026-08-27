@@ -20,6 +20,9 @@ dependencies {
     implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
+    implementation(libs.quarkus.smallrye.kafka)
+    implementation(libs.quarkus.smallrye.fault.tolerance)
+    implementation(libs.quarkus.scheduler)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
@@ -27,6 +30,7 @@ dependencies {
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.assertj)
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers)
