@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.4.0...incentive-service-v0.5.0) (2026-08-27)
+
+
+### Features
+
+* **incentive:** add attributed customer reservations ([#7276](https://github.com/JiRaska/open-bank-oss/issues/7276)) ([462df84](https://github.com/JiRaska/open-bank-oss/commit/462df84283dde74f0987da8f03a3d46267f9b3ce))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.3.0...incentive-service-v0.4.0) (2026-08-27)
 
 
