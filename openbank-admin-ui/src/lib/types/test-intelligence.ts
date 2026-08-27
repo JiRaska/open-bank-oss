@@ -148,6 +148,8 @@ export interface SyntheticJourneyEvidence {
   covers: string[]
   falsifies: string
   blocker: string | null
+  /** Known prerequisite for an active journey. It explains a current signal but never changes its verdict. */
+  runtimeNote?: string | null
   ci?: {
     state: EvidenceState
     observedAt: string

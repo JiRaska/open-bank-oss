@@ -39,6 +39,7 @@ journeys:
     capability: proves the public edge
     covers: [openbank-alpha-service]
     schedule: "*/5 * * * *"
+    runtime_note: requires a dedicated synthetic identity
     falsification: break it
   - id: mobile
     title: Mobile
@@ -112,7 +113,7 @@ scenarios:
       pactFile: 'alpha-provider.json', state: 'unknown',
       verificationDetail: expect.stringMatching(/not a passing result/i),
     })])
-    expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *', ci: {
+    expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *', runtimeNote: 'requires a dedicated synthetic identity', ci: {
       state: 'passed', detail: '2 threshold result(s), 0 breached', run: { id: 'synthetic-9', workflow: 'Synthetic journeys' },
     } })
     expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
