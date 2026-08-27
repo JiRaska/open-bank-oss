@@ -107,6 +107,16 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     expect(Math.round((await page.locator('#admin-sidebar').boundingBox())!.width)).toBe(264)
     expect(Math.round((await page.locator('header').boundingBox())!.height)).toBe(60)
     expect(await page.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
+
+    // The Explorer portrait is deliberately oversized and clipped by the guide,
+    // but its top (and therefore its head) must remain inside the visible banner.
+    // A negative portrait top previously left only the torso visible in production.
+    const explorerGuide = page.getByLabel('Welcome to your operations cockpit')
+    const guideBox = await explorerGuide.boundingBox()
+    const portraitBox = await explorerGuide.locator('img').boundingBox()
+    expect(guideBox).not.toBeNull()
+    expect(portraitBox).not.toBeNull()
+    expect(portraitBox!.y).toBeGreaterThanOrEqual(guideBox!.y)
   })
 
   test('tone swatches are square with zero padding, at both sizes', async ({ page }) => {

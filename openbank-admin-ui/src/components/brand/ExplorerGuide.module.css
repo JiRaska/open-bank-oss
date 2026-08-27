@@ -64,8 +64,9 @@
 
 .portrait {
   position: absolute;
+  top: 0;
   right: -12px;
-  bottom: -150px;
+  bottom: auto;
   width: 300px;
   height: 450px;
   overflow: hidden;
@@ -94,8 +95,9 @@
 }
 
 .compact .portrait {
+  top: 0;
   right: -8px;
-  bottom: -108px;
+  bottom: auto;
   width: 168px;
   height: 252px;
 }
@@ -114,6 +116,7 @@
 
   .portrait,
   .compact .portrait {
+    top: auto;
     right: -18px;
     bottom: -112px;
     width: 172px;
