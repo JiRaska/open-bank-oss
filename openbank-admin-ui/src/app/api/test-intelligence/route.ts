@@ -200,7 +200,30 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
       },
     }
   }))
-  return { ...report, syntheticJourneys }
+  // A scheduled k6 synthetic is both an availability journey and a measured runtime
+  // performance observation. Keep the Kubernetes verdict authoritative for the journey,
+  // but surface only actually published k6 metrics in the dedicated Performance view too.
+  // This does not turn a missing metric into a green benchmark or duplicate CI artifacts.
+  const runtimePerformance = syntheticJourneys.flatMap(journey => {
+    const measured = journey.live?.performance
+    if (!measured || (measured.worstP95Ms === null && measured.worstCheckPassRatePercent === null)) return []
+    return [{
+      id: `synthetic-${journey.id}`,
+      component: null,
+      state: journey.state,
+      observedAt: journey.live?.observedAt ?? null,
+      source: `runtime-synthetic:${journey.id}`,
+      thresholds: 0,
+      metrics: {
+        p95Ms: measured.worstP95Ms,
+        errorRatePercent: null,
+        checkPassRatePercent: measured.worstCheckPassRatePercent,
+        requests: null,
+      },
+      detail: `Sandbox synthetic runtime observation over the last ${Math.round(measured.windowSeconds / 60)} minutes; the Kubernetes Job verdict remains authoritative.`,
+    }]
+  })
+  return { ...report, syntheticJourneys, performance: [...report.performance, ...runtimePerformance] }
 }
 
 async function attachLiveClientExperience(report: TestIntelligenceReport): Promise<TestIntelligenceReport> {

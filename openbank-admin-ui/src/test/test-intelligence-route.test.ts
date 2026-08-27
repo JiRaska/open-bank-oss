@@ -246,6 +246,10 @@ describe('GET /api/test-intelligence', () => {
       state: 'passed',
       live: { performance: { source: 'prometheus', windowSeconds: 900, worstP95Ms: 1834.8, worstCheckPassRatePercent: 99.7 } },
     })
+    expect(body.performance).toEqual(expect.arrayContaining([expect.objectContaining({
+      id: 'synthetic-public-edge', state: 'passed', source: 'runtime-synthetic:public-edge', thresholds: 0,
+      metrics: { p95Ms: 1834.8, errorRatePercent: null, checkPassRatePercent: 99.7, requests: null },
+    })]))
     expect(queries.some(query => query.includes('max_over_time(k6_http_req_duration_p95{journey="public-edge"}[900s])'))).toBe(true)
     expect(queries.some(query => query.includes('min_over_time(k6_checks_rate{journey="public-edge"}[900s])'))).toBe(true)
   })
@@ -277,6 +281,7 @@ describe('GET /api/test-intelligence', () => {
       state: 'passed',
       live: { performance: { worstP95Ms: null, worstCheckPassRatePercent: null } },
     })
+    expect(body.performance).toEqual([])
   })
 
   it('shows a first scheduled Job still running as unresolved instead of claiming it was not run', async () => {
