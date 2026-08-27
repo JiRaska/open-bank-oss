@@ -469,6 +469,9 @@ function syntheticJourneys() {
   try {
     const raw = parseYaml(fs.readFileSync(file, 'utf8'))
     const latestCi = new Map()
+    const workflowByJourney = new Map((raw?.journeys ?? [])
+      .filter(item => item?.workflow && item?.workflow_name)
+      .map(item => [item.id, item.workflow_name]))
     const history = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), candidate => candidate.endsWith('.json'))
       .map(readJson).filter(item => item?.schemaVersion === 1 && item?.run)
       .sort((a, b) => Date.parse(a.run.observedAt) - Date.parse(b.run.observedAt))
@@ -476,7 +479,13 @@ function syntheticJourneys() {
       const provenance = safeRun(envelope.run, `synthetic:${envelope.component ?? 'unknown'}`)
       for (const evidence of envelope.specializedEvidence ?? []) {
         if (evidence.kind !== 'synthetic' || !evidence.source?.startsWith('journey:')) continue
-        latestCi.set(evidence.source.slice('journey:'.length), {
+        const journeyId = evidence.source.slice('journey:'.length)
+        const expectedWorkflow = workflowByJourney.get(journeyId)
+        if (expectedWorkflow && envelope.run.workflow !== expectedWorkflow) {
+          warnings.push(`synthetic evidence workflow mismatch omitted: ${journeyId}`)
+          continue
+        }
+        latestCi.set(journeyId, {
           state: freshnessAwareState(evidence.state, envelope.run.observedAt), observedAt: envelope.run.observedAt,
           detail: evidence.detail ?? 'Synthetic run retained without detail.',
           ...(provenance ? { run: provenance } : {}),
@@ -487,6 +496,7 @@ function syntheticJourneys() {
       id: item.id, title: item.name ?? item.title ?? item.id, status: item.status,
       capability: item.capability ?? '',
       state: item.status === 'active' ? 'unknown' : 'blocked', severity: item.severity,
+      executor: item.workflow ? 'github-actions' : 'kubernetes-cronjob',
       schedule: item.schedule ?? item.target_schedule ?? null, environment: item.environment ?? null,
       covers: item.covers ?? item.covered_services ?? [],
       falsifies: item.falsification ?? '', blocker: item.blocked_by ?? null,

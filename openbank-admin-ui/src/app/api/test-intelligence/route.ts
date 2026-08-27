@@ -172,6 +172,13 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
   const nowSeconds = Date.now() / 1000
   const syntheticJourneys = await Promise.all(report.syntheticJourneys.map(async journey => {
     if (journey.status !== 'active') return journey
+    // Browser synthetics run in GitHub Actions, not Kubernetes. Their immutable run envelope is
+    // the authoritative verdict; querying a non-existent CronJob would turn valid evidence into
+    // a false "not run" result in the operator UI.
+    if (journey.executor === 'github-actions') return {
+      ...journey,
+      state: journey.ci?.state ?? 'not-run' as EvidenceState,
+    }
     const cronjob = cronjobSelector(journey.id)
     if (!cronjob) return journey
     // A failure must remain visible for the same evidence window used to judge a
