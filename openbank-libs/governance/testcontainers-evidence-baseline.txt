@@ -31,7 +31,6 @@ openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisRedpan
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisTestResource.kt
 openbank-fx-service/src/test/kotlin/com/openbank/fx/it/PostgresRedisTestResource.kt
 openbank-interest-service/src/test/kotlin/com/openbank/interest/it/PostgresRedisTestResource.kt
-openbank-kyc-service/src/test/kotlin/com/openbank/kyc/it/PostgresTestResource.kt
 openbank-lending-service/src/test/kotlin/com/openbank/lending/it/PostgresRedisTestResource.kt
 openbank-onboarding-service/src/test/kotlin/com/openbank/onboarding/it/OnboardingPostgresTestResource.kt
 openbank-party-service/src/test/kotlin/com/openbank/party/it/PostgresRedpandaTestResource.kt
