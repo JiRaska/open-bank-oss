@@ -100,6 +100,42 @@ class CustomerIncentiveClaimIT {
         assertThat(StubUpstreamResource.requests(PRODUCT_PATH)).isEmpty()
     }
 
+    @Test
+    fun `authoritative account opening commits the claimed reservation over real http`() {
+        StubUpstreamResource.stub(PRODUCT_PATH, body = PRODUCT_JSON)
+        StubUpstreamResource.stub(
+            PARTY_PATH,
+            body = """{"status":"ACTIVE","legalName":"Ada Customer"}""",
+        )
+        StubUpstreamResource.stub(
+            ACCOUNT_PATH,
+            status = 201,
+            body = """
+                {"id":"77777777-7777-4777-8777-777777777777","partyId":"$CLAIM_PARTY_ID","productId":"$PRODUCT_ID",
+                "accountType":"TERM_DEPOSIT","status":"ACTIVE","openedAt":"$OPENED_AT"}
+            """.trimIndent(),
+        )
+        StubUpstreamResource.stub(
+            COMMIT_PATH,
+            body = RESERVATION_JSON.replace("RESERVED", "COMMITTED"),
+        )
+
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", "open-term-with-reward")
+            body("""{"productId":"$PRODUCT_ID","incentiveReservationId":"$RESERVATION_ID"}""")
+        } When {
+            post("/customer/v1/term-deposits")
+        } Then {
+            statusCode(201)
+            body("incentiveReservation.status", org.hamcrest.Matchers.equalTo("COMMITTED"))
+        }
+
+        val commit = ObjectMapper().readTree(StubUpstreamResource.requests(COMMIT_PATH).single().body)
+        assertThat(commit.path("productRef").asText()).isEqualTo(PRODUCT_ID)
+        assertThat(commit.path("qualifiedAt").asText()).isEqualTo(OPENED_AT)
+    }
+
     private fun stubProductAndAttribution() {
         StubUpstreamResource.stub(PRODUCT_PATH, body = PRODUCT_JSON)
         StubUpstreamResource.stub(ATTRIBUTION_PATH, body = ATTRIBUTION_JSON)
@@ -130,6 +166,10 @@ private const val RESERVATION_ID = "55555555-5555-4555-8555-555555555555"
 private const val PRODUCT_PATH = "/api/v1/products/$PRODUCT_ID"
 private const val ATTRIBUTION_PATH = "/api/v1/campaigns/interactions/$INTERACTION_ID/attribution"
 private const val INCENTIVE_PATH = "/api/v1/customer-incentives/offers/$OFFER_ID/reservations"
+private const val PARTY_PATH = "/api/v1/parties/$CLAIM_PARTY_ID"
+private const val ACCOUNT_PATH = "/api/v1/accounts"
+private const val COMMIT_PATH = "/api/v1/customer-incentives/reservations/$RESERVATION_ID/commit"
+private const val OPENED_AT = "2026-08-27T03:00:00Z"
 private const val CLAIM_JSON =
     """{"interactionRef":"$INTERACTION_ID","code":"WELCOME10","productId":"$PRODUCT_ID"}"""
 private const val PRODUCT_JSON =

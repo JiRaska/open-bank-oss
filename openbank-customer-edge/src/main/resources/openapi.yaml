@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.43.0
+  version: 1.44.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -122,6 +122,9 @@ paths:
       responses:
         '201':
           description: Term-deposit account opened
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Account'}
         '400':
           description: Missing idempotency key or malformed product ID
         '404':
@@ -3564,6 +3567,10 @@ components:
         nickname:
           type: string
           nullable: true
+        incentiveReservation:
+          allOf:
+            - {$ref: '#/components/schemas/IncentiveReservation'}
+          description: Present only when this account opening committed a campaign incentive.
 
     # Mirrors openbank-account-service AccountPage (GET /api/v1/accounts is cursor-paginated,
     # not a bare array).
@@ -4281,6 +4288,13 @@ components:
           type: string
           format: uuid
           description: ID returned by /products/term-deposits
+        incentiveReservationId:
+          type: string
+          format: uuid
+          description: >-
+            Optional opaque reservation returned by /incentives/claims. The edge commits it only
+            after account-service returns the authoritative openedAt; deterministic rejection
+            releases it, while transient failure leaves it retryable until its TTL.
 
     ClaimCampaignIncentiveRequest:
       type: object

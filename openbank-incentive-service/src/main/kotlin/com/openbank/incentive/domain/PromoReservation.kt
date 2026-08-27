@@ -34,8 +34,13 @@ data class PromoReservation(
 
     fun commit(at: Instant): PromoReservation {
         if (status == ReservationStatus.COMMITTED) return this
-        if (status != ReservationStatus.RESERVED) throw IncentiveConflict("only a reservation can be committed")
-        if (!at.isBefore(expiresAt)) throw IncentiveConflict("an expired reservation cannot be committed")
+        val conflict = when {
+            status != ReservationStatus.RESERVED -> "only a reservation can be committed"
+            at.isBefore(reservedAt) -> "qualifying action predates the reservation"
+            !at.isBefore(expiresAt) -> "an expired reservation cannot be committed"
+            else -> null
+        }
+        if (conflict != null) throw IncentiveConflict(conflict)
         return copy(status = ReservationStatus.COMMITTED)
     }
 

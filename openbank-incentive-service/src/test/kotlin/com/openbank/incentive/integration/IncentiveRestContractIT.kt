@@ -250,6 +250,70 @@ class IncentiveRestContractIT {
             body("id", equalTo(attributedId))
         }
 
+        execute(
+            """
+            update promo_reservation
+            set reserved_at = now() - interval '3 seconds', expires_at = now() - interval '1 second'
+            where id = '$attributedId'
+            """.trimIndent(),
+        )
+        Given { contentType("application/json") }
+            .When { post("/api/v1/incentives/maintenance/expire") }
+            .Then { statusCode(200) }
+        assertThat(string("select status from promo_reservation where id = '$attributedId'"))
+            .isEqualTo("RESERVED")
+        assertThat(
+            count(
+                """select count(*) from incentive_outbox where aggregate_id = '$attributedId'
+                    and event_type = 'incentive.reservation.expired.v2'
+                """.trimIndent(),
+            ),
+        ).isZero()
+
+        val qualifiedAt = Instant.now().minusSeconds(2)
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", customerParty.toString())
+            body(
+                """{"productRef":"current-account","qualifiedAt":"$qualifiedAt","partyRef":"spoofed"}""",
+            )
+        } When { post("/api/v1/customer-incentives/reservations/$attributedId/commit") } Then {
+            statusCode(400)
+        }
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", java.util.UUID.randomUUID().toString())
+            body("""{"productRef":"current-account","qualifiedAt":"$qualifiedAt"}""")
+        } When { post("/api/v1/customer-incentives/reservations/$attributedId/commit") } Then {
+            statusCode(404)
+        }
+        repeat(2) {
+            Given {
+                contentType("application/json")
+                header("X-Customer-Party-Id", customerParty.toString())
+                body("""{"productRef":"current-account","qualifiedAt":"$qualifiedAt"}""")
+            } When { post("/api/v1/customer-incentives/reservations/$attributedId/commit") } Then {
+                statusCode(200)
+                body("status", equalTo("COMMITTED"))
+                body("attributionRef", equalTo(attributionRef.toString()))
+                body("$", not(hasKey("partyRef")))
+            }
+        }
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", customerParty.toString())
+            body("""{"productRef":"current-account"}""")
+        } When { post("/api/v1/customer-incentives/reservations/$attributedId/release") } Then {
+            statusCode(409)
+        }
+        assertThat(
+            count(
+                """select count(*) from incentive_outbox where aggregate_id = '$attributedId'
+                    and event_type = 'incentive.reservation.committed.v2'
+                """.trimIndent(),
+            ),
+        ).isEqualTo(1)
+
         Given {
             contentType("application/json")
             header("X-Customer-Party-Id", customerParty.toString())
