@@ -639,9 +639,9 @@ async function clientExperiences() {
     {
       id: 'admin-ui', title: 'Admin UI web', surface: 'web', platforms: ['web'], evidence: webEvidence,
       rum: {
-        state: 'not-run', policy: 'rejected', observedAt: null,
+        state: 'unknown', policy: 'authenticated', observedAt: null,
         source: null, sampledSpansLast7d: null, errorSpansLast7d: null,
-        detail: 'Browser RUM is intentionally rejected for the internal operator console by ADR-0088; Playwright and server-side telemetry remain the evidence path.',
+        detail: 'Authenticated browser RUM capability is present; runtime arrival remains separate from Playwright evidence and is not inferred from this build snapshot.',
       }, blocker: null,
     },
     {
