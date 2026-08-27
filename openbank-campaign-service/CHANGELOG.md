@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/v0.35.0...v0.36.0) (2026-08-27)
+
+
+### Features
+
+* **campaign:** pin immutable incentive offers ([#7254](https://github.com/JiRaska/open-bank-oss/issues/7254)) ([fb31090](https://github.com/JiRaska/open-bank-oss/commit/fb31090f44a50bb685d082c7814594dd21c9574a))
+
 ## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/v0.34.1...v0.35.0) (2026-08-24)
 
 
