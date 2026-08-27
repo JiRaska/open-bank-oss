@@ -11,6 +11,7 @@
 // author) is enforced by the agent.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
 import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot, UserRound } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -60,6 +61,7 @@ export default function ApprovalsPage() {
   const [domainSources, setDomainSources] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const flight = useSingleFlight()
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   // The enforced charter registry (agents.yaml). `null` while it is still being fetched or
@@ -111,7 +113,11 @@ export default function ApprovalsPage() {
     return () => { cancelled = true }
   }, [])
 
+  // Keyed per proposal so approve and reject of the SAME proposal contend, while
+  // two different proposals stay independent (#7104). Segregation of duties is
+  // enforced server-side and is untouched by this lock.
   const decide = async (p: Proposal, approve: boolean) => {
+    const outcome = await flight.run(`proposal:${p.id}`, async () => {
     setBusyId(p.id)
     try {
       const res = await fetch('/api/agent/proposals', {
@@ -131,6 +137,8 @@ export default function ApprovalsPage() {
     } finally {
       setBusyId(null)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   const pending = useMemo(() => rows.filter(r => r.state === 'PROPOSED'), [rows])

@@ -5,6 +5,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { Bot, Boxes, CheckCircle2, CircleAlert, Eye, FileJson, Link2, ListChecks, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { canReviewPrivateCatalogDraft, type AgentModelDescriptor } from '@/lib/catalog-review-capability'
@@ -101,6 +102,7 @@ export default function ProductStudioPage() {
   const [draftText, setDraftText] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const flight = useSingleFlight()
   const [newSpecCode, setNewSpecCode] = useState('')
   const [newOfferingCode, setNewOfferingCode] = useState('')
   const [marketContextInput, setMarketContextInput] = useState<MarketContextInput>(defaultMarketContextInput)
@@ -239,11 +241,18 @@ export default function ProductStudioPage() {
     setReview(null)
   }
 
-  const run = async (work: () => Promise<unknown>, success: string) => {
-    setBusy(true); setMessage('')
-    try { await work(); setMessage(success); await load(); if (offeringId) await loadRevisions(offeringId) }
-    catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
-    finally { setBusy(false) }
+  // Every Product Studio remote mutation already funnelled through `run`, but `busy`
+  // was React state — set, then awaited in the same tick — and the create/save/publish
+  // buttons never read it at all. The lock is claimed synchronously here, and
+  // `flight.activeKey` now names WHICH operation is running (#7083).
+  const run = async (key: string, work: () => Promise<unknown>, success: string) => {
+    const outcome = await flight.run(key, async () => {
+      setBusy(true); setMessage('')
+      try { await work(); setMessage(success); await load(); if (offeringId) await loadRevisions(offeringId) }
+      catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+      finally { setBusy(false) }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   const createSpecification = () => {
@@ -252,7 +261,7 @@ export default function ProductStudioPage() {
     const body: SpecificationRequest = {
       code: newSpecCode.trim().toUpperCase(), schemaRef: { id: schema.id, version: schema.version },
     }
-    void run(() => catalogV2Operation('createSpecificationV2', {
+    void run('spec:create', () => catalogV2Operation('createSpecificationV2', {
       body,
     }), t('Specifikace vytvořena', 'Specification created'))
   }
@@ -263,7 +272,7 @@ export default function ProductStudioPage() {
       specificationId: selectedSpec.id, code: newOfferingCode.trim().toUpperCase(),
       market: marketContextFromInput(marketContextInput),
     }
-    void run(() => catalogV2Operation('createOfferingV2', {
+    void run('offering:create', () => catalogV2Operation('createOfferingV2', {
       body,
     }), t('Nabídka vytvořena', 'Offering created'))
   }
@@ -317,7 +326,7 @@ export default function ProductStudioPage() {
       attributes: seed(schema.document) as Record<string, unknown>,
       prices: [], eligibility: [], relationships: [], documentCodes: [],
     }
-    void run(() => catalogV2Operation('createOfferingRevisionV2', {
+    void run('revision:create', () => catalogV2Operation('createOfferingRevisionV2', {
       pathParameters: { id: selectedOffering.id }, body,
     }), t('Draft vytvořen; doplňte povinná pole schématu', 'Draft created; complete the schema-required fields'))
   }
@@ -325,7 +334,7 @@ export default function ProductStudioPage() {
   const saveDraft = () => {
     if (!selectedRevision || selectedRevision.state !== 'DRAFT') return
     if (!parsedDraft) { setMessage(t('Draft není validní JSON', 'Draft is not valid JSON')); return }
-    void run(() => catalogV2Operation('replaceOfferingRevisionV2', {
+    void run('revision:save', () => catalogV2Operation('replaceOfferingRevisionV2', {
       pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
       headers: { 'If-Match': `"${selectedRevision.revision}"` }, body: parsedDraft as RevisionRequest,
     }), t('Draft uložen', 'Draft saved'))
@@ -346,7 +355,7 @@ export default function ProductStudioPage() {
 
   const publish = () => {
     if (!selectedRevision || !publishReason.trim()) return
-    void run(() => catalogV2Operation('publishOfferingRevisionV2', {
+    void run('revision:publish', () => catalogV2Operation('publishOfferingRevisionV2', {
       pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
       headers: { 'If-Match': `"${selectedRevision.revision}"` },
       body: { reason: publishReason.trim() },
