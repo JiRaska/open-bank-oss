@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/v0.36.0...v0.37.0) (2026-08-27)
+
+
+### Features
+
+* **campaign:** expose trusted incentive attribution ([#7271](https://github.com/JiRaska/open-bank-oss/issues/7271)) ([b2ac0cc](https://github.com/JiRaska/open-bank-oss/commit/b2ac0cc004e875171c5ae65d808d39611db2d446))
+
 ## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/v0.35.0...v0.36.0) (2026-08-27)
 
 
