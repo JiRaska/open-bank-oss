@@ -7,6 +7,7 @@ import com.openbank.incentive.domain.PromoReservation
 import java.time.Instant
 import java.util.UUID
 
+@Suppress("TooManyFunctions")
 interface IncentiveStore {
     suspend fun createOffer(offer: IncentiveOffer): IncentiveOffer
     suspend fun findOffer(id: UUID): IncentiveOffer?
@@ -17,6 +18,20 @@ interface IncentiveStore {
     suspend fun reserve(command: ReserveIncentive): PromoReservation
     suspend fun commit(id: UUID, actor: String, at: Instant): PromoReservation
     suspend fun release(id: UUID, actor: String, at: Instant): PromoReservation
+    suspend fun commitAttributed(
+        id: UUID,
+        partyRef: String,
+        productRef: String,
+        actor: String,
+        qualifiedAt: Instant,
+    ): PromoReservation
+    suspend fun releaseAttributed(
+        id: UUID,
+        partyRef: String,
+        productRef: String,
+        actor: String,
+        at: Instant,
+    ): PromoReservation
     suspend fun expireDue(at: Instant): Int
 }
 

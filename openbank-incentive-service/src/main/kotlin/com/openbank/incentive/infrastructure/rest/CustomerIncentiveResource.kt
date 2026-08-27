@@ -34,6 +34,14 @@ data class CustomerReservationResponse(
     val status: ReservationStatus,
 )
 
+data class CustomerCommitReservationRequest(
+    val productRef: String,
+    val qualifiedAt: Instant,
+    val partyRef: String? = null,
+)
+
+data class CustomerReleaseReservationRequest(val productRef: String, val partyRef: String? = null)
+
 /**
  * Trusted customer-edge boundary. The retail client never supplies party identity or offer terms:
  * customer-edge derives the party from its Keycloak JWT and resolves the offer from the opaque
@@ -56,13 +64,11 @@ class CustomerIncentiveResource(
         @HeaderParam("Idempotency-Key") key: String?,
         request: CustomerReserveCodeRequest,
     ): Response {
-        val permittedCaller = callerPrincipal.orElse("")
-        if (permittedCaller.isBlank() || identity.principal?.name != permittedCaller) {
+        if (!callerPermitted()) {
             return Response.status(Response.Status.FORBIDDEN).build()
         }
         require(request.partyRef == null) { "partyRef must not be supplied by the customer request" }
-        val trustedParty = requireNotNull(partyId?.let(::parseUuid)) { "X-Customer-Party-Id is required" }
-        require(trustedParty != ZERO_UUID) { "X-Customer-Party-Id must not be the nil UUID" }
+        val trustedParty = requireTrustedParty(partyId)
         require(!key.isNullOrBlank()) { "Idempotency-Key is required" }
         val reservation = application.reserve(
             id,
@@ -86,9 +92,69 @@ class CustomerIncentiveResource(
         ).build()
     }
 
+    @POST
+    @Path("/reservations/{id}/commit")
+    suspend fun commit(
+        @PathParam("id") id: UUID,
+        @HeaderParam("X-Customer-Party-Id") partyId: String?,
+        request: CustomerCommitReservationRequest,
+    ): Response {
+        if (!callerPermitted()) return Response.status(Response.Status.FORBIDDEN).build()
+        require(request.partyRef == null) { "partyRef must not be supplied by the customer request" }
+        val trustedParty = requireTrustedParty(partyId)
+        val reservation = application.commitAttributed(
+            id,
+            trustedParty.toString(),
+            request.productRef,
+            identity.principal.name,
+            request.qualifiedAt,
+        )
+        return Response.ok(reservation.toCustomerResponse()).build()
+    }
+
+    @POST
+    @Path("/reservations/{id}/release")
+    suspend fun release(
+        @PathParam("id") id: UUID,
+        @HeaderParam("X-Customer-Party-Id") partyId: String?,
+        request: CustomerReleaseReservationRequest,
+    ): Response {
+        if (!callerPermitted()) return Response.status(Response.Status.FORBIDDEN).build()
+        require(request.partyRef == null) { "partyRef must not be supplied by the customer request" }
+        val trustedParty = requireTrustedParty(partyId)
+        val reservation = application.releaseAttributed(
+            id,
+            trustedParty.toString(),
+            request.productRef,
+            identity.principal.name,
+        )
+        return Response.ok(reservation.toCustomerResponse()).build()
+    }
+
+    private fun callerPermitted(): Boolean {
+        val permittedCaller = callerPrincipal.orElse("")
+        return permittedCaller.isNotBlank() && identity.principal?.name == permittedCaller
+    }
+
+    private fun requireTrustedParty(partyId: String?): UUID {
+        val trustedParty = requireNotNull(partyId?.let(::parseUuid)) { "X-Customer-Party-Id is required" }
+        require(trustedParty != ZERO_UUID) { "X-Customer-Party-Id must not be the nil UUID" }
+        return trustedParty
+    }
+
     private fun parseUuid(value: String): UUID? = runCatching { UUID.fromString(value) }.getOrNull()
 
     private companion object {
         val ZERO_UUID: UUID = UUID.fromString("00000000-0000-0000-0000-000000000000")
     }
 }
+
+private fun com.openbank.incentive.domain.PromoReservation.toCustomerResponse() = CustomerReservationResponse(
+    id,
+    offerRef,
+    productRef,
+    requireNotNull(attributionRef),
+    reservedAt,
+    expiresAt,
+    status,
+)

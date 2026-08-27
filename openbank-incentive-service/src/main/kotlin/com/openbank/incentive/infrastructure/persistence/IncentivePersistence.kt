@@ -391,6 +391,22 @@ class PanacheIncentiveStore(
     override suspend fun release(id: UUID, actor: String, at: Instant): PromoReservation =
         transition(id, actor, at, ReservationStatus.RELEASED)
 
+    override suspend fun commitAttributed(
+        id: UUID,
+        partyRef: String,
+        productRef: String,
+        actor: String,
+        qualifiedAt: Instant,
+    ): PromoReservation = transition(id, actor, qualifiedAt, ReservationStatus.COMMITTED, partyRef, productRef)
+
+    override suspend fun releaseAttributed(
+        id: UUID,
+        partyRef: String,
+        productRef: String,
+        actor: String,
+        at: Instant,
+    ): PromoReservation = transition(id, actor, at, ReservationStatus.RELEASED, partyRef, productRef)
+
     override suspend fun expireDue(at: Instant): Int {
         val ids = Panache.withSession {
             reservations.find("status = ?1 and expiresAt <= ?2", "RESERVED", at)
@@ -416,31 +432,50 @@ class PanacheIncentiveStore(
         }
     }.awaitSuspending()
 
-    private suspend fun transition(id: UUID, actor: String, at: Instant, target: ReservationStatus): PromoReservation =
-        Panache.withTransaction {
-            lockedReservation(id).flatMap { entity ->
-                if (entity == null) throw IncentiveNotFound("reservation not found")
-                val current = entity.toDomain()
-                val updated = when (target) {
-                    ReservationStatus.COMMITTED -> current.commit(at)
-                    ReservationStatus.RELEASED -> current.release()
-                    else -> throw IllegalArgumentException("unsupported transition")
-                }
-                if (updated === current) return@flatMap Uni.createFrom().item(current)
-                entity.status = target.name
-                if (target == ReservationStatus.COMMITTED) entity.committedAt = at else entity.releasedAt = at
-                lockedCode(entity.codeDigest).flatMap { code ->
-                    requireNotNull(code)
-                    code.status = if (target == ReservationStatus.COMMITTED) "REDEEMED" else "AVAILABLE"
-                    when (target) {
-                        ReservationStatus.COMMITTED -> reservationEvidence(updated, target, actor)
-                        ReservationStatus.RELEASED -> reservationEvidence(updated, target, actor)
-                        else -> error("unsupported transition")
-                    }
-                        .replaceWith(updated)
-                }
+    private suspend fun transition(
+        id: UUID,
+        actor: String,
+        at: Instant,
+        target: ReservationStatus,
+        expectedPartyRef: String? = null,
+        expectedProductRef: String? = null,
+    ): PromoReservation = Panache.withTransaction {
+        lockedReservation(id).flatMap { entity ->
+            if (entity == null) throw IncentiveNotFound("reservation not found")
+            val current = entity.toDomain()
+            requireAttributedOwner(current, expectedPartyRef, expectedProductRef)
+            val updated = when (target) {
+                ReservationStatus.COMMITTED -> current.commit(at)
+                ReservationStatus.RELEASED -> current.release()
+                else -> throw IllegalArgumentException("unsupported transition")
             }
-        }.awaitSuspending()
+            if (updated === current) return@flatMap Uni.createFrom().item(current)
+            entity.status = target.name
+            if (target == ReservationStatus.COMMITTED) entity.committedAt = at else entity.releasedAt = at
+            lockedCode(entity.codeDigest).flatMap { code ->
+                requireNotNull(code)
+                code.status = if (target == ReservationStatus.COMMITTED) "REDEEMED" else "AVAILABLE"
+                when (target) {
+                    ReservationStatus.COMMITTED -> reservationEvidence(updated, target, actor)
+                    ReservationStatus.RELEASED -> reservationEvidence(updated, target, actor)
+                    else -> error("unsupported transition")
+                }
+                    .replaceWith(updated)
+            }
+        }
+    }.awaitSuspending()
+
+    private fun requireAttributedOwner(
+        reservation: PromoReservation,
+        expectedPartyRef: String?,
+        expectedProductRef: String?,
+    ) {
+        if (expectedPartyRef == null) return
+        val owned = reservation.attributionRef != null &&
+            reservation.partyRef == expectedPartyRef &&
+            reservation.productRef == expectedProductRef
+        if (!owned) throw IncentiveNotFound("reservation not found")
+    }
 
     private fun expireEntity(entity: ReservationEntity, at: Instant): Uni<Void> =
         lockedCode(entity.codeDigest).flatMap { code ->

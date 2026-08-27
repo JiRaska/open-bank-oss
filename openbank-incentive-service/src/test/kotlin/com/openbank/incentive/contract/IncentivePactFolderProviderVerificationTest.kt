@@ -75,9 +75,42 @@ class IncentivePactFolderProviderVerificationTest {
         }
     }
 
+    @State("an attributed reservation is reserved for qualifying commit")
+    fun attributedReservationForCommit() = insertReservedAttribution()
+
+    @State("an attributed reservation is reserved for deterministic release")
+    fun attributedReservationForRelease() = insertReservedAttribution()
+
+    private fun insertReservedAttribution() {
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            deletePreviousReservation(connection)
+            if (!offerExists(connection)) insertOffer(connection)
+            if (!codeExists(connection)) insertCode(connection)
+            connection.prepareStatement(INSERT_RESERVATION).use { statement ->
+                statement.setString(1, RESERVATION_ID)
+                statement.setString(2, OFFER_ID)
+                statement.setString(3, codeDigest())
+                statement.setString(4, PARTY_ID)
+                statement.setString(5, PRODUCT_ID)
+                statement.setString(6, ATTRIBUTION_ID)
+                statement.executeUpdate()
+            }
+            connection.prepareStatement("UPDATE promo_code_inventory SET status = 'RESERVED' WHERE digest = ?")
+                .use { statement ->
+                    statement.setString(1, codeDigest())
+                    statement.executeUpdate()
+                }
+            connection.commit()
+        }
+    }
+
     private fun deletePreviousReservation(connection: Connection) {
-        connection.prepareStatement("DELETE FROM promo_reservation WHERE attribution_ref = ?::uuid").use { statement ->
-            statement.setString(1, ATTRIBUTION_ID)
+        connection.prepareStatement(
+            "DELETE FROM promo_reservation WHERE id = ?::uuid OR attribution_ref = ?::uuid",
+        ).use { statement ->
+            statement.setString(1, RESERVATION_ID)
+            statement.setString(2, ATTRIBUTION_ID)
             statement.executeUpdate()
         }
         connection.prepareStatement(
@@ -124,6 +157,9 @@ class IncentivePactFolderProviderVerificationTest {
     private companion object {
         const val OFFER_ID = "44444444-4444-4444-8444-444444444444"
         const val ATTRIBUTION_ID = "22222222-2222-4222-8222-222222222222"
+        const val PARTY_ID = "11111111-1111-4111-8111-111111111111"
+        const val PRODUCT_ID = "33333333-3333-4333-8333-333333333333"
+        const val RESERVATION_ID = "55555555-5555-4555-8555-555555555555"
         const val CODE = "WELCOME10"
         const val PEPPER = "integration-pepper-with-32-characters-minimum"
         const val INSERT_OFFER = """
@@ -138,6 +174,15 @@ class IncentivePactFolderProviderVerificationTest {
         const val INSERT_CODE = """
             INSERT INTO promo_code_inventory (digest, offer_id, status, created_at, retained_until)
             VALUES (?, ?::uuid, 'AVAILABLE', now(), now() + interval '13 months')
+        """
+        const val INSERT_RESERVATION = """
+            INSERT INTO promo_reservation (
+              id, offer_id, offer_name, offer_version, code_digest, party_ref, product_ref,
+              idempotency_key, status, reserved_at, expires_at, attribution_ref
+            ) VALUES (
+              ?::uuid, ?::uuid, 'WELCOME', 1, ?, ?, ?, 'open-pact-once', 'RESERVED',
+              '2026-08-27T00:00:00Z', '2099-01-01T00:00:00Z', ?::uuid
+            )
         """
     }
 }
