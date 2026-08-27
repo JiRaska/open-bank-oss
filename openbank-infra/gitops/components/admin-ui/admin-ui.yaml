@@ -15,15 +15,17 @@ metadata:
     app.kubernetes.io/part-of: app
 spec:
   replicas: 1
-  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
-  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
-  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
-  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  # Keep the public SSO boundary available during image rollouts. The browser synthetic
+  # proved that terminate-first creates a real 503 window: one engine can reach the old
+  # pod while the other reaches the interval before the replacement becomes Ready.
+  # The small, bounded surge is therefore part of the availability contract; a rollout
+  # that cannot schedule the additional 100m/256Mi pod must remain visibly pending,
+  # rather than deliberately taking the operator surface offline.
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 0
-      maxUnavailable: 1
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: admin-ui
