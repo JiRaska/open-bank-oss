@@ -57,6 +57,7 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(page.getByLabel('Test impact mapping state')).toContainText('Test impact selection: shadow only')
   await expect(page.getByText('AI must not infer it or select a required gate.')).toBeVisible()
   await page.getByRole('button', { name: /Testovací runtime|Test runtime/ }).click()
+  await expect(page.getByText('1 completed isolated cycles')).toBeVisible()
   await expect(page.getByText('1 started · 1 stopped')).toBeVisible()
   await page.getByRole('button', { name: /Historie|History/ }).click()
   await expect(page.getByText('4242 / 1')).toBeVisible()
