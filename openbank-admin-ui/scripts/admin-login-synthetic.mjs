@@ -56,7 +56,7 @@ try {
     const attestation = attestationResponse.ok() ? await attestationResponse.json() : null
     const observedBuildSha = typeof attestation?.gitSha === 'string' ? attestation.gitSha.toLowerCase() : null
     buildAttestation = { requestedSha: expectedBuildSha, observedSha: observedBuildSha }
-    if (!observedBuildSha || !expectedBuildSha.startsWith(observedBuildSha)) {
+    if (!observedBuildSha || !(expectedBuildSha.startsWith(observedBuildSha) || observedBuildSha.startsWith(expectedBuildSha))) {
       attestationFailure = `deployed build attestation ${observedBuildSha ?? 'unavailable'} does not match requested ${expectedBuildSha}`
     }
   }
