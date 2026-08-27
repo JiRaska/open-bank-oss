@@ -313,8 +313,8 @@ while removing manual run-to-artifact rediscovery for an authorized operator.
 ### D9 — Client experience evidence and RUM boundary
 
 Client quality is part of Test Intelligence, but CI and real-user telemetry remain distinct
-observations. The Admin UI contributes its Playwright and visual-regression evidence; browser RUM
-remains rejected for this internal operator surface by ADR-0088. The separate customer-app repository
+observations. The Admin UI contributes its Playwright and visual-regression evidence plus the
+privacy-bounded, authenticated browser RUM defined by ADR-0274. The separate customer-app repository
 publishes a bounded, immutable envelope containing unit and committed-golden verdicts plus run
 provenance. Missing private-repository access or an expired artifact renders `not-run` with a blocker;
 source presence is never promoted to a completed test.

@@ -226,7 +226,7 @@ export interface ClientExperienceEvidence {
   evidence: EvidenceObservation[]
   rum: {
     state: EvidenceState
-    policy: 'not-applicable' | 'rejected' | 'consent-gated'
+    policy: 'not-applicable' | 'rejected' | 'consent-gated' | 'authenticated'
     detail: string
     observedAt: string | null
     source?: 'prometheus' | 'tempo' | null

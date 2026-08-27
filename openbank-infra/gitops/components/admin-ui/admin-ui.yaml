@@ -92,8 +92,8 @@ spec:
             #
             # Setting this is what TURNS TRACING ON: src/lib/telemetry/tracing.ts starts no SDK
             # at all without it, so dev and test export nothing (same gating shape as the
-            # GlitchTip DSN, ADR-0075 inv. 2). This is server-side only; ADR-0088 D4's rejection
-            # of browser RUM for this console is untouched and still stands.
+            # GlitchTip DSN, ADR-0075 inv. 2). The authenticated, same-origin browser-RUM relay
+            # uses this same runtime-only endpoint; browsers never receive this address.
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://tempo.observability.svc:4318
             - name: OTEL_SERVICE_NAME

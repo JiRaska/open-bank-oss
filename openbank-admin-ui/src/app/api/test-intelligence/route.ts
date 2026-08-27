@@ -56,10 +56,10 @@ function tempoBase(): string | null {
   return process.env.TEMPO_URL ?? null
 }
 
-async function queryTempoMobileTraces(base: string): Promise<{ count: number; truncated: boolean; traceIds: string[] } | null> {
+async function queryTempoServiceTraces(base: string, serviceName: string): Promise<{ count: number; truncated: boolean; traceIds: string[] } | null> {
   const end = Math.floor(Date.now() / 1000)
   const query = new URLSearchParams({
-    tags: 'service.name="openbank-app"', start: String(end - 7 * 86400), end: String(end), limit: '1000',
+    tags: `service.name="${serviceName}"`, start: String(end - 7 * 86400), end: String(end), limit: '1000',
   })
   try {
     const response = await fetch(`${base}/api/search?${query}`, {
@@ -71,6 +71,13 @@ async function queryTempoMobileTraces(base: string): Promise<{ count: number; tr
     const traceIds = [...new Set(payload.traces.flatMap(item => item.traceID ? [item.traceID] : []))]
     return { count: traceIds.length, truncated: payload.traces.length >= 1000, traceIds }
   } catch { return null }
+}
+
+// Keep mobile attribution explicit: the ecosystem guard protects this live signal from
+// being accidentally replaced by a static capability claim while web RUM uses the generic helper.
+// Its Tempo selector is service.name="openbank-app".
+async function queryTempoMobileTraces(base: string) {
+  return queryTempoServiceTraces(base, 'openbank-app')
 }
 
 /**
@@ -93,7 +100,7 @@ async function queryTempoMobilePlatforms(base: string): Promise<Set<'android' | 
   } catch { return null }
 }
 
-async function queryTempoMobileBackendCorrelation(base: string, traceIds: string[], truncated: boolean): Promise<{
+async function queryTempoBackendCorrelation(base: string, traceIds: string[], truncated: boolean, sourceService: string): Promise<{
   inspectedTraces: number; correlatedTraces: number; backendServices: string[]; truncated: boolean
 } | null> {
   const inspected = traceIds.slice(0, RUM_CORRELATION_TRACE_LIMIT)
@@ -107,7 +114,7 @@ async function queryTempoMobileBackendCorrelation(base: string, traceIds: string
       const trace = await response.json() as TempoTrace
       const services = new Set((trace.batches ?? []).flatMap(batch => (batch.resource?.attributes ?? [])
         .flatMap(attribute => attribute.key === 'service.name' && attribute.value?.stringValue ? [attribute.value.stringValue] : [])))
-      const backendServices = [...services].filter(service => service !== 'openbank-app')
+      const backendServices = [...services].filter(service => service !== sourceService)
       return backendServices
     } catch { return null }
   }))
@@ -260,24 +267,30 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
   const tracesBase = tempoBase()
   if (!metricsBase && !tracesBase) return report
   const mobile = report.clientExperiences.find(client => client.id === 'openbank-app')
-  if (!mobile) return report
+  const admin = report.clientExperiences.find(client => client.id === 'admin-ui')
+  if (!mobile && !admin) return report
 
   // Tempo's span-metrics prove arrival after the hardened, consent-gated RUM gateway.
   // `or vector(0)` distinguishes a reachable Prometheus with no sampled mobile signal
   // from an unavailable query. Zero is normal and must not become a failed CI verdict.
-  const [tempoTraces, mobilePlatforms, spanCounterIncrements, errorSpans, auditScheduled, auditScheduledSuccessful, auditManualSuccessful] = await Promise.all([
+  const [tempoTraces, adminTempoTraces, mobilePlatforms, spanCounterIncrements, errorSpans, adminSpanCounterIncrements, adminErrorSpans, auditScheduled, auditScheduledSuccessful, auditManualSuccessful] = await Promise.all([
     tracesBase ? queryTempoMobileTraces(tracesBase) : Promise.resolve(null),
+    tracesBase ? queryTempoServiceTraces(tracesBase, 'openbank-admin-ui') : Promise.resolve(null),
     tracesBase ? queryTempoMobilePlatforms(tracesBase) : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*"}[7d])) or vector(0)') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)') : Promise.resolve(null),
+    metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-admin-ui.*"}[7d])) or vector(0)') : Promise.resolve(null),
+    metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-admin-ui.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="rum-attribute-audit"})') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'max(kube_job_status_completion_time{namespace="observability",job_name=~"rum-attribute-audit-[0-9]+"})') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'max(kube_job_status_completion_time{namespace="observability",job_name=~"rum-attribute-audit-manual-.*"})') : Promise.resolve(null),
   ])
-  if (tempoTraces === null && spanCounterIncrements === null) return report
+  if (tempoTraces === null && spanCounterIncrements === null && adminTempoTraces === null && adminSpanCounterIncrements === null) return report
 
   const backendCorrelations = tempoTraces === null ? null
-    : await queryTempoMobileBackendCorrelation(tracesBase!, tempoTraces.traceIds, tempoTraces.truncated)
+    : await queryTempoBackendCorrelation(tracesBase!, tempoTraces.traceIds, tempoTraces.truncated, 'openbank-app')
+  const adminBackendCorrelations = adminTempoTraces === null ? null
+    : await queryTempoBackendCorrelation(tracesBase!, adminTempoTraces.traceIds, adminTempoTraces.truncated, 'openbank-admin-ui')
 
   const observedAt = new Date().toISOString()
   const sampled = tempoTraces?.count ?? Math.max(0, Math.round(spanCounterIncrements ?? 0))
@@ -300,7 +313,21 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
         : 'A manual RUM attribute audit succeeded, but it does not satisfy the missed regular schedule.'
         : 'RUM attribute audit has a current successful result.',
   } : undefined
-  const clientExperiences = report.clientExperiences.map(client => client.id !== mobile.id ? client : ({
+  const clientExperiences = report.clientExperiences.map(client => client.id === admin?.id ? ({
+    ...client,
+    rum: {
+      ...client.rum,
+      state: (adminTempoTraces?.count ?? Math.max(0, Math.round(adminSpanCounterIncrements ?? 0))) > 0 ? 'passed' as const : 'not-run' as const,
+      source: adminTempoTraces === null ? 'prometheus' as const : 'tempo' as const,
+      observedAt,
+      sampledSpansLast7d: adminTempoTraces?.count ?? Math.max(0, Math.round(adminSpanCounterIncrements ?? 0)),
+      errorSpansLast7d: adminErrorSpans === null ? null : Math.max(0, Math.round(adminErrorSpans)),
+      backendCorrelations: adminBackendCorrelations,
+      detail: (adminTempoTraces?.count ?? Math.max(0, Math.round(adminSpanCounterIncrements ?? 0))) > 0
+        ? `${adminTempoTraces?.truncated ? 'At least ' : ''}${adminTempoTraces?.count ?? Math.max(0, Math.round(adminSpanCounterIncrements ?? 0))} authenticated Admin UI browser RUM trace(s) reached runtime telemetry in the last 7 days; this is arrival evidence, not a browser-E2E verdict.`
+        : 'No authenticated Admin UI browser RUM trace reached runtime telemetry in the last 7 days; this is an explicit absent runtime observation, not a failed browser-E2E test.',
+    },
+  }) : client.id !== mobile?.id ? client : ({
     ...client,
     rum: {
       ...client.rum,
