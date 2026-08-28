@@ -42,6 +42,10 @@ class ReferralRestContractIT {
             body("status", equalTo("DRAFT"))
         } Extract { path<String>("id") }
 
+        Given { contentType("application/json") } When { get("/api/v1/referrals/programs/$selfApprovalId") } Then {
+            statusCode(404)
+        }
+
         Given { contentType("application/json") }
             .When { post("/api/v1/referrals/programs/$selfApprovalId/publish") }
             .Then { statusCode(409) }
@@ -58,6 +62,21 @@ class ReferralRestContractIT {
                 body("status", equalTo("PUBLISHED"))
                 body("checker", equalTo("checker@openbank.test"))
             }
+
+        Given { contentType("application/json") } When { get("/api/v1/referrals/programs/$programId") } Then {
+            statusCode(200)
+            body("id", equalTo(programId.toString()))
+            body("version", equalTo(1))
+        }
+
+        val expiredProgramId = UUID.randomUUID()
+        seedDraft(expiredProgramId, Instant.now().minusSeconds(1))
+        Given { contentType("application/json") }
+            .When { post("/api/v1/referrals/programs/$expiredProgramId/publish") }
+            .Then { statusCode(200) }
+        Given { contentType("application/json") } When { get("/api/v1/referrals/programs/$expiredProgramId") } Then {
+            statusCode(404)
+        }
 
         val inviteToken = Given {
             contentType("application/json")
@@ -141,7 +160,7 @@ class ReferralRestContractIT {
         }
     }
 
-    private fun seedDraft(id: UUID) {
+    private fun seedDraft(id: UUID, attributionWindowEndsAt: Instant = Instant.now().plusSeconds(86_400)) {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """insert into referral_program
@@ -156,7 +175,7 @@ class ReferralRestContractIT {
                 statement.setBigDecimal(4, BigDecimal.TEN)
                 statement.setString(5, "EUR")
                 statement.setString(6, "account.opened")
-                statement.setTimestamp(7, Timestamp.from(Instant.now().plusSeconds(86_400)))
+                statement.setTimestamp(7, Timestamp.from(attributionWindowEndsAt))
                 statement.setString(8, "DRAFT")
                 statement.setString(9, "maker@openbank.test")
                 statement.setTimestamp(10, Timestamp.from(Instant.now()))
