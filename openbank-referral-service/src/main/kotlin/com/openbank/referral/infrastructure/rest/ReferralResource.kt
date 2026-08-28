@@ -5,6 +5,7 @@ import com.openbank.referral.domain.ReferralValidationException
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -25,6 +26,7 @@ data class CreateReferralProgramRequest(
 data class IssueReferralInviteRequest(val referrerPartyId: UUID)
 data class AttributeReferralInviteRequest(val refereePartyId: UUID)
 data class QualifyReferralInviteRequest(val eventName: String, val eventId: String)
+data class PublishedReferralProgramResponse(val id: UUID, val name: String, val version: Int)
 
 @Path("/api/v1/referrals")
 @ApplicationScoped
@@ -51,6 +53,13 @@ class ReferralResource(private val service: ReferralService, private val identit
     @POST
     @Path("/programs/{id}/publish")
     suspend fun publish(@PathParam("id") id: UUID): Response = Response.ok(service.publishProgram(id, actor())).build()
+
+    /** Trusted catalogue lookup for an immutable Campaign reference; unpublished programs are invisible. */
+    @GET
+    @Path("/programs/{id}")
+    suspend fun publishedProgram(@PathParam("id") id: UUID): Response = service.publishedProgram(id)?.let { program ->
+        Response.ok(PublishedReferralProgramResponse(program.id, program.name, program.version)).build()
+    } ?: Response.status(Response.Status.NOT_FOUND).build()
 
     @POST
     @Path("/programs/{id}/invites")
