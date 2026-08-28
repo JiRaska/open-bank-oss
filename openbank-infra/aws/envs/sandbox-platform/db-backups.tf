@@ -264,6 +264,10 @@ locals {
     # `kind: Cluster` manifests rather than from the rollout comments in this file, which have
     # asserted "all remaining clusters" incorrectly three times now (#1444).
     engagement = { namespace = "engagement", sa = "engagement-db" }
+    # Reserve the Pod Identity association before the reviewed Incentive CNPG Cluster is synced.
+    # The future Cluster uses barmanObjectStore under incentive-db; declaring its service account
+    # here prevents the otherwise silent "Ready but no WAL archive credentials" failure at first boot.
+    incentive = { namespace = "incentive", sa = "incentive-db" }
   }
 }
 
