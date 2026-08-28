@@ -100,6 +100,17 @@ class ReferralService(
         it.status == ProgramStatus.PUBLISHED && it.attributionWindowEndsAt.isAfter(Instant.now(clock))
     }
 
+    /**
+     * Read-only Campaign catalogue. It repeats the published/expiry predicate after the repository
+     * query so a stale or alternate adapter cannot disclose a draft or expired programme.
+     */
+    suspend fun publishedPrograms(): List<ReferralProgram> {
+        val now = Instant.now(clock)
+        return programs.listPublished(now).filter {
+            it.status == ProgramStatus.PUBLISHED && it.attributionWindowEndsAt.isAfter(now)
+        }
+    }
+
     // ThrowsCount: three distinct guard-clause rejections, each a different machine-readable
     // reason the caller can branch on — collapsing them into one exception would erase that.
     @Suppress("ThrowsCount")

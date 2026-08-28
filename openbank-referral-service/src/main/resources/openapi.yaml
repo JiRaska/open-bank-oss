@@ -1,9 +1,31 @@
 openapi: 3.0.3
 info:
   title: OpenBank Referral Service
-  version: 1.1.0
+  version: 1.2.0
 paths:
   /api/v1/referrals/programs:
+    get:
+      summary: List independently published, unexpired referral program revisions for Campaign selection
+      responses:
+        "200":
+          description: Published immutable program references only
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, version]
+                      additionalProperties: false
+                      properties:
+                        id: {type: string, format: uuid}
+                        name: {type: string}
+                        version: {type: integer, minimum: 1}
     post:
       summary: Create a draft referral program
       responses: {"201": {description: Created}}

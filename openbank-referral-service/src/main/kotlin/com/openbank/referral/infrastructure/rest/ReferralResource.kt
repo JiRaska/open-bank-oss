@@ -61,6 +61,16 @@ class ReferralResource(private val service: ReferralService, private val identit
         Response.ok(PublishedReferralProgramResponse(program.id, program.name, program.version)).build()
     } ?: Response.status(Response.Status.NOT_FOUND).build()
 
+    @GET
+    @Path("/programs")
+    suspend fun publishedPrograms(): Response = Response.ok(
+        mapOf(
+            "items" to service.publishedPrograms().map {
+                PublishedReferralProgramResponse(it.id, it.name, it.version)
+            },
+        ),
+    ).build()
+
     @POST
     @Path("/programs/{id}/invites")
     suspend fun invite(
