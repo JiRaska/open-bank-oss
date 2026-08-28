@@ -59,45 +59,56 @@ data class ReferralReward(
 )
 
 sealed class ReferralEvent {
+    /**
+     * A consumer must only project the versioned evidence it understands.  The referral topic is
+     * shared and retained, so inferring a schema from a Kotlin class name would make a later
+     * producer change silently rewrite reporting history.
+     */
+    abstract val schemaVersion: Int
     abstract val eventType: String
     abstract val eventId: UUID
     abstract val occurredAt: Instant
     abstract val programId: UUID
+    abstract val programVersion: Int
     abstract val inviteId: UUID
 
     data class Qualified(
+        override val schemaVersion: Int = 2,
         override val eventId: UUID,
         override val occurredAt: Instant,
         override val programId: UUID,
+        override val programVersion: Int,
         override val inviteId: UUID,
-        val referrerPartyId: UUID,
-        val refereePartyId: UUID,
         val qualificationEventId: String,
     ) : ReferralEvent() {
-        override val eventType = "Qualified"
+        override val eventType = "QualifiedV2"
     }
 
     data class RewardRequested(
+        override val schemaVersion: Int = 2,
         override val eventId: UUID,
         override val occurredAt: Instant,
         override val programId: UUID,
+        override val programVersion: Int,
         override val inviteId: UUID,
         val rewardReference: String,
         val amount: BigDecimal,
         val currency: String,
     ) : ReferralEvent() {
-        override val eventType = "RewardRequested"
+        override val eventType = "RewardRequestedV2"
     }
 
     data class RewardOutcome(
+        override val schemaVersion: Int = 2,
         override val eventId: UUID,
         override val occurredAt: Instant,
         override val programId: UUID,
+        override val programVersion: Int,
         override val inviteId: UUID,
         val rewardReference: String,
         val outcome: LedgerOutcome,
     ) : ReferralEvent() {
-        override val eventType = "RewardOutcome"
+        override val eventType = "RewardOutcomeV2"
     }
 }
 

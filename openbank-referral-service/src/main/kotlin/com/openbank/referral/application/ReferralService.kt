@@ -192,9 +192,8 @@ class ReferralService(
                 eventId = Ids.randomId(),
                 occurredAt = now,
                 programId = program.id,
+                programVersion = program.version,
                 inviteId = invite.id,
-                referrerPartyId = invite.referrerPartyId,
-                refereePartyId = invite.refereePartyId,
                 qualificationEventId = eventId,
             )
         val requested =
@@ -202,6 +201,7 @@ class ReferralService(
                 eventId = Ids.randomId(),
                 occurredAt = now,
                 programId = program.id,
+                programVersion = program.version,
                 inviteId = invite.id,
                 rewardReference = reward.rewardReference,
                 amount = reward.amount,
@@ -215,6 +215,7 @@ class ReferralService(
     /** Contract boundary only: a future ledger adapter is the sole producer of these outcomes. */
     suspend fun applyLedgerOutcome(reference: String, outcome: LedgerOutcome, actor: String): ReferralReward {
         val reward = rewards.findByReference(reference) ?: throw ReferralNotFoundException("reward not found")
+        val program = programs.find(reward.programId) ?: throw ReferralNotFoundException("program not found")
         val now = Instant.now(clock)
         val next = when (outcome) {
             LedgerOutcome.ACCEPTED -> RewardStatus.REWARDED
@@ -225,6 +226,7 @@ class ReferralService(
             eventId = Ids.randomId(),
             occurredAt = now,
             programId = reward.programId,
+            programVersion = program.version,
             inviteId = reward.inviteId,
             rewardReference = reference,
             outcome = outcome,

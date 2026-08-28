@@ -125,9 +125,18 @@ class ReferralRestContractIT {
                     }
                 }
                 assertThat(rows).hasSize(expectedRows)
-                assertThat(rows.map { it.first }).containsExactly("Qualified", "RewardRequested")
+                assertThat(rows.map { it.first }).containsExactly(
+                    "QualifiedV2",
+                    "RewardRequestedV2",
+                )
                 assertThat(rows.map { it.second }).containsOnly("PENDING")
                 assertThat(rows.map { it.third }).allMatch { it.contains("\"eventId\"") }
+                assertThat(rows.map { it.third }).allMatch {
+                    it.contains("\"schemaVersion\":2") && it.contains("\"programVersion\":1")
+                }
+                assertThat(rows.map { it.third }).allMatch {
+                    !it.contains("referrerPartyId") && !it.contains("refereePartyId")
+                }
             }
         }
     }
