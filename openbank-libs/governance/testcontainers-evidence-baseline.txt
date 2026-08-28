@@ -32,7 +32,6 @@ openbank-interest-service/src/test/kotlin/com/openbank/interest/it/PostgresRedis
 openbank-lending-service/src/test/kotlin/com/openbank/lending/it/PostgresRedisTestResource.kt
 openbank-party-service/src/test/kotlin/com/openbank/party/it/PostgresRedpandaTestResource.kt
 openbank-psd2-service/src/test/kotlin/com/openbank/psd2/it/PostgresRedisTestResource.kt
-openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/it/PostgresTestResource.kt
 openbank-sca-service/src/test/kotlin/com/openbank/sca/it/PostgresRedisTestResource.kt
 openbank-sdd-service/src/test/kotlin/com/openbank/sdd/it/PostgresTestResource.kt
 openbank-sepa-instant/src/test/kotlin/com/openbank/sepainstant/it/PostgresRedpandaRedisTestResource.kt
