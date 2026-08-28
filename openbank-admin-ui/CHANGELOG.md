@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.218.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.217.0...admin-ui-v0.218.0) (2026-08-28)
+
+
+### Features
+
+* **referral:** stage sandbox workload ([#7174](https://github.com/JiRaska/open-bank-oss/issues/7174)) ([05e4a7d](https://github.com/JiRaska/open-bank-oss/commit/05e4a7d54f7d408f329407b2b496a5b23f6ea12d))
+
 ## [0.217.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.216.1...admin-ui-v0.217.0) (2026-08-28)
 
 
