@@ -279,7 +279,7 @@ jobs:
                 exit 1
               fi
               svc="$REQUESTED"
-              if ! grep -qxF "$svc" <<< "$ALL_SERVICES" || [ ! -f "$svc/Dockerfile" ]; then
+              if ! grep -qxF "$svc" <<< "${ALL_SERVICES// /$'\n'}" || [ ! -f "$svc/Dockerfile" ]; then
                 echo "::error::bootstrap target must be a known service with a committed Dockerfile"
                 exit 1
               fi
