@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Live-delivery copy of analytics-sink's V9__referral_funnel.sql. clickhouse-init only runs on an
+# Live-delivery copy of analytics-sink's V11__referral_funnel.sql. clickhouse-init only runs on an
 # empty data directory, so the PostSync schema hook applies this idempotent view to existing nodes.
 apiVersion: v1
 kind: ConfigMap
