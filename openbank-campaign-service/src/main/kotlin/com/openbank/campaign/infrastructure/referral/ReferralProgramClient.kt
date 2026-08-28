@@ -35,7 +35,12 @@ interface ReferralProgramClient {
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ReferralProgramResponse(val id: UUID, val name: String, val version: Int, val status: String)
+/**
+ * The Referral 200 response is deliberately a minimal immutable reference. Its HTTP contract
+ * already makes 200 mean published and unexpired; adding lifecycle fields here would both drift
+ * from that contract and make Campaign decide Referral-owned lifecycle semantics.
+ */
+data class ReferralProgramResponse(val id: UUID, val name: String, val version: Int)
 
 /** Live validation prevents a draft from pinning an invented or unpublished MGM programme. */
 @ApplicationScoped
@@ -43,7 +48,7 @@ class LiveReferralProgramCatalogAdapter(@RestClient private val client: Referral
     ReferralProgramCatalogPort {
     override suspend fun resolvePublished(id: UUID): ReferralProgramRef? = try {
         client.published(id).awaitSuspending().let { response ->
-            response.takeIf { it.status == "PUBLISHED" }?.let { ReferralProgramRef(it.id, it.name, it.version) }
+            ReferralProgramRef(response.id, response.name, response.version)
         }
     } catch (failure: WebApplicationException) {
         if (failure.response.status == Response.Status.NOT_FOUND.statusCode) null else throw failure

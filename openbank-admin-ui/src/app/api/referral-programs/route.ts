@@ -11,6 +11,23 @@ const referralServiceUrl = process.env.REFERRAL_SERVICE_URL ??
     ? 'https://referral-service.referral.svc:8443'
     : 'http://localhost:8155')
 
+interface ReferralProgramReference {
+  id: string
+  name: string
+  version: number
+}
+
+function isPublishedCatalogue(body: unknown): body is { items: ReferralProgramReference[] } {
+  if (!body || typeof body !== 'object' || !Array.isArray((body as { items?: unknown }).items)) return false
+  return (body as { items: unknown[] }).items.every(item => {
+    if (!item || typeof item !== 'object') return false
+    const reference = item as Partial<ReferralProgramReference>
+    return typeof reference.id === 'string' && reference.id.length > 0 &&
+      typeof reference.name === 'string' && reference.name.trim().length > 0 &&
+      Number.isInteger(reference.version) && (reference.version ?? 0) > 0
+  })
+}
+
 export async function GET() {
   const session = await auth()
   if (!session?.user?.accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
@@ -28,7 +45,9 @@ export async function GET() {
           : 'unreachable'
       return NextResponse.json({ items: [], state })
     }
-    return NextResponse.json({ items: await response.json(), state: 'ok' })
+    const body: unknown = await response.json()
+    if (!isPublishedCatalogue(body)) return NextResponse.json({ items: [], state: 'unreachable' })
+    return NextResponse.json({ items: body.items, state: 'ok' })
   } catch {
     return NextResponse.json({ items: [], state: 'unreachable' })
   }

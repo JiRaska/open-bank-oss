@@ -555,9 +555,6 @@ describe('campaign studio', () => {
           id: referralProgramId,
           name: 'friends-get-friends',
           version: 3,
-          rewardAmount: 500,
-          currency: 'CZK',
-          qualifyingEvent: 'FIRST_CARD_PAYMENT',
         }],
       }) }
       if (String(url).includes('/cadences')) return { ok: true, status: 200, json: async () => CADENCES }

@@ -58,18 +58,14 @@ interface ReferralProgram {
   id: string
   name: string
   version: number
-  rewardAmount: number
-  currency: string
-  qualifyingEvent: string
 }
 
 function isReferralProgram(value: unknown): value is ReferralProgram {
   if (!value || typeof value !== 'object') return false
   const item = value as Partial<ReferralProgram>
-  return typeof item.id === 'string' && typeof item.name === 'string' &&
-    Number.isInteger(item.version) && typeof item.rewardAmount === 'number' &&
-    typeof item.currency === 'string' && /^[A-Z]{3}$/.test(item.currency) &&
-    typeof item.qualifyingEvent === 'string'
+  return typeof item.id === 'string' && item.id.length > 0 &&
+    typeof item.name === 'string' && item.name.trim().length > 0 &&
+    Number.isInteger(item.version) && (item.version ?? 0) > 0
 }
 
 interface Cadence {
@@ -837,7 +833,7 @@ export default function NewCampaignPage() {
               const selectedProgram = referralProgramId === program.id
               return <button key={program.id} type="button" data-referral-program-pick={program.id} aria-pressed={selectedProgram} onClick={() => setReferralProgramId(program.id)} className="rounded-xl border p-4 text-left" style={selectedProgram ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}>
                 <p className="text-sm font-semibold">{program.name} · v{program.version}</p>
-                <p className="mt-1 text-xs text-muted-foreground">{new Intl.NumberFormat(undefined, { style: 'currency', currency: program.currency }).format(program.rewardAmount)} · {program.qualifyingEvent}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{t('Neměnná publikovaná reference; odměnu i kvalifikaci spravuje Referral.', 'Immutable published reference; Referral owns reward and qualification.')}</p>
               </button>
             })}
           </div>
