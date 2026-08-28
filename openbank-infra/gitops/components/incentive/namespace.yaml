@@ -4,6 +4,10 @@
 apiVersion: v1
 kind: Namespace
 metadata:
+  annotations:
+    # A clean manual/DR sync must create the namespace before the wave -1
+    # ExternalSecrets that target it. Keep this earlier than every namespaced prerequisite.
+    argocd.argoproj.io/sync-wave: "-3"
   name: incentive
   labels:
     openbank.io/plane: app
