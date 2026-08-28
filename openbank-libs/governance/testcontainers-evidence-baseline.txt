@@ -21,7 +21,6 @@ openbank-consent-service/src/test/kotlin/com/openbank/consent/it/ConsentPostgres
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/PostgresTestResource.kt
 openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/it/RedpandaRedisTestResource.kt
 openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/it/PostgresRedisTestResource.kt
-openbank-engagement-service/src/test/kotlin/com/openbank/engagement/integration/EngagementPostgresTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisRedpandaTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisTestResource.kt
 openbank-fx-service/src/test/kotlin/com/openbank/fx/it/PostgresRedisTestResource.kt
