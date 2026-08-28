@@ -73,6 +73,27 @@ describe('useSingleFlight', () => {
     await act(async () => { gate.resolve('ok') })
   })
 
+  it('keeps reactive busy and per-key state truthful when different keys settle out of order', async () => {
+    const { result } = renderHook(() => useSingleFlight())
+    const first = deferred<string>()
+    const second = deferred<string>()
+    await act(async () => {
+      result.current.run('first', () => first.promise)
+      result.current.run('second', () => second.promise)
+    })
+    expect(result.current.busy).toBe(true)
+    expect(result.current.isRunning('first')).toBe(true)
+    expect(result.current.isRunning('second')).toBe(true)
+
+    await act(async () => { second.resolve('second') })
+    expect(result.current.busy).toBe(true)
+    expect(result.current.isRunning('first')).toBe(true)
+    expect(result.current.isRunning('second')).toBe(false)
+
+    await act(async () => { first.resolve('first') })
+    expect(result.current.busy).toBe(false)
+  })
+
   it('reports which operation is active, and clears it on settle', async () => {
     const { result } = renderHook(() => useSingleFlight())
     const gate = deferred<string>()

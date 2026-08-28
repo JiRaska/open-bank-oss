@@ -48,32 +48,43 @@ export interface SingleFlight {
   run: <T>(key: string, fn: () => Promise<T>) => Promise<SingleFlightResult<T>>
   /** True while any operation is in flight — for `aria-busy` / disabled rendering. */
   busy: boolean
-  /** The key currently in flight, or null. Lets a UI say WHICH operation is running. */
+  /**
+   * The sole key currently in flight, or null when none (or several) are running.
+   * Prefer `isRunning(key)` for per-control rendering: different keys may run together.
+   */
   activeKey: string | null
+  /** All active keys, reactively updated for UIs that intentionally permit concurrency. */
+  activeKeys: readonly string[]
   /** Synchronous read; does not depend on a render having happened. */
   isRunning: (key: string) => boolean
 }
 
 export function useSingleFlight(): SingleFlight {
   const inFlight = useRef<Set<string>>(new Set())
-  const [activeKey, setActiveKey] = useState<string | null>(null)
+  const [activeKeys, setActiveKeys] = useState<readonly string[]>([])
 
-  const isRunning = useCallback((key: string) => inFlight.current.has(key), [])
+  const isRunning = useCallback((key: string) => activeKeys.includes(key), [activeKeys])
 
   const run = useCallback(async <T,>(key: string, fn: () => Promise<T>): Promise<SingleFlightResult<T>> => {
     // Synchronous claim BEFORE any await — this is the whole point of the hook.
     if (inFlight.current.has(key)) return SKIPPED
     inFlight.current.add(key)
-    setActiveKey(key)
+    setActiveKeys(keys => [...keys, key])
     try {
       return await fn()
     } finally {
       inFlight.current.delete(key)
-      setActiveKey(prev => (prev === key ? null : prev))
+      setActiveKeys(keys => keys.filter(active => active !== key))
     }
   }, [])
 
-  return { run, busy: activeKey !== null, activeKey, isRunning }
+  return {
+    run,
+    busy: activeKeys.length > 0,
+    activeKey: activeKeys.length === 1 ? activeKeys[0] : null,
+    activeKeys,
+    isRunning,
+  }
 }
 
 /**

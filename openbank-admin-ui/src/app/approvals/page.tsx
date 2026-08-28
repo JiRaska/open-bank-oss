@@ -60,7 +60,6 @@ export default function ApprovalsPage() {
   const [domainItems, setDomainItems] = useState<InboxItem[]>([])
   const [domainSources, setDomainSources] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
-  const [busyId, setBusyId] = useState<string | null>(null)
   const flight = useSingleFlight()
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
@@ -118,7 +117,6 @@ export default function ApprovalsPage() {
   // enforced server-side and is untouched by this lock.
   const decide = async (p: Proposal, approve: boolean) => {
     const outcome = await flight.run(`proposal:${p.id}`, async () => {
-    setBusyId(p.id)
     try {
       const res = await fetch('/api/agent/proposals', {
         method: 'POST',
@@ -134,8 +132,6 @@ export default function ApprovalsPage() {
       }
     } catch {
       setError('unreachable')
-    } finally {
-      setBusyId(null)
     }
     })
     if (wasSkipped(outcome)) return
@@ -290,11 +286,11 @@ export default function ApprovalsPage() {
                     onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}
                     style={{ flex: 1, minWidth: 180, fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}
                   />
-                  <button type="button" aria-label={t(`Schválit návrh ${p.title}`, `Approve proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, true)} disabled={busyId === p.id}
+                  <button type="button" aria-label={t(`Schválit návrh ${p.title}`, `Approve proposal ${p.title}`)} aria-busy={flight.isRunning(`proposal:${p.id}`)} onClick={() => decide(p, true)} disabled={flight.isRunning(`proposal:${p.id}`)}
                     style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #6ee7b7', background: '#ecfdf5', color: '#059669', cursor: 'pointer' }}>
                     <CheckCircle2 aria-hidden="true" size={14} /> {t('Schválit', 'Approve')}
                   </button>
-                  <button type="button" aria-label={t(`Zamítnout návrh ${p.title}`, `Reject proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, false)} disabled={busyId === p.id}
+                  <button type="button" aria-label={t(`Zamítnout návrh ${p.title}`, `Reject proposal ${p.title}`)} aria-busy={flight.isRunning(`proposal:${p.id}`)} onClick={() => decide(p, false)} disabled={flight.isRunning(`proposal:${p.id}`)}
                     style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
                     <XCircle aria-hidden="true" size={14} /> {t('Zamítnout', 'Reject')}
                   </button>

@@ -45,6 +45,7 @@ describe('audience library', () => {
     const submit = await screen.findByRole('button', { name: 'Submit for approval' })
     const approve = screen.getByRole('button', { name: 'Approve audience' })
     fireEvent.click(submit)
+    fireEvent.click(submit)
 
     expect(await screen.findByRole('button', { name: 'Submitting…' })).toHaveProperty('disabled', true)
     expect(approve).toHaveProperty('disabled', true)
