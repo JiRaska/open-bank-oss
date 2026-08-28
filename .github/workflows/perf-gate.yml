@@ -16,9 +16,12 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Space-separated service modules to test (blank = openbank-product-catalog)"
+        description: "Space-separated service modules to test (blank = declared v1 scope)"
         required: false
-        default: "openbank-product-catalog"
+        # A dispatch input's default is still a non-empty override.  Keeping this empty means
+        # an operator-triggered run measures the same declared Product Catalog + Flaky Test
+        # Hunter denominator as the scheduled run, unless they deliberately narrow it.
+        default: ""
 
 permissions:
   contents: read
