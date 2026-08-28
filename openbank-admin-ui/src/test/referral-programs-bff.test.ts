@@ -28,6 +28,14 @@ describe('referral program catalogue BFF', () => {
     expect(await (await GET()).json()).toEqual({ items: [], state: 'unreachable' })
   })
 
+  it('projects a valid upstream item to its immutable selection reference', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      items: [{ id: 'p-1', name: 'friends', version: 2, rewardAmount: 500, partyRef: 'must-not-leak' }],
+    })))
+    const { GET } = await import('@/app/api/referral-programs/route')
+    expect(await (await GET()).json()).toEqual({ items: [{ id: 'p-1', name: 'friends', version: 2 }], state: 'ok' })
+  })
+
   it('does not turn an unavailable service into an empty catalogue', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
     const { GET } = await import('@/app/api/referral-programs/route')

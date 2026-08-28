@@ -47,7 +47,11 @@ export async function GET() {
     }
     const body: unknown = await response.json()
     if (!isPublishedCatalogue(body)) return NextResponse.json({ items: [], state: 'unreachable' })
-    return NextResponse.json({ items: body.items, state: 'ok' })
+    // The admin edge is a data-minimising contract boundary. Even if an upstream regression adds
+    // Referral-owned reward, qualification, or party fields, Campaign Studio receives only its
+    // immutable selection reference.
+    const items = body.items.map(({ id, name, version }) => ({ id, name, version }))
+    return NextResponse.json({ items, state: 'ok' })
   } catch {
     return NextResponse.json({ items: [], state: 'unreachable' })
   }
