@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.216.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.216.0...admin-ui-v0.216.1) (2026-08-28)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop duplicate mutations with one single-flight mechanism ([#7290](https://github.com/JiRaska/open-bank-oss/issues/7290)) ([e8eb451](https://github.com/JiRaska/open-bank-oss/commit/e8eb451830bee519499e452494b8486611b4cb7e))
+
 ## [0.216.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.215.1...admin-ui-v0.216.0) (2026-08-28)
 
 
