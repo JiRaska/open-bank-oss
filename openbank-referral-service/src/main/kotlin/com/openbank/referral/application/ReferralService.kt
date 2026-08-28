@@ -91,6 +91,26 @@ class ReferralService(
         return published
     }
 
+    /**
+     * A Campaign may pin only a published program revision.  This deliberately exposes the
+     * immutable reference, not reward value or invite/customer data, and treats drafts/expired
+     * records exactly like a missing program so an upstream caller cannot infer unpublished work.
+     */
+    suspend fun publishedProgram(id: UUID): ReferralProgram? = programs.find(id)?.takeIf {
+        it.status == ProgramStatus.PUBLISHED && it.attributionWindowEndsAt.isAfter(Instant.now(clock))
+    }
+
+    /**
+     * Read-only Campaign catalogue. It repeats the published/expiry predicate after the repository
+     * query so a stale or alternate adapter cannot disclose a draft or expired programme.
+     */
+    suspend fun publishedPrograms(): List<ReferralProgram> {
+        val now = Instant.now(clock)
+        return programs.listPublished(now).filter {
+            it.status == ProgramStatus.PUBLISHED && it.attributionWindowEndsAt.isAfter(now)
+        }
+    }
+
     // ThrowsCount: three distinct guard-clause rejections, each a different machine-readable
     // reason the caller can branch on — collapsing them into one exception would erase that.
     @Suppress("ThrowsCount")
