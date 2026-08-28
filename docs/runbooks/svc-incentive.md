@@ -8,18 +8,17 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `incentive` service. Data domain **open-banking**,
 > classification **confidential**, datastore **PostgreSQL**.
 
-## Deployment status — NOT DEPLOYED
+## Deployment status — WORKLOAD NOT DEPLOYED
 
-**This service has no workload anywhere in `openbank-infra/gitops/`** — no Deployment,
-no Rollout, and therefore no namespace, no CNPG cluster, no NetworkPolicy and no
-PodMonitor coverage. It is a released component (it has a `version.txt`) that has never
-run, so **every `kubectl` command below names a namespace that does not exist** and every
-procedure here is a plan rather than a rehearsed one.
+**This service has no workload anywhere in `openbank-infra/gitops/`** — no Deployment
+or Rollout. Its data plane is declared separately (Namespace `incentive` and CNPG cluster), but
+declared GitOps state is not live evidence: do not run the workload, claim
+traffic, or treat backup configuration as healthy until the separately reviewed sync and
+cluster-health checks have completed. The operational commands below remain plans for the
+absent workload, not proof that it has ever run.
 
-The production-readiness matrix reports it as **NOT-DEPLOYED** rather than NO-GO for the
-same reason: the cells it fails are consequences of the absent workload, not controls
-someone skipped, and none of them can be closed by a repo change. Whether this service
-should be deployed is an owner decision — see the service's own `CLAUDE.md`.
+The production-readiness matrix reports this as **NOT-DEPLOYED** because the service
+workload is absent; a staged namespace or database cannot close runtime-readiness cells.
 
 ## Service identity
 
@@ -66,9 +65,8 @@ triaging an incident that starts on `incentive`.
 
 ## Disaster recovery
 
-- **RPO/RTO: undefined** — no backup is configured yet (see the prerequisite below), so no recovery-point/time guarantee can be made today.
-- **⚠ Prerequisite NOT met:** this PostgreSQL cluster has **no backup configured** (`barmanObjectStore` absent — prod-readiness C5=1). **DR is not achievable today** and the RPO/RTO targets above do NOT yet apply. Enabling the CNPG backup is the blocking prerequisite (see the backup sweep). Once enabled, the procedure is:
-- **Mechanism (after enablement):** CNPG continuous WAL + base backups → PITR.
+- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
+- **Mechanism:** CloudNativePG continuous WAL archiving + base backups to S3 (`barmanObjectStore`). Point-in-time recovery (PITR).
 - **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the backup object store; CNPG replays WAL to the target time. See runbook 0003 (PG major upgrade) for the cluster-recreate mechanics.
 - **Verify:** `kubectl cnpg status <db>-rw -n <ns>` shows the recovered cluster Healthy and the `*-app` secret regenerated.
 
