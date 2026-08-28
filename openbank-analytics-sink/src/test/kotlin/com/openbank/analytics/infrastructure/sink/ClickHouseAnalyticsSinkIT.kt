@@ -197,19 +197,35 @@ class ClickHouseAnalyticsSinkIT {
     fun `referral funnel deduplicates replayed reward facts by event id`() = runBlocking<Unit> {
         val programId = UUID.randomUUID().toString()
         val inviteId = UUID.randomUUID().toString()
-        val qualified = referralEvent("Qualified", mapOf("programId" to programId, "inviteId" to inviteId))
-        val requested = referralEvent(
-            "RewardRequested",
+        val qualified = referralEvent(
+            "QualifiedV2",
             mapOf(
                 "programId" to programId,
+                "programVersion" to 1,
                 "inviteId" to inviteId,
+                "qualificationEventId" to "qualification-1",
+            ),
+        )
+        val requested = referralEvent(
+            "RewardRequestedV2",
+            mapOf(
+                "programId" to programId,
+                "programVersion" to 1,
+                "inviteId" to inviteId,
+                "rewardReference" to "reward-1",
                 "amount" to 500,
                 "currency" to "CZK",
             ),
         )
         val accepted = referralEvent(
-            "RewardOutcome",
-            mapOf("programId" to programId, "inviteId" to inviteId, "outcome" to "ACCEPTED"),
+            "RewardOutcomeV2",
+            mapOf(
+                "programId" to programId,
+                "programVersion" to 1,
+                "inviteId" to inviteId,
+                "rewardReference" to "reward-1",
+                "outcome" to "ACCEPTED",
+            ),
         )
 
         // Replay the same request and outcome exactly as Kafka at-least-once delivery may do.
@@ -304,7 +320,7 @@ class ClickHouseAnalyticsSinkIT {
         eventType = eventType,
         occurredAt = Instant.now(),
         sourceService = "openbank-referral-service",
-        schemaVersion = 1,
+        schemaVersion = 2,
         payload = payload,
     )
 }

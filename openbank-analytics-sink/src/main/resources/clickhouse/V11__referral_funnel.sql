@@ -8,22 +8,22 @@
 CREATE OR REPLACE VIEW openbank_analytics.gold_referral_funnel AS
 SELECT
     JSONExtractString(dedup_payload, 'programId') AS program_id,
-    uniqExactIf(JSONExtractString(dedup_payload, 'inviteId'), dedup_event_type = 'Qualified') AS qualified_invites,
-    uniqExactIf(JSONExtractString(dedup_payload, 'inviteId'), dedup_event_type = 'RewardRequested') AS reward_requests,
+    uniqExactIf(JSONExtractString(dedup_payload, 'inviteId'), dedup_event_type = 'QualifiedV2') AS qualified_invites,
+    uniqExactIf(JSONExtractString(dedup_payload, 'inviteId'), dedup_event_type = 'RewardRequestedV2') AS reward_requests,
     uniqExactIf(
         JSONExtractString(dedup_payload, 'inviteId'),
-        dedup_event_type = 'RewardOutcome' AND JSONExtractString(dedup_payload, 'outcome') = 'ACCEPTED'
+        dedup_event_type = 'RewardOutcomeV2' AND JSONExtractString(dedup_payload, 'outcome') = 'ACCEPTED'
     ) AS rewarded_invites,
     uniqExactIf(
         JSONExtractString(dedup_payload, 'inviteId'),
-        dedup_event_type = 'RewardOutcome' AND JSONExtractString(dedup_payload, 'outcome') = 'REJECTED'
+        dedup_event_type = 'RewardOutcomeV2' AND JSONExtractString(dedup_payload, 'outcome') = 'REJECTED'
     ) AS failed_rewards,
     uniqExactIf(
         JSONExtractString(dedup_payload, 'inviteId'),
-        dedup_event_type = 'RewardOutcome' AND JSONExtractString(dedup_payload, 'outcome') = 'REVERSED'
+        dedup_event_type = 'RewardOutcomeV2' AND JSONExtractString(dedup_payload, 'outcome') = 'REVERSED'
     ) AS reversed_rewards,
-    sumIf(JSONExtractFloat(dedup_payload, 'amount'), dedup_event_type = 'RewardRequested') AS requested_reward_amount,
-    anyIf(JSONExtractString(dedup_payload, 'currency'), dedup_event_type = 'RewardRequested') AS currency,
+    sumIf(JSONExtractFloat(dedup_payload, 'amount'), dedup_event_type = 'RewardRequestedV2') AS requested_reward_amount,
+    anyIf(JSONExtractString(dedup_payload, 'currency'), dedup_event_type = 'RewardRequestedV2') AS currency,
     min(observed_at) AS first_observed_at,
     max(observed_at) AS last_observed_at
 FROM
@@ -35,7 +35,7 @@ FROM
         max(b.occurred_at) AS observed_at
     FROM openbank_analytics.bronze_events AS b
     WHERE upperUTF8(b.aggregate_type) = 'REFERRAL'
-      AND b.event_type IN ('Qualified', 'RewardRequested', 'RewardOutcome')
+      AND b.event_type IN ('QualifiedV2', 'RewardRequestedV2', 'RewardOutcomeV2')
       AND JSONExtractString(b.payload, 'programId') != ''
       AND JSONExtractString(b.payload, 'inviteId') != ''
     GROUP BY event_id
