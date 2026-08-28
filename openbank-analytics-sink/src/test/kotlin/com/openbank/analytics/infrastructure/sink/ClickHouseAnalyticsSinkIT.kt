@@ -62,7 +62,7 @@ class ClickHouseAnalyticsSinkIT {
                     "/docker-entrypoint-initdb.d/06-campaign-engagement.sql",
                 )
                 .withCopyFileToContainer(
-                    MountableFile.forClasspathResource("clickhouse/V9__referral_funnel.sql"),
+                    MountableFile.forClasspathResource("clickhouse/V11__referral_funnel.sql"),
                     "/docker-entrypoint-initdb.d/09-referral-funnel.sql",
                 )
                 .withExposedPorts(8123)
