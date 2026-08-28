@@ -48,14 +48,32 @@ class ReferralServiceTest {
         assertThat(service.publishedProgram(id)).isNull()
     }
 
+    @Test
+    fun `published programme catalogue fails closed for drafts and expired programmes`(): Unit = runBlocking {
+        val published = program(UUID.randomUUID(), ProgramStatus.PUBLISHED, name = "alpha", version = 2)
+        val draft = program(UUID.randomUUID(), ProgramStatus.DRAFT, name = "beta", version = 1)
+        val expired = program(
+            UUID.randomUUID(),
+            ProgramStatus.PUBLISHED,
+            attributionWindowEndsAt = Instant.parse("2026-08-27T23:59:59Z"),
+            name = "gamma",
+            version = 1,
+        )
+        coEvery { programs.listPublished(any()) } returns listOf(published, draft, expired)
+
+        assertThat(service.publishedPrograms()).containsExactly(published)
+    }
+
     private fun program(
         id: UUID,
         status: ProgramStatus,
         attributionWindowEndsAt: Instant = Instant.parse("2026-12-31T00:00:00Z"),
+        name: String = "term-deposit-referral",
+        version: Int = 2,
     ) = ReferralProgram(
         id = id,
-        name = "term-deposit-referral",
-        version = 2,
+        name = name,
+        version = version,
         rewardAmount = BigDecimal.TEN,
         currency = "EUR",
         qualifyingEvent = "account.opened",
