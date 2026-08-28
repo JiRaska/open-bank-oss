@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Classify a genuinely stalled GitHub-hosted service-build job (issue #7477).
+"""Classify a genuinely stalled GitHub-hosted service-CI job (issue #7477).
 
 This deliberately answers a narrower question than "is a workflow old?". A service CI
 build can spend legitimate time uploading Kover, generating its envelope or publishing
-artifacts. The only automatically-cancellable shape is the mandatory `Build + test`
-step itself remaining in progress past the bounded interval. A different job, a completed
-step, malformed API data or a fresh build is never an implicit cancellation candidate.
+artifacts. We cancel only two bounded shapes: the mandatory `Build + test` step itself,
+or a `Post Run …` action that has exceeded the interval after every substantive step
+already completed. The latter catches runner cleanup hangs without cancelling Kover,
+envelope creation or an active test. A different job, malformed API data or a fresh step
+is never an implicit cancellation candidate.
 
 The workflow owns reading the GitHub Actions API and cancellation. Keeping this classifier
 pure makes both the positive and the "do not cancel normal work" paths executable in CI.
@@ -23,6 +25,8 @@ from typing import Any
 
 BUILD_PREFIX = "build (openbank-"
 STEP_PREFIX = "Build + test (:openbank-"
+VERIFICATION_JOB = "verification-metadata"
+POST_RUN_PREFIX = "Post Run "
 
 
 def parse_time(value: Any) -> datetime | None:
@@ -43,34 +47,50 @@ def classify(payload: dict[str, Any], now: datetime, timeout_minutes: int) -> li
         if not isinstance(job, dict):
             raise ValueError("Actions jobs payload contains a non-object job")
         name = job.get("name")
-        if not isinstance(name, str) or not name.startswith(BUILD_PREFIX):
+        if not isinstance(name, str) or (not name.startswith(BUILD_PREFIX) and name != VERIFICATION_JOB):
             continue
         if job.get("status") != "in_progress":
             continue
-        started = parse_time(job.get("started_at"))
-        if started is None:
+        job_started = parse_time(job.get("started_at"))
+        if job_started is None:
             raise ValueError(f"{name} is in progress but has no valid started_at")
-        age_minutes = (now - started).total_seconds() / 60
-        if age_minutes < timeout_minutes:
-            continue
         steps = job.get("steps")
         if not isinstance(steps, list):
             raise ValueError(f"{name} is in progress but has no steps list")
         build_step = next((step for step in steps if isinstance(step, dict) and isinstance(step.get("name"), str)
                            and step["name"].startswith(STEP_PREFIX)), None)
-        if build_step is None:
-            # The service build has not reached its mandatory command. It may be queued or
-            # warming a cache; do not cancel it as though it had stalled (#7477's correction).
-            continue
-        if build_step.get("status") != "in_progress":
+        candidate_step = None
+        candidate_started = job_started
+        reason = "mandatory-build"
+        if build_step is not None and build_step.get("status") == "in_progress":
+            # The service build has reached its mandatory command and that command is still live.
+            candidate_step = build_step
+        else:
+            # A post-action may be cancelled only after every meaningful job step has completed.
+            # This deliberately excludes an in-progress Kover/envelope/upload step even on a
+            # long-lived job, and requires the post-action's own clock rather than job age.
+            substantive = [step for step in steps if isinstance(step, dict)
+                           and isinstance(step.get("name"), str) and not step["name"].startswith(POST_RUN_PREFIX)]
+            post_steps = [step for step in steps if isinstance(step, dict)
+                          and isinstance(step.get("name"), str) and step["name"].startswith(POST_RUN_PREFIX)
+                          and step.get("status") == "in_progress"]
+            if not substantive or any(step.get("status") != "completed" for step in substantive) or not post_steps:
+                continue
+            candidate_step = post_steps[0]
+            candidate_started = parse_time(candidate_step.get("started_at"))
+            if candidate_started is None:
+                raise ValueError(f"{name} has an in-progress post-action without valid started_at")
+            reason = "post-action"
+        age_minutes = (now - candidate_started).total_seconds() / 60
+        if age_minutes < timeout_minutes:
             continue
         job_id = job.get("id")
         html_url = job.get("html_url")
         if not isinstance(job_id, int) or not isinstance(html_url, str):
             raise ValueError(f"{name} has no stable job id or URL")
         stalled.append({
-            "jobId": str(job_id), "job": name, "step": str(build_step["name"]),
-            "startedAt": started.isoformat().replace("+00:00", "Z"), "ageMinutes": str(int(age_minutes)),
+            "jobId": str(job_id), "job": name, "step": str(candidate_step["name"]), "reason": reason,
+            "startedAt": candidate_started.isoformat().replace("+00:00", "Z"), "ageMinutes": str(int(age_minutes)),
             "url": html_url,
         })
     return stalled
@@ -86,6 +106,10 @@ def self_test() -> int:
         ("stalled mandatory build is selected", {"jobs": [base]}, 1),
         ("fresh mandatory build is not selected", {"jobs": [{**base, "started_at": "2026-08-28T11:40:00Z"}]}, 0),
         ("long Kover report is not selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Generate Kover XML report", "status": "in_progress"}]}]}, 0),
+        ("stalled post-action after completed build is selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 1),
+        ("fresh post-action is not selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:40:00Z"}]}]}, 0),
+        ("post-action beside active envelope is not selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Build Test Intelligence run envelope", "status": "in_progress"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 0),
+        ("verification post-action is selected", {"jobs": [{**base, "name": VERIFICATION_JOB, "steps": [{"name": "Check verification metadata", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 1),
         ("other workflow job is not selected", {"jobs": [{**base, "name": "CodeQL (java-kotlin, manual)"}]}, 0),
     ]
     failures = 0
