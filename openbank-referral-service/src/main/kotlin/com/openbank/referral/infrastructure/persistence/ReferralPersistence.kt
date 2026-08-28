@@ -145,6 +145,13 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
     }.awaitSuspending().let { p }
     override suspend fun find(id: UUID) =
         Panache.withSession { find("id", id).firstResult<ReferralProgramEntity>() }.awaitSuspending()?.toDomain()
+    override suspend fun listPublished(at: Instant): List<ReferralProgram> = Panache.withSession {
+        list(
+            "status = ?1 and attributionWindowEndsAt > ?2 order by name asc, version desc",
+            ProgramStatus.PUBLISHED.name,
+            at,
+        )
+    }.awaitSuspending().map { it.toDomain() }
     override suspend fun publish(id: UUID, maker: String, checker: String, at: Instant) = Panache.withTransaction {
         find("id", id).firstResult<ReferralProgramEntity>().map { e ->
             requireNotNull(e)
