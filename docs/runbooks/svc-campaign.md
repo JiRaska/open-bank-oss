@@ -30,7 +30,7 @@ triaging an incident that starts on `campaign`.
 
 ## Health & probes
 
-- Readiness: `GET :8128/q/health/ready` · Liveness: `GET :8128/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `campaign`); dashboards in Grafana.
 - Logs: `kubectl logs -n campaign deploy/campaign-service -f`, or Loki
   `{namespace="campaign"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `campaign`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/campaign-service -n campaign` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/campaign-service -n campaign --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/campaign-service -n campaign --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

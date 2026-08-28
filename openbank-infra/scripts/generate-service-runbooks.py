@@ -95,6 +95,52 @@ def service_namespace(short: str) -> str:
     return gitops_facts.service_namespace(short, GITOPS) or short
 
 
+def zero_replica_workload(short: str) -> bool:
+    """True when GitOps deliberately stages this service with no runnable replicas.
+
+    A Deployment object is desired state, not proof of a running service. In particular, a
+    reviewed zero-replica manifest is an activation gate: treating it like an operational workload
+    would hand an operator a `kubectl scale` bypass before the image, sync, and live-health gates
+    have been satisfied.
+    """
+    component = GITOPS / "components" / short
+    for path in component.glob("*.yaml"):
+        for document in re.split(r"^---\s*$", read(path), flags=re.M):
+            if not re.search(r"^kind:\s*(?:Deployment|Rollout)\s*$", document, re.M):
+                continue
+            if re.search(r"^\s{2}replicas:\s*0\s*$", document, re.M):
+                return True
+    return False
+
+
+def management_port(short: str) -> str:
+    """The management endpoint port declared by the workload, with config fallback.
+
+    Health and metrics are served on the named management port for several services, not the
+    public HTTP listener. Prefer the workload declaration because it is the exact deployed
+    contract; retain the shared Quarkus default only when no workload declares one.
+    """
+    component = GITOPS / "components" / short
+    for path in component.glob("*.yaml"):
+        match = re.search(
+            r"(?ms)^\s*- name:\s*management\s*\n\s*containerPort:\s*(\d+)\s*$",
+            read(path),
+        )
+        if match:
+            return match.group(1)
+    lines = read(
+        gitops_facts.module_dir(short, REPO) / "src" / "main" / "resources" / "application.yaml"
+    ).splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() != "management:":
+            continue
+        for nested in lines[index + 1:index + 12]:
+            match = re.match(r"^\s*port:\s*(\d+)\s*$", nested)
+            if match:
+                return match.group(1)
+    return "8085"
+
+
 def deployment_status(short: str) -> str:
     """A banner for a service with NO workload in gitops — Deployment, Rollout or nothing.
 
@@ -103,6 +149,18 @@ def deployment_status(short: str) -> str:
     and the matrix cannot disagree about whether a service runs. Empty for every deployed
     service, so this changes no committed runbook but the undeployed one.
     """
+    if zero_replica_workload(short):
+        return (
+            "## Deployment status — WORKLOAD STAGED, ACTIVATION PENDING\n"
+            "\n"
+            "**GitOps deliberately declares zero replicas for this workload.** This is not a live\n"
+            "service and does not authorize a replica increase, restart, log inspection, traffic claim,\n"
+            "or metrics/health assertion. Activation remains the separately reviewed step after the\n"
+            "pinned image, GitOps sync, and live cluster-health evidence are available. After that\n"
+            f"step, health must be checked on the management endpoint `:{management_port(short)}`;\n"
+            "the public HTTP port is not a health-evidence substitute.\n"
+            "\n"
+        )
     if gitops_facts.service_namespace(short, GITOPS) is not None:
         return ""
     component = GITOPS / "components" / short
@@ -276,18 +334,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `{short}`.
 
-## Health & probes
-
-- Readiness: `GET :{port}/q/health/ready` · Liveness: `GET :{port}/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `{ns}`); dashboards in Grafana.
-- Logs: {logs_cmd}, or Loki
-  `{{namespace="{ns}"}}`.
-
-## Routine operations
-
-- **Restart:** {restart_cmd}
-- **Scale:** {scale_cmd} (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
-- **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
+{runtime_sections}
 
 ## Common failure modes
 
@@ -353,6 +400,37 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
     }
 
 
+def runtime_sections(short: str, ns: str) -> str:
+    """Render operational commands only for a workload that is intended to run."""
+    if zero_replica_workload(short):
+        return (
+            "## Runtime operations — DEFERRED\n"
+            "\n"
+            "Do not increase replicas, restart, or use log/metrics commands to activate this staged\n"
+            "workload. The reviewed activation procedure must first establish the signed image,\n"
+            "GitOps sync, and actual cluster health. It will then use management health endpoints\n"
+            f"`GET :{management_port(short)}/q/health/ready` and\n"
+            f"`GET :{management_port(short)}/q/health/live`.\n"
+        )
+    commands = ops_commands(short, ns)
+    return (
+        "## Health & probes\n"
+        "\n"
+        f"- Readiness: `GET :{management_port(short)}/q/health/ready` · Liveness: "
+        f"`GET :{management_port(short)}/q/health/live`\n"
+        f"- Metrics: scraped by the fleet PodMonitor (namespace `{ns}`); dashboards in Grafana.\n"
+        f"- Logs: {commands['logs_cmd']}, or Loki\n"
+        f"  `{{namespace=\"{ns}\"}}`.\n"
+        "\n"
+        "## Routine operations\n"
+        "\n"
+        f"- **Restart:** {commands['restart_cmd']}\n"
+        f"- **Scale:** {commands['scale_cmd']} (or edit the GitOps manifest — GitOps is source of truth, "
+        "a later ArgoCD sync reconciles manual changes).\n"
+        "- **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.\n"
+    )
+
+
 def render(short: str) -> str:
     f = gov_facts(short)
     up = ", ".join(f"`{s}`" for s in f.get("upstream", [])) or "_none declared_"
@@ -416,7 +494,7 @@ def render(short: str) -> str:
         downstream=down,
         rpo=rpo,
         dr=dr_for(datastore, has_backup, owns_none),
-        **ops_commands(short, service_namespace(short)),
+        runtime_sections=runtime_sections(short, service_namespace(short)).rstrip(),
     )
 
 
@@ -513,6 +591,17 @@ def self_test() -> int:
     deployed = [x for x in all_services() if gitops_facts.service_namespace(x, GITOPS) is not None]
     case("a deployed service gets no deployment banner",
          all(deployment_status(x) == "" for x in deployed[:5]))
+    # A zero-replica Deployment is a deliberate activation gate, not an operational workload.
+    # Referral is the real staged instance in this repository; using it keeps the guard coupled to
+    # the manifest that must not regress into an accidental manual-scale playbook.
+    if "referral" in deployed:
+        t = render("referral")
+        case("a zero-replica workload is rendered as staged rather than operational",
+             says(t, "WORKLOAD STAGED", "ACTIVATION PENDING", "Runtime operations — DEFERRED"))
+        case("a zero-replica workload never offers a manual scale bypass",
+             "kubectl scale" not in t)
+        case("a staged workload names its declared management health port",
+             "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
     if undeployed:
         absent_data_plane = [
             x for x in undeployed if "namespace that does not exist" in deployment_status(x)
@@ -557,7 +646,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: runbook DR classifier is falsifiable (17 cases)")
+    print("self-test ok: runbook deployment/DR classifier is falsifiable (20 cases)")
     return 0
 
 def main():

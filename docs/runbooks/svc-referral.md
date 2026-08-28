@@ -8,6 +8,15 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `referral` service. Data domain **open-banking**,
 > classification **confidential**, datastore **PostgreSQL**.
 
+## Deployment status — WORKLOAD STAGED, ACTIVATION PENDING
+
+**GitOps deliberately declares zero replicas for this workload.** This is not a live
+service and does not authorize a replica increase, restart, log inspection, traffic claim,
+or metrics/health assertion. Activation remains the separately reviewed step after the
+pinned image, GitOps sync, and live cluster-health evidence are available. After that
+step, health must be checked on the management endpoint `:8086`;
+the public HTTP port is not a health-evidence substitute.
+
 ## Service identity
 
 | Field | Value |
@@ -28,18 +37,13 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `referral`.
 
-## Health & probes
+## Runtime operations — DEFERRED
 
-- Readiness: `GET :8155/q/health/ready` · Liveness: `GET :8155/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `referral`); dashboards in Grafana.
-- Logs: `kubectl logs -n referral deploy/referral-service -f`, or Loki
-  `{namespace="referral"}`.
-
-## Routine operations
-
-- **Restart:** `kubectl rollout restart deploy/referral-service -n referral` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/referral-service -n referral --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
-- **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
+Do not increase replicas, restart, or use log/metrics commands to activate this staged
+workload. The reviewed activation procedure must first establish the signed image,
+GitOps sync, and actual cluster health. It will then use management health endpoints
+`GET :8086/q/health/ready` and
+`GET :8086/q/health/live`.
 
 ## Common failure modes
 
