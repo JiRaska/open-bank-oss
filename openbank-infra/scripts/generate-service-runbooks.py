@@ -105,6 +105,38 @@ def deployment_status(short: str) -> str:
     """
     if gitops_facts.service_namespace(short, GITOPS) is not None:
         return ""
+    component = GITOPS / "components" / short
+    data_plane = "\n".join(read(path) for path in component.glob("*.yaml"))
+    staged_namespace = re.search(
+        r"^kind:\s*Namespace\s*$.*?^\s{2}name:\s*(\S+)", data_plane, re.M | re.S
+    )
+    staged_cnpg = bool(re.search(
+        r"^apiVersion:\s*postgresql\.cnpg\.io/\S+\s*$.*?^kind:\s*Cluster\s*$",
+        data_plane,
+        re.M | re.S,
+    ))
+    if staged_namespace or staged_cnpg:
+        namespace = staged_namespace.group(1) if staged_namespace else short
+        data_plane_facts = []
+        if staged_namespace:
+            data_plane_facts.append(f"Namespace `{namespace}`")
+        if staged_cnpg:
+            data_plane_facts.append("CNPG cluster")
+        data_plane_description = " and ".join(data_plane_facts)
+        return (
+            "## Deployment status — WORKLOAD NOT DEPLOYED\n"
+            "\n"
+            "**This service has no workload anywhere in `openbank-infra/gitops/`** — no Deployment\n"
+            f"or Rollout. Its data plane is declared separately ({data_plane_description}), but\n"
+            "declared GitOps state is not live evidence: do not run the workload, claim\n"
+            "traffic, or treat backup configuration as healthy until the separately reviewed sync and\n"
+            "cluster-health checks have completed. The operational commands below remain plans for the\n"
+            "absent workload, not proof that it has ever run.\n"
+            "\n"
+            "The production-readiness matrix reports this as **NOT-DEPLOYED** because the service\n"
+            "workload is absent; a staged namespace or database cannot close runtime-readiness cells.\n"
+            "\n"
+        )
     return (
         "## Deployment status — NOT DEPLOYED\n"
         "\n"
@@ -482,11 +514,27 @@ def self_test() -> int:
     case("a deployed service gets no deployment banner",
          all(deployment_status(x) == "" for x in deployed[:5]))
     if undeployed:
-        t = deployment_status(undeployed[0])
-        case("an undeployed service is told its kubectl commands name a namespace that does not exist",
-             says(t, "NOT DEPLOYED", "namespace that does not exist"))
-        case("...and the banner reaches the rendered runbook",
-             "NOT DEPLOYED" in render(undeployed[0]))
+        absent_data_plane = [
+            x for x in undeployed if "namespace that does not exist" in deployment_status(x)
+        ]
+        if absent_data_plane:
+            t = deployment_status(absent_data_plane[0])
+            case(
+                "an undeployed service without a staged data plane is told its kubectl commands name a namespace that does not exist",
+                says(t, "NOT DEPLOYED", "namespace that does not exist"),
+            )
+        staged_data_plane = [
+            x for x in undeployed if "data plane is declared separately" in deployment_status(x)
+        ]
+        if staged_data_plane:
+            t = deployment_status(staged_data_plane[0])
+            case(
+                "an undeployed service with a staged data plane never calls that declared namespace absent",
+                says(t, "WORKLOAD NOT DEPLOYED", "data plane is declared separately")
+                and "namespace that does not exist" not in t,
+            )
+        case("...and every undeployed banner reaches its rendered runbook",
+             all("NOT DEPLOYED" in render(x) for x in undeployed))
     # No `else` that passes: an empty undeployed set is the expected steady state (every released
     # component deployed), and the two cases above are then vacuous rather than wrong.
 
