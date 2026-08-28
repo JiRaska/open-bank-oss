@@ -1,6 +1,7 @@
-# Incentive domain (ADR-0037: domain = namespace). This foundation intentionally contains no
-# service Deployment, image reference, or secret projection. Those arrive only after the signed
-# image, backup identity, and externally seeded promo-code pepper are independently evidenced.
+# Incentive domain (ADR-0037: domain = namespace). This component intentionally contains no
+# service Deployment, image reference, Service, or NetworkPolicy. Its secret projections are
+# staged prerequisites only; a later reviewed workload still requires the signed image, backup
+# identity, and externally seeded promo-code pepper to be independently evidenced.
 apiVersion: v1
 kind: Namespace
 metadata:
