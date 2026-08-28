@@ -104,6 +104,15 @@ on:
         type: boolean
         required: false
         default: false
+      bootstrap_image_only:
+        description: >-
+          Build, sign and attest exactly one service image that has no GitOps manifest yet.
+          This is an artifact-only bootstrap: it never runs the contract deploy gate, rewrites
+          GitOps, opens a PR or deploys a workload. Use the resulting immutable image only in a
+          separately reviewed first-manifest PR.
+        type: boolean
+        required: false
+        default: false
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); each job below declares its own override for the access it needs.
@@ -147,6 +156,7 @@ jobs:
         env:
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
+          INPUT_SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -euo pipefail
           # Full fleet — unlike services-ci.yml (which discovers every openbank-*/
@@ -258,6 +268,31 @@ jobs:
           # commit leaves the contract gate with no pact version for this SHA and produces the
           # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
+              if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
+                echo "::error::bootstrap_image_only and reconcile are mutually exclusive"
+                exit 1
+              fi
+              REQUESTED="$INPUT_SERVICES"
+              if [ "$(wc -w <<< "$REQUESTED" | tr -d ' ')" -ne 1 ]; then
+                echo "::error::bootstrap_image_only requires exactly one service"
+                exit 1
+              fi
+              svc="$REQUESTED"
+              if ! grep -qxF "$svc" <<< "$ALL_SERVICES" || [ ! -f "$svc/Dockerfile" ]; then
+                echo "::error::bootstrap target must be a known service with a committed Dockerfile"
+                exit 1
+              fi
+              if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
+                echo "::error::bootstrap_image_only is only for a service with no GitOps manifest"
+                exit 1
+              fi
+              SERVICES_JSON="$(printf '%s\n' "$svc" | jq -R . | jq -sc .)"
+              echo "artifact-only bootstrap → building: $SERVICES_JSON"
+              echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
+              echo "any=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             # Reconcile on demand: use the same logic as the schedule tick, which picks the
             # correct per-service commit instead of forcing everything onto the current HEAD.
             if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
@@ -275,7 +310,7 @@ jobs:
               exit 0
             fi
 
-            REQUESTED="${{ github.event.inputs.services }}"
+            REQUESTED="$INPUT_SERVICES"
             if [ -z "$REQUESTED" ]; then
               echo "::error::workflow_dispatch with empty services is only allowed when reconcile=true. A blank manual dispatch of the full fleet at an unrelated commit creates the NOT_ASKED / missing-pact failures seen in runs 31149468822 and 31150052893. Use reconcile=true to re-drive stranded services, or list explicit services that changed in the current HEAD."
               exit 1
@@ -866,7 +901,7 @@ jobs:
   can-i-deploy:
     name: can-i-deploy
     needs: [changes, build-push]
-    if: needs.changes.outputs.any == 'true'
+    if: needs.changes.outputs.any == 'true' && github.event.inputs.bootstrap_image_only != 'true'
     # Stays on the self-hosted pool: the Pact Broker has no public ingress
     # (ADR-0056) and is only resolvable over cluster DNS. ARC scale-to-zero
     # serves this label at ~$0 idle.
@@ -975,6 +1010,7 @@ jobs:
     if: |
       always() &&
       needs.changes.outputs.any == 'true' &&
+      github.event.inputs.bootstrap_image_only != 'true' &&
       needs.build-push.result == 'success' &&
       needs.can-i-deploy.result != 'cancelled'
     runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
