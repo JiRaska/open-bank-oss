@@ -127,8 +127,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.items[10]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
     expect(body.items[11]).toMatchObject({ domain: 'agent', action: 'agent.research' })
     expect(body.items[12]).toMatchObject({ domain: 'transaction', action: 'transaction.reverse', maker: 'teller.d' })
-    expect(body.sources.account).toBe('not-configured')
-    expect(body.sources.balance).toBe('not-configured')
+    expect(body.sources.party).toBe('ok')
   })
 
   // The regression this file exists to prevent, stated as a test for the transaction slice of
