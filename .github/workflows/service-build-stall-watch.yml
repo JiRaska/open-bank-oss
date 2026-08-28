@@ -1,4 +1,4 @@
-# Cancel only a proven-stalled mandatory service build, then leave an addressed audit trail.
+# Cancel only a proven-stalled service CI job, then leave an addressed audit trail.
 # A cancelled test run is never turned green; Services CI's normal failure/retry path owns its
 # immutable diagnostics and any later rerun. This control prevents an invisible in-progress job
 # from blocking its PR forever (issue #7477).
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Self-test classifier
         run: python3 .github/scripts/check-stuck-service-build.py --self-test
-      - name: Find and cancel only stalled mandatory service builds
+      - name: Find and cancel only proved stalled service CI jobs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -55,7 +55,7 @@ jobs:
           jq -c '.[]' /tmp/stalled.json | while IFS= read -r candidate; do
             run_id=$(jq -r '.runId' <<<"$candidate")
             title="CI stalled service build: $(jq -r '.job' <<<"$candidate")"
-            body=$(jq -r '"<!-- service-build-stall:" + .runId + ":" + .jobId + " -->\n\n## Mandatory service build was cancelled after no progress\n\n| | |\n|---|---|\n| workflow run | [run " + .runId + " attempt " + .attempt + "](" + .runUrl + ") |\n| stalled job | [" + .job + "](" + .url + ") |\n| stalled step | `" + .step + "` |\n| started | `" + .startedAt + "` |\n| observed age | `" + .ageMinutes + " minutes` |\n\nThe watchdog only acts when the mandatory `Build + test` step itself exceeds 45 minutes. It does not cancel Kover, envelope or artifact publication. The cancellation preserves GitHub attempt diagnostics and does **not** create a green verdict. Inspect and rerun through the normal CI path.\n\n_Automated by Service build stall watch (issue #7477)._"' <<<"$candidate")
+            body=$(jq -r '"<!-- service-build-stall:" + .runId + ":" + .jobId + " -->\n\n## Service CI job was cancelled after no progress\n\n| | |\n|---|---|\n| workflow run | [run " + .runId + " attempt " + .attempt + "](" + .runUrl + ") |\n| stalled job | [" + .job + "](" + .url + ") |\n| stalled step | `" + .step + "` |\n| classifier | `" + .reason + "` |\n| started | `" + .startedAt + "` |\n| observed age | `" + .ageMinutes + " minutes` |\n\nThe watchdog acts only when the mandatory `Build + test` step itself exceeds 45 minutes, or when every substantive step completed and a `Post Run …` action alone exceeds 45 minutes. It never cancels Kover, envelope creation or artifact publication while those steps are active. The cancellation preserves GitHub attempt diagnostics and does **not** create a green verdict. Inspect and rerun through the normal CI path.\n\n_Automated by Service build stall watch (issue #7477)._"' <<<"$candidate")
             if [ "$DRY_RUN" = "true" ]; then
               echo "::warning title=CI stalled-build dry run::${title}"
               continue
