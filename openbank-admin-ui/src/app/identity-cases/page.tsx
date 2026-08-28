@@ -5,6 +5,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -78,7 +79,15 @@ function DecisionForm({
 
   const isSecond = c.status === 'AWAITING_SECOND_APPROVAL'
 
+  // NOTE ON SCOPE (#7096): this lock stops ONE approver double-activating. It does
+  // NOT and cannot serialize two DIFFERENT approvers racing the same case — nothing
+  // in this browser observes the other operator. That race is arbitrated server-side
+  // and answers 409 (handled below); claiming otherwise would be a control that
+  // reports healthy while the race is still there.
+  const flight = useSingleFlight()
+
   const submit = useCallback(async () => {
+    const outcome = await flight.run(`identity-case:${c.id}`, async () => {
     setBusy(true)
     setError(null)
     try {
@@ -108,9 +117,12 @@ function DecisionForm({
     } finally {
       setBusy(false)
     }
-  }, [verdict, linkPartyId, notes, c.id, onDecided, t])
+    })
+    if (wasSkipped(outcome)) return
+  }, [flight, verdict, linkPartyId, notes, c.id, onDecided, t])
 
   const reopen = useCallback(async () => {
+    const outcome = await flight.run(`identity-case:${c.id}`, async () => {
     setBusy(true)
     setError(null)
     try {
@@ -128,7 +140,9 @@ function DecisionForm({
     } finally {
       setBusy(false)
     }
-  }, [c.id, onDecided, t])
+    })
+    if (wasSkipped(outcome)) return
+  }, [flight, c.id, onDecided, t])
 
   return (
     <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border)' }}>
