@@ -3,7 +3,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import SegmentsPage from '@/app/segments/page'
 import { SessionProvider } from 'next-auth/react'
@@ -44,8 +44,12 @@ describe('audience library', () => {
     render(React.createElement(SessionProvider, { session }, React.createElement(LanguageProvider, null, React.createElement(SegmentsPage))))
     const submit = await screen.findByRole('button', { name: 'Submit for approval' })
     const approve = screen.getByRole('button', { name: 'Approve audience' })
-    fireEvent.click(submit)
-    fireEvent.click(submit)
+    await act(async () => {
+      // Native activations share one React batch. This is the pre-render race that
+      // `disabled` cannot stop; only the hook's synchronous ref claim can.
+      submit.click()
+      submit.click()
+    })
 
     expect(await screen.findByRole('button', { name: 'Submitting…' })).toHaveProperty('disabled', true)
     expect(approve).toHaveProperty('disabled', true)
