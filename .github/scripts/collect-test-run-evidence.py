@@ -461,8 +461,12 @@ def specialized_evidence(
         if synthetic_variant and sidecar_variant and sidecar_variant != synthetic_variant:
             raise ValueError("browser vitals sidecar does not match --synthetic-variant")
         variant = synthetic_variant or sidecar_variant
+        # A zero CLS is a valid, stable page. A zero FCP is not a paint observation:
+        # k6's summary export uses it for an unavailable paint metric. Do not turn that
+        # absence into a passing browser-performance verdict (#7371).
         valid = (variant in {"chromium", "firefox", "webkit"} and isinstance(metrics, dict)
-                 and all(isinstance(metrics.get(key), (int, float)) and metrics[key] >= 0 for key in ("fcpMs", "cls")))
+                 and isinstance(metrics.get("fcpMs"), (int, float)) and metrics["fcpMs"] > 0
+                 and isinstance(metrics.get("cls"), (int, float)) and metrics["cls"] >= 0)
         state = e2e["state"] if e2e and e2e["state"] == "failed" else "passed" if e2e and valid else "not-run"
         detail = (f"{e2e['executed']}/{e2e['discovered']} browser E2E checks; FCP {round(metrics['fcpMs'])}ms, CLS {metrics['cls']:.3f}"
                   if e2e and valid else "browser Web Vitals sample absent or unattributable" if e2e else "browser E2E JUnit report absent")
@@ -581,6 +585,11 @@ def main() -> None:
             browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004}}')
             browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
             assert browser_synthetic == [{"kind": "synthetic", "state": "passed", "source": "journey:admin-ui-sso-boundary", "detail": "1/1 browser E2E checks; FCP 321ms, CLS 0.004", "variant": "chromium"}]
+            # A browser summary may encode an unavailable FCP as zero. That must stay
+            # explicit instead of becoming a green Web Vitals sample; zero CLS remains valid.
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":0,"cls":0}}')
+            browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert browser_synthetic == [{"kind": "synthetic", "state": "not-run", "source": "journey:admin-ui-sso-boundary", "detail": "browser Web Vitals sample absent or unattributable", "variant": "chromium"}]
             valid = {
                 "schemaVersion": 1,
                 "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "observedAt": "2026-08-22T21:12:00Z"},
