@@ -103,8 +103,10 @@ spec:
                     # `grep` exits 1 when a tag has zero values; under `set -o pipefail` that
                     # non-zero status would kill the whole job (it did, every run). Swallow it
                     # so a legitimately-empty attribute counts as 0 instead of aborting.
+                    # This is a cardinality audit, not a telemetry explorer: values may include
+                    # the pseudonymous party_id.  Never put a response sample in logs.
                     count=$(echo "$result" | { grep -o '"value"' || true; } | wc -l | tr -d ' ')
-                    echo "{\"event\":\"rum-attribute-audit\",\"attribute\":\"${attr}\",\"unique_value_count\":${count},\"sample\":$(echo "$result" | head -c 512)}"
+                    echo "{\"event\":\"rum-attribute-audit\",\"attribute\":\"${attr}\",\"unique_value_count\":${count}}"
                   done
                   # RUM-INGEST LIVENESS. The attribute audit above verifies the redaction
                   # allow-list, but app.version, device.model and screen.name are client-version
