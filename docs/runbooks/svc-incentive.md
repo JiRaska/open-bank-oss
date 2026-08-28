@@ -42,7 +42,7 @@ triaging an incident that starts on `incentive`.
 
 ## Health & probes
 
-- Readiness: `GET :8156/q/health/ready` · Liveness: `GET :8156/q/health/live`
+- Readiness: `GET :8087/q/health/ready` · Liveness: `GET :8087/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `incentive`); dashboards in Grafana.
 - Logs: `kubectl logs -n incentive deploy/incentive-service -f`, or Loki
   `{namespace="incentive"}`.
@@ -50,7 +50,7 @@ triaging an incident that starts on `incentive`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/incentive-service -n incentive` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/incentive-service -n incentive --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/incentive-service -n incentive --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
