@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.217.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.216.1...admin-ui-v0.217.0) (2026-08-28)
+
+
+### Features
+
+* **party:** expose pending approvals in unified inbox ([#7020](https://github.com/JiRaska/open-bank-oss/issues/7020)) ([0445a3e](https://github.com/JiRaska/open-bank-oss/commit/0445a3ec6c9fafc25c3640998b3872cb118aa94b))
+
 ## [0.216.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.216.0...admin-ui-v0.216.1) (2026-08-28)
 
 
