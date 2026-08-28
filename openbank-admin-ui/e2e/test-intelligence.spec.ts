@@ -70,6 +70,8 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(page.getByLabel('Browser matrix for Admin UI SSO boundary')).toContainText('chromium')
   await expect(page.getByLabel('Browser matrix for Admin UI SSO boundary')).toContainText('firefox')
   await expect(page.getByLabel('Browser matrix for Admin UI SSO boundary')).toContainText('not-run')
+  await expect(page.getByLabel('chromium browser evidence')).toContainText('Browser E2E and attributable Web Vitals passed.')
+  await expect(page.getByLabel('firefox browser evidence')).toContainText('No retained immutable envelope for this declared browser variant.')
   await expect(page.getByText('ledger · Covered')).toBeVisible()
   await expect(page.getByText('payment · Unwatched')).toBeVisible()
   await expect(page.getByLabel('openbank-ledger-service: Covered. public-edge')).toBeVisible()
