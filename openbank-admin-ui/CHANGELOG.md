@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.216.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.215.1...admin-ui-v0.216.0) (2026-08-28)
+
+
+### Features
+
+* **admin-ui:** expose browser evidence details ([#7505](https://github.com/JiRaska/open-bank-oss/issues/7505)) ([b235637](https://github.com/JiRaska/open-bank-oss/commit/b235637cecd941af11939749573de4fa06111707))
+
 ## [0.215.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.215.0...admin-ui-v0.215.1) (2026-08-27)
 
 
