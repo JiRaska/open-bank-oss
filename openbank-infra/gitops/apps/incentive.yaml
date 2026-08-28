@@ -1,9 +1,8 @@
-# Data-plane-only Incentive foundation. Do not add a Deployment or image pin here: the service
-# has a fail-closed PROMO_CODE_PEPPER startup gate. This Application also deliberately has no
-# automated sync: CNPG must not create a database before the separately reviewed EKS Pod Identity
-# association is applied and observed. Workload, network policy, and customer-edge wiring remain
-# later independently reviewed rollout steps. Kafka mTLS and Vault references may be staged here
-# without a workload, but must not be treated as a live producer or traffic activation.
+# Incentive desired state includes the reviewed workload and its prerequisites. This Application
+# deliberately has no automated sync: the manifest is not evidence that a pod, database, scrape,
+# or traffic path exists. The service has a fail-closed PROMO_CODE_PEPPER startup gate; customer-edge
+# wiring remains a later independently reviewed step. Kafka mTLS and Vault references must not be
+# treated as a live producer or traffic activation until manual sync and observed health complete.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
