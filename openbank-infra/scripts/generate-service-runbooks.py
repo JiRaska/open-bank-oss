@@ -70,6 +70,51 @@ def http_port(short: str) -> str:
     return "?"
 
 
+def management_port(short: str) -> str:
+    """The declared management port, preferring the workload's actual probe/scrape contract.
+
+    Health and metrics deliberately live on a separate Quarkus management listener in some
+    services. Reusing the business HTTP port makes an on-call command look reasonable but return
+    404/connection refused precisely during an incident. The workload declaration is authoritative
+    for this runbook because its named ``management`` port is what probes and the fleet PodMonitor
+    actually target; application.yaml is only a fallback for undeployed services.
+    """
+    names = gitops_facts.module_names(short)
+    for manifest in sorted(GITOPS.rglob("*.yaml")):
+        for doc in read(manifest).split("\n---"):
+            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
+            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
+            if not kind or kind.group(1) not in ("Deployment", "Rollout") or not name or name.group(1) not in names:
+                continue
+            port = re.search(r"^\s+-\s+name:\s*management\s*$\s*^\s+containerPort:\s*(\d+)", doc, re.M)
+            if port:
+                return port.group(1)
+    txt = read(gitops_facts.module_dir(short, REPO) / "src" / "main" / "resources" / "application.yaml")
+    configured = re.search(r"^\s{2}management:\s*$.*?^\s{4}port:\s*(\d+)", txt, re.M | re.S)
+    return configured.group(1) if configured else "8085"
+
+
+def application_automated(short: str) -> bool | None:
+    """Whether the Argo Application owning this component declares automated sync.
+
+    ``False`` is materially different from a missing Application: a workload YAML under a manual
+    Application is desired state only, not a claim that Argo ever created a pod. Keep this small
+    parser intentionally tied to the source path rather than the Application's display name.
+    """
+    marker = f"path: openbank-infra/gitops/components/{short}"
+    for app in sorted((GITOPS / "apps").glob("*.yaml")):
+        text = read(app)
+        if marker not in text:
+            continue
+        sync_policy = re.search(r"^  syncPolicy:\s*$([\s\S]*?)(?=^\S|\Z)", text, re.M)
+        return bool(sync_policy and re.search(r"^\s+automated:\s*$", sync_policy.group(1), re.M))
+    return None
+
+
+def workload_live_unverified(short: str) -> bool:
+    return gitops_facts.service_namespace(short, GITOPS) is not None and application_automated(short) is False
+
+
 def service_namespace(short: str) -> str:
     """The namespace this service's Deployment/Rollout actually lands in.
 
@@ -104,6 +149,17 @@ def deployment_status(short: str) -> str:
     service, so this changes no committed runbook but the undeployed one.
     """
     if gitops_facts.service_namespace(short, GITOPS) is not None:
+        if workload_live_unverified(short):
+            return (
+                "## Deployment status — WORKLOAD DESIRED — LIVE STATUS UNVERIFIED\n"
+                "\n"
+                "The GitOps manifest declares this workload, but its owning ArgoCD Application has **no\n"
+                "automated sync**. This is desired state, not evidence that the Deployment, database,\n"
+                "metrics scrape, or traffic path exists in the cluster. Before using any command below\n"
+                "as an incident procedure, complete the separately reviewed manual sync and observe\n"
+                "the resulting deployment and health checks.\n"
+                "\n"
+            )
         return ""
     component = GITOPS / "components" / short
     data_plane = "\n".join(read(path) for path in component.glob("*.yaml"))
@@ -278,15 +334,15 @@ triaging an incident that starts on `{short}`.
 
 ## Health & probes
 
-- Readiness: `GET :{port}/q/health/ready` · Liveness: `GET :{port}/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `{ns}`); dashboards in Grafana.
+- Readiness: `GET :{management_port}/q/health/ready` · Liveness: `GET :{management_port}/q/health/live`
+- Metrics: {metrics_status}
 - Logs: {logs_cmd}, or Loki
   `{{namespace="{ns}"}}`.
 
 ## Routine operations
 
-- **Restart:** {restart_cmd}
-- **Scale:** {scale_cmd} (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+{operations_caveat}- **Restart:** {restart_cmd}
+- **Scale:** {scale_cmd} (or edit the GitOps manifest — GitOps is source of truth; a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
@@ -399,6 +455,7 @@ def render(short: str) -> str:
             f"- **Readiness flapping:** datastore ({datastore}) unreachable or saturated — check the\n"
             "  datastore pod/cluster health and connection-pool metrics."
         )
+    live_unverified = workload_live_unverified(short)
     return TEMPLATE.format(
         short=short,
         module=gitops_facts.module_dir(short, REPO).name,
@@ -412,6 +469,16 @@ def render(short: str) -> str:
         retention=f.get("retentionPolicy", "—"),
         role=f.get("dataLineageRole", "—"),
         port=http_port(short),
+        management_port=management_port(short),
+        metrics_status=(
+            f"declared for the fleet PodMonitor (namespace `{service_namespace(short)}`), but live scrape status is unverified until manual sync and health observation."
+            if live_unverified else
+            f"scraped by the fleet PodMonitor (namespace `{service_namespace(short)}`); dashboards in Grafana."
+        ),
+        operations_caveat=(
+            "> **Live status unverified:** the commands below are planned procedures until the manual ArgoCD sync and cluster health checks have been observed.\n\n"
+            if live_unverified else ""
+        ),
         upstream=up,
         downstream=down,
         rpo=rpo,
@@ -513,6 +580,16 @@ def self_test() -> int:
     deployed = [x for x in all_services() if gitops_facts.service_namespace(x, GITOPS) is not None]
     case("a deployed service gets no deployment banner",
          all(deployment_status(x) == "" for x in deployed[:5]))
+    # A manual-sync Application is a third state: its Deployment YAML is desired state, not proof
+    # that Argo has ever created a pod. Incentive is the fixture because it deliberately has no
+    # automated sync while this exact distinction is under rollout review.
+    incentive = render("incentive")
+    case("a manual-sync workload is explicitly live-unverified",
+         says(incentive, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
+    case("a manual-sync workload does not present declared metrics as a live scrape",
+         says(incentive, "live scrape status is unverified"))
+    case("a separate management listener is used for health commands",
+         "GET :8087/q/health/ready" in incentive and "GET :8156/q/health/ready" not in incentive)
     if undeployed:
         absent_data_plane = [
             x for x in undeployed if "namespace that does not exist" in deployment_status(x)
@@ -557,7 +634,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: runbook DR classifier is falsifiable (17 cases)")
+    print("self-test ok: runbook deployment/DR classifier is falsifiable (20 cases)")
     return 0
 
 def main():

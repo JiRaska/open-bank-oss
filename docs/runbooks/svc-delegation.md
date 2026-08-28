@@ -30,7 +30,7 @@ triaging an incident that starts on `delegation`.
 
 ## Health & probes
 
-- Readiness: `GET :8126/q/health/ready` · Liveness: `GET :8126/q/health/live`
+- Readiness: `GET :8090/q/health/ready` · Liveness: `GET :8090/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `delegation`); dashboards in Grafana.
 - Logs: `kubectl logs -n delegation deploy/delegation-service -f`, or Loki
   `{namespace="delegation"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `delegation`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/delegation-service -n delegation` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/delegation-service -n delegation --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/delegation-service -n delegation --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth; a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

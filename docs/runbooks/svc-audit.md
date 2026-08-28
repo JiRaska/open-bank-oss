@@ -30,7 +30,7 @@ triaging an incident that starts on `audit`.
 
 ## Health & probes
 
-- Readiness: `GET :8113/q/health/ready` · Liveness: `GET :8113/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `audit`); dashboards in Grafana.
 - Logs: `kubectl logs -n audit deploy/audit-service -f`, or Loki
   `{namespace="audit"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `audit`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/audit-service -n audit` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/audit-service -n audit --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/audit-service -n audit --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth; a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

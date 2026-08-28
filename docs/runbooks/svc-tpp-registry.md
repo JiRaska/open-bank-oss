@@ -30,7 +30,7 @@ triaging an incident that starts on `tpp-registry`.
 
 ## Health & probes
 
-- Readiness: `GET :8108/q/health/ready` · Liveness: `GET :8108/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `tpp-registry`); dashboards in Grafana.
 - Logs: `kubectl logs -n tpp-registry deploy/tpp-registry-service -f`, or Loki
   `{namespace="tpp-registry"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `tpp-registry`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/tpp-registry-service -n tpp-registry` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/tpp-registry-service -n tpp-registry --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/tpp-registry-service -n tpp-registry --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth; a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

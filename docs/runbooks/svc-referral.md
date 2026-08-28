@@ -43,7 +43,7 @@ triaging an incident that starts on `referral`.
 
 ## Health & probes
 
-- Readiness: `GET :8155/q/health/ready` · Liveness: `GET :8155/q/health/live`
+- Readiness: `GET :8086/q/health/ready` · Liveness: `GET :8086/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `referral`); dashboards in Grafana.
 - Logs: `kubectl logs -n referral deploy/referral-service -f`, or Loki
   `{namespace="referral"}`.
@@ -51,7 +51,7 @@ triaging an incident that starts on `referral`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/referral-service -n referral` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/referral-service -n referral --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/referral-service -n referral --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth; a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

@@ -30,7 +30,7 @@ triaging an incident that starts on `dispute`.
 
 ## Health & probes
 
-- Readiness: `GET :8135/q/health/ready` · Liveness: `GET :8135/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `dispute`); dashboards in Grafana.
 - Logs: `kubectl logs -n dispute deploy/dispute-service -f`, or Loki
   `{namespace="dispute"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `dispute`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/dispute-service -n dispute` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/dispute-service -n dispute --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/dispute-service -n dispute --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth; a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

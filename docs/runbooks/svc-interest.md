@@ -30,7 +30,7 @@ triaging an incident that starts on `interest`.
 
 ## Health & probes
 
-- Readiness: `GET :8125/q/health/ready` · Liveness: `GET :8125/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `interest`); dashboards in Grafana.
 - Logs: `kubectl logs -n interest deploy/interest-service -f`, or Loki
   `{namespace="interest"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `interest`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/interest-service -n interest` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/interest-service -n interest --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/interest-service -n interest --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth; a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
