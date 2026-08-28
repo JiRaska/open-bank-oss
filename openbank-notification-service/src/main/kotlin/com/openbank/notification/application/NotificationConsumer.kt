@@ -296,11 +296,21 @@ class NotificationConsumer @Inject constructor(
             return Uni.createFrom().voidItem()
         }
         return dispatch(req)
-            .onFailure().recoverWithUni { e ->
-                // Processing failure (e.g. transient DB error): log and ack. Preserves the prior
-                // swallow semantics so the consumer keeps draining; redelivery is safe (see above).
-                log.errorf(e, "Failed to process notification: %s", payload)
-                Uni.createFrom().voidItem()
+            .onFailure().invoke { e ->
+                // #5745 (sweep of #5698): a processing failure (e.g. transient DB error) used to be
+                // logged and ACKED here — "redelivery is safe" was never true, because acking is
+                // exactly what tells Kafka NOT to redeliver. An acked message and a successfully
+                // handled one are indistinguishable from outside, so the notification itself (a
+                // transactional or SECURITY-category send, not only marketing) was silently lost.
+                //
+                // Deliberately NOT wrapped in EventRetry's bounded in-process retry, unlike
+                // PartyErasureConsumer's idempotent deletes: dispatchResolved() mints a fresh
+                // notificationId and persists a NEW row on every call, so retrying this Uni from
+                // the top after a failure that occurred AFTER that persist (e.g. in sendEmail)
+                // would insert a second row and could re-send — trading a lost notification for a
+                // duplicated one. A single attempt, then rethrow, hands the decision to the
+                // connector's own failure-strategy (dead-letter-queue, application.yaml) instead.
+                log.errorf(e, "Failed to process notification — rethrowing so it is not acked: %s", payload)
             }
     }
 

@@ -34,6 +34,7 @@ import jakarta.enterprise.inject.Alternative
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.reactive.messaging.Message
+import org.eclipse.microprofile.reactive.messaging.Metadata
 import org.eclipse.microprofile.reactive.messaging.spi.Connector
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -42,6 +43,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.function.Function
 import java.util.function.Supplier
 
 /**
@@ -143,6 +145,62 @@ class NotificationConsumerIT {
             ),
         )
         acked.get(20, TimeUnit.SECONDS)
+    }
+
+    /**
+     * Like [consumeAndAwait], but reports which of ack/nack the connector actually invoked,
+     * instead of assuming ack (#5745). SmallRye calls the message's `nack` function when the
+     * `@Incoming` handler's returned `Uni` fails, and its `ack` supplier when it succeeds —
+     * exactly the distinction [NotificationConsumer.consume]'s dispatch failure handling used to
+     * erase by recovering every failure into a successful (acked) `Uni`.
+     */
+    private fun sendAndAwaitOutcome(request: NotificationRequest): String {
+        val source: InMemorySource<Message<String>> = connector.source("notification-events-in")
+        source.runOnVertxContext(true)
+        val outcome = CompletableFuture<String>()
+        val message = Message.of(
+            objectMapper.writeValueAsString(request),
+            Metadata.empty(),
+            Supplier<CompletionStage<Void>> {
+                outcome.complete("acked")
+                CompletableFuture.completedFuture<Void>(null)
+            },
+            Function<Throwable, CompletionStage<Void>> { _ ->
+                outcome.complete("nacked")
+                CompletableFuture.completedFuture<Void>(null)
+            },
+        )
+        source.send(message)
+        return outcome.get(20, TimeUnit.SECONDS)
+    }
+
+    /**
+     * The core of #5745 (sweep of #5698): a processing failure must not be told to Kafka as "done".
+     *
+     * Before the fix, [NotificationConsumer.consume] caught this exact failure, logged it, and
+     * returned a successful `Uni` — which SmallRye acks. An acked message and a delivered one are
+     * indistinguishable from outside, so a transient failure here (this channel also carries
+     * SECURITY-category sends: OTP, SCA approval) was silently lost with nothing to replay it.
+     *
+     * Fails against unmodified `main`: the old `.onFailure().recoverWithUni { ... ack }` makes this
+     * assert `"nacked"` against an outcome of `"acked"`.
+     */
+    @Test
+    fun `a dispatch failure is nacked, not acked, so the connector can dead-letter it (#5745)`() {
+        val partyId = UUID.randomUUID()
+        seedActiveDevice(partyId, OffContextPushSender.FAILING_TOKEN)
+
+        val outcome = sendAndAwaitOutcome(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.WELCOME,
+                recipient = "dispatch-failure@example.com",
+                variables = mapOf("name" to "Retry"),
+            ),
+        )
+
+        assertThat(outcome).isEqualTo("nacked")
     }
 
     @Test
@@ -727,6 +785,18 @@ class OffContextPushSender : PushSender {
         // Record what actually crosses the transport boundary so a test can assert the payload
         // is PII-free (ADR-0135 §3, issue #1182).
         SENT.add(message)
+        if (message.token == FAILING_TOKEN) {
+            // A dependency FAILING — not a provider rejection like BAD_TOKEN, which still returns
+            // a normal (if unsuccessful) PushResult. This Uni fails, exactly the shape of the
+            // transient error #5745 is about (a downstream call throwing), so it can drive
+            // NotificationConsumer.consume()'s dispatch() Uni to failure end to end.
+            return Uni.createFrom().completionStage(
+                CompletableFuture.supplyAsync(
+                    { throw IllegalStateException("simulated transient push failure (#5745 test)") },
+                    EXECUTOR,
+                ),
+            )
+        }
         val result = when (message.token) {
             GOOD_TOKEN -> PushResult.ok("apns-id-it")
             // ADR-0252 phase 0: what a DISABLED adapter returns — a successful no-op.
@@ -742,6 +812,9 @@ class OffContextPushSender : PushSender {
 
         /** Token whose send comes back *skipped*, i.e. the adapter is switched off. */
         const val DISABLED_TOKEN = "apns-disabled-adapter-token-it"
+
+        /** Token whose send Uni FAILS outright — a dependency error, not a provider rejection. */
+        const val FAILING_TOKEN = "apns-failing-token-it"
         private val EXECUTOR = Executors.newSingleThreadExecutor()
 
         /** Messages the adapter was asked to deliver, in order — inspected by the PII assertion. */
