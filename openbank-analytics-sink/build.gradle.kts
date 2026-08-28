@@ -82,6 +82,14 @@ tasks.test {
     systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
 }
 
+tasks.withType<Test> {
+    // The ClickHouse adapter IT boots Quarkus plus ClickHouse/Testcontainers in the test JVM.
+    // With Gradle's 512m default it exhausted the heap in Quarkus' shutdown workers, then left
+    // the Gradle client waiting for the worker socket. Keep the capacity correction local: the
+    // Docker-backed tests remain explicitly selected with -PwithDocker and no test is skipped.
+    maxHeapSize = "2g"
+}
+
 tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setIncludeConfigs(listOf("runtimeClasspath"))
     setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
