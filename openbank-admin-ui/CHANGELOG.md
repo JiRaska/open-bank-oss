@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.218.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.218.0...admin-ui-v0.218.1) (2026-08-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** close public-surface guard gaps in the auth gate and font sweep ([#7288](https://github.com/JiRaska/open-bank-oss/issues/7288)) ([b15d93a](https://github.com/JiRaska/open-bank-oss/commit/b15d93a38eeb05a90f93760a3ff5099ecce24c28)), closes [#7073](https://github.com/JiRaska/open-bank-oss/issues/7073) [#7184](https://github.com/JiRaska/open-bank-oss/issues/7184)
+
 ## [0.218.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.217.0...admin-ui-v0.218.0) (2026-08-28)
 
 
