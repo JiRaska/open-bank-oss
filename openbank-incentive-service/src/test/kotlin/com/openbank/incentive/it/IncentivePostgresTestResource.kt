@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.incentive.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -9,17 +10,19 @@ import org.testcontainers.utility.DockerImageName
 
 class IncentivePostgresTestResource : QuarkusTestResourceLifecycleManager {
     private var postgres: PostgreSQLContainer<*>? = null
+    private val image = DockerImageName.parse("postgres:16.3-alpine")
 
     override fun start(): Map<String, String> {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping incentive HTTP IT")
         }
-        val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
+        val pg = PostgreSQLContainer(image)
             .withUsername("openbank")
             .withPassword("openbank_secret")
             .withDatabaseName("openbank_incentive_it")
         pg.start()
         postgres = pg
+        TestInfrastructureEvidence.record("postgres", image.asCanonicalNameString(), "started")
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         return mapOf(
@@ -33,6 +36,9 @@ class IncentivePostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        postgres?.stop()
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", image.asCanonicalNameString(), "stopped")
+        }
     }
 }
