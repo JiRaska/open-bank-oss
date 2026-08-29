@@ -4,6 +4,7 @@
 
 package com.openbank.onboarding.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -26,12 +27,14 @@ class OnboardingPostgresTestResource : QuarkusTestResourceLifecycleManager {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
-        val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
+        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
             .withUsername("openbank")
             .withPassword("openbank_secret")
             .withDatabaseName(DB)
-        pg.start()
+        // Retain the handle before start so partial startup can still be cleaned up and observed.
         postgres = pg
+        pg.start()
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
 
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
@@ -46,10 +49,14 @@ class OnboardingPostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        postgres?.stop()
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
     }
 
     private companion object {
         const val DB = "openbank_onboarding_it"
+        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
     }
 }

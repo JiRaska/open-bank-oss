@@ -4,6 +4,7 @@
 
 'use client'
 import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import {
   ShieldAlert, Search, CheckCircle2, Clock, RefreshCw,
   AlertTriangle, User, Play, List, ChevronDown, ChevronUp,
@@ -388,12 +389,20 @@ export default function SanctionsPage() {
     setPendingApproval(null)
   }
 
+  // SEPARATE locks for the maker and checker halves (#7098): a maker disposition and a
+  // checker decision are different operations and must not block each other. Neither
+  // lock addresses the cross-operator four-eyes race — that is arbitrated upstream
+  // (403 on self-approval, below) and no client-side lock could ever see it.
+  const reviewFlight = useSingleFlight()
+  const decideFlight = useSingleFlight()
+
   /** Submit a disposition. `approvalId` is set only on the post-approval retry. */
   const submitReview = async (checkId: string, approvalId?: string) => {
     if (!reviewNote.trim()) {
       setReviewError(t('Poznámka je povinná — je to auditní stopa rozhodnutí.', 'A note is required — it is the audit trail for this decision.'))
       return
     }
+    const outcome = await reviewFlight.run(`sanctions:review:${checkId}`, async () => {
     setReviewBusy(true)
     setReviewError('')
     try {
@@ -436,6 +445,8 @@ export default function SanctionsPage() {
     } finally {
       setReviewBusy(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
 
@@ -443,6 +454,7 @@ export default function SanctionsPage() {
   const decideApproval = async (approve: boolean) => {
     const id = decideId.trim()
     if (!id) return
+    const outcome = await decideFlight.run(`sanctions:decide:${id}`, async () => {
     setDecideBusy(true)
     setDecideMsg('')
     try {
@@ -469,6 +481,8 @@ export default function SanctionsPage() {
     } finally {
       setDecideBusy(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   const filtered = checks.filter(c =>

@@ -25,9 +25,9 @@ import java.time.LocalDate
  * provisions, etc.) is out of scope for this increment.
  *
  * The rendered return deliberately carries **flagged data gaps** rather than silent omissions
- * (ADR-0097): capital-structure rows have no GL accounts behind them yet, so they are reported as
- * explicit zeros marked `isDataGap`. That flag is the honest thing to do and also invisible — the
- * `data_gap_cells` histogram on [FinrepMetricsPort] is how far the report is from submittable.
+ * (ADR-0097): a render with no recognised 6000-6060 capital source is reported as explicit zeros
+ * marked `isDataGap`. Once those ledger accounts carry balances, the mapper derives the own-funds
+ * subtotals and `data_gap_cells` proves that the source gap cleared.
  */
 @ApplicationScoped
 class CorepService(private val ledgerPort: LedgerPort, private val metrics: FinrepMetricsPort) : CorepUseCase {

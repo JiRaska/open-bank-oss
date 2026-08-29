@@ -5,6 +5,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
 import {
   FileSignature, Plus, Search, RefreshCw, Edit, Eye, X, Send, Archive,
@@ -403,8 +404,14 @@ export default function DocumentTemplatesPage() {
     })
   }
 
+  // ONE lock across save, publish and retire (#7091): they were separate React flags,
+  // so a save could overlap a publish on the same template. React state disables the
+  // control a render too late, so the claim is synchronous.
+  const flight = useSingleFlight()
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    const outcome = await flight.run('template:write', async () => {
     setSaving(true)
     setActionError(null)
     try {
@@ -427,9 +434,12 @@ export default function DocumentTemplatesPage() {
     } finally {
       setSaving(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   const runAction = async (id: string, kind: 'publish' | 'retire') => {
+    const outcome = await flight.run('template:write', async () => {
     setActioning(true)
     setActionError(null)
     try {
@@ -441,6 +451,8 @@ export default function DocumentTemplatesPage() {
     } finally {
       setActioning(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   return (

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: OpenBank Incentive Service
-  version: 1.2.0
+  version: 1.3.0
   description: Governed fixed-benefit offers and opaque promo-code reservations.
 paths:
   /api/v1/customer-incentives/offers/{id}/reservations:
@@ -34,6 +34,50 @@ paths:
         "400": {description: Missing trusted party, idempotency key, or invalid request}
         "404": {description: Offer or code not found}
         "409": {description: Replay mismatch, inventory, offer, attribution, or limit conflict}
+  /api/v1/customer-incentives/reservations/{id}/commit:
+    post:
+      summary: Commit an attributed reservation after the trusted qualifying action succeeds
+      description: >-
+        Internal customer-edge boundary. Party identity comes from the customer JWT and productRef
+        is the validated catalogue product. qualifiedAt is the authoritative account openedAt so a
+        crash-window retry can replay the same business outcome without extending reservation TTL.
+      parameters:
+        - {$ref: '#/components/parameters/ReservationId'}
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CustomerCommitReservation'}
+      responses:
+        "200": {description: Committed or idempotently replayed, content: {application/json: {schema: {$ref: '#/components/schemas/CustomerReservation'}}}}
+        "400": {description: Missing trusted party or malformed qualifying evidence}
+        "403": {description: Caller is not the configured customer-edge workload}
+        "404": {description: Reservation does not belong to the trusted party and product}
+        "409": {description: Reservation expired or is terminal in another state}
+  /api/v1/customer-incentives/reservations/{id}/release:
+    post:
+      summary: Release an attributed reservation after a deterministic qualifying-action rejection
+      parameters:
+        - {$ref: '#/components/parameters/ReservationId'}
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CustomerReleaseReservation'}
+      responses:
+        "200": {description: Released or idempotently replayed, content: {application/json: {schema: {$ref: '#/components/schemas/CustomerReservation'}}}}
+        "400": {description: Missing trusted party or malformed request}
+        "403": {description: Caller is not the configured customer-edge workload}
+        "404": {description: Reservation does not belong to the trusted party and product}
+        "409": {description: Reservation is committed or terminal in another state}
   /api/v1/incentives/offers:
     get:
       summary: List immutable published incentive offers for governed catalogue selection
@@ -184,6 +228,19 @@ components:
         reservedAt: {type: string, format: date-time}
         expiresAt: {type: string, format: date-time}
         status: {type: string, enum: [RESERVED, COMMITTED, RELEASED, EXPIRED]}
+    CustomerCommitReservation:
+      type: object
+      additionalProperties: false
+      required: [productRef, qualifiedAt]
+      properties:
+        productRef: {type: string, minLength: 1}
+        qualifiedAt: {type: string, format: date-time}
+    CustomerReleaseReservation:
+      type: object
+      additionalProperties: false
+      required: [productRef]
+      properties:
+        productRef: {type: string, minLength: 1}
     Offer:
       type: object
       required: [ref, productScope, effectiveFrom, expiresAt, totalLimit, perPartyLimit, stackingPolicy, status, maker]

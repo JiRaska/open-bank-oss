@@ -33,23 +33,16 @@ class Eba42DatapointFixtureTest {
         assertThat(EbaReportingFramework42.TAXONOMY_VERSION).isEqualTo(fixture["taxonomyVersion"].asText())
         assertThat(fixture["taxonomyPackageSha256"].asText())
             .isEqualTo("0bf9e33720de1472e809417999cfd29e4b5eadb31750c7770622e502590bbdd0")
-        assertThat(fixture["supportedFacts"].map { it["datapointId"]?.takeUnless { id -> id.isNull }?.asInt() })
-            .containsExactly(32354, 32592, 32464, null, 57025)
+        assertThat(fixture["supportedFacts"]).hasSize(33)
         assertThat(fixture["supportedFacts"].map { it["meaning"].asText() })
-            .containsExactly(
-                "TOTAL ASSETS",
-                "TOTAL LIABILITIES",
-                "TOTAL EQUITY",
-                "TOTAL EQUITY AND LIABILITIES",
-                "PROFIT OR LOSS FOR THE YEAR",
-            )
+            .contains("TOTAL ASSETS", "TOTAL LIABILITIES", "TOTAL EQUITY", "PROFIT OR LOSS FOR THE YEAR")
 
         val snapshot = TrialBalanceSnapshot(
             lines = listOf(
-                line("ASSET", "500000"),
-                line("LIABILITY", "-300000"),
-                line("INCOME", "-260000"),
-                line("EXPENSE", "60000"),
+                line("1100", "ASSET", "500000"),
+                line("2100", "LIABILITY", "-300000"),
+                line("4100", "INCOME", "-260000"),
+                line("5100", "EXPENSE", "60000"),
             ),
             ledgerReportsBalanced = true,
         )
@@ -67,8 +60,8 @@ class Eba42DatapointFixtureTest {
         assertThat(actual).containsExactlyElementsOf(expected)
     }
 
-    private fun line(accountType: String, net: String) = TrialBalanceLineDto(
-        code = accountType,
+    private fun line(code: String, accountType: String, net: String) = TrialBalanceLineDto(
+        code = code,
         accountType = accountType,
         net = BigDecimal(net),
         currency = "CZK",

@@ -136,6 +136,19 @@ export interface PerformanceEvidence {
   }
 }
 
+/**
+ * Immutable performance observation copied from a retained deployment snapshot. A point exists
+ * only when k6 emitted metrics; absent/blocked scenarios never become a zero-valued datapoint.
+ */
+export interface PerformanceHistoryPoint {
+  id: string
+  collectedAt: string
+  state: EvidenceState
+  observedAt: string | null
+  metrics: NonNullable<PerformanceEvidence['metrics']>
+  run?: TestRunProvenance
+}
+
 export interface SyntheticJourneyEvidence {
   id: string
   title: string
@@ -143,16 +156,27 @@ export interface SyntheticJourneyEvidence {
   status: 'active' | 'planned'
   state: EvidenceState
   severity: string
+  executor?: 'kubernetes-cronjob' | 'github-actions'
   schedule: string | null
   environment: string | null
   covers: string[]
   falsifies: string
   blocker: string | null
+  /** Known prerequisite for an active journey. It explains a current signal but never changes its verdict. */
+  runtimeNote?: string | null
   ci?: {
     state: EvidenceState
     observedAt: string
     detail: string
     run: TestRunProvenance
+    /** Browser engines declared by the journey. Missing evidence remains explicitly not-run. */
+    variants?: Array<{
+      browser: 'chromium' | 'firefox' | 'webkit'
+      state: EvidenceState
+      observedAt: string | null
+      detail: string
+      run?: TestRunProvenance
+    }>
   }
   live?: {
     source: 'prometheus'
@@ -202,12 +226,22 @@ export interface ClientExperienceEvidence {
   evidence: EvidenceObservation[]
   rum: {
     state: EvidenceState
-    policy: 'not-applicable' | 'rejected' | 'consent-gated'
+    policy: 'not-applicable' | 'rejected' | 'consent-gated' | 'authenticated'
     detail: string
     observedAt: string | null
     source?: 'prometheus' | 'tempo' | null
     sampledSpansLast7d?: number | null
     errorSpansLast7d?: number | null
+    /** Scheduled audit freshness is separate from telemetry arrival. */
+    audit?: {
+      state: EvidenceState
+      lastScheduledAt: string | null
+      lastSuccessfulAt: string | null
+      /** A one-off audit never substitutes the regular schedule. */
+      lastManualSuccessfulAt?: string | null
+      freshnessSeconds: number | null
+      detail: string
+    }
     /** A bounded inspection of sampled mobile traces.  This proves trace-context
      * continuity only for the listed sampled traces; it is never a traffic estimate. */
     backendCorrelations?: {
@@ -235,9 +269,16 @@ export interface TestIntelligenceReport {
   contracts: ContractEvidence[]
   mutations: MutationEvidence[]
   performance: PerformanceEvidence[]
+  performanceHistory: PerformanceHistoryPoint[]
   syntheticJourneys: SyntheticJourneyEvidence[]
   journeyCoverage?: JourneyCoverageSummary
   clientExperiences: ClientExperienceEvidence[]
+  /**
+   * Build-time derived ADR-0148 record/replay posture. This is deliberately neither a CI
+   * test result nor a runtime agent-health signal: it says which registered charters have a
+   * versioned eval suite and a real recorded baseline.
+   */
+  aiEvalAssurance?: AiEvalAssurance
   history: TestIntelligenceHistoryPoint[]
   runHistory: TestRunHistoryPoint[]
   testCases: TestCaseHistory[]
@@ -253,6 +294,18 @@ export interface TestIntelligenceReport {
     unresolvedEvidence?: number
   }
   warnings: string[]
+}
+
+export interface AiEvalAssurance {
+  state: EvidenceState
+  source: string
+  defaultMinPassRate: number
+  registeredCharters: string[]
+  suiteCharters: string[]
+  recordedCharters: string[]
+  missingSuiteCharters: string[]
+  missingRecordingCharters: string[]
+  detail: string
 }
 
 /**

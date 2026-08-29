@@ -39,6 +39,7 @@ journeys:
     capability: proves the public edge
     covers: [openbank-alpha-service]
     schedule: "*/5 * * * *"
+    runtime_note: requires a dedicated synthetic identity
     falsification: break it
   - id: mobile
     title: Mobile
@@ -50,6 +51,16 @@ journeys:
     capability: proves the mobile critical path
     falsification: break the app route
     blocked_by: needs canary devices
+  - id: admin-ui-sso-boundary
+    title: Admin UI SSO boundary
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
+    schedule: "13 */2 * * *"
+    capability: proves the public SSO hand-off
+    falsification: remove the SSO boundary
 money_path_accountability:
   default_blocker: needs synthetic parties
   services:
@@ -94,7 +105,21 @@ scenarios:
       schemaVersion: 1,
       run: { id: 'synthetic-9', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Synthetic journeys', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/synthetic-9', observedAt: '2026-08-25T08:00:00Z' },
       component: 'openbank-platform', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
-      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:edge', detail: '2 threshold result(s), 0 breached' }],
+      specializedEvidence: [
+        { kind: 'synthetic', state: 'passed', source: 'journey:edge', detail: '2 threshold result(s), 0 breached' },
+      ],
+    }))
+    write(repo, 'openbank-admin-ui/test-run-history/browser-synthetic.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'browser-10', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Admin UI browser synthetic', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/browser-10', observedAt: '2026-08-25T08:10:00Z' },
+      component: 'openbank-admin-ui', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: '1/1 browser E2E checks executed' }],
+    }))
+    write(repo, 'openbank-admin-ui/test-intelligence-history/previous-snapshot.json', JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-24T06:00:00Z', totals: { components: 2 },
+      performance: [{ id: 'openbank-alpha-service-alpha-smoke', state: 'passed', observedAt: '2026-08-24T05:59:00Z', metrics: {
+        p95Ms: 280, errorRatePercent: 0, checkPassRatePercent: 100, requests: 75,
+      }, run: { id: 'perf-previous', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Performance gate', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/perf-previous' } }],
     }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
@@ -112,10 +137,13 @@ scenarios:
       pactFile: 'alpha-provider.json', state: 'unknown',
       verificationDetail: expect.stringMatching(/not a passing result/i),
     })])
-    expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *', ci: {
+    expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *', runtimeNote: 'requires a dedicated synthetic identity', ci: {
       state: 'passed', detail: '2 threshold result(s), 0 breached', run: { id: 'synthetic-9', workflow: 'Synthetic journeys' },
     } })
     expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
+    expect(report.syntheticJourneys.find(item => item.id === 'admin-ui-sso-boundary')).toMatchObject({
+      status: 'active', executor: 'github-actions', ci: { state: 'passed', detail: '1/1 browser E2E checks executed' },
+    })
     expect(report.journeyCoverage).toMatchObject({ moneyPathTotal: 2, activelyCovered: 1, explicitlyUnwatched: 1 })
     expect(report.journeyCoverage?.services).toEqual([
       expect.objectContaining({ component: 'openbank-alpha-service', state: 'covered', journeys: ['edge'] }),
@@ -124,13 +152,17 @@ scenarios:
     expect(report.performance.find(item => item.id === 'openbank-alpha-service-alpha-smoke')).toMatchObject({ state: 'passed', metrics: {
       p95Ms: 321.4, errorRatePercent: 1.25, checkPassRatePercent: 98.75, requests: 80,
     }, run: { id: 'perf-42', workflow: 'Performance gate' } })
+    expect(report.performanceHistory.filter(item => item.id === 'openbank-alpha-service-alpha-smoke')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ collectedAt: '2026-08-24T06:00:00Z', metrics: expect.objectContaining({ p95Ms: 280 }), run: { id: 'perf-previous', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Performance gate', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/perf-previous' } }),
+      expect.objectContaining({ metrics: expect.objectContaining({ p95Ms: 321.4 }), run: expect.objectContaining({ id: 'perf-42' }) }),
+    ]))
     expect(report.performance.find(item => item.id === 'breached')).toMatchObject({ state: 'failed', detail: '1 threshold result(s), 1 breached' })
     expect(report.performance.find(item => item.id === 'money-path-smoke')).toMatchObject({
       state: 'not-run', detail: 'No safe money-path target is configured for this GitHub-hosted runner.', run: { id: 'baseline-7', workflow: 'Perf baseline' },
       plan: { executionMode: 'planned-read-only-sandbox', safetyBoundary: 'read-only target only', targetSchedule: '0 5 * * *', blocker: 'no safe target or runner configured' },
     })
     expect(report.clientExperiences).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'admin-ui', rum: expect.objectContaining({ policy: 'rejected' }) }),
+      expect.objectContaining({ id: 'admin-ui', rum: expect.objectContaining({ policy: 'authenticated', state: 'unknown' }) }),
       expect.objectContaining({ id: 'openbank-app', evidence: [], blocker: expect.stringMatching(/artifact/i) }),
     ]))
   })
@@ -151,6 +183,25 @@ scenarios:
     expect(web.evidence).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'unit', state: 'passed', counts: expect.objectContaining({ discovered: 2, passed: 2 }) }),
       expect.objectContaining({ kind: 'e2e', state: 'failed', counts: expect.objectContaining({ discovered: 2, failed: 1, passed: 1 }) }),
+    ]))
+  })
+
+  it('recognizes a named JVM E2E suite under the ordinary Gradle test task in fallback evidence', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-jvm-e2e-fallback-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-results/test/TEST-com.openbank.alpha.PaymentJourneyE2E.xml',
+      '<testsuite name="com.openbank.alpha.PaymentJourneyE2E" tests="2" failures="0" errors="0" skipped="0" time="1"><testcase classname="com.openbank.alpha.e2e.PaymentJourneyE2E" name="books payment"/><testcase classname="com.openbank.alpha.e2e.PaymentJourneyE2E" name="reads booking"/></testsuite>')
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components[0].evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'e2e', state: 'passed', source: 'JUnit:test', counts: expect.objectContaining({ discovered: 2, executed: 2, passed: 2 }) }),
+    ]))
+    expect(report.components[0].evidence).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'unit', source: 'JUnit:test' }),
     ]))
   })
 

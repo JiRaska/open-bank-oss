@@ -17,13 +17,14 @@ info:
     Own Funds template from
     openbank-ledger-service's GL trial balance. Derive-only and stateless — it holds no datastore,
     moves no money, and has NO ČNB transmission channel. It exposes an EBA XBRL-CSV *preflight*
-    only: the preflight states why a bounded preview is blocked before a future renderer can create
-    a local artifact. It never creates an XBRL file or submits anything.
+    only: the preflight evaluates governed mapping and trial-balance controls before a future
+    renderer can create a local artifact. It never creates an XBRL file or submits anything.
 
-    FINREP output is a bounded preview containing only the official datapoints the platform can
-    currently derive without inventing regulatory classifications; it is not a complete return.
-    COREP preview gaps remain explicit flagged zeroes (`isDataGap`) with reasons.
-  version: 1.7.0
+    FINREP maps every active account in the governed ledger chart to official EBA 4.2 facts and
+    fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
+    official facts are not emitted by this structured preview. COREP derives its subtotals from
+    explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
+  version: 1.8.0
 tags:
   - name: FINREP
   - name: COREP
@@ -92,8 +93,8 @@ paths:
       description: >-
         Derives the template from the ledger GL trial balance as of `asOf`. Supported
         `templateId` values are `F01.01` (Assets), `F01.02` (Liabilities), `F01.03` (Equity) and
-        `F02.00` (Profit & Loss); any other value is rejected. The bounded previews expose only
-        datapoints that the current ledger can derive without inventing regulatory classifications.
+        `F02.00` (Profit & Loss); any other value is rejected. Every active account in the governed
+        chart has an explicit mapping; an unclassified active code produces a visible data gap.
         `FROZEN` (the default) requires immutable FROZEN / LINES_V1 evidence. `LIVE_PREVIEW`
         explicitly reads the mutable period aggregate for internal review only; callers must label
         it provisional and must not export or submit it as a regulatory artefact.
@@ -140,9 +141,10 @@ paths:
         Derives the template from the ledger GL trial balance as of `asOf`. Only `C_01.00`
         (Own Funds) is implemented in this increment; any other value is rejected.
 
-        The ledger's chart of accounts has no capital-structure GL accounts today, so every
-        capital row comes back as an explicit zero with `isDataGap: true` and a `gapReason` — a
-        documented gap, never to be read as an attested zero balance. `FROZEN` (the default)
+        The mapper derives CET1, Tier 1 and own funds from explicit ledger accounts 6000-6060; it
+        never plugs capital as assets minus liabilities. With no recognised capital source every
+        row is an explicit zero with `isDataGap: true`; absent optional categories in an otherwise
+        recognised capital structure are genuine zeroes. `FROZEN` (the default)
         requires immutable evidence; `LIVE_PREVIEW` is a mutable internal working view that must
         never be exported or submitted as a regulatory artefact.
       operationId: getCorepTemplate
@@ -244,11 +246,10 @@ components:
     FinrepTemplate:
       type: object
       description: >-
-        One bounded FINREP preview using official EBA Reporting Framework 4.2 coordinates. F01.01
-        publishes r0380/c0010 (total assets); F01.02 publishes r0300/c0010 (total liabilities);
-        F01.03 publishes r0300/c0010 (total equity) and r0310/c0010 (total equity and liabilities);
-        F02.00 publishes r0670/c0010 (profit or loss for the year). It is not a complete regulatory
-        return or an XBRL artifact. Values are reported in their natural reporting sign.
+        A governed FINREP preview using official EBA Reporting Framework 4.2 coordinates for assets,
+        liabilities, equity and profit or loss. Aggregate and material-detail facts are emitted for
+        the platform's closed chart; zero-only facts are omitted. It is structured data, not an XBRL
+        artifact or regulator submission. Values use their natural reporting sign.
       required: [templateId, period, cells, dataGaps, hasDataGaps, isBalanced, balanceVerdict]
       properties:
         templateId: { type: string, example: F01.01 }

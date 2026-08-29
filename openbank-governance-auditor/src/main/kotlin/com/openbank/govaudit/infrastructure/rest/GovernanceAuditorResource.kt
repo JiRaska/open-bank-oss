@@ -36,14 +36,11 @@ class GovernanceAuditorResource(
     @GET
     @Path("/findings")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getActiveFindings(): List<GovernanceFinding> = runBlocking {
-        getFindings.getActive()
-    }
+    suspend fun getActiveFindings(): List<GovernanceFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getFinding(@PathParam("id") id: String): GovernanceFinding = runBlocking {
+    suspend fun getFinding(@PathParam("id") id: String): GovernanceFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
-    }
 }

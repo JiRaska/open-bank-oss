@@ -30,7 +30,7 @@ triaging an incident that starts on `aml`.
 
 ## Health & probes
 
-- Readiness: `GET :8117/q/health/ready` · Liveness: `GET :8117/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `aml`); dashboards in Grafana.
 - Logs: `kubectl logs -n aml deploy/aml-service -f`, or Loki
   `{namespace="aml"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `aml`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/aml-service -n aml` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/aml-service -n aml --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/aml-service -n aml --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

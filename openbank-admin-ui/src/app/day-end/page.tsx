@@ -18,6 +18,7 @@
 // rather than faked status, per the read-only-consumer rule.
 
 import { Suspense, useEffect, useState, useCallback, useRef } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -496,7 +497,13 @@ function EomPanel() {
     )
   }, [loading, unavailable, empty, latest, runs.length, recordCheck])
 
+  // The closings endpoint is itself idempotent, so a duplicate POST does not create a
+  // second close run — but it does produce a second operator check-trail entry and a
+  // second 35 s request. Serialize it anyway (#7102).
+  const triggerFlight = useSingleFlight()
+
   const trigger = useCallback(async () => {
+    const outcome = await triggerFlight.run('closings:catch-up', async () => {
     setTriggering(true); setNotice(null)
     try {
       const res = await fetch('/api/closings/runs', {
@@ -518,7 +525,9 @@ function EomPanel() {
     } finally {
       setTriggering(false)
     }
-  }, [t, load, recordCheck])
+    })
+    if (wasSkipped(outcome)) return
+  }, [triggerFlight, t, load, recordCheck])
 
   const toggleFailures = useCallback(async (run: CloseRun) => {
     const open = !expanded[run.id]

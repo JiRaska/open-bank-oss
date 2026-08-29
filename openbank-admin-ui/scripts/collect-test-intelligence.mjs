@@ -96,6 +96,17 @@ function allFiles(dir, predicate) {
   return result
 }
 
+export function classifyJUnitEvidence(task, identity, component) {
+  const integrationIdentity = /(?:\.integration\.|\.it\.|IT(?:$|\$|\.))/i.test(identity)
+  // JVM services commonly keep true end-to-end HTTP tests in the ordinary Gradle `test`
+  // task. The task name alone cannot distinguish them from unit tests, so retain the
+  // explicit suite/class convention used by the CI run-envelope collector.
+  const e2eIdentity = /(?:\.e2e\.|E2E(?:$|\$|\.))/i.test(identity)
+  if (/integration|inttest/i.test(task) || integrationIdentity) return 'integration'
+  if (/e2e|playwright/i.test(task) || e2eIdentity) return 'e2e'
+  return component === 'openbank-simulation' ? 'simulation' : 'unit'
+}
+
 async function junitEvidence(component) {
   const root = path.join(repo, component, 'build', 'test-results')
   // Gradle's TEST-*.xml convention is not universal: Vitest and Playwright emit
@@ -126,10 +137,7 @@ async function junitEvidence(component) {
       const attributes = suite.$ ?? {}
       const cases = suite.testcase ?? []
       const identity = [attributes.name, ...cases.map(item => item.$?.classname)].filter(Boolean).join(' ')
-      const integrationIdentity = /(?:\.integration\.|\.it\.|IT(?:$|\$|\.))/i.test(identity)
-      const kind = /integration|inttest/i.test(task) || integrationIdentity ? 'integration'
-        : /e2e|playwright/i.test(task) ? 'e2e'
-          : component === 'openbank-simulation' ? 'simulation' : 'unit'
+      const kind = classifyJUnitEvidence(task, identity, component)
       const bucket = buckets.get(kind) ?? {
         kind, source: `JUnit:${task}`, environment: 'ci', durationMs: 0,
         counts: { discovered: 0, executed: 0, passed: 0, failed: 0, skipped: 0, errors: 0 },
@@ -461,6 +469,10 @@ function syntheticJourneys() {
   try {
     const raw = parseYaml(fs.readFileSync(file, 'utf8'))
     const latestCi = new Map()
+    const latestVariants = new Map()
+    const workflowByJourney = new Map((raw?.journeys ?? [])
+      .filter(item => item?.workflow && item?.workflow_name)
+      .map(item => [item.id, item.workflow_name]))
     const history = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), candidate => candidate.endsWith('.json'))
       .map(readJson).filter(item => item?.schemaVersion === 1 && item?.run)
       .sort((a, b) => Date.parse(a.run.observedAt) - Date.parse(b.run.observedAt))
@@ -468,22 +480,57 @@ function syntheticJourneys() {
       const provenance = safeRun(envelope.run, `synthetic:${envelope.component ?? 'unknown'}`)
       for (const evidence of envelope.specializedEvidence ?? []) {
         if (evidence.kind !== 'synthetic' || !evidence.source?.startsWith('journey:')) continue
-        latestCi.set(evidence.source.slice('journey:'.length), {
+        const journeyId = evidence.source.slice('journey:'.length)
+        const expectedWorkflow = workflowByJourney.get(journeyId)
+        if (expectedWorkflow && envelope.run.workflow !== expectedWorkflow) {
+          warnings.push(`synthetic evidence workflow mismatch omitted: ${journeyId}`)
+          continue
+        }
+        const observation = {
           state: freshnessAwareState(evidence.state, envelope.run.observedAt), observedAt: envelope.run.observedAt,
           detail: evidence.detail ?? 'Synthetic run retained without detail.',
           ...(provenance ? { run: provenance } : {}),
-        })
+        }
+        if (evidence.variant) {
+          const variants = latestVariants.get(journeyId) ?? new Map()
+          variants.set(evidence.variant, observation)
+          latestVariants.set(journeyId, variants)
+        } else {
+          latestCi.set(journeyId, observation)
+        }
       }
     }
-    return (raw?.journeys ?? []).map(item => ({
+    return (raw?.journeys ?? []).map(item => {
+      const expectedVariants = Array.isArray(item.browser_variants) ? item.browser_variants : []
+      const observedVariants = latestVariants.get(item.id)
+      const variants = expectedVariants.map(browser => ({
+        browser,
+        ...(observedVariants?.get(browser) ?? {
+          state: 'not-run', observedAt: null,
+          detail: 'No retained immutable envelope for this declared browser variant.',
+        }),
+      }))
+      const variantState = variants.some(variant => variant.state === 'failed') ? 'failed'
+        : variants.some(variant => variant.state !== 'passed') ? 'not-run' : 'passed'
+      const variantCi = variants.length ? {
+        state: variantState,
+        observedAt: variants.map(variant => variant.observedAt).filter(Boolean).sort().at(-1) ?? new Date(0).toISOString(),
+        detail: `${variants.filter(variant => variant.state === 'passed').length}/${variants.length} declared browser variants passed.`,
+        run: variants.find(variant => variant.run)?.run,
+        variants,
+      } : null
+      return {
       id: item.id, title: item.name ?? item.title ?? item.id, status: item.status,
       capability: item.capability ?? '',
       state: item.status === 'active' ? 'unknown' : 'blocked', severity: item.severity,
+      executor: item.workflow ? 'github-actions' : 'kubernetes-cronjob',
       schedule: item.schedule ?? item.target_schedule ?? null, environment: item.environment ?? null,
       covers: item.covers ?? item.covered_services ?? [],
       falsifies: item.falsification ?? '', blocker: item.blocked_by ?? null,
-      ...(latestCi.has(item.id) ? { ci: latestCi.get(item.id) } : {}),
-    }))
+      runtimeNote: item.runtime_note ?? null,
+      ...(variantCi?.run ? { ci: variantCi } : latestCi.has(item.id) ? { ci: latestCi.get(item.id) } : {}),
+    }
+    })
   } catch (error) {
     warnings.push(`synthetic journey catalogue unavailable: ${error.message}`)
     return []
@@ -592,9 +639,9 @@ async function clientExperiences() {
     {
       id: 'admin-ui', title: 'Admin UI web', surface: 'web', platforms: ['web'], evidence: webEvidence,
       rum: {
-        state: 'not-run', policy: 'rejected', observedAt: null,
+        state: 'unknown', policy: 'authenticated', observedAt: null,
         source: null, sampledSpansLast7d: null, errorSpansLast7d: null,
-        detail: 'Browser RUM is intentionally rejected for the internal operator console by ADR-0088; Playwright and server-side telemetry remain the evidence path.',
+        detail: 'Authenticated browser RUM capability is present; runtime arrival remains separate from Playwright evidence and is not inferred from this build snapshot.',
       }, blocker: null,
     },
     {
@@ -675,8 +722,9 @@ async function main() {
     .filter(item => ['unknown', 'not-run', 'blocked'].includes(item.state)).length
   const missingEvidence = components.filter(item => item.evidence.length === 0).length
   const historyDir = path.join(repo, 'openbank-admin-ui', 'test-intelligence-history')
-  const historicalReports = allFiles(historyDir, file => file.endsWith('.json'))
+  const historicalSnapshots = allFiles(historyDir, file => file.endsWith('.json'))
     .map(readJson).filter(item => item?.collectedAt && item?.totals)
+  const historicalReports = historicalSnapshots
     .map(item => ({ collectedAt: item.collectedAt, ...item.totals }))
   const currentPoint = { collectedAt: collectedAt.toISOString(), components: components.length,
     componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
@@ -685,6 +733,34 @@ async function main() {
     .sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
     .filter((item, index, all) => index === 0 || item.collectedAt !== all[index - 1].collectedAt)
     .slice(-30)
+  const performanceHistoryByScenario = new Map()
+  for (const snapshot of [...historicalSnapshots, { collectedAt: collectedAt.toISOString(), performance: performanceEvidence }]) {
+    if (!Number.isFinite(Date.parse(snapshot.collectedAt))) continue
+    for (const item of snapshot.performance ?? []) {
+      const metrics = item?.metrics
+      if (!item?.id || !metrics || !Object.values(metrics).some(value => typeof value === 'number' && Number.isFinite(value))) continue
+      const normalized = {
+        p95Ms: typeof metrics.p95Ms === 'number' && Number.isFinite(metrics.p95Ms) ? metrics.p95Ms : null,
+        errorRatePercent: typeof metrics.errorRatePercent === 'number' && Number.isFinite(metrics.errorRatePercent) ? metrics.errorRatePercent : null,
+        checkPassRatePercent: typeof metrics.checkPassRatePercent === 'number' && Number.isFinite(metrics.checkPassRatePercent) ? metrics.checkPassRatePercent : null,
+        requests: typeof metrics.requests === 'number' && Number.isFinite(metrics.requests) ? metrics.requests : null,
+      }
+      const key = `${item.id}:${snapshot.collectedAt}`
+      const rows = performanceHistoryByScenario.get(item.id) ?? new Map()
+      const run = safeRun(item.run, `performance-history:${item.id}`)
+      rows.set(key, {
+        id: item.id, collectedAt: snapshot.collectedAt,
+        state: ['passed', 'failed', 'skipped', 'not-run', 'stale', 'blocked', 'unknown'].includes(item.state) ? item.state : 'unknown',
+        observedAt: typeof item.observedAt === 'string' ? item.observedAt : null,
+        metrics: normalized,
+        ...(run ? { run } : {}),
+      })
+      performanceHistoryByScenario.set(item.id, rows)
+    }
+  }
+  const performanceHistory = [...performanceHistoryByScenario.values()]
+    .flatMap(rows => [...rows.values()].sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt)).slice(-30))
+    .sort((a, b) => a.id.localeCompare(b.id) || Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
   const serviceRunEnvelopes = [
     ...allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json')).map(readJson),
     ...currentEnvelopes,
@@ -715,7 +791,7 @@ async function main() {
     .sort((a, b) => Date.parse(b.run.observedAt) - Date.parse(a.run.observedAt)).slice(0, 500)
   const report = {
     schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
-    contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence,
+    contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence, performanceHistory,
     syntheticJourneys: synthetic, journeyCoverage: syntheticCoverage, history, runHistory, testCases, testImpact: impact,
     clientExperiences: clientExperience,
     totals: {
@@ -730,4 +806,15 @@ async function main() {
   console.log(`[collect-test-intelligence] ${report.totals.componentsWithExecutionEvidence}/${report.totals.components} components with execution evidence -> ${out}`)
 }
 
-main().catch(error => { console.error(error); process.exit(1) })
+if (args.includes('--self-test')) {
+  const assert = (actual, expected, label) => {
+    if (actual !== expected) throw new Error(`${label}: expected ${expected}, got ${actual}`)
+  }
+  assert(classifyJUnitEvidence('test', 'com.openbank.payment.PaymentApiIT', 'openbank-payment-service'), 'integration', 'IT precedence')
+  assert(classifyJUnitEvidence('test', 'com.openbank.customer.OnboardingE2E', 'openbank-customer-edge'), 'e2e', 'named E2E suite')
+  assert(classifyJUnitEvidence('test', 'com.openbank.UnitTest', 'openbank-service'), 'unit', 'ordinary suite')
+  assert(classifyJUnitEvidence('test', 'com.openbank.simulation.DstSimulationTest', 'openbank-simulation'), 'simulation', 'simulation suite')
+  console.log('collect-test-intelligence self-test: classification evidence is preserved')
+} else {
+  main().catch(error => { console.error(error); process.exit(1) })
+}

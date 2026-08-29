@@ -46,6 +46,10 @@ export function enforceRuntimeFreshness(report: TestIntelligenceReport): TestInt
       ...journey,
       ...(journey.ci ? { ci: {
         ...journey.ci, state: runtimeFreshnessState(journey.ci.state, journey.ci.observedAt),
+        ...(journey.ci.variants ? { variants: journey.ci.variants.map(variant => ({
+          ...variant,
+          state: runtimeFreshnessState(variant.state, variant.observedAt),
+        })) } : {}),
       } } : {}),
     })),
     clientExperiences: (report.clientExperiences ?? []).map(client => ({

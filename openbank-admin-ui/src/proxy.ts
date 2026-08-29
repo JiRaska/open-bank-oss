@@ -110,7 +110,8 @@ export const config = {
     // api/sanctions reachable WITHOUT a token — the same unauthenticated-info-disclosure class as
     // F-AUTH-01/02. They are consumed only by gated pages (security, system/tests, product-catalog,
     // fees, devops), so the session cookie still reaches them; nothing pre-auth needs them. Now the
-    // ONLY exclusions are Auth.js's own handlers and Next static assets — everything else is gated.
+    // ONLY exclusions are Auth.js's own handlers, Next static assets, and the public brand assets
+    // needed by the pre-auth login page — everything else is gated.
     // (k8s probes the pod via tcpSocket, not an /api path, so gating /api can't break liveness.)
     // NOTE: /auth/* is intentionally NOT excluded (ADR-0080 P1): the middleware must run there to
     // emit the nonce CSP on the pre-auth login page. The callback short-circuits /auth so the auth
@@ -120,6 +121,6 @@ export const config = {
     // not 2xx/401/403 to a 500 — so the middleware's 302-to-login would make the gate fail closed on
     // precisely the unauthenticated request it exists to reject cleanly. The route runs the same
     // session + role check itself, returns 204/401/403 with no body, and proxies nothing.
-    "/((?!api/auth|api/gate|_next/static|_next/image|favicon.ico|robots.txt).*)",
+    "/((?!api/auth|api/gate|_next/static|_next/image|brand/|favicon.ico|robots.txt).*)",
   ],
 }

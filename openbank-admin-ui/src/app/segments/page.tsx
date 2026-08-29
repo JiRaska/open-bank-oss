@@ -11,6 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 
 // Read-only by design. ADR-0201 D1: a segment is a versioned artifact defined in code, reviewed and
 // released like anything else — "no free-form SQL from a UI". A marketer picks from this catalogue;
@@ -37,25 +38,65 @@ export default function SegmentsPage() {
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const [previews, setPreviews] = useState<Record<string, Preview | 'loading'>>({})
+  const [lifecycleAction, setLifecycleAction] = useState<{ key: string; action: 'submit' | 'approve' } | null>(null)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const lifecycleFlight = useSingleFlight()
 
-  const loadAudiences = useCallback(() => {
-    fetch('/api/audiences').then(r => r.json()).then((d: { items: Segment[]; state: string }) => {
-      if (d.state !== 'ok') { setUnavailable(d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable'); return }
+  const loadAudiences = useCallback(async (keepExistingOnFailure = false) => {
+    try {
+      const response = await fetch('/api/audiences')
+      const d = await response.json() as { items: Segment[]; state: string }
+      if (d.state !== 'ok') {
+        if (!keepExistingOnFailure) setUnavailable(d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable')
+        return false
+      }
       // Older catalogue rows were approved before lifecycle metadata existed. Treating an omitted
       // state as a draft would remove a previously targetable audience during a rolling rollout.
       setItems((d.items ?? []).map(item => ({ ...item, state: item.state ?? 'APPROVED' })))
-    }).catch(() => setUnavailable('unreachable')).finally(() => setLoading(false))
+      setUnavailable(null)
+      return true
+    } catch {
+      if (!keepExistingOnFailure) setUnavailable('unreachable')
+      return false
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
     loadAudiences()
   }, [loadAudiences])
 
-  const lifecycle = (s: Segment, action: 'submit' | 'approve') => {
-    fetch(`/api/audiences/${encodeURIComponent(s.name)}/${s.version}/${action}`, { method: 'POST' }).then(r => {
-      if (!r.ok) throw new Error()
-      loadAudiences()
-    }).catch(() => setUnavailable('unreachable'))
+  const lifecycle = async (s: Segment, action: 'submit' | 'approve') => {
+    // Submit/approve are state transitions, not catalogue reads. One in-flight transition keeps
+    // a double click or two cards from racing the same maker-checker lifecycle, while a failure
+    // remains local to the action and never turns an already loaded catalogue into "unavailable".
+    const audienceKey = key(s)
+    const outcome = await lifecycleFlight.run('audience:lifecycle', async () => {
+      setLifecycleAction({ key: audienceKey, action })
+      setLifecycleError(null)
+      try {
+        const response = await fetch(`/api/audiences/${encodeURIComponent(s.name)}/${s.version}/${action}`, { method: 'POST' })
+        if (!response.ok) {
+          const body = await response.json().catch(() => null) as { error?: string } | null
+          throw new Error(body?.error || 'lifecycle mutation failed')
+        }
+        if (!await loadAudiences(true)) {
+          setLifecycleError(t(
+            'Stav se mohl změnit, ale katalog se nepodařilo obnovit. Zkuste načtení znovu.',
+            'The state may have changed, but the catalogue could not be refreshed. Try loading it again.',
+          ))
+        }
+      } catch {
+        setLifecycleError(t(
+          'Změna stavu publika se nepodařila. Katalog zůstává dostupný; zkuste akci znovu.',
+          'The audience state change did not complete. The catalogue is still available; try the action again.',
+        ))
+      } finally {
+        setLifecycleAction(null)
+      }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   const key = (s: Segment) => `${s.name}@${s.version}`
@@ -152,6 +193,12 @@ export default function SegmentsPage() {
         <DataUnavailable kind={unavailable} service="Campaign-service" feature={t('Segmenty', 'Segments')} />
       )}
 
+      {!loading && !unavailable && lifecycleError && (
+        <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          {lifecycleError}
+        </p>
+      )}
+
       {!loading && !unavailable && items.length === 0 && (
         <p className="text-sm text-muted-foreground">{t('Katalog je prázdný.', 'The catalogue is empty.')}</p>
       )}
@@ -198,7 +245,7 @@ export default function SegmentsPage() {
                     data-use-audience={key(s)}
                   >
                     {t('Použít v kampani', 'Use in campaign')} <ArrowRight className="h-3.5 w-3.5" />
-                  </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => lifecycle(s, 'submit')} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800">{t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={() => lifecycle(s, 'approve')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700">{t('Schválit publikum', 'Approve audience')}</button></Can>}
+                  </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => void lifecycle(s, 'submit')} disabled={lifecycleFlight.busy} aria-busy={lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit'} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60">{lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit' ? t('Odesílám…', 'Submitting…') : t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={() => void lifecycle(s, 'approve')} disabled={lifecycleFlight.busy} aria-busy={lifecycleAction?.key === key(s) && lifecycleAction.action === 'approve'} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">{lifecycleAction?.key === key(s) && lifecycleAction.action === 'approve' ? t('Schvaluji…', 'Approving…') : t('Schválit publikum', 'Approve audience')}</button></Can>}
                 </div>
                 <p className="mt-3 flex items-center gap-1.5 text-[.68rem] text-slate-400"><Clock3 className="h-3 w-3" />{t('Dosah se mění s aktuálním stavem; verze pravidel zůstává stejná.', 'Reach changes with current state; the rule version stays fixed.')}</p>
               </article>

@@ -82,6 +82,24 @@ class IncentiveApplication(
 
     suspend fun commit(id: UUID, actor: String, now: Instant = Instant.now()) = store.commit(id, actor, now)
     suspend fun release(id: UUID, actor: String, now: Instant = Instant.now()) = store.release(id, actor, now)
+    suspend fun commitAttributed(
+        id: UUID,
+        partyRef: String,
+        productRef: String,
+        actor: String,
+        qualifiedAt: Instant,
+        now: Instant = Instant.now(),
+    ): PromoReservation {
+        require(!qualifiedAt.isAfter(now.plus(MAX_QUALIFYING_CLOCK_SKEW))) { "qualifiedAt must not be in the future" }
+        return store.commitAttributed(id, partyRef, productRef, actor, qualifiedAt)
+    }
+    suspend fun releaseAttributed(
+        id: UUID,
+        partyRef: String,
+        productRef: String,
+        actor: String,
+        now: Instant = Instant.now(),
+    ) = store.releaseAttributed(id, partyRef, productRef, actor, now)
     suspend fun expireDue(now: Instant = Instant.now()) = store.expireDue(now)
 
     private fun digest(code: String): CodeDigest {
@@ -96,6 +114,7 @@ class IncentiveApplication(
         const val MIN_CODE_LENGTH = 8
         const val MAX_CODE_LENGTH = 128
         const val MIN_PEPPER_LENGTH = 32
+        val MAX_QUALIFYING_CLOCK_SKEW: Duration = Duration.ofMinutes(1)
     }
 }
 

@@ -32,6 +32,7 @@ describe('GET /api/test-intelligence', () => {
     expect(body.schemaVersion).toBe(1)
     expect(body.components[0].coverage.state).toBe('not-run')
     expect(body.totals.missingEvidence).toBe(1)
+    expect(body.performanceHistory).toEqual([])
     expect(body.testImpact).toMatchObject({
       mode: 'shadow', mappingState: 'unknown', selectionState: 'unavailable', declaredByAllRetainedRuns: false,
     })
@@ -109,14 +110,22 @@ describe('GET /api/test-intelligence', () => {
       const url = new URL(String(input))
       if (url.hostname === 'tempo.test') {
         if (url.pathname === '/api/search') {
-          expect(url.searchParams.get('tags')).toBe('service.name="openbank-app"')
           expect(url.searchParams.get('limit')).toBe('1000')
-          return new Response(JSON.stringify({ traces: Array.from({ length: 12 }, (_, index) => ({ traceID: `trace-${index}` })) }), { status: 200 })
+          const service = url.searchParams.get('tags')
+          expect(['service.name="openbank-app"', 'service.name="openbank-admin-ui"']).toContain(service)
+          return new Response(JSON.stringify({ traces: service === 'service.name="openbank-app"' ? Array.from({ length: 12 }, (_, index) => ({ traceID: `trace-${index}` })) : [] }), { status: 200 })
+        }
+        if (url.pathname === '/api/v2/search/tag/.os.type/values') {
+          return new Response(JSON.stringify({ tagValues: [{ value: 'ios' }, { value: 'linux' }] }), { status: 200 })
         }
         return new Response(JSON.stringify({ batches: [] }), { status: 200 })
       }
       const query = url.searchParams.get('query') ?? ''
-      const value = query.includes('STATUS_CODE_ERROR') ? '2' : '1'
+      const value = query.includes('STATUS_CODE_ERROR')
+        ? '2'
+        : query.includes('rum-attribute-audit-manual-')
+          ? String(Math.floor(Date.now() / 1000))
+          : '1'
       return new Response(JSON.stringify({ status: 'success', data: { result: [{ value: [1, value] }] } }), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
@@ -125,9 +134,16 @@ describe('GET /api/test-intelligence', () => {
       state: 'passed', policy: 'consent-gated', source: 'tempo', sampledSpansLast7d: 12, errorSpansLast7d: 2,
     })
     expect(body.clientExperiences[0].rum.detail).toContain('12 sampled mobile RUM trace(s)')
+    expect(body.clientExperiences[0].rum.audit).toMatchObject({
+      state: 'stale',
+      lastScheduledAt: new Date(1000).toISOString(),
+      lastSuccessfulAt: new Date(1000).toISOString(),
+    })
+    expect(body.clientExperiences[0].rum.audit.lastManualSuccessfulAt).not.toBeNull()
+    expect(body.clientExperiences[0].rum.audit.detail).toContain('manual RUM attribute audit succeeded')
     expect(body.clientExperiences[0].rum.platforms).toEqual([
-      expect.objectContaining({ platform: 'android', capability: 'passed', runtime: 'unknown' }),
-      expect.objectContaining({ platform: 'ios', capability: 'passed', runtime: 'unknown' }),
+      expect.objectContaining({ platform: 'android', capability: 'passed', runtime: 'not-run' }),
+      expect.objectContaining({ platform: 'ios', capability: 'passed', runtime: 'passed' }),
     ])
     expect(body.clientExperiences[0].rum.backendCorrelations).toEqual({ inspectedTraces: 12, correlatedTraces: 0, backendServices: [], truncated: false })
     expect(body.clientExperiences[0].evidence).toEqual([])
@@ -153,6 +169,34 @@ describe('GET /api/test-intelligence', () => {
     const { GET } = await import('@/app/api/test-intelligence/route')
     const body = await (await GET()).json()
     expect(body.clientExperiences[0].rum).toMatchObject({ state: 'passed', backendCorrelations: { inspectedTraces: 2, correlatedTraces: 1, backendServices: ['openbank-copilot-service'], truncated: false } })
+  })
+
+  it('projects authenticated Admin UI browser RUM and its backend correlation separately from mobile RUM', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-admin-rum-route-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-28T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], syntheticJourneys: [], history: [], runHistory: [], testCases: [],
+      clientExperiences: [{ id: 'admin-ui', title: 'OpenBank Admin UI', surface: 'web', platforms: ['web'], evidence: [], rum: { state: 'unknown', policy: 'authenticated', detail: 'static capability', observedAt: null }, blocker: null }],
+      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.TEMPO_URL = 'http://tempo.test'
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input))
+      if (url.pathname === '/api/search') {
+        expect(url.searchParams.get('tags')).toBe('service.name="openbank-admin-ui"')
+        return new Response(JSON.stringify({ traces: [{ traceID: 'browser-backend' }] }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ batches: [{ resource: { attributes: [{ key: 'service.name', value: { stringValue: 'openbank-admin-ui' } }] } }, { resource: { attributes: [{ key: 'service.name', value: { stringValue: 'openbank-copilot-service' } }] } }] }), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+    expect(body.clientExperiences[0].rum).toMatchObject({
+      state: 'passed', policy: 'authenticated', source: 'tempo', sampledSpansLast7d: 1,
+      backendCorrelations: { inspectedTraces: 1, correlatedTraces: 1, backendServices: ['openbank-copilot-service'], truncated: false },
+    })
+    expect(body.clientExperiences[0].rum.detail).toContain('authenticated Admin UI browser RUM trace')
   })
 
   it('does not treat a retained historical failed Job as a current synthetic failure', async () => {
@@ -246,6 +290,10 @@ describe('GET /api/test-intelligence', () => {
       state: 'passed',
       live: { performance: { source: 'prometheus', windowSeconds: 900, worstP95Ms: 1834.8, worstCheckPassRatePercent: 99.7 } },
     })
+    expect(body.performance).toEqual(expect.arrayContaining([expect.objectContaining({
+      id: 'synthetic-public-edge', state: 'passed', source: 'runtime-synthetic:public-edge', thresholds: 0,
+      metrics: { p95Ms: 1834.8, errorRatePercent: null, checkPassRatePercent: 99.7, requests: null },
+    })]))
     expect(queries.some(query => query.includes('max_over_time(k6_http_req_duration_p95{journey="public-edge"}[900s])'))).toBe(true)
     expect(queries.some(query => query.includes('min_over_time(k6_checks_rate{journey="public-edge"}[900s])'))).toBe(true)
   })
@@ -277,6 +325,7 @@ describe('GET /api/test-intelligence', () => {
       state: 'passed',
       live: { performance: { worstP95Ms: null, worstCheckPassRatePercent: null } },
     })
+    expect(body.performance).toEqual([])
   })
 
   it('shows a first scheduled Job still running as unresolved instead of claiming it was not run', async () => {

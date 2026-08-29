@@ -21,7 +21,7 @@ import java.util.UUID
  * D4 gives it a defined meaning for consumers — a later refinement of an earlier `SENT`. A consumer
  * written now must already tolerate it; adding it later would be the breaking change.
  */
-enum class NotificationOutcome { SENT, SUPPRESSED, FAILED, BOUNCED }
+enum class NotificationOutcome { SENT, SUPPRESSED, FAILED, BOUNCED, REROUTED }
 
 /**
  * The `openbank.notification.outcomes.v1` payload (ADR-0239 D2).
@@ -58,6 +58,9 @@ data class NotificationOutcomeEvent(
         const val REASON_NO_RECIPIENT: String = "no_deliverable_recipient"
         const val REASON_MAILER_REFUSED: String = "mailer_refused"
         const val REASON_NO_DEVICE: String = "no_active_device"
+
+        /** The original PUSH had no device; a separately persisted safe-channel request was created. */
+        const val REASON_REROUTED_NO_DEVICE: String = "rerouted_no_active_device"
         const val REASON_PUSH_REJECTED: String = "push_rejected_by_provider"
         const val REASON_PREFERENCE_MUTED: String = "channel_muted_by_preference"
 

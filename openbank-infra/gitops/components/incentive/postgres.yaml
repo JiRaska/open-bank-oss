@@ -1,0 +1,53 @@
+# Single-owner PostgreSQL for the future Incentive service. CNPG creates the incentive-db-app
+# secret and incentive-db-rw Service; no application workload consumes either in this slice.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: incentive-db
+  namespace: incentive
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+      max_wal_size: "512MB"
+  # The Pod Identity association is introduced by the parent prerequisite PR before this
+  # Application may be synced. It supplies barman-cloud through the AWS SDK chain, never Git.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/incentive-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+  bootstrap:
+    initdb:
+      database: openbank_incentive
+      owner: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: incentive-db-daily
+  namespace: incentive
+spec:
+  schedule: "0 57 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: incentive-db
