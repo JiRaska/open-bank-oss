@@ -37,13 +37,21 @@ This document covers the Temporal-based replacement workflow and its security po
 [caller] ──HTTPS (OIDC)──▶ POST /api/v1/settlements ─▶ [settlement-service] ─▶ [settlements DB]
                                           │ originate → settle
                                           ▼
-[Temporal server] ──gRPC (mTLS)──▶ [settlement-service worker]
+[Temporal server] ──gRPC (no transport auth)──▶ [settlement-service worker]
                                           │
                                 ┌─────────┼──────────┐
                                 ▼         ▼          ▼
                           debit-port  credit-port  ledger-port
                           (balance)   (balance)   (ledger)
 ```
+
+*(Corrected 2026-08-27, #6066: this edge previously read `gRPC (mTLS)`, contradicting the S1
+row below, which was corrected on 2026-08-20 by #6055 and states that it is not mTLS. The
+diagram is now consistent with S1 — `TemporalClientProducer` builds
+`WorkflowServiceStubsOptions` with a target and an optional metrics scope and nothing else, the
+Temporal HelmRelease configures no frontend TLS, and no API key or namespace token is
+configured anywhere, so the edge carries no transport authentication at all rather than merely
+no mTLS. What does constrain it is stated in S1 and Residual risk 2.)*
 
 The settlement-service worker receives workflow tasks from Temporal over gRPC. The worker calls
 three downstream ports. Each port call is an activity — idempotency-keyed so Temporal can replay
