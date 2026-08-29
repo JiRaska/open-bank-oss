@@ -483,4 +483,65 @@ journeys:
     expect(report.contracts[0]).toMatchObject({ state: 'stale' })
     expect(report.totals).toMatchObject({ failingEvidence: 1, staleEvidence: 5 })
   })
+
+  it('classifies why a Pact Broker verdict is unresolved and never turns an unresolved pact into a pass (#7544)', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-contract-reason-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-admin-ui/quality-report.json', JSON.stringify({ contracts: [
+      {
+        consumer: 'openbank-admin-ui', provider: 'openbank-case-coordinator-agent', pactFile: 'error.json',
+        status: 'pending', verifiedAt: null, reasonCode: 'query-error',
+        detail: 'Pact Broker matrix query returned HTTP 400 for openbank-admin-ui → openbank-case-coordinator-agent.',
+        interactions: [{ description: 'a', status: 'pending' }],
+      },
+      {
+        consumer: 'openbank-alpha-service', provider: 'openbank-document-service', pactFile: 'no-main.json',
+        status: 'pending', verifiedAt: null, reasonCode: 'no-provider-main-version',
+        detail: 'openbank-document-service has no published main-branch version in the Pact Broker, so provider verification cannot be dispatched yet.',
+        interactions: [{ description: 'b', status: 'pending' }],
+      },
+      {
+        consumer: 'openbank-alpha-service', provider: 'openbank-incentive-service', pactFile: 'pending.json',
+        status: 'pending', verifiedAt: null, reasonCode: 'pending-verification',
+        detail: 'openbank-incentive-service has a main-branch version, but no verification result for the latest openbank-alpha-service pact yet.',
+        interactions: [{ description: 'c', status: 'pending' }],
+      },
+      // A legacy/unclassified snapshot (no reasonCode) must still read as unresolved, not passed.
+      {
+        consumer: 'openbank-alpha-service', provider: 'openbank-legacy-provider', pactFile: 'legacy.json',
+        status: 'pending', verifiedAt: null, interactions: [{ description: 'd', status: 'pending' }],
+      },
+      {
+        consumer: 'openbank-alpha-service', provider: 'openbank-real-provider', pactFile: 'passed.json',
+        status: 'passed', verifiedAt: '2026-08-28T00:00:00Z', interactions: [{ description: 'e', status: 'passed' }],
+      },
+    ] }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const byFile = (file: string) => report.contracts.find(c => c.pactFile === file)
+
+    expect(byFile('error.json')).toMatchObject({
+      state: 'unknown', unavailableReason: 'query-error', verificationDetail: expect.stringMatching(/HTTP 400/),
+    })
+    expect(byFile('no-main.json')).toMatchObject({
+      state: 'unknown', unavailableReason: 'no-provider-main-version',
+      verificationDetail: expect.stringMatching(/no published main-branch version/),
+    })
+    expect(byFile('pending.json')).toMatchObject({
+      state: 'unknown', unavailableReason: 'pending-verification',
+      verificationDetail: expect.stringMatching(/no verification result/),
+    })
+    // Every unresolved pact stays 'unknown' — having a pact file, interactions, and even a
+    // consumer/provider pair is never itself sufficient for 'passed'.
+    for (const file of ['error.json', 'no-main.json', 'pending.json', 'legacy.json']) {
+      expect(byFile(file)?.state).not.toBe('passed')
+      expect(byFile(file)?.state).toBe('unknown')
+    }
+    expect(byFile('legacy.json')).toMatchObject({ state: 'unknown', unavailableReason: null })
+    // Only a real broker 'passed' verdict produces state 'passed', and it carries no reason.
+    expect(byFile('passed.json')).toMatchObject({ state: 'passed', unavailableReason: null })
+  })
 })
