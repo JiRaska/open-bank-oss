@@ -19,15 +19,17 @@ import http from "k6/http";
 import { check } from "k6";
 import { Trend } from "k6/metrics";
 
-// The two money-path reads sit behind auth and legitimately answer 401 unauthenticated.
-// Without this, k6's http_req_failed counts every 401 as a failure → the built-in
-// reliability metric would be ~0.67 by construction whenever OIDC is on, breaching its
-// threshold on every run and making the "trend" meaningless. Treat 200 AND 401 as expected
-// so http_req_failed only counts real transport errors / 5xx.
-http.setResponseCallback(http.expectedStatuses(200, 401));
+// A 401 proves only that the identity boundary rejected the request. It does NOT prove
+// that either money-path handler, database projection, or read query ran, so it must never
+// become a latency baseline. A runner without a dedicated read-only identity will therefore
+// emit a failed evidence envelope instead of a green-looking measurement of the rejection.
+http.setResponseCallback(http.expectedStatuses(200));
 
 const LEDGER_URL = __ENV.LEDGER_URL || "http://localhost:8101";
 const TXN_URL = __ENV.TXN_URL || "http://localhost:8102";
+// PERF_READ_TOKEN is injected only by the scheduled workflow from an environment secret.
+// It is deliberately never given a default and is never logged or added to k6 tags.
+const readHeaders = { Authorization: `Bearer ${__ENV.PERF_READ_TOKEN || ""}` };
 
 const ledgerLatency = new Trend("ledger_journals_ms", true);
 const txnLatency = new Trend("txn_list_ms", true);
@@ -54,26 +56,32 @@ export const options = {
     "txn_list_ms": ["p(95)<800"],
     "info_ms": ["p(95)<200"],
     "http_req_failed": ["rate<0.01"],
+    // A transport percentile is not a handler baseline unless every asserted route answered.
+    // The workflow keeps thresholds advisory; Test Intelligence retains the breach as failed
+    // evidence until a least-privilege runner identity is configured.
+    "checks": ["rate==1.0"],
   },
 };
 
 export default function () {
   // Ledger: list journal entries (cursor-paginated read).
   const j = http.get(`${LEDGER_URL}/api/v1/journals?limit=20`, {
+    headers: readHeaders,
     tags: { name: "ledger_journals" },
   });
   ledgerLatency.add(j.timings.duration);
-  check(j, { "ledger journals 200|401": (r) => r.status === 200 || r.status === 401 });
+  check(j, { "ledger journals 200": (r) => r.status === 200 });
 
   // Transaction: list (read side of the money path).
   const t = http.get(`${TXN_URL}/api/v1/transactions?limit=20`, {
+    headers: readHeaders,
     tags: { name: "txn_list" },
   });
   txnLatency.add(t.timings.duration);
-  check(t, { "txn list 200|401": (r) => r.status === 200 || r.status === 401 });
+  check(t, { "txn list 200": (r) => r.status === 200 });
 
   // libs-served service-info (unauthenticated; cheap liveness+version surface).
-  const i = http.get(`${LEDGER_URL}/api/v1/info`, { tags: { name: "info" } });
+  const i = http.get(`${LEDGER_URL}/api/v1/info`, { headers: readHeaders, tags: { name: "info" } });
   infoLatency.add(i.timings.duration);
   check(i, { "info 200": (r) => r.status === 200 });
 }

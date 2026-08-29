@@ -444,6 +444,29 @@ describe('campaign studio', () => {
     expect(funnel.getByText(/18 click events; 120 impression events on Home banner/)).toBeTruthy()
   }, 15000)
 
+  it('reports only committed incentive outcomes as redeemed', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        campaign: {
+          ...active.campaign,
+          incentiveOfferRef: { id: 'f69b33a4-07e4-4bf6-b61c-f08bfc019136', name: 'term-deposit-welcome', version: 2 },
+        },
+        incentives: { reserved: 18, committed: 7, released: 4, expired: 3 },
+        sources: { ...active.sources, incentives: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-incentive-funnel')).toBeTruthy(), { timeout: 8000 })
+    const funnel = within(screen.getByTestId('campaign-incentive-funnel'))
+    expect(funnel.getByText('Redeemed')).toBeTruthy()
+    expect(funnel.getByText('7')).toBeTruthy()
+    expect(funnel.getByText('Held, not redeemed')).toBeTruthy()
+    expect(funnel.getByText('18')).toBeTruthy()
+  }, 15000)
+
   it('keeps independent app events out of a made-up attention funnel', async () => {
     const active = detail('ACTIVE')
     vi.stubGlobal('fetch', mockFetch({

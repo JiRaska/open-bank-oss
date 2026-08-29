@@ -25,7 +25,7 @@ Assets protected, in priority order:
 1. **Journal integrity** — every posting is balanced (Σdebit = Σcredit per base currency) and immutable
    once `POSTED`. Corrections happen only by compensating reversal, never mutation.
 2. **GL account structure** — chart of accounts, deposit-control accounts (2100–2103), FX-position
-   accounts; their `type`/normal-side semantics.
+   accounts and regulatory-capital source accounts (6000–6060); their `type`/normal-side semantics.
 3. **Sub-ledger dimension** (`subAccountId`, Phase B) — analytická evidence that lets GL control
    accounts tie out per customer (CNB zákon 563/1991 Sb., vyhláška 501/2002 Sb.).
 4. **Trial balance / sub-ledger balances** — derived reporting that auditors and reconciliation rely on.
@@ -107,6 +107,9 @@ isolation from transport/persistence.
   regulatory source. During rollout the count of `HASH_ONLY` frozen records is an explicit report
   availability gate. No backfill is automatic: historical reproduction needs a separately approved,
   controlled evidence-import procedure and cannot be inferred from mutable journals.
+- **Regulatory capital source integrity:** COREP reads only explicit 6000–6060 EQUITY accounts.
+  Capital is never plugged as assets minus liabilities; each movement is a balanced, attributable
+  journal subject to normal posting, idempotency, period-lock and frozen-evidence controls.
 
 ## 5. Open items / follow-ups
 
@@ -380,3 +383,15 @@ set) apply equally to the new `ledger.approval.decide` action.
   line inserts occur only during an operator four-eyes freeze, not on the posting path. **Rollback:**
   before FINREP depends on the source, stop writers and archive frozen evidence, then remove the
   trigger/function/table; never delete attested evidence as a convenience rollback.
+
+- **2026-08-27** — Journal posting now emits the bounded internal span
+  `ledger.journal.post`, asserted against an SDK exporter while the real reactive repository writes
+  a balanced journal and transactional outbox rows in `LedgerOutboxProjectionIT` (issue #7383).
+  **Information disclosure:** the span has one allow-listed attribute only,
+  `openbank.ledger.journal.status`; it carries no journal/account/transaction IDs, actor,
+  idempotency key, amount, currency, description, or payload. **Tampering:** telemetry is
+  observational and cannot alter the posting, its balance validation, day/period locks,
+  idempotency, or transactional outbox. **Availability:** tracing failure is not caught or
+  translated into a financial success; an application failure remains an error span and propagates
+  unchanged. Rollback: revert the instrumentation and its contract test; no stored financial data,
+  schema, caller, endpoint, role, or policy changes.

@@ -62,6 +62,8 @@ import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Executor
+import java.util.function.Function
+import java.util.function.Supplier
 
 @ApplicationScoped
 @Suppress("TooManyFunctions") // one delivery path per channel + shared helpers; grows with channels
@@ -69,6 +71,13 @@ class NotificationConsumer @Inject constructor(
     /** See the KDoc on the `mailerMocked` declaration site below (issue #4737). */
     @ConfigProperty(name = "quarkus.mailer.mock", defaultValue = "false")
     val mailerMocked: Boolean,
+    /**
+     * Default-off guard for the reviewed no-device fallback policy (#4363). Enabling it is a
+     * separate reviewed GitOps decision: sandbox mail is deliberately mocked, so a false default
+     * must never be mistaken for delivery readiness.
+     */
+    @ConfigProperty(name = "openbank.notification.push-fallback.enabled", defaultValue = "false")
+    val pushFallbackEnabled: Boolean,
 ) {
 
     companion object {
@@ -80,6 +89,10 @@ class NotificationConsumer @Inject constructor(
          * party-scoped GET /api/v1/notifications/{id}/self.
          */
         const val GENERIC_PUSH_BODY = "Open the OpenBank app to view details."
+
+        /** PII-free fallback e-mail body. Full detail remains behind the authenticated app. */
+        const val GENERIC_FALLBACK_EMAIL_BODY =
+            "A notification is waiting in the OpenBank app. Open the app to view details."
 
         /**
          * The consent scope a MARKETING send is checked against, per target channel (ADR-0198 D4).
@@ -223,6 +236,7 @@ class NotificationConsumer @Inject constructor(
 
     @PostConstruct
     fun init() {
+        pushMetrics.recordFallbackEnabled(pushFallbackEnabled)
         cdiOversightAdapters = jakarta.enterprise.inject.spi.CDI.current()
             .select(OversightWebhookPublisher::class.java).toList()
         log.infof("notification.consumer.init oversight_adapters=%d", cdiOversightAdapters.size)
@@ -727,12 +741,7 @@ class NotificationConsumer @Inject constructor(
                 if (tokens.isEmpty()) {
                     log.infof("PUSH: no active devices for party=%s template=%s", req.partyId, req.template)
                     pushMetrics.recordFanOut(req.template, NotificationOutcome.FAILED, 0)
-                    return@chain markStatus(
-                        req,
-                        entity,
-                        NotificationOutcome.FAILED,
-                        NotificationOutcomeEvent.REASON_NO_DEVICE,
-                    )
+                    return@chain rerouteNoDevice(req, subject, entity)
                 }
                 // Snapshot detached values before crossing the async send boundary — the
                 // managed entities belong to the (now closed) read transaction.
@@ -756,6 +765,80 @@ class NotificationConsumer @Inject constructor(
                     .replaceWithVoid()
             }
     }
+
+    /**
+     * Keep the original row truthful (`FAILED` / no active device) and publish the more precise
+     * REROUTED outcome and fresh EMAIL request commit in one transaction. The fallback has a new
+     * row and its own terminal outcome, so neither row claims that a different channel delivered
+     * it. In particular, a crash cannot publish REROUTED without a durable fallback request.
+     */
+    private fun rerouteNoDevice(req: NotificationRequest, subject: String, entity: NotificationEntity): Uni<Void> {
+        val fallback = req.template.noDeviceFallbackChannel
+        if (!pushFallbackEnabled || fallback == null) {
+            return markStatus(req, entity, NotificationOutcome.FAILED, NotificationOutcomeEvent.REASON_NO_DEVICE)
+        }
+        val fallbackRequest = req.copy(
+            channel = fallback,
+            deepLink = null,
+            interactionRef = null,
+        )
+        val fallbackEntity = fallbackNotificationEntity(fallbackRequest, subject)
+        return persistReroute(req, entity, fallbackEntity)
+            .invoke(
+                Runnable {
+                    pushMetrics.recordFallbackRouted(
+                        req.template,
+                        NotificationChannel.PUSH,
+                        NotificationChannel.EMAIL,
+                        NotificationOutcome.REROUTED,
+                    )
+                },
+            )
+            .chain(Supplier { sendEmail(fallbackRequest, subject, GENERIC_FALLBACK_EMAIL_BODY, fallbackEntity) })
+    }
+
+    /** Builds the separate generic EMAIL notification persisted with the original reroute evidence. */
+    private fun fallbackNotificationEntity(req: NotificationRequest, subject: String): NotificationEntity =
+        NotificationEntity().also { entity ->
+            entity.notificationId = Ids.newId()
+            entity.partyId = req.partyId
+            entity.channel = NotificationChannel.EMAIL.name
+            entity.template = req.template.name
+            entity.recipient = req.recipient
+            entity.subject = subject
+            entity.body = GENERIC_FALLBACK_EMAIL_BODY
+            entity.correlationId = req.correlationId
+            entity.status = "PENDING"
+            entity.createdAt = Instant.now(clock)
+        }
+
+    /** Atomically records the original failed PUSH outcome, its REROUTED evidence, and the fallback request. */
+    private fun persistReroute(
+        req: NotificationRequest,
+        original: NotificationEntity,
+        fallback: NotificationEntity,
+    ): Uni<Void> = Panache.withTransaction {
+        notificationRepo.find("notificationId", original.notificationId).firstResult()
+            .chain(
+                Function { persisted: NotificationEntity? ->
+                    if (persisted == null) {
+                        reportMissingRow(req, original, NotificationOutcome.REROUTED)
+                        Uni.createFrom().failure<Void>(IllegalStateException("notification row missing during reroute"))
+                    } else {
+                        persisted.status = NotificationStatus.FAILED.name
+                        persisted.failureReason = NotificationOutcomeEvent.REASON_REROUTED_NO_DEVICE
+                        outboxRepo.persistInTransaction(
+                            outcomeMessage(
+                                req,
+                                original,
+                                NotificationOutcome.REROUTED,
+                                NotificationOutcomeEvent.REASON_REROUTED_NO_DEVICE,
+                            ),
+                        ).chain(Supplier { notificationRepo.persist(fallback) })
+                    }
+                },
+            )
+    }.replaceWithVoid()
 
     /**
      * FCM/APNs data is a routing envelope, not customer content. `notificationId` lets an app
@@ -833,12 +916,13 @@ class NotificationConsumer @Inject constructor(
         status: NotificationOutcome,
         reason: String?,
         sent: Boolean = false,
+        persistedStatus: String = status.name,
     ): Uni<Void> = Panache.withTransaction {
         notificationRepo.find("notificationId", entity.notificationId).firstResult()
             .map { e ->
                 if (e == null) reportMissingRow(req, entity, status)
                 e?.also {
-                    it.status = status.name
+                    it.status = persistedStatus
                     // Persist the reason alongside the status (V13): the outcome event below
                     // carries the same value, but its outbox row is pruned after dispatch, so
                     // without this the table can only ever say FAILED.

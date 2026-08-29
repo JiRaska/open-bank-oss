@@ -32,8 +32,8 @@ class F0101MapperTest {
     private fun balancedTrialBalance() = listOf(
         line("1000", "ASSET", "500000"),
         line("2000", "LIABILITY", "-300000"),
-        line("4000", "INCOME", "-260000"),
-        line("5000", "EXPENSE", "60000"),
+        line("4100", "INCOME", "-260000"),
+        line("5100", "EXPENSE", "60000"),
     )
 
     @Test
@@ -41,11 +41,10 @@ class F0101MapperTest {
         val template = F0101Mapper.map(tb(balancedTrialBalance(), ledgerSays = true), asOf)
 
         assertThat(template.templateId).isEqualTo("F01.01")
-        assertThat(template.cells).hasSize(1)
+        assertThat(template.cells).hasSize(6)
         assertThat(cell(template.cells, "r0380")).isEqualByComparingTo("500000")
-        assertThat(template.cells.single().colRef).isEqualTo("c0010")
-        assertThat(template.hasDataGaps).isTrue()
-        assertThat(template.dataGaps.single().affectedScope).isEqualTo("F01.01 except r0380/c0010")
+        assertThat(template.cells).allMatch { it.colRef == "c0010" }
+        assertThat(template.hasDataGaps).isFalse()
     }
 
     @Test

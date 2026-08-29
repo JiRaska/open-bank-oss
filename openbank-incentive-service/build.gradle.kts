@@ -28,7 +28,6 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
-    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
@@ -37,6 +36,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
+    testImplementation(libs.pact.provider)
 }
 
 kover {

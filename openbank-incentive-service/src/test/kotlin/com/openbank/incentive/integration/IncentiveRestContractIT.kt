@@ -26,8 +26,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.eclipse.microprofile.reactive.messaging.spi.Connector
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.hasKey
-import org.hamcrest.Matchers.hasSize
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
@@ -90,7 +90,7 @@ class IncentiveRestContractIT {
 
         When { get("/api/v1/incentives/offers") } Then {
             statusCode(200)
-            body("items", hasSize<Any>(0))
+            body("items.ref.id", not(hasItem(offerId)))
         }
 
         Given { contentType("application/json") }
@@ -138,9 +138,8 @@ class IncentiveRestContractIT {
         }
         When { get("/api/v1/incentives/offers") } Then {
             statusCode(200)
-            body("items", hasSize<Any>(1))
-            body("items[0].ref.id", equalTo(offerId))
-            body("items[0].status", equalTo("PUBLISHED"))
+            body("items.ref.id", hasItem(offerId))
+            body("items.find { it.ref.id == '$offerId' }.status", equalTo("PUBLISHED"))
         }
 
         val start = CountDownLatch(1)
@@ -250,6 +249,70 @@ class IncentiveRestContractIT {
             statusCode(201)
             body("id", equalTo(attributedId))
         }
+
+        execute(
+            """
+            update promo_reservation
+            set reserved_at = now() - interval '3 seconds', expires_at = now() - interval '1 second'
+            where id = '$attributedId'
+            """.trimIndent(),
+        )
+        Given { contentType("application/json") }
+            .When { post("/api/v1/incentives/maintenance/expire") }
+            .Then { statusCode(200) }
+        assertThat(string("select status from promo_reservation where id = '$attributedId'"))
+            .isEqualTo("RESERVED")
+        assertThat(
+            count(
+                """select count(*) from incentive_outbox where aggregate_id = '$attributedId'
+                    and event_type = 'incentive.reservation.expired.v2'
+                """.trimIndent(),
+            ),
+        ).isZero()
+
+        val qualifiedAt = Instant.now().minusSeconds(2)
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", customerParty.toString())
+            body(
+                """{"productRef":"current-account","qualifiedAt":"$qualifiedAt","partyRef":"spoofed"}""",
+            )
+        } When { post("/api/v1/customer-incentives/reservations/$attributedId/commit") } Then {
+            statusCode(400)
+        }
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", java.util.UUID.randomUUID().toString())
+            body("""{"productRef":"current-account","qualifiedAt":"$qualifiedAt"}""")
+        } When { post("/api/v1/customer-incentives/reservations/$attributedId/commit") } Then {
+            statusCode(404)
+        }
+        repeat(2) {
+            Given {
+                contentType("application/json")
+                header("X-Customer-Party-Id", customerParty.toString())
+                body("""{"productRef":"current-account","qualifiedAt":"$qualifiedAt"}""")
+            } When { post("/api/v1/customer-incentives/reservations/$attributedId/commit") } Then {
+                statusCode(200)
+                body("status", equalTo("COMMITTED"))
+                body("attributionRef", equalTo(attributionRef.toString()))
+                body("$", not(hasKey("partyRef")))
+            }
+        }
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", customerParty.toString())
+            body("""{"productRef":"current-account"}""")
+        } When { post("/api/v1/customer-incentives/reservations/$attributedId/release") } Then {
+            statusCode(409)
+        }
+        assertThat(
+            count(
+                """select count(*) from incentive_outbox where aggregate_id = '$attributedId'
+                    and event_type = 'incentive.reservation.committed.v2'
+                """.trimIndent(),
+            ),
+        ).isEqualTo(1)
 
         Given {
             contentType("application/json")

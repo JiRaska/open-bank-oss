@@ -30,7 +30,7 @@ triaging an incident that starts on `ap2`.
 
 ## Health & probes
 
-- Readiness: `GET :8151/q/health/ready` · Liveness: `GET :8151/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `platform`); dashboards in Grafana.
 - Logs: `kubectl logs -n platform deploy/ap2-service -f`, or Loki
   `{namespace="platform"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `ap2`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/ap2-service -n platform` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/ap2-service -n platform --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/ap2-service -n platform --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

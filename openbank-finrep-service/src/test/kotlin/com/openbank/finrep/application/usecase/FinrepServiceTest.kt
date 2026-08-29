@@ -40,8 +40,8 @@ class FinrepServiceTest {
                 net = BigDecimal("-300000"),
                 currency = "CZK",
             ),
-            TrialBalanceLineDto(code = "4000", accountType = "INCOME", net = BigDecimal("-260000"), currency = "CZK"),
-            TrialBalanceLineDto(code = "5000", accountType = "EXPENSE", net = BigDecimal("60000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "4100", accountType = "INCOME", net = BigDecimal("-260000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "5100", accountType = "EXPENSE", net = BigDecimal("60000"), currency = "CZK"),
         )
         coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(lines, ledgerSays = true)
         val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
@@ -50,9 +50,7 @@ class FinrepServiceTest {
 
         assertThat(template.templateId).isEqualTo("F01.01")
         assertThat(template.period).isEqualTo(asOf)
-        assertThat(template.cells).containsExactly(
-            com.openbank.finrep.domain.model.FinrepCell("r0380", "c0010", BigDecimal("500000")),
-        )
+        assertThat(template.cells.single { it.rowRef == "r0380" }.value).isEqualByComparingTo("500000")
         coVerify(exactly = 1) { ledgerPort.getTrialBalance(asOf) }
     }
 
@@ -60,8 +58,8 @@ class FinrepServiceTest {
     fun `getTemplate dispatches F02_00 to the P&L mapper`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
         val lines = listOf(
-            TrialBalanceLineDto(code = "4000", accountType = "INCOME", net = BigDecimal("-120000"), currency = "CZK"),
-            TrialBalanceLineDto(code = "5000", accountType = "EXPENSE", net = BigDecimal("80000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "4100", accountType = "INCOME", net = BigDecimal("-120000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "5100", accountType = "EXPENSE", net = BigDecimal("80000"), currency = "CZK"),
         )
         coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(lines, ledgerSays = true)
         val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
@@ -78,8 +76,8 @@ class FinrepServiceTest {
         val lines = listOf(
             TrialBalanceLineDto("1000", "ASSET", BigDecimal("500000"), "CZK"),
             TrialBalanceLineDto("2000", "LIABILITY", BigDecimal("-300000"), "CZK"),
-            TrialBalanceLineDto("4000", "INCOME", BigDecimal("-260000"), "CZK"),
-            TrialBalanceLineDto("5000", "EXPENSE", BigDecimal("60000"), "CZK"),
+            TrialBalanceLineDto("4100", "INCOME", BigDecimal("-260000"), "CZK"),
+            TrialBalanceLineDto("5100", "EXPENSE", BigDecimal("60000"), "CZK"),
         )
         coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(lines, ledgerSays = true)
         val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
@@ -87,13 +85,9 @@ class FinrepServiceTest {
         val liabilities = service.getTemplate(GetFinrepTemplateQuery("F01.02", asOf))
         val equity = service.getTemplate(GetFinrepTemplateQuery("F01.03", asOf))
 
-        assertThat(liabilities.cells).containsExactly(
-            com.openbank.finrep.domain.model.FinrepCell("r0300", "c0010", BigDecimal("300000")),
-        )
-        assertThat(equity.cells).containsExactly(
-            com.openbank.finrep.domain.model.FinrepCell("r0300", "c0010", BigDecimal("200000")),
-            com.openbank.finrep.domain.model.FinrepCell("r0310", "c0010", BigDecimal("500000")),
-        )
+        assertThat(liabilities.cells.single { it.rowRef == "r0300" }.value).isEqualByComparingTo("300000")
+        assertThat(equity.cells.single { it.rowRef == "r0300" }.value).isEqualByComparingTo("200000")
+        assertThat(equity.cells.single { it.rowRef == "r0310" }.value).isEqualByComparingTo("500000")
         assertThat(registry.get("openbank.finrep.templates.rendered").tag("template", "F01.02").counter().count())
             .isEqualTo(1.0)
         assertThat(registry.get("openbank.finrep.templates.rendered").tag("template", "F01.03").counter().count())

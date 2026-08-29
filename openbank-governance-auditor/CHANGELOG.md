@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/governance-auditor-v0.6.0...governance-auditor-v0.6.1) (2026-08-27)
+
+
+### Performance
+
+* **flaky-test-hunter:** add read-path smoke coverage ([#7374](https://github.com/JiRaska/open-bank-oss/issues/7374)) ([b93d00d](https://github.com/JiRaska/open-bank-oss/commit/b93d00d3ab19f3705b87212ab0ce60cfd1119f6f))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/governance-auditor-v0.5.0...governance-auditor-v0.6.0) (2026-08-06)
 
 

@@ -19,8 +19,9 @@ describe('operator shell serves fonts without a third-party request', () => {
     }
   })
 
-  it('self-hosts the shell typography via next/font instead of a CSS @import', () => {
+  it('keeps shell typography free of a CSS or build-time Google Fonts dependency', () => {
     expect(globalsCss).not.toMatch(/@import\s+url\(['"]?https:\/\/fonts\.googleapis\.com/)
+    expect(layout).not.toMatch(/from\s+['"]next\/font\/google['"]/)
     for (const host of GOOGLE_FONT_HOSTS) {
       expect(globalsCss).not.toContain(host)
     }

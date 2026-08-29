@@ -1,0 +1,29 @@
+# Data-plane-only Incentive foundation. Do not add a Deployment or image pin here: the service
+# has a fail-closed PROMO_CODE_PEPPER startup gate. This Application also deliberately has no
+# automated sync: CNPG must not create a database before the separately reviewed EKS Pod Identity
+# association is applied and observed. Workload, network policy, Kafka mTLS, and customer-edge
+# wiring remain later independently reviewed rollout steps.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: incentive
+  namespace: argocd
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/incentive
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: incentive
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

@@ -10,19 +10,18 @@ import org.testcontainers.utility.DockerImageName
 
 class IncentivePostgresTestResource : QuarkusTestResourceLifecycleManager {
     private var postgres: PostgreSQLContainer<*>? = null
-    private val image = DockerImageName.parse("postgres:16.3-alpine")
 
     override fun start(): Map<String, String> {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping incentive HTTP IT")
         }
-        val pg = PostgreSQLContainer(image)
+        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
             .withUsername("openbank")
             .withPassword("openbank_secret")
             .withDatabaseName("openbank_incentive_it")
         pg.start()
         postgres = pg
-        TestInfrastructureEvidence.record("postgres", image.asCanonicalNameString(), "started")
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         return mapOf(
@@ -38,7 +37,11 @@ class IncentivePostgresTestResource : QuarkusTestResourceLifecycleManager {
     override fun stop() {
         postgres?.let {
             it.stop()
-            TestInfrastructureEvidence.record("postgres", image.asCanonicalNameString(), "stopped")
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
         }
+    }
+
+    private companion object {
+        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
     }
 }

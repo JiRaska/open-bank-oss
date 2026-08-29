@@ -114,7 +114,7 @@ test('regulatory preview blocks fiction: it shows real FINREP cells and no submi
   await page.route('**/api/svc/finrep-service/api/v1/finrep/templates/**', route => {
     const path = new URL(route.request().url()).pathname
     const body = path.includes('F01.01')
-      ? { templateId: 'F01.01', period: '2026-06-30', isBalanced: true, cells: [{ rowRef: 'r010', colRef: 'c010', value: 1250.5, currency: 'CZK' }] }
+      ? { templateId: 'F01.01', period: '2026-06-30', isBalanced: true, cells: [{ rowRef: 'r0380', colRef: 'c0010', value: 1250.5, currency: 'CZK' }] }
       : { templateId: 'F02.00', period: '2026-06-30', isBalanced: true, cells: [{ rowRef: 'r450', colRef: 'c010', value: 42, currency: 'CZK' }] }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })

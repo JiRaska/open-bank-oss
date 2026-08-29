@@ -16,6 +16,14 @@ import org.junit.jupiter.api.Test
 class FlakyTestResourceRoutingIT {
 
     @Test
+    @TestSecurity(user = "viewer", roles = ["ROLE_VIEWER"])
+    fun `findings read is served from the reactive Vertx context`() {
+        given()
+            .`when`().get("/api/v1/flaky-test-hunter/findings")
+            .then().statusCode(200)
+    }
+
+    @Test
     fun `async trigger is a served route that rejects an anonymous caller`() {
         given()
             .`when`().post("/api/v1/flaky-test-hunter/check/trigger-async")

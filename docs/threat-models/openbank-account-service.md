@@ -95,6 +95,15 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-27** — **New tightly scoped inbound diagnostic edge:** the sandbox's
+  `journey-product-catalog-read` k6 CronJob may make one read-only request to
+  product-catalog `:8104`. The additive NetworkPolicy selects both its `observability`
+  namespace and its immutable journey pod labels; it does not admit Grafana, Prometheus,
+  or any other observability workload. The Job has no ServiceAccount token or credentials
+  and the endpoint returns only the public product list. This is a production-like
+  availability assertion, not an access-control bypass: Product Catalog still owns
+  request handling, and removing the policy restores fail-closed connection denial.
+
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass: sanctions, SCA and all other downstream controls still see the journey. It prevents synthetic activity from becoming indistinguishable before a downstream persistence/event boundary; a separate fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-08-20** — Product-catalog product/currency enforcement (#668). This existing reference-data

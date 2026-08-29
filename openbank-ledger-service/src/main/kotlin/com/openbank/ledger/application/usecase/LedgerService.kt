@@ -35,8 +35,13 @@ import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.opentelemetry.api.GlobalOpenTelemetry
+import io.opentelemetry.api.trace.SpanKind
+import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.api.trace.Tracer
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import jakarta.persistence.PersistenceException
 import java.time.Clock
 import java.util.UUID
@@ -52,6 +57,9 @@ class LedgerService(
     private val periodFreezeLock: PeriodFreezeLock,
     private val clock: Clock,
 ) : LedgerUseCase {
+    /** Field injection keeps the established money-path constructor shape stable for direct tests. */
+    @Inject
+    lateinit var tracer: Tracer
     // The single constructor is the CDI entry point; tests pass a fixed Clock for deterministic
     // timestamps (ADR-0100 Layer 1).
     //
@@ -62,7 +70,33 @@ class LedgerService(
     // now the injected UTC bean (correct for timestamps); the accounting DATE comes from
     // AccountingClock via [accountingDayLock], the single authority for it.
 
+    /**
+     * A successful posting is a money-path execution boundary. The span deliberately excludes
+     * journal, account, transaction, actor, amount, and idempotency data: it proves execution
+     * without becoming a second financial record.
+     */
+    @Suppress("TooGenericExceptionCaught") // The span must record every failure before propagation.
     override suspend fun postJournal(command: PostJournalCommand): JournalEntry {
+        val span = activeTracer().spanBuilder("ledger.journal.post")
+            .setSpanKind(SpanKind.INTERNAL)
+            .startSpan()
+        return try {
+            postJournalInternal(command).also { entry ->
+                span.setAttribute("openbank.ledger.journal.status", entry.status.name)
+            }
+        } catch (failure: Exception) {
+            span.recordException(failure)
+            span.setStatus(StatusCode.ERROR)
+            throw failure
+        } finally {
+            span.end()
+        }
+    }
+
+    private fun activeTracer(): Tracer =
+        if (::tracer.isInitialized) tracer else GlobalOpenTelemetry.getTracer("openbank-ledger-service")
+
+    private suspend fun postJournalInternal(command: PostJournalCommand): JournalEntry {
         // Idempotent replay: a repeated key returns the original entry, never double-posts.
         // Checked BEFORE the period lock so replaying an entry that was legitimately booked while
         // the year was still open stays idempotent even after the year is later attested.
