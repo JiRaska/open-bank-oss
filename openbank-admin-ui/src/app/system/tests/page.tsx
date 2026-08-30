@@ -170,7 +170,27 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
         <Stat label="No execution evidence" value={report.totals.missingEvidence} tone={report.totals.missingEvidence ? '#d97706' : '#16a34a'} />
         <Stat label="Stale evidence" value={report.totals.staleEvidence} tone={report.totals.staleEvidence ? '#d97706' : '#16a34a'} />
         <Stat label="Unresolved evidence" value={report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0} tone={(report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) ? '#64748b' : '#16a34a'} />
+        <Stat label="Required-control gaps" value={`${report.totals.requiredControlGaps ?? 0}/${report.totals.requiredControls ?? 0}`} tone={report.totals.requiredControlGaps ? '#dc2626' : '#16a34a'} />
       </div>
+      <section aria-label={t('Deterministické povinné kontroly', 'Deterministic required controls')} style={{ marginBottom: 20 }}>
+        <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t('Deterministické povinné kontroly', 'Deterministic required controls')}</h2>
+        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+          <thead><tr><th style={thStyle}>Control</th><th style={thStyle}>State</th><th style={thStyle}>Reason</th><th style={thStyle}>Observed</th></tr></thead>
+          <tbody>{(report.requiredControls ?? []).map(control => <tr key={control.id}>
+            <td style={{ ...tdStyle, fontWeight: 650 }}>{control.id}</td><td style={tdStyle}><StateBadge state={control.state} /></td>
+            <td style={{ ...tdStyle, minWidth: 320 }}>{control.reason}{control.blocker && <div style={{ color: '#7c3aed', fontSize: 10, marginTop: 3 }}>{control.blocker}</div>}</td>
+            <td style={tdStyle}>{control.observedAt ? formatTimestamp(control.observedAt) : '—'}</td>
+          </tr>)}</tbody>
+        </table></div>
+      </section>
+      <section aria-label={t('Hranice schopností platformy', 'Platform capability boundaries')} style={{ marginBottom: 20 }}>
+        <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t('Hranice schopností platformy', 'Platform capability boundaries')}</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>{(report.platformCapabilities ?? []).map(capability => <div key={capability.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14, background: 'var(--surface-1)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{capability.title}</strong><span style={{ color: capability.state === 'implemented' ? '#16a34a' : '#7c3aed', fontSize: 10, fontWeight: 700 }}>{capability.state}</span></div>
+          {capability.blocker && <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '8px 0 0' }}>{capability.blocker}</p>}
+          <code style={{ display: 'block', color: 'var(--text-tertiary)', fontSize: 9, marginTop: 8 }}>{capability.evidence}</code>
+        </div>)}</div>
+      </section>
       <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
         <table style={tableStyle}>
           <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>

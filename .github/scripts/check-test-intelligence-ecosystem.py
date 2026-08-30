@@ -194,10 +194,31 @@ def check(root: Path) -> list[str]:
     ui_page = text(root / "openbank-admin-ui/src/app/system/tests/page.tsx")
     if "| 'trace'" not in ui_types or "'trace', 'mutation'" not in ui_page:
         errors.append("Admin UI does not expose trace-contract evidence in fleet posture")
+    if "RequiredTestControl" not in ui_types or "Deterministic required controls" not in ui_page:
+        errors.append("Admin UI does not expose required controls as a typed operator surface")
     for needle in ("function journeyCoverage(journeys)", "journeys.filter(item => item.status === 'active')",
                    "journeyCoverage: syntheticCoverage"):
         if needle not in collector:
             errors.append(f"admin projection loses the governed synthetic coverage denominator: {needle}")
+    for needle in ("function requiredControls(", "mutationComponents()", "requiredControls: controls",
+                   "requiredControlGaps: controls.filter"):
+        if needle not in collector:
+            errors.append(f"admin projection loses an independent required-control denominator: {needle}")
+    capability_text = text(root / "openbank-libs/governance/test-intelligence-capabilities.yaml")
+    capability_blocks = re.split(r"(?m)^  - id: ", capability_text)[1:]
+    ids = [block.splitlines()[0].strip() for block in capability_blocks]
+    allowed = {"implemented", "external-blocked", "ownership-blocked", "safety-blocked", "intentionally-deferred"}
+    if not capability_blocks or len(ids) != len(set(ids)):
+        errors.append("test-intelligence capability register is empty or duplicated")
+    for identifier, block in zip(ids, capability_blocks, strict=True):
+        state = re.search(r"(?m)^    state: ([a-z-]+)$", block)
+        if not state or state.group(1) not in allowed or "\n    title:" not in block or "\n    evidence:" not in block:
+            errors.append(f"test-intelligence capability is incomplete: {identifier}")
+        if state and state.group(1) != "implemented" and "\n    blocker:" not in block:
+            errors.append(f"blocked test-intelligence capability has no blocker: {identifier}")
+    for needle in ("function platformCapabilities()", "platformCapabilities: capabilities"):
+        if needle not in collector:
+            errors.append(f"admin projection loses operator-visible platform blockers: {needle}")
     agent_analysis = text(root / "openbank-flaky-test-hunter/src/main/kotlin/com/openbank/flakytest/application/usecase/FlakyTestHunterService.kt")
     if "private val EVIDENCE_KINDS" not in agent_analysis or '"trace",' not in agent_analysis:
         errors.append("flaky-test-hunter cannot consume the trace evidence emitted by the Admin BFF")
@@ -207,12 +228,16 @@ def check(root: Path) -> list[str]:
     for workflow_name, required in {
         "perf-gate.yml": ("--performance-summary", "Build performance Test Intelligence envelope"),
         "perf-baseline.yml": ("--performance-summary", "test-intelligence-run-openbank-money-path"),
-        "pitest.yml": ("--mutation-report", "Build mutation Test Intelligence envelope"),
+        "pitest.yml": ("--mutation-report", "--mutation-threshold 70", "Build mutation Test Intelligence envelope"),
     }.items():
         workflow = text(root / ".github/workflows" / workflow_name)
         for needle in required:
             if needle not in workflow:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
+    if "pitest.yml/runs?branch=main&status=completed&per_page=1" not in deploy:
+        errors.append("mutation projection does not select the latest completed attempt regardless of verdict")
+    if "pitest.yml/runs?branch=main&status=success" in deploy:
+        errors.append("mutation projection hides failed attempts behind an older successful workflow")
     perf_gate = text(root / ".github/workflows/perf-gate.yml")
     perf_baseline = text(root / ".github/workflows/perf-baseline.yml")
     pinned_k6 = "ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79"

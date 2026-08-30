@@ -526,11 +526,12 @@ jobs:
               done
           echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes."
 
-      - name: Stage pitest mutation results from latest weekly run
+      - name: Stage pitest mutation results from latest completed weekly run
         # pitest.yml uploads one artifact per service: pitest-{service} (30-day retention).
         # collect-quality-report.mjs reads openbank-*/build/reports/pitest/mutations.xml.
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
-        # Best-effort: absent → mutations tab stays empty (acceptable, never blocks build).
+        # Do not filter to success: a failed/latest attempt must not disappear behind an
+        # older green run. Best-effort absence stays visible as missing evidence.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -538,11 +539,11 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=success&per_page=1" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=1" \
             | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
             2>/dev/null || true)
           if [ -z "${RUN_ID}" ]; then
-            echo "No successful pitest run found — skipping pitest staging."
+            echo "No completed pitest run found — skipping pitest staging."
             exit 0
           fi
           echo "Staging pitest results from run ${RUN_ID}..."

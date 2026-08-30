@@ -289,6 +289,8 @@ export interface TestIntelligenceReport {
   syntheticJourneys: SyntheticJourneyEvidence[]
   journeyCoverage?: JourneyCoverageSummary
   clientExperiences: ClientExperienceEvidence[]
+  requiredControls?: RequiredTestControl[]
+  platformCapabilities?: TestPlatformCapability[]
   /**
    * Build-time derived ADR-0148 record/replay posture. This is deliberately neither a CI
    * test result nor a runtime agent-health signal: it says which registered charters have a
@@ -308,8 +310,29 @@ export interface TestIntelligenceReport {
     staleEvidence: number
     unknownEvidence?: number
     unresolvedEvidence?: number
+    requiredControls?: number
+    requiredControlGaps?: number
   }
   warnings: string[]
+}
+
+export interface RequiredTestControl {
+  id: string
+  component: string | null
+  kind: EvidenceKind | 'coverage' | 'runtime'
+  state: EvidenceState
+  reason: string
+  source: string | null
+  observedAt: string | null
+  blocker?: string
+}
+
+export interface TestPlatformCapability {
+  id: string
+  title: string
+  state: 'implemented' | 'external-blocked' | 'ownership-blocked' | 'safety-blocked' | 'intentionally-deferred'
+  blocker: string | null
+  evidence: string
 }
 
 export interface AiEvalAssurance {
