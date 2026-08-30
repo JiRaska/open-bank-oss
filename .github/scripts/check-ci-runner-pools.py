@@ -58,6 +58,9 @@ from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gatelib  # noqa: E402  (path must be set first)
+
 # Declared in rules.yaml: ci_runners.pools, provisioned by no OpenTofu scale set.
 # Removing an entry requires either provisioning the pool or deleting its declaration.
 KNOWN_UNPROVISIONED = {
@@ -283,6 +286,10 @@ def main() -> int:
         print("ERROR: no .github/workflows directory — the gate read nothing.", file=sys.stderr)
         return 1
 
+    # The corpus is the DECLARATION plus the labels in use: if rules.yaml stops parsing, or
+    # every workflow loses its self-hosted `runs-on`, every clause matches nothing and the
+    # gate passes everything while still exiting 0.
+    gatelib.subjects(n_pools + n_labels, "declared pools + self-hosted runs-on labels")
     print(f"ci-runner-pools: {n_pools} declared pools, {n_labels} self-hosted runs-on labels examined")
     if KNOWN_UNPROVISIONED:
         for k, v in sorted(KNOWN_UNPROVISIONED.items()):

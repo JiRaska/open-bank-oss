@@ -360,6 +360,7 @@ gates:
       job must never reach the credential-carrying deploy pool. Declared capacity that does
       not exist reads exactly like capacity that does.
     review_after: "2027-08-30"
+    min_subjects: 5   # 3 declared pools + 4 self-hosted runs-on labels today (2026-08-30)
     selftest: python3 .github/scripts/check-ci-runner-pools.py --self-test
     selftest_expect: pass
     run: |
