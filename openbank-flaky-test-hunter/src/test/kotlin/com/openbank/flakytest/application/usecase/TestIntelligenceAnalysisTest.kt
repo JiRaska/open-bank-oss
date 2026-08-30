@@ -54,6 +54,7 @@ class TestIntelligenceAnalysisTest {
             FlakyTestCheckType.OBSERVED_FLAKY_TESTS,
             FlakyTestCheckType.STALE_TEST_EVIDENCE,
             FlakyTestCheckType.UNPROVEN_TEST_INFRASTRUCTURE,
+            FlakyTestCheckType.REQUIRED_CONTROL_GAP,
         )
         assertThat(findings.filter { it.checkType != FlakyTestCheckType.STALE_TEST_EVIDENCE }).allSatisfy {
             assertThat(it.severity).isEqualTo(FindingSeverity.CRITICAL)
@@ -128,6 +129,10 @@ class TestIntelligenceAnalysisTest {
                     TestIntelligenceEvidenceInput("contract", "failed"),
                     TestIntelligenceEvidenceInput("mutation", "failed"),
                     TestIntelligenceEvidenceInput("trace", "passed"),
+                ),
+                requiredControls = listOf(
+                    TestIntelligenceEvidenceInput("integration", "failed"),
+                    TestIntelligenceEvidenceInput("coverage", "not-run"),
                 ),
                 declaredInfrastructure = listOf("postgres"),
                 observedInfrastructureStarts = 0,

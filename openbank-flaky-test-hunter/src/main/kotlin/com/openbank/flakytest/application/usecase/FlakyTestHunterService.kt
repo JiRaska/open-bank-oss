@@ -171,6 +171,19 @@ class FlakyTestHunterService(
         component: TestIntelligenceComponentInput,
         severity: FindingSeverity,
     ) = buildList {
+        val requiredGaps = component.requiredControls.count { it.state != "passed" }
+        if (requiredGaps > 0) {
+            add(
+                evidenceFinding(
+                    snapshotId,
+                    component.component,
+                    FlakyTestCheckType.REQUIRED_CONTROL_GAP,
+                    severity,
+                    "${component.component} has $requiredGaps unsatisfied required test control(s)",
+                    BigDecimal(requiredGaps),
+                ),
+            )
+        }
         if (component.evidence.any { it.state == "failed" }) {
             add(
                 evidenceFinding(
@@ -267,6 +280,12 @@ class FlakyTestHunterService(
                         it.kind in EVIDENCE_KINDS && it.state in EVIDENCE_STATES
                     },
             ) { "invalid evidence vocabulary" }
+            require(
+                component.requiredControls.size <= MAX_EVIDENCE_PER_COMPONENT &&
+                    component.requiredControls.all {
+                        it.kind in REQUIRED_CONTROL_KINDS && it.state in EVIDENCE_STATES
+                    },
+            ) { "invalid required-control vocabulary" }
         }
     }
 
@@ -282,6 +301,7 @@ class FlakyTestHunterService(
                     "trace",
                 )
         private val EVIDENCE_STATES = setOf("passed", "failed", "skipped", "not-run", "stale", "blocked", "unknown")
+        private val REQUIRED_CONTROL_KINDS = EVIDENCE_KINDS + setOf("coverage", "runtime")
         private val INFRASTRUCTURE = setOf("postgres", "redpanda", "valkey")
         private val COMPONENT = Regex("^openbank-[a-z0-9-]{1,100}$")
         private const val MAX_COMPONENTS = 250

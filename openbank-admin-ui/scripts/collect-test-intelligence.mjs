@@ -398,6 +398,93 @@ async function mutations(components) {
   return result
 }
 
+function mutationComponents() {
+  const workflow = readText(path.join(repo, '.github', 'workflows', 'pitest.yml'))
+  const serviceMatrix = workflow.match(/\n {8}service:\s*\n([\s\S]*?)\n {4}steps:/)?.[1] ?? ''
+  return new Set([...serviceMatrix.matchAll(/- (openbank-[a-z0-9-]+)/g)].map(match => match[1]))
+}
+
+function platformCapabilities() {
+  const file = path.join(repo, 'openbank-libs', 'governance', 'test-intelligence-capabilities.yaml')
+  try {
+    const register = parseYaml(fs.readFileSync(file, 'utf8'))
+    return (register?.capabilities ?? []).map(item => ({
+      id: item.id, title: item.title, state: item.state,
+      blocker: item.blocker ?? null, evidence: item.evidence,
+    }))
+  } catch (error) {
+    warnings.push(`test-intelligence capability register unavailable: ${error.message}`)
+    return []
+  }
+}
+
+function requiredControls(components, contracts, mutations, performance, synthetics) {
+  const pactParticipants = new Set(contracts.flatMap(item => [item.consumer, item.provider]))
+  const mutationParticipants = mutationComponents()
+  const mutationByComponent = new Map(mutations.map(item => [item.component, item]))
+  const performanceComponents = new Set(performance.map(item => item.component).filter(Boolean))
+  const controls = []
+  const observation = (component, kind) => {
+    const rows = component.evidence.filter(item => item.kind === kind)
+    const precedence = ['failed', 'blocked', 'unknown', 'not-run', 'stale', 'skipped', 'passed']
+    return rows.sort((left, right) => precedence.indexOf(left.state) - precedence.indexOf(right.state))[0]
+  }
+  const addEvidence = (component, kind, reason) => {
+    const row = observation(component, kind)
+    controls.push({
+      id: `${component.component}:${kind}`, component: component.component, kind,
+      state: row?.state ?? 'not-run', reason, source: row?.source ?? null,
+      observedAt: row?.observedAt ?? null,
+    })
+  }
+  for (const component of components.filter(item => item.released)) {
+    addEvidence(component, 'unit', 'Every released component must publish executable test evidence.')
+    if (exists(path.join(repo, component.component, 'build.gradle.kts'))) {
+      controls.push({
+        id: `${component.component}:coverage`, component: component.component, kind: 'coverage',
+        state: component.coverage.state, reason: 'Every released Gradle component is subject to the Kover coverage ratchet.',
+        source: component.coverage.source, observedAt: component.coverage.observedAt,
+      })
+    }
+    if (component.component === 'openbank-admin-ui') addEvidence(component, 'e2e', 'The operator UI requires its Playwright journey evidence.')
+    if (component.moneyPath || component.testInfrastructure.declared.length > 0) {
+      addEvidence(component, 'integration', component.moneyPath
+        ? 'Money-path components require integration evidence.'
+        : 'A declared container topology requires an integration run.')
+    }
+    if (pactParticipants.has(component.component)) addEvidence(component, 'contract', 'The component participates in a governed Pact contract.')
+    if (performanceComponents.has(component.component)) addEvidence(component, 'performance', 'A governed k6 scenario exists for this component.')
+    if (mutationParticipants.has(component.component)) {
+      const row = mutationByComponent.get(component.component)
+      controls.push({
+        id: `${component.component}:mutation`, component: component.component, kind: 'mutation',
+        state: row?.state ?? 'not-run', reason: 'The service is in the governed Pitest matrix and must publish its 70% advisory result.',
+        source: row ? 'Pitest:mutations.xml' : null, observedAt: row?.observedAt ?? null,
+      })
+    }
+    for (const resource of component.testInfrastructure.declared) {
+      const rows = component.testInfrastructure.observed.filter(item => item.resource === resource)
+      const starts = rows.filter(item => item.lifecycle === 'started').length
+      const stops = rows.filter(item => item.lifecycle === 'stopped').length
+      controls.push({
+        id: `${component.component}:runtime:${resource}`, component: component.component, kind: 'runtime',
+        state: starts > 0 && starts === stops ? 'passed' : starts > 0 || stops > 0 ? 'failed' : 'not-run',
+        reason: `Declared ${resource} topology requires balanced start and stop proof from the same run.`,
+        source: rows.length ? 'test-intelligence-run:v1' : null,
+        observedAt: rows.map(item => item.observedAt).sort().at(-1) ?? null,
+      })
+    }
+  }
+  for (const journey of synthetics) controls.push({
+    id: `synthetic:${journey.id}`, component: null, kind: 'synthetic', state: journey.state,
+    reason: journey.falsifies || `Governed synthetic journey ${journey.id}.`,
+    source: journey.live?.source ?? journey.ci?.run?.url ?? 'openbank-libs/governance/journeys.yaml',
+    observedAt: journey.live?.observedAt ?? journey.ci?.observedAt ?? null,
+    ...(journey.blocker ? { blocker: journey.blocker } : {}),
+  })
+  return controls.sort((left, right) => left.id.localeCompare(right.id))
+}
+
 function performance() {
   const catalogFile = path.join(repo, 'perf', 'scenarios.yaml')
   const catalog = fs.existsSync(catalogFile)
@@ -737,6 +824,8 @@ async function main() {
     })
   }
   const synthetic = syntheticJourneys()
+  const controls = requiredControls(components, contractEvidence, mutationEvidence, performanceEvidence, synthetic)
+  const capabilities = platformCapabilities()
   const syntheticCoverage = journeyCoverage(synthetic)
   const clientExperience = await clientExperiences()
   const testCases = testCaseHistory(currentEnvelopes)
@@ -819,12 +908,14 @@ async function main() {
     schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
     contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence, performanceHistory,
     syntheticJourneys: synthetic, journeyCoverage: syntheticCoverage, history, runHistory, testCases, testImpact: impact,
-    clientExperiences: clientExperience,
+    clientExperiences: clientExperience, requiredControls: controls, platformCapabilities: capabilities,
     totals: {
       components: components.length,
       componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
       moneyPathComponents: components.filter(item => item.moneyPath).length,
       failingEvidence, missingEvidence, staleEvidence, unknownEvidence, unresolvedEvidence,
+      requiredControls: controls.length,
+      requiredControlGaps: controls.filter(item => item.state !== 'passed').length,
     },
     warnings,
   }

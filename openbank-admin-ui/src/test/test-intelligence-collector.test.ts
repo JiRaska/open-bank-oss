@@ -171,6 +171,26 @@ scenarios:
     ]))
   })
 
+  it('derives required mutation controls from the full commented Pitest matrix', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-required-mutation-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-beta-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-libs/governance/test-intelligence-capabilities.yaml', 'version: 1\ncapabilities:\n  - id: probes\n    title: Independent probes\n    state: external-blocked\n    blocker: no external fleet\n    evidence: issue-1\n')
+    write(repo, '.github/workflows/pitest.yml', 'jobs:\n  pitest:\n    strategy:\n      matrix:\n        service:\n          - openbank-alpha-service\n          # comments must not truncate the denominator\n          - openbank-beta-service\n    steps:\n      - run: true\n')
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.requiredControls?.filter(control => control.kind === 'mutation')).toEqual([
+      expect.objectContaining({ id: 'openbank-alpha-service:mutation', state: 'not-run' }),
+      expect.objectContaining({ id: 'openbank-beta-service:mutation', state: 'not-run' }),
+    ])
+    expect(report.totals).toMatchObject({ requiredControls: 4, requiredControlGaps: 4 })
+    expect(report.platformCapabilities).toContainEqual(expect.objectContaining({ id: 'probes', state: 'external-blocked' }))
+  })
+
   it('keeps Vitest and multi-suite Playwright fallback evidence when no CI envelope was retained', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-xml-fallback-'))
     dirs.push(repo)

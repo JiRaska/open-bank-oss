@@ -399,6 +399,7 @@ def specialized_evidence(
     performance_summary: str | None,
     mutation_report: str | None,
     performance_not_run_detail: str | None = None,
+    mutation_threshold: float | None = None,
     synthetic_summary: str | None = None,
     synthetic_journey: str | None = None,
     suite_evidence: list[dict] | None = None,
@@ -425,8 +426,13 @@ def specialized_evidence(
             mutations = root.findall(".//mutation")
             killed = sum(1 for item in mutations if item.attrib.get("status") == "KILLED")
             score = round(killed * 100 / len(mutations), 2) if mutations else None
-            specialized.append({"kind": "mutation", "state": "passed" if mutations else "skipped",
-                                "source": str(mutation_file), "detail": f"{killed}/{len(mutations)} killed ({score if score is not None else 'n/a'}%)"})
+            state = "skipped" if not mutations else (
+                "failed" if mutation_threshold is not None and score is not None and score < mutation_threshold else "passed"
+            )
+            target = f", target {mutation_threshold:g}%" if mutation_threshold is not None else ""
+            specialized.append({"kind": "mutation", "state": state,
+                                "source": str(mutation_file),
+                                "detail": f"{killed}/{len(mutations)} killed ({score if score is not None else 'n/a'}%{target})"})
         else:
             specialized.append({"kind": "mutation", "state": "not-run", "source": str(mutation_file), "detail": "mutation report absent"})
     if synthetic_summary:
@@ -484,6 +490,7 @@ def main() -> None:
     parser.add_argument("--performance-summary")
     parser.add_argument("--performance-not-run-detail")
     parser.add_argument("--mutation-report")
+    parser.add_argument("--mutation-threshold", type=float)
     parser.add_argument("--synthetic-summary")
     parser.add_argument("--synthetic-journey")
     parser.add_argument("--synthetic-variant")
@@ -573,8 +580,9 @@ def main() -> None:
             assert [item["observedAt"] for item in observed] == [
                 "2026-08-22T21:10:01Z", "2026-08-22T21:10:10Z", "2026-08-22T21:11:01Z",
             ]
-            specialized = specialized_evidence(str(performance), str(mutation))
-            assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "passed")]
+            specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
+            assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]
+            assert "target 70%" in specialized[1]["detail"]
             absent = specialized_evidence(str(service / "missing-summary.json"), None, "no safe target configured")
             assert absent == [{"kind": "performance", "state": "not-run", "source": str(service / "missing-summary.json"), "detail": "no safe target configured"}]
             synthetic = specialized_evidence(None, None, synthetic_summary=str(performance), synthetic_journey="public-edge")
@@ -685,6 +693,7 @@ def main() -> None:
         args.performance_summary,
         args.mutation_report,
         args.performance_not_run_detail,
+        args.mutation_threshold,
         args.synthetic_summary,
         args.synthetic_journey,
         suite_evidence,
