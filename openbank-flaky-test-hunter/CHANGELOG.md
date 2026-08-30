@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.1...flaky-test-hunter-v0.14.2) (2026-08-30)
+
+
+### Bug Fixes
+
+* **test-intelligence:** expose deterministic fleet gaps ([938f031](https://github.com/JiRaska/open-bank-oss/commit/938f03118ec1d5fcaa481f4c684a70c2f143360d))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.0...flaky-test-hunter-v0.14.1) (2026-08-27)
 
 
