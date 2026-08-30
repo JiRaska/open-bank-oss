@@ -77,6 +77,9 @@ describe('Regulatory report preview', () => {
     expect(String(fetchMock.mock.calls[3][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F01.03?asOf=2026-06-30')
     expect(String(fetchMock.mock.calls[4][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F02.00?asOf=2026-06-30')
     expect(screen.getByText('finrep-service ← zmrazená ledger předvaha (FROZEN / LINES_V1)')).toBeInTheDocument()
+    expect(screen.getByTestId('test-data-watermark')).toHaveTextContent(/TEST DATA/i)
+    expect(screen.getByText('TEST_ONLY')).toBeInTheDocument()
+    expect(screen.getByText(/NESMÍ BÝT ODESLÁNO REGULÁTOROVI/)).toBeInTheDocument()
     expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Ready for internal export/)
     expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeEnabled()
   })
@@ -118,6 +121,7 @@ describe('Regulatory report preview', () => {
     expect(fetchMock).toHaveBeenCalledTimes(5)
     expect(String(fetchMock.mock.calls[1][0])).toContain('evidence=LIVE_PREVIEW')
     expect(screen.getByTestId('export-blocked')).toHaveAttribute('data-block-reason', 'provisional_data')
+    expect(screen.getByRole('link', { name: /Open regulatory close/i })).toHaveAttribute('href', '/day-end?tab=regulatory')
     expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeDisabled()
   })
 
