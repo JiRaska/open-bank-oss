@@ -50,14 +50,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
-import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import gatelib
+import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 GITOPS = Path("openbank-infra/gitops")
@@ -149,7 +147,12 @@ def discover_clusters() -> tuple[dict[str, dict], list[str]]:
             continue
         try:
             docs = gatelib.load_yaml_all(path, errors="replace")
-        except Exception:  # a manifest this gate cannot parse is not this gate's subject
+        except yaml.YAMLError as exc:
+            # A manifest this gate cannot parse is not this gate's subject -- the yaml-lint
+            # gate owns that. Reported rather than swallowed: a parse failure that silently
+            # shrinks the corpus is exactly the "scope quietly excludes the subject" defect
+            # this whole gate exists for.
+            errors.append(f"{rel}: could not be parsed, so any Cluster in it is unchecked ({exc})")
             continue
         for doc in docs:
             if not isinstance(doc, dict):
@@ -274,8 +277,10 @@ def render_fixture(clusters: dict[str, dict]) -> str:
                 continue
             c = clusters[k]
             out += [
-                f'      - series: \'up{{container="postgres",namespace="{c["namespace"]}",'
-                f'pod="{c["name"]}-1",job="{c["name"]}"}}\'',
+                (
+                    f'      - series: \'up{{container="postgres",'
+                    f'namespace="{c["namespace"]}",pod="{c["name"]}-1",job="{c["name"]}"}}\''
+                ),
                 f'        values: "{value}"',
             ]
         return out
@@ -285,7 +290,7 @@ def render_fixture(clusters: dict[str, dict]) -> str:
 
     L += [f"  # 1. NEGATIVE CASE: {holdout} has no scrape target at all. Absence must page.",
           "  - interval: 1m",
-          f'    name: "a declared cluster with no scrape target is a finding, not a silence"',
+          '    name: "a declared cluster with no scrape target is a finding, not a silence"',
           "    input_series:"]
     L += up_series(holdout, "1+0x40")
     L += ["    alert_rule_test:", "      - eval_time: 30m",
@@ -330,8 +335,9 @@ def render_fixture(clusters: dict[str, dict]) -> str:
           f"              pod: {hc}-1", '              container: postgres',
           f"              job: {hc}", "            exp_annotations:",
           f'              summary: "Postgres {hn}/{hc}-1 is down"',
-          f'              description: "{instance_down_desc(hn, hc)}"', ""]
-    return "\n".join(L) + "\n"
+          f'              description: "{instance_down_desc(hn, hc)}"']
+    # No trailing blank line: yamllint's empty-lines rule is an ERROR at 1 > 0.
+    return "\n".join(L).rstrip("\n") + "\n"
 
 def build(strict: bool = True) -> tuple[dict[str, dict], list[str]]:
     clusters, errors = discover_clusters()

@@ -670,6 +670,7 @@ gates:
       bash .github/scripts/install-promtool.sh
       n=$(find openbank-infra/tests/promtool -name '*_test.yaml' | wc -l)
       test "$n" -ge 2 || { echo "expected >=2 promtool test files, found $n"; exit 1; }
+      echo "SUBJECTS=$n  # promtool test files"
       bash openbank-infra/tests/promtool/run.sh
 
   - id: podmonitor-namespace-coverage

@@ -447,4 +447,3 @@ tests:
             exp_annotations:
               summary: "Postgres accounts/accounts-db-1 is down"
               description: "Prometheus cannot scrape Postgres on accounts-db-1 for >5m — the instance is down, crashlooping, or unreachable. Check `kubectl get cluster -n accounts`: a CNPG cluster parked in phase `Not enough disk space` will NOT self-heal or fail over, by design — it waits for the PVC to be enlarged."
-
