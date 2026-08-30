@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.218.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.218.4...admin-ui-v0.218.5) (2026-08-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop the /temporal page claiming components that do not exist ([#7591](https://github.com/JiRaska/open-bank-oss/issues/7591)) ([6ec5a26](https://github.com/JiRaska/open-bank-oss/commit/6ec5a26da4a84bc454a28b3205991ce2cde69ee9)), closes [#6066](https://github.com/JiRaska/open-bank-oss/issues/6066)
+
 ## [0.218.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.218.3...admin-ui-v0.218.4) (2026-08-30)
 
 
