@@ -30,7 +30,7 @@
   "openbank-governance-auditor": "0.6.2",
   "openbank-interest-service": "0.19.0",
   "openbank-kyc-service": "0.14.0",
-  "openbank-ledger-service": "1.26.1",
+  "openbank-ledger-service": "1.26.2",
   "openbank-lending-service": "0.32.0",
   "openbank-mcp-service": "0.17.0",
   "openbank-notification-service": "0.29.1",
