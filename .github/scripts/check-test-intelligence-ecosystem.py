@@ -80,7 +80,15 @@ def check(root: Path) -> list[str]:
         errors.append(f"run schema unavailable: {exc}")
 
     workflow = text(root / ".github/workflows/_service-ci.yml")
-    for needle in ("collect-test-run-evidence.py", "build/test-intelligence/run.json", "if: always()", "docker events", "--filter event=start", "--filter event=die"):
+    for needle in (
+        "collect-test-run-evidence.py",
+        "build/test-intelligence/run.json",
+        "if: always()",
+        "docker events",
+        "--filter type=container",
+        "--filter event=start",
+        "--filter event=die",
+    ):
         if needle not in workflow:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
     if "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport" not in workflow:
