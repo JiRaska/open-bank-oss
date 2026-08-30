@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.219.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.219.0...admin-ui-v0.219.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **test-intelligence:** expose deterministic fleet gaps ([938f031](https://github.com/JiRaska/open-bank-oss/commit/938f03118ec1d5fcaa481f4c684a70c2f143360d))
+
 ## [0.219.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.218.5...admin-ui-v0.219.0) (2026-08-30)
 
 
