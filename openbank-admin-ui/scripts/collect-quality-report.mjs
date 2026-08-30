@@ -147,6 +147,10 @@ export async function providerHasMainVersion(baseUrl, auth, provider) {
   const headers = { Accept: 'application/hal+json' }
   if (auth) headers.Authorization = auth
   try {
+    // `provider` traces back to a pacticipant name parsed out of a locally committed pact JSON
+    // file under pacts/ (collectContracts()), not attacker input — this script only runs in CI
+    // against this repo's own checked-in fixtures, sent to the Pact Broker's own read API.
+    // codeql[js/file-access-to-http]
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) })
     // A network/parse failure here proves nothing either way — do not assert the stronger
     // "no main version" claim without a real 404 to back it.
