@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.1](https://github.com/JiRaska/open-bank-oss/compare/v0.38.0...v0.38.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **campaign:** document CONVERTED in SendRecord.outcome ([#5962](https://github.com/JiRaska/open-bank-oss/issues/5962)) ([#7573](https://github.com/JiRaska/open-bank-oss/issues/7573)) ([35c82f9](https://github.com/JiRaska/open-bank-oss/commit/35c82f92b1375850adffb5a20be54f5c07d8be61))
+
 ## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/v0.37.0...v0.38.0) (2026-08-27)
 
 
