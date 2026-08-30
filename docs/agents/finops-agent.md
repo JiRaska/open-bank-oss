@@ -41,3 +41,11 @@ is always watching" answer to that class of problem.
   runaway NAT bill accumulating hour by hour) still waits on a human merge. That's the deliberate
   trade-off (ADR-0112: propose, never write), not a bug, but it's worth knowing the agent buys
   detection speed, not remediation speed.
+- **`GitHubProposalPort` is unwired and REFUSES — no anomaly of this agent reaches GitHub today**
+  (#5897). `openProposalPr` returns `null`, and `DiagnoseAndProposeActivityImpl` then leaves the
+  anomaly `DIAGNOSED` with no `proposalPrUrl`: it is never counted in a run's `anomaliesProposed`
+  and never presented as awaiting a human. It previously returned a fabricated
+  `https://github.com/openbank/openbank/pulls/pending-finops-<id>` URL and moved the anomaly to
+  `PROPOSED` — a no-op sharing its shape with a real result, on a host that is not even this
+  repository. This follows `openbank-mcp-service`'s `UnwiredProposalPort` (#3900).
+  `flaky-test-hunter`'s adapter is the template if and when this gets wired.
