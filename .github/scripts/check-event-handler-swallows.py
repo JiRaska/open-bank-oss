@@ -65,7 +65,15 @@ CATCH = re.compile(r"catch\s*\(\s*\w+\s*:\s*(?:Exception|Throwable)\s*\)\s*\{")
 TRANSPORT_RECEIVER = re.compile(r"\b(httpClient|webClient|restClient|httpclient|kafkaClient)\s*\.\s*$", re.IGNORECASE)
 
 STATE_CALL = re.compile(
-    r"\b\w*(?:repository|repo|usecase|port|store|dao|publisher|client|service)\s*\.\s*"
+    # RECEIVER BLINDNESS (#5745 section C). The nine nouns above are a naming convention,
+    # not a rule, and the fleet does not universally follow it. Every read-model and
+    # sink handler spells its receiver outside the set — `projections.applyIfNewer`,
+    # `sink.write`, `sendLog.applyDeliveryOutcome`, `projection.eraseParty` — so the
+    # gate scanned 182 handler files, matched nothing, and printed "clean". A scope
+    # that is a naming convention reads as PASSING when the convention is not
+    # followed, never as UNCHECKED.
+    r"\b\w*(?:repository|repo|usecase|port|store|dao|publisher|client|service|"
+    r"projections|projection|sink|log|writer|sender|gateway|adapter)\s*\.\s*"
     r"(save|persist|insert|update|create|open|activate|grant|credit|debit|post|record|apply|"
     r"anonymize|anonymise|delete|upsert|merge|register|enrol|enroll|book|settle|publish|send|"
     r"notify|emit|write|mark|complete|cancel|approve|reject|erase|"
@@ -74,7 +82,11 @@ STATE_CALL = re.compile(
     # direct-debit debit — was not flagged: the receiver matched (which is exactly what
     # TRANSPORT_RECEIVER above keeps `client` in the list FOR), but the verb did not.
     r"initiate|execute|transfer|charge|capture|reverse|refund|submit|dispatch|trigger|"
-    r"assign|revoke|close|freeze|release|disburse|repay|withdraw|deposit)\w*\s*\(",
+    r"assign|revoke|close|freeze|release|disburse|repay|withdraw|deposit|"
+    # Read-model / sink verbs. `taxFilingService.observe(...)` matched the RECEIVER
+    # (…Service) and was still invisible, because the verb list was written from the
+    # money path and a projection does not "save", it "observes" or "ingests".
+    r"observe|ingest|index|flush|commit|advance|project)\w*\s*\(",
     re.IGNORECASE,
 )
 # Two ways to be legitimately silent, and both must be STATED where a reviewer reads them.
@@ -96,8 +108,16 @@ RECOVERED = re.compile(r"^\s*\.\s*(getOrNull|getOrElse|getOrDefault|onFailure|fo
 # .getOrThrow() / .getOrElse { throw … } are the SAFE terminators: the failure still surfaces.
 RETHROWN_TERMINATOR = re.compile(r"getOrThrow|throw")
 
+# A MANUAL NEGATIVE ACKNOWLEDGEMENT is the other correct ending, and it must be recognised
+# here or widening STATE_CALL above turns correct code red. `message.nack(e)`
+# (campaign's EnrolmentTriggerConsumer) and `settle(message, e)` (analytics-sink's
+# AnalyticsConsumer) both leave the message unacked and the work recoverable — the exact
+# outcome the gate exists to require. Neither goes through a repository, so neither matched
+# the durable-state clause below.
 HANDLED_IN_CATCH = re.compile(
-    r"\b\w*(?:repository|repo|store)\s*\.\s*(markFailed|markDead|recordFailure|reschedule|release)\w*\s*\(",
+    r"\b\w*(?:repository|repo|store)\s*\.\s*(markFailed|markDead|recordFailure|reschedule|release)\w*\s*\("
+    r"|\bnack\s*\("
+    r"|\bsettle\s*\(\s*\w*message",
     re.IGNORECASE,
 )
 
@@ -471,6 +491,101 @@ SELF_TEST_CASES = [
             }
 
             private fun walk(n: JsonNode) { walk(n) }
+        }
+        """,
+        0,
+    ),
+    # ---- #5745 section C: receivers the nine-noun convention never covered ---------------
+    # Each of these is a verbatim reduction of a real handler on main. All four `1` cases
+    # return 0 findings on the unwidened gate — which is how 182 handler files scanned
+    # "clean".
+    (
+        "a read-model projection is a state change (anacredit: projections.applyIfNewer)",
+        """
+        @Incoming("loan-stage")
+        suspend fun consume(p: String) {
+            try {
+                projections.applyIfNewer(projection)
+            } catch (e: Exception) {
+                log.error("projection failed", e)
+            }
+        }
+        """,
+        1,
+    ),
+    (
+        "a sink write is a state change (analytics-sink: sink.write)",
+        """
+        @Incoming("analytics")
+        suspend fun consume(p: String) {
+            try {
+                sink.write(rows)
+            } catch (e: Exception) {
+                log.error("write failed", e)
+            }
+        }
+        """,
+        1,
+    ),
+    (
+        "a delivery-log update is a state change (campaign: sendLog.applyDeliveryOutcome)",
+        """
+        @Incoming("notification-outcome")
+        suspend fun consume(p: String) {
+            try {
+                sendLog.applyDeliveryOutcome(id, outcome)
+            } catch (e: Exception) {
+                log.error("outcome lost", e)
+            }
+        }
+        """,
+        1,
+    ),
+    (
+        # The receiver ALREADY matched (…Service). Only the verb was missing, because the
+        # alternation was written from the money path and a projection does not "save".
+        "a domain-service verb outside the money-path vocabulary (tax: taxFilingService.observe)",
+        """
+        @Incoming("withholding-remitted")
+        suspend fun consume(p: String) {
+            try {
+                taxFilingService.observe(event)
+            } catch (e: Exception) {
+                log.error("observation lost", e)
+            }
+        }
+        """,
+        1,
+    ),
+    # ---- the two controls that must stay GREEN, or the widening above is a false-positive
+    # factory. Both are correct code on main today: the message stays unacked and the work
+    # is recoverable, without any repository being involved.
+    (
+        "manual nack is not a swallow (campaign: message.nack(e))",
+        """
+        @Incoming("enrolment-trigger")
+        suspend fun consume(message: Message<String>) {
+            try {
+                triggered.enrol(id)
+            } catch (e: Exception) {
+                log.error("enrol failed", e)
+                message.nack(e)
+            }
+        }
+        """,
+        0,
+    ),
+    (
+        "settle(message, e) is not a swallow (analytics-sink: AnalyticsConsumer)",
+        """
+        @Incoming("analytics")
+        suspend fun consume(message: Message<String>) {
+            try {
+                sink.write(rows)
+            } catch (e: Exception) {
+                log.error("write failed", e)
+                settle(message, e)
+            }
         }
         """,
         0,
