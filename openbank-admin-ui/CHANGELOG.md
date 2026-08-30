@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.219.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.218.5...admin-ui-v0.219.0) (2026-08-30)
+
+
+### Features
+
+* **admin-ui:** classify why a Pact Broker verdict is unresolved ([#7574](https://github.com/JiRaska/open-bank-oss/issues/7574)) ([227b3fb](https://github.com/JiRaska/open-bank-oss/commit/227b3fb9888fcea62806adefd5078380b653f31e))
+
 ## [0.218.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.218.4...admin-ui-v0.218.5) (2026-08-30)
 
 
