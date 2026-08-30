@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.218.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.218.3...admin-ui-v0.218.4) (2026-08-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** separate browser RUM from BFF trace identity ([#7566](https://github.com/JiRaska/open-bank-oss/issues/7566)) ([b432dde](https://github.com/JiRaska/open-bank-oss/commit/b432ddef95a49cab20c1dd3fca8f2a5f939f538f)), closes [#7536](https://github.com/JiRaska/open-bank-oss/issues/7536)
+
 ## [0.218.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.218.2...admin-ui-v0.218.3) (2026-08-30)
 
 
