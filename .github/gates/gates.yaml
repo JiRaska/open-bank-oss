@@ -603,6 +603,75 @@ gates:
     run: |
       python3 .github/scripts/check-provider-type-classpath.py
 
+  # An alert whose subject emits NO series cannot fire, and nothing anywhere goes red: the
+  # workload is healthy, the rule is valid, promtool is clean, ArgoCD is green, and the
+  # expression matches an empty vector forever. Every Postgres alert in prometheus-rules-db.yaml
+  # was in that state for any CNPG Cluster without `spec.monitoring.enablePodMonitor` --
+  # `PostgresInstanceDown` included, because Prometheus writes `up` per TARGET and an unscraped
+  # cluster is not a target. Measured on origin/main 2026-08-30: 4 of 62 declared clusters, among
+  # them party-db (canonical client identity) and pid-db (the identity golden record), both of
+  # which back up to S3 and had that backup state watched by nothing.
+  #
+  # Same shape as #2255 one layer down, and the same shape as the pact-drift gate that asserted a
+  # diff over a hand-kept module list: a control whose coverage set is maintained separately from
+  # the artifacts it covers reads as PASSING when the set is short, never as UNCHECKED. So the
+  # coverage set is DERIVED from the `kind: Cluster` manifests, and the checker also generates the
+  # PrometheusRule and its promtool fixture from that same derivation -- the alert's denominator
+  # cannot fall behind the manifests without going red. Exemptions need a reason and go stale in
+  # BOTH directions. ENFORCED.
+  - id: cnpg-scrape-coverage
+    name: "every declared CNPG cluster is scraped, and absence pages (#7220, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Absent is not zero. A CNPG cluster with no PodMonitor emits no `cnpg_*` and no `up`, so
+      PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and
+      PostgresInstanceDown all match nothing for it -- indistinguishable from healthy. The
+      database most likely to be misconfigured is the one guaranteed not to alert.
+    review_after: "2027-02-28"
+    min_subjects: 40   # 62 CNPG Clusters declared in gitops today (2026-08-30)
+    selftest: |
+      python3 .github/scripts/check-cnpg-scrape-coverage.py --self-test
+    run: |
+      python3 .github/scripts/check-cnpg-scrape-coverage.py
+
+  # promtool validates that a rule PARSES; it says nothing about whether the rule can fire. The
+  # unit tests under openbank-infra/tests/promtool assert behaviour against the SHIPPED
+  # PrometheusRule manifests (the runner unwraps `.spec` rather than testing a copy that could
+  # drift), and every must-fire case is paired with a must-NOT-fire control so a rule that fired
+  # unconditionally could not pass. Each case was falsified by deleting the clause it covers and
+  # confirming it goes red -- including one that was originally VACUOUS, passing with the `> 0`
+  # sentinel guard removed because promtool's `time()` starts at the unix epoch and `time() - 0`
+  # is therefore minutes, not the ~56 years a real never-backed-up cluster produces. ENFORCED.
+  - id: promql-alert-unit-tests
+    name: "alert rules are unit-tested for what they PREVENT (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      A green promtool `check rules` proves a rule is well-formed, which is exactly the signal
+      that was already green throughout every alerting defect recorded here -- #5736's rule was
+      loaded, health=ok and promtool-clean for the whole 8h40m it failed to fire.
+    review_after: "2027-02-28"
+    min_subjects: 2   # 2 test files today; grows with each alert given a behavioural test
+    env:
+      PROMETHEUS_VERSION: "3.14.0"
+      PROMETHEUS_SHA256: "f665c6da19eb7ba399c915d30c7d9793c9b417bf8a749b504bc470678631478d"
+    selftest: |
+      bash .github/scripts/install-promtool.sh
+      # Prove the harness can FAIL: a test asserting an alert no rule defines must go red.
+      # Without this the runner could silently find no test files and exit 0.
+      d=$(mktemp -d)
+      printf 'rule_files:\n  - prometheus-rules-db.yaml\ntests:\n  - interval: 1m\n    input_series: []\n    alert_rule_test:\n      - eval_time: 1m\n        alertname: NoSuchAlertExists\n        exp_alerts:\n          - exp_labels:\n              severity: critical\n' > "$d/selftest_test.yaml"
+      if bash openbank-infra/tests/promtool/run.sh "$d/selftest_test.yaml" >"$d/out" 2>&1; then
+        echo "SELF-TEST FAIL: the runner passed a test that must fail"; cat "$d/out"; exit 1
+      fi
+      echo "SELF-TEST PASS"
+    run: |
+      bash .github/scripts/install-promtool.sh
+      n=$(find openbank-infra/tests/promtool -name '*_test.yaml' | wc -l)
+      test "$n" -ge 2 || { echo "expected >=2 promtool test files, found $n"; exit 1; }
+      bash openbank-infra/tests/promtool/run.sh
+
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
     group: gitops
@@ -3923,6 +3992,44 @@ gates:
   # disassembly — it checks the one machine-checkable trace it leaves, that the verdict is
   # anchored to a sha256 the build actually resolves rather than to sorting two strings.
   # Falsified against the real pre-fix tree (3356426^): 47 of 47 red, exit 1.
+  # The only VEX gate today, `vex-range-reasoning`, GLOBS the store:
+  # VEX_GLOB = "openbank-libs/governance/vex/*.openvex.json". A gate whose scope is the set of
+  # files that happen to exist cannot report a file that does not, so a released component with
+  # no overlay is not undispositioned-and-flagged -- it is outside the question, and the gate
+  # reads as PASSING rather than as UNCHECKED. Same shape as the pact-drift gate that asserted a
+  # diff over a hand-kept module list, and as #7220 one floor up.
+  #
+  # It has already cost a real miss: referral-service has no overlay, so it silently skipped the
+  # whole 48-file CVE-2025-14969 fan-out and surfaced only as a triage issue seven months later
+  # (#6719). Measured on origin/main 2026-08-30: 58 released components carrying a release-please
+  # `component`, 56 overlays, FOUR components with none. #6988 named three of the four -- the
+  # enumeration finds all of them, which is the difference between a control and an audit.
+  #
+  # The identity is release-please's `component`, never the directory name: it names the tag and
+  # is what release-please.yml passes as $COMPONENT. Keying on the directory reports 60 phantom
+  # mismatches. The derivation also surfaced that TWO packages carry a version.txt and no
+  # `component` at all, so release-please.yml's `if comp and tag` skips them in silence and their
+  # releases produce no SBOM, provenance, VEX or evidence manifest -- declared, not fixed here,
+  # since changing a `component` is release-registration lockstep and the owner's call.
+  #
+  # This does NOT invent dispositions for the four gaps: a VEX statement is a security judgement
+  # about a specific CVE and artifact, and fabricating one to make a gate green would be strictly
+  # worse than the gap. #6717/#6719/#6720 close them on their own evidence. ENFORCED.
+  - id: vex-overlay-coverage
+    name: "every released component is enumerated against the VEX store (#6988, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: >-
+      A shared-artifact CVE fan-out reaches only the components that already have a file, and
+      nothing compares the file set to the component set. referral-service missed all 48
+      statements of one fan-out for exactly that reason and no gate could see it.
+    review_after: "2027-02-28"
+    min_subjects: 40   # 58 released components with a release-please component today (2026-08-30)
+    selftest: |
+      python3 .github/scripts/check-vex-overlay-coverage.py --self-test
+    run: |
+      python3 .github/scripts/check-vex-overlay-coverage.py
+
   - id: vex-range-reasoning
     name: "a VEX verdict reasoned across release lines is anchored to a pinned artifact (#4716, enforced)"
     group: supplychain
