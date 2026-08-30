@@ -67,7 +67,7 @@ if [ "${1:-}" = "--self-test" ]; then
   # DISTANCE: the date must be found within the 3-line window. Beyond it the rule is treated
   # as dateless — that is the intended behaviour and it must stay deliberate, not incidental.
   expect "a date more than 3 lines away is not credited" \
-    "rule_a:\n  enforced: advisory\n  a: 1\n  b: 2\n  c: 3\n  d: 4\n  target_enforce_date: \"$future\"\n" 1 "no target_enforce_date"
+    "rule_a:\n  enforced: advisory\n  a: 1\n  b: 2\n  c: 3\n  d: 4\n  target_enforce_date: \"$future\"\n" 1 "has no target_enforce_date"
   # A file with no advisory rules at all must say ZERO rather than read like a clean estate.
   expect "a file with no advisory rules reports 0 checked" "rule_a:\n  enforced: enforce\n" 0 "0 advisory/planned"
 
