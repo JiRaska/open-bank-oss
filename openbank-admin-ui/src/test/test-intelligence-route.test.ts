@@ -112,7 +112,7 @@ describe('GET /api/test-intelligence', () => {
         if (url.pathname === '/api/search') {
           expect(url.searchParams.get('limit')).toBe('1000')
           const service = url.searchParams.get('tags')
-          expect(['service.name="openbank-app"', 'service.name="openbank-admin-ui"']).toContain(service)
+          expect(['service.name="openbank-app"', 'service.name="openbank-admin-ui-browser"']).toContain(service)
           return new Response(JSON.stringify({ traces: service === 'service.name="openbank-app"' ? Array.from({ length: 12 }, (_, index) => ({ traceID: `trace-${index}` })) : [] }), { status: 200 })
         }
         if (url.pathname === '/api/v2/search/tag/.os.type/values') {
@@ -185,18 +185,68 @@ describe('GET /api/test-intelligence', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
       const url = new URL(String(input))
       if (url.pathname === '/api/search') {
-        expect(url.searchParams.get('tags')).toBe('service.name="openbank-admin-ui"')
+        // The browser exporter's own service.name (issue #7536) — distinct from the BFF's
+        // "openbank-admin-ui", or this query could never tell inbound proxy traffic apart
+        // from a real exported browser span.
+        expect(url.searchParams.get('tags')).toBe('service.name="openbank-admin-ui-browser"')
         return new Response(JSON.stringify({ traces: [{ traceID: 'browser-backend' }] }), { status: 200 })
       }
+      // The fetched trace carries the BFF's span (a real backend the browser correlated
+      // through) alongside a downstream service — neither is the browser's own service.name,
+      // so both must surface as backend correlations now that the two identities differ.
       return new Response(JSON.stringify({ batches: [{ resource: { attributes: [{ key: 'service.name', value: { stringValue: 'openbank-admin-ui' } }] } }, { resource: { attributes: [{ key: 'service.name', value: { stringValue: 'openbank-copilot-service' } }] } }] }), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
     const body = await (await GET()).json()
     expect(body.clientExperiences[0].rum).toMatchObject({
       state: 'passed', policy: 'authenticated', source: 'tempo', sampledSpansLast7d: 1,
-      backendCorrelations: { inspectedTraces: 1, correlatedTraces: 1, backendServices: ['openbank-copilot-service'], truncated: false },
+      backendCorrelations: { inspectedTraces: 1, correlatedTraces: 1, backendServices: ['openbank-admin-ui', 'openbank-copilot-service'], truncated: false },
     })
     expect(body.clientExperiences[0].rum.detail).toContain('authenticated Admin UI browser RUM trace')
+  })
+
+  it('does not let inbound BFF traffic satisfy browser RUM arrival evidence', async () => {
+    // Falsifies #7536: before the fix, both the BFF's own OTel SDK and the browser RUM
+    // exporter emitted service.name="openbank-admin-ui", so a Tempo/Prometheus query for
+    // "openbank-admin-ui" was satisfied by every proxied request — including the 307 every
+    // unauthenticated route answers — regardless of whether a browser ever exported a span.
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-admin-rum-bff-only-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-28T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], syntheticJourneys: [], history: [], runHistory: [], testCases: [],
+      clientExperiences: [{ id: 'admin-ui', title: 'OpenBank Admin UI', surface: 'web', platforms: ['web'], evidence: [], rum: { state: 'unknown', policy: 'authenticated', detail: 'static capability', observedAt: null }, blocker: null }],
+      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.PROMETHEUS_URL = 'http://prometheus.test'
+    process.env.TEMPO_URL = 'http://tempo.test'
+    const promQueries: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input))
+      if (url.hostname === 'tempo.test') {
+        if (url.pathname === '/api/search') return new Response(JSON.stringify({ traces: [] }), { status: 200 })
+        return new Response(JSON.stringify({ batches: [] }), { status: 200 })
+      }
+      const query = url.searchParams.get('query') ?? ''
+      promQueries.push(query)
+      // Simulates only the BFF exporting spans (bare "openbank-admin-ui", no "-browser" suffix)
+      // — the shape every unauthenticated request produces via the otel-bootstrap.cjs preload.
+      const matchesBffOnly = /service=~?"openbank-admin-ui\.?\*?"/.test(query) && !query.includes('browser')
+      return new Response(JSON.stringify({ status: 'success', data: { result: matchesBffOnly ? [{ value: [1, '400'] }] : [] } }), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+    expect(body.clientExperiences[0].rum).toMatchObject({ state: 'not-run', sampledSpansLast7d: 0 })
+    expect(body.clientExperiences[0].rum.detail).toContain('No authenticated Admin UI browser RUM trace')
+    // The admin span-counter query must select the browser's distinct identity by EXACT match,
+    // never a prefix regex like `openbank-admin-ui.*` — that shape also matches the bare BFF name.
+    const adminSpanQueries = promQueries.filter(q => q.includes('traces_spanmetrics_calls_total') && q.includes('admin-ui'))
+    expect(adminSpanQueries.length).toBeGreaterThan(0)
+    for (const q of adminSpanQueries) {
+      expect(q).toContain('service="openbank-admin-ui-browser"')
+      expect(q).not.toMatch(/service=~"openbank-admin-ui\.\*"/)
+    }
   })
 
   it('does not treat a retained historical failed Job as a current synthetic failure', async () => {

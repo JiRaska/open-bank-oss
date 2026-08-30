@@ -37,7 +37,7 @@ describe('authenticated Admin UI browser RUM', () => {
     expect(span.name).toBe('screen./payments/sepa')
     expect(span.attributes).toMatchObject({ 'screen.name': '/payments/sepa', 'http.route': '/payments/sepa' })
     expect(span.resource.attributes).toMatchObject({
-      'service.name': 'openbank-admin-ui',
+      'service.name': 'openbank-admin-ui-browser',
       'app.version': '1.2.3',
       'device.model': 'iphone',
       'os.type': 'ios',

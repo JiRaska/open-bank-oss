@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server'
 import type { EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
 import { enforceRuntimeFreshness } from '@/lib/test-intelligence-freshness'
 import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
+import { RUM_SERVICE_NAME as ADMIN_RUM_SERVICE_NAME } from '@/lib/telemetry/rum-service-name'
 
 export const dynamic = 'force-dynamic'
 
@@ -275,12 +276,15 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
   // from an unavailable query. Zero is normal and must not become a failed CI verdict.
   const [tempoTraces, adminTempoTraces, mobilePlatforms, spanCounterIncrements, errorSpans, adminSpanCounterIncrements, adminErrorSpans, auditScheduled, auditScheduledSuccessful, auditManualSuccessful] = await Promise.all([
     tracesBase ? queryTempoMobileTraces(tracesBase) : Promise.resolve(null),
-    tracesBase ? queryTempoServiceTraces(tracesBase, 'openbank-admin-ui') : Promise.resolve(null),
+    tracesBase ? queryTempoServiceTraces(tracesBase, ADMIN_RUM_SERVICE_NAME) : Promise.resolve(null),
     tracesBase ? queryTempoMobilePlatforms(tracesBase) : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*"}[7d])) or vector(0)') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)') : Promise.resolve(null),
-    metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-admin-ui.*"}[7d])) or vector(0)') : Promise.resolve(null),
-    metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-admin-ui.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)') : Promise.resolve(null),
+    // Exact match, never a prefix regex: `openbank-admin-ui.*` also matches the BFF's own bare
+    // "openbank-admin-ui" service.name, which reintroduces the conflation this constant exists
+    // to prevent (issue #7536).
+    metricsBase ? queryPrometheus(metricsBase, `sum(increase(traces_spanmetrics_calls_total{service="${ADMIN_RUM_SERVICE_NAME}"}[7d])) or vector(0)`) : Promise.resolve(null),
+    metricsBase ? queryPrometheus(metricsBase, `sum(increase(traces_spanmetrics_calls_total{service="${ADMIN_RUM_SERVICE_NAME}",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)`) : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="rum-attribute-audit"})') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'max(kube_job_status_completion_time{namespace="observability",job_name=~"rum-attribute-audit-[0-9]+"})') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'max(kube_job_status_completion_time{namespace="observability",job_name=~"rum-attribute-audit-manual-.*"})') : Promise.resolve(null),
@@ -290,7 +294,7 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
   const backendCorrelations = tempoTraces === null ? null
     : await queryTempoBackendCorrelation(tracesBase!, tempoTraces.traceIds, tempoTraces.truncated, 'openbank-app')
   const adminBackendCorrelations = adminTempoTraces === null ? null
-    : await queryTempoBackendCorrelation(tracesBase!, adminTempoTraces.traceIds, adminTempoTraces.truncated, 'openbank-admin-ui')
+    : await queryTempoBackendCorrelation(tracesBase!, adminTempoTraces.traceIds, adminTempoTraces.truncated, ADMIN_RUM_SERVICE_NAME)
 
   const observedAt = new Date().toISOString()
   const sampled = tempoTraces?.count ?? Math.max(0, Math.round(spanCounterIncrements ?? 0))
