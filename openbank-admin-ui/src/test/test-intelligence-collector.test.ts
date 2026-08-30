@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { execFileSync } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { createServer } from 'http'
 import { tmpdir } from 'os'
 import path from 'path'
+import { promisify } from 'util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TestIntelligenceReport } from '@/lib/types/test-intelligence'
 
 const SCRIPT = path.resolve(__dirname, '../../scripts/collect-test-intelligence.mjs')
+const QUALITY_SCRIPT = path.resolve(__dirname, '../../scripts/collect-quality-report.mjs')
+const execFileAsync = promisify(execFile)
 const dirs: string[] = []
 const write = (root: string, relative: string, body: string) => {
   const file = path.join(root, relative)
@@ -543,5 +547,71 @@ journeys:
     expect(byFile('legacy.json')).toMatchObject({ state: 'unknown', unavailableReason: null })
     // Only a real broker 'passed' verdict produces state 'passed', and it carries no reason.
     expect(byFile('passed.json')).toMatchObject({ state: 'passed', unavailableReason: null })
+  })
+
+  it('pins a Pact verdict to the committed consumer version instead of the broker latest pair', async () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'quality-contract-provenance-'))
+    const output = mkdtempSync(path.join(tmpdir(), 'quality-contract-output-'))
+    dirs.push(repo, output)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'pacts/openbank-consumer-openbank-provider.json', JSON.stringify({
+      consumer: { name: 'openbank-consumer' }, provider: { name: 'openbank-provider' }, interactions: [],
+    }))
+    execFileSync('git', ['init'], { cwd: repo })
+    execFileSync('git', ['config', 'user.email', 'test@example.test'], { cwd: repo })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repo })
+    execFileSync('git', ['config', 'commit.gpgSign', 'false'], { cwd: repo })
+    execFileSync('git', ['add', '.'], { cwd: repo })
+    execFileSync('git', ['commit', '-m', 'test pact provenance'], { cwd: repo })
+    const consumerVersion = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim()
+
+    let requestUrl = ''
+    const server = createServer((request, response) => {
+      requestUrl = request.url ?? ''
+      response.setHeader('content-type', 'application/json')
+      response.end(JSON.stringify({ matrix: [{
+        providerVersion: { number: 'provider-replay-sha' },
+        verificationResult: { success: true, verifiedAt: '2026-08-26T12:00:00Z' },
+      }] }))
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('test broker did not bind a TCP port')
+    try {
+      await execFileAsync('node', [QUALITY_SCRIPT, '--repo-root', repo], {
+        cwd: output,
+        env: { ...process.env, PACT_BROKER_URL: `http://127.0.0.1:${address.port}` },
+      })
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
+    const report = JSON.parse(readFileSync(path.join(output, 'quality-report.json'), 'utf8'))
+    expect(report.contracts).toEqual([expect.objectContaining({
+      consumerVersion, providerVersion: 'provider-replay-sha', status: 'passed',
+    })])
+    const query = new URL(`http://broker${requestUrl}`).searchParams
+    expect(query.getAll('q[][pacticipant]')).toEqual(['openbank-consumer', 'openbank-provider'])
+    expect(query.getAll('q[][version]')).toEqual([consumerVersion])
+    expect(query.getAll('q[][latest]')).toEqual(['true'])
+  })
+
+  it('does not query a broker latest pair when the committed Pact has no Git provenance', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'quality-contract-no-provenance-'))
+    const output = mkdtempSync(path.join(tmpdir(), 'quality-contract-no-provenance-output-'))
+    dirs.push(repo, output)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'pacts/openbank-consumer-openbank-provider.json', JSON.stringify({
+      consumer: { name: 'openbank-consumer' }, provider: { name: 'openbank-provider' }, interactions: [],
+    }))
+    execFileSync('node', [QUALITY_SCRIPT, '--repo-root', repo], {
+      cwd: output,
+      // A deliberately unavailable endpoint proves the collector returns before
+      // network I/O when it cannot pin the Pact to a committed consumer version.
+      env: { ...process.env, PACT_BROKER_URL: 'http://127.0.0.1:1' },
+    })
+    const report = JSON.parse(readFileSync(path.join(output, 'quality-report.json'), 'utf8'))
+    expect(report.contracts).toEqual([expect.objectContaining({
+      consumerVersion: null, providerVersion: null, status: 'pending', verifiedAt: null,
+    })])
   })
 })

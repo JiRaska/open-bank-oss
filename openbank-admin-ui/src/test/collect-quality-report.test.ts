@@ -14,7 +14,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('collect-quality-report contract classification (#7544)', () => {
   it('classifies a broker query error (e.g. HTTP 400) as query-error, without echoing the body', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(400, { secret: 'do-not-leak' })))
-    const v = await fetchPairVerification('http://broker.example', null, 'openbank-admin-ui', 'openbank-case-coordinator-agent')
+    const v = await fetchPairVerification('http://broker.example', null, 'openbank-admin-ui', 'sha-consumer', 'openbank-case-coordinator-agent')
     expect(v).toMatchObject({ status: 'pending', reasonCode: 'query-error', detail: expect.stringMatching(/HTTP 400/) })
     expect(v.detail).not.toMatch(/do-not-leak/)
   })
@@ -25,7 +25,7 @@ describe('collect-quality-report contract classification (#7544)', () => {
       if (url.includes('/branches/main/latest-version')) return jsonResponse(404, { error: 'not found' })
       throw new Error(`unexpected url ${url}`)
     }))
-    const v = await fetchPairVerification('http://broker.example', null, 'openbank-alpha-service', 'openbank-document-service')
+    const v = await fetchPairVerification('http://broker.example', null, 'openbank-alpha-service', 'sha-consumer', 'openbank-document-service')
     expect(v).toMatchObject({
       status: 'pending', reasonCode: 'no-provider-main-version',
       detail: expect.stringMatching(/no published main-branch version/),
@@ -38,7 +38,7 @@ describe('collect-quality-report contract classification (#7544)', () => {
       if (url.includes('/branches/main/latest-version')) return jsonResponse(200, { name: '1.0.0' })
       throw new Error(`unexpected url ${url}`)
     }))
-    const v = await fetchPairVerification('http://broker.example', null, 'openbank-alpha-service', 'openbank-incentive-service')
+    const v = await fetchPairVerification('http://broker.example', null, 'openbank-alpha-service', 'sha-consumer', 'openbank-incentive-service')
     expect(v).toMatchObject({
       status: 'pending', reasonCode: 'pending-verification',
       detail: expect.stringMatching(/no verification result/),
@@ -49,21 +49,21 @@ describe('collect-quality-report contract classification (#7544)', () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, {
       matrix: [{ verificationResult: { success: true, verifiedAt: '2026-08-28T00:00:00Z' } }],
     })))
-    const passed = await fetchPairVerification('http://broker.example', null, 'openbank-alpha-service', 'openbank-real-provider')
-    expect(passed).toEqual({ status: 'passed', verifiedAt: '2026-08-28T00:00:00Z' })
+    const passed = await fetchPairVerification('http://broker.example', null, 'openbank-alpha-service', 'sha-consumer', 'openbank-real-provider')
+    expect(passed).toEqual({ status: 'passed', verifiedAt: '2026-08-28T00:00:00Z', providerVersion: null })
     expect(passed).not.toHaveProperty('reasonCode')
 
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, {
       matrix: [{ verificationResult: { success: false, verifiedAt: '2026-08-28T00:00:00Z' } }],
     })))
-    const failed = await fetchPairVerification('http://broker.example', null, 'openbank-alpha-service', 'openbank-real-provider')
-    expect(failed).toEqual({ status: 'failed', verifiedAt: '2026-08-28T00:00:00Z' })
+    const failed = await fetchPairVerification('http://broker.example', null, 'openbank-alpha-service', 'sha-consumer', 'openbank-real-provider')
+    expect(failed).toEqual({ status: 'failed', verifiedAt: '2026-08-28T00:00:00Z', providerVersion: null })
     expect(failed).not.toHaveProperty('reasonCode')
   })
 
   it('classifies a network/timeout exception as query-error, and never turns it into a pass', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('The operation was aborted', 'TimeoutError') }))
-    const contracts = [{ consumer: 'openbank-alpha-service', provider: 'openbank-real-provider', pactFile: 'x.json', status: 'pending', verifiedAt: null, interactions: [] }]
+    const contracts = [{ consumer: 'openbank-alpha-service', provider: 'openbank-real-provider', pactFile: 'x.json', consumerVersion: 'sha-consumer', status: 'pending', verifiedAt: null, interactions: [] }]
     const originalEnv = process.env.PACT_BROKER_URL
     process.env.PACT_BROKER_URL = 'http://broker.example'
     try {

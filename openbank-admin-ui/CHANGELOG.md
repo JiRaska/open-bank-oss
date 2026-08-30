@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.218.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.218.1...admin-ui-v0.218.2) (2026-08-30)
+
+
+### Bug Fixes
+
+* **testing:** pin Pact evidence to contract version ([#7148](https://github.com/JiRaska/open-bank-oss/issues/7148)) ([7c53c6b](https://github.com/JiRaska/open-bank-oss/commit/7c53c6b7025c99c2c9067b4e308ef39583de5193))
+
 ## [0.218.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.218.0...admin-ui-v0.218.1) (2026-08-29)
 
 
