@@ -9,6 +9,7 @@
 import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
+import { pathToFileURL } from 'url'
 import { parseStringPromise } from 'xml2js'
 import { moneyPathServices } from './lib/service-inventory.mjs'
 
@@ -83,7 +84,7 @@ function pactConsumerVersion(pactFile) {
   }
 }
 
-function collectContracts() {
+export function collectContracts() {
   const pactsDir = path.join(REPO_ROOT, 'pacts')
   if (!fs.existsSync(pactsDir)) return []
 
@@ -128,7 +129,38 @@ function brokerAuthHeader() {
   return 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64')
 }
 
-async function fetchPairVerification(baseUrl, auth, consumer, consumerVersion, provider) {
+// A pact left 'pending' is unresolved for one of several different reasons, and the fix for
+// each differs (#7544). Classify so the admin-ui snapshot can say which applies, rather than
+// flattening them all to one "unavailable" sentence:
+//   - query-error: the broker itself answered with an error (bad request, auth, 5xx).
+//   - no-provider-main-version: the provider has never published a main-branch version, so
+//     there is nothing for provider verification to run against — re-dispatching cannot help.
+//   - pending-verification: both pacticipants exist but the matrix has no verification row yet
+//     — genuinely awaiting a verification run.
+// (A missing consumerVersion — no Git provenance for the pact file — short-circuits below
+// before any of these apply, and carries no reasonCode.)
+// Never include the response body or the broker credentials in `detail` — it is bundled into
+// the admin-ui image and rendered to any operator with console access.
+
+export async function providerHasMainVersion(baseUrl, auth, provider) {
+  const url = `${baseUrl.replace(/\/$/, '')}/pacticipants/${encodeURIComponent(provider)}/branches/main/latest-version`
+  const headers = { Accept: 'application/hal+json' }
+  if (auth) headers.Authorization = auth
+  try {
+    // `provider` traces back to a pacticipant name parsed out of a locally committed pact JSON
+    // file under pacts/ (collectContracts()), not attacker input — this script only runs in CI
+    // against this repo's own checked-in fixtures, sent to the Pact Broker's own read API.
+    // codeql[js/file-access-to-http]
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) })
+    // A network/parse failure here proves nothing either way — do not assert the stronger
+    // "no main version" claim without a real 404 to back it.
+    return res.status !== 404
+  } catch {
+    return true
+  }
+}
+
+export async function fetchPairVerification(baseUrl, auth, consumer, consumerVersion, provider) {
   if (!consumerVersion) return { status: 'pending', verifiedAt: null, providerVersion: null }
   // Matrix API — pin the consumer to the commit that authored this exact pact
   // file. The provider remains latest because it is the provider replay asked
@@ -146,7 +178,12 @@ async function fetchPairVerification(baseUrl, auth, consumer, consumerVersion, p
   if (auth) headers.Authorization = auth
 
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) })
-  if (!res.ok) return { status: 'pending', verifiedAt: null, providerVersion: null }
+  if (!res.ok) {
+    return {
+      status: 'pending', verifiedAt: null, providerVersion: null, reasonCode: 'query-error',
+      detail: `Pact Broker matrix query returned HTTP ${res.status} for ${consumer} → ${provider}.`,
+    }
+  }
 
   const body = await res.json()
   const rows = Array.isArray(body?.matrix) ? body.matrix : []
@@ -161,10 +198,19 @@ async function fetchPairVerification(baseUrl, auth, consumer, consumerVersion, p
     const at = verifs.map(v => v.verifiedAt).filter(Boolean).sort().pop() ?? null
     return { status: 'passed', verifiedAt: at, providerVersion }
   }
-  return { status: 'pending', verifiedAt: null, providerVersion: null }
+  if (!(await providerHasMainVersion(baseUrl, auth, provider))) {
+    return {
+      status: 'pending', verifiedAt: null, providerVersion: null, reasonCode: 'no-provider-main-version',
+      detail: `${provider} has no published main-branch version in the Pact Broker, so provider verification cannot be dispatched yet.`,
+    }
+  }
+  return {
+    status: 'pending', verifiedAt: null, providerVersion: null, reasonCode: 'pending-verification',
+    detail: `${provider} has a main-branch version, but no verification result for the latest ${consumer} pact yet.`,
+  }
 }
 
-async function enrichWithVerification(contracts) {
+export async function enrichWithVerification(contracts) {
   const baseUrl = process.env.PACT_BROKER_URL
   if (!baseUrl) {
     console.log('  PACT_BROKER_URL unset — leaving contracts at pending (no broker query)')
@@ -179,8 +225,12 @@ async function enrichWithVerification(contracts) {
       c.verifiedAt = v.verifiedAt
       c.providerVersion = v.providerVersion
       c.interactions = c.interactions.map(i => ({ ...i, status: v.status }))
+      c.reasonCode = v.reasonCode ?? null
+      c.detail = v.detail ?? null
       if (v.status !== 'pending') resolved++
     } catch (e) {
+      c.reasonCode = 'query-error'
+      c.detail = `Pact Broker request failed while resolving ${c.consumer} → ${c.provider}: ${e.name ?? 'network or timeout error'}.`
       console.log(`  broker verification lookup failed for ${c.consumer} → ${c.provider}: ${e.message} (left pending)`)
     }
   }
@@ -244,4 +294,6 @@ async function main() {
   console.log(`  ${contracts.length} contract pair(s), ${mutations.length} mutation report(s)`)
 }
 
-main().catch(e => { console.error(e); process.exit(1) })
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(e => { console.error(e); process.exit(1) })
+}

@@ -89,6 +89,16 @@ export interface ComponentTestPosture {
   }
 }
 
+/**
+ * Why `state` is `'unknown'` for a contract pair — never set alongside a resolved verdict.
+ * - `query-error`: the Pact Broker itself answered the verification query with an error.
+ * - `no-provider-main-version`: the provider has no published main-branch version, so
+ *   provider verification cannot be dispatched (re-running it will not help).
+ * - `pending-verification`: both pacticipants exist but no verification result yet —
+ *   genuinely awaiting a broker-backed run.
+ */
+export type ContractUnavailableReason = 'query-error' | 'no-provider-main-version' | 'pending-verification'
+
 export interface ContractEvidence {
   consumer: string
   provider: string
@@ -102,6 +112,8 @@ export interface ContractEvidence {
   interactions: number
   /** Why a broker verdict is unavailable, or the authority behind one that is. */
   verificationDetail?: string
+  /** Classification of `verificationDetail` when `state` is `'unknown'`; null otherwise. */
+  unavailableReason?: ContractUnavailableReason | null
 }
 
 export interface MutationEvidence {

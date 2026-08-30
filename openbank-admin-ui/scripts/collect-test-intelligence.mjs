@@ -323,17 +323,39 @@ function moneyPathComponents() {
   }
 }
 
+// A 'pending' pact-broker verdict is unresolved for one of several distinct reasons
+// (collect-quality-report.mjs's `reasonCode`); fall back to a generic sentence for a
+// legacy/unclassified snapshot rather than pretending the reason is known (#7544).
+const PENDING_DETAIL_BY_REASON = {
+  'query-error': item => item.detail
+    ?? 'The Pact Broker returned an error when this pair’s verification was queried. This is not a passing result.',
+  'no-provider-main-version': item => item.detail
+    ?? `${item.provider} has no published main-branch version in the Pact Broker, so provider verification cannot be dispatched yet. This is not a passing result.`,
+  'pending-verification': item => item.detail
+    ?? 'Provider verification has not completed for the latest versions in the Pact Broker yet. This is not a passing result.',
+}
+
+function pendingContractDetail(item) {
+  const byReason = item.reasonCode && PENDING_DETAIL_BY_REASON[item.reasonCode]
+  if (byReason) return byReason(item)
+  if (!item.consumerVersion) {
+    return 'The committed Pact has no immutable consumer-version provenance in this snapshot, so the Broker was not queried. This is not a passing result.'
+  }
+  return 'Pact Broker provider-verification verdict was unavailable when this immutable deployment snapshot was built. This is not a passing result.'
+}
+
 function contracts() {
   const quality = readJson(path.join(repo, 'openbank-admin-ui', 'quality-report.json'))
   if (quality?.contracts) return quality.contracts.map(item => ({
     consumer: item.consumer, provider: item.provider, pactFile: item.pactFile,
     consumerVersion: item.consumerVersion ?? null, providerVersion: item.providerVersion ?? null,
+    // A pact file existing, or even carrying interactions, is never itself evidence of a pass —
+    // only a broker status of 'passed' can produce state 'passed' below.
     state: item.status === 'pending' ? 'unknown' : freshnessAwareState(item.status, item.verifiedAt),
     observedAt: item.verifiedAt ?? null, interactions: item.interactions?.length ?? 0,
+    unavailableReason: item.status === 'pending' ? (item.reasonCode ?? null) : null,
     verificationDetail: item.status === 'pending'
-      ? item.consumerVersion
-        ? `Pact Broker provider-verification verdict for consumer ${item.consumerVersion.slice(0, 12)} was unavailable when this immutable deployment snapshot was built. This is not a passing result.`
-        : 'The committed Pact has no immutable consumer-version provenance in this snapshot, so the Broker was not queried. This is not a passing result.'
+      ? pendingContractDetail(item)
       : `Verified by the Pact Broker provider replay for consumer ${item.consumerVersion?.slice(0, 12) ?? 'unknown'} and provider ${item.providerVersion?.slice(0, 12) ?? 'unknown'} retained in this deployment snapshot.`,
   }))
   const dir = path.join(repo, 'pacts')
@@ -343,6 +365,7 @@ function contracts() {
     return pact ? [{
       consumer: pact.consumer?.name ?? 'unknown', provider: pact.provider?.name ?? 'unknown',
       pactFile: name, state: 'unknown', observedAt: null, interactions: pact.interactions?.length ?? 0,
+      unavailableReason: null,
       verificationDetail: 'No Pact Broker verification snapshot was bundled. This is not a passing result.',
     }] : []
   })

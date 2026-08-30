@@ -23,6 +23,10 @@ export interface ContractVerification {
   status: 'passed' | 'failed' | 'pending'
   verifiedAt: string | null
   interactions: PactInteractionResult[]
+  /** Why `status` stayed 'pending' — see ContractUnavailableReason in test-intelligence.ts. */
+  reasonCode?: 'query-error' | 'no-provider-main-version' | 'pending-verification' | null
+  /** Safe-to-render explanation for `reasonCode` — never the broker response body or credentials. */
+  detail?: string | null
 }
 
 export interface MutationScore {
