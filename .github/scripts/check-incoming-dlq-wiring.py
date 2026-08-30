@@ -64,8 +64,9 @@ KNOWN_UNWIRED = {
     # #5737 (merged) wired notification-service's `party-events-in` — and did it through the
     # msg-override ConfigMap, not application.yaml, because the key is a dotted leaf (#686). It is
     # therefore NOT listed here: it is wired, and recording it as debt would be a false statement
-    # in the baseline. The gate reads the ConfigMap and sees it. #5745 wired `notification-events-in`
-    # the same way, so it is gone from here too — only `delegation-events-in` remains untouched.
+    # in the baseline. The gate reads the ConfigMap and sees it. Its two SIBLING channels are a
+    # different matter — #5737 did not touch them, and they carry no `failure-strategy` at all.
+    ("openbank-notification-service", "notification-events-in"): "#5737 wired only party-events-in; this channel has no failure-strategy yet (#5745)",
     ("openbank-notification-service", "delegation-events-in"): "#5737 wired only party-events-in; this channel has no failure-strategy yet (#5745)",
     ("openbank-tax-reporting-service", "withholding-remitted-in"): "no KafkaUser in gitops — a Write ACL cannot be granted, so a DLQ would wedge on the send (#5745)",
     # The four channels that had a DLQ BEFORE #5745, all on SmallRye's implicit
