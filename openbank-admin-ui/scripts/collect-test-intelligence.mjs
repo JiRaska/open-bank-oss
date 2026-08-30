@@ -327,11 +327,14 @@ function contracts() {
   const quality = readJson(path.join(repo, 'openbank-admin-ui', 'quality-report.json'))
   if (quality?.contracts) return quality.contracts.map(item => ({
     consumer: item.consumer, provider: item.provider, pactFile: item.pactFile,
+    consumerVersion: item.consumerVersion ?? null, providerVersion: item.providerVersion ?? null,
     state: item.status === 'pending' ? 'unknown' : freshnessAwareState(item.status, item.verifiedAt),
     observedAt: item.verifiedAt ?? null, interactions: item.interactions?.length ?? 0,
     verificationDetail: item.status === 'pending'
-      ? 'Pact Broker provider-verification verdict was unavailable when this immutable deployment snapshot was built. This is not a passing result.'
-      : 'Verified by the Pact Broker provider-verification verdict retained in this deployment snapshot.',
+      ? item.consumerVersion
+        ? `Pact Broker provider-verification verdict for consumer ${item.consumerVersion.slice(0, 12)} was unavailable when this immutable deployment snapshot was built. This is not a passing result.`
+        : 'The committed Pact has no immutable consumer-version provenance in this snapshot, so the Broker was not queried. This is not a passing result.'
+      : `Verified by the Pact Broker provider replay for consumer ${item.consumerVersion?.slice(0, 12) ?? 'unknown'} and provider ${item.providerVersion?.slice(0, 12) ?? 'unknown'} retained in this deployment snapshot.`,
   }))
   const dir = path.join(repo, 'pacts')
   if (!exists(dir)) return []
