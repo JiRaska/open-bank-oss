@@ -4,6 +4,7 @@
 
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
@@ -62,6 +63,12 @@ const TEMPLATE_PATHS: Record<string, string[]> = {
   'cnb-capital': ['/api/v1/corep/templates/C_01.00'],
 }
 
+// This is the canonical environment tag already embedded in the browser bundle. Unknown
+// environments fail safe as non-production: missing deployment metadata must never remove a
+// TEST_ONLY mark from a regulatory artefact.
+const DEPLOYMENT_ENVIRONMENT = process.env.NEXT_PUBLIC_GLITCHTIP_ENVIRONMENT?.trim() || 'unknown'
+const IS_TEST_ENVIRONMENT = DEPLOYMENT_ENVIRONMENT !== 'production'
+
 const CELL_LABELS: Record<string, string> = {
   'F01.01:r0010:c0010': 'Hotovost, centrální banky a vklady na požádání',
   'F01.01:r0040:c0010': 'Ostatní vklady na požádání',
@@ -113,6 +120,14 @@ function lastCompletedMonthEnd(): string {
 
 function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
   const meta: ExportRow[] = [
+    { field: 'Klasifikace artefaktu', value: IS_TEST_ENVIRONMENT ? 'TEST_ONLY' : 'INTERNÍ REGULATORNÍ NÁHLED' },
+    { field: 'Prostředí', value: DEPLOYMENT_ENVIRONMENT },
+    {
+      field: 'Povolené použití',
+      value: IS_TEST_ENVIRONMENT
+        ? 'TESTOVACÍ DATA — NESMÍ BÝT ODESLÁNO REGULÁTOROVI'
+        : 'Interní kontrola; odeslání regulátorovi není připojeno',
+    },
     { field: 'ID výkazu', value: report.id },
     { field: 'Název', value: report.name },
     { field: 'Autorita', value: report.authority },
@@ -362,7 +377,7 @@ export default function RegulatoryPage() {
       exportedAt: new Date().toISOString(),
     }
     triggerDownload(
-      `report_${report.sdatCode}_${new Date().toISOString().slice(0, 10)}.json`,
+      `${IS_TEST_ENVIRONMENT ? 'TEST_ONLY_' : ''}report_${report.sdatCode}_${new Date().toISOString().slice(0, 10)}.json`,
       JSON.stringify(data, null, 2),
       'application/json',
     )
@@ -375,7 +390,7 @@ export default function RegulatoryPage() {
     const header = `${csvCell(t('Pole', 'Field'))},${csvCell(t('Hodnota', 'Value'))}`
     const body = rows.map(r => `${csvCell(r.field)},${csvCell(r.value)}`).join('\n')
     triggerDownload(
-      `report_${report.sdatCode}_${new Date().toISOString().slice(0, 10)}.csv`,
+      `${IS_TEST_ENVIRONMENT ? 'TEST_ONLY_' : ''}report_${report.sdatCode}_${new Date().toISOString().slice(0, 10)}.csv`,
       `${header}\n${body}\n`,
       'text/csv;charset=utf-8',
     )
@@ -649,6 +664,12 @@ export default function RegulatoryPage() {
               </div>
             )}
 
+            {IS_TEST_ENVIRONMENT && (
+              <div role="status" data-testid="test-data-watermark" style={{ padding: '10px 20px', color: '#991b1b', background: '#fef2f2', borderBottom: '1px solid #fecaca', fontSize: '12px', fontWeight: 700 }}>
+                {DEPLOYMENT_ENVIRONMENT.toUpperCase()} / {t('TESTOVACÍ DATA — náhled ani stažený soubor nesmí být odeslán regulátorovi.', 'TEST DATA — neither this preview nor a downloaded file may be submitted to a regulator.')}
+              </div>
+            )}
+
             {/* Visual control table */}
             <div style={{ overflowY: 'auto', padding: '0' }}>
               {previewData.status === 'unavailable' ? (
@@ -709,6 +730,11 @@ export default function RegulatoryPage() {
                     </div>
                   )
                 })()}
+                {!exportReadiness.ok && (exportReadiness.reason === 'no_closed_periods' || exportReadiness.reason === 'provisional_data') && (
+                  <Link href="/day-end?tab=regulatory" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginBottom: '8px', color: 'var(--accent)', fontWeight: 700 }}>
+                    {t('Otevřít regulatorní uzávěrku', 'Open regulatory close')} <ExternalLink size={11} aria-hidden="true" />
+                  </Link>
+                )}
                 {previewData.status === 'unsupported'
                   ? t('Tento katalogový výkaz zatím nemá implementovaný datový zdroj ani odeslání. Nezobrazuje fiktivní hodnoty.', 'This catalogue report has no implemented data source or submission path yet. It does not show fictional values.')
                   : t('FINREP/COREP se při načtení ověřují ve finrep-service nad ledger trial balance; při nedostupnosti se hodnoty nezobrazí. ClickHouse ani ČNB XBRL/SDAT přenos nejsou součástí tohoto náhledu.', 'FINREP/COREP are verified on load from finrep-service over the ledger trial balance; values are not shown when unavailable. ClickHouse and ČNB XBRL/SDAT transmission are not part of this preview.')}
