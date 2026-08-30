@@ -2578,6 +2578,43 @@ gates:
       bash .github/scripts/install-oasdiff.sh
       python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}" --enforce
 
+  # The gate above classifies the bump against the MERGE-BASE, which is the right question for
+  # "is this bump big enough" and structurally blind to a number that someone else already took.
+  # Measured 2026-08-30: four PRs were green while claiming a version main had already released
+  # (account 1.11.0, consent 1.7.0, card-issuance 1.8.0, campaign 1.43.0). Each forked one minor
+  # lower and bumped by one; a competing PR then landed the same number first. The merge-base still
+  # holds the OLD value, so the contract gate sees a clean minor bump — and git sees nothing either,
+  # because identical text is not a conflict, so the merge is exit 0 and prints nothing. Two checks
+  # each answering a question that is individually right and jointly insufficient.
+  #
+  # This one asks whether the number is still free on the base branch AS IT IS NOW.
+  #
+  # DETECTION, NOT PREVENTION, and the distinction matters: a run is only as fresh as the moment it
+  # executes, so a PR whose last CI run predates a competing merge and then merges with no later run
+  # is invisible here as to any run-time check. Closing that needs a merge queue or up-to-date-branch
+  # enforcement; ADR-0048 deliberately chose detection. What this buys is that a stale claim goes RED
+  # ON THE NEXT RUN instead of merging silently — today all four collisions are green.
+  #
+  # The self-test drives the pure comparison directly and carries must-VIOLATE cases, not only
+  # passing ones, so it can detect its own vacuity. Falsified before merge against the four real
+  # colliding branches (exit 1 each, each naming the taken number) and against two non-colliding
+  # ones (#6486 1.16.0->1.17.0, #6481 1.5.0->1.6.0, exit 0) — it discriminates in both directions
+  # rather than failing everything.
+  - id: openapi-version-not-taken
+    name: "openapi-version-not-taken — info.version still free on the base tip (ADR-0048, enforced)"
+    group: api
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    min_subjects: 1
+    selftest: |
+      set -euo pipefail
+      python3 .github/scripts/check-openapi-version-not-taken.py --self-test
+    run: |
+      set -euo pipefail
+      git fetch -q origin main
+      python3 .github/scripts/check-openapi-version-not-taken.py --base "${PR_DIFF_BASE}" --base-ref origin/main --enforce
+
   # ENFORCED against a declared baseline (#2314). It landed advisory because 104 findings
   # cannot be a merge blocker on day one — but an advisory check over a GENERATED comparison
   # is a contradiction (#2216): there is no judgement left to exercise, advisory just makes
