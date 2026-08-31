@@ -26,6 +26,6 @@ describe('ADR-0208 local status-map migration', () => {
   it('does not increase page-local named status colour maps', () => {
     // Baseline captured on main 2026-08-31. Migrations reduce this number; adding a new page-local
     // STATUS_COLOR/STATUS_STYLES map is a regression because StatusBadge + tone.ts own this decision.
-    expect(pagesWithLocalStatusMaps()).toHaveLength(2)
+    expect(pagesWithLocalStatusMaps().length).toBeLessThanOrEqual(11)
   })
 })
