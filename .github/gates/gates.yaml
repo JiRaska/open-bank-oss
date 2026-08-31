@@ -2735,13 +2735,19 @@ gates:
   # ConfigMap a FRESH cluster boots from. Nothing reconciles the two, and a migration that reaches
   # only the resources is invisible — file in git, object present in the sandbox because someone
   # applied it, CI green — until a warehouse is rebuilt without it. V4__screen_feedback_context.sql
-  # sat that way from 2026-07 until #4511. Compares created OBJECTS, not text, in both directions.
+  # sat that way from 2026-07 until #4511. Compares created OBJECTS, not text, in both directions —
+  # PLUS, since #7645, the two properties an object set cannot express: ALTER-added COLUMNS, and
+  # agreement between the last definition of an object on each side. V9__synthetic_provenance.sql
+  # creates no object (it adds bronze_events.synthetic and re-cuts four existing views with
+  # `WHERE synthetic = 0`), so it was structurally invisible to the set comparison and had never
+  # reached the ConfigMap. Definition agreement is compared on comment-stripped, whitespace-collapsed
+  # SQL — the two artefacts are indented differently and need not be byte-identical.
   - id: clickhouse-ddl-configmap-parity
-    min_subjects: 15   # 22 objects today (V1-V5 + the ConfigMap's copies, 2026-08-13)
-    name: "ClickHouse DDL reaches a fresh cluster (issue #4511, enforced)"
+    min_subjects: 15   # 28 objects today (V1-V10 + the ConfigMap's copies, 2026-08-31)
+    name: "ClickHouse DDL reaches a fresh cluster (issues #4511/#7645, enforced)"
     group: data
     mode: enforced
-    rationale: "A migration present only in the operator-applied resource path disappears on a fresh ClickHouse rebuild, silently changing the analytics schema after recovery."
+    rationale: "A migration present only in the operator-applied resource path disappears on a fresh ClickHouse rebuild, silently changing the analytics schema after recovery; a migration that only redefines existing objects is invisible to an object-set comparison, so column and definition parity are checked too."
     review_after: "2027-02-13"
     selftest: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
