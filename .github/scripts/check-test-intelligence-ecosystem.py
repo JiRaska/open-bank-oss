@@ -102,6 +102,11 @@ def check(root: Path) -> list[str]:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
     if "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport" not in workflow:
         errors.append("Kover evidence is not bounded with the money-path-safe timeout")
+    immutable_envelope_artifact = workflow.partition("Retain immutable Test Intelligence run envelope")[2].partition(
+        "Upload coverage to Codecov"
+    )[0]
+    if "build/test-intelligence/run.json" not in immutable_envelope_artifact or "runtime/" in immutable_envelope_artifact:
+        errors.append("immutable Test Intelligence artifact must retain only the redacted run envelope, never raw runtime evidence")
 
     convention = text(root / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts")
     if "OPENBANK_TEST_EVIDENCE_DIR" not in convention:
@@ -148,7 +153,8 @@ def check(root: Path) -> list[str]:
     for needle in ('"trace"', "def trace_contract_evidence", "OPENBANK_TRACE_CONTRACT_V1:",
                    "specialized.extend(trace_contract_evidence(service))", "def parse_timestamp(",
                    "run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW",
-                   "observed_at - run_observed_at > MAX_FUTURE_SKEW"):
+                   "observed_at - run_observed_at > MAX_FUTURE_SKEW", "def public_runtime_image",
+                   'item["image"] = public_runtime_image'):
         if needle not in run_collector:
             errors.append(f"run-envelope collector loses executed trace evidence: {needle}")
     tracing_pilot = text(root / "openbank-agent-service/src/test/kotlin/com/openbank/agent/application/AgentChatServiceTracingTest.kt")

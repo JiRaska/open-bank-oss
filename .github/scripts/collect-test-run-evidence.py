@@ -348,6 +348,23 @@ def runtime_image_identity(image: str) -> str:
     return image
 
 
+def public_runtime_image(resource: str, image: object) -> str:
+    """Project an untrusted image reference onto a safe runtime label.
+
+    The raw Docker/Testcontainers image can contain an internal registry hostname,
+    namespace, or (for a malformed local test input) credentials.  The aggregate
+    needs only the declared runtime family plus an optional immutable digest or
+    ordinary tag to reconcile its lifecycle; publishing the original reference
+    would turn a CI evidence artifact into an inventory of private infrastructure.
+    """
+    reference = str(image).rsplit("/", 1)[-1]
+    digest = re.search(r"@sha256:([0-9a-f]{64})$", reference, re.I)
+    if digest:
+        return f"{resource}@sha256:{digest.group(1).lower()}"
+    tag = re.search(r":([A-Za-z0-9][A-Za-z0-9._-]{0,127})$", reference)
+    return f"{resource}:{tag.group(1)}" if tag else resource
+
+
 def observations(service: Path) -> list[dict]:
     result = []
     for file in (service / "build" / "test-intelligence" / "runtime").glob("*.jsonl"):
@@ -364,7 +381,7 @@ def observations(service: Path) -> list[dict]:
                         # reaches the schema-valid observation returned below: an envelope
                         # must not disclose a container identity, but two different daemon
                         # containers of the same image must not be merged accidentally.
-                        result.append((1, {"resource": resource, "image": image, "lifecycle": lifecycle,
+                        result.append((1, {"resource": resource, "image": public_runtime_image(resource, image), "lifecycle": lifecycle,
                                           "observedAt": datetime.fromtimestamp(int(item["observedAtUnix"]), timezone.utc).isoformat().replace("+00:00", "Z"),
                                           "_dockerContainerId": item.get("containerId")}))
                 else:
@@ -372,6 +389,9 @@ def observations(service: Path) -> list[dict]:
                     # stronger lifecycle observation than Docker's raw daemon
                     # stream. Keep that provenance only while deduplicating;
                     # the published schema deliberately contains no host data.
+                    resource = item.get("resource")
+                    if resource in INFRASTRUCTURE:
+                        item["image"] = public_runtime_image(resource, item.get("image", ""))
                     result.append((0 if file.name == "testcontainers.jsonl" else 1, item))
             except json.JSONDecodeError:
                 continue
@@ -570,7 +590,9 @@ def main() -> None:
             # lifecycle at slightly different instants. Keep one event per
             # lifecycle rather than inflating the UI's runtime evidence count.
             (runtime / "testcontainers.jsonl").write_text(
-                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
+                # The shared recorder may be configured through an internal image
+                # mirror. Its hostname/namespace are not allowed in the aggregate.
+                '{"schemaVersion":1,"resource":"postgres","image":"registry.openbank.invalid/team/postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
                 '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:11:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
                 '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:10Z","resourceScopeId":"22222222-2222-4222-8222-222222222222"}\n'
             )
@@ -674,6 +696,10 @@ def main() -> None:
                 "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", None,
                 None, "11111111-1111-4111-8111-111111111111",
             ]
+            assert {item["image"] for item in observed} == {"postgres:16.3-alpine"}
+            assert all("openbank.invalid" not in item["image"] for item in observed)
+            assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres@sha256:" + "A" * 64) == "postgres@sha256:" + "a" * 64
+            assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres:tag?credential=secret") == "postgres"
             assert all("containerId" not in item and "_dockerContainerId" not in item for item in observed)
             specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]
