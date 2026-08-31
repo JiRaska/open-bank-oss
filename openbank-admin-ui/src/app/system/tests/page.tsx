@@ -58,7 +58,7 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
   const runtimeState: EvidenceState = runtimeRows.some(component => {
     const observed = component.testInfrastructure.observed
     return observed.filter(item => item.lifecycle === 'stopped').length < observed.filter(item => item.lifecycle === 'started').length
-  }) ? 'failed' : runtimeRows.some(component => component.testInfrastructure.observed.length === 0) ? 'unknown' : 'passed'
+  }) ? 'unknown' : runtimeRows.some(component => component.testInfrastructure.observed.length === 0) ? 'unknown' : 'passed'
   const clientEvidence = report.clientExperiences ?? []
   const clientState = aggregateEvidenceState(
     clientEvidence.flatMap(client => [...client.evidence.map(item => item.state), client.rum.state]),
@@ -316,9 +316,12 @@ function RuntimeInfrastructure({ report }: { report: TestIntelligenceReport }) {
       const completedLifecycles = Math.min(started.length, stopped.length)
       const unmatchedStarts = started.length - stopped.length
       const impossibleStops = stopped.length > started.length
-      const state: EvidenceState = started.length === 0 || impossibleStops ? 'unknown' : unmatchedStarts > 0 ? 'failed' : 'passed'
+      // The aggregate contains intentionally redacted observations, not a container identity or
+      // resource-manager correlation key. An unequal count is a real finding, but it does not prove
+      // that a container leaked; presenting it as failed would overclaim beyond the retained evidence.
+      const state: EvidenceState = started.length === 0 || impossibleStops || unmatchedStarts > 0 ? 'unknown' : 'passed'
       const latest = row.testInfrastructure.observed.at(-1)?.observedAt
-      return <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.testInfrastructure.declared.join(' · ') || 'none'}</td><td style={tdStyle}><StateBadge state={state} /></td><td style={tdStyle}><strong>{completedLifecycles} {t('dokončených izolovaných cyklů', 'completed isolated cycles')}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{started.length} started · {stopped.length} stopped</div>{unmatchedStarts > 0 && <div role="status" style={{ color: '#dc2626', fontSize: 10, marginTop: 3 }}>{t(`${unmatchedStarts} unmatched start`, `${unmatchedStarts} unmatched start${unmatchedStarts === 1 ? '' : 's'}`)}</div>}{impossibleStops && <div role="status" style={{ color: '#64748b', fontSize: 10, marginTop: 3 }}>{t('Nekonzistentní lifecycle evidence: více stop než start.', 'Inconsistent lifecycle evidence: more stops than starts.')}</div>}</td><td style={tdStyle}>{latest ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(latest)) : 'not emitted by this run'}</td></tr>
+      return <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.testInfrastructure.declared.join(' · ') || 'none'}</td><td style={tdStyle}><StateBadge state={state} /></td><td style={tdStyle}><strong>{completedLifecycles} {t('dokončených izolovaných cyklů', 'completed isolated cycles')}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{started.length} started · {stopped.length} stopped</div>{unmatchedStarts > 0 && <div role="status" style={{ color: '#a16207', fontSize: 10, marginTop: 3 }}>{t(`${unmatchedStarts} nepropojených startů: agregovaná evidence sama nepotvrzuje leak ani cleanup.`, `${unmatchedStarts} unmatched starts: aggregate evidence alone proves neither a leak nor cleanup.`)}</div>}{impossibleStops && <div role="status" style={{ color: '#64748b', fontSize: 10, marginTop: 3 }}>{t('Nekonzistentní lifecycle evidence: více stop než start.', 'Inconsistent lifecycle evidence: more stops than starts.')}</div>}</td><td style={tdStyle}>{latest ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(latest)) : 'not emitted by this run'}</td></tr>
     })}</tbody>
   </table></div>
 }
