@@ -87,6 +87,12 @@ class CnbRateIngestionScheduler(
             liveness?.recordSuccess()
             feed?.record(CnbFetchOutcomes.of(result))
         } catch (ex: Exception) {
+            // observed-by: openbank_feed_fetch_* for FEED_NAME — `feed.record(ofFailure)` marks the
+            // run failed, so the feed's own gauge stops advancing and CnbFeedStale fires. This is a
+            // SCHEDULED job with no message to nack: there is nothing to hand back to a broker, and
+            // the next cron re-fetches the same fixing, so the failure is not lost work. The gauge
+            // is the signal, which is exactly the condition `observed-by:` exists to state (#5745).
+            //
             // Record before logging: the metric is the signal that survives, and a log line is what
             // this failure has already been reduced to once, for 46 days.
             feed?.record(CnbFetchOutcomes.ofFailure(ex))
