@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.225.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.224.1...admin-ui-v0.225.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** unify the three-month FX rate trend ([#7736](https://github.com/JiRaska/open-bank-oss/issues/7736)) ([5e85aa6](https://github.com/JiRaska/open-bank-oss/commit/5e85aa60dab75048024186ff7072c0918cddaeea))
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve clearing evidence during outages ([#7822](https://github.com/JiRaska/open-bank-oss/issues/7822)) ([853b827](https://github.com/JiRaska/open-bank-oss/commit/853b827063ea02d3f25c5edf5b88a82b36328ca3))
+* **admin-ui:** preserve ledger evidence after failed searches ([#7831](https://github.com/JiRaska/open-bank-oss/issues/7831)) ([9b03e28](https://github.com/JiRaska/open-bank-oss/commit/9b03e283b3477c1824377907d5926f6de2393a0d))
+* **admin-ui:** preserve masked card detail during outages ([#7829](https://github.com/JiRaska/open-bank-oss/issues/7829)) ([1da0759](https://github.com/JiRaska/open-bank-oss/commit/1da07598978ad2fb51866e009bd9ea46f68183ca))
+
 ## [0.224.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.224.0...admin-ui-v0.224.1) (2026-08-31)
 
 
