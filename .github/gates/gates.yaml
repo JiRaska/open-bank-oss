@@ -2477,7 +2477,7 @@ gates:
       python3 .github/scripts/check-outbox-has-writer.py .
 
   - id: pact-provider-replay-coverage
-    name: "Pact provider-replay coverage (issue #2338, enforced)"
+    name: "Pact provider replay + broker publication (issues #2338, #7621, enforced)"
     group: api
     mode: enforced
     selftest: |
