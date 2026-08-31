@@ -76,6 +76,14 @@ and read the output when it returns. Do not use background execution, do not pol
 appear, do not wait for a notification. If a command genuinely cannot finish inside the job's
 45-minute budget, the issue is too big for one run — abandon it and say so.
 
+Concretely: never call the Bash tool with `run_in_background: true`. Never call the `Monitor`
+tool. Neither exists for you — there is no later turn in which their result reaches you, only a
+job that sits until its own timeout kills it. This has now killed three separate runs
+(2026-08-22, and twice more on 2026-08-31) the same way: a build or test command backgrounded,
+then a turn ending on "waiting for it to finish" or "waiting for the scheduled fallback wakeup" —
+language that describes a *different* harness (an interactive session with a wakeup scheduler),
+not this one. You are `claude -p`; nothing schedules you a wakeup.
+
 ## Step 1 — pick one issue you can actually finish and verify
 
 List open issues with `gh issue list`. Discard, in this order:
