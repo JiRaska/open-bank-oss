@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ADR-0076 Layer 2 — Playwright E2E configuration
 //
-// Runs against a dedicated Next.js dev server (auto-started before tests, torn down after).
+// Runs against the Next.js dev server (auto-started before tests, torn down after).
 // Tests live in e2e/ and mock BFF endpoints via page.route() — no live services needed.
 // Scoped to pages that render live service state (docs coverage, health, governance).
 
@@ -41,15 +41,9 @@ export default defineConfig({
   ],
 
   webServer: {
-    // Webpack is deliberate here: Turbopack rejects the safe shared-dependency
-    // symlink used by isolated worktrees, while production builds retain their
-    // configured bundler. E2E needs a deterministic server, not a bundler test.
-    command: `npm run dev -- --webpack -p ${e2ePort}`,
+    command: `npm run dev -- -p ${e2ePort}`,
     url: e2eBaseUrl,
-    // A reachable port is not evidence that it serves admin-ui: locally a different
-    // project can already own 3001 and make every assertion target the wrong app.
-    // Fail fast instead; callers that need parallel runs choose OPENBANK_E2E_PORT.
-    reuseExistingServer: false,
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
       // Point docs bundle to the repo root so libs docs are found
