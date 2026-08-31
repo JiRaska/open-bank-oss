@@ -215,4 +215,22 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     const bg = (l: typeof active) => l.evaluate(el => getComputedStyle(el).backgroundColor)
     expect(await bg(active)).not.toBe(await bg(revoked))
   })
+
+  test('the dark token theme changes shared surfaces without collapsing status distinction', async ({ page }) => {
+    await page.route('**/api/prod-readiness', route =>
+      route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
+    )
+    await page.goto('/system/readiness')
+
+    const body = page.locator('body')
+    const lightBackground = await body.evaluate(el => getComputedStyle(el).backgroundColor)
+    await page.locator('html').evaluate(el => el.classList.add('dark'))
+    const darkBackground = await body.evaluate(el => getComputedStyle(el).backgroundColor)
+    expect(darkBackground).not.toBe(lightBackground)
+
+    const [go, noGo] = await Promise.all(
+      ['GO', 'NO-GO'].map(label => page.locator('.badge', { hasText: new RegExp(`^${label}$`) }).evaluate(el => getComputedStyle(el).backgroundColor)),
+    )
+    expect(go).not.toBe(noGo)
+  })
 })
