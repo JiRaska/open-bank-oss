@@ -44,4 +44,14 @@ describe('system code quality accessibility', () => {
     expect(source).toContain('<SharedStatusBadge status={state} tone={evidenceTone(state)} label={state} withDot />')
     expect(source).not.toContain('STATE_COLOR')
   })
+
+  it('keeps the component evidence matrix ahead of detailed control rows', () => {
+    const source = read()
+    const matrix = source.indexOf("t('Matice důkazů komponent', 'Component evidence matrix')")
+    const controls = source.indexOf("t('Deterministické povinné kontroly', 'Deterministic required controls')")
+
+    expect(matrix).toBeGreaterThan(-1)
+    expect(controls).toBeGreaterThan(matrix)
+    expect(source).toContain('One row per component: scan across test kinds; money-path components are first.')
+  })
 })

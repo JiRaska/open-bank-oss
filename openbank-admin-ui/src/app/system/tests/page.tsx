@@ -173,6 +173,22 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
         <Stat label="Unresolved evidence" value={report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0} tone={(report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) ? 'neutral' : 'success'} />
         <Stat label="Required-control gaps" value={`${report.totals.requiredControlGaps ?? 0}/${report.totals.requiredControls ?? 0}`} tone={report.totals.requiredControlGaps ? 'danger' : 'success'} />
       </div>
+      <section aria-label={t('Matice důkazů komponent', 'Component evidence matrix')} style={{ marginBottom: 20 }}>
+        <h2 style={{ fontSize: 16, marginBottom: 4 }}>{t('Matice důkazů komponent', 'Component evidence matrix')}</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jeden řádek na komponentu: skenuj napříč druhy testů; peněžní toky jsou nahoře.', 'One row per component: scan across test kinds; money-path components are first.')}</p>
+        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+          <table style={tableStyle}>
+            <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
+            <tbody>{sorted.map(component => (
+              <tr key={component.component}>
+                <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: '#dc2626', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
+                {KINDS.map(kind => <td key={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
+                <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </section>
       <section aria-label={t('Deterministické povinné kontroly', 'Deterministic required controls')} style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t('Deterministické povinné kontroly', 'Deterministic required controls')}</h2>
         <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
@@ -192,18 +208,6 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
           <code style={{ display: 'block', color: 'var(--text-tertiary)', fontSize: 9, marginTop: 8 }}>{capability.evidence}</code>
         </div>)}</div>
       </section>
-      <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
-        <table style={tableStyle}>
-          <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
-          <tbody>{sorted.map(component => (
-            <tr key={component.component}>
-              <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: '#dc2626', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
-              {KINDS.map(kind => <td key={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
-              <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
     </>
   )
 }
