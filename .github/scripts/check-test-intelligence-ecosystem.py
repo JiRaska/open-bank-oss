@@ -103,6 +103,8 @@ def check(root: Path) -> list[str]:
     convention = text(root / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts")
     if "OPENBANK_TEST_EVIDENCE_DIR" not in convention:
         errors.append("service test JVMs do not receive the runtime-evidence directory")
+    if "project.delete(testIntelligenceRuntimeDir)" not in convention:
+        errors.append("runtime evidence is not reset before each Test task and can mix local reruns")
     # Kover's agent otherwise transforms Testcontainers' shaded classes during Quarkus
     # integration tests.  That can leave the advisory report task green but no XML to
     # project, which is indistinguishable from absent coverage in the operator view.
