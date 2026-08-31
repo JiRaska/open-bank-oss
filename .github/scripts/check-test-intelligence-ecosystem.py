@@ -62,6 +62,15 @@ def check(root: Path) -> list[str]:
                                 .get("properties", {}).get("kind", {}).get("enum", []))
         if "trace" not in specialized_kinds:
             errors.append("run schema cannot represent executed trace-contract evidence")
+        runtime_observation = schema.get("$defs", {}).get("infrastructureObservation", {})
+        runtime_properties = runtime_observation.get("properties", {})
+        scope_pattern = runtime_properties.get("resourceScopeId", {}).get("pattern", "")
+        if ("resourceScopeId" in runtime_observation.get("required", [])
+                or not scope_pattern.startswith("^[0-9a-f]{8}-")):
+            errors.append("run schema cannot safely represent optional opaque Testcontainers resource scopes")
+        reprovisions = runtime_properties.get("reprovisions", {})
+        if reprovisions.get("type") != "integer" or reprovisions.get("minimum") != 1:
+            errors.append("run schema cannot safely represent positive logical-resource reprovision counts")
         diagnostic = schema.get("properties", {}).get("diagnostics", {})
         if diagnostic.get("items", {}).get("$ref") != "#/$defs/diagnosticArtifact":
             errors.append("run schema has no typed diagnostic artifact collection")
@@ -97,6 +106,8 @@ def check(root: Path) -> list[str]:
     convention = text(root / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts")
     if "OPENBANK_TEST_EVIDENCE_DIR" not in convention:
         errors.append("service test JVMs do not receive the runtime-evidence directory")
+    if "project.delete(testIntelligenceRuntimeDir)" not in convention:
+        errors.append("runtime evidence is not reset before each Test task and can mix local reruns")
     # Kover's agent otherwise transforms Testcontainers' shaded classes during Quarkus
     # integration tests.  That can leave the advisory report task green but no XML to
     # project, which is indistinguishable from absent coverage in the operator view.
@@ -106,10 +117,14 @@ def check(root: Path) -> list[str]:
     recorder = root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/evidence/TestInfrastructureEvidence.kt"
     if not recorder.exists():
         errors.append("openbank-libs-testing has no shared runtime evidence recorder")
+    elif "resourceScopeId" not in text(recorder) or "reprovisions" not in text(recorder):
+        errors.append("shared runtime evidence recorder cannot preserve opaque scopes and logical reprovisions")
     for name in ("PostgresBase.kt", "PostgresRedpandaTestResource.kt", "PostgresRedisTestResource.kt"):
         source = text(root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/containers" / name)
         if "TestInfrastructureEvidence.record" not in source:
             errors.append(f"shared Testcontainers resource emits no lifecycle proof: {name}")
+        if "resourceScopeId" not in source:
+            errors.append(f"shared Testcontainers resource lacks opaque lifecycle correlation: {name}")
 
     baseline_path = root / TESTCONTAINERS_EVIDENCE_BASELINE
     baseline = {

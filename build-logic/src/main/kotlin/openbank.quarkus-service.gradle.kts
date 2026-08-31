@@ -102,10 +102,14 @@ tasks.withType<Test>().configureEach {
     // A shared Testcontainers resource emits a deliberately secret-free lifecycle
     // observation here. The CI envelope is evidence, not a container inventory:
     // ports, hosts, credentials and ids must never leave the test runner.
-    environment(
-        "OPENBANK_TEST_EVIDENCE_DIR",
-        layout.buildDirectory.dir("test-intelligence/runtime").get().asFile.absolutePath,
-    )
+    val testIntelligenceRuntimeDir = layout.buildDirectory.dir("test-intelligence/runtime")
+    environment("OPENBANK_TEST_EVIDENCE_DIR", testIntelligenceRuntimeDir.get().asFile.absolutePath)
+    // Recorder output is append-only within one test task so concurrently managed resources do
+    // not lose transitions. Reset only this generated task directory before each invocation:
+    // otherwise a local re-run mixes prior lifecycle evidence into the next envelope.
+    doFirst {
+        project.delete(testIntelligenceRuntimeDir)
+    }
 
     // Committed pacts are derived data (ADR-0063), so a regenerated pact must be AUTHORITATIVE —
     // it has to be able to remove an interaction, not only add one. pact-jvm's default writer
