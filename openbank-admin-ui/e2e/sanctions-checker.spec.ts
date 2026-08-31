@@ -63,6 +63,10 @@ test.describe('sanctions maker-checker workflow', () => {
       decisionRequests += 1
       expect(route.request().method()).toBe('PATCH')
       expect(await route.request().postDataJSON()).toEqual({ approve: true })
+      if (decisionRequests === 1) {
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporarily unavailable' }) })
+        return
+      }
       queue = []
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'APPROVED' }) })
     })
@@ -84,8 +88,19 @@ test.describe('sanctions maker-checker workflow', () => {
     await expect(page.getByLabel(/Approval id|ID žádosti/)).toHaveValue(approval.id)
     await page.getByRole('button', { name: /Approve|Schválit/, exact: true }).click()
 
+    const dialog = page.getByRole('alertdialog')
+    await expect(dialog).toContainText(approval.action)
+    await expect(dialog).toContainText(approval.makerId)
+    await expect(dialog).toContainText(approval.id)
+    const confirm = dialog.getByRole('button', { name: /Confirm approval|Potvrdit schválení/ })
+    await confirm.click()
+    await expect(dialog.getByRole('alert')).toContainText(/Decision failed|Rozhodnutí selhalo/)
+    await expect(dialog).toBeVisible()
+    await confirm.click()
+
+    await expect(dialog).toBeHidden()
     await expect(page.getByText(/Approved\. The maker can now retry the action\.|Schváleno\./)).toBeVisible()
     await expect(page.getByText(/No approvals waiting\.|Žádné čekající žádosti\./)).toBeVisible()
-    expect(decisionRequests).toBe(1)
+    expect(decisionRequests).toBe(2)
   })
 })
