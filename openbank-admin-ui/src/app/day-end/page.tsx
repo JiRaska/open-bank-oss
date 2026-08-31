@@ -32,6 +32,7 @@ import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { RegulatoryPeriodPanel } from '@/components/closings/RegulatoryPeriodPanel'
+import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 
 const POLL = 30_000
 // A healthy daily tie-out (23:30) is at most ~24h old; past 25h the day's close likely
@@ -437,6 +438,8 @@ function EomPanel() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const [triggering, setTriggering] = useState(false)
+  const [triggerReviewOpen, setTriggerReviewOpen] = useState(false)
+  const triggerButtonRef = useRef<HTMLButtonElement | null>(null)
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [failures, setFailures] = useState<Record<string, FailuresState>>({})
@@ -503,6 +506,7 @@ function EomPanel() {
   const triggerFlight = useSingleFlight()
 
   const trigger = useCallback(async () => {
+    let succeeded = false
     const outcome = await triggerFlight.run('closings:catch-up', async () => {
     setTriggering(true); setNotice(null)
     try {
@@ -514,11 +518,12 @@ function EomPanel() {
         return
       }
       // Optimistic: show the accepted run immediately, then refresh the history.
-      const accepted = (await res.json()) as CloseRun
-      setRuns(prev => [accepted, ...prev.filter(r => r.id !== accepted.id)])
+      const acceptedRun = (await res.json()) as CloseRun
+      setRuns(prev => [acceptedRun, ...prev.filter(r => r.id !== acceptedRun.id)])
       setEmpty(false)
       setNotice({ ok: true, text: t('Catch-up uzávěrka přijata.', 'Catch-up close run accepted.') })
-      recordCheck('ok', 'trigger', `trigger:${accepted.id}`)
+      recordCheck('ok', 'trigger', `trigger:${acceptedRun.id}`)
+      succeeded = true
       void load()
     } catch {
       setNotice({ ok: false, text: t('Spuštění catch-up uzávěrky se nezdařilo.', 'Could not start the catch-up close run.') })
@@ -526,8 +531,15 @@ function EomPanel() {
       setTriggering(false)
     }
     })
-    if (wasSkipped(outcome)) return
+    if (wasSkipped(outcome)) return false
+    return succeeded
   }, [triggerFlight, t, load, recordCheck])
+
+  const closeTriggerReview = () => {
+    if (triggering) return
+    setTriggerReviewOpen(false)
+    requestAnimationFrame(() => triggerButtonRef.current?.focus())
+  }
 
   const toggleFailures = useCallback(async (run: CloseRun) => {
     const open = !expanded[run.id]
@@ -620,22 +632,33 @@ function EomPanel() {
           </button>
           {canTrigger && (
             <button
+              ref={triggerButtonRef}
               type="button"
-              aria-busy={triggering}
-              aria-label={triggering ? t('Spouštím catch-up uzávěrku', 'Starting catch-up close') : t('Spustit catch-up uzávěrku', 'Run catch-up close')}
+              aria-label={t('Zkontrolovat catch-up uzávěrku', 'Review catch-up close')}
               className="btn btn-primary"
-              onClick={() => void trigger()}
+              onClick={() => { setNotice(null); setTriggerReviewOpen(true) }}
               disabled={triggering || running || unavailable !== null}
               title={t('Spustit dohánějící uzávěrku nyní (idempotentní)', 'Run a catch-up close now (idempotent)')}
             >
-              <Play size={13} aria-hidden="true" className={triggering ? 'animate-spin' : undefined} />
-              {triggering ? t('Spouštím…', 'Starting…') : t('Spustit catch-up', 'Run catch-up')}
+              <Play size={13} aria-hidden="true" />
+              {t('Zkontrolovat a spustit', 'Review and run')}
             </button>
           )}
         </div>
       </div>
 
-      {notice && (
+      {triggerReviewOpen && <ClosingTriggerReviewDialog
+        latest={latest}
+        historyCount={runs.length}
+        busy={triggering}
+        error={notice?.ok === false ? notice.text : null}
+        onCancel={closeTriggerReview}
+        onConfirm={async () => {
+          if (await trigger()) setTriggerReviewOpen(false)
+        }}
+      />}
+
+      {notice && !triggerReviewOpen && (
         <div style={{
           marginBottom: '12px', padding: '10px 14px', borderRadius: 'var(--r-md)', fontSize: '13px',
           background: notice.ok ? 'var(--success-bg)' : 'var(--warning-bg)',
@@ -788,6 +811,64 @@ function EomPanel() {
       </div>
     </div>
   )
+}
+
+function ClosingTriggerReviewDialog({ latest, historyCount, busy, error, onCancel, onConfirm }: {
+  latest: CloseRun | null
+  historyCount: number
+  busy: boolean
+  error: string | null
+  onCancel: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const { t, language } = useLanguage()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const titleId = 'closing-catch-up-review-title'
+  const impactId = 'closing-catch-up-review-impact'
+  const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const formatDate = (value: string | null) => value ? new Date(value).toLocaleDateString(locale) : '—'
+  const period = latest ? `${formatDate(latest.periodFrom)} – ${formatDate(latest.periodTo)}` : t('zatím bez běhu', 'no run yet')
+
+  return <div
+    ref={dialogRef}
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby={titleId}
+    aria-describedby={impactId}
+    aria-busy={busy}
+    onKeyDown={event => {
+      if (event.key === 'Escape' && !busy) onCancel()
+      trapDialogFocus(event, dialogRef.current)
+    }}
+    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)', display: 'grid', placeItems: 'center', padding: 20 }}
+  >
+    <div className="card" style={{ width: 'min(600px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+        <CalendarCheck2 size={20} aria-hidden="true" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
+        <div>
+          <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{t('Spustit catch-up měsíční uzávěrku', 'Run monthly catch-up close')}</h2>
+          <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>{t(
+            'Statement-service určí chybějící období a přijme idempotentní běh po kapsách. Přijetí pouze potvrzuje zahájení — úspěch, přeskočení a chyby uvidíte až v historii běhu.',
+            'Statement-service determines the missing period and accepts an idempotent per-pocket run. Acceptance only confirms the start — completion, skips, and failures appear later in run history.',
+          )}</p>
+        </div>
+      </div>
+      <div style={{ marginTop: 14, padding: 12, borderRadius: 9, border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning)', fontSize: 12.5, lineHeight: 1.5 }}>
+        {t('Nespouštějte ručně jen proto, že plánovaný běh ještě není vidět. Ověřte plánovač 1. den v měsíci v 02:30 a poslední běh níže.', 'Do not trigger manually only because the scheduled run is not visible yet. Check the 1st-of-month 02:30 schedule and the latest run below.')}
+      </div>
+      <dl style={{ margin: '14px 0 0', padding: 12, borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface-2)', display: 'grid', gap: 8, fontSize: 12.5 }}>
+        <div><dt style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Plán', 'Schedule')}</dt><dd style={{ margin: '2px 0 0', fontWeight: 650 }}>{t('1. den v měsíci · 02:30', '1st of month · 02:30')}</dd></div>
+        <div><dt style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Poslední pozorované období', 'Latest observed period')}</dt><dd style={{ margin: '2px 0 0' }}>{period}</dd></div>
+        <div><dt style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Poslední běh', 'Latest run')}</dt><dd className="mono" style={{ margin: '2px 0 0', wordBreak: 'break-all' }}>{latest ? `${latest.id} · ${latest.status} · ${latest.trigger}` : t('žádný', 'none')}</dd></div>
+        <div><dt style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Načtená historie', 'Loaded history')}</dt><dd style={{ margin: '2px 0 0' }}>{historyCount} {t('běhů', 'runs')}</dd></div>
+      </dl>
+      {error && <p role="alert" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>{error}</p>}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+        <button type="button" autoFocus className="btn btn-secondary" disabled={busy} onClick={onCancel}>{t('Zpět ke kontrole', 'Back to review')}</button>
+        <button type="button" className="btn btn-primary" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()}><Play size={13} aria-hidden="true" />{busy ? t('Spouštím…', 'Starting…') : t('Potvrdit spuštění', 'Confirm run')}</button>
+      </div>
+    </div>
+  </div>
 }
 
 function RunRows({ run, expandable, isOpen, fState, onToggle, statusPill, reasonLabel, fmtTs, fmtPeriod, fmtDuration }: {
