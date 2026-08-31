@@ -32,6 +32,7 @@ import {
   capabilityLabels,
   counterpartyLabel,
   formatCeiling,
+  grantCounterparty,
   type Grant,
 } from '@/components/delegations/GrantView'
 
@@ -217,12 +218,14 @@ export default function DelegationsPage() {
             subtitle={t('Práva, která tato strana udělila jiným.', 'Rights this party has granted to others.')}
             grants={grants.granted}
             state={grants.sources.granted}
+            direction="granted"
           />
           <GrantTable
             title={t('Sdíleno s touto stranou', 'Shared with this party')}
             subtitle={t('Práva, která tato strana drží nad cizími zdroji.', 'Rights this party holds over other people’s resources.')}
             grants={grants.received}
             state={grants.sources.received}
+            direction="received"
           />
           <ProjectionHealth consumers={consumers} known={projectionKnown} />
         </>
@@ -232,8 +235,8 @@ export default function DelegationsPage() {
 }
 
 function GrantTable({
-  title, subtitle, grants, state,
-}: { title: string; subtitle: string; grants: Grant[]; state: DirectionState }) {
+  title, subtitle, grants, state, direction,
+}: { title: string; subtitle: string; grants: Grant[]; state: DirectionState; direction: 'granted' | 'received' }) {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
@@ -273,10 +276,11 @@ function GrantTable({
               </tr>
             </thead>
             <tbody>
-              {grants.map(g => (
-                <tr key={g.id}>
+              {grants.map(g => {
+                const counterparty = grantCounterparty(g, direction)
+                return <tr key={g.id}>
                   <td><DelegationStatusBadge status={g.status} /></td>
-                  <td><EntityChip type="party" id={g.granteePartyId} label={counterpartyLabel(g.granteeName)} /></td>
+                  <td><EntityChip type="party" id={counterparty.id} label={counterparty.name} /></td>
                   <td style={{ fontSize: '12px' }}>{g.resourceType}</td>
                   <td style={{ fontSize: '12px' }}>{capabilityLabels(g.capabilities)}</td>
                   <td style={{ fontSize: '12px' }}>{formatCeiling(g.perTransactionLimit, numberLocale)}</td>
@@ -287,7 +291,7 @@ function GrantTable({
                     </Link>
                   </td>
                 </tr>
-              ))}
+              })}
             </tbody>
           </table>
         </div>
