@@ -26,6 +26,7 @@ import { classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { RoleCatalog } from '@/components/delegations/RoleCatalog'
 import {
   DelegationStatusBadge,
   capabilityLabels,
@@ -132,6 +133,8 @@ export default function DelegationsPage() {
           </button>
         )}
       />
+
+      <RoleCatalog />
 
       {/* ---- party lookup (ADR-0228 facade, never a raw UUID field) ---- */}
       <div className="card" style={{ padding: '16px', marginBottom: '20px' }}>
