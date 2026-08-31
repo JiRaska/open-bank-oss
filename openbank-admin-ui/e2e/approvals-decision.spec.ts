@@ -28,7 +28,12 @@ test.describe('approval workbench', () => {
     let decided = false
     let decisionRequests = 0
 
-    await page.route('**/api/agent/proposals?state=all', async route => {
+    // Matches both the GET list read (…/proposals?state=all) and the POST decision
+    // write (…/proposals, no query string) — the two differ only by query string and
+    // method, and a pattern anchored on the literal "?state=all" suffix would only ever
+    // catch the GET, silently letting the POST fall through to the real (unmocked)
+    // network and leaving `decided` stuck false forever (#7814).
+    await page.route('**/api/agent/proposals*', async route => {
       if (route.request().method() === 'GET') {
         const row = decided ? {
           ...proposal,
