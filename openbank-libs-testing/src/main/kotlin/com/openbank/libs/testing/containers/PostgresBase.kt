@@ -32,7 +32,9 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
         initArgs["db"]?.let { dbName = it }
     }
 
+    @Synchronized
     protected fun startPostgres(): PostgreSQLContainer<*> {
+        postgres?.let { return it }
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
@@ -58,9 +60,15 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
         )
     }
 
+    @Synchronized
     override fun stop() {
-        postgres?.stop()
-        if (postgres != null) TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        val running = postgres ?: return
+        postgres = null
+        try {
+            running.stop()
+        } finally {
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
     }
 
     private companion object {
