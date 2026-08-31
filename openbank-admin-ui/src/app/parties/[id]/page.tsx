@@ -15,7 +15,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge } from '@/components/ui'
 import { opsMessageApi, OPERATOR_MESSAGE_TEMPLATE_VARS, type OperatorMessageTemplate, type ComposeMessageRequest } from '@/lib/api'
 
 const PAGE_SIZE = 25
@@ -37,16 +37,6 @@ interface KycCase {
 interface NotificationSummary {
   id: string; partyId: string; channel: string; template: string; recipient: string
   subject?: string; status: string; sentAt?: string; readAt?: string; createdAt: string
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  ACTIVE: 'var(--green)', INACTIVE: 'var(--text-muted)', BLOCKED: 'var(--red)',
-}
-const KYC_COLOR: Record<string, string> = {
-  APPROVED: 'var(--green)', PENDING: 'var(--yellow)', REJECTED: 'var(--red)', NOT_STARTED: 'var(--text-muted)',
-}
-const MSG_STATUS_COLOR: Record<string, string> = {
-  SENT: 'var(--green)', FAILED: 'var(--red)', PENDING: 'var(--yellow)', BOUNCED: 'var(--red)',
 }
 
 function PartyDetailPage() {
@@ -167,9 +157,7 @@ function PartyDetailPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
               <Users size={15} style={{ color: 'var(--accent)' }} />
               <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Detaily subjektu', 'Party Details')}</span>
-              <span className="pill" style={{ marginLeft: 'auto', background: `${STATUS_COLOR[party.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[party.status] ?? 'var(--text-muted)' }}>
-                {party.status}
-              </span>
+              <span style={{ marginLeft: 'auto' }}><StatusBadge status={party.status} /></span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {[
@@ -198,8 +186,8 @@ function PartyDetailPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
               <ShieldCheck size={15} style={{ color: 'var(--accent)' }} />
               <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Stav KYC', 'KYC Status')}</span>
-              <span className="pill" style={{ marginLeft: 'auto', background: `${KYC_COLOR[party.kycStatus] ?? 'var(--text-muted)'}22`, color: KYC_COLOR[party.kycStatus] ?? 'var(--text-muted)' }}>
-                {party.kycStatus?.replace('_', ' ')}
+              <span style={{ marginLeft: 'auto' }}>
+                <StatusBadge status={party.kycStatus} label={party.kycStatus?.replace('_', ' ')} />
               </span>
             </div>
             {kyc ? (
@@ -210,9 +198,7 @@ function PartyDetailPage() {
                 {kyc.checks?.map(check => (
                   <div key={check.checkType} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
                     <span style={{ fontSize: '13px' }}>{check.checkType?.replace(/_/g, ' ') ?? check.checkType}</span>
-                    <span className="pill" style={{ background: `${KYC_COLOR[check.status] ?? 'var(--text-muted)'}22`, color: KYC_COLOR[check.status] ?? 'var(--text-muted)' }}>
-                      {check.status}
-                    </span>
+                    <StatusBadge status={check.status} />
                   </div>
                 ))}
                 {kyc.reviewedBy && (
@@ -563,9 +549,7 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                 <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{row.recipient}</td>
                 <td style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{row.subject ?? '—'}</td>
                 <td>
-                  <span className="pill" style={{ background: `${MSG_STATUS_COLOR[row.status] ?? 'var(--text-muted)'}22`, color: MSG_STATUS_COLOR[row.status] ?? 'var(--text-muted)' }}>
-                    {row.status}
-                  </span>
+                  <StatusBadge status={row.status} />
                 </td>
                 <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.sentAt ? new Date(row.sentAt).toLocaleString(dateLocale) : '—'}</td>
                 <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.readAt ? new Date(row.readAt).toLocaleString(dateLocale) : '—'}</td>
