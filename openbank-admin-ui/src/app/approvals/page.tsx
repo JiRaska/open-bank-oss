@@ -410,6 +410,7 @@ function ApprovalDecisionDialog({ intent, busy, failed, onCancel, onConfirm }: {
     </label>
     <textarea
       id="approval-decision-reason"
+      aria-label={t('Důvod rozhodnutí návrhu', 'Decision reason for proposal')}
       autoFocus
       rows={4}
       maxLength={1000}
