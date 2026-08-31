@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useCallback } from 'react'
+import { Fragment, useState, useCallback } from 'react'
 import { ScrollText, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
@@ -35,27 +35,36 @@ export default function AuditPage() {
   // environment, so a failed lookup is normally "not deployed", not "broken".
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [aggregateId, setAggregateId] = useState('')
+  const [loadedAggregateId, setLoadedAggregateId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
 
   const search = useCallback(async () => {
-    if (!aggregateId.trim()) return
+    const query = aggregateId.trim()
+    if (!query) return
     setLoading(true); setUnavailable(null)
     try {
-      const res = await fetch(`${AUDIT_SERVICE}/api/v1/audit/entries/${aggregateId.trim()}?limit=100`, { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(`${AUDIT_SERVICE}/api/v1/audit/entries/${query}?limit=100`, { signal: AbortSignal.timeout(5000) })
       if (!res.ok) {
-        setEntries([])
+        if (loadedAggregateId !== query) {
+          setEntries([])
+          setLoadedAggregateId(null)
+        }
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
       const data = await res.json()
       setEntries(Array.isArray(data) ? data : data.entries ?? [])
+      setLoadedAggregateId(query)
     } catch {
       // fetch threw (timeout/abort/network) — the BFF or audit-service didn't
       // answer at all. Treat as unreachable rather than leaking the raw error.
-      setEntries([])
+      if (loadedAggregateId !== query) {
+        setEntries([])
+        setLoadedAggregateId(null)
+      }
       setUnavailable({ kind: 'unreachable' })
     } finally { setLoading(false) }
-  }, [aggregateId])
+  }, [aggregateId, loadedAggregateId])
 
   return (
     <div>
@@ -98,6 +107,9 @@ export default function AuditPage() {
             service={t('Audit-service', 'Audit-service')}
             feature={t('Auditní záznamy', 'Audit trail')}
             lang={language}
+            detail={entries.length > 0 && loadedAggregateId === aggregateId.trim()
+              ? t('Zobrazen je poslední ověřený snapshot pro stejné Aggregate ID; novější události mohou chybět.', 'The last verified snapshot for this Aggregate ID is shown; newer events may be missing.')
+              : undefined}
           />
         </div>
       )}
@@ -105,7 +117,7 @@ export default function AuditPage() {
       {entries.length > 0 && (
         <div className="card" style={{ overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '13px', color: 'var(--text-muted)' }}>
-            {entries.length} {t('událostí pro', 'events for')} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{aggregateId}</span>
+            {entries.length} {t('událostí pro', 'events for')} <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{loadedAggregateId}</span>
           </div>
           <table className="data-table">
             <thead>
@@ -119,8 +131,8 @@ export default function AuditPage() {
             </thead>
             <tbody>
               {entries.map(e => (
-                <>
-                  <tr key={e.id} tabIndex={0} aria-expanded={expanded === e.id} aria-label={expanded === e.id ? t('Sbalit auditní událost', 'Collapse audit event') : t('Rozbalit auditní událost', 'Expand audit event')} style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === e.id ? null : e.id)}
+                <Fragment key={e.id}>
+                  <tr tabIndex={0} aria-expanded={expanded === e.id} aria-label={expanded === e.id ? t('Sbalit auditní událost', 'Collapse audit event') : t('Rozbalit auditní událost', 'Expand audit event')} style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === e.id ? null : e.id)}
                     onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setExpanded(expanded === e.id ? null : e.id) } }}>
                     <td>
                       <span className="pill" style={{ background: `${EVENT_COLOR[e.eventType] ?? 'var(--text-muted)'}22`, color: EVENT_COLOR[e.eventType] ?? 'var(--text-muted)' }}>
@@ -145,7 +157,7 @@ export default function AuditPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
