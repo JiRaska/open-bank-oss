@@ -190,7 +190,7 @@ NOT_PROBED = [
     ("https://github.com/JiRaska/open-bank-oss/blob", "runbook deep-link in an alert annotation; read by a human, not by a workload"),
     ("https://open-bank.tech/", "OAuth redirect/claimed-HTTPS identifier in a Keycloak client; not a feed"),
     ("https://flagd.dev", "flagd JSON-schema URI in a feature-flag ConfigMap; an identifier"),
-    ("https://go.temporal.io", "Go module path in a Temporal chart value; not an HTTP fetch"),
+    ("https://go.temporal.io", "Helm chart repository; deploy-time"),
     #
     # (2) DEPLOY-TIME sources. Resolved by Argo CD / the registry cache, not by a running
     # service. A failure blocks the sync or the pull loudly — it cannot go silent the way a
