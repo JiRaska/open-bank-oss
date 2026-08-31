@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.221.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.220.0...admin-ui-v0.221.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** establish theme token foundation ([#7678](https://github.com/JiRaska/open-bank-oss/issues/7678)) ([0168a54](https://github.com/JiRaska/open-bank-oss/commit/0168a54e464b92ff4b3afbbbbef504c77e9fe631))
+
+
+### Bug Fixes
+
+* **admin-ui:** announce unavailable data states ([#7665](https://github.com/JiRaska/open-bank-oss/issues/7665)) ([3cbdac5](https://github.com/JiRaska/open-bank-oss/commit/3cbdac5c93cbb54af2491e56831e46f35694581c))
+* **admin-ui:** qualify unmatched runtime evidence ([#7679](https://github.com/JiRaska/open-bank-oss/issues/7679)) ([a867341](https://github.com/JiRaska/open-bank-oss/commit/a867341dd5b79c4027ae10bafe18d70260e44d12))
+* **admin-ui:** trap focus in mobile navigation ([#7662](https://github.com/JiRaska/open-bank-oss/issues/7662)) ([b6337dc](https://github.com/JiRaska/open-bank-oss/commit/b6337dc8d9b0bc96e0a9f795e678c72eabe5228c))
+
 ## [0.220.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.219.1...admin-ui-v0.220.0) (2026-08-31)
 
 
