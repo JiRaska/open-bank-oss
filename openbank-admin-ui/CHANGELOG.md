@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.226.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.226.0...admin-ui-v0.226.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **admin-ui:** make role deletion recoverable ([#7863](https://github.com/JiRaska/open-bank-oss/issues/7863)) ([6a8c65b](https://github.com/JiRaska/open-bank-oss/commit/6a8c65bbe951c62cfacf2d0cb4145b1226cc769b))
+
 ## [0.226.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.225.0...admin-ui-v0.226.0) (2026-08-31)
 
 
