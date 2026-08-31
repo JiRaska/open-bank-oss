@@ -10,8 +10,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui/PageHeader'
-import { StatCard } from '@/components/ui/StatCard'
+import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 
 // Shape served by openbank-product-catalog GET /api/v1/fees — the bank-wide fee
 // schedule, flattened from the per-product Fee model. The UI no longer hardcodes
@@ -32,14 +31,6 @@ interface FeeScheduleItem {
   productName: string
   status: string
   updatedAt: string
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  ACTIVE: 'var(--green)',
-  INACTIVE: 'var(--text-muted)',
-  DRAFT: 'var(--yellow)',
-  DEPRECATED: 'var(--text-muted)',
-  ARCHIVED: 'var(--text-muted)',
 }
 
 export default function FeesPage() {
@@ -214,11 +205,7 @@ export default function FeesPage() {
                   </td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{fee.currency}</td>
                   <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{fee.frequency}</td>
-                  <td>
-                    <span className="pill" style={{ background: `${STATUS_COLOR[fee.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[fee.status] ?? 'var(--text-muted)' }}>
-                      {fee.status}
-                    </span>
-                  </td>
+                  <td><StatusBadge status={fee.status} /></td>
                 </tr>
               ))}
             </tbody>
