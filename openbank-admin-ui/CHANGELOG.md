@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.226.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.226.1...admin-ui-v0.226.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* **admin-ui:** make card filters recoverable ([#7872](https://github.com/JiRaska/open-bank-oss/issues/7872)) ([0622d11](https://github.com/JiRaska/open-bank-oss/commit/0622d11b35206822395d7b22befb96c0beb4f7d5))
+* **admin-ui:** serialize regulatory period actions ([#7869](https://github.com/JiRaska/open-bank-oss/issues/7869)) ([9f8bb28](https://github.com/JiRaska/open-bank-oss/commit/9f8bb28cfadb3111ad906e7015f7a75dce3faf62))
+
 ## [0.226.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.226.0...admin-ui-v0.226.1) (2026-08-31)
 
 
