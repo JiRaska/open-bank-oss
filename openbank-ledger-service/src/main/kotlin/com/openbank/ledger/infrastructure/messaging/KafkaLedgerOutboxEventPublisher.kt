@@ -68,8 +68,9 @@ class KafkaLedgerOutboxEventPublisher(
      *
      * The literal key matters: the payload is a serialised data class, so the wire key exists only
      * as a Kotlin property name at runtime and a quoted-string probe over this module finds nothing.
-     * Writing it through an ObjectNode is what makes the claim greppable AND resolvable by
-     * `.github/scripts/check-source-service-presence.py`.
+     * Writing it through an ObjectNode is what makes the claim greppable by a quoted-key probe as
+     * well as visible to one that reads the emitting type -- the fleet has both, and a claim only
+     * one of them can see is a claim that gets miscounted.
      *
      * A payload that is not a JSON object is emitted unchanged and logged: this is the money path,
      * and refusing to publish would be a strictly worse failure than an unattributed row.
