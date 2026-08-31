@@ -2606,7 +2606,19 @@ gates:
     mode: enforced
     when: pull_request
     needs_base: required
-    min_subjects: 1
+    # No min_subjects: this gate is DIFF-SCOPED, so most PRs legitimately have zero subjects
+    # (they touch no openapi.yaml). A floor here is the "declares a floor and never prints a
+    # count" failure the subject-floor gate exists to catch -- which is exactly how it caught
+    # this entry on its own first CI run. api-contract-gate, diff-scoped for the same reason,
+    # declares none either. The gate still prints SUBJECTS=, including zero, so that "no
+    # subjects" and "did not look" never render identically.
+    rationale: >-
+      api-contract-gate classifies a bump against the merge-base, so it cannot see a version a
+      competing PR already released; four PRs were green on 2026-08-30 claiming taken numbers.
+    review_after: 2027-03-01   # Re-examine if a merge queue or up-to-date-branch enforcement
+                               # lands: either would PREVENT this collision rather than detect
+                               # it late, making this gate redundant. ADR-0048 chose detection,
+                               # so until that changes it stays.
     selftest: |
       set -euo pipefail
       python3 .github/scripts/check-openapi-version-not-taken.py --self-test

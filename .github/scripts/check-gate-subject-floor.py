@@ -53,6 +53,11 @@ MANIFEST = ".github/gates/gates.yaml"
 # A gate with no repo corpus to count. Stated, not inferred.
 NO_CORPUS = {
     "agent-review-proof-falsifiable",
+    # DIFF-SCOPED: its corpus is the PR's own changed files, so zero is the ordinary case (most
+    # PRs touch no openapi.yaml) and a floor would fail every one of them. It is not exempt from
+    # the underlying question -- it prints SUBJECTS= including zero, so "no specs changed" and
+    # "did not look" stay distinguishable in the log.
+    "openapi-version-not-taken",
     "agent-review-scope-falsifiable",
     "auto-deploy-reconcile-probe-unit-test",
     "blocking-counterpart-probe-unit-test",

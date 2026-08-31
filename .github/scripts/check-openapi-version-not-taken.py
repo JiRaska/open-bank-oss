@@ -149,6 +149,7 @@ def main() -> int:
     ]
     if not changed:
         print("openapi-version-not-taken: no openapi.yaml changed — nothing to check.")
+        print("SUBJECTS=0")
         return 0
 
     level = "error" if args.enforce else "warning"
