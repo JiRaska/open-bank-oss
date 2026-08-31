@@ -2847,6 +2847,38 @@ gates:
     run: |
       python3 .github/scripts/check-audit-money-path-subscription.py --root . --enforce
 
+  # Companion to `source-service-convention` (which polices the VALUE a producer stamps): this one
+  # polices whether the claim EXISTS AT ALL. The distinction is load-bearing — a convention check's
+  # subject set is the write sites it can find, so a producer that never mentions `sourceService`
+  # has zero write sites, is neither a finding nor a subject, and the check reports a clean fleet in
+  # exactly the state this gate exists to catch.
+  # Scope is DERIVED, never hand-kept: every module declaring a literal `openbank.*` topic under an
+  # `mp.messaging.outgoing.*` channel. A gate whose coverage set is maintained beside the artifacts
+  # it covers reads as PASSING when the list is short, never as UNCHECKED — this repo's most
+  # repeated defect. A new event-producing service enters scope on the commit declaring its channel.
+  # Both write idioms are matched. A quoted-key probe returns ZERO for card-issuance and fx, which
+  # declare `val sourceService` on a serialised data class where the wire key exists only at runtime
+  # as a property name; --self-test pins one known-positive per idiom, and asserts that the
+  # quoted-only probe is still genuinely blind, so a regression fails instead of silently shrinking.
+  # Ratchet, not zero: today's ten undeclared producers are baselined with their owning issue and
+  # the list may only shrink — a stale entry, in either direction, is itself an error.
+  # Why gate rather than sweep: `audit_entries` is append-only AT THE DATABASE (DO INSTEAD NOTHING,
+  # so a normalising UPDATE touches zero rows and REPORTS SUCCESS) and `source_service` is
+  # chain-hashed into `record_hash`. Attribution is unrepairable in retrospect, so the only
+  # available fix is forward-only and every unstamped event permanently costs one more row.
+  - id: source-service-presence
+    min_subjects: 30   # 36 modules produce an openbank.* domain-event topic today (2026-08-31)
+    name: "Every event producer declares sourceService (issues #5256/#6035, enforced)"
+    group: data
+    mode: enforced
+    rationale: "A producer that never states its own name leaves audit-service deriving attribution from the topic name (AttributionSource.TOPIC) instead of recording the producer's claim (EVENT); audit_entries is append-only at the database and source_service is chain-hashed into record_hash, so a row written without the field can never be corrected and the gap costs one permanently-inferred row per event."
+    review_after: "2027-02-28"
+    selftest: |
+      python3 .github/scripts/check-source-service-presence.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-source-service-presence.py --root .
+
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
