@@ -16,6 +16,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { statusTone } from '@/components/ui/tone'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -906,15 +907,34 @@ export default function SanctionsPage() {
                     {screenError}
                   </div>
                 )}
-                {screenResult && (
-                  <div style={{ padding: '16px', borderRadius: '8px', border: `2px solid ${screenResult.status === 'HIT' ? 'var(--danger-border)' : 'var(--success-border)'}`,
-                    background: screenResult.status === 'HIT' ? 'var(--danger-bg)' : 'var(--success-bg)' }}>
+                {screenResult && (() => {
+                  /* Only CLEAR and WHITELISTED may say "clear record". The previous code gated on
+                     `status === 'HIT'` alone, so POTENTIAL_HIT, ESCALATED and any unrecognised
+                     value rendered a green box, a tick, and the literal text CLEAR RECORD --
+                     a false textual assertion that a screened name is clean, which is worse than
+                     the wrong colour. POTENTIAL_HIT is directly producible by the screening
+                     endpoint this panel renders.
+
+                     The default is deliberately the cautious one: anything this UI has not been
+                     taught reads as "review required", never as clear. Same property as
+                     statusTone(), which resolves an unknown value to `neutral` and never to
+                     `success`. */
+                  const isClear = screenResult.status === 'CLEAR' || screenResult.status === 'WHITELISTED'
+                  const tone = statusTone(screenResult.status)
+                  const headline = screenResult.status === 'HIT'
+                    ? t('SHODA NALEZENA', 'MATCH FOUND')
+                    : isClear
+                      ? t('ČISTÝ ZÁZNAM', 'CLEAR RECORD')
+                      : t('NUTNÁ KONTROLA', 'REVIEW REQUIRED')
+                  return (
+                  <div style={{ padding: '16px', borderRadius: '8px', border: `2px solid var(--${tone}-border)`,
+                    background: `var(--${tone}-bg)` }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                      {screenResult.status === 'HIT'
-                        ? <AlertTriangle size={18} style={{ color: 'var(--danger)' }} />
-                        : <CheckCircle2 size={18} style={{ color: 'var(--success)' }} />}
-                      <span style={{ fontSize: '15px', fontWeight: 800, color: screenResult.status === 'HIT' ? 'var(--danger-text)' : 'var(--success-text)' }}>
-                        {screenResult.status === 'HIT' ? t('SHODA NALEZENA', 'MATCH FOUND') : t('ČISTÝ ZÁZNAM', 'CLEAR RECORD')}
+                      {isClear
+                        ? <CheckCircle2 size={18} style={{ color: 'var(--success)' }} />
+                        : <AlertTriangle size={18} style={{ color: `var(--${tone})` }} />}
+                      <span style={{ fontSize: '15px', fontWeight: 800, color: `var(--${tone}-text)` }}>
+                        {headline}
                       </span>
                       <span style={{ marginLeft: 'auto', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
                         {t('Skóre', 'Score')}: {Math.round((screenResult.overallScore ?? 0) * 100)}%
@@ -937,7 +957,7 @@ export default function SanctionsPage() {
                       </div>
                     )}
                   </div>
-                )}
+                  )})()}
               </div>
             </div>
             </Can>
