@@ -3,11 +3,15 @@
 
 This deliberately answers a narrower question than "is a workflow old?". A service CI
 build can spend legitimate time uploading Kover, generating its envelope or publishing
-artifacts. We cancel only two bounded shapes: the mandatory `Build + test` step itself,
-or a `Post Run …` action that has exceeded the interval after every substantive step
-already completed. The latter catches runner cleanup hangs without cancelling Kover,
-envelope creation or an active test. A different job, malformed API data or a fresh step
-is never an implicit cancellation candidate.
+artifacts. We cancel only three bounded shapes: the mandatory `Build + test` step itself,
+a `Post Run …` action that has exceeded the interval after every substantive step
+already completed, or a job that has recorded its `started_at` but has not moved a
+single step to `in_progress`/`completed` (the exact shape evidenced on runs 33120723738
+and 33121304719 — a job wedged before its first step). The post-action shape catches
+runner cleanup hangs without cancelling Kover, envelope creation or an active test; the
+no-first-step shape uses its own, much shorter threshold, because a healthy job's first
+step starts within seconds of the job itself, never minutes. A different job, malformed
+API data or a fresh step is never an implicit cancellation candidate.
 
 The workflow owns reading the GitHub Actions API and cancellation. Keeping this classifier
 pure makes both the positive and the "do not cancel normal work" paths executable in CI.
@@ -38,7 +42,12 @@ def parse_time(value: Any) -> datetime | None:
         return None
 
 
-def classify(payload: dict[str, Any], now: datetime, timeout_minutes: int) -> list[dict[str, str]]:
+def classify(
+    payload: dict[str, Any],
+    now: datetime,
+    timeout_minutes: int,
+    no_step_timeout_minutes: int = 5,
+) -> list[dict[str, str]]:
     jobs = payload.get("jobs")
     if not isinstance(jobs, list):
         raise ValueError("Actions jobs payload has no jobs list")
@@ -62,9 +71,20 @@ def classify(payload: dict[str, Any], now: datetime, timeout_minutes: int) -> li
         candidate_step = None
         candidate_started = job_started
         reason = "mandatory-build"
+        threshold = timeout_minutes
+        any_progress = any(isinstance(step, dict) and step.get("status") in ("in_progress", "completed")
+                           for step in steps)
         if build_step is not None and build_step.get("status") == "in_progress":
             # The service build has reached its mandatory command and that command is still live.
             candidate_step = build_step
+        elif not any_progress:
+            # started_at is set but no step has moved past "queued" — the exact wedge evidenced
+            # in #7477. A healthy job's first step starts within seconds; use a short threshold,
+            # never the long one that tolerates legitimate Kover/envelope/upload work.
+            candidate_step = {"name": "(no step started)"}
+            candidate_started = job_started
+            reason = "no-first-step"
+            threshold = no_step_timeout_minutes
         else:
             # A post-action may be cancelled only after every meaningful job step has completed.
             # This deliberately excludes an in-progress Kover/envelope/upload step even on a
@@ -82,7 +102,7 @@ def classify(payload: dict[str, Any], now: datetime, timeout_minutes: int) -> li
                 raise ValueError(f"{name} has an in-progress post-action without valid started_at")
             reason = "post-action"
         age_minutes = (now - candidate_started).total_seconds() / 60
-        if age_minutes < timeout_minutes:
+        if age_minutes < threshold:
             continue
         job_id = job.get("id")
         html_url = job.get("html_url")
@@ -111,6 +131,18 @@ def self_test() -> int:
         ("post-action beside active envelope is not selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Build Test Intelligence run envelope", "status": "in_progress"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 0),
         ("verification post-action is selected", {"jobs": [{**base, "name": VERIFICATION_JOB, "steps": [{"name": "Check verification metadata", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 1),
         ("other workflow job is not selected", {"jobs": [{**base, "name": "CodeQL (java-kotlin, manual)"}]}, 0),
+        # #7477's exact evidence: started_at recorded, every step still queued (or absent).
+        ("stale no-first-step job (all queued) is selected", {"jobs": [{**base, "started_at": "2026-08-28T11:50:00Z",
+            "steps": [{"name": "Set up job", "status": "queued"},
+                      {"name": "Build + test (:openbank-example-service)", "status": "queued"}]}]}, 1),
+        ("stale no-first-step job (empty steps) is selected", {"jobs": [{**base, "started_at": "2026-08-28T11:50:00Z",
+            "steps": []}]}, 1),
+        ("fresh no-first-step job is not selected", {"jobs": [{**base, "started_at": "2026-08-28T11:58:00Z",
+            "steps": [{"name": "Set up job", "status": "queued"}]}]}, 0),
+        ("queued job with a completed step is not the no-first-step shape",
+            {"jobs": [{**base, "started_at": "2026-08-28T11:50:00Z",
+            "steps": [{"name": "Set up job", "status": "completed"},
+                      {"name": "Build + test (:openbank-example-service)", "status": "queued"}]}]}, 0),
     ]
     failures = 0
     for label, payload, expected in cases:
@@ -134,17 +166,19 @@ def main() -> int:
     parser.add_argument("--jobs-json", type=Path)
     parser.add_argument("--now")
     parser.add_argument("--timeout-minutes", type=int, default=45)
+    parser.add_argument("--no-step-timeout-minutes", type=int, default=5)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
         return self_test()
-    if not args.jobs_json or not args.now or args.timeout_minutes <= 0:
-        parser.error("--jobs-json, --now and positive --timeout-minutes are required")
+    if not args.jobs_json or not args.now or args.timeout_minutes <= 0 or args.no_step_timeout_minutes <= 0:
+        parser.error("--jobs-json, --now, positive --timeout-minutes and positive --no-step-timeout-minutes are required")
     now = parse_time(args.now)
     if now is None:
         parser.error("--now must be ISO-8601 UTC")
     try:
-        print(json.dumps(classify(json.loads(args.jobs_json.read_text()), now, args.timeout_minutes)))
+        print(json.dumps(classify(json.loads(args.jobs_json.read_text()), now, args.timeout_minutes,
+                                   args.no_step_timeout_minutes)))
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"::error title=CI stalled-build watchdog::{exc}", file=sys.stderr)
         return 1
