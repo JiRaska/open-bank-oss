@@ -47,6 +47,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gatelib  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "release-please-config.json"
 
@@ -236,6 +239,7 @@ def main() -> int:
         for p in released
         if (packages_cfg.get(p) or {}).get("component")
     )
+    gatelib.subjects(len(released), "released packages (version.txt on disk)")
     print(f"Released packages (version.txt on disk): {len(released)}")
     print(f"Resolve to a component that reaches released.tsv: {covered}")
     print(f"Declared uncovered (backlog, #7597): {len(KNOWN_UNCOVERED)}")
