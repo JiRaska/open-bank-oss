@@ -5,12 +5,56 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.4.0
+  version: 1.5.0
 servers:
   - url: http://localhost:8126
 tags:
   - name: Delegations
+  - name: Delegation role presets
 paths:
+  /api/v1/delegation-role-presets:
+    get:
+      tags: [Delegation role presets]
+      summary: List reusable delegation role presets
+      responses:
+        '200':
+          description: Presets ordered by name
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DelegationRolePresetResponse' } }
+        '403': { description: ROLE_OPERATOR or ROLE_ADMIN is required }
+    post:
+      tags: [Delegation role presets]
+      summary: Create a delegation role preset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DelegationRolePresetRequest' }
+      responses:
+        '201': { description: Preset created }
+        '400': { description: Invalid capability/resource combination }
+        '403': { description: ROLE_ADMIN is required }
+  /api/v1/delegation-role-presets/{id}:
+    parameters:
+      - $ref: '#/components/parameters/DelegationId'
+    put:
+      tags: [Delegation role presets]
+      summary: Replace a delegation role preset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DelegationRolePresetRequest' }
+      responses:
+        '200': { description: Preset updated }
+        '404': { description: Preset not found }
+    delete:
+      tags: [Delegation role presets]
+      summary: Delete a delegation role preset
+      responses:
+        '204': { description: Preset deleted }
+        '404': { description: Preset not found }
   /api/v1/delegations:
     post:
       tags: [Delegations]
@@ -329,6 +373,27 @@ components:
       required: true
       schema: { type: string, format: uuid }
   schemas:
+    DelegationRolePresetRequest:
+      type: object
+      required: [name, resourceType, capabilities]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT] }
+        capabilities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string }
+    DelegationRolePresetResponse:
+      allOf:
+        - $ref: '#/components/schemas/DelegationRolePresetRequest'
+        - type: object
+          required: [id, createdAt, updatedAt]
+          properties:
+            id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
     MoneyDto:
       type: object
       required: [amount, currency]
