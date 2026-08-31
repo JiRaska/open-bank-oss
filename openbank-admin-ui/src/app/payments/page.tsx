@@ -286,6 +286,7 @@ function PaymentsContent() {
   const [sctLoading, setSctLoading] = useState(true)
   const [sctSearch, setSctSearch] = useState('')
   const [sctServiceUp, setSctServiceUp] = useState<boolean | null>(null)
+  const [sctError, setSctError] = useState<string | null>(null)
 
   const handleTabChange = useCallback((t: Tab) => {
     setActiveTab(t)
@@ -311,16 +312,27 @@ function PaymentsContent() {
 
   const loadSct = useCallback(async () => {
     setSctLoading(true)
-    try {
-      await Promise.all([
-        fetch(`${SEPA_INSTANT_API}/q/health/ready`).then(r => setSctServiceUp(r.ok)).catch(() => setSctServiceUp(false)),
-        fetch(`${SEPA_INSTANT_API}/api/v1/sepa-instant`).then(r => r.json())
-          .then(d => setSctPayments(Array.isArray(d) ? d : d.payments ?? []))
-          .catch(() => setSctPayments([])),
-      ])
-    } catch { setSctServiceUp(false) }
-    finally { setSctLoading(false) }
-  }, [])
+    setSctError(null)
+    const [healthResult, paymentsResult] = await Promise.allSettled([
+      fetch(`${SEPA_INSTANT_API}/q/health/ready`).then(r => r.ok),
+      fetch(`${SEPA_INSTANT_API}/api/v1/sepa-instant`).then(async r => {
+        if (!r.ok) throw new Error(`SCT Inst request failed (${r.status})`)
+        const data = await r.json()
+        return Array.isArray(data) ? data : data.payments ?? []
+      }),
+    ])
+
+    setSctServiceUp(healthResult.status === 'fulfilled' ? healthResult.value : false)
+    if (paymentsResult.status === 'fulfilled') {
+      setSctPayments(paymentsResult.value)
+    } else {
+      setSctError(t(
+        'Aktuální SCT Inst platby nejsou dostupné. Zobrazené údaje mohou být zastaralé.',
+        'Current SCT Inst payments are unavailable. Displayed data may be stale.',
+      ))
+    }
+    setSctLoading(false)
+  }, [t])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { if (activeTab === 'sct-inst') loadSct() }, [activeTab, loadSct])
@@ -539,6 +551,21 @@ function PaymentsContent() {
             </div>
           )}
 
+          {sctError && (
+            <div role="status" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
+              background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', fontWeight: 600, color: 'var(--warning-text)' }}>
+                <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+                {sctError}
+              </span>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={loadSct} disabled={sctLoading} aria-busy={sctLoading}>
+                <RefreshCw size={12} aria-hidden="true" />
+                {t('Zkusit znovu', 'Retry')}
+              </button>
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
             {[
               { label: t('Platby celkem', 'Total payments'), value: sctPayments.length, icon: <Zap size={16} />, color: 'var(--accent)' },
@@ -580,7 +607,7 @@ function PaymentsContent() {
               <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
                 <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
               </div>
-            ) : sctFiltered.length === 0 ? (
+            ) : !sctError && sctFiltered.length === 0 ? (
               <div style={{ padding: '48px', textAlign: 'center' }}>
                 <Zap size={32} style={{ color: 'var(--text-tertiary)', marginBottom: '12px' }} />
                 <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Žádné SCT Inst platby', 'No SCT Inst payments')}</div>
