@@ -4105,3 +4105,25 @@ gates:
     min_subjects: 11   # 11 migrations today (2026-08-31)
     run: |
       python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --enforce
+
+  # Issue #7648. openbank-admin-ui is migrating hardcoded hex colours (`#1a2b3c`, `#fff`) to the
+  # shared semantic colour tokens in globals.css. #7649 landed a Vitest ratchet
+  # (raw-colour-literal-ratchet.guard.test.ts) that already runs on every admin-ui-touching PR via
+  # the `ui-build` job, so this gate is NOT closing an absent-job gap the way mermaid-parses does
+  # — the subject (app/**/*.tsx, components/**/*.tsx, *.css) is itself scoped to
+  # openbank-admin-ui/, so there is no PR shape that changes the count and skips `changes-ui`. It
+  # exists so the ratchet also gets rationale/review_after/min_subjects tracking and a
+  # `--self-test` this repo's own gate tooling can see, matching every other ratchet-style check
+  # here (check-nonnull-jaxrs-params.py). Keep MAX_RAW_COLOUR_LITERALS in this script and the
+  # Vitest test's own ceiling equal by hand — they scan the same corpus with the same regex.
+  - id: raw-colour-literal-ratchet
+    name: "raw hex colour literals in admin-ui do not increase (#7648, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A raw hex colour literal added outside the token stylesheet is a step away from the semantic colour migration; this only forbids the count from going back up, mirroring the Vitest guard already wired into ui-build."
+    review_after: "2027-02-28"
+    selftest: python3 .github/scripts/check-raw-colour-literal-ratchet.py --self-test
+    selftest_expect: pass
+    min_subjects: 1600   # 1628 raw hex colour literals today (2026-08-31)
+    run: |
+      python3 .github/scripts/check-raw-colour-literal-ratchet.py
