@@ -360,8 +360,13 @@ def observations(service: Path) -> list[dict]:
                     resource = "postgres" if "postgres" in image else "redpanda" if "redpanda" in image else "valkey" if re.search(r"valkey|redis", image, re.I) else None
                     lifecycle = {"start": "started", "die": "stopped"}.get(item.get("lifecycle"))
                     if resource and lifecycle:
+                        # Docker's daemon id is a transient correlation key only. It never
+                        # reaches the schema-valid observation returned below: an envelope
+                        # must not disclose a container identity, but two different daemon
+                        # containers of the same image must not be merged accidentally.
                         result.append((1, {"resource": resource, "image": image, "lifecycle": lifecycle,
-                                          "observedAt": datetime.fromtimestamp(int(item["observedAtUnix"]), timezone.utc).isoformat().replace("+00:00", "Z")}))
+                                          "observedAt": datetime.fromtimestamp(int(item["observedAtUnix"]), timezone.utc).isoformat().replace("+00:00", "Z"),
+                                          "_dockerContainerId": item.get("containerId")}))
                 else:
                     # A resource's own recorder marks readiness and carries the
                     # stronger lifecycle observation than Docker's raw daemon
@@ -379,24 +384,50 @@ def observations(service: Path) -> list[dict]:
         normalized.append((priority, observed_at, item))
     normalized.sort(key=lambda entry: (entry[0], entry[1]))
 
-    deduplicated = []
-    for _, observed_at, item in normalized:
-        duplicate = any(
+    def same_lifecycle(observed_at: datetime, item: dict, previous_at: datetime, previous: dict) -> bool:
+        return (
             item["resource"] == previous["resource"]
             and runtime_image_identity(item["image"]) == runtime_image_identity(previous["image"])
             and item["lifecycle"] == previous["lifecycle"]
-            # A recorder's opaque manager scope distinguishes separate resources that happen
-            # to emit the same lifecycle transition at nearly the same instant. Docker's raw
-            # event stream has no such scope, so it remains eligible to deduplicate with its
-            # corresponding recorder observation.
+            and abs(observed_at - previous_at) <= RUNTIME_OBSERVATION_DUPLICATE_WINDOW
+        )
+
+    # First deduplicate recorder records only. Different opaque scopes are different logical
+    # resource managers even when their lifecycle events happen together.
+    recorder = []
+    docker = []
+    for priority, observed_at, item in normalized:
+        (docker if priority else recorder).append((observed_at, item))
+    deduplicated_recorder = []
+    for observed_at, item in recorder:
+        duplicate = any(
+            same_lifecycle(observed_at, item, previous_at, previous)
             and (not item.get("resourceScopeId") or not previous.get("resourceScopeId")
                  or item["resourceScopeId"] == previous["resourceScopeId"])
-            and abs(observed_at - previous_at) <= RUNTIME_OBSERVATION_DUPLICATE_WINDOW
-            for previous_at, previous in deduplicated
+            for previous_at, previous in deduplicated_recorder
         )
         if not duplicate:
-            deduplicated.append((observed_at, item))
-    return [item for _, item in sorted(deduplicated, key=lambda entry: entry[0])]
+            deduplicated_recorder.append((observed_at, item))
+
+    # Suppress a daemon event only for an unambiguous one-to-one recorder pairing. A raw stream
+    # with two different daemon ids near one recorder is evidence of two physical containers,
+    # not a reason to hide one. Legacy streams without an id retain the former compatibility
+    # behaviour, because their ambiguity cannot be resolved retrospectively.
+    published = list(deduplicated_recorder)
+    for observed_at, item in docker:
+        matches = [(previous_at, previous) for previous_at, previous in deduplicated_recorder
+                   if same_lifecycle(observed_at, item, previous_at, previous)]
+        docker_id = item.get("_dockerContainerId")
+        same_recorder_raw_count = sum(
+            1 for other_at, other in docker
+            if same_lifecycle(other_at, other, matches[0][0], matches[0][1])
+        ) if len(matches) == 1 else 0
+        if len(matches) == 1 and (not docker_id or same_recorder_raw_count == 1):
+            continue
+        published.append((observed_at, item))
+
+    return [{key: value for key, value in item.items() if key != "_dockerContainerId"}
+            for _, item in sorted(published, key=lambda entry: entry[0])]
 
 
 def trace_contract_evidence(service: Path) -> list[dict]:
@@ -527,8 +558,13 @@ def main() -> None:
             runtime = service / "build/test-intelligence/runtime"
             runtime.mkdir(parents=True)
             (runtime / "docker-events.jsonl").write_text(
-                '{"image":"docker.io/library/postgres:16.3-alpine","lifecycle":"start","observedAtUnix":1787433000}\n'
-                '{"image":"docker.io/library/postgres:16.3-alpine","lifecycle":"die","observedAtUnix":1787433060}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-one","lifecycle":"start","observedAtUnix":1787433000}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-one","lifecycle":"die","observedAtUnix":1787433060}\n'
+                # These are two physical daemon containers near the second shared
+                # recorder start. They must not disappear merely because the published
+                # schema intentionally redacts their identities.
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-two","lifecycle":"start","observedAtUnix":1787433010}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-three","lifecycle":"start","observedAtUnix":1787433010}\n'
             )
             # The shared recorder and daemon event stream observe the same
             # lifecycle at slightly different instants. Keep one event per
@@ -629,13 +665,16 @@ def main() -> None:
             assert classify("creates LOAN_PACK_E2E", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x") == "unit"
             assert classify("reads products", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x", service) == "integration"
             observed = observations(service)
-            assert [item["lifecycle"] for item in observed] == ["started", "started", "stopped"]
+            assert [item["lifecycle"] for item in observed] == ["started", "started", "started", "started", "stopped"]
             assert [item["observedAt"] for item in observed] == [
-                "2026-08-22T21:10:01Z", "2026-08-22T21:10:10Z", "2026-08-22T21:11:01Z",
+                "2026-08-22T21:10:01Z", "2026-08-22T21:10:10Z", "2026-08-22T21:10:10Z",
+                "2026-08-22T21:10:10Z", "2026-08-22T21:11:01Z",
             ]
             assert [item.get("resourceScopeId") for item in observed] == [
-                "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "11111111-1111-4111-8111-111111111111",
+                "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", None,
+                None, "11111111-1111-4111-8111-111111111111",
             ]
+            assert all("containerId" not in item and "_dockerContainerId" not in item for item in observed)
             specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]
             assert "target 70%" in specialized[1]["detail"]

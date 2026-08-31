@@ -228,8 +228,11 @@ jobs:
       # runs. Read by the openapi-request-schema-conformance step below.
       - name: Build + test (:${{ inputs.service }})
         run: |
-          # Capture only image/lifecycle/time from this job's Docker daemon. Do not
-          # export container id, labels, ports, hostnames or environment variables.
+          # Capture image/lifecycle/time plus a transient daemon id from this job's Docker
+          # stream. The collector uses the id only to resolve one-to-one duplicate
+          # observations and strips it before schema validation/publication; it is never
+          # exported in the run envelope, artifact, UI or AI input. Without this local key,
+          # two concurrent containers of the same image could be collapsed as one lifecycle.
           EVIDENCE_DIR="${{ inputs.service }}/build/test-intelligence/runtime"
           mkdir -p "${EVIDENCE_DIR}"
           # Restrict the daemon stream to container objects so Testcontainers exec wait-strategy
@@ -237,7 +240,7 @@ jobs:
           # verdict: redacted aggregate lifecycle counts still need correlation before they can
           # establish cleanup or a leak (rendered as unknown by the Test Intelligence UI).
           docker events --filter type=container --filter event=start --filter event=die \
-            --format '{"image":"{{.Actor.Attributes.image}}","lifecycle":"{{.Action}}","observedAtUnix":{{.Time}}}' \
+            --format '{"image":"{{.Actor.Attributes.image}}","containerId":"{{.Actor.ID}}","lifecycle":"{{.Action}}","observedAtUnix":{{.Time}}}' \
             > "${EVIDENCE_DIR}/docker-events.jsonl" &
           docker_events_pid=$!
           cleanup_test_evidence() {
