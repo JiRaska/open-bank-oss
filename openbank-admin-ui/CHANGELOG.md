@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.222.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.222.0...admin-ui-v0.222.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **libs-testing:** record one logical Testcontainers lifecycle per resource ([#7690](https://github.com/JiRaska/open-bank-oss/issues/7690)) ([18d8ebb](https://github.com/JiRaska/open-bank-oss/commit/18d8ebb6bfda23be07e97da6a44797a0f56af7b8))
+
 ## [0.222.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.221.0...admin-ui-v0.222.0) (2026-08-31)
 
 
