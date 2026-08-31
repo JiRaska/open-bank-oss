@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.226.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.225.0...admin-ui-v0.226.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** show customer effective access ([#7840](https://github.com/JiRaska/open-bank-oss/issues/7840)) ([52eb2e3](https://github.com/JiRaska/open-bank-oss/commit/52eb2e320d66c7bba3887c9500a2a3bef19531a8))
+* **test-intelligence:** correlate shared resource lifecycle evidence ([#7689](https://github.com/JiRaska/open-bank-oss/issues/7689)) ([9ca8884](https://github.com/JiRaska/open-bank-oss/commit/9ca8884613bb9164cc65d4a82885bf9974f37752))
+
 ## [0.225.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.224.1...admin-ui-v0.225.0) (2026-08-31)
 
 
