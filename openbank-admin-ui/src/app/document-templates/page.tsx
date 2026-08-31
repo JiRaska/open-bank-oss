@@ -259,7 +259,6 @@ export default function DocumentTemplatesPage() {
       setTemplates(items)
       setVisibleCount(PAGE_SIZE)
     } catch (e) {
-      setTemplates([])
       setUnavailable({ kind: e instanceof ApiError ? e.kind : 'unreachable' })
     } finally {
       setLoading(false)
@@ -482,6 +481,11 @@ export default function DocumentTemplatesPage() {
             {unavailable && (
               <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
                 <DataUnavailable kind={unavailable.kind} service={t('Document-service', 'Document-service')} feature={t('Šablony dokumentů', 'Document templates')} lang={language} dense />
+                {templates.length > 0 && (
+                  <div role="status" aria-live="polite" style={{ padding: '0 16px 14px', color: 'var(--warning-text)', fontSize: '12px', fontWeight: 600 }}>
+                    {t('Zobrazené šablony a jejich publikační stavy jsou poslední dostupná data; obnovení se nezdařilo.', 'Displayed templates and publication states are the last available data; refresh failed.')}
+                  </div>
+                )}
               </div>
             )}
 
@@ -540,7 +544,7 @@ export default function DocumentTemplatesPage() {
                       <td key={j}><div className="skeleton" style={{ height: '13px', width: j === 1 ? '140px' : '60px' }} /></td>
                     ))}</tr>
                   ))}
-                  {!loading && visible.length === 0 && (
+                  {!loading && !unavailable && visible.length === 0 && (
                     <tr><td colSpan={7} style={{ padding: 0 }}>
                       <DataUnavailable kind="no_data" feature={t('Šablony', 'Templates')} lang={language} dense />
                     </td></tr>
