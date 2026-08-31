@@ -3668,7 +3668,7 @@ class CustomerEdgeResource(
         if (!isValidCurrency(base) || !isValidCurrency(quote)) return badRequest("Invalid currency")
         if (from != null && !isValidInstant(from)) return badRequest("Invalid 'from' instant: $from")
         if (to != null && !isValidInstant(to)) return badRequest("Invalid 'to' instant: $to")
-        val safeLimit = (limit ?: 100).coerceIn(1, 365)
+        val safeLimit = (limit ?: 90).coerceIn(1, 365)
         val safeOffset = (offset ?: 0).coerceAtLeast(0)
         val windowEnd = to ?: java.time.Instant.now().toString()
         val windowStart = from ?: threeMonthWindowStart(java.time.Instant.parse(windowEnd)).toString()
