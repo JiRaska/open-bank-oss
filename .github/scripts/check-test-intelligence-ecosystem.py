@@ -62,6 +62,12 @@ def check(root: Path) -> list[str]:
                                 .get("properties", {}).get("kind", {}).get("enum", []))
         if "trace" not in specialized_kinds:
             errors.append("run schema cannot represent executed trace-contract evidence")
+        runtime_observation = schema.get("$defs", {}).get("infrastructureObservation", {})
+        runtime_properties = runtime_observation.get("properties", {})
+        scope_pattern = runtime_properties.get("resourceScopeId", {}).get("pattern", "")
+        if ("resourceScopeId" in runtime_observation.get("required", [])
+                or not scope_pattern.startswith("^[0-9a-f]{8}-")):
+            errors.append("run schema cannot safely represent optional opaque Testcontainers resource scopes")
         diagnostic = schema.get("properties", {}).get("diagnostics", {})
         if diagnostic.get("items", {}).get("$ref") != "#/$defs/diagnosticArtifact":
             errors.append("run schema has no typed diagnostic artifact collection")
@@ -106,10 +112,14 @@ def check(root: Path) -> list[str]:
     recorder = root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/evidence/TestInfrastructureEvidence.kt"
     if not recorder.exists():
         errors.append("openbank-libs-testing has no shared runtime evidence recorder")
+    elif "resourceScopeId" not in text(recorder):
+        errors.append("shared runtime evidence recorder cannot emit opaque resource-manager scopes")
     for name in ("PostgresBase.kt", "PostgresRedpandaTestResource.kt", "PostgresRedisTestResource.kt"):
         source = text(root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/containers" / name)
         if "TestInfrastructureEvidence.record" not in source:
             errors.append(f"shared Testcontainers resource emits no lifecycle proof: {name}")
+        if "resourceScopeId" not in source:
+            errors.append(f"shared Testcontainers resource lacks opaque lifecycle correlation: {name}")
 
     baseline_path = root / TESTCONTAINERS_EVIDENCE_BASELINE
     baseline = {

@@ -75,6 +75,8 @@ export interface TestInfrastructureObservation {
   image: string
   lifecycle: 'started' | 'stopped'
   observedAt: string
+  /** Opaque job-local resource-manager scope; never a Docker or network identity. */
+  resourceScopeId?: string
 }
 
 export interface ComponentTestPosture {

@@ -141,6 +141,14 @@ runtime proof from CI; migrating them to shared resources remains desirable beca
 duplicated lifecycle/configuration logic and also records proof outside that CI observer. New shared
 topologies belong in `openbank-libs-testing`, not another service-local copy.
 
+Shared resources additionally emit an optional, random UUID `resourceScopeId`. It is opaque and
+job-local: it contains no database name, Docker identity, host, port or credential, is never passed
+to an AI agent, and is not rendered as a value in the operator UI. It lets the retained envelope
+distinguish two resource-manager instances that emitted adjacent identical lifecycle events. A
+balanced scope proves only that the recorder observed matching manager transitions; it does **not**
+prove a Docker cleanup outcome. Missing scope data remains valid for service-local resources and
+Docker daemon observations, preserving compatibility while making the boundary explicit.
+
 ### D3 — Immutable bounded history, not a premature service
 
 The delivery remains a build-time, read-only snapshot because that is the existing

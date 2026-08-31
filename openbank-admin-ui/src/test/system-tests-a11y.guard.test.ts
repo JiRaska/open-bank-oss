@@ -29,6 +29,7 @@ describe('system code quality accessibility', () => {
     expect(source).toContain("started.length === 0 || impossibleStops || unmatchedStarts > 0 ? 'unknown'")
     expect(source).toContain('role="status"')
     expect(source).toContain('aggregate evidence alone proves neither a leak nor cleanup.')
+    expect(source).toContain('opaque resource-manager scopes')
     expect(source).toContain('Inconsistent lifecycle evidence: more stops than starts.')
   })
 })

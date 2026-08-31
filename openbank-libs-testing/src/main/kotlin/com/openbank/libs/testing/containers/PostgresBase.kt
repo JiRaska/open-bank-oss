@@ -4,6 +4,7 @@
 
 package com.openbank.libs.testing.containers
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
@@ -28,6 +29,10 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
     private var postgres: PostgreSQLContainer<*>? = null
     private var dbName: String = "openbank_it"
 
+    // An opaque, job-local manager scope. It correlates only recorder events and deliberately
+    // excludes the database name, Docker identity, ports, host and credentials.
+    protected val resourceScopeId: String = Ids.randomId().toString()
+
     override fun init(initArgs: Map<String, String>) {
         initArgs["db"]?.let { dbName = it }
     }
@@ -41,7 +46,7 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
             .withPassword("openbank_secret")
             .withDatabaseName(dbName)
         pg.start()
-        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started", resourceScopeId)
         postgres = pg
         return pg
     }
@@ -60,7 +65,7 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
 
     override fun stop() {
         postgres?.stop()
-        if (postgres != null) TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        if (postgres != null) TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped", resourceScopeId)
     }
 
     private companion object {

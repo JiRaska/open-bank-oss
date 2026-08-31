@@ -109,7 +109,12 @@
         "resource": { "enum": ["postgres", "redpanda", "valkey"] },
         "image": { "type": "string", "minLength": 1 },
         "lifecycle": { "enum": ["started", "stopped"] },
-        "observedAt": { "type": "string", "format": "date-time" }
+        "observedAt": { "type": "string", "format": "date-time" },
+        "resourceScopeId": {
+          "type": "string",
+          "description": "Opaque, job-local UUID emitted by a shared resource manager; never a Docker or network identity.",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
       },
       "additionalProperties": false
     },

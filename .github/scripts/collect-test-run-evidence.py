@@ -94,10 +94,16 @@ def validate_envelope(envelope: dict) -> None:
     if set(infrastructure) != {"declared", "observed"} or not set(infrastructure["declared"]).issubset(INFRASTRUCTURE):
         raise ValueError("declared test infrastructure is invalid")
     for item in infrastructure["observed"]:
-        if set(item) != {"resource", "image", "lifecycle", "observedAt"}:
+        required_runtime_fields = {"resource", "image", "lifecycle", "observedAt"}
+        if set(item) - (required_runtime_fields | {"resourceScopeId"}) or not required_runtime_fields.issubset(item):
             raise ValueError("runtime observation contains unsafe or incomplete fields")
         if item["resource"] not in INFRASTRUCTURE or item["lifecycle"] not in {"started", "stopped"} or not item["image"]:
             raise ValueError("runtime observation values are invalid")
+        if "resourceScopeId" in item and not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            str(item["resourceScopeId"]),
+        ):
+            raise ValueError("runtime resource scope id is invalid")
         observed_at = parse_timestamp(item["observedAt"], "testInfrastructure.observed.observedAt")
         if observed_at - run_observed_at > MAX_FUTURE_SKEW:
             raise ValueError("runtime observation occurs after its run beyond the allowed clock skew")
@@ -368,6 +374,12 @@ def observations(service: Path) -> list[dict]:
             item["resource"] == previous["resource"]
             and runtime_image_identity(item["image"]) == runtime_image_identity(previous["image"])
             and item["lifecycle"] == previous["lifecycle"]
+            # A recorder's opaque manager scope distinguishes separate resources that happen
+            # to emit the same lifecycle transition at nearly the same instant. Docker's raw
+            # event stream has no such scope, so it remains eligible to deduplicate with its
+            # corresponding recorder observation.
+            and (not item.get("resourceScopeId") or not previous.get("resourceScopeId")
+                 or item["resourceScopeId"] == previous["resourceScopeId"])
             and abs(observed_at - previous_at) <= RUNTIME_OBSERVATION_DUPLICATE_WINDOW
             for previous_at, previous in deduplicated
         )
@@ -511,9 +523,9 @@ def main() -> None:
             # lifecycle at slightly different instants. Keep one event per
             # lifecycle rather than inflating the UI's runtime evidence count.
             (runtime / "testcontainers.jsonl").write_text(
-                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z"}\n'
-                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:11:01Z"}\n'
-                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:10Z"}\n'
+                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
+                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:11:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
+                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:10Z","resourceScopeId":"22222222-2222-4222-8222-222222222222"}\n'
             )
             performance = service / "perf.json"
             # This is k6's actual summary-export form: true means the threshold was crossed.
@@ -579,6 +591,9 @@ def main() -> None:
             assert [item["lifecycle"] for item in observed] == ["started", "started", "stopped"]
             assert [item["observedAt"] for item in observed] == [
                 "2026-08-22T21:10:01Z", "2026-08-22T21:10:10Z", "2026-08-22T21:11:01Z",
+            ]
+            assert [item.get("resourceScopeId") for item in observed] == [
+                "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "11111111-1111-4111-8111-111111111111",
             ]
             specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]

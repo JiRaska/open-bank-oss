@@ -25,7 +25,7 @@ class PostgresRedpandaTestResource : PostgresBase() {
                 .asCompatibleSubstituteFor("docker.redpanda.com/redpandadata/redpanda"),
         )
         rp.start()
-        TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started")
+        TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started", resourceScopeId)
         redpanda = rp
 
         val bootstrap = rp.bootstrapServers
@@ -37,7 +37,7 @@ class PostgresRedpandaTestResource : PostgresBase() {
 
     override fun stop() {
         redpanda?.stop()
-        if (redpanda != null) TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped")
+        if (redpanda != null) TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped", resourceScopeId)
         super.stop()
     }
 

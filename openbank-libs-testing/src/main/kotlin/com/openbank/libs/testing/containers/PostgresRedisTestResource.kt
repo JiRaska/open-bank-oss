@@ -23,7 +23,7 @@ class PostgresRedisTestResource : PostgresBase() {
 
         val rd = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine")).withExposedPorts(REDIS_PORT)
         rd.start()
-        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started", resourceScopeId)
         redis = rd
 
         return postgresConfig(pg) + mapOf(
@@ -33,7 +33,7 @@ class PostgresRedisTestResource : PostgresBase() {
 
     override fun stop() {
         redis?.stop()
-        if (redis != null) TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
+        if (redis != null) TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped", resourceScopeId)
         super.stop()
     }
 
