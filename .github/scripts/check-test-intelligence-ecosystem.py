@@ -68,6 +68,9 @@ def check(root: Path) -> list[str]:
         if ("resourceScopeId" in runtime_observation.get("required", [])
                 or not scope_pattern.startswith("^[0-9a-f]{8}-")):
             errors.append("run schema cannot safely represent optional opaque Testcontainers resource scopes")
+        reprovisions = runtime_properties.get("reprovisions", {})
+        if reprovisions.get("type") != "integer" or reprovisions.get("minimum") != 1:
+            errors.append("run schema cannot safely represent positive logical-resource reprovision counts")
         diagnostic = schema.get("properties", {}).get("diagnostics", {})
         if diagnostic.get("items", {}).get("$ref") != "#/$defs/diagnosticArtifact":
             errors.append("run schema has no typed diagnostic artifact collection")
@@ -114,8 +117,8 @@ def check(root: Path) -> list[str]:
     recorder = root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/evidence/TestInfrastructureEvidence.kt"
     if not recorder.exists():
         errors.append("openbank-libs-testing has no shared runtime evidence recorder")
-    elif "resourceScopeId" not in text(recorder):
-        errors.append("shared runtime evidence recorder cannot emit opaque resource-manager scopes")
+    elif "resourceScopeId" not in text(recorder) or "reprovisions" not in text(recorder):
+        errors.append("shared runtime evidence recorder cannot preserve opaque scopes and logical reprovisions")
     for name in ("PostgresBase.kt", "PostgresRedpandaTestResource.kt", "PostgresRedisTestResource.kt"):
         source = text(root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/containers" / name)
         if "TestInfrastructureEvidence.record" not in source:

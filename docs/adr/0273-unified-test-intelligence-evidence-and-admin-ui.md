@@ -143,11 +143,14 @@ topologies belong in `openbank-libs-testing`, not another service-local copy.
 
 Shared resources additionally emit an optional, random UUID `resourceScopeId`. It is opaque and
 job-local: it contains no database name, Docker identity, host, port or credential, is never passed
-to an AI agent, and is not rendered as a value in the operator UI. It lets the retained envelope
-distinguish two resource-manager instances that emitted adjacent identical lifecycle events. A
-balanced scope proves only that the recorder observed matching manager transitions; it does **not**
-prove a Docker cleanup outcome. Missing scope data remains valid for service-local resources and
-Docker daemon observations, preserving compatibility while making the boundary explicit.
+to an AI agent, and is not rendered as a value in the operator UI. It identifies one logical shared
+resource-manager family across Quarkus reprovisioned object instances, while separate shared
+resource families retain separate scopes. Repeated physical starts in that scope are collapsed into
+one logical lifecycle; the terminal `stopped` observation carries positive `reprovisions` only when
+such repeats occurred. A balanced scope proves only that the recorder observed matching logical
+manager transitions; neither it nor `reprovisions` proves a Docker cleanup outcome. Missing scope
+data remains valid for service-local resources and Docker daemon observations, preserving
+compatibility while making the boundary explicit.
 
 ### D3 — Immutable bounded history, not a premature service
 

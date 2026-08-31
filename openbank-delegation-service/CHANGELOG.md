@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.9.0...delegation-service-v0.10.0) (2026-08-31)
+
+
+### Features
+
+* **delegation:** manage reusable role presets ([#7697](https://github.com/JiRaska/open-bank-oss/issues/7697)) ([c3f21ee](https://github.com/JiRaska/open-bank-oss/commit/c3f21ee63cc482a7ab27e6002967b23654812abe))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.8.0...delegation-service-v0.9.0) (2026-08-24)
 
 

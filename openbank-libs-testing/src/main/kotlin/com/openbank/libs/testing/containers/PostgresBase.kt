@@ -4,7 +4,6 @@
 
 package com.openbank.libs.testing.containers
 
-import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
@@ -24,14 +23,14 @@ import org.testcontainers.utility.DockerImageName
  * should always set it explicitly to avoid cross-service collisions if tests ever run in a
  * shared Postgres instance.
  */
-abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
+abstract class PostgresBase(
+    // Quarkus reprovisions a fresh manager instance; this scope must therefore identify the
+    // logical shared-resource family for the test JVM, not the individual object instance.
+    protected val resourceScopeId: String,
+) : QuarkusTestResourceLifecycleManager {
 
     private var postgres: PostgreSQLContainer<*>? = null
     private var dbName: String = "openbank_it"
-
-    // An opaque, job-local manager scope. It correlates only recorder events and deliberately
-    // excludes the database name, Docker identity, ports, host and credentials.
-    protected val resourceScopeId: String = Ids.randomId().toString()
 
     override fun init(initArgs: Map<String, String>) {
         initArgs["db"]?.let { dbName = it }

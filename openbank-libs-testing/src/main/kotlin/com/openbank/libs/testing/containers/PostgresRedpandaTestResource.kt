@@ -4,6 +4,7 @@
 
 package com.openbank.libs.testing.containers
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import org.testcontainers.redpanda.RedpandaContainer
 import org.testcontainers.utility.DockerImageName
@@ -13,7 +14,7 @@ import org.testcontainers.utility.DockerImageName
  * `@Channel` emitter/consumer without switching to the in-memory connector. See [PostgresBase]
  * for the database-name `initArgs` convention.
  */
-class PostgresRedpandaTestResource : PostgresBase() {
+class PostgresRedpandaTestResource : PostgresBase(RESOURCE_SCOPE_ID) {
 
     private var redpanda: RedpandaContainer? = null
 
@@ -42,6 +43,7 @@ class PostgresRedpandaTestResource : PostgresBase() {
     }
 
     private companion object {
+        val RESOURCE_SCOPE_ID = Ids.randomId().toString()
         const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
     }
 }

@@ -70,6 +70,13 @@ export interface TestRunProvenance {
   url: string
 }
 
+/**
+ * One LOGICAL resource lifecycle, not one physical container start (issue #7640). Quarkus
+ * reprovisions a test resource onto a fresh manager instance several times before the single
+ * terminal `stop()`, so the recorder collapses the repeats and publishes how many there were
+ * as `reprovisions`, present only on a `stopped` record and only when at least one repeat
+ * occurred. Absent `reprovisions` therefore means "provisioned once", never "unknown".
+ */
 export interface TestInfrastructureObservation {
   resource: 'postgres' | 'redpanda' | 'valkey'
   image: string
@@ -77,6 +84,7 @@ export interface TestInfrastructureObservation {
   observedAt: string
   /** Opaque job-local resource-manager scope; never a Docker or network identity. */
   resourceScopeId?: string
+  reprovisions?: number
 }
 
 export interface ComponentTestPosture {

@@ -95,7 +95,11 @@ def validate_envelope(envelope: dict) -> None:
         raise ValueError("declared test infrastructure is invalid")
     for item in infrastructure["observed"]:
         required_runtime_fields = {"resource", "image", "lifecycle", "observedAt"}
-        if set(item) - (required_runtime_fields | {"resourceScopeId"}) or not required_runtime_fields.issubset(item):
+        # `reprovisions` is optional and only ever present on a terminal `stopped`: it carries how
+        # many times Quarkus physically reprovisioned that logical resource before it was stopped
+        # (issue #7640). A record is one LOGICAL lifecycle, so without this field the reprovision
+        # count would simply stop being observable rather than being reconciled.
+        if set(item) - (required_runtime_fields | {"resourceScopeId", "reprovisions"}) or not required_runtime_fields.issubset(item):
             raise ValueError("runtime observation contains unsafe or incomplete fields")
         if item["resource"] not in INFRASTRUCTURE or item["lifecycle"] not in {"started", "stopped"} or not item["image"]:
             raise ValueError("runtime observation values are invalid")
@@ -104,6 +108,13 @@ def validate_envelope(envelope: dict) -> None:
             str(item["resourceScopeId"]),
         ):
             raise ValueError("runtime resource scope id is invalid")
+        if "reprovisions" in item and (
+            item["lifecycle"] != "stopped"
+            or not isinstance(item["reprovisions"], int)
+            or isinstance(item["reprovisions"], bool)
+            or item["reprovisions"] < 1
+        ):
+            raise ValueError("runtime observation reprovision count is invalid")
         observed_at = parse_timestamp(item["observedAt"], "testInfrastructure.observed.observedAt")
         if observed_at - run_observed_at > MAX_FUTURE_SKEW:
             raise ValueError("runtime observation occurs after its run beyond the allowed clock skew")
@@ -583,6 +594,36 @@ def main() -> None:
                 "component": "openbank-admin-ui", "suites": suites("openbank-admin-ui", service),
                 "coverage": None, "testInfrastructure": {"declared": [], "observed": []},
             })
+            # `reprovisions` (issue #7640) is accepted only on a terminal `stopped`, and only as a
+            # positive integer — a `started` carrying one, or a zero, is a malformed record, not a
+            # quietly tolerated one.
+            def envelope_with(observation):
+                return {
+                    "schemaVersion": 1,
+                    "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main",
+                            "workflow": "CI", "url": "", "observedAt": "2026-08-22T00:00:00Z"},
+                    "component": "openbank-admin-ui", "suites": suites("openbank-admin-ui", service),
+                    "coverage": None,
+                    "testInfrastructure": {"declared": [], "observed": [observation]},
+                }
+            base_observation = {"resource": "postgres", "image": "postgres:16.3-alpine",
+                                "observedAt": "2026-08-22T00:00:00Z"}
+            validate_envelope(envelope_with({**base_observation, "lifecycle": "stopped", "reprovisions": 41}))
+            validate_envelope(envelope_with({
+                **base_observation,
+                "lifecycle": "stopped",
+                "resourceScopeId": "11111111-1111-4111-8111-111111111111",
+                "reprovisions": 41,
+            }))
+            for rejected in ({**base_observation, "lifecycle": "started", "reprovisions": 41},
+                             {**base_observation, "lifecycle": "stopped", "reprovisions": 0},
+                             {**base_observation, "lifecycle": "stopped", "reprovisions": True}):
+                try:
+                    validate_envelope(envelope_with(rejected))
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"invalid reprovision count was accepted: {rejected}")
             assert classify("PaymentApiIT", "com.openbank.PaymentApiIT", "test", "openbank-x") == "integration"
             assert classify("UnitTest", "com.openbank.UnitTest", "test", "openbank-x") == "unit"
             assert classify("creates LOAN_PACK_E2E", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x") == "unit"

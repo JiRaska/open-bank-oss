@@ -4,6 +4,7 @@
 
 package com.openbank.libs.testing.containers
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.utility.DockerImageName
@@ -14,7 +15,7 @@ import org.testcontainers.utility.DockerImageName
  * switching a specific Kafka channel to the in-memory connector) should set it via its own
  * `%test` `application.yaml` profile, not by subclassing this resource further.
  */
-class PostgresRedisTestResource : PostgresBase() {
+class PostgresRedisTestResource : PostgresBase(RESOURCE_SCOPE_ID) {
 
     private var redis: GenericContainer<*>? = null
 
@@ -38,6 +39,7 @@ class PostgresRedisTestResource : PostgresBase() {
     }
 
     private companion object {
+        val RESOURCE_SCOPE_ID = Ids.randomId().toString()
         const val REDIS_PORT = 6379
         const val VALKEY_IMAGE = "valkey/valkey:7.2-alpine"
     }
