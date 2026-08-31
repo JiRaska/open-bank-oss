@@ -28,7 +28,7 @@ test.describe('approval workbench', () => {
     let decided = false
     let decisionRequests = 0
 
-    await page.route('**/api/agent/proposals?state=all', async route => {
+    await page.route('**/api/agent/proposals**', async route => {
       if (route.request().method() === 'GET') {
         const row = decided ? {
           ...proposal,
