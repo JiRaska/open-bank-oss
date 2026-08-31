@@ -254,6 +254,17 @@ main {
 .badge-info    { background: var(--info-bg);    color: var(--info-text);    border: 1px solid var(--info-border); }
 .badge-neutral { background: var(--surface-3);  color: var(--text-secondary); border: 1px solid var(--border-strong); }
 .badge-accent  { background: var(--ob-accent-light); color: var(--ob-accent-text); border: 1px solid var(--ob-accent-border); }
+.badge-sm {
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+.badge-detail {
+  font-weight: 600;
+  opacity: .8;
+  text-transform: none;
+}
 
 
 /* ── Button ── */
