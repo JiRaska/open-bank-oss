@@ -210,4 +210,30 @@ class CompliancePackActivationIT {
         assertThat(body).contains("\"pack\":{")
         assertThat(body).contains("\"jurisdiction\":\"CZ\"")
     }
+
+    /**
+     * The pending-proposals list, which had never been called by any test.
+     *
+     * `findByState` ordered by `proposed_at` -- the COLUMN name. HQL resolves entity PROPERTIES, and
+     * the property is `proposedAt`, so Hibernate answered `SemanticException: Could not interpret
+     * path expression 'proposed_at'` and this plain no-parameter GET returned 500 on every call
+     * since it shipped (#5913). The query is parsed when it is built, so the failure needs no rows
+     * and no malformed input: reaching the endpoint at all is the whole test.
+     *
+     * Invisible to `CompliancePackActivationServiceTest`, which mocks the repository -- the same
+     * shape as the consent `SuppressionEntity` defect (#5711). Only a real Hibernate session can
+     * tell a valid HQL path from an invalid one.
+     */
+    @Test
+    @Order(5)
+    @TestSecurity(user = "pack-it-reader", roles = ["ROLE_COMPLIANCE"])
+    fun `5 - the pending proposals list is queryable`() {
+        Given {
+            contentType("application/json")
+        } When {
+            get("/api/v1/lending/compliance-packs/proposals/pending")
+        } Then {
+            statusCode(200)
+        }
+    }
 }

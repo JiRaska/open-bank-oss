@@ -87,7 +87,7 @@ class JpaCompliancePackActivationRepository :
 
     @WithSession
     override fun findByState(state: ProposalState): Uni<List<CompliancePackActivationEntity>> =
-        list("state = ?1 order by proposed_at", state)
+        list("state = ?1 order by proposedAt", state)
 
     @WithSession
     override fun findActivated(): Uni<List<CompliancePackActivationEntity>> = list(
