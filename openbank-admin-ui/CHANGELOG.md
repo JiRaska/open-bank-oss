@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.223.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.222.2...admin-ui-v0.223.0) (2026-08-31)
+
+
+### Features
+
+* **delegation:** expand role capability catalog ([#7732](https://github.com/JiRaska/open-bank-oss/issues/7732)) ([4fdd0d3](https://github.com/JiRaska/open-bank-oss/commit/4fdd0d3e3c3a3d4b85c37c759300af60600a6cfb))
+
 ## [0.222.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.222.1...admin-ui-v0.222.2) (2026-08-31)
 
 
