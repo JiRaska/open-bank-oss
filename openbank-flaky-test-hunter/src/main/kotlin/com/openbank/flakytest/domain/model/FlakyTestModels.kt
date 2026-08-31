@@ -25,6 +25,7 @@ enum class FlakyTestCheckType {
     STALE_TEST_EVIDENCE,
     UNPROVEN_TEST_INFRASTRUCTURE,
     UNTERMINATED_TEST_INFRASTRUCTURE,
+    REQUIRED_CONTROL_GAP,
 }
 
 enum class FindingSeverity { WARNING, CRITICAL }
@@ -126,6 +127,7 @@ data class TestIntelligenceComponentInput(
     val component: String,
     val moneyPath: Boolean,
     val evidence: List<TestIntelligenceEvidenceInput>,
+    val requiredControls: List<TestIntelligenceEvidenceInput> = emptyList(),
     val declaredInfrastructure: List<String>,
     val observedInfrastructureStarts: Int,
     /** A start event proves neither teardown nor an isolated next test. */

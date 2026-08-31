@@ -27,6 +27,7 @@ const EVIDENCE_STATE_KEYS: Record<EvidenceState, true> = {
 }
 const EVIDENCE_KINDS = new Set<string>(Object.keys(EVIDENCE_KIND_KEYS))
 const EVIDENCE_STATES = new Set<string>(Object.keys(EVIDENCE_STATE_KEYS))
+const REQUIRED_CONTROL_KINDS = new Set([...EVIDENCE_KINDS, 'coverage', 'runtime'])
 const INFRASTRUCTURE = new Set(['postgres', 'redpanda', 'valkey'])
 const AGENT_SEVERITIES = new Set<TestAgentFinding['severity']>(['WARNING', 'CRITICAL'])
 const MAX_AGENT_TEXT = 1_000
@@ -69,6 +70,10 @@ const safeEvidence = (items: ReadonlyArray<{ kind: string; state: string; observ
       ? runtimeFreshnessState(item.state as EvidenceState, item.observedAt)
       : 'unknown',
   }))
+
+const safeRequiredControls = (items: ReadonlyArray<{ kind: string; state: string }> | undefined) =>
+  (items ?? []).filter(item => REQUIRED_CONTROL_KINDS.has(item.kind) && EVIDENCE_STATES.has(item.state))
+    .map(item => ({ kind: item.kind, state: item.state }))
 
 const boundedText = (value: unknown): string | null => {
   if (typeof value !== 'string') return null
@@ -161,6 +166,7 @@ export async function POST(): Promise<NextResponse> {
         component: component.component,
         moneyPath: component.moneyPath === true,
         evidence: safeEvidence(component.evidence),
+        requiredControls: safeRequiredControls(report.requiredControls?.filter(control => control.component === component.component)),
         declaredInfrastructure: (component.testInfrastructure?.declared ?? []).filter(item => INFRASTRUCTURE.has(item)),
         observedInfrastructureStarts: component.testInfrastructure?.observed.filter(item => item.lifecycle === 'started').length ?? 0,
         observedInfrastructureStops: component.testInfrastructure?.observed.filter(item => item.lifecycle === 'stopped').length ?? 0,

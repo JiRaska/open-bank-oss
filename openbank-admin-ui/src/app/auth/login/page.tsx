@@ -7,7 +7,8 @@
 import { ArrowRight, CheckCircle2, KeyRound, Languages, Loader2, ShieldCheck, Sparkles } from "lucide-react"
 import { signIn } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
-import { Suspense, useState } from "react"
+import Image from "next/image"
+import { Suspense, useEffect, useState } from "react"
 import { useLanguage } from "@/lib/i18n/LanguageContext"
 import { safeCallbackPath } from "@/lib/auth/safeCallbackPath"
 import styles from "./login.module.css"
@@ -16,8 +17,8 @@ const COPY = {
   en: {
     skip: "Skip to sign in",
     eyebrow: "OpenBank Operations",
-    headline: "Operate with confidence.",
-    intro: "One calm, governed workspace for the people who keep a bank moving.",
+    headline: "Explore operations with confidence.",
+    intro: "Your OpenBank Explorer is ready to guide you through one calm, governed workspace.",
     benefits: ["A shared operational picture", "Decisions with context", "Security built into every action"],
     secure: "Secure access",
     welcome: "Welcome back",
@@ -32,12 +33,13 @@ const COPY = {
     genericError: "We could not complete sign-in. Please try again or contact your administrator.",
     switchLanguage: "Přepnout do češtiny",
     locale: "Čeština",
+    scenes: ["OpenBank Explorer over Prague", "OpenBank Explorer lioness over Prague"],
   },
   cs: {
     skip: "Přeskočit k přihlášení",
     eyebrow: "OpenBank Operations",
-    headline: "Řiďte banku s jistotou.",
-    intro: "Jedno klidné a řízené pracovní prostředí pro všechny, kdo zajišťují chod banky.",
+    headline: "Prozkoumejte provoz s jistotou.",
+    intro: "OpenBank Explorer vás provede jedním klidným a řízeným pracovním prostředím.",
     benefits: ["Společný provozní přehled", "Rozhodnutí v souvislostech", "Bezpečnost v každém kroku"],
     secure: "Zabezpečený přístup",
     welcome: "Vítejte zpět",
@@ -52,6 +54,7 @@ const COPY = {
     genericError: "Přihlášení se nepodařilo dokončit. Zkuste to znovu nebo kontaktujte administrátora.",
     switchLanguage: "Switch to English",
     locale: "English",
+    scenes: ["OpenBank Explorer nad Prahou", "Lvice OpenBank Explorer nad Prahou"],
   },
 } as const
 
@@ -59,9 +62,18 @@ function LoginContent() {
   const params = useSearchParams()
   const { language, setLanguage } = useLanguage()
   const [pending, setPending] = useState(false)
+  const [scene, setScene] = useState(0)
   const copy = COPY[language]
   const error = params.get("error")
   const callbackUrl = safeCallbackPath(params.get("callbackUrl"))
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    if (reducedMotion) return
+
+    const timer = window.setInterval(() => setScene(current => (current + 1) % 2), 8000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const handleSignIn = async () => {
     if (pending) return
@@ -77,6 +89,23 @@ function LoginContent() {
     <main className={styles.page}>
       <a className={styles.skipLink} href="#sign-in-panel">{copy.skip}</a>
       <section className={styles.story} aria-labelledby="login-story-title">
+        <div className={styles.scenes} aria-hidden="true">
+          <Image
+            src="/brand/explorer-prague-lion.webp"
+            alt=""
+            fill
+            priority
+            sizes="(max-width: 860px) 100vw, 46vw"
+            className={`${styles.scene} ${scene === 0 ? styles.sceneActive : ""}`}
+          />
+          <Image
+            src="/brand/explorer-prague-lioness.webp"
+            alt=""
+            fill
+            sizes="(max-width: 860px) 100vw, 46vw"
+            className={`${styles.scene} ${scene === 1 ? styles.sceneActive : ""}`}
+          />
+        </div>
         <div className={styles.storyGlow} aria-hidden="true" />
         <div className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true"><Sparkles size={20} /></span>
@@ -90,7 +119,20 @@ function LoginContent() {
             {copy.benefits.map(benefit => <li key={benefit}><CheckCircle2 size={18} aria-hidden="true" />{benefit}</li>)}
           </ul>
         </div>
-        <p className={styles.storyFootnote}>Governed banking operations · Built for clarity</p>
+        <footer className={styles.storyFooter}>
+          <p className={styles.storyFootnote}>Prague · Czech Republic · Built for clarity</p>
+          <div className={styles.sceneControls} role="group" aria-label="Explorer scenes">
+            {copy.scenes.map((label, index) => (
+              <button
+                key={label}
+                type="button"
+                aria-label={label}
+                aria-pressed={scene === index}
+                onClick={() => setScene(index)}
+              />
+            ))}
+          </div>
+        </footer>
       </section>
 
       <section className={styles.access}>

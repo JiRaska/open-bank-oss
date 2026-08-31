@@ -18,6 +18,26 @@ def text(path: Path) -> str:
     return path.read_text(errors="ignore") if path.exists() else ""
 
 
+RECORD_CALL = re.compile(
+    r"""TestInfrastructureEvidence\.record\s*\((?:[^()"']|\((?:[^()]*)\)|"[^"]*"|'[^']*')*?["'](started|stopped)["']\s*[,)]""",
+    re.DOTALL,
+)
+
+
+def recorded_lifecycles(source: str) -> set[str]:
+    """Lifecycle literals a file really passes to the shared recorder, ignoring comments.
+
+    The mere PRESENCE of the identifier is not evidence of a lifecycle: an import line, a
+    KDoc sentence, or a resource that records only `started` all contain it. #7246's
+    acceptance is start AND stop, and a substring test cannot tell those apart — the same
+    shape as scoring a service "contract tested" off a comment containing the word
+    (check-pact-provider-replay.py's KNOWN_UNCOVERED note).
+    """
+    stripped = re.sub(r"/\*.*?\*/", " ", source, flags=re.DOTALL)
+    stripped = "\n".join(line.split("//")[0] for line in stripped.splitlines())
+    return set(RECORD_CALL.findall(stripped))
+
+
 def unrecorded_service_testcontainers_resources(root: Path) -> set[str]:
     """Find service-owned Testcontainers lifecycle managers without shared evidence."""
     resources = set()
@@ -25,7 +45,7 @@ def unrecorded_service_testcontainers_resources(root: Path) -> set[str]:
         source = text(path)
         if ("QuarkusTestResourceLifecycleManager" in source
                 and re.search(r"org\.testcontainers|PostgreSQLContainer|GenericContainer|KafkaContainer|RedpandaContainer", source)
-                and "TestInfrastructureEvidence.record" not in source):
+                and recorded_lifecycles(source) != {"started", "stopped"}):
             resources.add(path.relative_to(root).as_posix())
     return resources
 
@@ -60,7 +80,15 @@ def check(root: Path) -> list[str]:
         errors.append(f"run schema unavailable: {exc}")
 
     workflow = text(root / ".github/workflows/_service-ci.yml")
-    for needle in ("collect-test-run-evidence.py", "build/test-intelligence/run.json", "if: always()", "docker events", "--filter event=start", "--filter event=die"):
+    for needle in (
+        "collect-test-run-evidence.py",
+        "build/test-intelligence/run.json",
+        "if: always()",
+        "docker events",
+        "--filter type=container",
+        "--filter event=start",
+        "--filter event=die",
+    ):
         if needle not in workflow:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
     if "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport" not in workflow:
@@ -134,6 +162,10 @@ def check(root: Path) -> list[str]:
         ("github.event.workflow_run.head_sha || 'eligible'", "workflow-run events can evict the current push/dispatch Admin UI deploy queue"),
         ("git ls-remote origin refs/heads/main", "admin deployment does not reject a source commit that is stale before privileged build"),
         ("Skipping stale source", "admin deployment does not make stale-source rejection observable"),
+        ('"openbank-libs/governance/journeys.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the journey catalog changes"),
+        ('"perf/scenarios.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the performance catalog changes"),
+        ('"perf/k6/**"', "admin deployment does not rebuild the Test Intelligence snapshot when a performance definition changes"),
+        ('"openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when a synthetic runtime manifest changes"),
     ):
         if needle not in deploy:
             errors.append(message)
@@ -170,10 +202,31 @@ def check(root: Path) -> list[str]:
     ui_page = text(root / "openbank-admin-ui/src/app/system/tests/page.tsx")
     if "| 'trace'" not in ui_types or "'trace', 'mutation'" not in ui_page:
         errors.append("Admin UI does not expose trace-contract evidence in fleet posture")
+    if "RequiredTestControl" not in ui_types or "Deterministic required controls" not in ui_page:
+        errors.append("Admin UI does not expose required controls as a typed operator surface")
     for needle in ("function journeyCoverage(journeys)", "journeys.filter(item => item.status === 'active')",
                    "journeyCoverage: syntheticCoverage"):
         if needle not in collector:
             errors.append(f"admin projection loses the governed synthetic coverage denominator: {needle}")
+    for needle in ("function requiredControls(", "mutationComponents()", "requiredControls: controls",
+                   "requiredControlGaps: controls.filter"):
+        if needle not in collector:
+            errors.append(f"admin projection loses an independent required-control denominator: {needle}")
+    capability_text = text(root / "openbank-libs/governance/test-intelligence-capabilities.yaml")
+    capability_blocks = re.split(r"(?m)^  - id: ", capability_text)[1:]
+    ids = [block.splitlines()[0].strip() for block in capability_blocks]
+    allowed = {"implemented", "external-blocked", "ownership-blocked", "safety-blocked", "intentionally-deferred"}
+    if not capability_blocks or len(ids) != len(set(ids)):
+        errors.append("test-intelligence capability register is empty or duplicated")
+    for identifier, block in zip(ids, capability_blocks, strict=True):
+        state = re.search(r"(?m)^    state: ([a-z-]+)$", block)
+        if not state or state.group(1) not in allowed or "\n    title:" not in block or "\n    evidence:" not in block:
+            errors.append(f"test-intelligence capability is incomplete: {identifier}")
+        if state and state.group(1) != "implemented" and "\n    blocker:" not in block:
+            errors.append(f"blocked test-intelligence capability has no blocker: {identifier}")
+    for needle in ("function platformCapabilities()", "platformCapabilities: capabilities"):
+        if needle not in collector:
+            errors.append(f"admin projection loses operator-visible platform blockers: {needle}")
     agent_analysis = text(root / "openbank-flaky-test-hunter/src/main/kotlin/com/openbank/flakytest/application/usecase/FlakyTestHunterService.kt")
     if "private val EVIDENCE_KINDS" not in agent_analysis or '"trace",' not in agent_analysis:
         errors.append("flaky-test-hunter cannot consume the trace evidence emitted by the Admin BFF")
@@ -183,12 +236,16 @@ def check(root: Path) -> list[str]:
     for workflow_name, required in {
         "perf-gate.yml": ("--performance-summary", "Build performance Test Intelligence envelope"),
         "perf-baseline.yml": ("--performance-summary", "test-intelligence-run-openbank-money-path"),
-        "pitest.yml": ("--mutation-report", "Build mutation Test Intelligence envelope"),
+        "pitest.yml": ("--mutation-report", "--mutation-threshold 70", "Build mutation Test Intelligence envelope"),
     }.items():
         workflow = text(root / ".github/workflows" / workflow_name)
         for needle in required:
             if needle not in workflow:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
+    if "pitest.yml/runs?branch=main&status=completed&per_page=1" not in deploy:
+        errors.append("mutation projection does not select the latest completed attempt regardless of verdict")
+    if "pitest.yml/runs?branch=main&status=success" in deploy:
+        errors.append("mutation projection hides failed attempts behind an older successful workflow")
     perf_gate = text(root / ".github/workflows/perf-gate.yml")
     perf_baseline = text(root / ".github/workflows/perf-baseline.yml")
     pinned_k6 = "ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79"
@@ -269,7 +326,8 @@ def check(root: Path) -> list[str]:
         ("--extract public-edge", "synthetic CI does not execute the ConfigMap-mounted runtime artifact"),
         ('event_name }}-${{ github.ref }}', "synthetic PR and post-GitOps calls do not have isolated concurrency"),
         ('branches: [main]', "synthetic workflow has no post-GitOps main call site"),
-        ('cronjob-journey-public-edge.yaml', "synthetic workflow does not run when the runtime artifact changes"),
+        ('cronjob-journey-*.yaml', "synthetic workflow does not run when any synthetic runtime artifact changes"),
+        ('--active-ids', "synthetic CI does not validate every active runtime artifact"),
         ('--synthetic-summary', "synthetic workflow does not publish compatible Test Intelligence evidence"),
         ('test-intelligence-run-openbank-platform-', "synthetic run envelope is not retained in immutable history"),
         ('grafana/k6:1.2.0@sha256:', "synthetic CI image is not pinned to the runtime k6 digest"),
@@ -327,6 +385,38 @@ def self_test() -> int:
         baseline.write_text(f"{new_resource}\n")
         if any(new_resource in failure for failure in check(root)):
             print("self-test failed: baseline did not account for existing migration debt")
+            return 1
+        # A half-migrated resource must not clear the ratchet. Recording only `started`
+        # leaves teardown unobservable while the identifier is present, so a substring
+        # test would accept it and its baseline entry would have to be deleted --
+        # permanently declaring the migration done (#7246).
+        baseline.write_text("")
+        prefix = (
+            "import com.openbank.libs.testing.evidence.TestInfrastructureEvidence\n"
+            "import io.quarkus.test.common.QuarkusTestResourceLifecycleManager\n"
+            "import org.testcontainers.containers.PostgreSQLContainer\n"
+            "class PostgresTestResource : QuarkusTestResourceLifecycleManager {\n"
+        )
+        started_only = prefix + '  fun start() { TestInfrastructureEvidence.record("postgres", IMG, "started") }\n}\n'
+        resource.write_text(started_only)
+        if not any(new_resource in failure for failure in check(root)):
+            print("self-test failed: start-only lifecycle evidence was accepted as migrated")
+            return 1
+        # A file that only NAMES the recorder in prose or an import is not evidence either.
+        resource.write_text(
+            prefix + '  // TestInfrastructureEvidence.record("postgres", IMG, "started") and "stopped"\n}\n'
+        )
+        if not any(new_resource in failure for failure in check(root)):
+            print("self-test failed: commented-out lifecycle evidence was accepted as migrated")
+            return 1
+        # ...and the honest start+stop pair must PASS, or the check is red for everyone.
+        resource.write_text(
+            prefix
+            + '  fun start() { TestInfrastructureEvidence.record("postgres", IMG.asCanonicalNameString(), "started") }\n'
+            + '  fun stop() { TestInfrastructureEvidence.record("postgres", IMG.asCanonicalNameString(), "stopped") }\n}\n'
+        )
+        if any(new_resource in failure for failure in check(root)):
+            print("self-test failed: a genuine start/stop lifecycle pair was rejected")
             return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0

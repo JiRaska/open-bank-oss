@@ -65,6 +65,17 @@ enum class ConsentScope {
     // their spending mined for eligibility, and one checkbox cannot express that.
     CREDIT_OFFERS,
     CREDIT_PROFILE_USE,
+
+    /**
+     * ADR-0269 rule 5, L2: the assistant may watch and PREPARE on the customer's behalf — pre-fill
+     * an application, scan for a cheaper refinancing, warn that an instalment looks at risk.
+     *
+     * Separate from CREDIT_PROFILE_USE because the powers are different in kind, not in degree.
+     * Reading the profile answers a question the customer asked; acting on it means the assistant
+     * does something without being asked each time. It never extends to committing the customer:
+     * no level may submit, accept, raise a limit or draw funds.
+     */
+    CREDIT_AI_AGENT,
 }
 
 enum class GranteeType {
@@ -197,6 +208,7 @@ data class Consent(
             ConsentScope.MARKETING_COMMS_INAPP,
             ConsentScope.CREDIT_OFFERS,
             ConsentScope.CREDIT_PROFILE_USE,
+            ConsentScope.CREDIT_AI_AGENT,
         )
 
         /** PSD2 RTS Art. 10(2)(b): max AISP accesses per day without fresh SCA. */

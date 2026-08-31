@@ -20,6 +20,9 @@ import com.openbank.flakytest.domain.model.RunTrigger
 import com.openbank.flakytest.domain.model.TestIntelligenceAnalysisRequest
 import com.openbank.flakytest.domain.model.TestIntelligenceComponentInput
 import com.openbank.libs.temporal.TemporalConfig
+import io.opentelemetry.api.trace.SpanKind
+import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.api.trace.Tracer
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
@@ -40,6 +43,7 @@ class FlakyTestHunterService(
     private val findingRepository: FindingRepository,
     private val llmDiagnosis: LlmDiagnosisPort,
     private val clock: Clock,
+    private val tracer: Tracer,
 ) : RunFlakyTestCheckUseCase,
     GetFindingsUseCase,
     AnalyzeTestIntelligenceUseCase {
@@ -74,7 +78,27 @@ class FlakyTestHunterService(
         return workflowId
     }
 
-    override suspend fun getActive(): List<FlakyTestFinding> = findingRepository.findActive()
+    /**
+     * A read of the evidence-backed operator queue is a control-plane operation, not merely an
+     * HTTP transport event.  Emit a bounded semantic span so an executable trace contract can
+     * prove the operation reached its repository without putting findings, IDs or prompt data in
+     * telemetry.
+     */
+    override suspend fun getActive(): List<FlakyTestFinding> {
+        val span = tracer.spanBuilder("flaky-test-hunter.findings.read")
+            .setSpanKind(SpanKind.INTERNAL)
+            .startSpan()
+        return runCatching {
+            findingRepository.findActive().also { findings ->
+                span.setAttribute("openbank.flaky.findings.count", findings.size.toLong())
+            }
+        }.onFailure { failure ->
+            span.recordException(failure)
+            span.setStatus(StatusCode.ERROR)
+        }.also {
+            span.end()
+        }.getOrThrow()
+    }
 
     override suspend fun getById(id: String): FlakyTestFinding? = findingRepository.findById(id)
 
@@ -147,6 +171,19 @@ class FlakyTestHunterService(
         component: TestIntelligenceComponentInput,
         severity: FindingSeverity,
     ) = buildList {
+        val requiredGaps = component.requiredControls.count { it.state != "passed" }
+        if (requiredGaps > 0) {
+            add(
+                evidenceFinding(
+                    snapshotId,
+                    component.component,
+                    FlakyTestCheckType.REQUIRED_CONTROL_GAP,
+                    severity,
+                    "${component.component} has $requiredGaps unsatisfied required test control(s)",
+                    BigDecimal(requiredGaps),
+                ),
+            )
+        }
         if (component.evidence.any { it.state == "failed" }) {
             add(
                 evidenceFinding(
@@ -243,6 +280,12 @@ class FlakyTestHunterService(
                         it.kind in EVIDENCE_KINDS && it.state in EVIDENCE_STATES
                     },
             ) { "invalid evidence vocabulary" }
+            require(
+                component.requiredControls.size <= MAX_EVIDENCE_PER_COMPONENT &&
+                    component.requiredControls.all {
+                        it.kind in REQUIRED_CONTROL_KINDS && it.state in EVIDENCE_STATES
+                    },
+            ) { "invalid required-control vocabulary" }
         }
     }
 
@@ -258,6 +301,7 @@ class FlakyTestHunterService(
                     "trace",
                 )
         private val EVIDENCE_STATES = setOf("passed", "failed", "skipped", "not-run", "stale", "blocked", "unknown")
+        private val REQUIRED_CONTROL_KINDS = EVIDENCE_KINDS + setOf("coverage", "runtime")
         private val INFRASTRUCTURE = setOf("postgres", "redpanda", "valkey")
         private val COMPONENT = Regex("^openbank-[a-z0-9-]{1,100}$")
         private const val MAX_COMPONENTS = 250

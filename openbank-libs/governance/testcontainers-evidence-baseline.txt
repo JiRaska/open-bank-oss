@@ -1,51 +1,32 @@
 # Service-owned Testcontainers resources awaiting migration to
 # TestInfrastructureEvidence. This is a ratchet: a new unrecorded resource
-# fails CI, and a migrated path must be removed from this list.
+# fails CI, and a migrated path must be removed from this list. The gate also requires a
+# real start AND stop lifecycle pair, not merely the recorder's name in the file (#7246):
+# a start-only resource leaves teardown unobservable while reading as migrated.
+#
+# Select the next migration from the remaining entries below, after classifying its topology
+# and money-path status. Do not maintain a second candidate list here: it drifts as paths are
+# migrated and can send an operator back to already-recorded resources.
+# Money-path entries (ledger, transaction, account, balance, sepa-*, domestic-payment,
+# clearing, swift, fx, lending, sdd, interest, sca, consent) are tracked separately: they
+# need the two-approval + threat-model process before their topology is touched.
 openbank-account-service/src/test/kotlin/com/openbank/account/it/PostgresRedpandaRedisTestResource.kt
-openbank-agent-service/src/test/kotlin/com/openbank/agent/it/PostgresTestResource.kt
 openbank-aml-service/src/test/kotlin/com/openbank/aml/it/PostgresRedisTestResource.kt
 openbank-anacredit-service/src/test/kotlin/com/openbank/anacredit/it/PostgresRedpandaTestResource.kt
-openbank-anacredit-service/src/test/kotlin/com/openbank/anacredit/it/PostgresTestResource.kt
-openbank-analytics-sink/src/test/kotlin/com/openbank/analytics/it/RedpandaTestResource.kt
-openbank-audit-service/src/test/kotlin/com/openbank/audit/it/PostgresTestResource.kt
-openbank-authz-policy-auditor/src/test/kotlin/com/openbank/authzaudit/PostgresTestResource.kt
 openbank-balance-service/src/test/kotlin/com/openbank/balance/it/PostgresRedpandaTestResource.kt
 openbank-billing-service/src/test/kotlin/com/openbank/billing/it/PostgresRedisTestResource.kt
-openbank-campaign-service/src/test/kotlin/com/openbank/campaign/it/CampaignPostgresRedisTestResource.kt
 openbank-card-issuance-service/src/test/kotlin/com/openbank/cardissuance/it/PostgresRedisTestResource.kt
-openbank-case-coordinator-agent/src/test/kotlin/com/openbank/casecoordinator/PostgresTestResource.kt
 openbank-clearing-service/src/test/kotlin/com/openbank/clearing/it/PostgresRedpandaRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/ConsentPostgresRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/PostgresTestResource.kt
-openbank-control-liveness-sentinel/src/test/kotlin/com/openbank/liveness/PostgresTestResource.kt
 openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/it/RedpandaRedisTestResource.kt
-openbank-delegation-service/src/test/kotlin/com/openbank/delegation/it/PostgresTestResource.kt
-openbank-devops-agent/src/test/kotlin/com/openbank/devops/PostgresTestResource.kt
-openbank-dispute-service/src/test/kotlin/com/openbank/dispute/it/PostgresTestResource.kt
-openbank-docs-truth-agent/src/test/kotlin/com/openbank/docstruth/PostgresTestResource.kt
-openbank-document-service/src/test/kotlin/com/openbank/document/it/PostgresRedisTestResource.kt
 openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/it/PostgresRedisTestResource.kt
-openbank-engagement-service/src/test/kotlin/com/openbank/engagement/integration/EngagementPostgresTestResource.kt
-openbank-finops-agent/src/test/kotlin/com/openbank/finops/PostgresTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisRedpandaTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisTestResource.kt
 openbank-fx-service/src/test/kotlin/com/openbank/fx/it/PostgresRedisTestResource.kt
-openbank-governance-auditor/src/test/kotlin/com/openbank/govaudit/PostgresTestResource.kt
 openbank-interest-service/src/test/kotlin/com/openbank/interest/it/PostgresRedisTestResource.kt
-openbank-kyc-service/src/test/kotlin/com/openbank/kyc/it/PostgresTestResource.kt
-openbank-ledger-service/src/test/kotlin/com/openbank/ledger/it/PostgresRedpandaTestResource.kt
-openbank-ledger-service/src/test/kotlin/com/openbank/ledger/it/PostgresTestResource.kt
 openbank-lending-service/src/test/kotlin/com/openbank/lending/it/PostgresRedisTestResource.kt
-openbank-mcp-service/src/test/kotlin/com/openbank/mcp/PostgresTestResource.kt
-openbank-notification-service/src/test/kotlin/com/openbank/notification/it/PostgresTestResource.kt
-openbank-notification-service/src/test/kotlin/com/openbank/notification/it/RedisTestResource.kt
-openbank-onboarding-service/src/test/kotlin/com/openbank/onboarding/it/OnboardingPostgresTestResource.kt
-openbank-party-service/src/test/kotlin/com/openbank/party/it/PostgresRedpandaTestResource.kt
-openbank-pid-service/src/test/kotlin/com/openbank/pid/it/PostgresTestResource.kt
 openbank-psd2-service/src/test/kotlin/com/openbank/psd2/it/PostgresRedisTestResource.kt
-openbank-referral-service/src/test/kotlin/com/openbank/referral/it/ReferralPostgresTestResource.kt
-openbank-release-steward/src/test/kotlin/com/openbank/releasesteward/PostgresTestResource.kt
-openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/it/PostgresTestResource.kt
 openbank-sca-service/src/test/kotlin/com/openbank/sca/it/PostgresRedisTestResource.kt
 openbank-sdd-service/src/test/kotlin/com/openbank/sdd/it/PostgresTestResource.kt
 openbank-sepa-instant/src/test/kotlin/com/openbank/sepainstant/it/PostgresRedpandaRedisTestResource.kt
@@ -55,5 +36,4 @@ openbank-standing-order-service/src/test/kotlin/com/openbank/standingorder/it/Po
 openbank-statement-service/src/test/kotlin/com/openbank/statement/it/PostgresTestResource.kt
 openbank-swift-service/src/test/kotlin/com/openbank/swift/it/PostgresRedisTestResource.kt
 openbank-tpp-registry-service/src/test/kotlin/com/openbank/tppregistry/it/PostgresRedisTestResource.kt
-openbank-transaction-service/src/test/kotlin/com/openbank/transaction/it/PostgresRedpandaTestResource.kt
 openbank-vop-service/src/test/kotlin/com/openbank/vop/PostgresTestResource.kt

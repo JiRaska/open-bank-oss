@@ -48,6 +48,7 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(project(":openbank-libs-testing"))
     // Phase 2 (#4185): git-pact for the admin-ui read contract — consumer test generates
     // pacts/openbank-admin-ui-openbank-case-coordinator-agent.json, provider replays it (ADR-0063).
     testImplementation(libs.pact.consumer)

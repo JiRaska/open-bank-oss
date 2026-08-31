@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.26.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.1...ledger-service-v1.26.2) (2026-08-30)
+
+
+### Bug Fixes
+
+* **ledger:** require human close draft maker ([#7624](https://github.com/JiRaska/open-bank-oss/issues/7624)) ([7b5d97e](https://github.com/JiRaska/open-bank-oss/commit/7b5d97eecc37f3f5d24dc76c1c7d06a7ad0933f9))
+
+## [1.26.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.0...ledger-service-v1.26.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **regulatory:** complete FINREP and COREP previews ([#7296](https://github.com/JiRaska/open-bank-oss/issues/7296)) ([d387b3e](https://github.com/JiRaska/open-bank-oss/commit/d387b3ea51293416dc15a243d248564c2eeacf84))
+
 ## [1.26.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.25.0...ledger-service-v1.26.0) (2026-08-26)
 
 

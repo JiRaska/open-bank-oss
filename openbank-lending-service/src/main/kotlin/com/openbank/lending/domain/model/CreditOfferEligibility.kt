@@ -58,6 +58,15 @@ enum class CreditOfferSuppressionCode {
     /** 360-derived buffer is below the configured floor — thin cover, not yet distress. */
     BUFFER_BELOW_FLOOR,
 
+    /**
+     * The 360 profile has too few observed months to be evidence.
+     *
+     * Distinct from [SIGNALS_UNAVAILABLE] on purpose: that one is a fault worth alerting on, this
+     * one is a customer the bank has simply not seen for long enough. Collapsing them would bury a
+     * genuine outage inside the normal traffic of new customers.
+     */
+    HISTORY_TOO_THIN,
+
     /** A credit-marketing contact already went out inside the frequency window. */
     FREQUENCY_CAP,
 
@@ -82,10 +91,25 @@ data class BorrowerDistressSignals(
     val inHardshipArrangement: Boolean,
     val lastAffordabilityFailureAt: Instant?,
     val bufferDays: Int?,
+    /**
+     * Whole months of cash-flow history behind the 360 figures. A three-week-old customer and a
+     * five-year customer can produce the same median, so the count travels with the numbers rather
+     * than being discarded at the source.
+     */
+    val monthsObserved: Int?,
     val lastCreditContactAt: Instant?,
     val inputsChangedSinceLastContact: Boolean,
     val complete: Boolean,
 )
+
+/**
+ * Who started the conversation — the axis ADR-0269's pull-only rule turns on.
+ *
+ * PUSH is the bank speaking unprompted and needs consent; PULL is the customer asking and does not.
+ * Modelled as a type rather than a boolean parameter so a call site cannot get it backwards
+ * silently: `evaluate(partyId, PUSH)` reads as what it is, `evaluate(partyId, true)` does not.
+ */
+enum class OfferSurface { PUSH, PULL }
 
 /** Thresholds, versioned as one object so a change is a single reviewable diff (ADR-0213 shape). */
 data class CreditOfferPolicy(
@@ -93,12 +117,14 @@ data class CreditOfferPolicy(
     val minimumBufferDays: Int,
     val affordabilityCoolingDays: Long,
     val contactFrequencyDays: Long,
+    val minimumMonthsObserved: Int,
 ) {
     init {
         require(version > 0) { "policy version must be positive" }
         require(minimumBufferDays >= 0) { "minimumBufferDays must not be negative" }
         require(affordabilityCoolingDays >= 0) { "affordabilityCoolingDays must not be negative" }
         require(contactFrequencyDays >= 0) { "contactFrequencyDays must not be negative" }
+        require(minimumMonthsObserved >= 0) { "minimumMonthsObserved must not be negative" }
     }
 
     companion object {
@@ -112,6 +138,9 @@ data class CreditOfferPolicy(
             minimumBufferDays = 30,
             affordabilityCoolingDays = 14,
             contactFrequencyDays = 30,
+            // Three whole months: enough for one unusual month not to be the whole picture, and
+            // the point at which a median stops being an anecdote.
+            minimumMonthsObserved = 3,
         )
     }
 }
@@ -141,6 +170,7 @@ object CreditOfferEligibility {
         signals: BorrowerDistressSignals,
         now: Instant,
         policy: CreditOfferPolicy = CreditOfferPolicy.V1,
+        surface: OfferSurface = OfferSurface.PUSH,
     ): CreditOfferDecision {
         if (!hasOffersConsent) {
             return CreditOfferDecision.Suppressed(policy.version, CreditOfferSuppressionCode.CONSENT_ABSENT)
@@ -148,7 +178,7 @@ object CreditOfferEligibility {
         if (!signals.complete) {
             return CreditOfferDecision.Suppressed(policy.version, CreditOfferSuppressionCode.SIGNALS_UNAVAILABLE)
         }
-        val distress = distressCode(signals, now, policy)
+        val distress = distressCode(signals, now, policy, surface)
             ?: return CreditOfferDecision.Allowed(policy.version)
         return CreditOfferDecision.Suppressed(policy.version, distress)
     }
@@ -165,12 +195,29 @@ object CreditOfferEligibility {
         signals: BorrowerDistressSignals,
         now: Instant,
         policy: CreditOfferPolicy,
+        surface: OfferSurface,
     ): CreditOfferSuppressionCode? {
+        // Hard facts and a binding affordability refusal stop BOTH surfaces. These are the cases
+        // where the answer itself is the harm, no matter who started the conversation.
         hardFactCode(signals)?.let { return it }
-
         if (withinDays(signals.lastAffordabilityFailureAt, now, policy.affordabilityCoolingDays)) {
             return CreditOfferSuppressionCode.AFFORDABILITY_COOLING
         }
+        // Everything below is about the bank speaking UNPROMPTED, and none of it is a reason to
+        // refuse an answer the customer just asked for:
+        //
+        //  - a thin buffer means "do not go looking for this customer with an offer"; it does not
+        //    mean "refuse to tell them what a loan would cost", which would leave someone who is
+        //    managing carefully unable to plan at all;
+        //  - a frequency cap limits how often the BANK initiates, and cannot silence a reply;
+        //  - materiality asks whether there is anything new to SAY, which is meaningless when the
+        //    customer just asked the question.
+        if (surface == OfferSurface.PULL) return null
+
+        // A push needs evidence, and a median over one or two months is not evidence. A pull is
+        // unaffected: answering "what would this cost" does not rest on knowing the customer.
+        val months = signals.monthsObserved ?: return CreditOfferSuppressionCode.HISTORY_TOO_THIN
+        if (months < policy.minimumMonthsObserved) return CreditOfferSuppressionCode.HISTORY_TOO_THIN
 
         // A missing buffer is not a healthy buffer. Unknown reads as below the floor.
         val buffer = signals.bufferDays ?: return CreditOfferSuppressionCode.BUFFER_BELOW_FLOOR

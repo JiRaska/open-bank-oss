@@ -5,6 +5,7 @@
 
 package com.openbank.releasesteward
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.containers.PostgreSQLContainer
 
@@ -23,6 +24,7 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
             .withUsername("openbank")
             .withPassword("openbank")
         postgres.start()
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
         // reactive URL for Panache (vertx-pg-client) + JDBC URL for Flyway.
         val reactiveUrl = "postgresql://${postgres.host}:${postgres.firstMappedPort}/${postgres.databaseName}"
         return mapOf(
@@ -34,6 +36,13 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        if (::postgres.isInitialized) postgres.stop()
+        if (::postgres.isInitialized) {
+            postgres.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
+    }
+
+    private companion object {
+        const val POSTGRES_IMAGE = "postgres:18-alpine"
     }
 }

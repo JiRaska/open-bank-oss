@@ -74,6 +74,7 @@ on:
       - "Product Catalog Native Build (T1 enabler smoke test)"
       - "Schema registry apply (document-service pilot)"
       - "Synthetic journeys"
+      - "Admin UI browser synthetic"
     types: [completed]
   pull_request:
     paths:

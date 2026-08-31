@@ -3,7 +3,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import SegmentsPage from '@/app/segments/page'
 import { SessionProvider } from 'next-auth/react'
@@ -23,5 +23,54 @@ describe('audience library', () => {
     expect(start.href).toContain('/campaigns/new?audience=actives%401')
     fireEvent.click(container.querySelector('[data-audience-count="actives@1"]')!)
     await waitFor(() => expect(container.querySelector('[data-audience-size="actives@1"]')?.textContent).toContain('1,240'))
+  })
+
+  it('serializes lifecycle actions and makes progress visible on the active audience', async () => {
+    let completeMutation: ((value: { ok: boolean; json: () => Promise<object> }) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.endsWith('/submit')) {
+        return new Promise(resolve => { completeMutation = resolve })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({
+        state: 'ok',
+        items: [
+          { name: 'actives', version: 1, rules: ['party status is ACTIVE'], state: 'DRAFT' },
+          { name: 'tenured', version: 1, rules: ['tenure >= 30 days'], state: 'PENDING_APPROVAL' },
+        ],
+      }) })
+    }))
+
+    const session = { user: { roles: ['ROLE_OPERATOR'] }, expires: '2099-01-01' }
+    render(React.createElement(SessionProvider, { session }, React.createElement(LanguageProvider, null, React.createElement(SegmentsPage))))
+    const submit = await screen.findByRole('button', { name: 'Submit for approval' })
+    const approve = screen.getByRole('button', { name: 'Approve audience' })
+    await act(async () => {
+      // Native activations share one React batch. This is the pre-render race that
+      // `disabled` cannot stop; only the hook's synchronous ref claim can.
+      submit.click()
+      submit.click()
+    })
+
+    expect(await screen.findByRole('button', { name: 'Submitting…' })).toHaveProperty('disabled', true)
+    expect(approve).toHaveProperty('disabled', true)
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(([url]) => String(url).endsWith('/submit'))).toHaveLength(1)
+
+    completeMutation?.({ ok: true, json: async () => ({}) })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeTruthy())
+  })
+
+  it('reports lifecycle mutation errors locally without replacing the loaded catalogue', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/submit')) return { ok: false, json: async () => ({ error: 'four-eyes required' }) }
+      return { ok: true, json: async () => ({ state: 'ok', items: [{ name: 'actives', version: 1, rules: ['party status is ACTIVE'], state: 'DRAFT' }] }) }
+    }))
+
+    const session = { user: { roles: ['ROLE_OPERATOR'] }, expires: '2099-01-01' }
+    render(React.createElement(SessionProvider, { session }, React.createElement(LanguageProvider, null, React.createElement(SegmentsPage))))
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit for approval' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('catalogue is still available')
+    expect(screen.getByText('Active customers')).toBeTruthy()
+    expect(screen.queryByText('Campaign-service is not responding')).toBeNull()
   })
 })

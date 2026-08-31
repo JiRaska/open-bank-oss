@@ -10,8 +10,11 @@ import com.openbank.flakytest.domain.model.TestIntelligenceAnalysisRequest
 import com.openbank.flakytest.domain.model.TestIntelligenceComponentInput
 import com.openbank.flakytest.domain.model.TestIntelligenceEvidenceInput
 import com.openbank.libs.temporal.TemporalConfig
+import com.openbank.libs.testing.trace.RecordingSpanExporter
 import io.mockk.coEvery
 import io.mockk.mockk
+import io.opentelemetry.sdk.trace.SdkTracerProvider
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor
 import io.temporal.client.WorkflowClient
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -23,12 +26,17 @@ import java.time.ZoneOffset
 class TestIntelligenceAnalysisTest {
     private val repository = mockk<FindingRepository>()
     private val llm = mockk<LlmDiagnosisPort>()
+    private val exporter = RecordingSpanExporter()
+    private val tracerProvider = SdkTracerProvider.builder()
+        .addSpanProcessor(SimpleSpanProcessor.create(exporter))
+        .build()
     private val service = FlakyTestHunterService(
         mockk<WorkflowClient>(),
         mockk<TemporalConfig>(),
         repository,
         llm,
         Clock.fixed(Instant.parse("2026-08-22T12:00:00Z"), ZoneOffset.UTC),
+        tracerProvider.get("test"),
     )
 
     @Test
@@ -46,6 +54,7 @@ class TestIntelligenceAnalysisTest {
             FlakyTestCheckType.OBSERVED_FLAKY_TESTS,
             FlakyTestCheckType.STALE_TEST_EVIDENCE,
             FlakyTestCheckType.UNPROVEN_TEST_INFRASTRUCTURE,
+            FlakyTestCheckType.REQUIRED_CONTROL_GAP,
         )
         assertThat(findings.filter { it.checkType != FlakyTestCheckType.STALE_TEST_EVIDENCE }).allSatisfy {
             assertThat(it.severity).isEqualTo(FindingSeverity.CRITICAL)
@@ -95,6 +104,19 @@ class TestIntelligenceAnalysisTest {
         assertThat(finding.title).contains("2 test-infrastructure start", "1 stop")
     }
 
+    @Test
+    fun `findings read emits a bounded trace contract after repository execution`(): Unit = runBlocking {
+        coEvery { repository.findActive() } returns emptyList()
+
+        service.getActive()
+
+        exporter.contract()
+            .requiresSpan("flaky-test-hunter.findings.read")
+            .requiresAttribute("flaky-test-hunter.findings.read", "openbank.flaky.findings.count")
+            .hasNoErrorSpan()
+            .verifiedAs("flaky-findings-read")
+    }
+
     private fun analysisRequest() = TestIntelligenceAnalysisRequest(
         snapshotId = "run-42",
         collectedAt = Instant.parse("2026-08-22T11:00:00Z"),
@@ -107,6 +129,10 @@ class TestIntelligenceAnalysisTest {
                     TestIntelligenceEvidenceInput("contract", "failed"),
                     TestIntelligenceEvidenceInput("mutation", "failed"),
                     TestIntelligenceEvidenceInput("trace", "passed"),
+                ),
+                requiredControls = listOf(
+                    TestIntelligenceEvidenceInput("integration", "failed"),
+                    TestIntelligenceEvidenceInput("coverage", "not-run"),
                 ),
                 declaredInfrastructure = listOf("postgres"),
                 observedInfrastructureStarts = 0,

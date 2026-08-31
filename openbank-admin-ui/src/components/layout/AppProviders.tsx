@@ -8,6 +8,7 @@ import { usePathname } from 'next/navigation'
 import { Toaster } from 'sonner'
 import { AgentDock } from '@/components/agent/AgentDock'
 import { SessionProvider } from '@/components/auth/SessionProvider'
+import { RumScreenTracker } from '@/components/telemetry/RumScreenTracker'
 import { isPublicSurface } from '@/lib/auth/publicSurface'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
@@ -22,6 +23,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     <LanguageProvider>
       {children}
       {!publicSurface && <AgentDock />}
+      {!publicSurface && <RumScreenTracker />}
       <Toaster richColors position="top-right" />
     </LanguageProvider>
   )

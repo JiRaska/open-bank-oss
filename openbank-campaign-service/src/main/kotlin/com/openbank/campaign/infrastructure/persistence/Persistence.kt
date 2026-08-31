@@ -14,6 +14,9 @@ import com.openbank.campaign.application.port.out.CampaignEngagementMetric
 import com.openbank.campaign.application.port.out.CampaignEngagementRepository
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignExperimentRepository
+import com.openbank.campaign.application.port.out.CampaignIncentiveFunnel
+import com.openbank.campaign.application.port.out.CampaignIncentiveOutcomeEvent
+import com.openbank.campaign.application.port.out.CampaignIncentiveOutcomeRepository
 import com.openbank.campaign.application.port.out.CampaignInteractionAttribution
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
@@ -247,6 +250,42 @@ class CampaignEngagementEventEntity : PanacheEntityBase() {
 
     @Column(nullable = false, length = 16)
     lateinit var type: String
+
+    @Column(nullable = false)
+    lateinit var occurredAt: Instant
+}
+
+/** No party, promo code or digest is retained in this operator-facing projection. */
+@Entity
+@Table(name = "campaign_incentive_outcome")
+class CampaignIncentiveOutcomeEntity : PanacheEntityBase() {
+    @Id
+    @Column(nullable = false, updatable = false)
+    lateinit var eventId: UUID
+
+    @Column(nullable = false)
+    lateinit var reservationId: UUID
+
+    @Column(nullable = false)
+    lateinit var campaignId: UUID
+
+    @Column(nullable = false)
+    var stepOrder: Int = 0
+
+    @Column(nullable = false)
+    lateinit var attributionRef: UUID
+
+    @Column(nullable = false)
+    lateinit var offerId: UUID
+
+    @Column(nullable = false)
+    lateinit var offerName: String
+
+    @Column(nullable = false)
+    var offerVersion: Int = 1
+
+    @Column(nullable = false, length = 16)
+    lateinit var status: String
 
     @Column(nullable = false)
     lateinit var occurredAt: Instant
@@ -519,6 +558,52 @@ class PanacheCampaignEngagementRepository : CampaignEngagementRepository {
 }
 
 @ApplicationScoped
+class PanacheCampaignIncentiveOutcomeRepository : CampaignIncentiveOutcomeRepository {
+    override suspend fun record(campaignId: UUID, stepOrder: Int, event: CampaignIncentiveOutcomeEvent): Boolean =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Any>(
+                    "INSERT INTO campaign_incentive_outcome " +
+                        "(event_id, reservation_id, campaign_id, step_order, attribution_ref, " +
+                        "offer_id, offer_name, offer_version, status, occurred_at) " +
+                        "VALUES (:eventId, :reservationId, :campaignId, :stepOrder, :attributionRef, " +
+                        ":offerId, :offerName, :offerVersion, :status, :occurredAt) " +
+                        "ON CONFLICT DO NOTHING",
+                )
+                    .setParameter("eventId", event.eventId)
+                    .setParameter("reservationId", event.reservationId)
+                    .setParameter("campaignId", campaignId)
+                    .setParameter("stepOrder", stepOrder)
+                    .setParameter("attributionRef", event.attributionRef)
+                    .setParameter("offerId", event.offerRef.id)
+                    .setParameter("offerName", event.offerRef.name)
+                    .setParameter("offerVersion", event.offerRef.version)
+                    .setParameter("status", event.status.name)
+                    .setParameter("occurredAt", event.occurredAt)
+                    .executeUpdate()
+            }
+        }.awaitSuspending() == 1
+
+    override suspend fun funnel(campaignId: UUID): CampaignIncentiveFunnel {
+        val counts = Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.createQuery(
+                    "select e.status, count(e) from CampaignIncentiveOutcomeEntity e " +
+                        "where e.campaignId = :campaignId group by e.status",
+                    Array<Any>::class.java,
+                ).setParameter("campaignId", campaignId).resultList
+            }
+        }.awaitSuspending().associate { (it[0] as String) to (it[1] as Long) }
+        return CampaignIncentiveFunnel(
+            reserved = counts["RESERVED"] ?: 0,
+            committed = counts["COMMITTED"] ?: 0,
+            released = counts["RELEASED"] ?: 0,
+            expired = counts["EXPIRED"] ?: 0,
+        )
+    }
+}
+
+@ApplicationScoped
 /**
  * Detekt caps a class at 11 functions and fires AT the threshold, which this repository now sits on.
  * Suppressed rather than split: the count is ten interface methods plus one private query helper,
@@ -683,6 +768,19 @@ class PanacheSendLogRepository :
     }.awaitSuspending()?.let {
         CampaignInteractionAttribution(it.campaignId, it.stepOrder, Channel.valueOf(requireNotNull(it.channel)))
     }
+
+    override suspend fun attributionForIncentiveOutcome(interactionRef: UUID): CampaignInteractionAttribution? =
+        Panache.withSession {
+            find(
+                "id = ?1 and channel in (?2, ?3) and outcome = ?4",
+                interactionRef,
+                Channel.PUSH.name,
+                Channel.BANNER.name,
+                SendOutcome.SENT.name,
+            ).firstResult<SendLogEntity>()
+        }.awaitSuspending()?.let {
+            CampaignInteractionAttribution(it.campaignId, it.stepOrder, Channel.valueOf(requireNotNull(it.channel)))
+        }
 
     /**
      * The predecessor send's delivery status (#3585 branch conditions).

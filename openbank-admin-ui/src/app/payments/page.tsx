@@ -16,6 +16,7 @@ import { stashRow } from '@/lib/services/rowHandoff'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { hasPermission } from '@/lib/auth/roles'
 import { PageHeader, StatusBadge } from '@/components/ui'
+import { useSingleFlight, useIdempotencyKey, wasSkipped } from '@/lib/mutations/singleFlight'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
 // routes — never NEXT_PUBLIC_ localhost URLs, which leaked the internal port map into the
@@ -264,6 +265,17 @@ function PaymentsContent() {
 
   const [showCreate, setShowCreate] = useState<'payment-type' | 'domestic-form' | 'sepa-form' | null>(null)
   const [creating, setCreating] = useState(false)
+  // Two distinct defects, two mechanisms (see src/lib/mutations/singleFlight.ts):
+  //  - `flight` rejects a second submit in the SAME tick, before `disabled={creating}`
+  //    has rendered. Without it two clicks booked two payments.
+  //  - `idem` holds ONE Idempotency-Key per payload, so a retry after a lost or failed
+  //    response REPLAYS the original attempt. The payment services genuinely honour the
+  //    key (Redis IdempotencyStore + UNIQUE idempotency_key + a pre-insert lookup) — a
+  //    freshly minted UUID per submit, which is what this page used to send, threw that
+  //    protection away at the only layer that could use it.
+  const flight = useSingleFlight()
+  const domesticIdem = useIdempotencyKey()
+  const sepaIdem = useIdempotencyKey()
   const [createError, setCreateError] = useState<string | null>(null)
   const [createSuccess, setCreateSuccess] = useState<string | null>(null)
   const [domesticForm, setDomesticForm] = useState<DomesticFormData>(emptyDomestic(false))
@@ -339,6 +351,7 @@ function PaymentsContent() {
       setCreateError(t('Vyplňte všechna povinná pole', 'Please fill all required fields'))
       return
     }
+    const outcome = await flight.run('payment:create:domestic', async () => {
     setCreating(true)
     try {
       const payload = {
@@ -356,16 +369,21 @@ function PaymentsContent() {
         ...(f.endToEndId && { endToEndId: f.endToEndId }),
       }
       const res = await fetch(`/api/domestic-payments`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': domesticIdem.forPayload(payload) },
         body: JSON.stringify(payload),
       })
       if (!res.ok) throw new Error(await res.text() || t('Vytvoření platby selhalo', 'Failed to create payment'))
+      // Cleared only once the attempt has definitively succeeded: the next deliberate
+      // submission of an identical payload is then a NEW payment, not a replay.
+      domesticIdem.clear()
       setCreateSuccess(t(f.instant ? 'Okamžitá platba vytvořena' : 'Platba vytvořena', f.instant ? 'Instant payment created' : 'Payment created'))
       setShowCreate(null)
       load()
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : t('Neznámá chyba', 'Unknown error'))
     } finally { setCreating(false) }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   const handleSepaCreate = async (e: React.FormEvent) => {
@@ -393,6 +411,7 @@ function PaymentsContent() {
       setCreateError(t('Jméno příjemce nesouhlasí (VoP NO_MATCH) — platbu nelze odeslat', 'Payee name does not match (VoP NO_MATCH) — payment cannot be sent'))
       return
     }
+    const outcome = await flight.run('payment:create:sepa', async () => {
     setCreating(true)
     try {
       const payload = {
@@ -405,16 +424,19 @@ function PaymentsContent() {
         ...(f.purposeCode && { purposeCode: f.purposeCode }),
       }
       const res = await fetch(`/api/sepa-payments`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': sepaIdem.forPayload(payload) },
         body: JSON.stringify(payload),
       })
       if (!res.ok) throw new Error(await res.text() || t('Vytvoření platby selhalo', 'Failed to create payment'))
+      sepaIdem.clear()
       setCreateSuccess(t(f.instant ? 'SCT Inst platba vytvořena' : 'SEPA platba vytvořena', f.instant ? 'SCT Inst payment created' : 'SEPA payment created'))
       setShowCreate(null)
       load()
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : t('Neznámá chyba', 'Unknown error'))
     } finally { setCreating(false) }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   // ── Filtered data ──────────────────────────────────────────────

@@ -27,9 +27,8 @@ import java.time.LocalDate
  *
  * Derives C 01.00 (Own Funds) from the ledger trial balance, structured data only — NOT EBA
  * XBRL/DPM taxonomy output, and there is NO ČNB transmission channel. Capital-structure rows are
- * reported as explicit, flagged zeros ([CorepCell.isDataGap]) because the ledger's chart of
- * accounts has no capital-structure GL accounts today; see [com.openbank.finrep.domain.mapper.C0100Mapper]
- * for the detailed rationale.
+ * reported as explicit, flagged zeros ([CorepCell.isDataGap]) when the trial balance has no
+ * recognised 6000-6060 source; see [com.openbank.finrep.domain.mapper.C0100Mapper].
  *
  * Roles come from [Roles], never string literals — see the note on
  * [com.openbank.finrep.infrastructure.rest.FinrepResource]: the shipped

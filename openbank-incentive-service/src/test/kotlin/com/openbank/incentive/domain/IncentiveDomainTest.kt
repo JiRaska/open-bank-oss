@@ -39,6 +39,13 @@ class IncentiveDomainTest {
     }
 
     @Test
+    fun `qualifying action cannot predate reservation`() {
+        val reservation = reservation()
+        assertThatThrownBy { reservation.commit(reservation.reservedAt.minusSeconds(1)) }
+            .isInstanceOf(IncentiveConflict::class.java)
+    }
+
+    @Test
     fun `expiry closes inventory and cannot be converted into success`() {
         val reservation = reservation()
         assertThatThrownBy { reservation.expire(now) }.isInstanceOf(IncentiveConflict::class.java)

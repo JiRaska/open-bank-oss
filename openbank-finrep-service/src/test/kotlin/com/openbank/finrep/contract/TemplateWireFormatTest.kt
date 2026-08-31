@@ -72,25 +72,25 @@ class TemplateWireFormatTest {
      */
     private val trialBalance = listOf(
         TrialBalanceLineDto(
-            code = "1100-CASH-CZK",
+            code = "1100",
             accountType = "ASSET",
             net = BigDecimal("150000.00"),
             currency = "CZK",
         ),
         TrialBalanceLineDto(
-            code = "2100-DEPOSITS-CZK",
+            code = "2100",
             accountType = "LIABILITY",
             net = BigDecimal("-125000.00"),
             currency = "CZK",
         ),
         TrialBalanceLineDto(
-            code = "4100-FEE-INCOME-CZK",
+            code = "4100",
             accountType = "INCOME",
             net = BigDecimal("-28000.00"),
             currency = "CZK",
         ),
         TrialBalanceLineDto(
-            code = "5100-STAFF-COST-CZK",
+            code = "5100",
             accountType = "EXPENSE",
             net = BigDecimal("3000.00"),
             currency = "CZK",
@@ -156,32 +156,29 @@ class TemplateWireFormatTest {
         assertThat(json["isBalanced"]).isEqualTo(true)
         // The verdict is served as the ENUM NAME, which is what `openapi.yaml` documents (#6011).
         assertThat(json["balanceVerdict"]).isEqualTo("AGREED_BALANCED")
-        assertThat(json["hasDataGaps"]).isEqualTo(true)
+        assertThat(json["hasDataGaps"]).isEqualTo(false)
 
         @Suppress("UNCHECKED_CAST")
         val gaps = json["dataGaps"] as List<Map<*, *>>
-        assertThat(gaps).hasSize(1)
-        assertThat(gaps.single().keys).containsExactlyInAnyOrder("code", "affectedScope", "reason")
-        assertThat(gaps.single()["code"]).isEqualTo("UNMAPPED_OFFICIAL_CELLS")
-        assertThat(gaps.single()["affectedScope"]).isEqualTo("F01.01 except r0380/c0010")
+        assertThat(gaps).isEmpty()
 
         @Suppress("UNCHECKED_CAST")
         val cells = json["cells"] as List<Map<*, *>>
-        assertThat(cells).hasSize(1)
+        assertThat(cells).hasSize(6)
         assertThat(cells.first().keys).containsExactlyInAnyOrder("rowRef", "colRef", "value", "currency")
-        assertThat(cells.map { it["rowRef"] }).containsExactly("r0380")
-        assertThat(cells.map { it["colRef"] }).containsExactly("c0010")
+        assertThat(cells.map { it["rowRef"] }).contains("r0010", "r0040", "r0181", "r0183", "r0360", "r0380")
+        assertThat(cells.map { it["colRef"] }).containsOnly("c0010")
         assertThat(cells.first()["currency"]).isEqualTo("CZK")
         // Official F 01.01 r0380 total assets — proves the cell is really derived from the ledger
         // trial balance, not a fixed skeleton. `value` is a JSON
         // NUMBER (schema `type: number`), so compare numerically — an untyped parse of `150000.00`
         // yields a Double whose toString drops the scale.
-        assertThat(cells.map { (it["value"] as Number).toDouble() })
-            .containsExactly(150_000.00)
+        assertThat((cells.single { it["rowRef"] == "r0380" }["value"] as Number).toDouble())
+            .isEqualTo(150_000.00)
     }
 
     @Test
-    fun `the XBRL CSV preflight exposes blockers rather than an artifact`() {
+    fun `the XBRL CSV preflight is ready when the governed mapping is complete and the trial balance agrees`() {
         val json = getJson("/api/v1/finrep/templates/F01.01/xbrl-csv/preflight", LocalDate.of(2026, 6, 30))
 
         assertThat(json.keys).containsExactlyInAnyOrder(
@@ -198,13 +195,11 @@ class TemplateWireFormatTest {
         assertThat(json["reportingFrameworkVersion"]).isEqualTo("4.2")
         assertThat(json["dpmVersion"]).isEqualTo("4.2.1")
         assertThat(json["taxonomyVersion"]).isEqualTo("4.2.0.0")
-        assertThat(json["state"]).isEqualTo("BLOCKED")
+        assertThat(json["state"]).isEqualTo("READY_FOR_RENDERING")
 
         @Suppress("UNCHECKED_CAST")
         val blockers = json["blockers"] as List<Map<*, *>>
-        assertThat(blockers).hasSize(1)
-        assertThat(blockers.single().keys).containsExactlyInAnyOrder("code", "reason")
-        assertThat(blockers.single()["code"]).isEqualTo("INCOMPLETE_OFFICIAL_MAPPING")
+        assertThat(blockers).isEmpty()
     }
 
     @Test
@@ -214,7 +209,7 @@ class TemplateWireFormatTest {
         assertThat(json.keys).containsExactlyInAnyOrder("templateId", "period", "cells", "hasDataGaps")
         assertThat(json["templateId"]).isEqualTo("C_01.00")
         assertThat(json["period"]).isEqualTo("2026-06-30")
-        // No EQUITY line in the stubbed trial balance — every capital row is a flagged zero.
+        // No recognised capital line in the stubbed trial balance — every capital row is a flagged zero.
         assertThat(json["hasDataGaps"]).isEqualTo(true)
 
         @Suppress("UNCHECKED_CAST")
@@ -225,7 +220,7 @@ class TemplateWireFormatTest {
         assertThat(cells.first()["rowRef"]).isEqualTo("r010")
         assertThat(cells.first()["label"]).isEqualTo("OWN FUNDS")
         assertThat(cells.first()["isDataGap"]).isEqualTo(true)
-        assertThat(cells.first()["gapReason"].toString()).contains("No capital-structure GL accounts")
+        assertThat(cells.first()["gapReason"].toString()).contains("no recognised regulatory-capital source")
     }
 
     @Test

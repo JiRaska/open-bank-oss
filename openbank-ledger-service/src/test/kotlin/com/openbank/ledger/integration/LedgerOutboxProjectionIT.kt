@@ -4,11 +4,22 @@
 
 package com.openbank.ledger.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.ledger.application.port.`in`.JournalLineRequest
 import com.openbank.ledger.application.port.`in`.LedgerUseCase
 import com.openbank.ledger.application.port.`in`.PostJournalCommand
+import com.openbank.ledger.application.port.out.GlAccountRepository
+import com.openbank.ledger.application.port.out.JournalRepository
+import com.openbank.ledger.application.port.out.YearCloseRepository
+import com.openbank.ledger.application.usecase.AccountingDayLock
+import com.openbank.ledger.application.usecase.LedgerService
+import com.openbank.ledger.application.usecase.PeriodFreezeLock
 import com.openbank.ledger.domain.model.JournalSide
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.trace.RecordingSpanExporter
+import io.opentelemetry.sdk.trace.SdkTracerProvider
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
@@ -21,6 +32,7 @@ import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
 
@@ -43,6 +55,30 @@ class LedgerOutboxProjectionIT {
 
     @Inject
     lateinit var ledger: LedgerUseCase
+
+    @Inject
+    lateinit var journalRepository: JournalRepository
+
+    @Inject
+    lateinit var glAccountRepository: GlAccountRepository
+
+    @Inject
+    lateinit var objectMapper: ObjectMapper
+
+    @Inject
+    lateinit var metrics: DomainMetrics
+
+    @Inject
+    lateinit var yearCloseRepository: YearCloseRepository
+
+    @Inject
+    lateinit var accountingDayLock: AccountingDayLock
+
+    @Inject
+    lateinit var periodFreezeLock: PeriodFreezeLock
+
+    @Inject
+    lateinit var clock: Clock
 
     // Deterministic posting accounts seeded by V3__ledger_governance.sql.
     private val glAssetId = UUID.fromString("a0000000-0000-0000-0000-000000000001") // 1100 ASSET
@@ -108,6 +144,63 @@ class LedgerOutboxProjectionIT {
         // customer account id — both committed atomically with the journal.
         assertThat(outboxCount(entry.id, "JournalPosted")).isEqualTo(1L)
         assertThat(outboxCount(subAccount, "AccountBookedChanged")).isEqualTo(1L)
+    }
+
+    @Test
+    fun `real journal posting emits a bounded assertion-backed trace contract`() {
+        val exporter = RecordingSpanExporter()
+        val provider = SdkTracerProvider.builder().addSpanProcessor(SimpleSpanProcessor.create(exporter)).build()
+        try {
+            val tracedLedger = LedgerService(
+                journalRepository,
+                glAccountRepository,
+                objectMapper,
+                metrics,
+                yearCloseRepository,
+                accountingDayLock,
+                periodFreezeLock,
+                clock,
+            ).also { it.tracer = provider.get("ledger-trace-contract-it") }
+            val command = PostJournalCommand(
+                idempotencyKey = UUID.randomUUID().toString(),
+                transactionId = UUID.randomUUID(),
+                entryDate = LocalDate.now(),
+                valueDate = LocalDate.now(),
+                description = "Trace contract journal posting (IT)",
+                lines = listOf(
+                    JournalLineRequest(
+                        glAssetId,
+                        JournalSide.DEBIT,
+                        BigDecimal("10.00"),
+                        "CZK",
+                        null,
+                        BigDecimal("10.00"),
+                        "CZK",
+                    ),
+                    JournalLineRequest(
+                        glDepositControlId,
+                        JournalSide.CREDIT,
+                        BigDecimal("10.00"),
+                        "CZK",
+                        null,
+                        BigDecimal("10.00"),
+                        "CZK",
+                        UUID.randomUUID(),
+                    ),
+                ),
+                postedBy = UUID.randomUUID(),
+            )
+
+            onVertxContext { tracedLedger.postJournal(command) }
+
+            exporter.contract()
+                .requiresSpan("ledger.journal.post")
+                .requiresAttribute("ledger.journal.post", "openbank.ledger.journal.status")
+                .hasNoErrorSpan()
+                .verifiedAs("ledger-journal-post")
+        } finally {
+            provider.close()
+        }
     }
 
     @Test

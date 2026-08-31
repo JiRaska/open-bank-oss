@@ -7,6 +7,9 @@
 
 import { defineConfig, devices } from '@playwright/test'
 
+const e2ePort = process.env.OPENBANK_E2E_PORT ?? '3001'
+const e2eBaseUrl = `http://localhost:${e2ePort}`
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
@@ -25,7 +28,7 @@ export default defineConfig({
   ] : 'list',
 
   use: {
-    baseURL: 'http://localhost:3001',
+    baseURL: e2eBaseUrl,
     // Don't re-use browser state between tests — each spec gets a fresh page
     trace: 'on-first-retry',
   },
@@ -38,8 +41,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'npm run dev -- -p 3001',
-    url: 'http://localhost:3001',
+    command: `npm run dev -- -p ${e2ePort}`,
+    url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
@@ -47,7 +50,7 @@ export default defineConfig({
       OPENBANK_REPO_ROOT: '../',
       // Disable auth for E2E tests. e2e/helpers/auth.ts mints session cookies with this
       // same secret (falls back to the same default) — keep the two in sync.
-      NEXTAUTH_URL: 'http://localhost:3001',
+      NEXTAUTH_URL: e2eBaseUrl,
       NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET ?? 'e2e-test-secret',
     },
   },

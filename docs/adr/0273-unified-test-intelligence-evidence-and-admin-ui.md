@@ -273,15 +273,25 @@ The comparison is capability-based rather than a claim that OpenBank is categori
 |---|---|---|---|
 | Per-test history, flaky lifecycle, wasted CI time and AI-assisted categorisation | Datadog Test Optimization | Same-commit transitions, wasted duration and bounded diagnosis are live; automated quarantine is deliberately absent | Prove an accountable remediation lifecycle without allowing quarantine to green a money-path failure |
 | Coverage/change-driven test selection | Datadog Test Impact Analysis, Tricentis SeaLights, Launchable | Behind: path-scoped service selection exists, but per-test selection is not implemented | Run shadow recommendations against preserved full suites and measure escaped-failure recall before any gate use |
-| Scheduled browser/API journeys with retained results and observability correlation | Grafana Synthetic Monitoring, Checkly | Partially ahead on governed journey ownership, explicit planned/blocked states and banking taint boundaries; behind on globally distributed probes | Execute every active journey on its declared schedule and add region/private-probe evidence without weakening identity |
+| Scheduled browser/API journeys with retained results and observability correlation | Grafana Synthetic Monitoring, Checkly | Partially ahead on governed journey ownership, explicit planned/blocked states and banking taint boundaries; the Admin UI SSO boundary now retains separate Chromium and Firefox envelopes with an explicit declared-engine denominator. It remains behind on globally distributed probes and rollout-attested browser verdicts. | Execute every active journey on its declared schedule and add region/private-probe and rollout-attestation evidence without weakening identity |
 | Browser and mobile RUM combined with synthetics and backend telemetry | Dynatrace Digital Experience Monitoring, Datadog RUM/test correlation | Partial: privacy-bounded mobile trace arrival and Admin UI browser CI are separate, honest observations; no full session analytics is claimed | Prove consented Android and iOS exporter arrivals and journey-to-backend correlation in the sandbox |
 | Performance tests as continuous SDLC evidence correlated with system telemetry | Grafana k6 | Local service performance gate executes; the money-path sandbox baseline is explicitly `not-run` without a safe reachable target | Provide an isolated authenticated target/runner, then retain repeated comparable baselines and SLO correlation |
+| Semantic locator healing with confidence and revision history | mabl, Testim | Behind by design: source-reviewed Playwright selectors remain deterministic; the agent cannot silently rewrite them | Evaluate reviewed repair proposals against seeded locator defects before permitting any generated source change |
+| Natural-language test generation and reviewable smart fixes | Functionize | Partial: the agent diagnoses measured gaps and can prepare a human-reviewed proposal, but no generated test is accepted as evidence | Add a defect-seeding corpus, sensitive-data filter, deterministic replay and an accountable generated-test owner |
+| Visual AI with deterministic execution and cross-browser baselines | Applitools | Behind: functional Playwright and committed mobile goldens are enforced, but no owned fleet visual baseline is claimed | Establish screenshot classification, baseline approval ownership, retention and a cross-browser execution grid |
 
 OpenBank's present differentiator is therefore the evidence contract, not feature count: released
 components that did not run stay visible, Testcontainers are split into declared and observed
 runtime, every verdict retains commit/workflow provenance, and AI cannot raise a verdict or approve a
 release. The matrix is also a backlog: any row whose next proof is missing prevents a claim of
 end-to-end completion.
+
+Primary vendor documentation used for the AI-testing rows: mabl advanced auto-heal
+(<https://help.mabl.com/hc/en-us/articles/19078583792404-How-auto-heal-works>), Testim locator
+auto-improvement (<https://help.testim.io/docs/locators-auto-improve>), Functionize Create Agent and
+Smart Fix workflow (<https://support.functionize.com/hc/en-us/articles/32990538896663-Creating-Tests-with-Functionize>)
+and Applitools platform/deterministic authoring documentation (<https://applitools.com/docs/>,
+<https://applitools.com/platform/create/>). These are capability sources, not procurement claims.
 
 OpenBank combines the useful parts with a bank-specific invariant: flaky classification is triage
 metadata, never permission to make a failing money-path or control test green. Predictive selection
@@ -313,8 +323,8 @@ while removing manual run-to-artifact rediscovery for an authorized operator.
 ### D9 — Client experience evidence and RUM boundary
 
 Client quality is part of Test Intelligence, but CI and real-user telemetry remain distinct
-observations. The Admin UI contributes its Playwright and visual-regression evidence; browser RUM
-remains rejected for this internal operator surface by ADR-0088. The separate customer-app repository
+observations. The Admin UI contributes its Playwright and visual-regression evidence plus the
+privacy-bounded, authenticated browser RUM defined by ADR-0274. The separate customer-app repository
 publishes a bounded, immutable envelope containing unit and committed-golden verdicts plus run
 provenance. Missing private-repository access or an expired artifact renders `not-run` with a blocker;
 source presence is never promoted to a completed test.

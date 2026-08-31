@@ -59,16 +59,13 @@ class FlakyTestResource(
     @GET
     @Path("/findings")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getActiveFindings(): List<FlakyTestFinding> = runBlocking {
-        getFindings.getActive()
-    }
+    suspend fun getActiveFindings(): List<FlakyTestFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getFinding(@PathParam("id") id: String): FlakyTestFinding = runBlocking {
+    suspend fun getFinding(@PathParam("id") id: String): FlakyTestFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
-    }
 }
 
 data class FlakyTestCheckStarted(val workflowId: String)

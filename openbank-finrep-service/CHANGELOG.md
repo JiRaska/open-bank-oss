@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.10.1...finrep-service-v0.10.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* **regulatory:** complete FINREP and COREP previews ([#7296](https://github.com/JiRaska/open-bank-oss/issues/7296)) ([d387b3e](https://github.com/JiRaska/open-bank-oss/commit/d387b3ea51293416dc15a243d248564c2eeacf84))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.10.0...finrep-service-v0.10.1) (2026-08-26)
 
 

@@ -18,8 +18,8 @@ class F0102AndF0103MapperTest {
         lines = listOf(
             line("1000", "ASSET", "500000"),
             line("2000", "LIABILITY", "-300000"),
-            line("4000", "INCOME", "-260000"),
-            line("5000", "EXPENSE", "60000"),
+            line("4100", "INCOME", "-260000"),
+            line("5100", "EXPENSE", "60000"),
         ),
         ledgerReportsBalanced = true,
     )
@@ -29,11 +29,11 @@ class F0102AndF0103MapperTest {
         val template = F0102Mapper.map(snapshot, asOf)
 
         assertThat(template.templateId).isEqualTo("F01.02")
-        val cell = template.cells.single()
+        val cell = template.cells.single { it.rowRef == "r0300" }
         assertThat(cell.rowRef).isEqualTo("r0300")
         assertThat(cell.colRef).isEqualTo("c0010")
         assertThat(cell.value).isEqualByComparingTo("300000")
-        assertThat(template.dataGaps.single().affectedScope).isEqualTo("F01.02 except r0300/c0010")
+        assertThat(template.dataGaps).isEmpty()
     }
 
     @Test
@@ -41,12 +41,10 @@ class F0102AndF0103MapperTest {
         val template = F0103Mapper.map(snapshot, asOf)
 
         assertThat(template.templateId).isEqualTo("F01.03")
-        assertThat(template.cells.associate { it.rowRef to it.value }).containsExactlyInAnyOrderEntriesOf(
-            mapOf("r0300" to BigDecimal("200000"), "r0310" to BigDecimal("500000")),
-        )
+        assertThat(template.cells.single { it.rowRef == "r0300" }.value).isEqualByComparingTo(BigDecimal("200000"))
+        assertThat(template.cells.single { it.rowRef == "r0310" }.value).isEqualByComparingTo(BigDecimal("500000"))
         assertThat(template.cells).allMatch { it.colRef == "c0010" }
-        assertThat(template.dataGaps.single().affectedScope)
-            .isEqualTo("F01.03 except r0300/c0010, r0310/c0010")
+        assertThat(template.dataGaps).isEmpty()
     }
 
     private fun line(code: String, accountType: String, net: String) =

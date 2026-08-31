@@ -5,7 +5,7 @@
 openapi: 3.1.0
 info:
   title: Flaky Test Hunter API
-  version: 1.3.0
+  version: 1.4.0
   description: Internal development-plane agent API. It scans fleet test source; any automated repair is constrained to the agent's own test source and is proposed for human review only.
   license:
     name: AGPL-3.0-only
@@ -115,6 +115,11 @@ components:
           type: array
           maxItems: 20
           items: { $ref: '#/components/schemas/TestIntelligenceEvidenceInput' }
+        requiredControls:
+          type: array
+          maxItems: 20
+          default: []
+          items: { $ref: '#/components/schemas/TestIntelligenceRequiredControlInput' }
         declaredInfrastructure: { type: array, items: { type: string, enum: [postgres, redpanda, valkey] } }
         observedInfrastructureStarts: { type: integer, minimum: 0 }
         observedInfrastructureStops: { type: integer, minimum: 0, description: "Observed Testcontainers stop events; cannot exceed starts." }
@@ -127,4 +132,10 @@ components:
       required: [kind, state]
       properties:
         kind: { type: string, enum: [unit, integration, contract, e2e, performance, synthetic, mutation, visual, simulation] }
+        state: { type: string, enum: [passed, failed, skipped, not-run, stale, blocked, unknown] }
+    TestIntelligenceRequiredControlInput:
+      type: object
+      required: [kind, state]
+      properties:
+        kind: { type: string, enum: [unit, integration, contract, e2e, performance, synthetic, mutation, visual, trace, simulation, coverage, runtime] }
         state: { type: string, enum: [passed, failed, skipped, not-run, stale, blocked, unknown] }

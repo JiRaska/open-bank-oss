@@ -26,6 +26,11 @@ spec:
   # Sunday 02:00 UTC — low-traffic window, well before European business hours.
   schedule: "0 2 * * 0"
   concurrencyPolicy: Forbid
+  # A short controller outage must not silently erase an entire weekly audit, as
+  # happened in sandbox on 2026-08-23. Keep the catch-up window bounded: an audit
+  # started more than one hour late belongs to the wrong observation window and
+  # must remain visibly stale rather than manufacturing fresh-looking evidence.
+  startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 4
   # failedJobsHistoryLimit: 1 — keep the LATEST failure for triage, not an archive.
   # kube-prometheus-stack's KubeJobFailed fires per surviving failed Job OBJECT, so a
@@ -74,6 +79,12 @@ spec:
                   value: "http://tempo.observability.svc:3200"
                 - name: LOOKBACK
                   value: "168h"  # 7 days
+                # Bound retries for the mobile-signal liveness query (below) so a
+                # transient Tempo blip is not conflated with a genuine empty result.
+                - name: MOBILE_SIGNAL_MAX_RETRIES
+                  value: "3"
+                - name: MOBILE_SIGNAL_RETRY_DELAY_SECONDS
+                  value: "5"
               command:
                 - /bin/sh
                 - -c
@@ -98,8 +109,10 @@ spec:
                     # `grep` exits 1 when a tag has zero values; under `set -o pipefail` that
                     # non-zero status would kill the whole job (it did, every run). Swallow it
                     # so a legitimately-empty attribute counts as 0 instead of aborting.
+                    # This is a cardinality audit, not a telemetry explorer: values may include
+                    # the pseudonymous party_id.  Never put a response sample in logs.
                     count=$(echo "$result" | { grep -o '"value"' || true; } | wc -l | tr -d ' ')
-                    echo "{\"event\":\"rum-attribute-audit\",\"attribute\":\"${attr}\",\"unique_value_count\":${count},\"sample\":$(echo "$result" | head -c 512)}"
+                    echo "{\"event\":\"rum-attribute-audit\",\"attribute\":\"${attr}\",\"unique_value_count\":${count}}"
                   done
                   # RUM-INGEST LIVENESS. The attribute audit above verifies the redaction
                   # allow-list, but app.version, device.model and screen.name are client-version
@@ -109,9 +122,32 @@ spec:
                   # the canonical OTel resource identity set by the app and retained through
                   # the gateway; query it separately to distinguish no signal from sparse
                   # attribute coverage without widening the collected data.
-                  mobile_services=$(curl -sf --max-time 30 \
-                    "${TEMPO_URL}/api/v2/search/tag/.service.name/values?start=${START}&end=${END}" \
-                    2>/dev/null || echo '{"tagValues":[]}')
+                  # A `curl -sf` failure (network blip, Tempo restart mid-query) and a
+                  # successful-but-empty response both used to fall through the same
+                  # `|| echo '{"tagValues":[]}'` fallback, so a transient failure was
+                  # reported as "no mobile signal" — indistinguishable from a real gap
+                  # (issue #7535). Retry the query a bounded number of times, and only
+                  # treat a response that HTTP-succeeded as evidence of absence; a query
+                  # that never succeeds gets its own "unavailable" outcome instead.
+                  mobile_query_ok=0
+                  mobile_services=""
+                  attempt=1
+                  while [ "$attempt" -le "${MOBILE_SIGNAL_MAX_RETRIES:-3}" ]; do
+                    if mobile_services=$(curl -sf --max-time 30 \
+                      "${TEMPO_URL}/api/v2/search/tag/.service.name/values?start=${START}&end=${END}" \
+                      2>/dev/null); then
+                      mobile_query_ok=1
+                      break
+                    fi
+                    echo "{\"event\":\"rum-mobile-signal-query-retry\",\"attempt\":${attempt}}"
+                    attempt=$((attempt + 1))
+                    sleep "${MOBILE_SIGNAL_RETRY_DELAY_SECONDS:-5}"
+                  done
+                  if [ "$mobile_query_ok" -ne 1 ]; then
+                    echo "{\"event\":\"rum-mobile-signal-unavailable\",\"lookback\":\"${LOOKBACK}\",\"detail\":\"Tempo tag-values query for service.name failed on every attempt. This proves nothing about whether the openbank-app signal is present or absent — only that the query could not be established.\"}"
+                    echo "{\"event\":\"rum-attribute-audit-done\",\"result\":\"fail\"}"
+                    exit 1
+                  fi
                   if ! echo "$mobile_services" | grep -Eq '"value"[[:space:]]*:[[:space:]]*"openbank-app[^" ]*"'; then
                     echo "{\"event\":\"rum-mobile-signal-absent\",\"lookback\":\"${LOOKBACK}\",\"detail\":\"Tempo reported no service.name matching openbank-app in the window. Check the rum-gateway ingress, the app SDK exporter endpoint, and whether any build shipping the SDK is live.\"}"
                     echo "{\"event\":\"rum-attribute-audit-done\",\"result\":\"fail\"}"

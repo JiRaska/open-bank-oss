@@ -1,0 +1,65 @@
+# Cancel only a proven-stalled service CI job, then leave an addressed audit trail.
+# A cancelled test run is never turned green; Services CI's normal failure/retry path owns its
+# immutable diagnostics and any later rerun. This control prevents an invisible in-progress job
+# from blocking its PR forever (issue #7477).
+name: Service build stall watch
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report candidates without cancelling them'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: service-build-stall-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Self-test classifier
+        run: python3 .github/scripts/check-stuck-service-build.py --self-test
+      - name: Find and cancel only proved stalled service CI jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gh api "repos/${REPO}/actions/runs?status=in_progress&per_page=100" --jq '[.workflow_runs[] | select(.name == "Services CI") | {id,run_attempt,html_url}]' > /tmp/service-runs.json
+          printf '[]' > /tmp/stalled.json
+          jq -c '.[]' /tmp/service-runs.json | while IFS= read -r run; do
+            run_id=$(jq -r '.id' <<<"$run")
+            attempt=$(jq -r '.run_attempt' <<<"$run")
+            run_url=$(jq -r '.html_url' <<<"$run")
+            gh api "repos/${REPO}/actions/runs/${run_id}/attempts/${attempt}/jobs?per_page=100" > /tmp/jobs.json
+            candidates=$(python3 .github/scripts/check-stuck-service-build.py --jobs-json /tmp/jobs.json --now "$now" --timeout-minutes 45)
+            jq -c --arg runId "$run_id" --arg attempt "$attempt" --arg runUrl "$run_url" '.[] + {runId:$runId,attempt:$attempt,runUrl:$runUrl}' <<<"$candidates" \
+              | while IFS= read -r candidate; do
+                  jq --argjson candidate "$candidate" '. + [$candidate]' /tmp/stalled.json > /tmp/stalled.next && mv /tmp/stalled.next /tmp/stalled.json
+                done
+          done
+          jq -c '.[]' /tmp/stalled.json | while IFS= read -r candidate; do
+            run_id=$(jq -r '.runId' <<<"$candidate")
+            title="CI stalled service build: $(jq -r '.job' <<<"$candidate")"
+            body=$(jq -r '"<!-- service-build-stall:" + .runId + ":" + .jobId + " -->\n\n## Service CI job was cancelled after no progress\n\n| | |\n|---|---|\n| workflow run | [run " + .runId + " attempt " + .attempt + "](" + .runUrl + ") |\n| stalled job | [" + .job + "](" + .url + ") |\n| stalled step | `" + .step + "` |\n| classifier | `" + .reason + "` |\n| started | `" + .startedAt + "` |\n| observed age | `" + .ageMinutes + " minutes` |\n\nThe watchdog acts only when the mandatory `Build + test` step itself exceeds 45 minutes, or when every substantive step completed and a `Post Run …` action alone exceeds 45 minutes. It never cancels Kover, envelope creation or artifact publication while those steps are active. The cancellation preserves GitHub attempt diagnostics and does **not** create a green verdict. Inspect and rerun through the normal CI path.\n\n_Automated by Service build stall watch (issue #7477)._"' <<<"$candidate")
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "::warning title=CI stalled-build dry run::${title}"
+              continue
+            fi
+            gh api --method POST "repos/${REPO}/actions/runs/${run_id}/cancel" >/dev/null
+            gh issue create --repo "$REPO" --title "$title" --body "$body" --label fleet-health
+          done

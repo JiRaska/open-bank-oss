@@ -148,7 +148,7 @@ mp:
         group.id: openbank-balance-service
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest
-      # ADR-0073: create a zero balance row when an account is created (event-driven init,
+      # ADR-0267 §3: create a zero balance row when an account is created (event-driven init,
       # so onboarding accounts opened from a Kafka consumer get a balance without the
       # synchronous authenticated REST call). initializeBalance is idempotent.
       balance-init-in:

@@ -59,7 +59,16 @@ on:
       - "openbank-infra/gitops/components/*/feature-flags.yaml"
       - "openbank-libs/governance/agents.yaml"
       - "openbank-libs/governance/compliance-controls.yaml"
+      # Test Intelligence's governed performance plans are baked into
+      # test-intelligence.json. Without these inputs a GitOps manifest can be Synced
+      # while the running UI still presents the prior plan/blocker snapshot.
+      - "perf/scenarios.yaml"
+      - "perf/k6/**"
       - "openbank-libs/governance/rules.yaml"
+      # Test Intelligence snapshot inputs. A journey catalog/manifest change must rebuild
+      # the image: the sandbox CronJob alone proves runtime, but the operator's bundled
+      # inventory and blockers would otherwise remain stale until an unrelated UI edit.
+      - "openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"
       - "openbank-libs/governance/journeys.yaml"
       # openbank-libs/docs is the ONLY docs tree baked into the image: the Dockerfile's
       # docs-collector copies /repo/openbank-*/docs, and src/lib/services/docs.ts serves the
@@ -517,11 +526,12 @@ jobs:
               done
           echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes."
 
-      - name: Stage pitest mutation results from latest weekly run
+      - name: Stage pitest mutation results from latest completed weekly run
         # pitest.yml uploads one artifact per service: pitest-{service} (30-day retention).
         # collect-quality-report.mjs reads openbank-*/build/reports/pitest/mutations.xml.
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
-        # Best-effort: absent → mutations tab stays empty (acceptable, never blocks build).
+        # Do not filter to success: a failed/latest attempt must not disappear behind an
+        # older green run. Best-effort absence stays visible as missing evidence.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -529,11 +539,11 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=success&per_page=1" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=1" \
             | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
             2>/dev/null || true)
           if [ -z "${RUN_ID}" ]; then
-            echo "No successful pitest run found — skipping pitest staging."
+            echo "No completed pitest run found — skipping pitest staging."
             exit 0
           fi
           echo "Staging pitest results from run ${RUN_ID}..."
@@ -566,12 +576,15 @@ jobs:
           COUNT=$(find . -path "*/build/reports/pitest/mutations.xml" | wc -l | tr -d ' ')
           echo "Staged ${COUNT} mutations.xml files from ${DOWNLOADED} artifacts."
 
-      - name: Stage performance evidence from latest successful k6 run
+      - name: Stage performance evidence from latest complete k6 run
         # The Test Intelligence collector reads k6 summaries only from the deployment-local
         # perf-artifacts directory.  A declared scenario is deliberately not promoted to a
         # result, so bring in only artifacts emitted by the latest successful main run of the
         # governed performance workflows.  The money-path baseline may intentionally emit only
         # a `not-run` envelope when no safe runner target exists; retain that provenance too.
+        # A manually narrowed perf-gate dispatch is useful for diagnosis, but must not replace
+        # the broader declared-scope snapshot with one service's result.  Select the newest
+        # successful run that retained BOTH declared v1 artifacts instead.
         # Missing or expired evidence remains `not-run` in the
         # UI; this best-effort staging step must never turn absence into a deployment failure.
         env:
@@ -581,12 +594,24 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/perf-artifacts
-          RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/perf-gate.yml/runs?branch=main&status=success&per_page=1" \
-            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
+          RUN_ID=""
+          RUN_IDS=$(api \
+            "https://api.github.com/repos/${REPO}/actions/workflows/perf-gate.yml/runs?branch=main&status=success&per_page=20" \
+            | python3 -c "import json,sys; [print(r['id']) for r in json.load(sys.stdin).get('workflow_runs',[])]" \
             2>/dev/null || true)
+          for candidate in ${RUN_IDS}; do
+            candidate_artifacts=$(api \
+              "https://api.github.com/repos/${REPO}/actions/runs/${candidate}/artifacts?per_page=100" \
+              | python3 -c "import json,sys; [print(a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if not a['expired']]" \
+              2>/dev/null || true)
+            if grep -qx 'perf-reports-openbank-product-catalog' <<< "${candidate_artifacts}" \
+              && grep -qx 'perf-reports-openbank-flaky-test-hunter' <<< "${candidate_artifacts}"; then
+              RUN_ID="${candidate}"
+              break
+            fi
+          done
           if [ -z "${RUN_ID}" ]; then
-            echo "No successful performance run found — performance evidence remains not-run."
+            echo "No successful complete declared-scope performance run found — performance evidence remains not-run."
             exit 0
           fi
           ARTIFACTS=$(api \

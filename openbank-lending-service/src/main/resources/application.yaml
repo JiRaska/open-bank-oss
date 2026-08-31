@@ -76,6 +76,20 @@ quarkus:
       url: ${PRODUCT_CATALOG_URL:http://localhost:8104}
       connect-timeout: 2000
       read-timeout: 3000
+    # ADR-0269 rule 1: the CREDIT_OFFERS consent read behind the credit-offer gate. Short timeouts
+    # on purpose — the gate fails CLOSED, so a slow consent-service costs a suppressed offer, never
+    # an unconsented one, and a customer waiting on a screen is the worse failure to optimise for.
+    consent-service:
+      url: ${CONSENT_SERVICE_URL:http://localhost:8107}
+      connect-timeout: 2000
+      read-timeout: 3000
+    # ADR-0269 #6215: the 360 credit profile behind the distress floor. Same short timeouts and the
+    # same reasoning — an unreadable profile makes the gate refuse, never approve, so a slow
+    # analytics-sink costs a suppressed offer.
+    analytics-sink:
+      url: ${ANALYTICS_SINK_URL:http://localhost:8110}
+      connect-timeout: 2000
+      read-timeout: 3000
   redis:
     hosts: redis://localhost:6379
   shutdown:

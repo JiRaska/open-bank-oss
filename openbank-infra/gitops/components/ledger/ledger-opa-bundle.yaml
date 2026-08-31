@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "e961d47b32f75102"
+    openbank.tech/policy-checksum: "e59492f5a3cb4fe3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -543,10 +543,9 @@ data:
     # source, not guessed:
     #   ledger.list     — list journal entries (LedgerResource)
     #   ledger.read     — journal/trial-balance/sub-ledger-balance/control-account reads
-    #   ledger.create   — POST a balanced journal entry (LedgerResource.postJournal);
-    #                      ALSO used by YearCloseResource.createDraft (#fiscalYear resource) —
-    #                      same action string, two different resources/use cases, both
-    #                      operator-only writes on the book of record.
+    #   ledger.create   — POST a balanced journal entry (LedgerResource.postJournal).
+    #   ledger.close.draft — create/refresh a period or fiscal-year close DRAFT; human-only
+    #                      because its recorded principal becomes maker evidence.
     #   ledger.reverse  — reverse a posted journal entry (#journalId)
     #   ledger.approve  — attest a DRAFT year-close (#fiscalYear) — a statutory close,
     #                      not a routine posting; kept operator-only, no M2M path.
@@ -629,16 +628,25 @@ data:
     	endswith(input.action, sprintf(".%v", [verb]))
     }
 
-    # Operators and admins may perform any ledger write: post/reverse a journal, run an
-    # FX revaluation, or create/refresh a year-close DRAFT. Attestation (ledger.approve)
-    # rides on this too — it is still an operator action, but see the note below on why
-    # it has NO M2M path at all (unlike create/reverse).
+    # Operators and admins may perform routine ledger writes. Close DRAFT creation has a
+    # separate human-only reason below because the recorded principal is maker evidence.
     allowed_reasons contains "operator-ledger-write" if {
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	not startswith(input.principal.id, "service-account-")
     	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay"}
+    }
+
+    # Period and fiscal-year close DRAFT creation is a maker action. It must never inherit the
+    # service-ledger-post exception for ledger.create: a service-account maker makes the later
+    # four-eyes comparison technically distinct but evidentially meaningless.
+    allowed_reasons contains "operator-ledger-close-draft" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not startswith(input.principal.id, "service-account-")
+        input.action == "ledger.close.draft"
     }
 
     # Year-close attestation (ledger.approve) is deliberately its OWN rule, not folded into
@@ -704,7 +712,7 @@ data:
 
     prohibited if {
     	input.principal.id == "service-account-openbank-edge"
-    	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve"}
+        input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1223,19 +1231,12 @@ data:
       - openbank-delegation-service            # ADR-0232: mints payment rights (customer-to-party grants) without moving
                                                 # money itself — money-path for the same reason consent/vop are. Threat
                                                 # model: docs/threat-models/openbank-delegation-service.md. four-eyes assessed:
-                                                # delegation.offer/revoke are self-service with SCA-bound ceremonies on both
-                                                # ends. The bank-side suspend was justified here as landing "via the fraud
-                                                # pipeline, not an operator console" — that is NOT true (#4403): fraud scoring
-                                                # is shadow-only and drives no suspension, so this exemption rested on a
-                                                # control that does not exist. The exemption still holds on the narrower and
-                                                # true ground that no operator suspend endpoint has shipped, so there is no
-                                                # maker/checker pair to gate yet. Revisit when the operator backoffice
-                                                # surface ships, and do not re-derive it from the fraud pipeline.
-      - openbank-fraud-service                # ADR-0084: v4 rule engine live; scoring is SHADOW-ONLY on every rail. The domestic-payment
-                                               # enforcement gate (issue #667) was MERGED AND THEN DELETED by 189fe7b03 (PR #2122,
-                                               # closing issue #1917) — this comment credited it as merely flag-gated until #4403.
-                                               # No fraud verdict changes any payment outcome today: the four wired rails call
-                                               # POST /fraud/score and log the result. See ADR-0084's 2026-08-09 correction block.
+                                                # delegation.offer/revoke/suspend are self-service or fraud-signal actions
+                                                # with SCA-bound ceremonies on both ends; the bank-side suspend lands via
+                                                # the fraud pipeline, not an operator console, so there is no
+                                                # maker/checker pair to gate yet. Revisit when the operator
+                                                # backoffice surface ships.
+      - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
                                                # four-eyes assessed (issue #938 follow-up): the only REST surface today is a stateless
                                                # POST /fraud/score (fraud.score) — no operator case-decision, rule-config, or manual
                                                # override endpoint exists yet, so there is nothing real to maker-checker gate. Revisit
