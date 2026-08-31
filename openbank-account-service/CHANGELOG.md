@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.26.0...account-service-v0.27.0) (2026-08-31)
+
+
+### Features
+
+* **account:** expose pending approvals in unified inbox ([#7028](https://github.com/JiRaska/open-bank-oss/issues/7028)) ([82512a4](https://github.com/JiRaska/open-bank-oss/commit/82512a459701f9cbc9742a9b06fb5e7e94e5be37))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.25.0...account-service-v0.26.0) (2026-08-26)
 
 
