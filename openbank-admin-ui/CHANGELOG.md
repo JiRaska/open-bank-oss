@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.224.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.223.0...admin-ui-v0.224.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** make delegated access clear and comparable ([#7758](https://github.com/JiRaska/open-bank-oss/issues/7758)) ([040c30a](https://github.com/JiRaska/open-bank-oss/commit/040c30a843b49261bdbdde15d6701f99104f45fe))
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve product catalog on outage ([#7764](https://github.com/JiRaska/open-bank-oss/issues/7764)) ([2192682](https://github.com/JiRaska/open-bank-oss/commit/2192682a3e0bf18993bc94844a356377797f9c5e))
+* **admin-ui:** preserve readiness report on outage ([#7760](https://github.com/JiRaska/open-bank-oss/issues/7760)) ([c3ffd0c](https://github.com/JiRaska/open-bank-oss/commit/c3ffd0cea3b601d8187252b0cf4effc9ee7c1731))
+* **admin-ui:** preserve sanctions lists on outage ([#7762](https://github.com/JiRaska/open-bank-oss/issues/7762)) ([3d3a37f](https://github.com/JiRaska/open-bank-oss/commit/3d3a37f32f1b643774f188a6986e2cff850915f9))
+
 ## [0.223.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.222.2...admin-ui-v0.223.0) (2026-08-31)
 
 
