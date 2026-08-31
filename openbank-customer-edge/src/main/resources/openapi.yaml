@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.46.0
+  version: 1.47.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1127,31 +1127,33 @@ paths:
   /fx/rates/{base}/{quote}/history:
     get:
       tags: [FX]
-      summary: Historical bank commercial rates for a currency pair (newest-first)
+      summary: Three-calendar-month ČNB reference-mid trend for a currency pair (chronological)
       description: >-
-        Returns the bank's own published rates (source=INTERNAL) for the pair over time, ordered
-        newest-first. Use `from`/`to` (ISO-8601 Instant) to bound the window; `limit` is capped
-        at 365 (one year of daily rates). Designed for the app's rate-history chart.
+        Returns the ČNB (source=CNB) reference-mid fixing for the pair as a chronological
+        (oldest-first) trend, explicitly `indicative: true` (issue #7735). With `from`/`to`
+        omitted the window defaults to "three calendar months ago" through "now" **by date** —
+        never approximated from a row `limit`, since ČNB does not publish on weekends or Czech
+        public holidays. `limit` bounds the number of rows fetched from fx-service, capped at 365.
+        Inverse pairs are supported: if the requested pair has no direct history, the swapped pair
+        is fetched and every rate inverted. Observations with no usable rate, no timestamp, or a
+        duplicate calendar date are excluded (the latest observation per date wins).
       operationId: getFxRateHistory
       security:
         - customerOidc: [accounts:read]
       parameters:
         - {name: base, in: path, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
         - {name: quote, in: path, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
-        - {name: from, in: query, required: false, schema: {type: string, format: date-time}, description: Start of window (inclusive), ISO-8601 Instant}
-        - {name: to, in: query, required: false, schema: {type: string, format: date-time}, description: End of window (inclusive), ISO-8601 Instant}
-        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 365, default: 90}}
-        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: from, in: query, required: false, schema: {type: string, format: date-time}, description: Start of window (inclusive), ISO-8601 Instant. Defaults to three calendar months before `to`.}
+        - {name: to, in: query, required: false, schema: {type: string, format: date-time}, description: End of window (inclusive), ISO-8601 Instant. Defaults to now.}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 365, default: 100}}
       responses:
         '200':
-          description: Historical bank FX rates, newest first
+          description: The three-calendar-month ČNB reference-mid trend, oldest first
           content:
             application/json:
-              schema:
-                type: array
-                items: {$ref: '#/components/schemas/FxRate'}
+              schema: {$ref: '#/components/schemas/FxRateTrend'}
         '400':
-          description: Invalid currency code or instant format
+          description: Invalid currency code, instant format, or from after to
         '502':
           description: Malformed upstream history
 
@@ -4120,6 +4122,24 @@ components:
         timestamp: {type: string, format: date-time, description: validFrom of the upstream rate}
         refMid: {type: string, description: ČNB central-bank fixing mid for this pair (absent when no CNB rate ingested yet)}
         spreadPct: {type: string, description: "(ask − refMid) / refMid × 100, 2 d.p. — how much the bank's sell price exceeds the CNB reference"}
+
+    FxRateTrend:
+      type: object
+      required: [indicative, base, quote, points]
+      properties:
+        indicative: {type: boolean, description: Always true — a display trend, not a dealing rate}
+        base: {type: string, description: ISO-4217 base currency as requested, e.g. CZK}
+        quote: {type: string, description: ISO-4217 quote currency as requested, e.g. EUR}
+        points:
+          type: array
+          description: Chronological (oldest-first), deduped-by-date ČNB reference-mid observations
+          items:
+            type: object
+            required: [date, rate, timestamp]
+            properties:
+              date: {type: string, format: date, description: Calendar date (yyyy-MM-dd) of the fixing}
+              rate: {type: string, description: ČNB reference-mid as a decimal string (inverted when the pair had no direct history)}
+              timestamp: {type: string, format: date-time, description: Upstream validFrom/createdAt of the fixing}
 
     EnrollDeviceRequest:
       type: object

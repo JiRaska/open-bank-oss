@@ -3648,46 +3648,72 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Historical bank commercial rates for a currency pair (newest-first). The edge fixes
-     * source=INTERNAL so customers only see the bank's own published rates, not ECB/CNB reference
-     * rows. from/to are ISO-8601 Instant strings; limit is capped at 365 (one year of daily rates).
-     * The app uses this list to render a rate-history chart.
+     * The three-calendar-month ČNB reference-mid trend for a currency pair, chronological (oldest
+     * first) — the single truthful source both the admin portal and this app render for the same
+     * pair (issue #7735). Callers may narrow the window with `from`/`to` (ISO-8601 Instant strings);
+     * with neither supplied the window defaults to "three calendar months ago" through "now", by
+     * DATE — never by row count, since CNB does not publish on weekends/holidays and a row-limit
+     * window silently shrinks the calendar span it covers. `source` is always fixed to CNB: the
+     * reference-mid fixing, not the bank's own bid/ask spread, is what "indicative trend" means here.
+     * Supports inverse pairs (e.g. CZK/EUR when only EUR/CZK is published) by retrying the swapped
+     * pair and inverting each rate when the direct pair has no history. Observations with no usable
+     * rate, no timestamp, or a duplicate calendar date are excluded (the latest observation for a
+     * given date wins). The response is explicitly `indicative: true` so the app can label it.
      */
     @GET
     @Path("/fx/rates/{base}/{quote}/history")
     @Authorize(action = "customer.fx.read")
     @Blocking
+    @Suppress("CyclomaticComplexMethod")
     fun fxRateHistory(
         @PathParam("base") base: String,
         @PathParam("quote") quote: String,
         @QueryParam("from") from: String?,
         @QueryParam("to") to: String?,
         @QueryParam("limit") limit: Int?,
-        @QueryParam("offset") offset: Int?,
     ): Response {
         val customer = customer()
         if (!isValidCurrency(base) || !isValidCurrency(quote)) return badRequest("Invalid currency")
         if (from != null && !isValidInstant(from)) return badRequest("Invalid 'from' instant: $from")
         if (to != null && !isValidInstant(to)) return badRequest("Invalid 'to' instant: $to")
-        val safeLimit = (limit ?: 90).coerceIn(1, 365)
-        val safeOffset = (offset ?: 0).coerceAtLeast(0)
-        val url = buildString {
-            // No source filter: CNB reference rows are excluded by mapFxRateList (cnbRef partition);
-            // INTERNAL + ECB bank rows all appear in the chart — correct union of published rates.
-            append("$fxServiceUrl/api/v1/fx/rates/$base/$quote/history?limit=$safeLimit&offset=$safeOffset")
-            if (from != null) append("&from=${java.net.URLEncoder.encode(from, "UTF-8")}")
-            if (to != null) append("&to=${java.net.URLEncoder.encode(to, "UTF-8")}")
+        val toInstant = to?.let { java.time.Instant.parse(it) } ?: java.time.Instant.now(clock)
+        val fromInstant = from?.let { java.time.Instant.parse(it) }
+            ?: toInstant.atZone(java.time.ZoneOffset.UTC).minusMonths(THREE_MONTHS).toInstant()
+        if (fromInstant.isAfter(toInstant)) return badRequest("'from' must be before 'to'")
+        val safeLimit = (limit ?: FX_HISTORY_DEFAULT_LIMIT).coerceIn(1, FX_HISTORY_MAX_LIMIT)
+
+        fun fetch(pairBase: String, pairQuote: String): Pair<Int, String> {
+            val url = buildString {
+                append(
+                    "$fxServiceUrl/api/v1/fx/rates/$pairBase/$pairQuote/history" +
+                        "?source=CNB&limit=$safeLimit",
+                )
+                append("&from=${java.net.URLEncoder.encode(fromInstant.toString(), "UTF-8")}")
+                append("&to=${java.net.URLEncoder.encode(toInstant.toString(), "UTF-8")}")
+            }
+            val resp = upstream.get(url, customer.partyId.toString())
+            return resp.status to (resp.entity as? String).orEmpty()
         }
-        val resp = upstream.get(url, customer.partyId.toString())
-        val upstreamBody = (resp.entity as? String).orEmpty()
-        if (resp.status != 200) {
-            return Response.status(resp.status).entity(upstreamBody).type(MediaType.APPLICATION_JSON).build()
+
+        val (status, body) = fetch(base, quote)
+        if (status != 200) {
+            return Response.status(status).entity(body).type(MediaType.APPLICATION_JSON).build()
         }
-        val mapped = mapFxRateList(objectMapper, upstreamBody)
+        val direct = mapCnbTrend(objectMapper, body, base, quote, inverted = false)
             ?: return Response.status(Response.Status.BAD_GATEWAY)
                 .entity("""{"error":"malformed fx history"}""")
                 .type(MediaType.APPLICATION_JSON).build()
-        return Response.ok(mapped).type(MediaType.APPLICATION_JSON).build()
+
+        var result = direct
+        if (direct.first == 0 && base != quote) {
+            // No direct history — retry the inverse pair and invert every rate (e.g. asked for
+            // CZK/EUR, fx-service only publishes EUR/CZK).
+            val (invStatus, invBody) = fetch(quote, base)
+            if (invStatus == 200) {
+                mapCnbTrend(objectMapper, invBody, base, quote, inverted = true)?.let { result = it }
+            }
+        }
+        return Response.ok(result.second).type(MediaType.APPLICATION_JSON).build()
     }
 
     // --- Cards (lifecycle: list, freeze/unfreeze, block, cancel, limits, controls, issue, reveal) ---
@@ -4949,6 +4975,13 @@ class CustomerEdgeResource(
         // Decimal scale for the FX mid-price projected to the app (rate = (bid+ask)/2).
         private const val FX_RATE_SCALE = 6
 
+        // The trend window is a CALENDAR span, never a row count — CNB does not fix on weekends
+        // or Czech public holidays, so "90 rows" silently covers more than 90 calendar days while
+        // "3 calendar months" is a truthful, reproducible window (issue #7735).
+        private const val THREE_MONTHS = 3L
+        private const val FX_HISTORY_DEFAULT_LIMIT = 100
+        private const val FX_HISTORY_MAX_LIMIT = 365
+
         // Minor-unit scale for the buy leg of a pocket conversion (ADR-0107). All currencies the
         // product allow-list offers (CZK, EUR, USD, GBP, PLN) use 2 fraction digits.
         private const val PRIMARY_MINOR_UNIT_SCALE = 2
@@ -5388,6 +5421,78 @@ class CustomerEdgeResource(
                 if (spreadPct != null) put("spreadPct", spreadPct)
             }
         }
+
+        /**
+         * Project fx-service's CNB-sourced history rows into the app's chronological trend shape:
+         * `{indicative: true, base, quote, points: [{date, rate, timestamp}, ...]}`, oldest first.
+         *
+         * Normalization (issue #7735):
+         *  - a row is DROPPED unless it has both currency codes, a usable rate (midRate, else
+         *    bid/ask mid, else a plain `rate` field, always > 0) and a parseable timestamp;
+         *  - when [inverted] is true (the direct pair had no history and the swapped pair was
+         *    fetched instead) every rate is replaced with its reciprocal and base/quote in the
+         *    output are the ORIGINAL requested pair, not the upstream row's;
+         *  - rows are DEDUPED by calendar date (the date portion of the timestamp) — CNB publishes
+         *    at most one fixing per day, so more than one row for the same date is a data defect;
+         *    the row with the LATEST timestamp for that date wins;
+         *  - the result is sorted ascending by date (upstream returns newest-first).
+         *
+         * Returns `rowCount to json`, or null only on a non-array body. Package-visible for tests.
+         */
+        @Suppress("CyclomaticComplexMethod")
+        internal fun mapCnbTrend(
+            mapper: ObjectMapper,
+            upstreamJson: String,
+            base: String,
+            quote: String,
+            inverted: Boolean,
+        ): Pair<Int, String>? = runCatching {
+            val arr = mapper.readTree(upstreamJson) as? com.fasterxml.jackson.databind.node.ArrayNode ?: return null
+            val byDate = mutableMapOf<String, Pair<String, java.math.BigDecimal>>() // date -> (timestamp, rate)
+            arr.forEach { node ->
+                val obj = node as? ObjectNode ?: return@forEach
+                val rowBase = obj.get("baseCurrency")?.takeIf { it.isTextual }?.asText() ?: return@forEach
+                val rowQuote = obj.get("quoteCurrency")?.takeIf { it.isTextual }?.asText() ?: return@forEach
+                fun dec(f: String): java.math.BigDecimal? = obj.get(f)
+                    ?.let { if (it.isTextual) it.asText() else it.toString() }
+                    ?.let { runCatching { java.math.BigDecimal(it) }.getOrNull() }
+                var rate = dec("midRate") ?: midOf(dec("bidRate"), dec("askRate")) ?: dec("rate") ?: return@forEach
+                if (rate.signum() <= 0) return@forEach
+                val ts = obj.get("validFrom")?.takeIf { it.isTextual }?.asText()
+                    ?: obj.get("createdAt")?.takeIf { it.isTextual }?.asText()
+                    ?: return@forEach
+                val instant = runCatching { java.time.Instant.parse(ts) }.getOrNull() ?: return@forEach
+                if (inverted) {
+                    rate = java.math.BigDecimal.ONE.divide(rate, FX_RATE_SCALE, java.math.RoundingMode.HALF_UP)
+                } else if (rowBase != base || rowQuote != quote) {
+                    return@forEach
+                }
+                val date = ts.take(DATE_PREFIX_LENGTH)
+                val existing = byDate[date]
+                if (existing == null || instant.isAfter(java.time.Instant.parse(existing.first))) {
+                    byDate[date] = ts to rate
+                }
+            }
+            val out = mapper.createArrayNode()
+            byDate.toSortedMap().forEach { (date, tsRate) ->
+                out.add(
+                    mapper.createObjectNode().apply {
+                        put("date", date)
+                        put("rate", tsRate.second.stripTrailingZeros().toPlainString())
+                        put("timestamp", tsRate.first)
+                    },
+                )
+            }
+            val result = mapper.createObjectNode().apply {
+                put("indicative", true)
+                put("base", base)
+                put("quote", quote)
+                set<com.fasterxml.jackson.databind.node.ArrayNode>("points", out)
+            }
+            byDate.size to mapper.writeValueAsString(result)
+        }.getOrNull()
+
+        private const val DATE_PREFIX_LENGTH = 10
 
         /** Mid-price (bid+ask)/2, or whichever single side is present, or null if neither is. */
         private fun midOf(bid: java.math.BigDecimal?, ask: java.math.BigDecimal?): java.math.BigDecimal? = when {

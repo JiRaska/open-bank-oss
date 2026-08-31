@@ -1589,7 +1589,7 @@ class CustomerEdgeResourceTest {
     fun `fxRateHistory returns 400 for invalid currency code`() {
         val caller = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>(relaxed = true)
-        val resp = fxResource(upstream, caller).fxRateHistory("eur", "CZK", null, null, null, null)
+        val resp = fxResource(upstream, caller).fxRateHistory("eur", "CZK", null, null, null)
         assertThat(resp.status).isEqualTo(400)
     }
 
@@ -1597,7 +1597,7 @@ class CustomerEdgeResourceTest {
     fun `fxRateHistory returns 400 for malformed from instant`() {
         val caller = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>(relaxed = true)
-        val resp = fxResource(upstream, caller).fxRateHistory("EUR", "CZK", "not-a-date", null, null, null)
+        val resp = fxResource(upstream, caller).fxRateHistory("EUR", "CZK", "not-a-date", null, null)
         assertThat(resp.status).isEqualTo(400)
     }
 
@@ -1605,21 +1605,35 @@ class CustomerEdgeResourceTest {
     fun `fxRateHistory returns 400 for malformed to instant`() {
         val caller = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>(relaxed = true)
-        val resp = fxResource(upstream, caller).fxRateHistory("EUR", "CZK", null, "bad", null, null)
+        val resp = fxResource(upstream, caller).fxRateHistory("EUR", "CZK", null, "bad", null)
         assertThat(resp.status).isEqualTo(400)
     }
 
     @Test
-    fun `fxRateHistory builds correct upstream URL without source filter`() {
+    fun `fxRateHistory returns 400 when from is after to`() {
         val caller = UUID.randomUUID()
-        val urlSlot = slot<String>()
+        val upstream = mockk<UpstreamClient>(relaxed = true)
+        val resp = fxResource(upstream, caller)
+            .fxRateHistory("EUR", "CZK", "2026-06-01T00:00:00Z", "2026-01-01T00:00:00Z", null)
+        assertThat(resp.status).isEqualTo(400)
+    }
+
+    @Test
+    fun `fxRateHistory always fixes source=CNB, never the bank spread`() {
+        val caller = UUID.randomUUID()
+        val calledUrls = mutableListOf<String>()
         val upstream = mockk<UpstreamClient> {
-            every { get(capture(urlSlot), any()) } returns Response.ok("""[]""").build()
+            every { get(any(), any()) } answers {
+                calledUrls.add(firstArg())
+                Response.ok("""[]""").build()
+            }
         }
-        fxResource(upstream, caller).fxRateHistory("EUR", "CZK", null, null, 30, null)
-        assertThat(urlSlot.captured).doesNotContain("source=INTERNAL")
-        assertThat(urlSlot.captured).contains("/api/v1/fx/rates/EUR/CZK/history")
-        assertThat(urlSlot.captured).contains("limit=30")
+        fxResource(upstream, caller).fxRateHistory("EUR", "CZK", null, null, 30)
+        // The direct pair is fetched first, before any inverse-pair fallback.
+        val direct = calledUrls.first()
+        assertThat(direct).contains("source=CNB")
+        assertThat(direct).contains("/api/v1/fx/rates/EUR/CZK/history")
+        assertThat(direct).contains("limit=30")
     }
 
     @Test
@@ -1629,12 +1643,12 @@ class CustomerEdgeResourceTest {
         val upstream = mockk<UpstreamClient> {
             every { get(capture(urlSlot), any()) } returns Response.ok("""[]""").build()
         }
-        fxResource(upstream, caller).fxRateHistory("EUR", "CZK", null, null, 9999, null)
+        fxResource(upstream, caller).fxRateHistory("EUR", "CZK", null, null, 9999)
         assertThat(urlSlot.captured).contains("limit=365")
     }
 
     @Test
-    fun `fxRateHistory forwards from and to as encoded params`() {
+    fun `fxRateHistory forwards explicit from and to as encoded params`() {
         val caller = UUID.randomUUID()
         val urlSlot = slot<String>()
         val upstream = mockk<UpstreamClient> {
@@ -1643,8 +1657,130 @@ class CustomerEdgeResourceTest {
         fxResource(
             upstream,
             caller,
-        ).fxRateHistory("EUR", "CZK", "2026-01-01T00:00:00Z", "2026-06-01T00:00:00Z", null, null)
-        assertThat(urlSlot.captured).contains("from=")
-        assertThat(urlSlot.captured).contains("to=")
+        ).fxRateHistory("EUR", "CZK", "2026-01-01T00:00:00Z", "2026-06-01T00:00:00Z", null)
+        assertThat(urlSlot.captured).contains("from=2026-01-01T00%3A00%3A00Z")
+        assertThat(urlSlot.captured).contains("to=2026-06-01T00%3A00%3A00Z")
+    }
+
+    @Test
+    fun `fxRateHistory defaults the window to three calendar months, not a row count`() {
+        val caller = UUID.randomUUID()
+        val urlSlot = slot<String>()
+        val upstream = mockk<UpstreamClient> {
+            every { get(capture(urlSlot), any()) } returns Response.ok("""[]""").build()
+        }
+        fxResource(upstream, caller).fxRateHistory("EUR", "CZK", null, null, null)
+        val url = urlSlot.captured
+        val from = Regex("from=([^&]+)").find(url)!!.groupValues[1].let { java.net.URLDecoder.decode(it, "UTF-8") }
+        val to = Regex("to=([^&]+)").find(url)!!.groupValues[1].let { java.net.URLDecoder.decode(it, "UTF-8") }
+        val fromInstant = java.time.Instant.parse(from)
+        val toInstant = java.time.Instant.parse(to)
+        val expectedFrom = toInstant.atZone(java.time.ZoneOffset.UTC).minusMonths(3).toInstant()
+        // Within a few seconds of "now minus 3 calendar months" — not a row-count approximation.
+        assertThat(java.time.Duration.between(expectedFrom, fromInstant).abs().seconds).isLessThan(5)
+    }
+
+    @Test
+    fun `fxRateHistory falls back to the inverse pair and inverts every rate`() {
+        val caller = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient> {
+            every { get(any(), any()) } answers {
+                val url = firstArg<String>()
+                when {
+                    url.contains("/fx/rates/CZK/EUR/history") -> Response.ok("""[]""").build()
+                    url.contains("/fx/rates/EUR/CZK/history") -> Response.ok(
+                        """[{"baseCurrency":"EUR","quoteCurrency":"CZK","source":"CNB","midRate":"25.00",
+                            "validFrom":"2026-06-14T00:00:00Z"}]""",
+                    ).build()
+                    else -> Response.status(404).build()
+                }
+            }
+        }
+        val resp = fxResource(upstream, caller).fxRateHistory("CZK", "EUR", null, null, null)
+        assertThat(resp.status).isEqualTo(200)
+        val node = mapper.readTree(resp.entity as String)
+        assertThat(node.get("base").asText()).isEqualTo("CZK")
+        assertThat(node.get("quote").asText()).isEqualTo("EUR")
+        val points = node.get("points")
+        assertThat(points.size()).isEqualTo(1)
+        // 1 / 25.00 = 0.04
+        assertThat(points.get(0).get("rate").asText()).isEqualTo("0.04")
+    }
+
+    // --- mapCnbTrend (normalization: validation, ordering, dedup, inverse) ---
+
+    @Test
+    fun `mapCnbTrend orders chronologically oldest first and marks indicative`() {
+        val upstream = """[
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","source":"CNB","midRate":"25.10",
+             "validFrom":"2026-06-15T00:00:00Z"},
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","source":"CNB","midRate":"25.00",
+             "validFrom":"2026-06-14T00:00:00Z"}
+        ]"""
+        val (count, json) = CustomerEdgeResource.mapCnbTrend(mapper, upstream, "EUR", "CZK", inverted = false)!!
+        assertThat(count).isEqualTo(2)
+        val out = mapper.readTree(json)
+        assertThat(out.get("indicative").asBoolean()).isTrue()
+        val points = out.get("points")
+        assertThat(points.get(0).get("date").asText()).isEqualTo("2026-06-14")
+        assertThat(points.get(1).get("date").asText()).isEqualTo("2026-06-15")
+    }
+
+    @Test
+    fun `mapCnbTrend dedupes same-day observations keeping the latest timestamp`() {
+        val upstream = """[
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","source":"CNB","midRate":"25.00",
+             "validFrom":"2026-06-14T08:00:00Z"},
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","source":"CNB","midRate":"25.20",
+             "validFrom":"2026-06-14T14:30:00Z"}
+        ]"""
+        val (count, json) = CustomerEdgeResource.mapCnbTrend(mapper, upstream, "EUR", "CZK", inverted = false)!!
+        assertThat(count).isEqualTo(1)
+        val points = mapper.readTree(json).get("points")
+        assertThat(points.size()).isEqualTo(1)
+        assertThat(points.get(0).get("rate").asText()).isEqualTo("25.2")
+    }
+
+    @Test
+    fun `mapCnbTrend excludes rows with no usable rate, no timestamp, zero or negative rate`() {
+        val upstream = """[
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","validFrom":"2026-06-14T00:00:00Z"},
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","midRate":"25.00"},
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","midRate":"0","validFrom":"2026-06-15T00:00:00Z"},
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","midRate":"-1","validFrom":"2026-06-16T00:00:00Z"},
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","midRate":"25.00","validFrom":"2026-06-17T00:00:00Z"}
+        ]"""
+        val (count, json) = CustomerEdgeResource.mapCnbTrend(mapper, upstream, "EUR", "CZK", inverted = false)!!
+        assertThat(count).isEqualTo(1)
+        assertThat(mapper.readTree(json).get("points").get(0).get("date").asText()).isEqualTo("2026-06-17")
+    }
+
+    @Test
+    fun `mapCnbTrend excludes rows for a different pair`() {
+        val upstream = """[
+            {"baseCurrency":"USD","quoteCurrency":"CZK","midRate":"22.00","validFrom":"2026-06-14T00:00:00Z"},
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","midRate":"25.00","validFrom":"2026-06-15T00:00:00Z"}
+        ]"""
+        val (count, json) = CustomerEdgeResource.mapCnbTrend(mapper, upstream, "EUR", "CZK", inverted = false)!!
+        assertThat(count).isEqualTo(1)
+        assertThat(mapper.readTree(json).get("points").get(0).get("date").asText()).isEqualTo("2026-06-15")
+    }
+
+    @Test
+    fun `mapCnbTrend inverted mode inverts every rate and ignores upstream currency codes`() {
+        val upstream = """[
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","midRate":"25.00","validFrom":"2026-06-14T00:00:00Z"}
+        ]"""
+        val (count, json) = CustomerEdgeResource.mapCnbTrend(mapper, upstream, "CZK", "EUR", inverted = true)!!
+        assertThat(count).isEqualTo(1)
+        val out = mapper.readTree(json)
+        assertThat(out.get("base").asText()).isEqualTo("CZK")
+        assertThat(out.get("quote").asText()).isEqualTo("EUR")
+        assertThat(out.get("points").get(0).get("rate").asText()).isEqualTo("0.04")
+    }
+
+    @Test
+    fun `mapCnbTrend returns null on a non-array body`() {
+        assertThat(CustomerEdgeResource.mapCnbTrend(mapper, """{"not":"an array"}""", "EUR", "CZK", false)).isNull()
     }
 }
