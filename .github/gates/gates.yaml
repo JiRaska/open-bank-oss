@@ -967,7 +967,7 @@ gates:
     review_after: "2027-02-14"
     # The corpus is the checker's own fixture set — its subjects are assertions, not files, so
     # the floor is the number of cases that must run. It drops the day someone deletes one.
-    min_subjects: 14   # 15 today: 9 classifier + 5 end-to-end + 1 retry-count (2026-08-14)
+    min_subjects: 17   # 18 today: 9 classifier + 5 end-to-end + 1 retry-count + 3 placeholder-staleness (2026-08-31)
     run: |
       # The gate IS the selftest here: the artifact under test is the classifier + exit-code
       # contract, not the fleet (verifying 62 real images needs ECR credentials this job does
@@ -976,6 +976,13 @@ gates:
       # the pre-#1915 shape reddens 7 cases, and changing the final `exit 2` to `exit 1`
       # reddens exactly the one case that asserts the distinction.
       .github/scripts/check-fleet-attestations.sh --self-test
+      # ...and the one assertion the fixtures cannot make: the REAL placeholder allowlist
+      # against the REAL gitops tree. Needs no cosign and no ECR credentials, which is why it
+      # can run here on every PR rather than only in fleet-attestation.yml. Before #7740 the
+      # allowlist could only fail in one direction, and all five of its entries had outlived
+      # their subject — the file's own "remove an entry the moment the service is built" line
+      # had no enforcement behind it.
+      .github/scripts/check-fleet-attestations.sh --check-placeholders
 
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
