@@ -2,10 +2,10 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Pencil, Plus, Shield, Trash2, X } from 'lucide-react'
+import { Check, LayoutGrid, Pencil, Plus, Shield, Table2, Trash2, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useAuth } from '@/lib/auth/useAuth'
-import { CAPABILITIES_BY_RESOURCE, type DelegationResource, type RolePreset } from '@/lib/delegations/rolePresets'
+import { CAPABILITIES_BY_RESOURCE, capabilityIntent, type CapabilityIntent, type DelegationResource, type RolePreset } from '@/lib/delegations/rolePresets'
 
 const emptyRole = (): RolePreset => ({ id: '', name: '', description: '', resourceType: 'ACCOUNT', capabilities: [] })
 
@@ -15,6 +15,7 @@ export function RoleCatalog() {
   const canManage = hasRole('ROLE_ADMIN')
   const [roles, setRoles] = useState<RolePreset[]>([])
   const [resource, setResource] = useState<DelegationResource>('ACCOUNT')
+  const [view, setView] = useState<'overview' | 'matrix'>('overview')
   const [editing, setEditing] = useState<RolePreset | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
 
@@ -64,14 +65,46 @@ export function RoleCatalog() {
           </button>
         })}
       </div>
-      <div style={{ overflowX: 'auto' }}><table className="table" style={{ width: '100%', minWidth: 760 }}><thead><tr><th style={stickyRoleStyle}>{t('Role', 'Role')}</th>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+        <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0 }}>
+          {t('Začněte nejmenším rozsahem práv, který člověk pro svou práci potřebuje.', 'Start with the smallest set of rights a person needs for their work.')}
+        </p>
+        <div role="group" aria-label={t('Zobrazení katalogu', 'Catalog view')} style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          <button type="button" className={view === 'overview' ? 'btn btn-primary' : 'btn btn-secondary'} aria-pressed={view === 'overview'} onClick={() => setView('overview')}><LayoutGrid size={14} />{t('Přehled', 'Overview')}</button>
+          <button type="button" className={view === 'matrix' ? 'btn btn-primary' : 'btn btn-secondary'} aria-pressed={view === 'matrix'} onClick={() => setView('matrix')}><Table2 size={14} />{t('Porovnat', 'Compare')}</button>
+        </div>
+      </div>
+      {view === 'overview' && <RoleOverview roles={visibleRoles} canManage={canManage} edit={setEditing} remove={remove} />}
+      {view === 'matrix' && <div style={{ overflowX: 'auto' }}><table className="table" style={{ width: '100%', minWidth: 760 }}><thead><tr><th style={stickyRoleStyle}>{t('Role', 'Role')}</th>
       {rights.map(right => <th key={right} title={rightLabel(right, t)} style={{ textAlign: 'center', fontSize: 10, minWidth: 92 }}>{rightLabel(right, t)}</th>)}{canManage && <th aria-label={t('Akce', 'Actions')} />}</tr></thead>
       <tbody>{visibleRoles.map(role => <tr key={role.id}><td style={stickyRoleStyle}><strong>{role.name}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)', maxWidth: 280 }}>{role.description}</div></td>
         {rights.map(right => <td key={right} style={{ textAlign: 'center' }}>{role.capabilities.includes(right) ? <Check size={15} color="var(--success)" aria-label={t('Povoleno', 'Allowed')} /> : '—'}</td>)}
         {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button className="btn btn-secondary" onClick={() => setEditing({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${role.name}`}><Pencil size={13} /></button><button className="btn btn-secondary" onClick={() => void remove(role)} aria-label={`${t('Smazat', 'Delete')} ${role.name}`}><Trash2 size={13} /></button></div></td>}</tr>)}</tbody></table></div>
+      }
     </>}
     {editing && <Editor value={editing} cancel={() => setEditing(null)} save={save} />}
   </section>
+}
+
+function RoleOverview({ roles, canManage, edit, remove }: { roles: RolePreset[]; canManage: boolean; edit: (role: RolePreset) => void; remove: (role: RolePreset) => Promise<void> }) {
+  const { t } = useLanguage()
+  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 330px), 1fr))', gap: 12 }}>
+    {roles.map(role => <article key={role.id} style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 16, background: 'linear-gradient(145deg, var(--surface-1), var(--surface-2))' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+        <div><h3 style={{ fontSize: 15, fontWeight: 750 }}>{role.name}</h3><p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4, lineHeight: 1.5 }}>{role.description}</p></div>
+        {canManage && <div style={{ display: 'flex', gap: 4 }}><button className="btn btn-secondary" onClick={() => edit({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${role.name}`}><Pencil size={13} /></button><button className="btn btn-secondary" onClick={() => void remove(role)} aria-label={`${t('Smazat', 'Delete')} ${role.name}`}><Trash2 size={13} /></button></div>}
+      </div>
+      <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
+        {(['view', 'act', 'manage'] as CapabilityIntent[]).map(intent => {
+          const capabilities = role.capabilities.filter(capability => capabilityIntent(capability) === intent)
+          if (!capabilities.length) return null
+          return <div key={intent}><div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: intentColor(intent) }}>{intentLabel(intent, t)}</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>{capabilities.map(capability => <span key={capability} title={capability} style={{ borderRadius: 999, padding: '5px 9px', fontSize: 11, background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{rightLabel(capability, t)}</span>)}</div>
+          </div>
+        })}
+      </div>
+    </article>)}
+  </div>
 }
 
 function Editor({ value, cancel, save }: { value: RolePreset; cancel: () => void; save: (role: RolePreset) => Promise<void> }) {
@@ -101,6 +134,12 @@ const resourceLabel = (resource: DelegationResource, t: (cs: string, en: string)
   const label = RESOURCE_LABELS[resource]
   return t(label[0], label[1])
 }
+const intentLabel = (intent: CapabilityIntent, t: (cs: string, en: string) => string) => ({
+  view: t('Může vidět', 'Can view'),
+  act: t('Může provádět', 'Can act'),
+  manage: t('Může spravovat', 'Can manage'),
+})[intent]
+const intentColor = (intent: CapabilityIntent) => ({ view: 'var(--success)', act: 'var(--warning)', manage: 'var(--accent)' })[intent]
 const RIGHT_LABELS: Record<string, [string, string]> = {
   ACCOUNT_VIEW_DETAILS: ['Detail účtu', 'Account details'],
   ACCOUNT_READ_BALANCES: ['Zůstatky', 'Balances'],

@@ -7,3 +7,11 @@ export const CAPABILITIES_BY_RESOURCE = {
 } as const
 export type DelegationResource = keyof typeof CAPABILITIES_BY_RESOURCE
 export type RolePreset = { id: string; name: string; description: string; resourceType: DelegationResource; capabilities: string[]; createdAt?: string; updatedAt?: string }
+
+export type CapabilityIntent = 'view' | 'act' | 'manage'
+
+export function capabilityIntent(capability: string): CapabilityIntent {
+  if (capability.includes('_READ_') || capability.includes('_VIEW') || capability === 'OBJECT_READ' || capability.includes('DOWNLOAD')) return 'view'
+  if (capability.includes('MANAGE') || capability === 'DELEGATION_MANAGE') return 'manage'
+  return 'act'
+}
