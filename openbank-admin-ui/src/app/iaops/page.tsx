@@ -21,6 +21,7 @@ import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
 import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { StatusBadge, type Tone } from '@/components/ui'
 import styles from './IAOps.module.css'
 
 // ── Types (mirror /api/iaops/governance) ───────────────────────────────────
@@ -99,23 +100,16 @@ function toAgentFinding(a: FinOpsAnomaly, t: (cs: string, en: string) => string)
 }
 
 // ── Status visual helpers ───────────────────────────────────────────────────
-const STATUS_CFG: Record<DStatus, { color: string; bg: string; border: string; en: string; cs: string; icon: React.ReactNode }> = {
-  built:   { color: '#16a34a', bg: '#dcfce7', border: '#86efac', en: 'Built',   cs: 'Hotovo',   icon: <CheckCircle2 size={13} /> },
-  partial: { color: '#d97706', bg: '#fef9c3', border: '#fde047', en: 'Partial', cs: 'Částečně', icon: <CircleDot size={13} /> },
-  planned: { color: '#6366f1', bg: '#ede9fe', border: '#c4b5fd', en: 'Planned', cs: 'Plánováno', icon: <CircleDashed size={13} /> },
+const STATUS_CFG: Record<DStatus, { tone: Tone; en: string; cs: string }> = {
+  built: { tone: 'success', en: 'Built', cs: 'Hotovo' },
+  partial: { tone: 'warning', en: 'Partial', cs: 'Částečně' },
+  planned: { tone: 'accent', en: 'Planned', cs: 'Plánováno' },
 }
 
-function StatusPill({ status, large }: { status: DStatus; large?: boolean }) {
+function StatusPill({ status }: { status: DStatus }) {
   const { language } = useLanguage()
   const c = STATUS_CFG[status]
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px',
-      fontSize: large ? '12px' : '10px', fontWeight: 700, padding: large ? '3px 10px' : '2px 8px',
-      borderRadius: '10px', color: c.color, background: c.bg, border: `1px solid ${c.border}`,
-      letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-      {c.icon}{language === 'cs' ? c.cs : c.en}
-    </span>
-  )
+  return <StatusBadge status={status} tone={c.tone} label={language === 'cs' ? c.cs : c.en} withDot />
 }
 
 function Card({ children, accent, id }: { children: React.ReactNode; accent?: string; id?: string }) {
