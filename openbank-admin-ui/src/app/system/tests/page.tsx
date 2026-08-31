@@ -5,8 +5,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Activity, BarChart3, CheckCircle2, CircleHelp, Dna, FlaskConical,
-  Bot, Gauge, RefreshCw, ShieldCheck, Timer, TriangleAlert, XCircle,
+  Activity, BarChart3, Dna, FlaskConical,
+  Bot, Gauge, RefreshCw, ShieldCheck, Timer, TriangleAlert,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
@@ -16,32 +16,33 @@ import type {
 } from '@/lib/types/test-intelligence'
 import { TestIntelligenceFlow } from '@/components/testing/TestIntelligenceFlow'
 import { TestAgentPanel } from '@/components/testing/TestAgentPanel'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
 
 type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients' | 'ai-assurance'
 
-const STATE_COLOR: Record<EvidenceState, string> = {
-  passed: '#16a34a', failed: '#dc2626', skipped: '#d97706', 'not-run': '#64748b',
-  stale: '#d97706', blocked: '#7c3aed', unknown: '#64748b',
-}
-
 const KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e', 'trace', 'mutation', 'simulation', 'performance', 'synthetic']
 
-function StateBadge({ state }: { state: EvidenceState }) {
-  const Icon = state === 'passed' ? CheckCircle2 : state === 'failed' ? XCircle
-    : state === 'unknown' || state === 'not-run' ? CircleHelp : TriangleAlert
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: STATE_COLOR[state], fontSize: 11, fontWeight: 700 }}>
-      <Icon size={12} />{state}
-    </span>
-  )
+function evidenceTone(state: EvidenceState): Tone {
+  switch (state) {
+    case 'passed': return 'success'
+    case 'failed': return 'danger'
+    case 'skipped':
+    case 'stale': return 'warning'
+    case 'blocked': return 'accent'
+    case 'not-run':
+    case 'unknown': return 'neutral'
+  }
 }
 
-function Stat({ label, value, tone }: { label: string; value: number | string; tone?: string }) {
+function StateBadge({ state }: { state: EvidenceState }) {
+  return <SharedStatusBadge status={state} tone={evidenceTone(state)} label={state} withDot />
+}
+
+function Stat({ label, value, tone }: { label: string; value: number | string; tone?: Tone }) {
   return (
     <div style={{ padding: 16, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface-1)' }}>
       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 750, color: tone ?? 'var(--text-primary)' }}>{value}</div>
+      <div className={tone ? TONE_TEXT_CLASS[tone] : undefined} style={{ fontSize: 24, fontWeight: 750 }}>{value}</div>
     </div>
   )
 }
@@ -78,7 +79,7 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
       <div><div style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 750, letterSpacing: '.08em', textTransform: 'uppercase' }}>{t('Living assurance map', 'Living assurance map')}</div><strong style={{ fontSize: 18 }}>{t('Od změny až k zákaznickému signálu', 'From change to customer signal')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Klikni na vrstvu pro její neměnný důkaz, historii a známé mezery.', 'Open a layer for its immutable evidence, history, and known gaps.')}</div></div>
       <div style={{ maxWidth: 310, color: 'var(--text-secondary)', fontSize: 11, padding: '8px 10px', borderRadius: 8, background: 'var(--surface-2)' }}><strong>{t('AI guardrail', 'AI guardrail')}</strong><br />{t('Agenti smějí vysvětlit a navrhnout další krok. Nezvyšují verdikt, nemažou důkaz ani neschvalují release.', 'Agents may explain and propose a next step. They do not raise a verdict, delete evidence, or approve a release.')}</div>
     </div>
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(205px, 1fr))', gap: 10 }}>{cards.map((card, index) => <button key={card.tab} type="button" onClick={() => selectTab(card.tab)} style={{ textAlign: 'left', cursor: 'pointer', border: `1px solid color-mix(in srgb, ${STATE_COLOR[card.state]} 42%, var(--border))`, background: 'var(--surface-1)', borderRadius: 11, padding: 14, animation: `fadeIn ${180 + index * 80}ms ease-out both` }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(205px, 1fr))', gap: 10 }}>{cards.map((card, index) => <button key={card.tab} type="button" onClick={() => selectTab(card.tab)} style={{ textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)', background: 'var(--surface-1)', borderRadius: 11, padding: 14, animation: `fadeIn ${180 + index * 80}ms ease-out both` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'start' }}><div><div style={{ color: 'var(--text-tertiary)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em' }}>{card.eyebrow}</div><strong style={{ display: 'block', marginTop: 3 }}>{card.title}</strong></div><StateBadge state={card.state} /></div>
       <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 10 }}>{card.detail}</div>
       <div style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 650, marginTop: 11 }}>{t('Otevřít důkaz →', 'Open evidence →')}</div>
@@ -166,11 +167,11 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
         <Stat label="Inventoried components" value={report.totals.components} />
         <Stat label="With execution evidence" value={`${report.totals.componentsWithExecutionEvidence}/${report.totals.components}`} />
         <Stat label="Money-path components" value={report.totals.moneyPathComponents} />
-        <Stat label="Failing evidence" value={report.totals.failingEvidence} tone={report.totals.failingEvidence ? '#dc2626' : '#16a34a'} />
-        <Stat label="No execution evidence" value={report.totals.missingEvidence} tone={report.totals.missingEvidence ? '#d97706' : '#16a34a'} />
-        <Stat label="Stale evidence" value={report.totals.staleEvidence} tone={report.totals.staleEvidence ? '#d97706' : '#16a34a'} />
-        <Stat label="Unresolved evidence" value={report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0} tone={(report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) ? '#64748b' : '#16a34a'} />
-        <Stat label="Required-control gaps" value={`${report.totals.requiredControlGaps ?? 0}/${report.totals.requiredControls ?? 0}`} tone={report.totals.requiredControlGaps ? '#dc2626' : '#16a34a'} />
+        <Stat label="Failing evidence" value={report.totals.failingEvidence} tone={report.totals.failingEvidence ? 'danger' : 'success'} />
+        <Stat label="No execution evidence" value={report.totals.missingEvidence} tone={report.totals.missingEvidence ? 'warning' : 'success'} />
+        <Stat label="Stale evidence" value={report.totals.staleEvidence} tone={report.totals.staleEvidence ? 'warning' : 'success'} />
+        <Stat label="Unresolved evidence" value={report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0} tone={(report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) ? 'neutral' : 'success'} />
+        <Stat label="Required-control gaps" value={`${report.totals.requiredControlGaps ?? 0}/${report.totals.requiredControls ?? 0}`} tone={report.totals.requiredControlGaps ? 'danger' : 'success'} />
       </div>
       <section aria-label={t('Deterministické povinné kontroly', 'Deterministic required controls')} style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t('Deterministické povinné kontroly', 'Deterministic required controls')}</h2>
@@ -246,9 +247,9 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
   return <div style={{ display: 'grid', gap: 18 }}>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
       <Stat label="Tracked test definitions" value={report.testCases.length} />
-      <Stat label="Observed flaky" value={flaky.length} tone={flaky.length ? '#d97706' : '#16a34a'} />
-      <Stat label="Currently failing" value={failing.length} tone={failing.length ? '#dc2626' : '#16a34a'} />
-      <Stat label="Failed runtime" value={`${Math.round(wasted / 1000)} s`} tone={wasted ? '#d97706' : undefined} />
+      <Stat label="Observed flaky" value={flaky.length} tone={flaky.length ? 'warning' : 'success'} />
+      <Stat label="Currently failing" value={failing.length} tone={failing.length ? 'danger' : 'success'} />
+      <Stat label="Failed runtime" value={`${Math.round(wasted / 1000)} s`} tone={wasted ? 'warning' : undefined} />
     </div>
     <div style={{ padding: 12, border: '1px solid color-mix(in srgb, #16a34a 35%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12 }}>
       {t('Test je označen jako flaky až po úspěšném i neúspěšném pozorování stejného commitu. Vlastnictví vychází z CODEOWNERS. Triage nikdy nemění deterministický verdikt CI ani nepřeskakuje peněžní kontroly.', 'A test is marked flaky only after pass and fail observations on the same commit. Ownership comes from CODEOWNERS. Triage never changes the deterministic CI verdict or skips money-path controls.')}
@@ -381,7 +382,7 @@ function PerformanceTrend({ points, t }: { points: TestIntelligenceReport['perfo
     <div style={{ color: 'var(--text-secondary)', fontSize: 11, marginBottom: 6 }}><strong>{t('Neměnná historie p95', 'Immutable p95 history')}</strong> · {t('zobrazeny jsou pouze uchované k6 metriky, nikoli odhad baseline', 'only retained k6 metrics are shown; no baseline is inferred')}</div>
     <div style={{ display: 'flex', alignItems: 'end', gap: 5, minHeight: 52 }}>
       {measured.map(point => <div key={`${point.id}-${point.collectedAt}`} title={`${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(point.collectedAt))} · p95 ${Math.round(point.metrics.p95Ms ?? 0)} ms · ${point.state}`} style={{ flex: 1, minWidth: 10, display: 'grid', gap: 3 }}>
-        <div style={{ height: `${Math.max(3, (point.metrics.p95Ms ?? 0) / maximum * 42)}px`, borderRadius: '3px 3px 0 0', background: STATE_COLOR[point.state] }} />
+        <div className={TONE_TEXT_CLASS[evidenceTone(point.state)]} style={{ height: `${Math.max(3, (point.metrics.p95Ms ?? 0) / maximum * 42)}px`, borderRadius: '3px 3px 0 0', background: 'currentColor' }} />
         <span style={{ color: 'var(--text-tertiary)', fontSize: 9, textAlign: 'center' }}>{Math.round(point.metrics.p95Ms ?? 0)}</span>
       </div>)}
     </div>
