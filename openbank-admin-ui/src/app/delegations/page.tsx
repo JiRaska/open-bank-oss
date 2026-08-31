@@ -27,7 +27,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { EntityChip } from '@/components/entities/EntityChip'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { RoleCatalog } from '@/components/delegations/RoleCatalog'
-import { EffectiveAccess, type EffectiveAccessPayload } from '@/components/delegations/EffectiveAccess'
+import { EffectiveAccess, isEffectiveAccessPayload, type EffectiveAccessPayload } from '@/components/delegations/EffectiveAccess'
 import {
   DelegationStatusBadge,
   capabilityLabels,
@@ -98,7 +98,10 @@ export default function DelegationsPage() {
         fetch(`/api/delegations/party/${target.id}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) }),
         fetch(`/api/delegations/effective-access/${target.id}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) }),
       ])
-      if (effectiveRes.ok) setEffectiveAccess((await effectiveRes.json()) as EffectiveAccessPayload)
+      if (effectiveRes.ok) {
+        const payload: unknown = await effectiveRes.json()
+        if (isEffectiveAccessPayload(payload)) setEffectiveAccess(payload)
+      }
       if (!res.ok) {
         setGrantsUnavail((await classifyBffFailure(res)) as BffFailure)
         return

@@ -20,6 +20,14 @@ export type EffectiveAccessPayload = {
   sources: { accounts: SourceState; cards: SourceState; grants: SourceState; presets: SourceState }
 }
 
+export function isEffectiveAccessPayload(value: unknown): value is EffectiveAccessPayload {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<EffectiveAccessPayload>
+  return Array.isArray(candidate.accounts) && Array.isArray(candidate.cards) &&
+    Array.isArray(candidate.grants) && Array.isArray(candidate.presets) &&
+    !!candidate.sources && typeof candidate.sources === 'object'
+}
+
 const sameCapabilities = (left: string[] = [], right: string[] = []) =>
   left.length === right.length && [...left].sort().every((item, index) => item === [...right].sort()[index])
 

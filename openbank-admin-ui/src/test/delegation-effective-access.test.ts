@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest'
-import { matchedRoleName } from '@/components/delegations/EffectiveAccess'
+import { isEffectiveAccessPayload, matchedRoleName } from '@/components/delegations/EffectiveAccess'
 import type { Grant } from '@/components/delegations/GrantView'
 import type { RolePreset } from '@/lib/delegations/rolePresets'
 
@@ -14,5 +14,10 @@ describe('effective access role matching', () => {
 
   it('does not overstate a grant that only partly resembles a preset', () => {
     expect(matchedRoleName({ ...grant, capabilities: ['ACCOUNT_READ_BALANCES'] }, presets, 'cs')).toBe('Vlastní kombinace práv')
+  })
+
+  it('rejects a legacy grant payload instead of crashing the customer console', () => {
+    expect(isEffectiveAccessPayload({ ...grant, id: 'g1' })).toBe(false)
+    expect(isEffectiveAccessPayload({ accounts: [], cards: [], grants: [], presets: [], sources: { accounts: 'ok' } })).toBe(true)
   })
 })
