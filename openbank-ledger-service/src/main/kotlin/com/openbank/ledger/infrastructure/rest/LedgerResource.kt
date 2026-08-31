@@ -134,17 +134,21 @@ class LedgerResource(
     @Authorize(action = "ledger.create", resource = "")
     @Operation(summary = "Post a balanced journal entry")
     suspend fun postJournal(
-        request: PostJournalRequest,
+        // Nullable on purpose: JAX-RS injects null for an absent body, and a `suspend fun` emits no
+        // `Intrinsics.checkNotNullParameter`, so a non-nullable declaration would let that null flow
+        // into the body and NPE at the first dereference -- a 500 for what is a malformed request.
+        request: PostJournalRequest?,
         @Context
         requestContext: ContainerRequestContext,
     ): Response {
+        requireNotNull(request) { "a request body is required" }
         val command = PostJournalCommand(
             idempotencyKey = request.idempotencyKey,
             transactionId = request.transactionId,
             entryDate = LocalDate.parse(request.entryDate),
             valueDate = LocalDate.parse(request.valueDate),
             description = request.description,
-            lines = request.lines.map { it.toCommand() },
+            lines = request.requireLines().map { it.toCommand() },
             postedBy = request.createdBy,
             // The filter sets this property only after authenticating a configured canary
             // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
@@ -219,8 +223,28 @@ data class PostJournalRequest(
     val valueDate: String,
     val description: String? = null,
     val createdBy: UUID,
-    val lines: List<PostJournalLineRequest>,
-)
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     *
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS of
+     * a collection. So `"lines": [null]` deserialises happily into a `List<PostJournalLineRequest>`
+     * holding a null, and Kotlin's non-null element type is a compile-time promise nothing keeps.
+     * Writing the type honestly is what makes [requireLines] reachable instead of dead code.
+     */
+    val lines: List<PostJournalLineRequest?>,
+) {
+    /**
+     * The lines, with every element proven present.
+     *
+     * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`, so no
+     * service-local mapper is needed or wanted (two mappers for one type are selected at random per
+     * request, #526).
+     */
+    fun requireLines(): List<PostJournalLineRequest> =
+        lines.mapIndexed { index, line ->
+            requireNotNull(line) { "lines[$index] must not be null" }
+        }
+}
 
 data class ReverseJournalRequest(val reason: String, val reversedBy: UUID)
 
