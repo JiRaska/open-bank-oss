@@ -772,6 +772,48 @@ jobs:
             echo "${SERVICE} owns no provider Pact tests — consumer Pact publication is complete; provider verification is not applicable."
           fi
 
+      # Preflight the broker's selector/HAL response BEFORE pact-jvm touches it (#7376). The
+      # broker-backed provider test resolves consumer selectors via
+      # PactBrokerClient.fetchConsumersWithSelectorsV2 -> HalClient.handleResponseBody, and an
+      # invalid/malformed response there throws a bare NullPointerException deep inside pact-jvm
+      # with no HTTP status, no body, and no indication it was even the network's fault — it
+      # reads exactly like a code regression in the provider under test, and the committed
+      # @PactFolder replay (which never talks to the broker) is unaffected, so this diagnostic
+      # exists to tell the two apart at a glance. Secret-free by construction: only structural
+      # facts (HTTP status, Content-Type, whether the body parses as JSON, whether the expected
+      # HAL keys are present) are ever echoed — never the response body or the pact content.
+      - name: "Preflight Pact Broker selector/HAL response"
+        if: ${{ steps.provider_pact_task.outputs.available == 'true' && env.PACT_BROKER_URL != '' }}
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: |
+          set -euo pipefail
+          endpoint="${PACT_BROKER_URL%/}/pacts/provider/${SERVICE}/for-verification"
+          body='{"consumerVersionSelectors":[{"mainBranch":true}],"includePendingStatus":false}'
+          http_code="$(curl -sS -o /tmp/pact-preflight.json -w '%{http_code}' -X POST \
+            -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+            -H 'Content-Type: application/json' -H 'Accept: application/hal+json, application/json' \
+            "$endpoint" --data-binary "$body" || echo "curl_failed")"
+
+          if [ "$http_code" = "curl_failed" ]; then
+            echo "::error::Pact Broker preflight for ${SERVICE}: could not reach $endpoint at all (connection/DNS/TLS failure). This is a broker-reachability problem, not a ${SERVICE} contract regression."
+            exit 1
+          fi
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code from $endpoint. The broker rejected or failed the selector request before verification could start — this is a broker-side problem, not a ${SERVICE} contract regression."
+            exit 1
+          fi
+          if ! jq empty /tmp/pact-preflight.json 2>/dev/null; then
+            byte_count="$(wc -c < /tmp/pact-preflight.json | tr -d ' ')"
+            echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code but the body ($byte_count bytes) is not valid JSON. pact-jvm's HalClient cannot parse this either — expect a downstream NullPointerException in fetchConsumersWithSelectorsV2 if this preflight is bypassed. This is a broker-side malformed-response problem, not a ${SERVICE} contract regression."
+            exit 1
+          fi
+          if ! jq -e 'has("_embedded") or has("_links")' /tmp/pact-preflight.json > /dev/null 2>&1; then
+            echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code, valid JSON, but neither '_embedded' nor '_links' is present — not a HAL document. pact-jvm's HalClient expects HAL structure here and will NPE walking it. This is a broker-side response-shape problem, not a ${SERVICE} contract regression."
+            exit 1
+          fi
+          echo "Pact Broker preflight for ${SERVICE}: HTTP $http_code, valid HAL/JSON — proceeding to provider verification."
+
       # ADR-0250 Phase 2: provider verification runs as its OWN Test task (providerPactTest,
       # build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts), not `test`. `--rerun-tasks`
       # unconditionally: publishing the verification result is a network SIDE-EFFECT (a POST
