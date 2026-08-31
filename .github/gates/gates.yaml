@@ -2485,6 +2485,36 @@ gates:
     run: |
       python3 .github/scripts/check-pact-provider-replay.py
 
+  # Issue #7597. release-please.yml's "Map released components -> tags" step builds released.tsv
+  # from release-please-config.json's per-package `component` field; a package with a version.txt
+  # but no `component` produces no row, silently — no SBOM, no cosign provenance, no VEX for that
+  # package's release, while the release itself (tag, GitHub Release) looks completely normal.
+  # Measured today: openbank-campaign-service and openbank-tax-reporting-service both have a
+  # version.txt and a `packages` entry with no `component` key.
+  #
+  # This gate deliberately does NOT add the missing `component` keys — that changes the release
+  # tag name (`include-component-in-tag: true`), and version.txt / release-please-config.json /
+  # .release-please-manifest.json are a three-way lockstep for an ALREADY-RELEASED package
+  # (ADR-0029 rule 2), so retagging existing release history is a repo-owner decision, not CI-gate
+  # material. What this enforces is the durable half: a package with a version.txt must resolve to
+  # a component that reaches released.tsv, derived from release-please-config.json every run —
+  # never a hand-kept list — so a THIRD package cannot join the two above silently.
+  #
+  # RATCHET: today's two are baselined in the script with a reason citing #7597; the check fails on
+  # a stale baseline entry in either direction (fixed but still listed, or listed but no longer
+  # released), same contract as check-pact-provider-replay.py above.
+  - id: release-evidence-coverage
+    name: "released package resolves to a component that reaches released.tsv (issue #7597, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "A released package with no component key never enters released.tsv, so its release produces no SBOM, no provenance attestation and no VEX document — silently, since the release itself still succeeds. This gate makes that gap a finding instead of an absence nothing else can see."
+    review_after: "2027-08-31"
+    min_subjects: 60
+    selftest: |
+      python3 .github/scripts/check-release-evidence-coverage.py --self-test
+    run: |
+      python3 .github/scripts/check-release-evidence-coverage.py --enforce
+
   # openapi enum vs the Kotlin enum behind it (issue #5895 / #5962, enforced).
   #
   # The axis the api-contract gate below structurally CANNOT see: oasdiff compares a spec to its
