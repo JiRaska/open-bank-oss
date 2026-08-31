@@ -15,7 +15,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { PageHeader, StatCard, type Tone } from '@/components/ui'
+import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -613,12 +613,14 @@ export default function SanctionsPage() {
                           </div>
                         </td>
                         <td style={{ padding: '12px 16px' }}>
-                          <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-                            background: isHit ? 'var(--danger-bg)' : isPending ? 'var(--warning-bg)' : 'var(--success-bg)',
-                            color: isHit ? 'var(--danger-text)' : isPending ? 'var(--warning-text)' : 'var(--success-text)',
-                            border: `1px solid ${isHit ? 'var(--danger-border)' : isPending ? 'var(--warning-border)' : 'var(--success-border)'}` }}>
-                            {c.status}
-                          </span>
+                          {/* Delegated to StatusBadge/tone.ts on purpose. The hand-rolled ternary
+                              this replaces read `isHit ? danger : isPending ? warning : success`,
+                              so ESCALATED — a real SanctionsCheck value that isHighRisk() treats as
+                              high risk — rendered GREEN, as did any status the UI had not been
+                              taught. statusTone() resolves an unrecognised value to `neutral`,
+                              never `success`, which is the property that makes this safe by
+                              default rather than by enumeration. */}
+                          <StatusBadge status={c.status} />
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
                           {c.checkedAt ? new Date(c.checkedAt).toLocaleString(dateLocale) : '—'}
