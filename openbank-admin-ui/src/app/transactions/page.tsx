@@ -99,14 +99,12 @@ export default function TransactionsPage() {
         // sandbox), not that the search itself failed. Distinguish the cases so
         // the operator sees a meaningful state instead of a raw "HTTP 404".
         setFailure(await classifyBffFailure(res))
-        setResult(null)
         return
       }
       setResult(await res.json())
     } catch {
       // Network-level failure (BFF unreachable from the browser).
       setFailure('unreachable')
-      setResult(null)
     } finally {
       setLoading(false)
     }
@@ -224,7 +222,7 @@ export default function TransactionsPage() {
           </div>
         )}
 
-        {failure && <DataUnavailable kind={failure} service="Transaction-service" feature={t('Vyhledávání transakcí', 'Transaction search')} lang={language} />}
+        {failure && <DataUnavailable kind={failure} service="Transaction-service" feature={t('Vyhledávání transakcí', 'Transaction search')} lang={language} dense={result !== null} />}
 
         {/* Results */}
         {result && (
