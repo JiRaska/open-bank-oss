@@ -124,7 +124,7 @@ paths:
   /api/v1/fx/rates/{base}/{quote}/history:
     get:
       tags: [FX]
-      summary: Historical rates for a currency pair, newest first
+      summary: Historical rates for a currency pair, newest first (including derived inverse pairs)
       operationId: getRateHistory
       parameters:
         - name: base
