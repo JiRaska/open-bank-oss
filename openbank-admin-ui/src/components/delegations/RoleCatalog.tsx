@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Check, Pencil, Plus, Shield, Trash2, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useAuth } from '@/lib/auth/useAuth'
@@ -14,6 +14,7 @@ export function RoleCatalog() {
   const { hasRole } = useAuth()
   const canManage = hasRole('ROLE_ADMIN')
   const [roles, setRoles] = useState<RolePreset[]>([])
+  const [resource, setResource] = useState<DelegationResource>('ACCOUNT')
   const [editing, setEditing] = useState<RolePreset | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
 
@@ -30,7 +31,8 @@ export function RoleCatalog() {
     queueMicrotask(() => { void load() })
   }, [load])
 
-  const rights = useMemo(() => [...new Set(roles.flatMap(role => role.capabilities))].sort(), [roles])
+  const rights = CAPABILITIES_BY_RESOURCE[resource]
+  const visibleRoles = roles.filter(role => role.resourceType === resource)
   const save = async (role: RolePreset) => {
     const payload = { name: role.name.trim(), description: role.description.trim(), resourceType: role.resourceType, capabilities: role.capabilities }
     const response = await fetch(role.id ? `/api/delegation-role-presets/${role.id}` : '/api/delegation-role-presets', {
@@ -53,11 +55,21 @@ export function RoleCatalog() {
     </div>
     {state === 'loading' && <div style={{ padding: 20, color: 'var(--text-tertiary)' }}>{t('Načítám katalog…', 'Loading catalog…')}</div>}
     {state === 'error' && <div style={{ padding: 20, color: 'var(--text-tertiary)' }}>{t('Katalog rolí není dostupný.', 'Role catalog is unavailable.')}</div>}
-    {state === 'ready' && <div style={{ overflowX: 'auto' }}><table className="table" style={{ width: '100%' }}><thead><tr><th>{t('Role', 'Role')}</th><th>{t('Zdroj', 'Resource')}</th>
+    {state === 'ready' && <>
+      <div role="tablist" aria-label={t('Typ zdroje', 'Resource type')} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        {(Object.keys(CAPABILITIES_BY_RESOURCE) as DelegationResource[]).map(item => {
+          const count = roles.filter(role => role.resourceType === item).length
+          return <button key={item} type="button" role="tab" aria-selected={resource === item} className={resource === item ? 'btn btn-primary' : 'btn btn-secondary'} onClick={() => setResource(item)}>
+            {resourceLabel(item, t)} <span aria-label={t(`${count} rolí`, `${count} roles`)} style={{ opacity: .75 }}>({count})</span>
+          </button>
+        })}
+      </div>
+      <div style={{ overflowX: 'auto' }}><table className="table" style={{ width: '100%', minWidth: 760 }}><thead><tr><th style={stickyRoleStyle}>{t('Role', 'Role')}</th>
       {rights.map(right => <th key={right} title={rightLabel(right, t)} style={{ textAlign: 'center', fontSize: 10, minWidth: 92 }}>{rightLabel(right, t)}</th>)}{canManage && <th aria-label={t('Akce', 'Actions')} />}</tr></thead>
-      <tbody>{roles.map(role => <tr key={role.id}><td><strong>{role.name}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)', maxWidth: 260 }}>{role.description}</div></td><td>{role.resourceType}</td>
+      <tbody>{visibleRoles.map(role => <tr key={role.id}><td style={stickyRoleStyle}><strong>{role.name}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)', maxWidth: 280 }}>{role.description}</div></td>
         {rights.map(right => <td key={right} style={{ textAlign: 'center' }}>{role.capabilities.includes(right) ? <Check size={15} color="var(--success)" aria-label={t('Povoleno', 'Allowed')} /> : '—'}</td>)}
-        {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button className="btn btn-secondary" onClick={() => setEditing({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${role.name}`}><Pencil size={13} /></button><button className="btn btn-secondary" onClick={() => void remove(role)} aria-label={`${t('Smazat', 'Delete')} ${role.name}`}><Trash2 size={13} /></button></div></td>}</tr>)}</tbody></table></div>}
+        {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button className="btn btn-secondary" onClick={() => setEditing({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${role.name}`}><Pencil size={13} /></button><button className="btn btn-secondary" onClick={() => void remove(role)} aria-label={`${t('Smazat', 'Delete')} ${role.name}`}><Trash2 size={13} /></button></div></td>}</tr>)}</tbody></table></div>
+    </>}
     {editing && <Editor value={editing} cancel={() => setEditing(null)} save={save} />}
   </section>
 }
@@ -76,6 +88,19 @@ function Editor({ value, cancel, save }: { value: RolePreset; cancel: () => void
   </div></div>
 }
 const labelStyle = { display: 'grid', gap: 6, fontSize: 13, fontWeight: 600, marginBottom: 12 } as const
+const stickyRoleStyle = { position: 'sticky', left: 0, zIndex: 1, minWidth: 240, background: 'var(--surface-1)' } as const
+const RESOURCE_LABELS: Record<DelegationResource, [string, string]> = {
+  ACCOUNT: ['Účet', 'Account'],
+  CARD: ['Karta', 'Card'],
+  SAVINGS_GOAL: ['Spoření', 'Savings'],
+  PAYMENT: ['Platba', 'Payment'],
+  STATEMENT: ['Výpis', 'Statement'],
+  DOCUMENT: ['Dokument', 'Document'],
+}
+const resourceLabel = (resource: DelegationResource, t: (cs: string, en: string) => string) => {
+  const label = RESOURCE_LABELS[resource]
+  return t(label[0], label[1])
+}
 const RIGHT_LABELS: Record<string, [string, string]> = {
   ACCOUNT_VIEW_DETAILS: ['Detail účtu', 'Account details'],
   ACCOUNT_READ_BALANCES: ['Zůstatky', 'Balances'],
