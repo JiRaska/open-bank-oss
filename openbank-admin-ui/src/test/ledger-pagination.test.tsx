@@ -7,6 +7,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import LedgerPage from '@/app/ledger/page'
 
+vi.mock('@/components/auth/AuthGuard', () => ({
+  AuthGuard: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
 const firstPage = {
   data: [{ id: 'entry-1', transactionId: 'transaction-1', entryDate: '2026-08-01', valueDate: '2026-08-01', status: 'POSTED', lines: [], description: 'First page' }],
   pagination: { limit: 20, hasNextPage: true, nextCursor: 'cursor-1' },
