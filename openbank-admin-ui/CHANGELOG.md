@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.222.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.221.0...admin-ui-v0.222.0) (2026-08-31)
+
+
+### Features
+
+* **delegation:** manage reusable role presets ([#7697](https://github.com/JiRaska/open-bank-oss/issues/7697)) ([c3f21ee](https://github.com/JiRaska/open-bank-oss/commit/c3f21ee63cc482a7ab27e6002967b23654812abe))
+
+
+### Bug Fixes
+
+* **admin-ui:** stop the sanctions table rendering ESCALATED as a green pass ([#7698](https://github.com/JiRaska/open-bank-oss/issues/7698)) ([ea5e57c](https://github.com/JiRaska/open-bank-oss/commit/ea5e57cd750d86628344b20cb644bc357c377a44)), closes [#1035](https://github.com/JiRaska/open-bank-oss/issues/1035)
+
 ## [0.221.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.220.0...admin-ui-v0.221.0) (2026-08-31)
 
 
