@@ -34,7 +34,7 @@ test('preserves the last verified readiness report through an outage and retry',
   })
 
   await page.goto('/system/readiness')
-  await expect(page.getByText('ledger')).toBeVisible()
+  await expect(page.getByText('ledger', { exact: true })).toBeVisible()
   await expect(page.getByText('GO', { exact: true }).first()).toBeVisible()
 
   failNextRequest = true
@@ -42,11 +42,11 @@ test('preserves the last verified readiness report through an outage and retry',
 
   const stale = page.getByRole('status')
   await expect(stale).toContainText(/zobrazuji poslední dostupný report|showing the last available report/)
-  await expect(page.getByText('ledger')).toBeVisible()
+  await expect(page.getByText('ledger', { exact: true })).toBeVisible()
   await expect(page.getByText('GO', { exact: true }).first()).toBeVisible()
 
   await page.getByRole('button', { name: /Zkusit znovu načíst report připravenosti|Retry loading the readiness report/ }).click()
   await expect(stale).toBeHidden()
-  await expect(page.getByText('ledger')).toBeVisible()
+  await expect(page.getByText('ledger', { exact: true })).toBeVisible()
   expect(request).toBeGreaterThanOrEqual(3)
 })
