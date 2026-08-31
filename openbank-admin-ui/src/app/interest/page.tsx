@@ -39,7 +39,7 @@ export default function InterestPage() {
   const totalAccrued = accruals.reduce((s, a) => s + (a.accruedAmount ?? 0), 0)
 
   return (
-    <AuthGuard permission="payments:view">
+    <AuthGuard permission="interest:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <PageHeader icon={<Percent size={20} aria-hidden="true" />} title={t('Úrokové výpočty', 'Interest Calculations')} subtitle={t('Akruální účetnictví — ACT/365 · ACT/360 · kapitalizace', 'Accrual accounting — ACT/365 · ACT/360 · capitalisation')} actions={<ServiceStatusBadge
             label="interest-service :8125"
