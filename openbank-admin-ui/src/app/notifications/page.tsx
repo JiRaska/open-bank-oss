@@ -43,7 +43,6 @@ function NotificationsContent() {
       const res = await fetch(`${NOTIFICATION_SERVICE}/api/v1/notifications`, { signal: AbortSignal.timeout(5000) })
       if (!res.ok) {
         const kind = await classifyBffFailure(res)
-        setItems([])
         // A genuine 404/405 on the log endpoint means "no notifications yet",
         // not a broken app — degrade to the calm empty state.
         setUnavailable({ kind: res.status === 405 || kind === 'not_found' ? 'no_data' : kind })
@@ -53,7 +52,6 @@ function NotificationsContent() {
       setItems(Array.isArray(data) ? data : data.items ?? [])
     } catch {
       // Timeout / abort / network — the BFF or notification-service didn't answer.
-      setItems([])
       setUnavailable({ kind: 'unreachable' })
     } finally { setLoading(false) }
   }, [])
@@ -107,6 +105,9 @@ function NotificationsContent() {
             service={t('Notification-service', 'Notification-service')}
             feature={t('Notifikace', 'Notifications')}
             lang={language}
+            detail={items.length > 0
+              ? t('Zobrazen je poslední úspěšně načtený log; stav doručení se mohl změnit.', 'The last successfully loaded log is shown; delivery status may have changed.')
+              : undefined}
             dense
           />
         </div>
