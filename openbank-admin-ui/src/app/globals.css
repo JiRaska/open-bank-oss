@@ -49,6 +49,37 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --text-inverse:         #ffffff;
 
+  /* ── Foundation scales ──
+   * These are the source of truth for new primitives. Existing literal spacing
+   * is migrated tranche-by-tranche; do not introduce a competing scale. */
+  --space-1: .25rem;
+  --space-2: .5rem;
+  --space-3: .75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --text-xs: .75rem;
+  --text-sm: .875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --font-extrabold: 800;
+  --motion-fast: 120ms;
+  --motion-normal: 200ms;
+  --motion-slow: 400ms;
+  --ease-standard: cubic-bezier(.2, .8, .2, 1);
+  --z-dropdown: 20;
+  --z-sticky: 30;
+  --z-modal: 50;
+  --z-toast: 60;
+
   /* ── Brand / Accent ── */
   --ob-accent:            #6366f1;
   --ob-accent-hover:      #4f46e5;
@@ -126,6 +157,62 @@
    * colour, not a Tailwind HSL triplet. The triplet silently makes those
    * declarations invalid and leaves cards, fields and tables borderless. */
   --border: #e2e8f0;
+}
+
+/* Dark theme is token-only by design. Pages that still carry literal colours
+ * remain in the migration ratchet and must not opt into a one-off dark palette.
+ * Toggling `.dark` on the document root therefore changes every shared
+ * primitive and every token-based surface coherently. */
+.dark {
+  color-scheme: dark;
+  --bg: #0b1220;
+  --surface: #111827;
+  --surface-1: #111827;
+  --surface-2: #172033;
+  --surface-3: #243047;
+  --surface-4: #334155;
+  --border: #334155;
+  --border-strong: #475569;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --text-muted: var(--text-tertiary);
+  --text-inverse: #0f172a;
+  --accent: #a5b4fc;
+  --accent-hover: #c7d2fe;
+  --accent-light: #1e1b4b;
+  --accent-bg: #1e1b4b;
+  --accent-border: #4338ca;
+  --accent-text: #c7d2fe;
+  --ob-accent: var(--accent);
+  --ob-accent-hover: var(--accent-hover);
+  --ob-accent-light: var(--accent-light);
+  --ob-accent-border: var(--accent-border);
+  --ob-accent-text: var(--accent-text);
+  --success: #34d399;
+  --success-bg: #064e3b;
+  --success-border: #047857;
+  --success-text: #6ee7b7;
+  --warning: #fbbf24;
+  --warning-bg: #451a03;
+  --warning-border: #b45309;
+  --warning-text: #fcd34d;
+  --danger: #f87171;
+  --danger-bg: #450a0a;
+  --danger-border: #b91c1c;
+  --danger-text: #fecaca;
+  --info: #60a5fa;
+  --info-bg: #172554;
+  --info-border: #1d4ed8;
+  --info-text: #bfdbfe;
+  --sidebar-bg: #090e17;
+  --sidebar-hover-bg: rgba(255,255,255,0.08);
+  --sidebar-active-bg: rgba(165,180,252,0.18);
+  --sidebar-active-text: #e0e7ff;
+  --sidebar-text: #cbd5e1;
+  --sidebar-text-muted: #94a3b8;
+  --sidebar-border: rgba(255,255,255,0.09);
+  --sidebar-accent: var(--accent);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

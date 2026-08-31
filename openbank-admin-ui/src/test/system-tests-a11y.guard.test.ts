@@ -31,4 +31,16 @@ describe('system code quality accessibility', () => {
     expect(source).toContain('aggregate evidence alone proves neither a leak nor cleanup.')
     expect(source).toContain('Inconsistent lifecycle evidence: more stops than starts.')
   })
+
+  it('uses the shared semantic badge vocabulary for evidence states', () => {
+    const source = read()
+
+    expect(source).toContain("import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'")
+    expect(source).toContain('function evidenceTone(state: EvidenceState): Tone')
+    expect(source).toContain("case 'passed': return 'success'")
+    expect(source).toContain("case 'failed': return 'danger'")
+    expect(source).toContain("case 'blocked': return 'accent'")
+    expect(source).toContain('<SharedStatusBadge status={state} tone={evidenceTone(state)} label={state} withDot />')
+    expect(source).not.toContain('STATE_COLOR')
+  })
 })
