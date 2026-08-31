@@ -27,7 +27,7 @@ describe('statusTone (ADR-0208 D2)', () => {
   })
 
   it('maps failure statuses to danger', () => {
-    for (const s of ['FAILED', 'REJECTED', 'BLOCKED', 'SUSPENDED', 'CRITICAL', 'ERROR', 'BOUNCED', 'ESCALATED']) {
+    for (const s of ['FAILED', 'REJECTED', 'BLOCKED', 'SUSPENDED', 'CRITICAL', 'ERROR', 'BOUNCED', 'ESCALATED', 'DEPRECATED']) {
       expect(statusTone(s), s).toBe('danger')
     }
   })
@@ -35,7 +35,7 @@ describe('statusTone (ADR-0208 D2)', () => {
   it('maps terminal-but-not-failed statuses to neutral, not danger', () => {
     // REVOKED/EXPIRED/CANCELLED are the customer or the clock ending something normally. Colouring
     // them red reads as "something went wrong" on a screen an operator scans for real problems.
-    for (const s of ['REVOKED', 'EXPIRED', 'CANCELLED', 'CLOSED', 'MERGED', 'SUPPRESSED', 'CLEAN']) {
+    for (const s of ['REVOKED', 'EXPIRED', 'CANCELLED', 'CLOSED', 'MERGED', 'SUPPRESSED', 'CLEAN', 'ARCHIVED', 'INACTIVE']) {
       expect(statusTone(s), s).toBe('neutral')
     }
   })
