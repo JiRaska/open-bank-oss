@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.222.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.222.1...admin-ui-v0.222.2) (2026-08-31)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop the screening panel asserting CLEAR RECORD for a potential hit ([#7702](https://github.com/JiRaska/open-bank-oss/issues/7702)) ([bba6c74](https://github.com/JiRaska/open-bank-oss/commit/bba6c7470b6af10e9e3d6b68042f63706ef0358a)), closes [#1035](https://github.com/JiRaska/open-bank-oss/issues/1035)
+
 ## [0.222.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.222.0...admin-ui-v0.222.1) (2026-08-31)
 
 
