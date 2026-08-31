@@ -232,9 +232,10 @@ jobs:
           # export container id, labels, ports, hostnames or environment variables.
           EVIDENCE_DIR="${{ inputs.service }}/build/test-intelligence/runtime"
           mkdir -p "${EVIDENCE_DIR}"
-          # Docker's `event=start` filter also matches exec lifecycle events used by
-          # Testcontainers wait strategies. Restrict the stream to container objects,
-          # otherwise one PostgreSQL container appears as three starts and one stop.
+          # Restrict the daemon stream to container objects so Testcontainers exec wait-strategy
+          # events never enter the retained envelope. This is intentionally not a container-leak
+          # verdict: redacted aggregate lifecycle counts still need correlation before they can
+          # establish cleanup or a leak (rendered as unknown by the Test Intelligence UI).
           docker events --filter type=container --filter event=start --filter event=die \
             --format '{"image":"{{.Actor.Attributes.image}}","lifecycle":"{{.Action}}","observedAtUnix":{{.Time}}}' \
             > "${EVIDENCE_DIR}/docker-events.jsonl" &
