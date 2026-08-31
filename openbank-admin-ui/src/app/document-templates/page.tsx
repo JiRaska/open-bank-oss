@@ -17,7 +17,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge, type Tone } from '@/components/ui'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -91,10 +91,10 @@ async function apiFetch(path: string, opts?: RequestInit) {
   try { return JSON.parse(text) } catch { return null }
 }
 
-const STATUS_COLOR: Record<string, { bg: string; text: string; border: string }> = {
-  DRAFT:     { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' },
-  PUBLISHED: { bg: 'var(--success-bg)', text: 'var(--success-text)', border: 'var(--success-border)' },
-  RETIRED:   { bg: 'var(--surface-3)',  text: 'var(--text-tertiary)', border: 'var(--border)' },
+const TEMPLATE_STATUS_TONE: Record<TemplateStatus, Tone> = {
+  DRAFT: 'warning',
+  PUBLISHED: 'success',
+  RETIRED: 'neutral',
 }
 
 // Generic merge-field tokens offered as clickable chips. These are a UX aid for
@@ -188,15 +188,6 @@ const DEFAULT_SAMPLE_DATA = {
   signature: { block: 'Podepsáno elektronicky / Signed electronically' },
 }
 const DEFAULT_SAMPLE_DATA_TEXT = JSON.stringify(DEFAULT_SAMPLE_DATA, null, 2)
-
-function StatusBadge({ status }: { status?: string }) {
-  const c = STATUS_COLOR[status ?? ''] ?? STATUS_COLOR.DRAFT
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, background: c.bg, color: c.text, border: `1px solid ${c.border}`, letterSpacing: '0.03em' }}>
-      {status ?? 'DRAFT'}
-    </span>
-  )
-}
 
 export default function DocumentTemplatesPage() {
   const { t, language } = useLanguage()
@@ -559,7 +550,7 @@ export default function DocumentTemplatesPage() {
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '11px' }}>{tpl.code}</td>
                       <td style={{ fontSize: '13px', fontWeight: 600 }}>{tpl.name}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>v{tpl.version}</td>
-                      <td><StatusBadge status={tpl.status} /></td>
+                      <td><StatusBadge status={tpl.status ?? 'DRAFT'} tone={TEMPLATE_STATUS_TONE[tpl.status ?? 'DRAFT']} /></td>
                       <td style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{tpl.locale ?? '—'}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{tpl.productRef ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>
