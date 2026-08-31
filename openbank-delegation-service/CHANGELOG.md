@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.10.0...delegation-service-v0.11.0) (2026-08-31)
+
+
+### Features
+
+* **delegation:** expand role capability catalog ([#7732](https://github.com/JiRaska/open-bank-oss/issues/7732)) ([4fdd0d3](https://github.com/JiRaska/open-bank-oss/commit/4fdd0d3e3c3a3d4b85c37c759300af60600a6cfb))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.9.0...delegation-service-v0.10.0) (2026-08-31)
 
 

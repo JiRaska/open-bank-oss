@@ -261,13 +261,11 @@ export default function SanctionsPage() {
       const data = await res.json().catch(() => ([]))
       if (!res.ok) {
         const errorPayload = data as ApiError
-        setLists([])
         setListsError(errorPayload.error ?? t(`Načtení listů selhalo (HTTP ${res.status})`, `Failed to load lists (HTTP ${res.status})`))
         return
       }
       setLists(Array.isArray(data) ? data : [])
     } catch (error) {
-      setLists([])
       setListsError(error instanceof Error ? error.message : 'Spojení se službou selhalo')
     }
     finally { setListsLoading(false) }
@@ -969,16 +967,26 @@ export default function SanctionsPage() {
                 <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                   {lists.filter(l => l.enabled).length} {t('z', 'of')} {lists.length} {t('listů aktivních', 'lists active')}
                 </div>
-                <Can permission="sanctions:manage">
-                <button type="button" aria-busy={refreshingAll} aria-label={t('Stáhnout všechny sankční listy', 'Download all sanctions lists')} onClick={handleRefreshAll} disabled={refreshingAll}
-                  style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
-                    background: 'var(--accent)', color: 'white', border: 'none',
-                    cursor: refreshingAll ? 'not-allowed' : 'pointer', opacity: refreshingAll ? 0.7 : 1,
-                    display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {refreshingAll ? <Loader2 size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <RefreshCw size={12} aria-hidden="true" />}
-                  {t('Stáhnout vše', 'Download all')}
-                </button>
-                </Can>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button type="button" aria-busy={listsLoading} aria-label={t('Obnovit stav sankčních listů', 'Refresh sanctions-list status')} onClick={() => void loadLists()} disabled={listsLoading}
+                    style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
+                      background: 'var(--surface)', color: 'var(--text-primary)', border: '1px solid var(--border)',
+                      cursor: listsLoading ? 'not-allowed' : 'pointer', opacity: listsLoading ? 0.7 : 1,
+                      display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <RefreshCw size={12} aria-hidden="true" style={listsLoading ? { animation: 'spin 0.8s linear infinite' } : undefined} />
+                    {t('Obnovit stav', 'Refresh status')}
+                  </button>
+                  <Can permission="sanctions:manage">
+                  <button type="button" aria-busy={refreshingAll} aria-label={t('Stáhnout všechny sankční listy', 'Download all sanctions lists')} onClick={handleRefreshAll} disabled={refreshingAll}
+                    style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
+                      background: 'var(--accent)', color: 'white', border: 'none',
+                      cursor: refreshingAll ? 'not-allowed' : 'pointer', opacity: refreshingAll ? 0.7 : 1,
+                      display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {refreshingAll ? <Loader2 size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={12} aria-hidden="true" />}
+                    {t('Stáhnout vše', 'Download all')}
+                  </button>
+                  </Can>
+                </div>
               </div>
               {listsLoading ? (
                 <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
@@ -986,13 +994,23 @@ export default function SanctionsPage() {
                 </div>
               ) : lists.length === 0 ? (
                 <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-                  {listsError || t('Žádné sankční listy nenalezeny. Zkontrolujte připojení ke službě.', 'No sanctions lists found. Check service connection.')}
+                  <div>{listsError || t('Žádné sankční listy nenalezeny. Zkontrolujte připojení ke službě.', 'No sanctions lists found. Check service connection.')}</div>
+                  {listsError && (
+                    <button type="button" onClick={() => void loadLists()} aria-label={t('Zkusit znovu načíst sankční listy', 'Retry loading sanctions lists')}
+                      style={{ marginTop: '12px', padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                      {t('Zkusit znovu', 'Try again')}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <>
                   {listsError && (
-                    <div style={{ marginBottom: '12px', padding: '12px', borderRadius: '7px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: '13px', color: 'var(--danger-text)' }}>
-                      {listsError}
+                    <div role="status" aria-live="polite" style={{ marginBottom: '12px', padding: '12px', borderRadius: '7px', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                      <span>{t('Obnovení se nezdařilo; zobrazená konfigurace sankčních listů je poslední dostupná.', 'Refresh failed; the displayed sanctions-list configuration is the last available.')} {listsError}</span>
+                      <button type="button" onClick={() => void loadLists()} aria-label={t('Zkusit znovu načíst sankční listy', 'Retry loading sanctions lists')}
+                        style={{ flexShrink: 0, padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+                        {t('Zkusit znovu', 'Try again')}
+                      </button>
                     </div>
                   )}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

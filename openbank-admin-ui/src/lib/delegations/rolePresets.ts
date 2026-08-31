@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 export const CAPABILITIES_BY_RESOURCE = {
-  ACCOUNT: ['ACCOUNT_READ_BALANCES', 'ACCOUNT_READ_TRANSACTIONS', 'ACCOUNT_INITIATE_PAYMENT', 'ACCOUNT_PROPOSE_PAYMENT', 'DELEGATION_MANAGE'],
+  ACCOUNT: ['ACCOUNT_VIEW_DETAILS', 'ACCOUNT_READ_BALANCES', 'ACCOUNT_READ_TRANSACTIONS', 'ACCOUNT_DOWNLOAD_STATEMENTS', 'ACCOUNT_PROPOSE_PAYMENT', 'ACCOUNT_INITIATE_PAYMENT', 'ACCOUNT_MANAGE_BENEFICIARIES', 'ACCOUNT_MANAGE_LIMITS', 'DELEGATION_MANAGE'],
   SAVINGS_GOAL: ['SAVINGS_DEPOSIT', 'SAVINGS_WITHDRAW', 'SAVINGS_PROPOSE_WITHDRAW'],
-  CARD: ['CARD_VIEW', 'CARD_MANAGE_LIMITS'],
+  CARD: ['CARD_VIEW', 'CARD_VIEW_TRANSACTIONS', 'CARD_MANAGE_LIMITS', 'CARD_MANAGE_STATUS', 'CARD_MANAGE_CHANNELS'],
   PAYMENT: ['OBJECT_READ'], STATEMENT: ['OBJECT_READ'], DOCUMENT: ['OBJECT_READ'],
 } as const
 export type DelegationResource = keyof typeof CAPABILITIES_BY_RESOURCE
 export type RolePreset = { id: string; name: string; description: string; resourceType: DelegationResource; capabilities: string[]; createdAt?: string; updatedAt?: string }
+
+export type CapabilityIntent = 'view' | 'act' | 'manage'
+
+export function capabilityIntent(capability: string): CapabilityIntent {
+  if (capability.includes('_READ_') || capability.includes('_VIEW') || capability === 'OBJECT_READ' || capability.includes('DOWNLOAD')) return 'view'
+  if (capability.includes('MANAGE') || capability === 'DELEGATION_MANAGE') return 'manage'
+  return 'act'
+}
