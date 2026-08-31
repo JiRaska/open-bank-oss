@@ -56,6 +56,16 @@ export const TONE_TEXT_CLASS: Record<Tone, string> = {
   accent: 'tone-text-accent',
 }
 
+/** Semantic left-border classes for status-bearing cards and panels. */
+export const TONE_BORDER_LEFT_CLASS: Record<Tone, string> = {
+  success: 'tone-border-left-success',
+  warning: 'tone-border-left-warning',
+  danger: 'tone-border-left-danger',
+  info: 'tone-border-left-info',
+  neutral: 'tone-border-left-neutral',
+  accent: 'tone-border-left-accent',
+}
+
 export const DOT_CLASS: Record<Tone, string> = {
   success: 'status-dot status-dot-green',
   warning: 'status-dot status-dot-yellow',
@@ -88,10 +98,12 @@ const TONE_BY_STATUS: Record<string, Tone> = {
   RESOLVED: 'success',
   SENT: 'success',
   SETTLED: 'success',
+  UP: 'success',
   VERIFIED: 'success',
 
   // In-flight / needs attention but not wrong
   DEGRADED: 'warning',
+  DOWN: 'danger',
   DRAFT: 'warning',
   IN_PROGRESS: 'warning',
   PENDING: 'warning',

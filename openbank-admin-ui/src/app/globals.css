@@ -931,6 +931,16 @@ main {
 .tone-text-neutral { color: var(--text-secondary); }
 .tone-text-accent  { color: var(--ob-accent); }
 
+/* Semantic card emphasis for the cases where the verdict belongs to the whole surface, not just
+   a badge. The tone is selected in TypeScript; the actual colour remains token-owned here. */
+.tone-border-left { border-left-style: solid; border-left-width: 4px; }
+.tone-border-left-success { border-left-color: var(--success); }
+.tone-border-left-warning { border-left-color: var(--warning); }
+.tone-border-left-danger  { border-left-color: var(--danger); }
+.tone-border-left-info    { border-left-color: var(--info); }
+.tone-border-left-neutral { border-left-color: var(--border-strong); }
+.tone-border-left-accent  { border-left-color: var(--ob-accent); }
+
 /* ── Page header ── */
 .page-header {
   margin-bottom: 32px;

@@ -7,6 +7,7 @@ import {
   BADGE_CLASS,
   DOT_CLASS,
   SWATCH_CLASS,
+  TONE_BORDER_LEFT_CLASS,
   TONE_TEXT_CLASS,
   statusBadgeClass,
   statusDotClass,
@@ -15,7 +16,7 @@ import {
 
 describe('statusTone (ADR-0208 D2)', () => {
   it('maps terminal-good statuses to success', () => {
-    for (const s of ['ACTIVE', 'COMPLETED', 'SETTLED', 'CLEARED', 'APPROVED', 'OK', 'SENT']) {
+    for (const s of ['ACTIVE', 'COMPLETED', 'SETTLED', 'CLEARED', 'APPROVED', 'OK', 'SENT', 'UP']) {
       expect(statusTone(s), s).toBe('success')
     }
   })
@@ -27,7 +28,7 @@ describe('statusTone (ADR-0208 D2)', () => {
   })
 
   it('maps failure statuses to danger', () => {
-    for (const s of ['FAILED', 'REJECTED', 'BLOCKED', 'SUSPENDED', 'CRITICAL', 'ERROR', 'BOUNCED', 'ESCALATED', 'DEPRECATED']) {
+    for (const s of ['FAILED', 'REJECTED', 'BLOCKED', 'SUSPENDED', 'CRITICAL', 'ERROR', 'BOUNCED', 'ESCALATED', 'DEPRECATED', 'DOWN']) {
       expect(statusTone(s), s).toBe('danger')
     }
   })
@@ -91,6 +92,7 @@ describe('statusTone (ADR-0208 D2)', () => {
       expect(SWATCH_CLASS[tone], `swatch ${tone}`).toMatch(/^tone-swatch badge-/)
       expect(SWATCH_CLASS[tone], `swatch ${tone} must not apply .badge`).not.toMatch(/(^|\s)badge(\s|$)/)
       expect(TONE_TEXT_CLASS[tone], `text ${tone}`).toMatch(/^tone-text-/)
+      expect(TONE_BORDER_LEFT_CLASS[tone], `left border ${tone}`).toMatch(/^tone-border-left-/)
     }
   })
 
