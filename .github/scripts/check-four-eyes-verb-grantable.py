@@ -46,7 +46,7 @@ import sys
 
 REF = "origin/main"
 AUTHORIZE_RE = re.compile(r'@Authorize\(\s*action\s*=\s*"([^"]+)"')
-VERB_RE = re.compile(r"^\s+- (\w+)", re.M)
+VERB_RE = re.compile(r"^\s+- (\w+)", re.MULTILINE)
 
 # Declared, not inferred. An entry needs a reason and is expected to shrink; the gate also fails
 # on an entry that has become granted, so the declaration cannot outlive the debt.
@@ -77,11 +77,12 @@ KNOWN_UNGRANTED: dict[str, str] = {
 
 
 def sh(*args: str) -> str:
-    return subprocess.run(args, capture_output=True, text=True).stdout
+    # check=False: a `git grep` with no match exits 1, which is data here, not an error.
+    return subprocess.run(args, capture_output=True, text=True, check=False).stdout
 
 
 def four_eyes_verbs(rules: str) -> set[str]:
-    m = re.search(r"^four_eyes:\n  verbs:\n((?:\s+-.*\n|\s+#.*\n|\s{10,}#.*\n)+)", rules, re.M)
+    m = re.search(r"^four_eyes:\n  verbs:\n((?:\s+-.*\n|\s+#.*\n|\s{10,}#.*\n)+)", rules, re.MULTILINE)
     if not m:
         raise SystemExit("::error::could not locate four_eyes.verbs in rules.yaml")
     return set(VERB_RE.findall(m.group(1)))
@@ -100,7 +101,7 @@ def authorize_actions(ref: str) -> dict[str, str]:
 
 
 def matrix_text(rules: str) -> str:
-    m = re.search(r"^\s+role_action_matrix:\n((?:.*\n)*?)^\s{2}\w", rules, re.M)
+    m = re.search(r"^\s+role_action_matrix:\n((?:.*\n)*?)^\s{2}\w", rules, re.MULTILINE)
     return m.group(1) if m else ""
 
 
@@ -219,7 +220,7 @@ def main() -> int:
     ungranted, granted = evaluate(actions, verbs, matrix_text(rules), corpus)
     subjects = len(ungranted) + len(granted)
     print(f"four-eyes-verb-grantable: {len(verbs)} verb(s), {subjects} four-eyes action(s) found")
-    for action, path, where in granted:
+    for action, _path, where in granted:
         print(f"  ok   {action}  ({where})")
 
     level = "error" if args.enforce else "warning"
