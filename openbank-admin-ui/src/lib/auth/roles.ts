@@ -51,6 +51,9 @@ export const PERMISSIONS = {
   "payments:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.SUPERVISOR],
   "payments:create":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.PAYMENTS],
   "payments:approve":     [ROLES.ADMIN, ROLES.PAYMENTS, ROLES.SUPERVISOR],
+  // SWIFT and clearing list/detail reads share this exact human role boundary.
+  // Their submit/approval endpoints are not exposed by these read-only consoles.
+  "payment-rails:view":   [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS],
   // Lending compliance-pack reads include the operational lending roles accepted by
   // CompliancePackResource.listActive; maker/checker writes remain compliance/admin only.
   "lending:compliance:view":    [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.CREDIT_RISK, ROLES.LENDING_OFFICER],
@@ -228,12 +231,13 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
   ['transactions:view', ['/transactions']],
+  ['payment-rails:view', ['/swift', '/clearing']],
   ['accounts:create', ['/accounts/new']],
   ['accounts:view', ['/accounts', '/ledger', '/day-end']],
   ['cards:view', ['/cards']],
   ['payments:view', [
-    '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant', '/clearing',
-    '/fx', '/swift', '/interest', '/pid', '/fees', '/lending',
+    '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant',
+    '/fx', '/interest', '/pid', '/fees', '/lending',
   ]],
   ['sanctions:view', ['/sanctions']],
   ['compliance:view', [
