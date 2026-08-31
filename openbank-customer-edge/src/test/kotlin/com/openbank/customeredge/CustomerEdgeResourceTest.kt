@@ -1550,6 +1550,28 @@ class CustomerEdgeResourceTest {
         assertThat(out.get(0).has("spreadPct")).isFalse()
     }
 
+    @Test
+    fun `mapFxHistoryList keeps CNB rows sorts oldest input newest first and deduplicates timestamp`() {
+        val upstream = """[
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","source":"CNB","bidRate":"24.8","askRate":"25.2","validFrom":"2026-05-01T00:00:00Z"},
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","source":"CNB","bidRate":"24.9","askRate":"25.1","validFrom":"2026-06-01T00:00:00Z"},
+            {"baseCurrency":"EUR","quoteCurrency":"CZK","source":"CNB","bidRate":"24.9","askRate":"25.1","validFrom":"2026-06-01T00:00:00Z"}
+        ]"""
+
+        val out = mapper.readTree(CustomerEdgeResource.mapFxHistoryList(mapper, upstream)!!)
+
+        assertThat(out).hasSize(2)
+        assertThat(out[0]["timestamp"].asText()).isEqualTo("2026-06-01T00:00:00Z")
+        assertThat(out[1]["timestamp"].asText()).isEqualTo("2026-05-01T00:00:00Z")
+    }
+
+    @Test
+    fun `three month trend uses calendar months rather than a row or day count`() {
+        val now = java.time.Instant.parse("2026-05-31T12:00:00Z")
+        assertThat(CustomerEdgeResource.threeMonthWindowStart(now))
+            .isEqualTo(java.time.Instant.parse("2026-02-28T12:00:00Z"))
+    }
+
     // --- isValidInstant ---
 
     @Test
