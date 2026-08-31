@@ -50,21 +50,6 @@ class PostgresTestResourcesTest {
     }
 
     @Test
-    fun `repeated start on one resource reuses the running database`() {
-        val resource = PostgresTestResource()
-        resource.init(mapOf("db" to "openbank_kit_idempotent_start_it"))
-        try {
-            val first = resource.start()
-            val repeated = resource.start()
-
-            assertThat(repeated["quarkus.datasource.jdbc.url"])
-                .isEqualTo(first["quarkus.datasource.jdbc.url"])
-        } finally {
-            resource.stop()
-        }
-    }
-
-    @Test
     fun `PostgresRedisTestResource provisions both a database and a reachable Redis`() {
         val resource = PostgresRedisTestResource()
         resource.init(mapOf("db" to "openbank_kit_redis_selftest_it"))

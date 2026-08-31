@@ -32,9 +32,10 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
         initArgs["db"]?.let { dbName = it }
     }
 
-    @Synchronized
     protected fun startPostgres(): PostgreSQLContainer<*> {
-        postgres?.let { return it }
+        // Quarkus can reprovision this manager for another test application before its one
+        // terminal stop callback. Evidence describes that logical manager lifecycle, not each replacement.
+        val beginsLogicalLifecycle = postgres == null
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
@@ -43,7 +44,7 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
             .withPassword("openbank_secret")
             .withDatabaseName(dbName)
         pg.start()
-        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
+        if (beginsLogicalLifecycle) TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
         postgres = pg
         return pg
     }
@@ -60,15 +61,10 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
         )
     }
 
-    @Synchronized
     override fun stop() {
-        val running = postgres ?: return
+        postgres?.stop()
+        if (postgres != null) TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
         postgres = null
-        try {
-            running.stop()
-        } finally {
-            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
-        }
     }
 
     private companion object {
