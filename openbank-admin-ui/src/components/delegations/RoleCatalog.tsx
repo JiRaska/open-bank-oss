@@ -54,7 +54,7 @@ export function RoleCatalog() {
     {state === 'loading' && <div style={{ padding: 20, color: 'var(--text-tertiary)' }}>{t('Načítám katalog…', 'Loading catalog…')}</div>}
     {state === 'error' && <div style={{ padding: 20, color: 'var(--text-tertiary)' }}>{t('Katalog rolí není dostupný.', 'Role catalog is unavailable.')}</div>}
     {state === 'ready' && <div style={{ overflowX: 'auto' }}><table className="table" style={{ width: '100%' }}><thead><tr><th>{t('Role', 'Role')}</th><th>{t('Zdroj', 'Resource')}</th>
-      {rights.map(right => <th key={right} title={right} style={{ textAlign: 'center', fontSize: 10 }}>{shortRight(right)}</th>)}{canManage && <th aria-label={t('Akce', 'Actions')} />}</tr></thead>
+      {rights.map(right => <th key={right} title={rightLabel(right, t)} style={{ textAlign: 'center', fontSize: 10, minWidth: 92 }}>{rightLabel(right, t)}</th>)}{canManage && <th aria-label={t('Akce', 'Actions')} />}</tr></thead>
       <tbody>{roles.map(role => <tr key={role.id}><td><strong>{role.name}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)', maxWidth: 260 }}>{role.description}</div></td><td>{role.resourceType}</td>
         {rights.map(right => <td key={right} style={{ textAlign: 'center' }}>{role.capabilities.includes(right) ? <Check size={15} color="var(--success)" aria-label={t('Povoleno', 'Allowed')} /> : '—'}</td>)}
         {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button className="btn btn-secondary" onClick={() => setEditing({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${role.name}`}><Pencil size={13} /></button><button className="btn btn-secondary" onClick={() => void remove(role)} aria-label={`${t('Smazat', 'Delete')} ${role.name}`}><Trash2 size={13} /></button></div></td>}</tr>)}</tbody></table></div>}
@@ -71,9 +71,32 @@ function Editor({ value, cancel, save }: { value: RolePreset; cancel: () => void
     <label style={labelStyle}>{t('Název', 'Name')}<input className="input" maxLength={100} value={role.name} onChange={event => setRole({ ...role, name: event.target.value })} /></label>
     <label style={labelStyle}>{t('Popis', 'Description')}<textarea className="input" maxLength={500} value={role.description} onChange={event => setRole({ ...role, description: event.target.value })} /></label>
     <label style={labelStyle}>{t('Zdroj', 'Resource')}<select className="input" value={role.resourceType} onChange={event => changeResource(event.target.value as DelegationResource)}>{Object.keys(CAPABILITIES_BY_RESOURCE).map(resource => <option key={resource}>{resource}</option>)}</select></label>
-    <fieldset style={{ border: 0, padding: 0, margin: '14px 0' }}><legend style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{t('Práva', 'Rights')}</legend>{allowed.map(right => <label key={right} style={{ display: 'flex', gap: 8, padding: 8 }}><input type="checkbox" checked={role.capabilities.includes(right)} onChange={() => toggle(right)} /><code>{right}</code></label>)}</fieldset>
+    <fieldset style={{ border: 0, padding: 0, margin: '14px 0' }}><legend style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{t('Práva', 'Rights')}</legend>{allowed.map(right => <label key={right} title={right} style={{ display: 'flex', gap: 8, padding: 8 }}><input type="checkbox" checked={role.capabilities.includes(right)} onChange={() => toggle(right)} /><span>{rightLabel(right, t)}</span></label>)}</fieldset>
     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button className="btn btn-secondary" onClick={cancel}>{t('Zrušit', 'Cancel')}</button><button className="btn btn-primary" disabled={!role.name.trim() || !role.capabilities.length} onClick={() => void save(role)}>{t('Uložit', 'Save')}</button></div>
   </div></div>
 }
 const labelStyle = { display: 'grid', gap: 6, fontSize: 13, fontWeight: 600, marginBottom: 12 } as const
-const shortRight = (right: string) => right.replace(/^(ACCOUNT|SAVINGS|CARD|OBJECT)_/, '')
+const RIGHT_LABELS: Record<string, [string, string]> = {
+  ACCOUNT_VIEW_DETAILS: ['Detail účtu', 'Account details'],
+  ACCOUNT_READ_BALANCES: ['Zůstatky', 'Balances'],
+  ACCOUNT_READ_TRANSACTIONS: ['Transakce', 'Transactions'],
+  ACCOUNT_DOWNLOAD_STATEMENTS: ['Výpisy', 'Statements'],
+  ACCOUNT_PROPOSE_PAYMENT: ['Připravit platbu', 'Propose payment'],
+  ACCOUNT_INITIATE_PAYMENT: ['Provést platbu', 'Execute payment'],
+  ACCOUNT_MANAGE_BENEFICIARIES: ['Příjemci', 'Beneficiaries'],
+  ACCOUNT_MANAGE_LIMITS: ['Limity účtu', 'Account limits'],
+  DELEGATION_MANAGE: ['Disponenti', 'Delegates'],
+  CARD_VIEW: ['Detail karty', 'Card details'],
+  CARD_VIEW_TRANSACTIONS: ['Transakce karty', 'Card transactions'],
+  CARD_MANAGE_LIMITS: ['Limity karty', 'Card limits'],
+  CARD_MANAGE_STATUS: ['Blokace karty', 'Card status'],
+  CARD_MANAGE_CHANNELS: ['Kanály karty', 'Card channels'],
+  SAVINGS_DEPOSIT: ['Vklad', 'Deposit'],
+  SAVINGS_WITHDRAW: ['Výběr', 'Withdraw'],
+  SAVINGS_PROPOSE_WITHDRAW: ['Připravit výběr', 'Propose withdrawal'],
+  OBJECT_READ: ['Zobrazit', 'View'],
+}
+const rightLabel = (right: string, t: (cs: string, en: string) => string) => {
+  const label = RIGHT_LABELS[right]
+  return label ? t(label[0], label[1]) : right.replace(/^(ACCOUNT|SAVINGS|CARD|OBJECT)_/, '')
+}
