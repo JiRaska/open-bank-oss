@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.71.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.70.0...customer-edge-v0.71.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** unify the three-month FX rate trend ([#7736](https://github.com/JiRaska/open-bank-oss/issues/7736)) ([5e85aa6](https://github.com/JiRaska/open-bank-oss/commit/5e85aa60dab75048024186ff7072c0918cddaeea))
+
 ## [0.70.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.69.0...customer-edge-v0.70.0) (2026-08-27)
 
 
