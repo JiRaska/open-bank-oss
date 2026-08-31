@@ -193,15 +193,20 @@ export default function CardsPage() {
               <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} />
               <div>{t('Načítám karty…', 'Loading cards…')}</div>
             </div>
-          ) : unavailable ? (
+          ) : unavailable && cards.length === 0 ? (
             <DataUnavailable kind={unavailable.kind} service={t('Card-issuance-service', 'Card-issuance-service')} feature={t('Karty', 'Cards')} lang={language} />
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && !unavailable ? (
             <DataUnavailable kind="no_data" feature={t('Karty', 'Cards')} lang={language}
               detail={cards.length === 0
                 ? t('Služba běží, zatím nebyly vydány žádné karty.', 'The service is running; no cards have been issued yet.')
                 : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
             <>
+              {unavailable && (
+                <div role="status" aria-live="polite" style={{ padding: '12px 16px', color: 'var(--warning-text)', fontSize: '12px', fontWeight: 600, borderBottom: '1px solid var(--border)' }}>
+                  {t('Zobrazené karty a jejich stavy jsou poslední dostupná data; obnovení se nezdařilo.', 'Displayed cards and their statuses are the last available data; refresh failed.')}
+                </div>
+              )}
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
