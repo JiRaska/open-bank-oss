@@ -4087,3 +4087,21 @@ gates:
     min_subjects: 30   # 45 incoming channels today (2026-08-21, incl. audit-service agent-audit-events-in)
     run: |
       python3 .github/scripts/check-incoming-dlq-wiring.py --enforce
+
+  # #7645. The ClickHouse warehouse's schema is applied by a ConfigMap mounted into
+  # /docker-entrypoint-initdb.d, and ClickHouse only executes it when the data directory is EMPTY —
+  # so a schema change made after the cluster's first boot is real only for the NEXT fresh boot, and
+  # nothing scanned the migration directory to keep the ConfigMap in step with it. Two migrations
+  # (V9 synthetic_provenance, V10 credit_funnel) were merged and believed-deployed while absent from
+  # the ConfigMap, and a naming collision (two files both claiming V9) sat undetected alongside them.
+  - id: clickhouse-migration-configmap-sync
+    name: "every ClickHouse migration has a matching boot ConfigMap key (#7645, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "The ClickHouse init ConfigMap only runs on an empty data directory, so a migration added to the source-of-record directory without a matching ConfigMap key is invisible to every fresh boot; nothing scanned the two for drift before this gate, and two migrations plus a V9 naming collision had already accumulated unapplied."
+    review_after: "2027-02-28"
+    selftest: python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --self-test
+    selftest_expect: pass
+    min_subjects: 11   # 11 migrations today (2026-08-31)
+    run: |
+      python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --enforce
