@@ -130,6 +130,7 @@ def main() -> int:
 
     findings = scan(args.root)
     count = len(findings)
+    print(f"SUBJECTS={count}  # raw hex colour literals in openbank-admin-ui app/ and components/")
 
     if args.list:
         for f in sorted(findings, key=lambda x: (x["file"], x["line"])):
