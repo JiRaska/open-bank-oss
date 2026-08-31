@@ -2309,7 +2309,13 @@ gates:
     name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
     group: kotlin
     mode: enforced
-    min_subjects: 70   # 142 money-path domain/application files today (2026-08-09)
+    min_subjects: 153  # 306 money-path domain/application files today (2026-08-31, #6253).
+    # Was 70 = half of the 142 files counted on 2026-08-09. The corpus then more than doubled
+    # while the floor did not, so it had decayed to 23% of the corpus: measured under #6253,
+    # narrowing rules.yaml money_path_services back to the 8 services this gate shipped with
+    # (the ORIGINAL defect, named in check-clock-injection.sh's own header) scans 143 files and
+    # PASSED floor 70 with rc=0. 153 is half of today's count, per the seeding rule in
+    # check-gate-subject-floor.py.
     selftest: bash .github/scripts/check-clock-injection.sh --self-test
     selftest_expect: pass
     run: |
