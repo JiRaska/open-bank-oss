@@ -240,10 +240,9 @@ data class PostJournalRequest(
      * service-local mapper is needed or wanted (two mappers for one type are selected at random per
      * request, #526).
      */
-    fun requireLines(): List<PostJournalLineRequest> =
-        lines.mapIndexed { index, line ->
-            requireNotNull(line) { "lines[$index] must not be null" }
-        }
+    fun requireLines(): List<PostJournalLineRequest> = lines.mapIndexed { index, line ->
+        requireNotNull(line) { "lines[$index] must not be null" }
+    }
 }
 
 data class ReverseJournalRequest(val reason: String, val reversedBy: UUID)
