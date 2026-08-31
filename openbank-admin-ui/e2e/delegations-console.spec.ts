@@ -20,6 +20,13 @@ const PARTY = '018f4a3c-1b2d-7e00-9a11-000000000001'
 const GRANTEE = '018f4a3c-1b2d-7e00-9a11-0000000000ff'
 const GRANT = '018f4a3c-1b2d-7e00-9a11-000000000002'
 const RESOURCE = '018f4a3c-1b2d-7e00-9a11-000000000003'
+const ROLE_PRESET = {
+  id: '018f4a3c-1b2d-7e00-9a11-000000000004',
+  name: 'Účetní',
+  description: 'Čte zůstatky a historii účtu.',
+  resourceType: 'ACCOUNT',
+  capabilities: ['ACCOUNT_READ_BALANCES'],
+}
 
 const GRANT_ROW = {
   id: GRANT,
@@ -144,6 +151,81 @@ test('a refused direction never renders as "no delegations"', async ({ page }) =
   await expect(main.getByText(/nebyl povolen|was refused for your role/)).toBeVisible()
   // The dangerous wrong answer must NOT be on screen for the refused direction.
   await expect(main.getByText(/Žádné delegace\.|No delegations\./)).toHaveCount(1)
+})
+
+test('role deletion explains impact and recovers from a failed request before removing the preset', async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem('openbank-admin-lang', 'cs'))
+  await stubBff(page)
+
+  let roles = [ROLE_PRESET]
+  let deleteAttempts = 0
+  await page.route('**/api/delegation-role-presets**', route => {
+    const request = route.request()
+    if (request.method() === 'DELETE') {
+      deleteAttempts += 1
+      if (deleteAttempts === 1) {
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporarily unavailable' }) })
+      }
+      roles = []
+      return route.fulfill({ status: 204, body: '' })
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(roles) })
+  })
+
+  await page.goto('/delegations')
+  await expect(page.getByRole('heading', { name: ROLE_PRESET.name, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: `Smazat ${ROLE_PRESET.name}` }).click()
+
+  const dialog = page.getByRole('alertdialog', { name: `Smazat roli „${ROLE_PRESET.name}“?` })
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('Již udělená práva se nezmění ani neodvolají.')
+
+  await dialog.getByRole('button', { name: 'Smazat preset' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Nic se nezměnilo; zkuste to znovu.')
+  await expect(page.getByRole('heading', { name: ROLE_PRESET.name, exact: true })).toBeVisible()
+
+  await dialog.getByRole('button', { name: 'Smazat preset' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('heading', { name: ROLE_PRESET.name, exact: true })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Dispoziční role a práva' })).toBeFocused()
+  expect(deleteAttempts).toBe(2)
+})
+
+test('role creation stays editable after failure and retries without a duplicate submission', async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem('openbank-admin-lang', 'cs'))
+  await stubBff(page)
+
+  let roles: typeof ROLE_PRESET[] = []
+  let createAttempts = 0
+  await page.route('**/api/delegation-role-presets**', async route => {
+    const request = route.request()
+    if (request.method() === 'POST') {
+      createAttempts += 1
+      if (createAttempts === 1) {
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporarily unavailable' }) })
+      }
+      const payload = request.postDataJSON() as Omit<typeof ROLE_PRESET, 'id'>
+      roles = [{ ...payload, id: ROLE_PRESET.id }]
+      return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(roles[0]) })
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(roles) })
+  })
+
+  await page.goto('/delegations')
+  await page.getByRole('button', { name: 'Přidat roli' }).click()
+  const editor = page.getByRole('dialog', { name: 'Nastavení dispoziční role' })
+  await editor.getByRole('textbox', { name: 'Název' }).fill(ROLE_PRESET.name)
+  await editor.getByRole('textbox', { name: 'Popis' }).fill(ROLE_PRESET.description)
+  await editor.getByRole('checkbox').first().check()
+
+  await editor.getByRole('button', { name: 'Uložit' }).click()
+  await expect(editor.getByRole('alert')).toContainText('Nic se nezměnilo; zkontrolujte údaje a zkuste to znovu.')
+  await expect(editor.getByRole('textbox', { name: 'Název' })).toHaveValue(ROLE_PRESET.name)
+
+  await editor.getByRole('button', { name: 'Uložit' }).click()
+  await expect(editor).toBeHidden()
+  await expect(page.getByRole('heading', { name: ROLE_PRESET.name, exact: true })).toBeVisible()
+  expect(createAttempts).toBe(2)
 })
 
 test('the grant detail offers NO mutation — suspend, reinstate and revoke are absent from the wire', async ({ page }) => {
