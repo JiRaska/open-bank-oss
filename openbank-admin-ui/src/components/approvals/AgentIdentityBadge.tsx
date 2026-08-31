@@ -17,11 +17,6 @@ interface Props {
   lang?: 'cs' | 'en'
 }
 
-const chip: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700,
-  padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', letterSpacing: '0.04em',
-}
-
 export function AgentIdentityBadge({ identity, loading = false, lang = 'en' }: Props) {
   const cs = lang === 'cs'
 
@@ -30,7 +25,7 @@ export function AgentIdentityBadge({ identity, loading = false, lang = 'en' }: P
       <span
         data-testid="agent-identity"
         data-state="loading"
-        style={{ ...chip, color: 'var(--text-tertiary)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}
+        className="badge badge-sm badge-neutral"
       >
         {cs ? 'Ověřuji charter…' : 'Checking charter…'}
       </span>
@@ -45,11 +40,11 @@ export function AgentIdentityBadge({ identity, loading = false, lang = 'en' }: P
         data-state="chartered"
         data-agent-id={charter.id}
         title={charter.charter}
-        style={{ ...chip, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d' }}
+        className="badge badge-sm badge-warning"
       >
         <Bot size={11} aria-hidden="true" />
         {charter.id}
-        <span style={{ fontWeight: 600, opacity: 0.8, textTransform: 'none' }}>
+        <span className="badge-detail">
           · {cs ? 'charter' : 'charter'} · {charter.plane}
         </span>
       </span>
@@ -61,7 +56,7 @@ export function AgentIdentityBadge({ identity, loading = false, lang = 'en' }: P
       <span
         data-testid="agent-identity"
         data-state="unresolved"
-        style={{ ...chip, color: 'var(--text-secondary)', background: 'var(--surface-2)', border: '1px solid var(--border)' }}
+        className="badge badge-sm badge-neutral"
       >
         <UserRound size={11} aria-hidden="true" />
         {cs ? 'Bez charteru v agents.yaml' : 'No charter in agents.yaml'}
@@ -73,7 +68,7 @@ export function AgentIdentityBadge({ identity, loading = false, lang = 'en' }: P
     <span
       data-testid="agent-identity"
       data-state="unverifiable"
-      style={{ ...chip, color: '#b91c1c', background: '#fef2f2', border: '1px solid #fca5a5' }}
+      className="badge badge-sm badge-danger"
     >
       <ShieldQuestion size={11} aria-hidden="true" />
       {cs ? 'Identitu nelze ověřit — registr charterů nedostupný' : 'Identity unverifiable — charter registry unavailable'}
