@@ -745,7 +745,7 @@ export default function FxPage() {
         </div>
 
         <div style={{ marginBottom: '20px' }}>
-          <FxTrendChart base="EUR" quote="CZK" lang={language} />
+          <FxTrendChart bases={cnbRates.map(rate => rate.currencyCode)} quote="CZK" lang={language} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>

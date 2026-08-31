@@ -19,4 +19,15 @@ describe('FX trend normalisation', () => {
     expect(fxTrendChange([{ timestamp: 'a', rate: 25 }, { timestamp: 'b', rate: 26 }])).toBe(4)
     expect(fxTrendChange([{ timestamp: 'a', rate: 25 }])).toBeNull()
   })
+
+  it('keeps only the latest fixing for each UTC business day', () => {
+    expect(normaliseFxTrend([
+      { timestamp: '2026-08-31T08:00:00Z', rate: 25.1 },
+      { timestamp: '2026-08-31T14:30:00Z', rate: 25.2 },
+      { timestamp: '2026-05-31T12:00:00Z', rate: 25 },
+    ])).toEqual([
+      { timestamp: '2026-05-31T12:00:00Z', rate: 25 },
+      { timestamp: '2026-08-31T14:30:00Z', rate: 25.2 },
+    ])
+  })
 })

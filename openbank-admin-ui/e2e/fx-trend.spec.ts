@@ -2,7 +2,11 @@ import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
 const aggregate = {
-  cnb: { rates: [], syncedAt: '2026-08-31T12:00:00Z', error: null },
+  cnb: {
+    rates: [{ currencyCode: 'USD', currencyName: 'US dollar', country: 'USA', amount: 1, rate: 21.5, validFor: '2026-08-31' }],
+    syncedAt: '2026-08-31T12:00:00Z',
+    error: null,
+  },
   ecb: { rates: [], syncedAt: '2026-08-31T12:00:00Z', error: null },
   fxService: { status: 'up', rates: [], conversions: [] },
 }
@@ -30,7 +34,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 })
 
 test('renders one chronological, educational three-month CNB trend', async ({ page }) => {
-  await page.route('**/api/fx/history/EUR/CZK', route => route.fulfill({
+  await page.route('**/api/fx/history/*/CZK', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify([
@@ -44,6 +48,10 @@ test('renders one chronological, educational three-month CNB trend', async ({ pa
   await expect(page.getByRole('img', { name: /Kurz se změnil o 2\.00 procenta|Rate changed by 2\.00 percent/ })).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('+2.00 %')).toBeVisible()
   await expect(page.getByText(/Orientační střed ČNB; nejde o historickou závaznou klientskou nabídku|Indicative CNB mid-rate; not a binding historical customer quote/)).toBeVisible()
+
+  await page.getByLabel(/Měna trendu|Trend currency/).selectOption('USD')
+  await expect(page.getByRole('heading', { name: '/ CZK' })).toBeVisible()
+  await expect(page.getByRole('img', { name: /Kurz se změnil o 2\.00 procenta|Rate changed by 2\.00 percent/ })).toBeVisible()
 })
 
 test('does not mislabel an outage as missing fixings and can retry', async ({ page }) => {

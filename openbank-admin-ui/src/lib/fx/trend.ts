@@ -1,8 +1,8 @@
 export interface FxTrendPoint { timestamp: string; rate: number }
 
-/** Normalise a newest/oldest/mixed API response into one valid point per instant, oldest first. */
+/** Normalise a newest/oldest/mixed API response into one latest valid fixing per UTC day, oldest first. */
 export function normaliseFxTrend(rows: unknown[]): FxTrendPoint[] {
-  const unique = new Map<string, FxTrendPoint>()
+  const latestByDate = new Map<string, FxTrendPoint>()
   for (const value of rows) {
     if (!value || typeof value !== 'object') continue
     const row = value as Record<string, unknown>
@@ -11,9 +11,13 @@ export function normaliseFxTrend(rows: unknown[]): FxTrendPoint[] {
     const rawRate = row.rate ?? row.midRate
     const rate = typeof rawRate === 'number' ? rawRate : Number(rawRate)
     if (!timestamp || !Number.isFinite(Date.parse(timestamp)) || !Number.isFinite(rate) || rate <= 0) continue
-    unique.set(timestamp, { timestamp, rate })
+    const date = new Date(timestamp).toISOString().slice(0, 10)
+    const previous = latestByDate.get(date)
+    if (!previous || Date.parse(timestamp) > Date.parse(previous.timestamp)) {
+      latestByDate.set(date, { timestamp, rate })
+    }
   }
-  return [...unique.values()].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+  return [...latestByDate.values()].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
 }
 
 export function fxTrendChange(points: FxTrendPoint[]): number | null {
