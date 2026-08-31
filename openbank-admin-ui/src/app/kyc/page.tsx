@@ -88,7 +88,7 @@ export default function KycPage() {
         actions={<button
           type="button"
           className="btn btn-secondary"
-          onClick={load}
+          onClick={() => void load()}
           disabled={loading}
           aria-busy={loading}
           aria-label={t('Obnovit KYC případy', 'Refresh KYC cases')}
