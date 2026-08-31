@@ -2507,6 +2507,9 @@ gates:
     name: "released package resolves to a component that reaches released.tsv (issue #7597, enforced)"
     group: supplychain
     mode: enforced
+    rationale: "A released package with no component key never enters released.tsv, so its release produces no SBOM, no provenance attestation and no VEX document — silently, since the release itself still succeeds. This gate makes that gap a finding instead of an absence nothing else can see."
+    review_after: "2027-08-31"
+    min_subjects: 60
     selftest: |
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
     run: |
