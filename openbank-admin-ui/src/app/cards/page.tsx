@@ -188,14 +188,13 @@ export default function CardsPage() {
             </div>
           </div>
 
-          {loading ? (
+          {unavailable && <DataUnavailable kind={unavailable.kind} service={t('Card-issuance-service', 'Card-issuance-service')} feature={t('Karty', 'Cards')} lang={language} dense={cards.length > 0} />}
+          {loading && cards.length === 0 ? (
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} />
               <div>{t('Načítám karty…', 'Loading cards…')}</div>
             </div>
-          ) : unavailable ? (
-            <DataUnavailable kind={unavailable.kind} service={t('Card-issuance-service', 'Card-issuance-service')} feature={t('Karty', 'Cards')} lang={language} />
-          ) : filtered.length === 0 ? (
+          ) : unavailable && cards.length === 0 ? null : filtered.length === 0 ? (
             <DataUnavailable kind="no_data" feature={t('Karty', 'Cards')} lang={language}
               detail={cards.length === 0
                 ? t('Služba běží, zatím nebyly vydány žádné karty.', 'The service is running; no cards have been issued yet.')
