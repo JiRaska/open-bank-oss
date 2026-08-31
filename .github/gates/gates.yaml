@@ -981,6 +981,7 @@ gates:
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
     mode: enforced
+    min_subjects: 6   # 13 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-license-headers.py --selftest
     run: |
@@ -2028,6 +2029,7 @@ gates:
     name: "App Router route.ts exports only route fields (#3262/#3611, enforced)"
     group: lint
     mode: enforced
+    min_subjects: 55   # 114 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-route-exports.py --self-test
     run: |
@@ -2160,6 +2162,7 @@ gates:
     name: "no runBlocking in a @Scheduled body (rules.yaml: scheduled_methods, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 1080   # 2173 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-no-runblocking-in-scheduled.py --self-test
     selftest_expect: pass
     run: |
@@ -2227,6 +2230,7 @@ gates:
     name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 1080   # 2175 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
     selftest_expect: pass
     run: |
@@ -2364,6 +2368,7 @@ gates:
     name: "domain-purity gate — hexagonal invariant (ADR-0002, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 165   # 339 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-domain-purity.py --self-test
     run: |
@@ -2470,6 +2475,7 @@ gates:
     name: "a service shipping an outbox dispatcher must construct an OutboxMessage (#4007, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-outbox-has-writer.py --self-test
     selftest_expect: pass
@@ -2705,6 +2711,7 @@ gates:
     name: "openapi-server-port — spec dev port vs quarkus.http.port (enforced)"
     group: api
     mode: enforced
+    min_subjects: 26   # 52 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-openapi-server-port.py --self-test
     selftest_expect: pass
     run: |
@@ -2731,6 +2738,7 @@ gates:
     name: "Flyway default datasource, and migrations something actually runs (issue #3080, enforced)"
     group: data
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-flyway-default-datasource.py --selftest
     run: |
@@ -3175,6 +3183,7 @@ gates:
     name: "kafka dotted-key ratchet (issues #686/#2945, enforced)"
     group: data
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-kafka-dotted-keys.py --self-test
     selftest_expect: pass
     run: |
@@ -3319,6 +3328,7 @@ gates:
     name: "Scheduler exercised in tests (issue #2204, enforced)"
     group: security
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-scheduler-exercised.py --selftest
     run: |
