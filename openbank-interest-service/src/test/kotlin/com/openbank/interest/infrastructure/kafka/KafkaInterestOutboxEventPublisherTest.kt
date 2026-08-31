@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
-package com.openbank.fraud.infrastructure.kafka
+package com.openbank.interest.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxEntry
@@ -37,7 +37,7 @@ import java.util.UUID
  * test that asserted on the source, or on a substring of the payload string, would inherit the same
  * blindness. So this parses the captured message and reads the resolved value.
  */
-class KafkaFraudOutboxEventPublisherTest {
+class KafkaInterestOutboxEventPublisherTest {
 
     @Test
     fun `publish stamps sourceService on the emitted payload`() {
@@ -46,7 +46,7 @@ class KafkaFraudOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
         val mapper = ObjectMapper()
 
-        val payload = """{"partyId":"p-1","accountId":"a-1","active":true,"reason":"RULE"}"""
+        val payload = """{"accrualId":"acc-1","accountId":"a-1","amount":1.23}"""
 
         // The producer's own payload does not carry the field -- this is the state the stamp fixes.
         assertThat(mapper.readTree(payload).has("sourceService")).isFalse()
@@ -54,7 +54,7 @@ class KafkaFraudOutboxEventPublisherTest {
         val entry = OutboxEntry(
             eventId = UUID.randomUUID(),
             aggregateId = UUID.randomUUID(),
-            eventType = "fraud.hold_changed",
+            eventType = "interest.accrual.posted",
             payload = payload,
             status = OutboxStatus.PENDING,
             attemptCount = 0,
@@ -64,10 +64,10 @@ class KafkaFraudOutboxEventPublisherTest {
             lastError = null,
         )
 
-        runBlocking { KafkaFraudOutboxEventPublisher(emitter, mapper).publish(entry) }
+        runBlocking { KafkaInterestOutboxEventPublisher(emitter, mapper).publish(entry) }
 
         assertThat(mapper.readTree(captured.captured.payload).get("sourceService").asText())
-            .isEqualTo("fraud-service")
+            .isEqualTo("interest-service")
     }
 
     @Test
@@ -76,7 +76,7 @@ class KafkaFraudOutboxEventPublisherTest {
         // directory name without `openbank-`; a producer that drifts to a second spelling splits
         // its own history into two apparent producers at a merge date, and those rows cannot be
         // converged afterwards (append-only + chain-hashed).
-        assertThat(KafkaFraudOutboxEventPublisher.SOURCE_SERVICE).isEqualTo("fraud-service")
+        assertThat(KafkaInterestOutboxEventPublisher.SOURCE_SERVICE).isEqualTo("interest-service")
     }
 
     @Test
@@ -88,7 +88,7 @@ class KafkaFraudOutboxEventPublisherTest {
         val entry = OutboxEntry(
             eventId = UUID.randomUUID(),
             aggregateId = UUID.randomUUID(),
-            eventType = "fraud.hold_changed",
+            eventType = "interest.accrual.posted",
             payload = "not json at all",
             status = OutboxStatus.PENDING,
             attemptCount = 0,
@@ -98,7 +98,7 @@ class KafkaFraudOutboxEventPublisherTest {
             lastError = null,
         )
 
-        runBlocking { KafkaFraudOutboxEventPublisher(emitter, ObjectMapper()).publish(entry) }
+        runBlocking { KafkaInterestOutboxEventPublisher(emitter, ObjectMapper()).publish(entry) }
 
         // This is the money path: an unattributed row is a strictly better outcome than a
         // publish that throws and wedges the outbox dispatcher.
