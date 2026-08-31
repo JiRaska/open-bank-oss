@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.224.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.224.0...admin-ui-v0.224.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **admin-ui:** bind consent recovery snapshot ([#7807](https://github.com/JiRaska/open-bank-oss/issues/7807)) ([78155a0](https://github.com/JiRaska/open-bank-oss/commit/78155a0d5399edce7e9bc6869ea51c1634c9b80b))
+* **admin-ui:** distinguish unavailable related accounts ([#7769](https://github.com/JiRaska/open-bank-oss/issues/7769)) ([dc6f9fb](https://github.com/JiRaska/open-bank-oss/commit/dc6f9fb72d199a9150847f39514eb093b89bceb1))
+* **admin-ui:** make KYC filtering outage-safe ([#7787](https://github.com/JiRaska/open-bank-oss/issues/7787)) ([f681a8e](https://github.com/JiRaska/open-bank-oss/commit/f681a8e9357d7ca94b4b5a48d309a2c67f2c1f82))
+* **admin-ui:** preserve AML evidence during outages ([#7820](https://github.com/JiRaska/open-bank-oss/issues/7820)) ([01716bf](https://github.com/JiRaska/open-bank-oss/commit/01716bf6367a355a3742fccf5a74c03fa0e1203c))
+* **admin-ui:** preserve audit lookup evidence ([#7782](https://github.com/JiRaska/open-bank-oss/issues/7782)) ([1564362](https://github.com/JiRaska/open-bank-oss/commit/15643624ae47eb5de76aed065936a65faab3d907)), closes [#7780](https://github.com/JiRaska/open-bank-oss/issues/7780)
+* **admin-ui:** preserve dispute SLA evidence ([#7815](https://github.com/JiRaska/open-bank-oss/issues/7815)) ([b60ec60](https://github.com/JiRaska/open-bank-oss/commit/b60ec60c335f1def28bffd940d34eed12654c23a))
+* **admin-ui:** preserve document templates on outage ([#7766](https://github.com/JiRaska/open-bank-oss/issues/7766)) ([328562a](https://github.com/JiRaska/open-bank-oss/commit/328562a6af1a6dcf50ae75b855ef0e907fcc2110))
+* **admin-ui:** preserve fee schedule snapshot ([#7775](https://github.com/JiRaska/open-bank-oss/issues/7775)) ([44c320c](https://github.com/JiRaska/open-bank-oss/commit/44c320cfa5a7327d3a7c66575ddfc5f82f72249d)), closes [#7774](https://github.com/JiRaska/open-bank-oss/issues/7774)
+* **admin-ui:** preserve fraud review evidence ([#7812](https://github.com/JiRaska/open-bank-oss/issues/7812)) ([91a35f2](https://github.com/JiRaska/open-bank-oss/commit/91a35f24f07da5e1364adca5cf6f5fce85e0a2e3))
+* **admin-ui:** preserve masked card evidence ([#7802](https://github.com/JiRaska/open-bank-oss/issues/7802)) ([f00097f](https://github.com/JiRaska/open-bank-oss/commit/f00097f1660a545f860a4633c2d754ca89faff42))
+* **admin-ui:** preserve notification log snapshot ([#7778](https://github.com/JiRaska/open-bank-oss/issues/7778)) ([f40fc1d](https://github.com/JiRaska/open-bank-oss/commit/f40fc1d6f1871da3ce2834979f1ec9f72844c47b)), closes [#7777](https://github.com/JiRaska/open-bank-oss/issues/7777)
+* **admin-ui:** preserve SCT instant monitor snapshot ([#7773](https://github.com/JiRaska/open-bank-oss/issues/7773)) ([48ed3e3](https://github.com/JiRaska/open-bank-oss/commit/48ed3e3929797d3fdc320b80821415ba97f547f2)), closes [#7770](https://github.com/JiRaska/open-bank-oss/issues/7770)
+* **admin-ui:** preserve SDD mandate evidence ([#7796](https://github.com/JiRaska/open-bank-oss/issues/7796)) ([7279e87](https://github.com/JiRaska/open-bank-oss/commit/7279e87ee4d760b2193239fd089082329e0e991a))
+* **admin-ui:** preserve standing-order evidence ([#7799](https://github.com/JiRaska/open-bank-oss/issues/7799)) ([76e4914](https://github.com/JiRaska/open-bank-oss/commit/76e4914229c0fed6f6752083e479e021581727d9))
+* **admin-ui:** preserve transaction search evidence ([#7793](https://github.com/JiRaska/open-bank-oss/issues/7793)) ([31c6780](https://github.com/JiRaska/open-bank-oss/commit/31c67806d0fbd6f1f10162c40678ba7c716a7106))
+
 ## [0.224.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.223.0...admin-ui-v0.224.0) (2026-08-31)
 
 
