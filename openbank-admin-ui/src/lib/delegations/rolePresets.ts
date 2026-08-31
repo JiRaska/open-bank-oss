@@ -10,6 +10,32 @@ export type RolePreset = { id: string; name: string; description: string; resour
 
 export type CapabilityIntent = 'view' | 'act' | 'manage'
 
+const CAPABILITY_LABELS: Record<string, [string, string]> = {
+  ACCOUNT_VIEW_DETAILS: ['Detail účtu', 'Account details'],
+  ACCOUNT_READ_BALANCES: ['Zůstatky', 'Balances'],
+  ACCOUNT_READ_TRANSACTIONS: ['Transakce', 'Transactions'],
+  ACCOUNT_DOWNLOAD_STATEMENTS: ['Výpisy', 'Statements'],
+  ACCOUNT_PROPOSE_PAYMENT: ['Připravit platbu', 'Propose payment'],
+  ACCOUNT_INITIATE_PAYMENT: ['Provést platbu', 'Execute payment'],
+  ACCOUNT_MANAGE_BENEFICIARIES: ['Příjemci', 'Beneficiaries'],
+  ACCOUNT_MANAGE_LIMITS: ['Limity účtu', 'Account limits'],
+  DELEGATION_MANAGE: ['Disponenti', 'Delegates'],
+  CARD_VIEW: ['Detail karty', 'Card details'],
+  CARD_VIEW_TRANSACTIONS: ['Transakce karty', 'Card transactions'],
+  CARD_MANAGE_LIMITS: ['Limity karty', 'Card limits'],
+  CARD_MANAGE_STATUS: ['Blokace karty', 'Card status'],
+  CARD_MANAGE_CHANNELS: ['Kanály karty', 'Card channels'],
+  SAVINGS_DEPOSIT: ['Vklad', 'Deposit'],
+  SAVINGS_WITHDRAW: ['Výběr', 'Withdraw'],
+  SAVINGS_PROPOSE_WITHDRAW: ['Připravit výběr', 'Propose withdrawal'],
+  OBJECT_READ: ['Zobrazit', 'View'],
+}
+
+export function capabilityLabel(capability: string, language: 'cs' | 'en'): string {
+  const label = CAPABILITY_LABELS[capability]
+  return label ? label[language === 'cs' ? 0 : 1] : capability.replace(/^(ACCOUNT|SAVINGS|CARD|OBJECT)_/, '')
+}
+
 export function capabilityIntent(capability: string): CapabilityIntent {
   if (capability.includes('_READ_') || capability.includes('_VIEW') || capability === 'OBJECT_READ' || capability.includes('DOWNLOAD')) return 'view'
   if (capability.includes('MANAGE') || capability === 'DELEGATION_MANAGE') return 'manage'

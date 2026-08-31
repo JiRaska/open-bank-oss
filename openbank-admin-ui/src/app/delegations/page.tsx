@@ -27,6 +27,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { EntityChip } from '@/components/entities/EntityChip'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { RoleCatalog } from '@/components/delegations/RoleCatalog'
+import { EffectiveAccess, type EffectiveAccessPayload } from '@/components/delegations/EffectiveAccess'
 import {
   DelegationStatusBadge,
   capabilityLabels,
@@ -60,6 +61,7 @@ export default function DelegationsPage() {
 
   const [party, setParty] = useState<EntityRef | null>(null)
   const [grants, setGrants] = useState<GrantsPayload | null>(null)
+  const [effectiveAccess, setEffectiveAccess] = useState<EffectiveAccessPayload | null>(null)
   const [grantsUnavail, setGrantsUnavail] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -90,11 +92,13 @@ export default function DelegationsPage() {
     setLoading(true)
     setGrantsUnavail(null)
     setGrants(null)
+    setEffectiveAccess(null)
     try {
-      const res = await fetch(`/api/delegations/party/${target.id}`, {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(8000),
-      })
+      const [res, effectiveRes] = await Promise.all([
+        fetch(`/api/delegations/party/${target.id}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) }),
+        fetch(`/api/delegations/effective-access/${target.id}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) }),
+      ])
+      if (effectiveRes.ok) setEffectiveAccess((await effectiveRes.json()) as EffectiveAccessPayload)
       if (!res.ok) {
         setGrantsUnavail((await classifyBffFailure(res)) as BffFailure)
         return
@@ -210,6 +214,8 @@ export default function DelegationsPage() {
           lang={language}
         />
       )}
+
+      {party && effectiveAccess && <EffectiveAccess data={effectiveAccess} />}
 
       {party && !grantsUnavail && grants && (
         <>

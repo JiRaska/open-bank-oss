@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Check, LayoutGrid, Pencil, Plus, Shield, Table2, Trash2, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useAuth } from '@/lib/auth/useAuth'
-import { CAPABILITIES_BY_RESOURCE, capabilityIntent, type CapabilityIntent, type DelegationResource, type RolePreset } from '@/lib/delegations/rolePresets'
+import { CAPABILITIES_BY_RESOURCE, capabilityIntent, capabilityLabel, type CapabilityIntent, type DelegationResource, type RolePreset } from '@/lib/delegations/rolePresets'
 
 const emptyRole = (): RolePreset => ({ id: '', name: '', description: '', resourceType: 'ACCOUNT', capabilities: [] })
 
@@ -140,27 +140,6 @@ const intentLabel = (intent: CapabilityIntent, t: (cs: string, en: string) => st
   manage: t('Může spravovat', 'Can manage'),
 })[intent]
 const intentColor = (intent: CapabilityIntent) => ({ view: 'var(--success)', act: 'var(--warning)', manage: 'var(--accent)' })[intent]
-const RIGHT_LABELS: Record<string, [string, string]> = {
-  ACCOUNT_VIEW_DETAILS: ['Detail účtu', 'Account details'],
-  ACCOUNT_READ_BALANCES: ['Zůstatky', 'Balances'],
-  ACCOUNT_READ_TRANSACTIONS: ['Transakce', 'Transactions'],
-  ACCOUNT_DOWNLOAD_STATEMENTS: ['Výpisy', 'Statements'],
-  ACCOUNT_PROPOSE_PAYMENT: ['Připravit platbu', 'Propose payment'],
-  ACCOUNT_INITIATE_PAYMENT: ['Provést platbu', 'Execute payment'],
-  ACCOUNT_MANAGE_BENEFICIARIES: ['Příjemci', 'Beneficiaries'],
-  ACCOUNT_MANAGE_LIMITS: ['Limity účtu', 'Account limits'],
-  DELEGATION_MANAGE: ['Disponenti', 'Delegates'],
-  CARD_VIEW: ['Detail karty', 'Card details'],
-  CARD_VIEW_TRANSACTIONS: ['Transakce karty', 'Card transactions'],
-  CARD_MANAGE_LIMITS: ['Limity karty', 'Card limits'],
-  CARD_MANAGE_STATUS: ['Blokace karty', 'Card status'],
-  CARD_MANAGE_CHANNELS: ['Kanály karty', 'Card channels'],
-  SAVINGS_DEPOSIT: ['Vklad', 'Deposit'],
-  SAVINGS_WITHDRAW: ['Výběr', 'Withdraw'],
-  SAVINGS_PROPOSE_WITHDRAW: ['Připravit výběr', 'Propose withdrawal'],
-  OBJECT_READ: ['Zobrazit', 'View'],
-}
 const rightLabel = (right: string, t: (cs: string, en: string) => string) => {
-  const label = RIGHT_LABELS[right]
-  return label ? t(label[0], label[1]) : right.replace(/^(ACCOUNT|SAVINGS|CARD|OBJECT)_/, '')
+  return t(capabilityLabel(right, 'cs'), capabilityLabel(right, 'en'))
 }
