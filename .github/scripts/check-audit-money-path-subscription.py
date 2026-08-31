@@ -80,13 +80,21 @@ AUDIT_KAFKAUSER = "audit-service"
 # their entries deleted here; a stale entry is itself an error, so a half-fix cannot pass.
 #
 # The three that remain each need a decision this ratchet should not make silently:
-#  - billing has no KafkaTopic CR for openbank.billing.fee.event at all, so a Read grant would
-#    point at an undeclared topic -- a second way to get silence, and the topic's ownership is
-#    billing's call, not audit's.
+#  - billing: openbank.billing.fee.event IS declared -- the KafkaTopic CR is in
+#    openbank-infra/gitops/components/kafka/kafka.yaml, and the topic is also referenced from
+#    components/billing/kafka-billing-mtls.yaml and apps/billing.yaml. The gap is the same shape
+#    as the other two below (no Read grant in components/audit, no subscription), and whether the
+#    fee stream belongs in the audit trail is billing's call, not audit's. An earlier version of
+#    this comment and of _GAP_ISSUE said the CR did not exist; that was never true, and the
+#    reason it was written is not known -- do not reconstruct one.
 #  - standing-order and psd2 were found by THIS check and named in neither #5859 nor #6035, so
 #    nothing has yet reviewed whether their streams belong in the audit trail.
 _GAP_ISSUE = {
-    "openbank-billing-service": "#6035 - also has no KafkaTopic CR (see the issue)",
+    "openbank-billing-service": (
+        "#6035 - no Read grant in components/audit and no subscription. The KafkaTopic CR "
+        "for openbank.billing.fee.event DOES exist (gitops/components/kafka/kafka.yaml); "
+        "an earlier reason here claimed it did not."
+    ),
     # Found by THIS check on its first run, and by nothing before it: neither #5859's probe nor
     # #6035's enumeration named these two. That is the argument for deriving the scope rather
     # than probing it by hand - a careful manual enumeration of the same set, done twice, was
