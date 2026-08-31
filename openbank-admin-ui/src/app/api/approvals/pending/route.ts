@@ -22,7 +22,6 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 // the inbox can distinguish "not wired" from an empty queue. Omitting them would make
 // the most dangerous state look healthy to an operator.
 const NOT_CONFIGURED_SOURCES = {
-  account: 'not-configured',
   balance: 'not-configured',
   billing: 'not-configured',
   consent: 'not-configured',
@@ -30,7 +29,7 @@ const NOT_CONFIGURED_SOURCES = {
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -98,6 +97,10 @@ type NotificationApproval = LendingApproval
 // party-service serves the same shared PendingApproval shape. This source turns the approval id
 // returned from a parked `party.merge` into a visible checker hand-off before its 24-hour TTL.
 type PartyApproval = LendingApproval
+
+// account-service serves the shared PendingApproval shape for gated account lifecycle actions.
+// Surfacing it here makes a parked freeze or other protected action discoverable before TTL expiry.
+type AccountApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -309,6 +312,21 @@ async function partyPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function accountPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('account-service', 'accounts', 8100, '/api/v1/accounts/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as AccountApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'account' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -336,7 +354,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -349,9 +367,10 @@ export async function GET() {
     sepaInstantPending(headers).catch(() => unavailable),
     notificationPending(headers).catch(() => unavailable),
     partyPending(headers).catch(() => unavailable),
+    accountPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -369,6 +388,7 @@ export async function GET() {
       'sepa-instant': sepaInstant.state,
       notification: notification.state,
       party: party.state,
+      account: account.state,
       agent: agent.state,
     },
   })
