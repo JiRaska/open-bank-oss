@@ -14,6 +14,9 @@ type Card = { id?: string; maskedPan?: string; cardType?: string; network?: stri
 export type ResourceDetail = { key: string; resourceType: string; resourceId: string; state: SourceState; detail?: Account | Card }
 
 export type EffectiveAccessPayload = {
+  evaluatedAt: string
+  nextChangeAt: string | null
+  refreshAfterMs: number | null
   accounts: Account[]
   cards: Card[]
   grants: Grant[]
@@ -26,7 +29,10 @@ export type EffectiveAccessPayload = {
 export function isEffectiveAccessPayload(value: unknown): value is EffectiveAccessPayload {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<EffectiveAccessPayload>
-  return Array.isArray(candidate.accounts) && Array.isArray(candidate.cards) &&
+  return typeof candidate.evaluatedAt === 'string' && !Number.isNaN(Date.parse(candidate.evaluatedAt)) &&
+    (candidate.nextChangeAt === null || (typeof candidate.nextChangeAt === 'string' && !Number.isNaN(Date.parse(candidate.nextChangeAt)))) &&
+    (candidate.refreshAfterMs === null || (typeof candidate.refreshAfterMs === 'number' && Number.isFinite(candidate.refreshAfterMs) && candidate.refreshAfterMs >= 0)) &&
+    Array.isArray(candidate.accounts) && Array.isArray(candidate.cards) &&
     Array.isArray(candidate.grants) && Array.isArray(candidate.presets) && Array.isArray(candidate.resourceDetails) &&
     !!candidate.sources && typeof candidate.sources === 'object'
 }
@@ -88,6 +94,16 @@ export function grantConditions(grant: Grant, language: 'cs' | 'en') {
   ] as const
   limits.forEach(([label, limit]) => conditions.push({ label, value: limit ? formatCeiling(limit, locale) : t('bez limitu', 'uncapped') }))
   return conditions
+}
+
+/** Matches delegation-service's half-open validity interval: validFrom <= now < validTo. */
+export function isGrantEffectiveAt(grant: Grant, now: Date): boolean {
+  if (grant.status !== 'ACTIVE' || Number.isNaN(now.getTime())) return false
+  const validFrom = new Date(grant.validFrom ?? '').getTime()
+  if (Number.isNaN(validFrom) || now.getTime() < validFrom) return false
+  if (grant.validTo === null || grant.validTo === undefined) return true
+  const validTo = new Date(grant.validTo).getTime()
+  return !Number.isNaN(validTo) && now.getTime() < validTo
 }
 
 export type DelegationAttentionReason = {
@@ -152,8 +168,10 @@ export function delegationAttentionReasons(grant: Grant, now: Date, language: 'c
 export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
   const { t, language } = useLanguage()
   const partial = Object.entries(data.sources).filter(([, state]) => state !== 'ok')
+  const now = new Date(data.evaluatedAt)
+  const effectiveGrants = data.grants.filter(grant => isGrantEffectiveAt(grant, now))
   const attention = data.grants
-    .map(grant => ({ grant, reasons: delegationAttentionReasons(grant, new Date(), language) }))
+    .map(grant => ({ grant, reasons: delegationAttentionReasons(grant, now, language) }))
     .filter(item => item.reasons.length > 0)
 
   return <section className="card" style={{ padding: 16, marginBottom: 20 }} aria-labelledby="effective-access-title">
@@ -191,8 +209,8 @@ export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
       {data.cards.map(card => <AccessCard key={`card-${card.id}`} icon={<Crown size={15} />} role={card.delegated ? t('Držitel dodatkové karty', 'Additional cardholder') : t('Majitel karty', 'Card owner')} resource={card.maskedPan || t('Karta', 'Card')} meta={[card.network, card.cardType, card.status].filter(Boolean).join(' · ')} href={card.id ? `/cards/${card.id}` : undefined} capabilities={card.delegated ? delegatedCardCapabilities(card, data) : [...CAPABILITIES_BY_RESOURCE.CARD]} />)}
     </AccessSection>
 
-    <AccessSection title={t('Delegovaná oprávnění', 'Delegated rights')} empty={!data.grants.some(grant => grant.status === 'ACTIVE')}>
-      {data.grants.filter(grant => grant.status === 'ACTIVE').map(grant => {
+    <AccessSection title={t('Právě účinná delegovaná oprávnění', 'Delegated rights effective now')} empty={effectiveGrants.length === 0}>
+      {effectiveGrants.map(grant => {
         const resource = grantResourcePresentation(grant, data.resourceDetails, language)
         const grantor = grant.grantorName?.trim() || shortId(grant.grantorPartyId)
         return <AccessCard key={`grant-${grant.id}`} icon={<KeyRound size={15} />} role={matchedRoleName(grant, data.presets, language)} resource={resource.label} meta={<div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}><DelegationStatusBadge status={grant.status} /><span>{t('Udělil', 'Granted by')}: {grantor}</span>{resource.meta && <span>· {resource.meta}</span>}</div>} href={`/delegations/${grant.id}`} capabilities={grant.capabilities} conditions={grantConditions(grant, language)} />

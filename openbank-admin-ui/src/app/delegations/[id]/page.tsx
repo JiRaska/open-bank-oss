@@ -2,8 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// ADR-0230 + ADR-0232: single-grant detail — capabilities, ceilings, status timeline, and the
-// coverage probe.
+// ADR-0230 + ADR-0232: single-grant detail — capabilities, ceilings, status timeline, and a
+// side-effect-free resource access eligibility check.
 //
 // The bank-side actions (suspend / reinstate / revoke) are stated as UNAVAILABLE in place rather
 // than rendered as disabled buttons. A greyed-out button says "you lack the right"; the true
@@ -144,9 +144,10 @@ export default function DelegationDetailPage() {
 }
 
 /**
- * Asks delegation-service the same question its enforcement points ask. A grant row shows what
- * exists; only the authority knows how status, ceilings, expiry and capability combine, so an
- * operator answering "could this delegate really have done that?" from the table is guessing.
+ * Asks delegation-service whether any current delegation covers this grantee, resource and
+ * capability. The endpoint does not bind its decision to the grant shown on this page and does
+ * not prove cumulative headroom: only the payment reservation path can atomically consume
+ * daily/monthly capacity without racing another payment.
  */
 function CoverageProbe({ grant }: { grant: Grant }) {
   const { t } = useLanguage()
@@ -186,12 +187,12 @@ function CoverageProbe({ grant }: { grant: Grant }) {
     <div className="card" style={{ padding: '16px', marginTop: '16px' }}>
       <h2 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '2px' }}>
         <ShieldQuestion size={15} color="var(--accent)" style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-        {t('Ověření pokrytí', 'Coverage probe')}
+        {t('Kontrola přístupu ke zdroji', 'Resource access eligibility check')}
       </h2>
       <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
         {t(
-          'Zeptá se delegační služby na stejnou otázku, jakou klade vynucovací bod. Nic nemění.',
-          'Asks delegation-service the same question the enforcement point asks. Changes nothing.',
+          'Hledá libovolnou právě účinnou delegaci tohoto příjemce ke stejnému zdroji — výsledek nemusí pocházet z tohoto konkrétního grantu. Ověří oprávnění a strop jedné operace, nic nerezervuje a nepotvrzuje zbývající denní ani měsíční limit.',
+          'Finds any delegation currently effective for this grantee and resource — the result need not come from this specific grant. It checks capability and the per-operation ceiling, reserves nothing, and does not prove remaining daily or monthly headroom.',
         )}
       </p>
 
@@ -225,7 +226,7 @@ function CoverageProbe({ grant }: { grant: Grant }) {
 
       {outcome && (
         <div style={{ marginTop: '12px', fontSize: '13px' }}>
-          <strong>{outcome.granted ? t('Povoleno', 'Allowed') : t('Zamítnuto', 'Denied')}</strong>
+          <strong>{outcome.granted ? t('Aktuální přístup vyhovuje', 'Current access is eligible') : t('Zamítnuto', 'Denied')}</strong>
           {outcome.code && <span style={{ marginLeft: '8px', color: 'var(--text-tertiary)' }}>{outcome.code}</span>}
           {outcome.reason && <div style={{ color: 'var(--text-tertiary)', marginTop: '4px' }}>{outcome.reason}</div>}
         </div>
