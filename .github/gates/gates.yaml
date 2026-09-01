@@ -3461,6 +3461,8 @@ gates:
     name: "admin-ui route permissions ⇒ backend @RolesAllowed (issues #7790/#7783/#7788/#7824)"
     group: security
     mode: enforced
+    rationale: "The console's role matrix and the services' @RolesAllowed are written in different languages in different trees, and a divergence produces no failing test, no log line and no metric \u2014 only an operator being shown a link that 403s on click; one permission held twelve routes for five personas, and ROLE_SUPERVISOR was granted on all twelve and admitted by none."
+    review_after: "2027-09-01"
     min_subjects: 10   # 10 route permissions pinned, 28 declared unpinned (2026-09-01)
     selftest: python3 .github/scripts/check-admin-ui-rbac-alignment.py --self-test
     selftest_expect: pass
