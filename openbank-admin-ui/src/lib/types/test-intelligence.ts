@@ -31,6 +31,12 @@ export interface TestCounts {
   errors: number
 }
 
+/** Typed k6 threshold outcomes. A prose detail is not evidence of this denominator. */
+export interface ThresholdResults {
+  evaluated: number
+  breached: number
+}
+
 export interface CoverageObservation {
   state: EvidenceState
   observedAt: string | null
@@ -50,6 +56,10 @@ export interface EvidenceObservation {
   detail?: string
   run?: TestRunProvenance
   diagnostics?: TestDiagnosticArtifact[]
+  /** Present only when typed k6 threshold outcomes were retained. */
+  thresholdResults?: ThresholdResults
+  /** Browser synthetics prove execution without a k6 threshold denominator. */
+  variant?: 'chromium' | 'firefox' | 'webkit'
 }
 
 export interface TestDiagnosticArtifact {
@@ -145,6 +155,8 @@ export interface PerformanceEvidence {
   observedAt: string | null
   source: string
   thresholds: number
+  /** Present only when typed k6 threshold outcomes were observed. */
+  thresholdResults?: ThresholdResults
   metrics?: {
     p95Ms: number | null
     errorRatePercent: number | null
@@ -172,6 +184,7 @@ export interface PerformanceHistoryPoint {
   state: EvidenceState
   observedAt: string | null
   metrics: NonNullable<PerformanceEvidence['metrics']>
+  thresholdResults?: ThresholdResults
   run?: TestRunProvenance
 }
 
@@ -195,6 +208,7 @@ export interface SyntheticJourneyEvidence {
     observedAt: string
     detail: string
     run: TestRunProvenance
+    thresholdResults?: ThresholdResults
     /** Browser engines declared by the journey. Missing evidence remains explicitly not-run. */
     variants?: Array<{
       browser: 'chromium' | 'firefox' | 'webkit'
