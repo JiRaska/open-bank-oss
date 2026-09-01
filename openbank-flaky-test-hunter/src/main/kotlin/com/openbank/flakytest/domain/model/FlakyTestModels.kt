@@ -133,10 +133,9 @@ data class TestIntelligenceAnalysisRequest(
      * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`;
      * no service-local mapper is added (#526).
      */
-    fun requireComponents(): List<TestIntelligenceComponentInput> =
-        components.mapIndexed { index, component ->
-            requireNotNull(component) { "components[$index] must not be null" }
-        }
+    fun requireComponents(): List<TestIntelligenceComponentInput> = components.mapIndexed { index, component ->
+        requireNotNull(component) { "components[$index] must not be null" }
+    }
 }
 
 data class TestIntelligenceComponentInput(
@@ -155,15 +154,13 @@ data class TestIntelligenceComponentInput(
     val sameCommitTransitions: Int = 0,
     val wastedDurationMs: Int = 0,
 ) {
-    fun requireEvidence(): List<TestIntelligenceEvidenceInput> =
-        evidence.mapIndexed { index, item ->
-            requireNotNull(item) { "evidence[$index] must not be null" }
-        }
+    fun requireEvidence(): List<TestIntelligenceEvidenceInput> = evidence.mapIndexed { index, item ->
+        requireNotNull(item) { "evidence[$index] must not be null" }
+    }
 
-    fun requireRequiredControls(): List<TestIntelligenceEvidenceInput> =
-        requiredControls.mapIndexed { index, item ->
-            requireNotNull(item) { "requiredControls[$index] must not be null" }
-        }
+    fun requireRequiredControls(): List<TestIntelligenceEvidenceInput> = requiredControls.mapIndexed { index, item ->
+        requireNotNull(item) { "requiredControls[$index] must not be null" }
+    }
 }
 
 data class TestIntelligenceEvidenceInput(val kind: String, val state: String)
