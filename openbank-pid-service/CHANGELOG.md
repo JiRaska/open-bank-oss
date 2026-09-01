@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.0...pid-service-v0.10.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **pid:** reject a null array element with 400 instead of 500 ([#8002](https://github.com/JiRaska/open-bank-oss/issues/8002)) ([0ade9ac](https://github.com/JiRaska/open-bank-oss/commit/0ade9aca7e6a1ff20b86366234556625c73aef2a)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.9.1...pid-service-v0.10.0) (2026-08-24)
 
 

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 const aggregate = {
@@ -45,13 +46,26 @@ test('renders one chronological, educational three-month CNB trend', async ({ pa
 
   await page.goto('/fx')
 
-  await expect(page.getByRole('img', { name: /Kurz se změnil o 2\.00 procenta|Rate changed by 2\.00 percent/ })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('img', { name: /EUR\/CZK: (z|from).*2\.00 (procenta|percent change)/ })).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('+2.00 %')).toBeVisible()
+  await expect(page.getByText(/Začátek|Start/, { exact: true })).toBeVisible()
+  await expect(page.getByText(/Aktuálně|Latest/, { exact: true })).toBeVisible()
+  await expect(page.getByText(/Minimum/, { exact: true })).toBeVisible()
+  await expect(page.getByText(/Maximum/, { exact: true })).toBeVisible()
+  await expect(page.getByText(/Jak číst graf:|How to read this:/)).toBeVisible()
   await expect(page.getByText(/Orientační střed ČNB; nejde o historickou závaznou klientskou nabídku|Indicative CNB mid-rate; not a binding historical customer quote/)).toBeVisible()
+
+  const scan = await new AxeBuilder({ page })
+    .include('[data-testid="fx-trend-chart"]')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze()
+  expect(scan.violations, scan.violations.map(violation =>
+    `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+  ).join('\n')).toEqual([])
 
   await page.getByLabel(/Měna trendu|Trend currency/).selectOption('USD')
   await expect(page.getByRole('heading', { name: '/ CZK' })).toBeVisible()
-  await expect(page.getByRole('img', { name: /Kurz se změnil o 2\.00 procenta|Rate changed by 2\.00 percent/ })).toBeVisible()
+  await expect(page.getByRole('img', { name: /USD\/CZK: (z|from).*2\.00 (procenta|percent change)/ })).toBeVisible()
 })
 
 test('does not mislabel an outage as missing fixings and can retry', async ({ page }) => {

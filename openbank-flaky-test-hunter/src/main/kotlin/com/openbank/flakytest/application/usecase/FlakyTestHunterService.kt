@@ -103,14 +103,15 @@ class FlakyTestHunterService(
     override suspend fun getById(id: String): FlakyTestFinding? = findingRepository.findById(id)
 
     override suspend fun analyze(request: TestIntelligenceAnalysisRequest): List<FlakyTestFinding> {
-        validateEvidenceRequest(request)
-        return request.components.flatMap { component -> detectEvidenceFindings(request.snapshotId, component) }
+        val components = validateEvidenceRequest(request)
+        return components.flatMap { component -> detectEvidenceFindings(request.snapshotId, component) }
             .map { finding -> diagnoseEvidenceFinding(finding, request.collectedAt) }
     }
 
     private fun detectEvidenceFindings(snapshotId: String, component: TestIntelligenceComponentInput) = buildList {
         val severity = if (component.moneyPath) FindingSeverity.CRITICAL else FindingSeverity.WARNING
-        if (component.evidence.none {
+        val evidence = component.requireEvidence()
+        if (evidence.none {
                 it.kind in EXECUTION_KINDS
             }
         ) {
@@ -125,7 +126,7 @@ class FlakyTestHunterService(
             )
         }
         addAll(detectCurrentAndHistoricalFailures(snapshotId, component, severity))
-        if (component.evidence.any {
+        if (evidence.any {
                 it.state == "stale"
             }
         ) {
@@ -171,7 +172,7 @@ class FlakyTestHunterService(
         component: TestIntelligenceComponentInput,
         severity: FindingSeverity,
     ) = buildList {
-        val requiredGaps = component.requiredControls.count { it.state != "passed" }
+        val requiredGaps = component.requireRequiredControls().count { it.state != "passed" }
         if (requiredGaps > 0) {
             add(
                 evidenceFinding(
@@ -184,7 +185,7 @@ class FlakyTestHunterService(
                 ),
             )
         }
-        if (component.evidence.any { it.state == "failed" }) {
+        if (component.requireEvidence().any { it.state == "failed" }) {
             add(
                 evidenceFinding(
                     snapshotId,
@@ -259,10 +260,13 @@ class FlakyTestHunterService(
         title, component, "test-intelligence:$snapshotId", rawMetricValue, BigDecimal.ZERO,
     )
 
-    private fun validateEvidenceRequest(request: TestIntelligenceAnalysisRequest) {
+    private fun validateEvidenceRequest(
+        request: TestIntelligenceAnalysisRequest,
+    ): List<TestIntelligenceComponentInput> {
         require(request.snapshotId.isNotBlank() && request.snapshotId.length <= MAX_TEXT) { "invalid snapshotId" }
         require(request.components.size <= MAX_COMPONENTS) { "too many components" }
-        request.components.forEach { component ->
+        val components = request.requireComponents()
+        components.forEach { component ->
             require(COMPONENT.matches(component.component)) { "invalid component" }
             require(
                 component.declaredInfrastructure.all { it in INFRASTRUCTURE } &&
@@ -276,17 +280,18 @@ class FlakyTestHunterService(
             ) { "invalid infrastructure or historical metric" }
             require(
                 component.evidence.size <= MAX_EVIDENCE_PER_COMPONENT &&
-                    component.evidence.all {
+                    component.requireEvidence().all {
                         it.kind in EVIDENCE_KINDS && it.state in EVIDENCE_STATES
                     },
             ) { "invalid evidence vocabulary" }
             require(
                 component.requiredControls.size <= MAX_EVIDENCE_PER_COMPONENT &&
-                    component.requiredControls.all {
+                    component.requireRequiredControls().all {
                         it.kind in REQUIRED_CONTROL_KINDS && it.state in EVIDENCE_STATES
                     },
             ) { "invalid required-control vocabulary" }
         }
+        return components
     }
 
     companion object {
