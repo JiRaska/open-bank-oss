@@ -54,4 +54,15 @@ describe('system code quality accessibility', () => {
     expect(controls).toBeGreaterThan(matrix)
     expect(source).toContain('One row per component: scan across test kinds; money-path components are first.')
   })
+
+  it('keeps platform capability boundaries as a scanable matrix', () => {
+    const source = read()
+
+    expect(source).toContain("t('Matice hranic schopností', 'Platform capability boundary matrix')")
+    expect(source).toContain("t('Hranice / blokátor', 'Boundary / blocker')")
+    expect(source).toContain("<th style={thStyle}>Evidence</th>")
+    expect(source).toContain('One capability per row: state, actual blocker and verifiable source stay side by side.')
+    expect(source).toContain('The capability register is unavailable in this snapshot; the snapshot warning carries the exact reason.')
+    expect(source).toContain('<StateBadge state="unknown" />')
+  })
 })

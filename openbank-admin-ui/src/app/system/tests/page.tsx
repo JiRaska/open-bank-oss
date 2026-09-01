@@ -145,9 +145,8 @@ function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceRepor
 }
 
 function EvidenceCell({ component, kind }: { component: ComponentTestPosture; kind: EvidenceKind }) {
-  const evidence = component.evidence.find(item => item.kind === kind)
-  if (!evidence) return <StateBadge state="not-run" />
-  return <StateBadge state={evidence.state} />
+  const states = component.evidence.filter(item => item.kind === kind).map(item => item.state)
+  return <StateBadge state={aggregateEvidenceState(states, 'not-run')} />
 }
 
 const tableStyle = { width: '100%', borderCollapse: 'collapse' as const, fontSize: 12 }
@@ -176,13 +175,13 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
       <section aria-label={t('Matice důkazů komponent', 'Component evidence matrix')} style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, marginBottom: 4 }}>{t('Matice důkazů komponent', 'Component evidence matrix')}</h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jeden řádek na komponentu: skenuj napříč druhy testů; peněžní toky jsou nahoře.', 'One row per component: scan across test kinds; money-path components are first.')}</p>
-        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+        <div tabIndex={0} style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
           <table style={tableStyle}>
             <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
             <tbody>{sorted.map(component => (
               <tr key={component.component}>
                 <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: '#dc2626', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
-                {KINDS.map(kind => <td key={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
+                {KINDS.map(kind => <td key={kind} data-component={component.component} data-evidence-kind={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
                 <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
               </tr>
             ))}</tbody>
@@ -201,12 +200,17 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
         </table></div>
       </section>
       <section aria-label={t('Hranice schopností platformy', 'Platform capability boundaries')} style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t('Hranice schopností platformy', 'Platform capability boundaries')}</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>{(report.platformCapabilities ?? []).map(capability => <div key={capability.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14, background: 'var(--surface-1)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{capability.title}</strong><span style={{ color: capability.state === 'implemented' ? '#16a34a' : '#7c3aed', fontSize: 10, fontWeight: 700 }}>{capability.state}</span></div>
-          {capability.blocker && <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '8px 0 0' }}>{capability.blocker}</p>}
-          <code style={{ display: 'block', color: 'var(--text-tertiary)', fontSize: 9, marginTop: 8 }}>{capability.evidence}</code>
-        </div>)}</div>
+        <h2 style={{ fontSize: 16, marginBottom: 4 }}>{t('Matice hranic schopností', 'Platform capability boundary matrix')}</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jedna schopnost na řádek: stav, skutečný blokátor a ověřitelný zdroj jsou vedle sebe. Blokovaný stav není roadmapa ani skrytě hotová funkce.', 'One capability per row: state, actual blocker and verifiable source stay side by side. A blocked state is neither a roadmap nor a silently completed feature.')}</p>
+        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+          <thead><tr><th style={thStyle}>{t('Schopnost', 'Capability')}</th><th style={thStyle}>State</th><th style={thStyle}>{t('Hranice / blokátor', 'Boundary / blocker')}</th><th style={thStyle}>Evidence</th></tr></thead>
+          <tbody>{(report.platformCapabilities ?? []).length ? (report.platformCapabilities ?? []).map(capability => <tr key={capability.id}>
+            <td style={{ ...tdStyle, fontWeight: 650, minWidth: 210 }}>{capability.title}<div style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, marginTop: 3 }}>{capability.id}</div></td>
+            <td style={tdStyle}><span style={{ color: capability.state === 'implemented' ? '#16a34a' : '#7c3aed', fontSize: 10, fontWeight: 700 }}>{capability.state}</span></td>
+            <td style={{ ...tdStyle, minWidth: 360, color: 'var(--text-secondary)' }}>{capability.blocker ?? t('Implementováno; podrobnosti v evidenci.', 'Implemented; see the evidence pointer for detail.')}</td>
+            <td style={{ ...tdStyle, minWidth: 250, color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, overflowWrap: 'anywhere' }}>{capability.evidence}</td>
+          </tr>) : <tr><td colSpan={4} style={{ ...tdStyle, color: 'var(--text-secondary)' }}><StateBadge state="unknown" /> {t('Registr schopností není v tomto snapshotu dostupný; přesný důvod je ve varování snapshotu.', 'The capability register is unavailable in this snapshot; the snapshot warning carries the exact reason.')}</td></tr>}</tbody>
+        </table></div>
       </section>
     </>
   )

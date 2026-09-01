@@ -7,7 +7,7 @@ describe('delegations search contract', () => {
   it('keeps party search and selection explicit', () => {
     const source = readFileSync(path.resolve(__dirname, '../app/delegations/page.tsx'), 'utf8')
     expect(source).toContain('type="button" className="btn btn-primary" onClick={search}')
-    expect(source).toContain('aria-busy={loading}')
+    expect(source).toContain('aria-busy={searching}')
     expect(source).toContain("aria-label={t('Vyhledat delegující stranu', 'Search delegating party')}")
     expect(source).toContain('aria-pressed={party?.id === r.id}')
     expect(source).toContain('onClick={() => loadGrants(r)}')

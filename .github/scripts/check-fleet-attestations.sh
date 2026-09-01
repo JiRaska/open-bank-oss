@@ -262,6 +262,53 @@ STUB
   fi
   fixture_threshold=""
 
+  # -------------------------------------------------------------------------------------
+  # STALENESS, driven end to end through --check-placeholders (no cosign, no registry).
+  # Three cases, because the check has to DISCRIMINATE: an entry whose image is still
+  # declared must stay green, an entry whose image is gone must go red, and the mixed case
+  # must be red. A check that merely fails on any non-empty allowlist would pass the first
+  # two of these and be useless — it would reject every legitimate first registration.
+  # -------------------------------------------------------------------------------------
+  run_placeholder_fixture() {
+    local name="$1" expected_exit="$2" expected_text="$3" allow="$4"; shift 4
+    local out code
+    cases=$((cases + 1))
+    : > "$tmp/gitops/images.yaml"
+    for img in "$@"; do printf 'image: %s/%s\n' "$reg" "$img" >> "$tmp/gitops/images.yaml"; done
+    printf '# fixture allowlist\n' > "$tmp/placeholders.txt"
+    for img in $allow; do printf '%s/%s\n' "$reg" "$img" >> "$tmp/placeholders.txt"; done
+    out="$(GITOPS_DIR="$tmp/gitops" PLACEHOLDER_FILE="$tmp/placeholders.txt" \
+           bash "$SELF" --check-placeholders 2>&1)"
+    code=$?
+    if [ "$code" != "$expected_exit" ]; then
+      printf '  FAIL: %s — expected exit %s, got %s\n' "$name" "$expected_exit" "$code"
+      printf '%s\n' "$out" | tail -10 | sed 's/^/          | /'
+      failures=$((failures + 1))
+      return
+    fi
+    if ! grep -qF "$expected_text" <<< "$out"; then
+      printf '  FAIL: %s — exit %s correct, but expected text missing: %s\n' \
+        "$name" "$code" "$expected_text"
+      printf '%s\n' "$out" | tail -10 | sed 's/^/          | /'
+      failures=$((failures + 1))
+      return
+    fi
+    printf '  ok: %s (exit %s)\n' "$name" "$code"
+  }
+
+  # A genuine, still-declared placeholder — must NOT be flagged.
+  run_placeholder_fixture "live placeholder is not stale -> exit 0" 0 \
+    "1 entr(y/ies), 0 stale" "openbank-fixture-new:sandbox-init" \
+    "openbank-fixture-new:sandbox-init" "openbank-fixture-ok:t"
+  # An entry whose image left gitops — the class that rotted for five entries.
+  run_placeholder_fixture "entry whose image is gone -> exit 1" 1 \
+    "STALE     openbank-fixture-new:sandbox-init" "openbank-fixture-new:sandbox-init" \
+    "openbank-fixture-new:sandbox-real" "openbank-fixture-ok:t"
+  # Mixed: one live, one stale. Red, and only the stale one is named.
+  run_placeholder_fixture "one live + one stale -> exit 1" 1 \
+    "1 stale" "openbank-fixture-new:sandbox-init openbank-fixture-gone:sandbox-init" \
+    "openbank-fixture-new:sandbox-init" "openbank-fixture-ok:t"
+
   rm -rf "$tmp"
 
   printf 'SUBJECTS=%s\n' "$cases"
@@ -317,10 +364,15 @@ case "${1:-}" in
   --vocabulary-control)
     MODE=vocabulary-control
     ;;
+  # Staleness only: needs GITOPS_DIR and nothing else — no cosign, no ECR credentials — so
+  # it is reachable on an ordinary PR, which is the whole point (see check_placeholder_staleness).
+  --check-placeholders)
+    MODE=check-placeholders
+    ;;
   "") ;;
   *)
     echo "ERROR: unknown argument: $1" >&2
-    echo "       usage: $0 [--selftest|--self-test|--vocabulary-control]" >&2
+    echo "       usage: $0 [--selftest|--self-test|--vocabulary-control|--check-placeholders]" >&2
     exit 1
     ;;
 esac
@@ -359,16 +411,21 @@ if [ ! -d "$GITOPS_DIR" ]; then
   exit 1
 fi
 
-COSIGN_BIN_RESOLVED="$(resolve_cosign_v2 || true)"
-if [ -z "$COSIGN_BIN_RESOLVED" ]; then
+COSIGN_BIN_RESOLVED=""
+if [ "$MODE" != check-placeholders ]; then
+  COSIGN_BIN_RESOLVED="$(resolve_cosign_v2 || true)"
+fi
+if [ "$MODE" != check-placeholders ] && [ -z "$COSIGN_BIN_RESOLVED" ]; then
   echo "ERROR: cosign v2 unavailable — cannot verify fleet attestations." >&2
   echo "       Install cosign v2.x, set COSIGN_BIN, or set COSIGN_VERSION." >&2
   exit 1
 fi
 
 echo "==> Enumerating openbank-* images declared in ${GITOPS_DIR}"
-echo "    cosign:   $("$COSIGN_BIN_RESOLVED" version 2>/dev/null | awk '/GitVersion/{print $2}')"
-echo "    key:      ${COSIGN_KEY}"
+if [ "$MODE" != check-placeholders ]; then
+  echo "    cosign:   $("$COSIGN_BIN_RESOLVED" version 2>/dev/null | awk '/GitVersion/{print $2}')"
+  echo "    key:      ${COSIGN_KEY}"
+fi
 echo
 
 # Position-blind on purpose: matches `image:` under containers, initContainers, sidecars,
@@ -396,10 +453,84 @@ if [ "$MODE" = vocabulary-control ]; then
   exit $?
 fi
 
+# ---------------------------------------------------------------------------------------
+# STALENESS — the direction this gate could not fail in until #7740.
+#
+# The allowlist above suppresses the ABSENT verdict for an image ref. It could only ever be
+# consulted for a ref that is DECLARED in gitops, so an entry whose ref is no longer declared
+# anywhere suppresses nothing: it is invisible from every angle a run reports. The file's own
+# header says "Remove an entry the moment the service is genuinely built + pushed", and that
+# instruction had no enforcement — five of its five entries had outlived their subject (their
+# pins had all moved to real built tags: finrep sandbox-3b62a4a5, vop sandbox-3b62a4a5,
+# delegation/referral sandbox-c3f21ee6, case-coordinator sandbox-e96c8e41), and two of them
+# additionally justified themselves with prose that main contradicts (vop's "no Dockerfile,
+# absent from auto-deploy's ALL_SERVICES" — it has both).
+#
+# This is the repo's established baseline convention, which this one file sat outside of: a
+# declaration must fail in BOTH directions, or it outlives its subject and the reader inherits
+# a false statement about the fleet. Same rule as
+# `rules.yaml: lineage_code_audit` ("an allowlist entry below whose edge is no longer declared
+# ... is itself a finding — delete it") and deploy-coverage-baseline.txt's STALE_BASELINE.
+#
+# Note what it deliberately does NOT assert: nothing here says the image is absent from ECR.
+# A ref that is still declared in gitops stays allowlisted whether or not it has since been
+# built — the ABSENT/OK verdict from cosign is what decides that, and a fresh, genuinely
+# unbuilt placeholder must pass this check or it would fail every first registration.
+# ---------------------------------------------------------------------------------------
+check_placeholder_staleness() {
+  local stale=() entry declared=0
+  [ -f "$PLACEHOLDER_FILE" ] || { printf '==> No placeholder allowlist at %s — nothing to check.\n' "$PLACEHOLDER_FILE"; return 0; }
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    declared=$((declared + 1))
+    local found=0 img
+    for img in "${IMAGES[@]}"; do
+      [ "$img" = "$entry" ] && { found=1; break; }
+    done
+    if [ "$found" -eq 1 ]; then
+      printf '  DECLARED  %s\n' "${entry#"${ECR_REGISTRY}"/}"
+    else
+      printf '  STALE     %s  <-- allowlisted, but no longer declared in %s\n' \
+        "${entry#"${ECR_REGISTRY}"/}" "$GITOPS_DIR"
+      stale+=("$entry")
+    fi
+  done < <(grep -vE '^[[:space:]]*(#|$)' "$PLACEHOLDER_FILE")
+
+  printf '\n==> Placeholder allowlist: %s entr(y/ies), %s stale\n' "$declared" "${#stale[@]}"
+  if [ "${#stale[@]}" -gt 0 ]; then
+    echo
+    echo "STALE PLACEHOLDER ALLOWLIST ENTR(Y/IES) (${#stale[@]}):"
+    for entry in "${stale[@]}"; do echo "  - ${entry}"; done
+    echo
+    echo "  Each of these suppresses nothing: the ref is not declared under ${GITOPS_DIR}, so"
+    echo "  the ABSENT branch can never be reached for it. The entry survives only as prose"
+    echo "  asserting something about the fleet that is no longer true — which is how five"
+    echo "  entries outlived their own 'Remove an entry the moment the service is genuinely"
+    echo "  built + pushed' instruction. DELETE the entry (and, if its pin has moved to a real"
+    echo "  built tag, nothing else is needed)."
+    return 1
+  fi
+  return 0
+}
+
 is_allowed_placeholder() {
   [ -f "$PLACEHOLDER_FILE" ] || return 1
   grep -vE '^[[:space:]]*(#|$)' "$PLACEHOLDER_FILE" | grep -qxF "$1"
 }
+
+echo "==> Placeholder allowlist staleness (${PLACEHOLDER_FILE})"
+if ! check_placeholder_staleness; then
+  STALE_PLACEHOLDERS=1
+else
+  STALE_PLACEHOLDERS=0
+fi
+echo
+
+if [ "$MODE" = check-placeholders ]; then
+  [ "$STALE_PLACEHOLDERS" -eq 0 ] || exit 1
+  echo "PLACEHOLDER ALLOWLIST: PASS — every entry still names an image declared in ${GITOPS_DIR}."
+  exit 0
+fi
 
 PASS=0
 UNATTESTED=0
@@ -558,6 +689,15 @@ if [ "$UNKNOWN" -gt 0 ]; then
   echo "  fleet gap and do not rebuild anything on the strength of it. Re-run; if it persists,"
   echo "  verify one image by digest by hand and treat it as an infrastructure problem:"
   echo "    cosign verify-attestation --key ${COSIGN_KEY} --type cyclonedx <image>@<digest>"
+fi
+
+if [ "$STALE_PLACEHOLDERS" -gt 0 ] && [ "$FAIL" -eq 0 ]; then
+  echo
+  echo "FLEET ATTESTATION GATE: FAIL — every declared image is attested, but the placeholder"
+  echo "allowlist carries entr(y/ies) whose image is no longer declared. Kept a separate"
+  echo "sentence from the image classes above on purpose: nothing is undeployable, the"
+  echo "BASELINE is wrong, and the fix is a file deletion rather than a rebuild."
+  exit 1
 fi
 
 if [ "$FAIL" -gt 0 ]; then

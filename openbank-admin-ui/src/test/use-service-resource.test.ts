@@ -76,6 +76,23 @@ describe('useServiceResource', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
+  it('retains a per-attempt deadline when wake retries are disabled', async () => {
+    let signal: AbortSignal | null = null
+    vi.stubGlobal('fetch', vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      signal = init?.signal as AbortSignal
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      })
+    }))
+
+    const { result } = renderHook(() =>
+      useServiceResource('/api/svc/x/api/v1/items', { timeoutMs: 10, maxWakeRetries: 0 }),
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(signal?.aborted).toBe(true)
+    expect(result.current.unavailable).toEqual({ kind: 'unreachable' })
+  })
+
   it('does nothing when url is null', async () => {
     const fetchMock = vi.fn(async () => jsonRes(200, []))
     vi.stubGlobal('fetch', fetchMock)
@@ -83,5 +100,32 @@ describe('useServiceResource', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(fetchMock).not.toHaveBeenCalled()
     expect(result.current.data).toBeNull()
+  })
+
+  it('aborts an obsolete request when the URL changes and on unmount', async () => {
+    const signals: AbortSignal[] = []
+    const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal
+      expect(signal).toBeInstanceOf(AbortSignal)
+      signals.push(signal as AbortSignal)
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { rerender, unmount } = renderHook(
+      ({ url }) => useServiceResource(url, { timeoutMs: 60_000 }),
+      { initialProps: { url: '/api/svc/x/api/v1/items/first' } },
+    )
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    rerender({ url: '/api/svc/x/api/v1/items/second' })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(signals[0]?.aborted).toBe(true)
+    expect(signals[1]?.aborted).toBe(false)
+
+    unmount()
+    expect(signals[1]?.aborted).toBe(true)
   })
 })

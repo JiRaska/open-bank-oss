@@ -25,7 +25,16 @@
 # stdlib-only (awk); no PyYAML/yamllint dependency, matching
 # check-app-version-override.sh / check-outbox-dispatch-enabled.sh.
 # ENFORCED.
+# WARN MODE (--warn-days N, issue #7941). The enforcing comparison above is
+# against TODAY, so the first signal a deadline exists is the day it turns every
+# PR red regardless of its diff — which is exactly how ADR-0144's own
+# ci-runner-governance date reached 2026-08-31 unnoticed and froze a ~80-PR queue
+# (#7897/#7919). `--warn-days N` reports every target_enforce_date falling inside
+# the next N days and ALWAYS exits 0, including for dates already in the past: it
+# is a horizon report, never a second gate. The PR-time behaviour is untouched.
+#
 # Usage: check-gate-graduation.sh [rules.yaml path]   (default: openbank-libs/governance/rules.yaml)
+#        check-gate-graduation.sh --warn-days 30 [rules.yaml path]
 set -euo pipefail
 
 # --- self-test ------------------------------------------------------------------------
@@ -71,16 +80,75 @@ if [ "${1:-}" = "--self-test" ]; then
   # A file with no advisory rules at all must say ZERO rather than read like a clean estate.
   expect "a file with no advisory rules reports 0 checked" "rule_a:\n  enforced: enforce\n" 0 "0 advisory/planned"
 
+  # --- warn mode (#7941) -------------------------------------------------------------
+  # A warner is worth nothing unless it can be shown to DISCRIMINATE. The three cases
+  # below are the discrimination: same rule, three windows, three different answers.
+  # Without them "0 due" is indistinguishable from a scan that walked nothing — the
+  # exact shape that let ci-runner-governance reach its own deadline unnoticed.
+  expect_warn() { local label="$1" body="$2" days="$3" want_sub="$4" out rc
+    printf '%b' "$body" > "$td/rules.yaml"
+    out=$(bash "$0" --warn-days "$days" "$td/rules.yaml" 2>&1); rc=$?
+    if [ "$rc" -ne 0 ]; then echo "::error::self-test: $label — warn mode must always exit 0, got $rc: $out" >&2; fails=$((fails+1))
+    elif ! printf '%s' "$out" | grep -qF -- "$want_sub"; then
+      echo "::error::self-test: $label — no '$want_sub' in: $out" >&2; fails=$((fails+1)); fi; }
+
+  soon=$(date -u -v+10d +%Y-%m-%d 2>/dev/null || date -u -d '+10 days' +%Y-%m-%d)
+
+  # INSIDE the window: reported.
+  expect_warn "a date inside the window is reported" \
+    "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$soon\"\n" 30 "1 of 1 advisory/planned"
+  # OUTSIDE it: the SAME rule, silent. This is the half that proves the window is real
+  # and not a scan that reports everything it sees.
+  expect_warn "the same date outside the window is NOT reported" \
+    "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$soon\"\n" 3 "0 of 1 advisory/planned"
+  # --warn-days 0 is the degenerate window: a future date can never be inside it.
+  expect_warn "--warn-days 0 reports nothing for a future date" \
+    "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$future\"\n" 0 "0 of 1 advisory/planned"
+  # An ALREADY-EXPIRED date is reported by the warner but must NOT fail it — warn mode
+  # is a report, not a second gate. The enforcing lane above already covers this case,
+  # and a warner that can go red is one someone will eventually silence.
+  expect_warn "an expired date is reported and still exits 0" \
+    "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$past\"\n" 30 "ALREADY PASSED"
+  # ...and the enforcing lane on that very same file must still be RED, or warn mode
+  # has quietly replaced the gate instead of preceding it.
+  expect "the enforcing lane is unchanged by the existence of warn mode" \
+    "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$past\"\n" 1 "has passed"
+
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: gate-graduation guard is falsifiable (7 cases)"
+  echo "self-test ok: gate-graduation guard is falsifiable (12 cases)"
   exit 0
 fi
-rules="${1:-openbank-libs/governance/rules.yaml}"
+# --- arguments ------------------------------------------------------------------------
+# warn_days = 0 means enforcing mode (the default, and what CI runs on every PR).
+warn_days=""
+rules=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --warn-days)   warn_days="${2:-}"; shift 2 ;;
+    --warn-days=*) warn_days="${1#*=}"; shift ;;
+    -*)            echo "::error::check-gate-graduation: unknown option $1" >&2; exit 1 ;;
+    *)             rules="$1"; shift ;;
+  esac
+done
+rules="${rules:-openbank-libs/governance/rules.yaml}"
 [ -f "$rules" ] || { echo "::error::check-gate-graduation: $rules not found" >&2; exit 1; }
 
+if [ -n "$warn_days" ]; then
+  case "$warn_days" in
+    ''|*[!0-9]*) echo "::error::check-gate-graduation: --warn-days needs a non-negative integer, got '$warn_days'" >&2; exit 1 ;;
+  esac
+fi
+
 today="$(date -u +%Y-%m-%d)"
+# The horizon is only consulted in warn mode. BSD and GNU date disagree on relative
+# arithmetic, so try both — the same shape the self-test above already uses.
+if [ -n "$warn_days" ]; then
+  horizon="$(date -u -v+"${warn_days}"d +%Y-%m-%d 2>/dev/null \
+    || date -u -d "+${warn_days} days" +%Y-%m-%d)"
+fi
 fail=0
 checked=0
+due=0
 
 # Walk the file; whenever a line matches `enforced: advisory` or
 # `enforced: planned`, remember its line number and scan the next few lines
@@ -118,6 +186,22 @@ awk -v today="$today" '
 
 while IFS=: read -r lineno date; do
   checked=$((checked + 1))
+  if [ -n "$warn_days" ]; then
+    # WARN MODE: report, never fail. A missing date is already the enforcing gate's
+    # problem and is reported there; here it is listed so the horizon report is not
+    # silently narrower than the estate it claims to cover.
+    if [ "$date" = "MISSING" ]; then
+      echo "  $rules:$lineno  (no target_enforce_date — see the enforcing run)"
+      due=$((due + 1))
+    elif [[ "$date" < "$today" ]]; then
+      echo "  $rules:$lineno  $date  ALREADY PASSED"
+      due=$((due + 1))
+    elif [[ ! "$date" > "$horizon" ]]; then
+      echo "  $rules:$lineno  $date  due within ${warn_days}d"
+      due=$((due + 1))
+    fi
+    continue
+  fi
   if [ "$date" = "MISSING" ]; then
     echo "::error file=$rules,line=$lineno::advisory/planned rule has no target_enforce_date within 3 lines (ADR-0144: a rule may not be added without one)."
     fail=1
@@ -127,6 +211,13 @@ while IFS=: read -r lineno date; do
   fi
 done < /tmp/.gate-graduation-findings.$$
 rm -f /tmp/.gate-graduation-findings.$$
+
+if [ -n "$warn_days" ]; then
+  # Both numbers, always. "$due due" alone cannot be told apart from a scan that
+  # walked nothing — the failure mode this repo keeps paying for.
+  echo "check-gate-graduation --warn-days $warn_days: $due of $checked advisory/planned rule(s) due on or before $horizon."
+  exit 0
+fi
 
 echo "check-gate-graduation: $checked advisory/planned rule(s) checked, $( [ "$fail" -eq 0 ] && echo "all carry a live target_enforce_date." || echo "VIOLATIONS above." )"
 exit "$fail"

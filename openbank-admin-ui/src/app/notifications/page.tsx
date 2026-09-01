@@ -14,6 +14,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { opsMessageApi } from '@/lib/api'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { readApprovalId } from '@/lib/approvals/triage'
 
 const NOTIFICATION_SERVICE = '/api/svc/notification-service'
 
@@ -173,16 +174,22 @@ export default function NotificationsPage() {
  * `PATCH /api/v1/notifications/approvals/{id}` endpoint. SelfApprovalNotAllowedException refuses
  * a maker deciding their own request server-side (403).
  *
- * Deliberately NOT an auto-loaded queue: the shipped backend (ApprovalStore) exposes no query to
- * enumerate pending approvals — there is no list endpoint — so the checker acts on the approval
- * id the maker relays out of band (shown on the maker's party-page banner). A backend list
- * endpoint would let this become a real queue; that is remaining ADR-0176 work.
+ * The unified /approvals inbox owns the auto-loaded queue. This domain workbench accepts the
+ * selected opaque id by deep link, but keeps the actual decision on the existing endpoint where
+ * backend self-approval and maker-checker enforcement remain authoritative.
  */
 function OperatorMessageApprovals() {
   const { t } = useLanguage()
   const [approvalId, setApprovalId] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
+
+  useEffect(() => {
+    const linkedApprovalId = readApprovalId(window.location.search)
+    if (!linkedApprovalId) return
+    const frame = requestAnimationFrame(() => setApprovalId(linkedApprovalId))
+    return () => cancelAnimationFrame(frame)
+  }, [])
 
   const decide = async (approve: boolean) => {
     const id = approvalId.trim()
@@ -221,6 +228,7 @@ function OperatorMessageApprovals() {
         </span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
+            id="notification-approval-id"
             aria-label={t('ID schválení notifikace', 'Notification approval ID')}
             className="input"
             style={{ flex: 1, minWidth: '240px', fontFamily: 'var(--font-mono)' }}

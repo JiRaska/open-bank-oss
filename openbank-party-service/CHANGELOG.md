@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.22.0...party-service-v0.22.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **party:** answer 400 for a null phone hash in a directory lookup, not 500 ([#7861](https://github.com/JiRaska/open-bank-oss/issues/7861)) ([0b05abe](https://github.com/JiRaska/open-bank-oss/commit/0b05abe058827a8fa0bdfa9955164d278a41182f)), closes [#5913](https://github.com/JiRaska/open-bank-oss/issues/5913)
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.21.0...party-service-v0.22.0) (2026-08-28)
 
 
