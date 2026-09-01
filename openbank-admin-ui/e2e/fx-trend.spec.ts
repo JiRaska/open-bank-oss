@@ -90,3 +90,27 @@ test('does not mislabel an outage as missing fixings and can retry', async ({ pa
   await expect(page.getByText('+2.00 %')).toBeVisible()
   expect(attempts).toBeGreaterThan(attemptsBeforeRetry)
 })
+
+test('meets WCAG A and AA rules across the rendered FX workspace', async ({ page }) => {
+  await page.route('**/api/fx/history/*/CZK', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([
+      { timestamp: '2026-05-29T00:00:00Z', rate: 25 },
+      { timestamp: '2026-08-29T00:00:00Z', rate: 25.5 },
+    ]),
+  }))
+  await page.goto('/fx')
+  await expect(page.getByRole('img', { name: /EUR\/CZK: (z|from).*2\.00 (procenta|percent change)/ })).toBeVisible({ timeout: 20_000 })
+
+  const scheduleEditor = page.getByRole('button', { name: /Upravit plán CNB|Edit CNB schedule/ })
+  await expect(scheduleEditor).toBeVisible()
+  await expect(scheduleEditor).toHaveAttribute('aria-expanded', 'false')
+
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze()
+  expect(scan.violations, scan.violations.map(violation =>
+    `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+  ).join('\n')).toEqual([])
+})
