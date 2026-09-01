@@ -75,6 +75,16 @@ test_edge_veto_fires_on_approval_read if {
 		with data.rules as rules_mock
 }
 
+test_shared_denied_approval_read if {
+	not rest.allow with input as {"principal": shared, "action": "billing.approval.read"}
+		with data.rules as rules_mock
+}
+
+test_shared_veto_fires_on_approval_read if {
+	rest.prohibited with input as {"principal": shared, "action": "billing.approval.read"}
+		with data.rules as rules_mock
+}
+
 test_edge_veto_fires_on_post if {
 	rest.prohibited with input as {"principal": edge, "action": "billing.post"}
 		with data.rules as rules_mock
