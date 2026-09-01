@@ -1992,8 +1992,8 @@ ci_runners:
     deploy_only_signed_digests: true
   gate: ci-runner-governance
   enforced: planned                     # ADR-0053 Accepted; lint + tofu enable land on rollout
-  target_enforce_date: "2026-08-31"   # ADR-0144
-  blocked_on: "a CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) + the OpenTofu apply for the three scale sets have not both landed yet"
+  target_enforce_date: "2026-09-30"   # ADR-0144 — moved 2026-09-01; neither half of blocked_on has landed
+  blocked_on: "a CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) + the OpenTofu apply for the three scale sets have not both landed yet. Measured 2026-09-01: the lint is written and in review (#7598, gate ci-runner-pool-capacity) but not merged, and the scale sets are still TWO — `kubectl get autoscalingrunnersets -n arc-runners` returns openbank-build and openbank-deploy only, openbank-batch does not exist. #7598 own review also found no workflow routes to openbank-batch, so whether the third pool is a real requirement or a stale declaration is the question to settle before the next date."
 
 # ---------------------------------------------------------------------------------------
 # Infra apply (ADR-0060). Closes the "as-code without applied" gap: CI applies the
