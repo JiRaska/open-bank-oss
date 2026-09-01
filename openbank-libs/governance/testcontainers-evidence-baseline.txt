@@ -12,7 +12,6 @@
 # need the two-approval + threat-model process before their topology is touched.
 openbank-account-service/src/test/kotlin/com/openbank/account/it/PostgresRedpandaRedisTestResource.kt
 openbank-aml-service/src/test/kotlin/com/openbank/aml/it/PostgresRedisTestResource.kt
-openbank-anacredit-service/src/test/kotlin/com/openbank/anacredit/it/PostgresRedpandaTestResource.kt
 openbank-balance-service/src/test/kotlin/com/openbank/balance/it/PostgresRedpandaTestResource.kt
 openbank-billing-service/src/test/kotlin/com/openbank/billing/it/PostgresRedisTestResource.kt
 openbank-card-issuance-service/src/test/kotlin/com/openbank/cardissuance/it/PostgresRedisTestResource.kt
