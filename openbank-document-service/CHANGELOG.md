@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.0...document-service-v0.14.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **document:** reject a null array element with 400 instead of 500 ([#8010](https://github.com/JiRaska/open-bank-oss/issues/8010)) ([49de0d8](https://github.com/JiRaska/open-bank-oss/commit/49de0d8c1e2f781bb01c586d3a051f1a5ab03a77)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.13.0...document-service-v0.14.0) (2026-08-24)
 
 

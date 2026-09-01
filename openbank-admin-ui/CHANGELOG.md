@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.231.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.230.0...admin-ui-v0.231.0) (2026-09-01)
+
+
+### Features
+
+* **balance:** expose pending approvals in unified inbox ([#7031](https://github.com/JiRaska/open-bank-oss/issues/7031)) ([541a03d](https://github.com/JiRaska/open-bank-oss/commit/541a03d739528a503725f03020e75fbd67bd5058))
+* **billing:** expose pending approvals in unified inbox ([#7034](https://github.com/JiRaska/open-bank-oss/issues/7034)) ([234f53f](https://github.com/JiRaska/open-bank-oss/commit/234f53f7fe84db29ab40b5ed9d25b9439f99f273))
+
+
+### Bug Fixes
+
+* **admin-ui:** bind delegated access to latest party ([#8026](https://github.com/JiRaska/open-bank-oss/issues/8026)) ([f19267c](https://github.com/JiRaska/open-bank-oss/commit/f19267c69640a77cd75c4b8b0f625d0dc0ae0b60)), closes [#8018](https://github.com/JiRaska/open-bank-oss/issues/8018)
+* **admin-ui:** require observed execution evidence ([#8028](https://github.com/JiRaska/open-bank-oss/issues/8028)) ([4a2a5d3](https://github.com/JiRaska/open-bank-oss/commit/4a2a5d392ec023b01b31ba7f6aa2b7a72251fa9a))
+* **admin-ui:** surface strongest matrix verdict ([#8036](https://github.com/JiRaska/open-bank-oss/issues/8036)) ([8503e80](https://github.com/JiRaska/open-bank-oss/commit/8503e8006d357d286bc3c135d3f4f71a6420631c))
+
 ## [0.230.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.229.1...admin-ui-v0.230.0) (2026-09-01)
 
 
