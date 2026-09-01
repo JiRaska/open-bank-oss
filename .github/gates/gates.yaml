@@ -2649,6 +2649,51 @@ gates:
   # colliding branches (exit 1 each, each naming the taken number) and against two non-colliding
   # ones (#6486 1.16.0->1.17.0, #6481 1.5.0->1.6.0, exit 0) — it discriminates in both directions
   # rather than failing everything.
+  # `rules.yaml: four_eyes.verbs` declares which verbs pause for a second approver. Whether that
+  # approval can ever be REQUESTED depends on something else entirely -- the action needs an allow
+  # reason, in `role_action_matrix` or a service rego. Nothing connected the two, and three
+  # money-path actions are declared four-eyes and granted nowhere (#4754): transaction.sweep,
+  # swift.send, sctInstPayment.recall.
+  #
+  # Both consequences are invisible in normal operation. `response_attributes` ride on the ALLOW
+  # object in rest.rego, so a denied decision carries no attributes: `four_eyes_required = true` is
+  # computed and never reaches AuthorizeInterceptor, making the gate structurally unreachable -- and
+  # the day AUTHZ_ENFORCE flips for that service, the endpoint 403s for every principal. The worst
+  # of both states, with no signal either way, because a control that cannot fire produces none.
+  #
+  # Falsified in three directions before merge: a new ungranted action fails (exit 1), a baseline
+  # entry that has become granted fails (exit 1), and the untouched tree passes (exit 0). It also
+  # refuses to run when the policy corpus or the @Authorize corpus comes back empty, rather than
+  # reporting a clean sweep of nothing.
+  #
+  # Two false positives were caught before shipping, both from customer-edge: `customer.*` actions
+  # are granted by ONE prefix rule (`startswith(input.action, "customer.")`), so they appear as no
+  # literal anywhere. A literal-only probe called them ungranted on a service whose AUTHZ_ENFORCE
+  # defaults TRUE, which reads exactly like a live customer-facing outage. The gate reads prefix
+  # rules, and searches bundle ConfigMaps as well as `.rego` files -- transaction-service has no
+  # `*_rest_ext.rego` at all, so a rego-only search would have missed its policy entirely.
+  - id: four-eyes-verb-grantable
+    name: "four-eyes-verb-grantable — a four-eyes action must have an allow reason (ADR-0155, enforced)"
+    group: api
+    mode: enforced
+    when: pull_request
+    min_subjects: 15   # 25 four-eyes actions today; a floor at ~60% catches corpus collapse
+                       # (a renamed annotation, a moved source root) without failing on ordinary
+                       # fleet churn.
+    rationale: >-
+      four_eyes.verbs declares the control; role_action_matrix and the service regos decide whether
+      it can ever fire. Nothing checked that the two agree, and three money-path actions did not.
+    review_after: 2027-03-01   # Re-examine when the three baselined actions are granted: if the
+                               # list reaches empty this becomes a pure ratchet, which is the
+                               # intended end state.
+    selftest: |
+      set -euo pipefail
+      python3 .github/scripts/check-four-eyes-verb-grantable.py --self-test
+    run: |
+      set -euo pipefail
+      git fetch -q origin main
+      python3 .github/scripts/check-four-eyes-verb-grantable.py --ref origin/main --enforce
+
   - id: openapi-version-not-taken
     name: "openapi-version-not-taken — info.version still free on the base tip (ADR-0048, enforced)"
     group: api
