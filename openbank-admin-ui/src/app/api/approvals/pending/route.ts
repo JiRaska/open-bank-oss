@@ -24,12 +24,11 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 const NOT_CONFIGURED_SOURCES = {
   balance: 'not-configured',
   billing: 'not-configured',
-  consent: 'not-configured',
 } as const satisfies Record<string, SourceState>
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -101,6 +100,8 @@ type PartyApproval = LendingApproval
 // account-service serves the shared PendingApproval shape for gated account lifecycle actions.
 // Surfacing it here makes a parked freeze or other protected action discoverable before TTL expiry.
 type AccountApproval = LendingApproval
+
+type ConsentApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -327,6 +328,21 @@ async function accountPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function consentPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('consent-service', 'consent', 8106, '/api/v1/consents/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as ConsentApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'consent' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -354,7 +370,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -368,9 +384,10 @@ export async function GET() {
     notificationPending(headers).catch(() => unavailable),
     partyPending(headers).catch(() => unavailable),
     accountPending(headers).catch(() => unavailable),
+    consentPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -389,6 +406,7 @@ export async function GET() {
       notification: notification.state,
       party: party.state,
       account: account.state,
+      consent: consent.state,
       agent: agent.state,
     },
   })
