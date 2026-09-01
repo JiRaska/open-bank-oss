@@ -32,5 +32,4 @@ openbank-settlement-service/src/test/kotlin/com/openbank/settlement/it/PostgresT
 openbank-standing-order-service/src/test/kotlin/com/openbank/standingorder/it/PostgresRedisTestResource.kt
 openbank-statement-service/src/test/kotlin/com/openbank/statement/it/PostgresTestResource.kt
 openbank-swift-service/src/test/kotlin/com/openbank/swift/it/PostgresRedisTestResource.kt
-openbank-tpp-registry-service/src/test/kotlin/com/openbank/tppregistry/it/PostgresRedisTestResource.kt
 openbank-vop-service/src/test/kotlin/com/openbank/vop/PostgresTestResource.kt
