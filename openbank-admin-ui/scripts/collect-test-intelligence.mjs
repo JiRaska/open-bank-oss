@@ -6,7 +6,7 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { parse as parseYaml } from 'yaml'
+import { parse as parseYaml, parseDocument } from 'yaml'
 import { parseStringPromise } from 'xml2js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -407,11 +407,25 @@ function mutationComponents() {
 function platformCapabilities() {
   const file = path.join(repo, 'openbank-libs', 'governance', 'test-intelligence-capabilities.yaml')
   try {
-    const register = parseYaml(fs.readFileSync(file, 'utf8'))
-    return (register?.capabilities ?? []).map(item => ({
-      id: item.id, title: item.title, state: item.state,
-      blocker: item.blocker ?? null, evidence: item.evidence,
-    }))
+    const document = parseDocument(fs.readFileSync(file, 'utf8'), { uniqueKeys: true })
+    if (document.errors.length) throw new Error(document.errors.map(error => error.message).join('; '))
+    const capabilities = document.toJS()?.capabilities
+    if (!Array.isArray(capabilities) || capabilities.length === 0) throw new Error('expected a non-empty capability list')
+    const states = new Set(['implemented', 'external-blocked', 'ownership-blocked', 'safety-blocked', 'intentionally-deferred'])
+    const ids = new Set()
+    return capabilities.map((item, index) => {
+      const prefix = `capability #${index + 1}`
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`${prefix} is not a mapping`)
+      if (typeof item.id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.id)) throw new Error(`${prefix} has an invalid id`)
+      if (ids.has(item.id)) throw new Error(`${prefix} duplicates id ${item.id}`)
+      ids.add(item.id)
+      if (typeof item.title !== 'string' || !item.title.trim()) throw new Error(`${prefix} has an empty title`)
+      if (typeof item.state !== 'string' || !states.has(item.state)) throw new Error(`${prefix} has an unsupported state`)
+      if (typeof item.evidence !== 'string' || !item.evidence.trim()) throw new Error(`${prefix} has no evidence pointer`)
+      if (item.state !== 'implemented' && (typeof item.blocker !== 'string' || !item.blocker.trim())) throw new Error(`${prefix} has no blocker`)
+      if (item.state === 'implemented' && item.blocker !== undefined) throw new Error(`${prefix} has an unexpected blocker`)
+      return { id: item.id, title: item.title, state: item.state, blocker: item.blocker ?? null, evidence: item.evidence }
+    })
   } catch (error) {
     warnings.push(`test-intelligence capability register unavailable: ${error.message}`)
     return []

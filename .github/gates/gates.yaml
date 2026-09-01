@@ -967,7 +967,7 @@ gates:
     review_after: "2027-02-14"
     # The corpus is the checker's own fixture set — its subjects are assertions, not files, so
     # the floor is the number of cases that must run. It drops the day someone deletes one.
-    min_subjects: 14   # 15 today: 9 classifier + 5 end-to-end + 1 retry-count (2026-08-14)
+    min_subjects: 17   # 18 today: 9 classifier + 5 end-to-end + 1 retry-count + 3 placeholder-staleness (2026-08-31)
     run: |
       # The gate IS the selftest here: the artifact under test is the classifier + exit-code
       # contract, not the fleet (verifying 62 real images needs ECR credentials this job does
@@ -976,11 +976,19 @@ gates:
       # the pre-#1915 shape reddens 7 cases, and changing the final `exit 2` to `exit 1`
       # reddens exactly the one case that asserts the distinction.
       .github/scripts/check-fleet-attestations.sh --self-test
+      # ...and the one assertion the fixtures cannot make: the REAL placeholder allowlist
+      # against the REAL gitops tree. Needs no cosign and no ECR credentials, which is why it
+      # can run here on every PR rather than only in fleet-attestation.yml. Before #7740 the
+      # allowlist could only fail in one direction, and all five of its entries had outlived
+      # their subject — the file's own "remove an entry the moment the service is built" line
+      # had no enforcement behind it.
+      .github/scripts/check-fleet-attestations.sh --check-placeholders
 
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
     mode: enforced
+    min_subjects: 6   # 13 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-license-headers.py --selftest
     run: |
@@ -2028,6 +2036,7 @@ gates:
     name: "App Router route.ts exports only route fields (#3262/#3611, enforced)"
     group: lint
     mode: enforced
+    min_subjects: 55   # 114 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-route-exports.py --self-test
     run: |
@@ -2160,6 +2169,7 @@ gates:
     name: "no runBlocking in a @Scheduled body (rules.yaml: scheduled_methods, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 1080   # 2173 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-no-runblocking-in-scheduled.py --self-test
     selftest_expect: pass
     run: |
@@ -2227,6 +2237,7 @@ gates:
     name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 1080   # 2175 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
     selftest_expect: pass
     run: |
@@ -2309,7 +2320,13 @@ gates:
     name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
     group: kotlin
     mode: enforced
-    min_subjects: 70   # 142 money-path domain/application files today (2026-08-09)
+    min_subjects: 153  # 306 money-path domain/application files today (2026-08-31, #6253).
+    # Was 70 = half of the 142 files counted on 2026-08-09. The corpus then more than doubled
+    # while the floor did not, so it had decayed to 23% of the corpus: measured under #6253,
+    # narrowing rules.yaml money_path_services back to the 8 services this gate shipped with
+    # (the ORIGINAL defect, named in check-clock-injection.sh's own header) scans 143 files and
+    # PASSED floor 70 with rc=0. 153 is half of today's count, per the seeding rule in
+    # check-gate-subject-floor.py.
     selftest: bash .github/scripts/check-clock-injection.sh --self-test
     selftest_expect: pass
     run: |
@@ -2364,6 +2381,7 @@ gates:
     name: "domain-purity gate — hexagonal invariant (ADR-0002, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 165   # 339 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-domain-purity.py --self-test
     run: |
@@ -2470,6 +2488,7 @@ gates:
     name: "a service shipping an outbox dispatcher must construct an OutboxMessage (#4007, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-outbox-has-writer.py --self-test
     selftest_expect: pass
@@ -2705,6 +2724,7 @@ gates:
     name: "openapi-server-port — spec dev port vs quarkus.http.port (enforced)"
     group: api
     mode: enforced
+    min_subjects: 26   # 52 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-openapi-server-port.py --self-test
     selftest_expect: pass
     run: |
@@ -2731,6 +2751,7 @@ gates:
     name: "Flyway default datasource, and migrations something actually runs (issue #3080, enforced)"
     group: data
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-flyway-default-datasource.py --selftest
     run: |
@@ -2876,6 +2897,38 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-audit-money-path-subscription.py --root . --enforce
+
+  # Companion to `source-service-convention` (which polices the VALUE a producer stamps): this one
+  # polices whether the claim EXISTS AT ALL. The distinction is load-bearing — a convention check's
+  # subject set is the write sites it can find, so a producer that never mentions `sourceService`
+  # has zero write sites, is neither a finding nor a subject, and the check reports a clean fleet in
+  # exactly the state this gate exists to catch.
+  # Scope is DERIVED, never hand-kept: every module declaring a literal `openbank.*` topic under an
+  # `mp.messaging.outgoing.*` channel. A gate whose coverage set is maintained beside the artifacts
+  # it covers reads as PASSING when the list is short, never as UNCHECKED — this repo's most
+  # repeated defect. A new event-producing service enters scope on the commit declaring its channel.
+  # Both write idioms are matched. A quoted-key probe returns ZERO for card-issuance and fx, which
+  # declare `val sourceService` on a serialised data class where the wire key exists only at runtime
+  # as a property name; --self-test pins one known-positive per idiom, and asserts that the
+  # quoted-only probe is still genuinely blind, so a regression fails instead of silently shrinking.
+  # Ratchet, not zero: today's ten undeclared producers are baselined with their owning issue and
+  # the list may only shrink — a stale entry, in either direction, is itself an error.
+  # Why gate rather than sweep: `audit_entries` is append-only AT THE DATABASE (DO INSTEAD NOTHING,
+  # so a normalising UPDATE touches zero rows and REPORTS SUCCESS) and `source_service` is
+  # chain-hashed into `record_hash`. Attribution is unrepairable in retrospect, so the only
+  # available fix is forward-only and every unstamped event permanently costs one more row.
+  - id: source-service-presence
+    min_subjects: 30   # 36 modules produce an openbank.* domain-event topic today (2026-08-31)
+    name: "Every event producer declares sourceService (issues #5256/#6035, enforced)"
+    group: data
+    mode: enforced
+    rationale: "A producer that never states its own name leaves audit-service deriving attribution from the topic name (AttributionSource.TOPIC) instead of recording the producer's claim (EVENT); audit_entries is append-only at the database and source_service is chain-hashed into record_hash, so a row written without the field can never be corrected and the gap costs one permanently-inferred row per event."
+    review_after: "2027-02-28"
+    selftest: |
+      python3 .github/scripts/check-source-service-presence.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-source-service-presence.py --root .
 
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
@@ -3175,6 +3228,7 @@ gates:
     name: "kafka dotted-key ratchet (issues #686/#2945, enforced)"
     group: data
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-kafka-dotted-keys.py --self-test
     selftest_expect: pass
     run: |
@@ -3319,6 +3373,7 @@ gates:
     name: "Scheduler exercised in tests (issue #2204, enforced)"
     group: security
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-scheduler-exercised.py --selftest
     run: |
@@ -4105,3 +4160,25 @@ gates:
     min_subjects: 11   # 11 migrations today (2026-08-31)
     run: |
       python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --enforce
+
+  # Issue #7648. openbank-admin-ui is migrating hardcoded hex colours (`#1a2b3c`, `#fff`) to the
+  # shared semantic colour tokens in globals.css. #7649 landed a Vitest ratchet
+  # (raw-colour-literal-ratchet.guard.test.ts) that already runs on every admin-ui-touching PR via
+  # the `ui-build` job, so this gate is NOT closing an absent-job gap the way mermaid-parses does
+  # — the subject (app/**/*.tsx, components/**/*.tsx, *.css) is itself scoped to
+  # openbank-admin-ui/, so there is no PR shape that changes the count and skips `changes-ui`. It
+  # exists so the ratchet also gets rationale/review_after/min_subjects tracking and a
+  # `--self-test` this repo's own gate tooling can see, matching every other ratchet-style check
+  # here (check-nonnull-jaxrs-params.py). Keep MAX_RAW_COLOUR_LITERALS in this script and the
+  # Vitest test's own ceiling equal by hand — they scan the same corpus with the same regex.
+  - id: raw-colour-literal-ratchet
+    name: "raw hex colour literals in admin-ui do not increase (#7648, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A raw hex colour literal added outside the token stylesheet is a step away from the semantic colour migration; this only forbids the count from going back up, mirroring the Vitest guard already wired into ui-build."
+    review_after: "2027-02-28"
+    selftest: python3 .github/scripts/check-raw-colour-literal-ratchet.py --self-test
+    selftest_expect: pass
+    min_subjects: 1600   # 1628 raw hex colour literals today (2026-08-31)
+    run: |
+      python3 .github/scripts/check-raw-colour-literal-ratchet.py

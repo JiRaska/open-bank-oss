@@ -205,12 +205,12 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
         <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jedna schopnost na řádek: stav, skutečný blokátor a ověřitelný zdroj jsou vedle sebe. Blokovaný stav není roadmapa ani skrytě hotová funkce.', 'One capability per row: state, actual blocker and verifiable source stay side by side. A blocked state is neither a roadmap nor a silently completed feature.')}</p>
         <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
           <thead><tr><th style={thStyle}>{t('Schopnost', 'Capability')}</th><th style={thStyle}>State</th><th style={thStyle}>{t('Hranice / blokátor', 'Boundary / blocker')}</th><th style={thStyle}>Evidence</th></tr></thead>
-          <tbody>{(report.platformCapabilities ?? []).map(capability => <tr key={capability.id}>
+          <tbody>{(report.platformCapabilities ?? []).length ? (report.platformCapabilities ?? []).map(capability => <tr key={capability.id}>
             <td style={{ ...tdStyle, fontWeight: 650, minWidth: 210 }}>{capability.title}<div style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, marginTop: 3 }}>{capability.id}</div></td>
             <td style={tdStyle}><span style={{ color: capability.state === 'implemented' ? '#16a34a' : '#7c3aed', fontSize: 10, fontWeight: 700 }}>{capability.state}</span></td>
             <td style={{ ...tdStyle, minWidth: 360, color: 'var(--text-secondary)' }}>{capability.blocker ?? t('Implementováno; podrobnosti v evidenci.', 'Implemented; see the evidence pointer for detail.')}</td>
             <td style={{ ...tdStyle, minWidth: 250, color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, overflowWrap: 'anywhere' }}>{capability.evidence}</td>
-          </tr>)}</tbody>
+          </tr>) : <tr><td colSpan={4} style={{ ...tdStyle, color: 'var(--text-secondary)' }}><StateBadge state="unknown" /> {t('Registr schopností není v tomto snapshotu dostupný; přesný důvod je ve varování snapshotu.', 'The capability register is unavailable in this snapshot; the snapshot warning carries the exact reason.')}</td></tr>}</tbody>
         </table></div>
       </section>
     </>

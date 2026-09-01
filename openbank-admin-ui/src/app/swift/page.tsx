@@ -27,11 +27,17 @@ export default function SwiftPage() {
   const numberLocale = dateLocale
   const router = useRouter()
   const [search, setSearch] = useState('')
-  const { data, loading, unavailable, waking } = useServiceResource<SwiftMessage[]>(
+  const [lastSuccessfulAt, setLastSuccessfulAt] = useState<Date | null>(null)
+  const { data, loading, unavailable, waking, reload } = useServiceResource<SwiftMessage[]>(
     svcUrl('swift-service', '/api/v1/swift/messages'),
-    { select: (raw) => (Array.isArray(raw) ? (raw as SwiftMessage[]) : ((raw as { messages?: SwiftMessage[] }).messages ?? [])) },
+    { select: (raw) => {
+      setLastSuccessfulAt(new Date())
+      return Array.isArray(raw) ? (raw as SwiftMessage[]) : ((raw as { messages?: SwiftMessage[] }).messages ?? [])
+    } },
   )
   const messages = data ?? []
+  const hasSnapshot = data !== null
+  const showingRetainedSnapshot = unavailable !== null && hasSnapshot
 
   const filtered = messages.filter(m =>
     m.senderBic?.toLowerCase().includes(search.toLowerCase()) ||
@@ -41,7 +47,7 @@ export default function SwiftPage() {
   )
 
   return (
-    <AuthGuard>
+    <AuthGuard permission="payments:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <PageHeader
           breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('SWIFT', 'SWIFT')}</span></div>}
@@ -64,10 +70,26 @@ export default function SwiftPage() {
             <span role="status" style={{ padding: '5px 9px', borderRadius: '6px', border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontSize: '11px', fontWeight: 600 }}>
               {t('Odeslání zprávy není připojeno', 'Message submission is not connected')}
             </span>
+            <button type="button" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit SWIFT zprávy', 'Refresh SWIFT messages')} className="btn btn-secondary btn-sm">
+              <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+            </button>
           </div>}
         />
 
-        <div className="grid-4" style={{ marginBottom: '24px' }}>
+        {showingRetainedSnapshot && <div role="status" aria-live="polite" style={{ marginBottom: 20 }}>
+          <DataUnavailable kind={unavailable.kind} service={t('SWIFT-service', 'SWIFT-service')} feature={t('Aktualizace SWIFT zpráv', 'SWIFT message refresh')} lang={language} dense />
+          <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+            {t('Zobrazen je poslední úspěšný snapshot', 'Showing the last successful snapshot')}
+            {lastSuccessfulAt ? ` (${lastSuccessfulAt.toLocaleString(dateLocale)})` : ''}.
+            {' '}{t('Stav zpráv se od té doby mohl změnit.', 'Message status may have changed since then.')}
+          </p>
+        </div>}
+
+        {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {t('Aktualizuji SWIFT zprávy; poslední snapshot zůstává dostupný.', 'Refreshing SWIFT messages; the last snapshot remains available.')}
+        </p>}
+
+        {hasSnapshot && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
             { label: t('Zpráv celkem', 'Total messages'), value: messages.length, icon: <Globe size={16} />, color: 'var(--accent)' },
             { label: t('Odesláno', 'Sent'), value: messages.filter(m => m.status === 'SENT').length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
@@ -81,7 +103,7 @@ export default function SwiftPage() {
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
             </div>
           ))}
-        </div>
+        </div>}
 
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -92,11 +114,11 @@ export default function SwiftPage() {
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
           </div>
-          {loading ? (
-            <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-              <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
+          {loading && !hasSnapshot ? (
+            <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+              <RefreshCw size={20} aria-hidden="true" className="animate-spin" style={{ marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
-          ) : unavailable ? (
+          ) : unavailable && !hasSnapshot ? (
             <DataUnavailable kind={unavailable.kind} service={t('SWIFT-service', 'SWIFT-service')} feature={t('SWIFT zprávy', 'SWIFT messages')} lang={language} />
           ) : filtered.length === 0 ? (
             <DataUnavailable kind="no_data" feature={t('SWIFT zprávy', 'SWIFT messages')} lang={language}
