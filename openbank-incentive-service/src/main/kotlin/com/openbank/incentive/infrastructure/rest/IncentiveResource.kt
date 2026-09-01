@@ -30,7 +30,23 @@ data class CreateOfferRequest(
     val stackingPolicy: StackingPolicy,
 )
 
-data class ImportCodesRequest(val codes: List<String>)
+data class ImportCodesRequest(
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS
+     * of a collection, so `{"codes": [null]}` deserialises happily into a `List<String>` holding a
+     * null. Writing the type honestly is what makes [requireCodes] reachable instead of dead code.
+     */
+    val codes: List<String?> = emptyList(),
+) {
+    /**
+     * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`;
+     * no service-local mapper is added (#526).
+     */
+    fun requireCodes(): List<String> = codes.mapIndexed { index, code ->
+        requireNotNull(code) { "codes[$index] must not be null" }
+    }
+}
 data class ReserveCodeRequest(val code: String, val partyRef: String, val productRef: String)
 data class ReservationResponse(
     val id: UUID,
@@ -90,7 +106,7 @@ class IncentiveResource(private val application: IncentiveApplication, private v
     @Path("/offers/{id}/codes")
     suspend fun importCodes(@PathParam("id") id: UUID, request: ImportCodesRequest): Response = Response.status(
         Response.Status.CREATED,
-    ).entity(mapOf("imported" to application.addCodes(id, request.codes, actor()))).build()
+    ).entity(mapOf("imported" to application.addCodes(id, request.requireCodes(), actor()))).build()
 
     @POST
     @Path("/offers/{id}/reservations")

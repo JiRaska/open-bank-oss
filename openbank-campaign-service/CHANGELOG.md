@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.2](https://github.com/JiRaska/open-bank-oss/compare/v0.38.1...v0.38.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **campaign:** reject a null array element with 400 instead of 500 ([#7995](https://github.com/JiRaska/open-bank-oss/issues/7995)) ([5f01839](https://github.com/JiRaska/open-bank-oss/commit/5f01839622eb2388ca6e644de9a4e7b577e5802a)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
 ## [0.38.1](https://github.com/JiRaska/open-bank-oss/compare/v0.38.0...v0.38.1) (2026-08-30)
 
 
