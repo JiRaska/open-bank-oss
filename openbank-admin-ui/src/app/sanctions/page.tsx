@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, Fragment, useRef } from 'react'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import {
   ShieldAlert, Search, CheckCircle2, Clock, RefreshCw,
@@ -17,6 +17,7 @@ import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { statusTone } from '@/components/ui/tone'
+import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -57,6 +58,11 @@ interface PendingApprovalItem {
   status: string
   makerId?: string | null
   createdAt?: string | null
+}
+
+interface ApprovalDecisionIntent {
+  approval: PendingApprovalItem
+  approve: boolean
 }
 
 const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN']
@@ -231,6 +237,8 @@ export default function SanctionsPage() {
   const [queueUnavail, setQueueUnavail] = useState(false)
   const [decideBusy, setDecideBusy] = useState(false)
   const [decideMsg, setDecideMsg] = useState('')
+  const [decisionIntent, setDecisionIntent] = useState<ApprovalDecisionIntent | null>(null)
+  const decisionTriggerRef = useRef<HTMLElement | null>(null)
 
   const loadChecks = useCallback(async () => {
     setLoading(true)
@@ -450,9 +458,10 @@ export default function SanctionsPage() {
 
 
   /** Checker half of the four-eyes gate. A maker deciding their own request gets 403 upstream. */
-  const decideApproval = async (approve: boolean) => {
-    const id = decideId.trim()
-    if (!id) return
+  const decideApproval = async (approval: PendingApprovalItem, approve: boolean): Promise<boolean> => {
+    const id = approval.id.trim()
+    if (!id) return false
+    let succeeded = false
     const outcome = await decideFlight.run(`sanctions:decide:${id}`, async () => {
     setDecideBusy(true)
     setDecideMsg('')
@@ -473,6 +482,7 @@ export default function SanctionsPage() {
       setDecideMsg(approve
         ? t('Schváleno. Maker nyní může akci zopakovat.', 'Approved. The maker can now retry the action.')
         : t('Zamítnuto.', 'Rejected.'))
+      succeeded = true
       setDecideId('')
       await loadPendingQueue()
     } catch {
@@ -481,7 +491,29 @@ export default function SanctionsPage() {
       setDecideBusy(false)
     }
     })
-    if (wasSkipped(outcome)) return
+    if (wasSkipped(outcome)) return false
+    return succeeded
+  }
+
+  const openApprovalDecision = (approve: boolean, trigger: HTMLElement) => {
+    const id = decideId.trim()
+    if (!id) return
+    decisionTriggerRef.current = trigger
+    setDecideMsg('')
+    setDecisionIntent({
+      approval: pendingQueue.find(item => item.id === id) ?? {
+        id,
+        action: t('Ručně zadaná sankční žádost', 'Manually entered sanctions approval'),
+        status: 'PENDING',
+      },
+      approve,
+    })
+  }
+
+  const closeApprovalDecision = () => {
+    if (decideBusy) return
+    setDecisionIntent(null)
+    requestAnimationFrame(() => decisionTriggerRef.current?.focus())
   }
 
   const filtered = checks.filter(c =>
@@ -721,10 +753,8 @@ export default function SanctionsPage() {
                 </table>
               )}
 
-              {/* Checker half of the four-eyes gate. It is an id field rather than a queue because
-                  sanctions-service exposes no pending-approvals list endpoint — ApprovalResource
-                  serves only PATCH /{id}, so the id has to be handed over out of band. The
-                  ADR-0227 inbox federates lending and agent only, and is read-only by design. */}
+              {/* Checker half of the four-eyes gate. The served queue is authoritative; manual ID
+                  entry remains a recovery path for an approval handed over out of band. */}
               <Can permission="sanctions:review" fallback={<div style={{ padding: '16px', borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)', fontSize: '12px' }}>{t('Rozhodování sankčních žádostí je dostupné pouze operátorům a administrátorům.', 'Sanctions decisions are available to operators and administrators only.')}</div>}>
               <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
                 <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -760,7 +790,7 @@ export default function SanctionsPage() {
                               {a.id}{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleString(dateLocale)}` : ''}
                             </div>
                           </div>
-                          <button onClick={() => setDecideId(a.id)}
+                          <button type="button" onClick={() => setDecideId(a.id)}
                             style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent',
                               color: 'var(--text-primary)', fontSize: '11px', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
                             {t('Vybrat', 'Select')}
@@ -773,18 +803,18 @@ export default function SanctionsPage() {
                     <input id="sanctions-approval-id" aria-label={t('ID žádosti', 'Approval id')} value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
                       style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px',
                         fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
-                    <button type="button" onClick={() => decideApproval(true)} disabled={decideBusy || !decideId.trim()} aria-busy={decideBusy}
+                    <button type="button" onClick={event => openApprovalDecision(true, event.currentTarget)} disabled={decideBusy || !decideId.trim()} aria-busy={decideBusy}
                       style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', background: 'var(--success)', color: '#fff', fontSize: '12px', fontWeight: 600,
                         cursor: decideBusy || !decideId.trim() ? 'default' : 'pointer', opacity: decideBusy || !decideId.trim() ? 0.6 : 1 }}>
                       {t('Schválit', 'Approve')}
                     </button>
-                    <button type="button" onClick={() => decideApproval(false)} disabled={decideBusy || !decideId.trim()} aria-busy={decideBusy}
+                    <button type="button" onClick={event => openApprovalDecision(false, event.currentTarget)} disabled={decideBusy || !decideId.trim()} aria-busy={decideBusy}
                       style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '12px',
                         cursor: decideBusy || !decideId.trim() ? 'default' : 'pointer', opacity: decideBusy || !decideId.trim() ? 0.6 : 1 }}>
                       {t('Zamítnout', 'Reject')}
                     </button>
                   </div>
-                  {decideMsg && <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{decideMsg}</div>}
+                  {decideMsg && !decisionIntent && <div role="status" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{decideMsg}</div>}
                 </div>
               </div>
               </Can>
@@ -1027,6 +1057,68 @@ export default function SanctionsPage() {
           )}
         </div>
       </div>
+      {decisionIntent && <SanctionsApprovalDecisionDialog
+        intent={decisionIntent}
+        busy={decideBusy}
+        message={decideMsg}
+        onCancel={closeApprovalDecision}
+        onConfirm={async () => {
+          const succeeded = await decideApproval(decisionIntent.approval, decisionIntent.approve)
+          if (succeeded) setDecisionIntent(null)
+        }}
+      />}
     </AuthGuard>
   )
+}
+
+function SanctionsApprovalDecisionDialog({ intent, busy, message, onCancel, onConfirm }: {
+  intent: ApprovalDecisionIntent
+  busy: boolean
+  message: string
+  onCancel: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const { t } = useLanguage()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const titleId = `sanctions-approval-${intent.approval.id}-title`
+  const impactId = `sanctions-approval-${intent.approval.id}-impact`
+  const action = intent.approve ? t('Schválit žádost', 'Approve request') : t('Zamítnout žádost', 'Reject request')
+
+  return <div
+    ref={dialogRef}
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby={titleId}
+    aria-describedby={impactId}
+    aria-busy={busy}
+    onKeyDown={event => {
+      if (event.key === 'Escape' && !busy) onCancel()
+      trapDialogFocus(event, dialogRef.current)
+    }}
+    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'grid', placeItems: 'center', padding: 20 }}
+  ><div className="card" style={{ width: 'min(560px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <AlertTriangle aria-hidden="true" size={19} style={{ color: intent.approve ? 'var(--warning)' : 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
+      <div>
+        <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{action}</h2>
+        <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+          {intent.approve
+            ? t('Potvrdíte rozhodnutí jiného operátora. Maker pak může znovu odeslat řízenou sankční dispozici; toto schválení ji samo neprovede.', 'You are confirming another operator’s decision. The maker may then retry the governed sanctions disposition; this approval does not execute it.')
+            : t('Žádost odmítnete. Maker toto schválení nemůže použít a sankční dispozice se neprovede.', 'You are refusing the request. The maker cannot use this approval and the sanctions disposition will not execute.')}
+        </p>
+      </div>
+    </div>
+    <div style={{ marginTop: 14, padding: '11px 12px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12.5 }}>
+      <div><strong>{t('Akce', 'Action')}:</strong> {intent.approval.action}</div>
+      <div style={{ marginTop: 5 }}><strong>{t('Požádal', 'Requested by')}:</strong> {intent.approval.makerId ?? t('neuvedeno', 'not provided')}</div>
+      <div style={{ marginTop: 5, fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}><strong>{t('ID žádosti', 'Approval ID')}:</strong> {intent.approval.id}</div>
+    </div>
+    {message && <p role="alert" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>{message}</p>}
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+      <button type="button" autoFocus className="btn btn-secondary" disabled={busy} onClick={onCancel}>{t('Zpět ke kontrole', 'Back to review')}</button>
+      <button type="button" className={intent.approve ? 'btn btn-primary' : 'btn btn-danger'} disabled={busy} aria-busy={busy} onClick={() => void onConfirm()}>
+        {busy ? t('Ukládám rozhodnutí…', 'Recording decision…') : intent.approve ? t('Potvrdit schválení', 'Confirm approval') : t('Potvrdit zamítnutí', 'Confirm rejection')}
+      </button>
+    </div>
+  </div></div>
 }
