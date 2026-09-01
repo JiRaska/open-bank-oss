@@ -11,7 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
 
 const PID_SERVICE = '/api/svc/pid-service'
 
@@ -27,11 +27,13 @@ interface PidRecord {
   validUntil?: string
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  ACTIVE:   'var(--success)',
-  INACTIVE: 'var(--text-muted)',
-  EXPIRED:  'var(--warning)',
-  REVOKED:  'var(--danger)',
+// PID lifecycle deliberately treats expired credentials as renewal work and a
+// revoked credential as a security concern. Those meanings are stricter than
+// the shared consent-oriented defaults for the same words.
+function pidStatusTone(status: string): Tone {
+  if (status === 'EXPIRED') return 'warning'
+  if (status === 'REVOKED') return 'danger'
+  return statusTone(status)
 }
 
 export default function PidPage() {
@@ -545,9 +547,7 @@ export default function PidPage() {
                     </Can>
                   </td>
                   <td>
-                    <span className="pill" style={{ background: `${STATUS_COLORS[r.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLORS[r.status] ?? 'var(--text-muted)' }}>
-                      {r.status}
-                    </span>
+                    <StatusBadge status={r.status} tone={pidStatusTone(r.status)} />
                   </td>
                   <td>
                     {r.verified ? <CheckCircle2 size={14} color="var(--success)" /> : <Clock size={14} color="var(--warning)" />}

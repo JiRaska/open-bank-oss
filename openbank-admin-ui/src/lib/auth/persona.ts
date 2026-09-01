@@ -43,10 +43,10 @@ const WORKSPACES: Record<Persona, WorkspaceLink[]> = {
     { href: '/audit', nameCs: 'Audit', nameEn: 'Audit', permission: 'audit:view' },
   ],
   platform: [
+    { href: '/system/tests', nameCs: 'Test Intelligence', nameEn: 'Test Intelligence', permission: 'system:view' },
     { href: '/system/health', nameCs: 'Zdraví systému', nameEn: 'System Health', permission: 'system:view' },
     { href: '/devops', nameCs: 'DevOps', nameEn: 'DevOps', permission: 'system:view' },
     { href: '/observability', nameCs: 'Observability', nameEn: 'Observability', permission: 'system:view' },
-    { href: '/services', nameCs: 'Služby', nameEn: 'Services', permission: 'docs:view' },
   ],
 }
 

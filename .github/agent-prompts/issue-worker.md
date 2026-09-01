@@ -37,6 +37,27 @@ Check this BEFORE writing code, not after: run
 and read `openbank-libs/governance/rules.yaml` key `autonomous_agent_prs` for the exact
 protected set. Picking a protected issue wastes the entire run.
 
+## Emit a PROVISIONAL verdict before you start, and the real one at the end
+
+The job reads the **last** `WORKER-VERDICT:` line in your output. So the very first thing you do,
+before any tool call, is print exactly this:
+
+```
+WORKER-VERDICT: BLOCKED run ended before reaching its own conclusion
+```
+
+Then do the work, and print the real verdict at the end. It wins, because it comes later.
+
+This exists because a run that **dies** — turn limit, timeout, a turn ended waiting on something
+— cannot report anything, and a session that produced pages of reasoning and no verdict line is
+indistinguishable from one that never started. Both happened on 2026-08-23: the worker hit
+`Reached max turns (120)` at 04:15, and the steward's 06:58 run simply stopped after five
+minutes with no closing line. Neither was a lie, but neither said what had happened.
+
+With the provisional line in place, a death now reports `BLOCKED` and fails the job loudly,
+which is the truth: a run that could not finish is a defect in this harness, not an empty
+backlog. Do not skip it because you expect to finish — the runs that died expected to finish too.
+
 ## You are ONE non-interactive invocation — never background a command
 
 This is `claude -p`, a single shot. There is **no loop to deliver a background-task
@@ -55,6 +76,14 @@ and read the output when it returns. Do not use background execution, do not pol
 appear, do not wait for a notification. If a command genuinely cannot finish inside the job's
 45-minute budget, the issue is too big for one run — abandon it and say so.
 
+Concretely: never call the Bash tool with `run_in_background: true`. Never call the `Monitor`
+tool. Neither exists for you — there is no later turn in which their result reaches you, only a
+job that sits until its own timeout kills it. This has now killed three separate runs
+(2026-08-22, and twice more on 2026-08-31) the same way: a build or test command backgrounded,
+then a turn ending on "waiting for it to finish" or "waiting for the scheduled fallback wakeup" —
+language that describes a *different* harness (an interactive session with a wakeup scheduler),
+not this one. You are `claude -p`; nothing schedules you a wakeup.
+
 ## Step 1 — pick one issue you can actually finish and verify
 
 List open issues with `gh issue list`. Discard, in this order:
@@ -68,6 +97,22 @@ List open issues with `gh issue list`. Discard, in this order:
   ADR-XXXX", anything needing a judgement a human owns. You implement; you do not decide
   architecture;
 - any too large for one run: a whole new service, a 30-module sweep, a framework migration.
+
+**Do not reason about whether the fix lands on a protected path — ASK.** Once you know which
+files you would touch, run:
+
+```
+python3 .github/scripts/check-agent-pr-guard.py --paths <file> <file> ...
+```
+
+Exit 1 means the gate will refuse the PR, so the issue is out of scope: pick another and say why.
+Exit 0 means it is in scope.
+
+This exists because reasoning about it failed. On 2026-08-24 the worker picked the
+party-service slice of #5679, having weighed `money_path_services` and overlooked
+`extra_protected_tokens`, where `party` sits. #6607 was red from its first check and could never
+merge — a whole run spent on work the gate was always going to refuse. The rule was in these
+instructions the entire time; applying it by hand is what went wrong. One command answers it.
 
 Then ask the question that decides everything else: **what test would prove this fix, and can I
 run that test on this runner?** Check rather than assume — the job step before you measured

@@ -5,6 +5,7 @@
 
 package com.openbank.docstruth
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.containers.PostgreSQLContainer
 
@@ -17,12 +18,17 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
 
     private lateinit var postgres: PostgreSQLContainer<*>
 
+    companion object {
+        private const val POSTGRES_IMAGE = "postgres:18-alpine"
+    }
+
     override fun start(): Map<String, String> {
-        postgres = PostgreSQLContainer("postgres:18-alpine")
+        postgres = PostgreSQLContainer(POSTGRES_IMAGE)
             .withDatabaseName("openbank_docstruth")
             .withUsername("openbank")
             .withPassword("openbank")
         postgres.start()
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
         // reactive URL for Panache (vertx-pg-client) + JDBC URL for Flyway.
         val reactiveUrl = "postgresql://${postgres.host}:${postgres.firstMappedPort}/${postgres.databaseName}"
         return mapOf(
@@ -34,6 +40,9 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        if (::postgres.isInitialized) postgres.stop()
+        if (::postgres.isInitialized) {
+            postgres.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
     }
 }

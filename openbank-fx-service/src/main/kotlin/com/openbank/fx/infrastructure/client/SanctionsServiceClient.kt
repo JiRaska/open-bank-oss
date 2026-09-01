@@ -5,6 +5,7 @@
 package com.openbank.fx.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -21,6 +22,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * like the other inter-service clients (ADR-0032 §D).
  */
 @RegisterRestClient(configKey = "sanctions-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/sanctions")
 @Produces(MediaType.APPLICATION_JSON)
@@ -37,7 +39,7 @@ data class ScreenRequest(
     val idempotencyKey: String,
     val entityType: String,
     val name: String,
-    val aliases: List<String> = emptyList()
+    val aliases: List<String> = emptyList(),
 )
 
 /** Subset of the sanctions-service `SanctionsCheck` payload we act on. */
@@ -45,11 +47,8 @@ data class ScreenRequest(
 data class ScreenResponse(
     val status: String? = null,
     val overallScore: Double? = null,
-    val matches: List<ScreenMatch> = emptyList()
+    val matches: List<ScreenMatch> = emptyList(),
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ScreenMatch(
-    val matchedName: String? = null,
-    val matchScore: Double? = null
-)
+data class ScreenMatch(val matchedName: String? = null, val matchScore: Double? = null)

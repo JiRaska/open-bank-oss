@@ -15,7 +15,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge } from '@/components/ui'
 import { opsMessageApi, OPERATOR_MESSAGE_TEMPLATE_VARS, type OperatorMessageTemplate, type ComposeMessageRequest } from '@/lib/api'
 
 const PAGE_SIZE = 25
@@ -37,16 +37,6 @@ interface KycCase {
 interface NotificationSummary {
   id: string; partyId: string; channel: string; template: string; recipient: string
   subject?: string; status: string; sentAt?: string; readAt?: string; createdAt: string
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  ACTIVE: 'var(--green)', INACTIVE: 'var(--text-muted)', BLOCKED: 'var(--red)',
-}
-const KYC_COLOR: Record<string, string> = {
-  APPROVED: 'var(--green)', PENDING: 'var(--yellow)', REJECTED: 'var(--red)', NOT_STARTED: 'var(--text-muted)',
-}
-const MSG_STATUS_COLOR: Record<string, string> = {
-  SENT: 'var(--green)', FAILED: 'var(--red)', PENDING: 'var(--yellow)', BOUNCED: 'var(--red)',
 }
 
 function PartyDetailPage() {
@@ -167,9 +157,7 @@ function PartyDetailPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
               <Users size={15} style={{ color: 'var(--accent)' }} />
               <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Detaily subjektu', 'Party Details')}</span>
-              <span className="pill" style={{ marginLeft: 'auto', background: `${STATUS_COLOR[party.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[party.status] ?? 'var(--text-muted)' }}>
-                {party.status}
-              </span>
+              <span style={{ marginLeft: 'auto' }}><StatusBadge status={party.status} /></span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {[
@@ -198,8 +186,8 @@ function PartyDetailPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
               <ShieldCheck size={15} style={{ color: 'var(--accent)' }} />
               <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Stav KYC', 'KYC Status')}</span>
-              <span className="pill" style={{ marginLeft: 'auto', background: `${KYC_COLOR[party.kycStatus] ?? 'var(--text-muted)'}22`, color: KYC_COLOR[party.kycStatus] ?? 'var(--text-muted)' }}>
-                {party.kycStatus?.replace('_', ' ')}
+              <span style={{ marginLeft: 'auto' }}>
+                <StatusBadge status={party.kycStatus} label={party.kycStatus?.replace('_', ' ')} />
               </span>
             </div>
             {kyc ? (
@@ -210,9 +198,7 @@ function PartyDetailPage() {
                 {kyc.checks?.map(check => (
                   <div key={check.checkType} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
                     <span style={{ fontSize: '13px' }}>{check.checkType?.replace(/_/g, ' ') ?? check.checkType}</span>
-                    <span className="pill" style={{ background: `${KYC_COLOR[check.status] ?? 'var(--text-muted)'}22`, color: KYC_COLOR[check.status] ?? 'var(--text-muted)' }}>
-                      {check.status}
-                    </span>
+                    <StatusBadge status={check.status} />
                   </div>
                 ))}
                 {kyc.reviewedBy && (
@@ -242,7 +228,7 @@ function PartyDetailPage() {
           </div>
 
           {/* Related entities (ADR-0231 D3) — the party → accounts walk is chips, not UUID copying. */}
-          <RelatedAccounts partyId={party.id} />
+          <RelatedAccounts key={party.id} partyId={party.id} />
         </div>
       )}
 
@@ -256,17 +242,31 @@ type AccountRef = { id: string; accountNumber: string; currencyCode?: string; st
 function RelatedAccounts({ partyId }: { partyId: string }) {
   const { t } = useLanguage()
   const [accounts, setAccounts] = useState<AccountRef[] | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     const ctrl = new AbortController()
     fetch(svcUrl('account-service', '/api/v1/accounts', { partyId, limit: '20' }), {
       signal: ctrl.signal, cache: 'no-store',
     })
-      .then(r => (r.ok ? r.json() : null))
-      .then(d => setAccounts(d ? (d.data ?? []) : []))
-      .catch(() => setAccounts([]))
+      .then(r => {
+        if (!r.ok) throw new Error(`Related accounts HTTP ${r.status}`)
+        return r.json()
+      })
+      .then(d => setAccounts(d?.data ?? []))
+      .catch(error => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setUnavailable(true)
+      })
     return () => ctrl.abort()
-  }, [partyId])
+  }, [partyId, reloadKey])
+
+  const retry = () => {
+    setAccounts(null)
+    setUnavailable(false)
+    setReloadKey(key => key + 1)
+  }
 
   return (
     <div className="card" style={{ padding: '20px' }}>
@@ -274,7 +274,15 @@ function RelatedAccounts({ partyId }: { partyId: string }) {
         <Users size={15} style={{ color: 'var(--accent)' }} />
         <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Související účty', 'Related accounts')}</span>
       </div>
-      {accounts === null ? (
+      {unavailable ? (
+        <div role="status" aria-live="polite" style={{ fontSize: '12px', color: 'var(--warning-text)' }}>
+          <div>{t('Související účty se nepodařilo načíst — tento stav neznamená, že subjekt nemá žádné účty.', 'Related accounts could not be loaded — this does not mean the party has no accounts.')}</div>
+          <button type="button" onClick={retry} aria-label={t('Zkusit znovu načíst související účty', 'Retry loading related accounts')}
+            style={{ marginTop: '10px', padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+            {t('Zkusit znovu', 'Try again')}
+          </button>
+        </div>
+      ) : accounts === null ? (
         <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Načítám…', 'Loading…')}</div>
       ) : accounts.length === 0 ? (
         <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Žádné účty', 'No accounts')}</div>
@@ -447,8 +455,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                 <span style={{ fontSize: '13px' }}>
                   {t('Zpráva čeká na schválení druhým operátorem.', 'Message is awaiting a second operator’s approval.')}
                 </span>
-                <button className="btn btn-secondary" style={{ marginLeft: 'auto' }} onClick={retrySubmit} disabled={retrying}>
-                  <RefreshCw size={13} /> {retrying ? t('Zkouším…', 'Retrying…') : t('Zkusit znovu odeslat', 'Retry send')}
+                <button type="button" className="btn btn-secondary" style={{ marginLeft: 'auto' }} onClick={retrySubmit} disabled={retrying} aria-busy={retrying} aria-label={t('Zkusit znovu odeslat zprávu', 'Retry sending message')}>
+                  <RefreshCw size={13} aria-hidden="true" /> {retrying ? t('Zkouším…', 'Retrying…') : t('Zkusit znovu odeslat', 'Retry send')}
                 </button>
               </div>
               {/* No backend endpoint lists pending approvals (ApprovalStore has no query), so the
@@ -504,8 +512,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                 </label>
               ))}
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <button className="btn btn-secondary" onClick={sendMessage} disabled={sending}>
-                  <Send size={13} /> {sending ? t('Odesílám…', 'Sending…') : t('Poslat zprávu', 'Send message')}
+                <button type="button" className="btn btn-secondary" onClick={sendMessage} disabled={sending} aria-busy={sending} aria-label={t('Poslat zprávu', 'Send message')}>
+                  <Send size={13} aria-hidden="true" /> {sending ? t('Odesílám…', 'Sending…') : t('Poslat zprávu', 'Send message')}
                 </button>
                 {composeError && <span style={{ fontSize: '12px', color: 'var(--red)' }}>{composeError}</span>}
               </div>
@@ -563,9 +571,7 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                 <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{row.recipient}</td>
                 <td style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{row.subject ?? '—'}</td>
                 <td>
-                  <span className="pill" style={{ background: `${MSG_STATUS_COLOR[row.status] ?? 'var(--text-muted)'}22`, color: MSG_STATUS_COLOR[row.status] ?? 'var(--text-muted)' }}>
-                    {row.status}
-                  </span>
+                  <StatusBadge status={row.status} />
                 </td>
                 <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.sentAt ? new Date(row.sentAt).toLocaleString(dateLocale) : '—'}</td>
                 <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.readAt ? new Date(row.readAt).toLocaleString(dateLocale) : '—'}</td>
@@ -577,8 +583,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
 
       {hasNextPage && !loadingMore && (
         <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
-          <button className="btn btn-secondary" onClick={() => load(page + 1)}>
-            <ChevronDown size={13} /> {t('Načíst další', 'Load more')}
+          <button type="button" className="btn btn-secondary" onClick={() => load(page + 1)} aria-label={t('Načíst další zprávy', 'Load more messages')}>
+            <ChevronDown size={13} aria-hidden="true" /> {t('Načíst další', 'Load more')}
           </button>
         </div>
       )}

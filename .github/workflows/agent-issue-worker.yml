@@ -246,7 +246,7 @@ jobs:
           git config user.name  "openbank-issue-worker"
           git config user.email "openbank-issue-worker@users.noreply.github.com"
           claude -p "$(cat .github/agent-prompts/issue-worker.md)" \
-            --max-turns 120 \
+            --max-turns 200 \
             --permission-mode bypassPermissions \
           | tee /tmp/worker-output.txt
           echo "--- worker output above ---"
@@ -265,7 +265,7 @@ jobs:
             echo "::error::the worker produced no output at all — it did not run, which is not the same as having nothing to do"
             exit 1
           fi
-          verdict=$(grep -oE '^WORKER-VERDICT: (OPENED .*|NOTHING QUALIFIED|BLOCKED .*)$' /tmp/worker-output.txt | tail -1)
+          verdict=$(grep -oE '^WORKER-VERDICT: (OPENED|NOTHING QUALIFIED|BLOCKED).*$' /tmp/worker-output.txt | tail -1)
           if [ -z "${verdict}" ]; then
             echo "::error::the worker never stated a verdict. It talked, but nothing here can tell whether it worked an issue, found nothing to do, or was blocked. Treating as NOT having run."
             echo "--- last 20 lines of what it did say ---"

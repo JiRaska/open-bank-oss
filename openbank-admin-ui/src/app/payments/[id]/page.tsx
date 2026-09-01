@@ -12,7 +12,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { readStashedRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
 
 // Mirrors the list-row shape on the payments page. The record can carry more
 // fields than the table showed — the detail view surfaces all of them.
@@ -33,9 +33,14 @@ interface Payment {
   [k: string]: unknown
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  SETTLED: 'var(--success)', RECEIVED: 'var(--info-text)', SENT_TO_CLEARING: 'var(--warning)',
-  PENDING: 'var(--warning)', PROCESSING: 'var(--warning)', REJECTED: 'var(--danger)', FAILED: 'var(--danger)',
+// These two statuses are specific to payment processing. Keep their explicit
+// meaning here rather than broadening the cross-domain status vocabulary:
+// RECEIVED means accepted by the payment service, not settled; SENT_TO_CLEARING
+// remains an in-flight operator state that needs attention.
+function paymentStatusTone(status: string | undefined): Tone {
+  if (status === 'RECEIVED') return 'info'
+  if (status === 'SENT_TO_CLEARING') return 'warning'
+  return statusTone(status)
 }
 
 // The list route is the source of truth (no by-id backend endpoint exists);
@@ -108,7 +113,7 @@ function PaymentDetailContent() {
         subtitle={t('Detail platebního příkazu', 'Payment order detail')}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/payments" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('Platby', 'Payments')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{id.slice(0, 12)}…</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {payment?.status && <span className="pill" style={{ background: `${STATUS_COLOR[payment.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[payment.status] ?? 'var(--text-muted)' }}>{payment.status}</span>}
+          {payment?.status && <StatusBadge status={payment.status} tone={paymentStatusTone(payment.status)} />}
           {payment?.type && <span className="tag">{payment.type}</span>}
           <Link href="/payments" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>
           <button type="button" className="btn btn-secondary" onClick={load} disabled={loading} aria-busy={loading} aria-label={t('Obnovit platbu', 'Refresh payment')}>

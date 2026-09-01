@@ -9,6 +9,8 @@ describe('regulatory preview loading contract', () => {
     expect(source).toContain('type="button"')
     expect(source).toContain("aria-busy={previewData.status === 'loading'}")
     expect(source).toContain("aria-label={t('Načíst data pro náhled', 'Load preview data')}")
-    expect(source).toContain('onClick={() => void loadPreview(preview)}')
+    expect(source).toContain(
+      'onClick={() => void loadPreview(preview, reportingDate || undefined, reportingEvidence)}',
+    )
   })
 })

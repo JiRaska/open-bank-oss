@@ -3,7 +3,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, CheckCircle2, ShieldCheck, Users } from 'lucide-react'
@@ -20,8 +20,14 @@ export default function NewAudiencePage() {
   const [minDays, setMinDays] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // React state is rendered asynchronously. Keep the one operator action single-flight before a
+  // second click can observe the disabled button; audience creation otherwise allocates a new,
+  // governed version on each request.
+  const createInFlight = useRef(false)
 
   const create = async () => {
+    if (createInFlight.current) return
+    createInFlight.current = true
     setSaving(true); setError(null)
     const rules: Array<Record<string, unknown>> = [{ type: 'PARTY_STATUS_IS', status }]
     if (minDays.trim() !== '') rules.push({ type: 'TENURE_AT_LEAST_DAYS', minDays: Number(minDays) })
@@ -29,7 +35,10 @@ export default function NewAudiencePage() {
       const response = await fetch('/api/audiences', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, rules }) })
       if (!response.ok) throw new Error((await response.json()).error ?? 'Unable to create audience')
       router.push('/segments')
-    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to create audience') } finally { setSaving(false) }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to create audience') } finally {
+      createInFlight.current = false
+      setSaving(false)
+    }
   }
 
   const validName = /^[a-z0-9][a-z0-9-]*$/.test(name)
@@ -50,7 +59,7 @@ export default function NewAudiencePage() {
             <label htmlFor="segment-min-days" className="block rounded-xl border border-slate-200 p-4 text-sm text-slate-700"><span className="font-semibold">{t('Minimální délka vztahu (volitelné)', 'Minimum relationship age (optional)')}</span><input id="segment-min-days" inputMode="numeric" value={minDays} onChange={e => setMinDays(e.target.value)} placeholder="30" className="mt-3 block w-full rounded-lg border border-slate-200 px-3 py-2" /><span className="mt-2 block text-xs text-slate-500">{t('Prázdné = bez omezení podle délky vztahu.', 'Blank = no relationship-age restriction.')}</span></label>
           </fieldset>
           {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
-          <button type="submit" disabled={!validName || !validTenure || saving} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40"><CheckCircle2 className="h-4 w-4" />{saving ? t('Ukládám…', 'Saving…') : t('Vytvořit návrh', 'Create draft')}</button>
+          <button type="submit" aria-busy={saving} aria-label={saving ? t('Ukládám návrh publika', 'Saving audience draft') : t('Vytvořit návrh publika', 'Create audience draft')} disabled={!validName || !validTenure || saving} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40"><CheckCircle2 aria-hidden="true" className="h-4 w-4" />{saving ? t('Ukládám…', 'Saving…') : t('Vytvořit návrh', 'Create draft')}</button>
         </form>
         <aside className="rounded-2xl border border-emerald-100 bg-[linear-gradient(160deg,#f6fffb,#fff)] p-6 shadow-sm"><ShieldCheck className="h-6 w-6 text-emerald-600" /><h2 className="mt-4 text-lg font-semibold tracking-tight text-slate-900">{t('Co se stane dál', 'What happens next')}</h2><ol className="mt-4 space-y-4 text-sm leading-6 text-slate-600"><li><strong className="text-slate-900">1. {t('Návrh', 'Draft')}</strong><br />{t('Můžete bezpečně zkontrolovat aktuální dosah stejným evaluátorem jako při zařazení do kampaně.', 'You can safely check current reach with the same evaluator used for campaign enrolment.')}</li><li><strong className="text-slate-900">2. {t('Schválení', 'Approval')}</strong><br />{t('Jiný člověk schválí přesnou, verzovanou definici. Autor ji nemůže schválit sám.', 'A different person approves the exact versioned definition. The maker cannot approve it.')}</li><li><strong className="text-slate-900">3. {t('Použití', 'Use')}</strong><br />{t('Teprve schválené publikum lze vybrat do kampaně; souhlas a limity se stále ověřují při doručení.', 'Only an approved audience can be chosen in a campaign; consent and caps are still checked at delivery.')}</li></ol></aside>
       </section>

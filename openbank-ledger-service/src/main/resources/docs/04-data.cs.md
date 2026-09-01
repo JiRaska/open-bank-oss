@@ -28,6 +28,7 @@ V1 seeduje hotovostní/vkladové/úrokové/poplatkové účty (1000, 1001, 2000,
 | Verze | Shrnutí | Rollback |
 |---|---|---|
 | `V1__init_ledger` | `gl_accounts`, partitionované `journal_entries` (2024–2026 + default), `journal_lines`, indexy, seed osnovy | drop schématu (greenfield) |
+| `V25__regulatory_capital_accounts` | explicitní zdrojové účty CET1, odpočtů, AT1 a Tier 2 pro COREP C 01.00 | smazat jen před prvním odkazem z účetního řádku |
 | `V2__create_ledger_outbox` | `ledger_outbox` + indexy status/aggregate | drop tabulky |
 | `V3__ledger_governance` | sloupec `reversal_of`, tabulka `ledger_idempotency`, stabilní účty (1100, 2100) | drop přídavků |
 | `V4__hibernate_sequences` | `ledger_outbox_seq` (Hibernate pooled allocator) | drop sekvence |

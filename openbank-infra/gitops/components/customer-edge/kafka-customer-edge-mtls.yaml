@@ -63,6 +63,16 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # Producer: CreditFunnelPublisher -> openbank.credit.funnel.events (ADR-0269 rule 8).
+      # Write only; the consumer is analytics-sink. Without this grant the produce is DENIED and the
+      # telemetry silently never reaches the warehouse — the sepa-instant/swift failure mode, and
+      # invisible here because the publisher is best-effort by design.
+      - resource:
+          type: topic
+          name: openbank.credit.funnel.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       # Producer: FeedbackPublisher -> openbank.feedback.events (ADR-0192 screen feedback).
       # Write only; the consumer is analytics-sink. Without this grant the produce is denied and
       # the submission silently never reaches the warehouse — the sepa-instant/swift failure mode.

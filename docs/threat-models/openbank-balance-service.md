@@ -173,6 +173,8 @@ also be deleted (nothing else in balance-service depends on it).
 
 ## 7. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass: downstream controls still see the journey. It prevents synthetic activity from becoming indistinguishable before a downstream persistence/event boundary; a fleet gate now requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-05** — Prohibit the customer-edge M2M principal from balance writes (#3734). The
   `operator-balance-write` ext rule was role-only, and `rules.yaml`'s `role_action_matrix` grants
   the balance writes (`hold`/`holdRelease`/`credit`/`debit`/`initialize`/`reconciliation.run`) to

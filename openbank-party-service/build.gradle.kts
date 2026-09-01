@@ -46,6 +46,7 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     // Provider-side message Pact verification for the PARTY_CREATED event (ADR-0063 P1).
     testImplementation(libs.pact.provider)
+    testImplementation(project(":openbank-libs-testing"))
 
     // CI infra pilot (P2): @QuarkusTest ITs get an isolated, per-JVM PostgreSQL +
     // Redpanda (Kafka API) via Testcontainers, instead of the shared compose stack

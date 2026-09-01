@@ -107,6 +107,7 @@ class TppOutboxRepositoryImpl(private val clock: Clock) :
 
     private fun OutboxMessage.toEntity() = TppOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload

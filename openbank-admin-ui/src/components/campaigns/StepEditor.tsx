@@ -103,7 +103,7 @@ export function StepEditor({
         <h3 className="text-sm font-semibold">
           {t('Krok', 'Step')} {index + 1}
         </h3>
-        <button onClick={onClose} className="text-xs text-muted-foreground hover:underline">
+        <button type="button" onClick={onClose} className="text-xs text-muted-foreground hover:underline">
           {t('Hotovo', 'Done')}
         </button>
       </div>

@@ -18,6 +18,14 @@ enum class FlakyTestCheckType {
     PACT_LOCAL_VERIFICATION_BLIND_SPOT,
     PACT_PROVIDER_CLASS_COLLISION,
     TEST_COUNT_DRIFT,
+    MISSING_EXECUTION_EVIDENCE,
+    FAILED_TEST_EVIDENCE,
+    OBSERVED_FAILING_TESTS,
+    OBSERVED_FLAKY_TESTS,
+    STALE_TEST_EVIDENCE,
+    UNPROVEN_TEST_INFRASTRUCTURE,
+    UNTERMINATED_TEST_INFRASTRUCTURE,
+    REQUIRED_CONTROL_GAP,
 }
 
 enum class FindingSeverity { WARNING, CRITICAL }
@@ -107,3 +115,27 @@ data class FlakyTestReport(
 )
 
 enum class RunTrigger { SCHEDULED, CI_TEST_SUITE_FAILURE_WEBHOOK, OPERATOR_MANUAL }
+
+/** Privacy-bounded projection received only from the authenticated Admin UI BFF. */
+data class TestIntelligenceAnalysisRequest(
+    val snapshotId: String,
+    val collectedAt: Instant,
+    val components: List<TestIntelligenceComponentInput>,
+)
+
+data class TestIntelligenceComponentInput(
+    val component: String,
+    val moneyPath: Boolean,
+    val evidence: List<TestIntelligenceEvidenceInput>,
+    val requiredControls: List<TestIntelligenceEvidenceInput> = emptyList(),
+    val declaredInfrastructure: List<String>,
+    val observedInfrastructureStarts: Int,
+    /** A start event proves neither teardown nor an isolated next test. */
+    val observedInfrastructureStops: Int = 0,
+    val flakyTests: Int = 0,
+    val failingTests: Int = 0,
+    val sameCommitTransitions: Int = 0,
+    val wastedDurationMs: Int = 0,
+)
+
+data class TestIntelligenceEvidenceInput(val kind: String, val state: String)

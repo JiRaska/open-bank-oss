@@ -5,6 +5,7 @@
 package com.openbank.account.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -22,6 +23,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 // gets a 401 -> ProductLookupResult.Unavailable -> validation silently skipped (fail-open by
 // design, so this was never a crash, just a silent bypass of ADR-0158's whole point).
 @RegisterRestClient(configKey = "product-catalog-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterProvider(ProductCatalogHostHeaderFilter::class)
 @Path("/api/v1/products")

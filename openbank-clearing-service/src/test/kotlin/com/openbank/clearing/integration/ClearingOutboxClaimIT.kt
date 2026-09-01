@@ -11,6 +11,7 @@ import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
@@ -33,6 +34,7 @@ import java.time.Instant
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@TestProfile(OutboxRepositoryIsolationProfile::class)
 class ClearingOutboxClaimIT {
 
     @Inject

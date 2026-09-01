@@ -149,7 +149,7 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
     expect(gateTools).toContain(tool)
   })
 
-  it('the middleware matcher excludes /api/gate', () => {
+  it('the middleware matcher excludes /api/gate and pre-auth brand assets', () => {
     // Without this the middleware answers an unauthenticated sub-request with a
     // 302 and nginx turns the gate into a 500 — dashboards unreachable for
     // everyone, including the operators the gate would have admitted.
@@ -163,6 +163,10 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
       .match(/matcher:\s*\[([\s\S]*?)\]/)?.[1]
     expect(matcher, 'middleware config.matcher not found').toBeDefined()
     expect(matcher).toMatch(/api\/gate/)
+    // The login page renders the Explorer from /public/brand before a session
+    // exists. Matching /brand here redirects the image request back to login,
+    // leaving the new experience deployed but the mascot invisible.
+    expect(matcher).toMatch(/brand\//)
   })
 
   // Every tool, not just the first one. A gate wider than the nav hides access

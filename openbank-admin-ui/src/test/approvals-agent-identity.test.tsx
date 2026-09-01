@@ -106,4 +106,13 @@ describe('AgentIdentityBadge — the states render distinguishably', () => {
     const out = stateOf(<AgentIdentityBadge identity={resolveAgentIdentity('totally-made-up-agent', registry)} />)
     expect(out.text).not.toContain('totally-made-up-agent')
   })
+
+  it('uses shared semantic badge tokens instead of local colour literals', () => {
+    const source = readFileSync(path.resolve(__dirname, '../components/approvals/AgentIdentityBadge.tsx'), 'utf8')
+
+    expect(source).toContain('badge-warning')
+    expect(source).toContain('badge-neutral')
+    expect(source).toContain('badge-danger')
+    expect(source).not.toMatch(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}(?![0-9a-fA-F])/)
+  })
 })

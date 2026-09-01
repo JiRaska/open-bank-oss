@@ -36,4 +36,14 @@ describe('new account form accessibility', () => {
     expect(page).toContain('partyId:     form.partyId.trim()')
     expect(page).toContain('legalName:   form.legalName.trim()')
   })
+
+  it('keeps one account-opening request and its idempotency key stable across a retry', () => {
+    expect(page).toContain("import { useEffect, useRef, useState } from 'react'")
+    expect(page).toContain('const openingInFlight = useRef(false)')
+    expect(page).toContain('const idempotencyKey = useRef<string | null>(null)')
+    expect(page).toContain('if (openingInFlight.current) return')
+    expect(page).toContain('idempotencyKey.current ??= crypto.randomUUID()')
+    expect(page).toContain('}, stableIdempotencyKey)')
+    expect(page).toContain('openingInFlight.current = false')
+  })
 })

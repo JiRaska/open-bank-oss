@@ -12,7 +12,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { opsMessageApi } from '@/lib/api'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge } from '@/components/ui'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 
 const NOTIFICATION_SERVICE = '/api/svc/notification-service'
@@ -26,10 +26,6 @@ interface Notification {
 const TYPE_ICON: Record<string, React.ElementType> = {
   EMAIL: Mail, ALERT: AlertTriangle, SUCCESS: CheckCircle2, INFO: Info,
 }
-const STATUS_COLOR: Record<string, string> = {
-  SENT: 'var(--green)', FAILED: 'var(--red)', PENDING: 'var(--yellow)', QUEUED: 'var(--accent)',
-}
-
 function NotificationsContent() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -47,7 +43,6 @@ function NotificationsContent() {
       const res = await fetch(`${NOTIFICATION_SERVICE}/api/v1/notifications`, { signal: AbortSignal.timeout(5000) })
       if (!res.ok) {
         const kind = await classifyBffFailure(res)
-        setItems([])
         // A genuine 404/405 on the log endpoint means "no notifications yet",
         // not a broken app — degrade to the calm empty state.
         setUnavailable({ kind: res.status === 405 || kind === 'not_found' ? 'no_data' : kind })
@@ -57,7 +52,6 @@ function NotificationsContent() {
       setItems(Array.isArray(data) ? data : data.items ?? [])
     } catch {
       // Timeout / abort / network — the BFF or notification-service didn't answer.
-      setItems([])
       setUnavailable({ kind: 'unreachable' })
     } finally { setLoading(false) }
   }, [])
@@ -111,6 +105,9 @@ function NotificationsContent() {
             service={t('Notification-service', 'Notification-service')}
             feature={t('Notifikace', 'Notifications')}
             lang={language}
+            detail={items.length > 0
+              ? t('Zobrazen je poslední úspěšně načtený log; stav doručení se mohl změnit.', 'The last successfully loaded log is shown; delivery status may have changed.')
+              : undefined}
             dense
           />
         </div>
@@ -151,11 +148,7 @@ function NotificationsContent() {
                   <td><span className="tag">{n.channel}</span></td>
                   <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{n.recipient}</td>
                   <td style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{n.subject ?? '—'}</td>
-                  <td>
-                    <span className="pill" style={{ background: `${STATUS_COLOR[n.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[n.status] ?? 'var(--text-muted)' }}>
-                      {n.status}
-                    </span>
-                  </td>
+                  <td><StatusBadge status={n.status} /></td>
                   <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                     {n.sentAt ? new Date(n.sentAt).toLocaleString(dateLocale) : '—'}
                   </td>

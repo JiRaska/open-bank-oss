@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: Apache-2.0
+# One executable journey, three call sites (ADR-0252 phase 2, #4348).
+#
+# The k6 program is not copied into this workflow. It is extracted from the ConfigMap that
+# Argo CD applies and the sandbox CronJob mounts. A PR therefore proves the proposed runtime
+# artifact, a GitOps merge proves the newly desired sandbox state, and the CronJob keeps
+# falsifying it every five minutes. The post-merge lane is watched by main-red-watch.
+name: Synthetic journeys
+
+on:
+  pull_request:
+    paths:
+      - ".github/scripts/check-journey-catalog.py"
+      - ".github/scripts/check-journey-coverage.py"
+      - ".github/workflows/synthetic-journeys.yml"
+      - "openbank-libs/governance/journeys.yaml"
+      - "openbank-libs/governance/rules.yaml"
+      - "openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"
+  push:
+    branches: [main]
+    paths:
+      # Re-prove and publish main-branch evidence when the executor or envelope producer
+      # changes; manifest merges remain the actual post-GitOps call site.
+      - ".github/scripts/check-journey-catalog.py"
+      - ".github/scripts/check-journey-coverage.py"
+      - ".github/scripts/collect-test-run-evidence.py"
+      - ".github/workflows/synthetic-journeys.yml"
+      - "openbank-libs/governance/journeys.yaml"
+      - "openbank-libs/governance/rules.yaml"
+      - "openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: synthetic-journeys-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-edge:
+    name: public-edge / exact runtime artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PyYAML
+        run: bash .github/scripts/install-pyyaml-hash-pinned.sh
+
+      - name: Validate catalog and parse every active mounted k6 program
+        run: |
+          python3 .github/scripts/check-journey-catalog.py --self-test
+          python3 .github/scripts/check-journey-catalog.py --root . --enforce
+          python3 .github/scripts/check-journey-coverage.py --self-test
+          python3 .github/scripts/check-journey-coverage.py --root . --enforce
+          mkdir -p synthetic-evidence
+          # The catalog is the source of the active set.  A new CronJob cannot bypass CI
+          # merely because this workflow once hard-coded public-edge.  Internal-only
+          # journeys are syntax-checked here; their actual execution happens from the
+          # sandbox CronJob, where their Service DNS and network policy are meaningful.
+          while read -r journey; do
+            [ -n "$journey" ] || continue
+            python3 .github/scripts/check-journey-catalog.py \
+              --root . --extract "$journey" --out "synthetic-evidence/${journey}.js"
+            docker run --rm \
+              --user "$(id -u):$(id -g)" \
+              --volume "$PWD/synthetic-evidence:/evidence" \
+              docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc \
+              inspect "/evidence/${journey}.js"
+          done < <(python3 .github/scripts/check-journey-catalog.py --root . --active-ids)
+          # public-edge is internet-reachable and therefore gets an actual CI execution;
+          # internal-only service journeys get their authoritative execution evidence only
+          # from their scheduled sandbox Job, not a misleading hosted-runner substitute.
+          python3 .github/scripts/check-journey-catalog.py \
+            --root . --extract public-edge --out synthetic-evidence/journey.js
+
+      - name: Run the exact sandbox journey
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --volume "$PWD/synthetic-evidence:/evidence" \
+            docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc \
+            run --quiet --summary-export /evidence/summary.json /evidence/journey.js
+
+      - name: Build synthetic Test Intelligence envelope
+        if: always()
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service synthetic-evidence \
+            --component openbank-platform \
+            --synthetic-summary synthetic-evidence/summary.json \
+            --synthetic-journey public-edge \
+            --out synthetic-evidence/run.json
+
+      - name: Retain immutable synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: synthetic-public-edge-${{ github.run_id }}-${{ github.run_attempt }}
+          path: synthetic-evidence/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Retain immutable Test Intelligence history
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-run-openbank-platform-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: synthetic-evidence/run.json
+          retention-days: 30
+          if-no-files-found: error

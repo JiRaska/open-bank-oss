@@ -191,6 +191,21 @@ fi
 #    pacts is unverifiable no matter what the consumer did. Run 31080511057 is the worked
 #    example — PACT_VERSION_PRESENT was `no` for all six blocked services, so every one
 #    reported PENDING_BUILD and promised a reconcile that could not deliver.
+# #6568: a counterpart version that publishes no pacts but DOES carry verification results is
+# a live PROVIDER version, not the #3223 bookkeeping shape. It is still durable — the 3-hourly
+# reconciler asks whether the provider's LATEST MAIN version owes a verification, while
+# can-i-deploy asks about the version currently DEPLOYED IN THE ENVIRONMENT, and a provider that
+# is not itself deploying never gains a new verification at that older sha. But the remedy is the
+# opposite of UNVERIFIABLE's: publish the missing verification AT that sha, which is exactly what
+# verify-provider.yml's `ref` input exists for ("a counterpart's deployed sha"). Telling an
+# operator to redeploy a healthy provider instead is what kept six services (four money-path)
+# blocked for 40 hours on run 32599859753.
+if [ "$CP_STATE" = "provider-live" ]; then
+  cp_svc="${CP_DETAIL%%@*}"; cp_ref="${CP_DETAIL##*@}"; cp_ref="${cp_ref%%,*}"
+  emit PROVIDER_UNVERIFIED "the counterpart version deployed in the environment has published no verification result for this pact — ${CP_DETAIL:-see the verdict}. That version is NOT contentless: it carries verification results for other consumers, so it is a live provider version and this is not the #3223 shape. It is still not self-clearing — the reconciler (pact-verification-reconcile.yml) asks about the provider's LATEST main version, not the version deployed in the environment. Remedy: gh workflow run verify-provider.yml -f service=${cp_svc} -f ref=${cp_ref}"
+  exit 0
+fi
+
 if [ "$CP_STATE" = "contentless" ]; then
   emit UNVERIFIABLE "blocked on counterpart version(s) that carry ZERO pacts — ${CP_DETAIL:-see the verdict}. No verification run targets a version with no pacts, so this will NOT clear on its own and waiting for a reconcile tick cannot help (#3223). The counterpart has to be deployed at a version that actually published pacts, or co-deployed with ${SVC}"
   exit 0

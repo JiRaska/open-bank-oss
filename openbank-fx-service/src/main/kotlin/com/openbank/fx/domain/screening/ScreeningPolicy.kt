@@ -19,7 +19,7 @@ data class ScreeningResult(
     val role: ScreeningRole,
     val status: ScreeningMatchStatus,
     val score: Double,
-    val matchedEntity: String?
+    val matchedEntity: String?,
 )
 
 /** The verdict the policy renders over all screened names of one conversion. */
@@ -45,11 +45,9 @@ object ScreeningPolicy {
         else -> ScreeningDecision.CLEAR
     }
 
-    private fun isBlock(r: ScreeningResult): Boolean =
-        r.status == ScreeningMatchStatus.HIT ||
-            r.status == ScreeningMatchStatus.ESCALATED ||
-            (r.status == ScreeningMatchStatus.POTENTIAL_HIT && r.score > POTENTIAL_HIT_BLOCK_THRESHOLD)
+    private fun isBlock(r: ScreeningResult): Boolean = r.status == ScreeningMatchStatus.HIT ||
+        r.status == ScreeningMatchStatus.ESCALATED ||
+        (r.status == ScreeningMatchStatus.POTENTIAL_HIT && r.score > POTENTIAL_HIT_BLOCK_THRESHOLD)
 
-    private fun isReview(r: ScreeningResult): Boolean =
-        r.status == ScreeningMatchStatus.POTENTIAL_HIT
+    private fun isReview(r: ScreeningResult): Boolean = r.status == ScreeningMatchStatus.POTENTIAL_HIT
 }

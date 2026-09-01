@@ -21,4 +21,15 @@ describe('infrastructure topology controls accessibility contract', () => {
     expect(page).toContain('<Pause aria-hidden="true"')
     expect(page).toContain('<X aria-hidden="true"')
   })
+
+  it('uses the shared semantic status vocabulary for live probes', () => {
+    expect(page).toContain("import { PageHeader, StatusBadge, statusTone } from '@/components/ui'")
+    expect(page).toContain('const tone = statusTone(status)')
+    expect(page).toContain("return 'var(--success)'")
+    expect(page).toContain("return 'var(--danger)'")
+    expect(page).toContain('<StatusBadge')
+    expect(page).toContain('status={statusOf(selectedNode.id)}')
+    expect(page).toContain('withDot')
+    expect(page).not.toContain('const statusColor')
+  })
 })

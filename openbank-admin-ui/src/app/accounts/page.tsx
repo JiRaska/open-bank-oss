@@ -214,10 +214,13 @@ export default function AccountsPage() {
               <option value="">{t('Všechny typy', 'All types')}</option>
               <option value="CURRENT">{t('Běžný', 'Current')}</option>
               <option value="SAVINGS">{t('Spořicí', 'Savings')}</option>
+              <option value="TERM_DEPOSIT">{t('Termínovaný', 'Term deposit')}</option>
             </select>
             <button
               className="btn btn-primary"
+              type="button"
               aria-label={t('Vyhledat účty', 'Search accounts')}
+              aria-busy={loading}
               onClick={() => void search()}
               disabled={loading || !canSearch}
             >
@@ -226,6 +229,8 @@ export default function AccountsPage() {
             </button>
             <button
               className="btn btn-ghost"
+              type="button"
+              aria-label={t('Vymazat filtry účtů', 'Reset account filters')}
               onClick={resetFilters}
               disabled={loading}
             >
@@ -335,6 +340,8 @@ export default function AccountsPage() {
           <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
             <button
               className="btn btn-secondary"
+              type="button"
+              aria-label={t('Zobrazit další účty', 'Load more accounts')}
               style={{ fontSize: '12px' }}
               onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
             >

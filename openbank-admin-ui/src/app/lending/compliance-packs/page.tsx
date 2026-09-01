@@ -38,6 +38,9 @@ type PackActivationView = {
   proposedBy: string
   decidedBy: string | null
   decidedAt: string | null
+  proposedAt: string | null
+  decisionReason: string | null
+  pack: Record<string, unknown>
 }
 
 /** A read that was REFUSED must never render as "nothing pending" — same reasoning as /approvals
@@ -66,6 +69,7 @@ export default function CompliancePacksPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [packJson, setPackJson] = useState('')
+  const [detail, setDetail] = useState<PackActivationView | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -243,7 +247,12 @@ export default function CompliancePacksPage() {
                 <td style={cell}>{p.productType}</td>
                 <td style={cell}>v{p.packVersion}</td>
                 <td style={cell}>{p.effectiveFrom}</td>
-                <td style={{ ...cell, fontSize: 11 }} className="mono">{p.contentHash.slice(0, 16)}…</td>
+                <td style={{ ...cell, fontSize: 11 }}>
+                  <span className="mono">{p.contentHash.slice(0, 16)}…</span>{' '}
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetail(p)}>
+                    {t('Zobrazit detail', 'View details')}
+                  </button>
+                </td>
               </tr>
             ))}
             {active.length === 0 && (
@@ -278,6 +287,9 @@ export default function CompliancePacksPage() {
               <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
                 {t('Navrhl', 'Proposed by')}: {p.proposedBy} · <span className="mono">{p.contentHash.slice(0, 16)}…</span>
               </div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetail(p)} style={{ marginTop: 6 }}>
+                {t('Zobrazit detail', 'View details')}
+              </button>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <Can permission="lending:compliance:decide" fallback={<span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Rozhodnutí je pouze pro compliance principály.', 'Decisions are limited to compliance principals.')}</span>}>
@@ -306,6 +318,19 @@ export default function CompliancePacksPage() {
           </div>
         )}
       </div>
+
+      {detail && <div onClick={() => setDetail(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div onClick={e => e.stopPropagation()} className="card" style={{ width: 'min(820px, 100%)', maxHeight: '88vh', overflow: 'auto', padding: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><h2 style={{ margin: 0 }}>{detail.jurisdiction} / {detail.productType} · v{detail.packVersion}</h2><div className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{detail.contentHash}</div></div><button type="button" className="btn btn-secondary" onClick={() => setDetail(null)}>{t('Zavřít', 'Close')}</button></div>
+          <dl style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '8px 12px', fontSize: 12, margin: '18px 0' }}>
+            <dt>{t('Navrhl', 'Proposed by')}</dt><dd>{detail.proposedBy || '—'} · {detail.proposedAt || '—'}</dd>
+            <dt>{t('Rozhodl', 'Decided by')}</dt><dd>{detail.decidedBy || '—'} · {detail.decidedAt || '—'}</dd>
+            <dt>{t('Důvod rozhodnutí', 'Decision reason')}</dt><dd>{detail.decisionReason || '—'}</dd>
+          </dl>
+          <h3 className="section-title">{t('Přesný obsah packu', 'Exact pack content')}</h3>
+          <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 11 }}>{JSON.stringify(detail.pack, null, 2)}</pre>
+        </div>
+      </div>}
 
       <Can permission="lending:compliance:propose">
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

@@ -12,11 +12,12 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { CardTransition } from '@/lib/cards/lifecycle'
 import type { Card } from '@/lib/cards/types'
+import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 import { CardStatusChip } from './CardStatusChip'
 
 export function ConfirmTransitionDialog({
@@ -29,6 +30,7 @@ export function ConfirmTransitionDialog({
   onConfirm: (reason: string) => void
 }) {
   const { t } = useLanguage()
+  const dialogRef = useRef<HTMLDivElement>(null)
   const [reason, setReason] = useState('')
   const label = transition.action === 'block'
     ? t('Blokovat kartu', 'Block card')
@@ -36,10 +38,15 @@ export function ConfirmTransitionDialog({
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={label}
-      onKeyDown={e => { if (e.key === 'Escape' && !busy) onCancel() }}
+      aria-busy={busy}
+      onKeyDown={e => {
+        if (e.key === 'Escape' && !busy) onCancel()
+        trapDialogFocus(e, dialogRef.current)
+      }}
       style={{
         position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,23,42,0.45)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px',
@@ -47,7 +54,7 @@ export function ConfirmTransitionDialog({
     >
       <div className="card" style={{ width: '100%', maxWidth: '460px', padding: '22px 24px', background: 'var(--surface-1)' }}>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '14px' }}>
-          <AlertTriangle size={18} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: '2px' }} />
+          <AlertTriangle size={18} aria-hidden="true" style={{ color: 'var(--danger)', flexShrink: 0, marginTop: '2px' }} />
           <div>
             <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{label}</div>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
@@ -83,12 +90,14 @@ export function ConfirmTransitionDialog({
         />
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-          <button className="btn btn-ghost btn-sm" onClick={onCancel} disabled={busy}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel} disabled={busy}>
             {t('Zpět', 'Back')}
           </button>
           <button
+            type="button"
             className="btn btn-danger btn-sm"
             disabled={busy || reason.trim().length === 0}
+            aria-busy={busy}
             onClick={() => onConfirm(reason.trim())}
           >
             {busy

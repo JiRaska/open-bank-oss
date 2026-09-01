@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.16.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.15.0...balance-service-v1.16.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [1.15.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.14.3...balance-service-v1.15.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
 ## [1.14.3](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.14.2...balance-service-v1.14.3) (2026-08-22)
 
 

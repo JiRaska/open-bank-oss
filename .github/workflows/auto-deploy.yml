@@ -31,6 +31,9 @@ on:
     branches: [main]
     paths:
       - "openbank-*/src/main/**"
+      # The canonical runtime image reads the service Dockerfile's EXPOSE declaration.
+      # A port-only change therefore requires a rebuild just as source does.
+      - "openbank-*/Dockerfile"
       # openbank-libs/src/main no longer holds compiled code (ADR-0122 moved it to
       # openbank-libs-domain / openbank-libs-runtime, both already covered by the
       # openbank-*/src/main/** glob above) — only its build file and Gradle wrapper
@@ -101,6 +104,15 @@ on:
         type: boolean
         required: false
         default: false
+      bootstrap_image_only:
+        description: >-
+          Build, sign and attest exactly one service image that has no GitOps manifest yet.
+          This is an artifact-only bootstrap: it never runs the contract deploy gate, rewrites
+          GitOps, opens a PR or deploys a workload. Use the resulting immutable image only in a
+          separately reviewed first-manifest PR.
+        type: boolean
+        required: false
+        default: false
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); each job below declares its own override for the access it needs.
@@ -144,6 +156,7 @@ jobs:
         env:
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
+          INPUT_SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -euo pipefail
           # Full fleet — unlike services-ci.yml (which discovers every openbank-*/
@@ -209,7 +222,7 @@ jobs:
             # see it either, because its subject set was release-please's released components and
             # analytics-sink has no version.txt (it owns no OLTP database and cuts no release —
             # ADR-0022). That blindness is fixed in the same PR; this line is the gap it found.
-            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-delegation-service openbank-case-coordinator-agent openbank-analytics-sink'
+            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service'
 
           # Which files changed in this push (compare to the parent commit). We compute this
           # early because the workflow_dispatch guard below also needs to know which services
@@ -242,7 +255,9 @@ jobs:
           # Services changed directly in this push.
           DIRECT_SERVICES=()
           for svc in $ALL_SERVICES; do
-            if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
+            # Keep this aligned with the push trigger: release-please changes only
+            # version.txt, and that release marker must rebuild/deploy the component.
+            if grep -qE "^${svc}/(src/main|build\.gradle\.kts|version\.txt|Dockerfile)" <<< "$CHANGED_FILES"; then
               DIRECT_SERVICES+=("$svc")
             fi
           done
@@ -253,6 +268,31 @@ jobs:
           # commit leaves the contract gate with no pact version for this SHA and produces the
           # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
+              if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
+                echo "::error::bootstrap_image_only and reconcile are mutually exclusive"
+                exit 1
+              fi
+              REQUESTED="$INPUT_SERVICES"
+              if [ "$(wc -w <<< "$REQUESTED" | tr -d ' ')" -ne 1 ]; then
+                echo "::error::bootstrap_image_only requires exactly one service"
+                exit 1
+              fi
+              svc="$REQUESTED"
+              if ! grep -qxF "$svc" <<< "${ALL_SERVICES// /$'\n'}" || [ ! -f "$svc/Dockerfile" ]; then
+                echo "::error::bootstrap target must be a known service with a committed Dockerfile"
+                exit 1
+              fi
+              if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
+                echo "::error::bootstrap_image_only is only for a service with no GitOps manifest"
+                exit 1
+              fi
+              SERVICES_JSON="$(printf '%s\n' "$svc" | jq -R . | jq -sc .)"
+              echo "artifact-only bootstrap → building: $SERVICES_JSON"
+              echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
+              echo "any=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             # Reconcile on demand: use the same logic as the schedule tick, which picks the
             # correct per-service commit instead of forcing everything onto the current HEAD.
             if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
@@ -270,7 +310,7 @@ jobs:
               exit 0
             fi
 
-            REQUESTED="${{ github.event.inputs.services }}"
+            REQUESTED="$INPUT_SERVICES"
             if [ -z "$REQUESTED" ]; then
               echo "::error::workflow_dispatch with empty services is only allowed when reconcile=true. A blank manual dispatch of the full fleet at an unrelated commit creates the NOT_ASKED / missing-pact failures seen in runs 31149468822 and 31150052893. Use reconcile=true to re-drive stranded services, or list explicit services that changed in the current HEAD."
               exit 1
@@ -861,7 +901,7 @@ jobs:
   can-i-deploy:
     name: can-i-deploy
     needs: [changes, build-push]
-    if: needs.changes.outputs.any == 'true'
+    if: needs.changes.outputs.any == 'true' && github.event.inputs.bootstrap_image_only != 'true'
     # Stays on the self-hosted pool: the Pact Broker has no public ingress
     # (ADR-0056) and is only resolvable over cluster DNS. ARC scale-to-zero
     # serves this label at ~$0 idle.
@@ -970,6 +1010,7 @@ jobs:
     if: |
       always() &&
       needs.changes.outputs.any == 'true' &&
+      github.event.inputs.bootstrap_image_only != 'true' &&
       needs.build-push.result == 'success' &&
       needs.can-i-deploy.result != 'cancelled'
     runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
@@ -1118,6 +1159,10 @@ jobs:
           # so any generator or tool that writes into the tree earlier in the job silently becomes
           # part of the deploy. See admin-ui-deploy.yml for the three defects that caused there.
           add-paths: openbank-infra/gitops/**
+          # workflow_dispatch may run from a recovery ref. Without an explicit base,
+          # create-pull-request targets that stale ref and includes every intervening main
+          # commit in the deploy PR instead of only the rewritten GitOps manifests.
+          base: main
           branch: chore/gitops-auto-deploy-${{ github.sha }}
           delete-branch: true
           commit-message: "chore(gitops): auto-deploy sandbox-${{ github.sha && github.sha || '' }}"

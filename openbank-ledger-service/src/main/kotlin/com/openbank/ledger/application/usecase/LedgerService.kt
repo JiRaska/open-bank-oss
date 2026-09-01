@@ -35,8 +35,13 @@ import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.opentelemetry.api.GlobalOpenTelemetry
+import io.opentelemetry.api.trace.SpanKind
+import io.opentelemetry.api.trace.StatusCode
+import io.opentelemetry.api.trace.Tracer
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import jakarta.persistence.PersistenceException
 import java.time.Clock
 import java.util.UUID
@@ -52,6 +57,9 @@ class LedgerService(
     private val periodFreezeLock: PeriodFreezeLock,
     private val clock: Clock,
 ) : LedgerUseCase {
+    /** Field injection keeps the established money-path constructor shape stable for direct tests. */
+    @Inject
+    lateinit var tracer: Tracer
     // The single constructor is the CDI entry point; tests pass a fixed Clock for deterministic
     // timestamps (ADR-0100 Layer 1).
     //
@@ -62,7 +70,33 @@ class LedgerService(
     // now the injected UTC bean (correct for timestamps); the accounting DATE comes from
     // AccountingClock via [accountingDayLock], the single authority for it.
 
+    /**
+     * A successful posting is a money-path execution boundary. The span deliberately excludes
+     * journal, account, transaction, actor, amount, and idempotency data: it proves execution
+     * without becoming a second financial record.
+     */
+    @Suppress("TooGenericExceptionCaught") // The span must record every failure before propagation.
     override suspend fun postJournal(command: PostJournalCommand): JournalEntry {
+        val span = activeTracer().spanBuilder("ledger.journal.post")
+            .setSpanKind(SpanKind.INTERNAL)
+            .startSpan()
+        return try {
+            postJournalInternal(command).also { entry ->
+                span.setAttribute("openbank.ledger.journal.status", entry.status.name)
+            }
+        } catch (failure: Exception) {
+            span.recordException(failure)
+            span.setStatus(StatusCode.ERROR)
+            throw failure
+        } finally {
+            span.end()
+        }
+    }
+
+    private fun activeTracer(): Tracer =
+        if (::tracer.isInitialized) tracer else GlobalOpenTelemetry.getTracer("openbank-ledger-service")
+
+    private suspend fun postJournalInternal(command: PostJournalCommand): JournalEntry {
         // Idempotent replay: a repeated key returns the original entry, never double-posts.
         // Checked BEFORE the period lock so replaying an entry that was legitimately booked while
         // the year was still open stays idempotent even after the year is later attested.
@@ -125,7 +159,9 @@ class LedgerService(
         }
 
         val messages =
-            listOf(journalPostedMessage(entry)) + bookedChangedMessages(entry) + command.additionalOutboxMessages(entry)
+            listOf(journalPostedMessage(entry, command.synthetic)) +
+                bookedChangedMessages(entry, command.synthetic) +
+                command.additionalOutboxMessages(entry)
         val saved = try {
             journalRepository.save(entry, command.idempotencyKey, messages)
         } catch (e: PersistenceException) {
@@ -152,9 +188,10 @@ class LedgerService(
         return journalRepository.findByIdempotencyKey(idempotencyKey) ?: throw e
     }
 
-    private fun journalPostedMessage(entry: JournalEntry): OutboxMessage = OutboxMessage(
+    private fun journalPostedMessage(entry: JournalEntry, synthetic: Boolean): OutboxMessage = OutboxMessage(
         aggregateId = entry.id,
         eventType = JOURNAL_POSTED,
+        synthetic = synthetic,
         payload = objectMapper.writeValueAsString(
             JournalPostedEvent(
                 aggregateId = entry.id,
@@ -314,24 +351,26 @@ class LedgerService(
      * (pure GL movements). Computed from the SAME entry that is being persisted, so a reversal's
      * flipped sides naturally yield negated deltas, keyed by the reversal entry's id.
      */
-    private fun bookedChangedMessages(entry: JournalEntry): List<OutboxMessage> = entry.bookedDeltas().map { d ->
-        OutboxMessage(
-            aggregateId = d.accountId,
-            eventType = ACCOUNT_BOOKED_CHANGED,
-            payload = objectMapper.writeValueAsString(
-                AccountBookedChangedEvent(
-                    aggregateId = d.accountId,
-                    version = entry.version,
-                    currency = d.currency,
-                    delta = d.delta,
-                    journalEntryId = entry.id,
-                    transactionId = entry.transactionId,
-                    entryDate = entry.entryDate,
-                    occurredAt = clock.instant(),
+    private fun bookedChangedMessages(entry: JournalEntry, synthetic: Boolean = false): List<OutboxMessage> =
+        entry.bookedDeltas().map { d ->
+            OutboxMessage(
+                aggregateId = d.accountId,
+                eventType = ACCOUNT_BOOKED_CHANGED,
+                synthetic = synthetic,
+                payload = objectMapper.writeValueAsString(
+                    AccountBookedChangedEvent(
+                        aggregateId = d.accountId,
+                        version = entry.version,
+                        currency = d.currency,
+                        delta = d.delta,
+                        journalEntryId = entry.id,
+                        transactionId = entry.transactionId,
+                        entryDate = entry.entryDate,
+                        occurredAt = clock.instant(),
+                    ),
                 ),
-            ),
-        )
-    }
+            )
+        }
 
     companion object {
         // The bank time zone constant that used to live here is gone: the accounting date is no

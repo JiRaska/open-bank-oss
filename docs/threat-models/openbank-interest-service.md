@@ -60,6 +60,8 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-20** — Added catalog fixed-rate snapshot boundary. Only immutable maker-checker-published
   revisions with a content hash and UTC-day-aligned effective interval can materialize a local rate.
   Unsupported or malformed profiles are durably rejected; catalog outages do not advance the cursor.

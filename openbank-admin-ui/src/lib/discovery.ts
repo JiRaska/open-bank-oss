@@ -79,6 +79,7 @@ const NS_GROUP: Record<string, ServiceGroup> = {
   psd2:               'open-banking', // psd2-service (Berlin Group)
   documents:          'platform',    // document-service (ADR-0161/0162)
   engagement:         'platform',    // engagement-service (ADR-0220 in-app surfaces)
+  referral:           'platform',    // referral-service (ADR-0266 MGM attribution)
 }
 
 export function inCluster(): boolean {

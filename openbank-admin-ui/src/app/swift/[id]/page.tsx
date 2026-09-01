@@ -115,13 +115,13 @@ export default function SwiftDetailPage() {
             ]} />
           </div>
           <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <button onClick={() => setShowRaw(s => !s)}
+            <button type="button" aria-expanded={showRaw} aria-controls="swift-raw-payload" aria-label={showRaw ? t('Skrýt surový payload', 'Hide raw payload') : t('Zobrazit surový payload', 'Show raw payload')} onClick={() => setShowRaw(s => !s)}
               style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '6px', padding: '12px 18px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600 }}>
-              {showRaw ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              {showRaw ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
               {t('Surová data (JSON)', 'Raw payload (JSON)')}
             </button>
             {showRaw && (
-              <pre style={{ margin: 0, padding: '0 18px 18px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflowX: 'auto' }}>
+              <pre id="swift-raw-payload" style={{ margin: 0, padding: '0 18px 18px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflowX: 'auto' }}>
                 {JSON.stringify(message, null, 2)}
               </pre>
             )}
