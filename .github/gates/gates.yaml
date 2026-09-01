@@ -3392,6 +3392,29 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  - id: quoted-sequence-name-ratchet
+    name: "quoted mixed-case Hibernate sequence ratchet (issue #6480, enforced)"
+    group: data
+    mode: enforced
+    rationale: >-
+      A `CREATE SEQUENCE "party_payees_SEQ"` keeps its case, but Hibernate's pooled-id allocator
+      emits `select nextval('party_payees_SEQ')` with the identifier unquoted inside the literal,
+      which Postgres folds to lower case — so it looks up a sequence that does not exist and every
+      insert into that table fails 42P01 at id allocation. The migration applies cleanly and the pod
+      passes its health probes; the failure appears only on the first write. openbank-party-service
+      made this mistake three times and fixed it twice (V5 -> V6, then V16/V18 -> V19/#6467), with
+      V16 and V18 both written after V6 had documented the failure in the same directory — a defect
+      a service reintroduces after fixing it is one review does not see. Baselined rather than flat:
+      the offending statements sit in already-applied migrations that Flyway checksums, so they can
+      never be edited, only repaired forward. Only party-service has ever used the quoted form
+      across the 54 migration files that create a sequence, so this is prevention, not debt paydown.
+    review_after: '2027-02-22'
+    min_subjects: 300
+    selftest: python3 .github/scripts/check-quoted-sequence-names.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-quoted-sequence-names.py --root .
+
   - id: external-feed-declaration-drift
     name: "external feed declaration drift (issue #2204, enforced)"
     group: data
