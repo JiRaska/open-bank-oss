@@ -23,6 +23,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EntityChip } from '@/components/entities/EntityChip'
+import { DelegationAuditTimeline } from '@/components/delegations/DelegationAuditTimeline'
 import {
   DelegationStatusBadge,
   capabilityLabels,
@@ -135,6 +136,7 @@ export default function DelegationDetailPage() {
             </dl>
           </div>
 
+          <DelegationAuditTimeline grantId={grant.id} currentStatus={grant.status} />
           <CoverageProbe grant={grant} />
           <BankSideActions />
         </>
