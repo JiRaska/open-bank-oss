@@ -367,6 +367,31 @@ out of it (they are path-scoped, not less important — several are live-inciden
 
 ### Prometheus / Loki rules — configured-looking and inert
 
+- **An alert built on a threshold cannot see a subject that emits NOTHING, and `up` does not
+  save you — Prometheus writes `up` per TARGET, so a workload nobody scrapes has no `up` either.**
+  `PostgresInstanceDown` documents at length that `cnpg_collector_up` cannot report its own
+  exporter's death and that `up` survives instead; that is right and stops one level short. A CNPG
+  `Cluster` without `spec.monitoring.enablePodMonitor` creates no PodMonitor, so all nine Postgres
+  alerts — `PostgresInstanceDown` included — matched an empty vector forever. Measured 2026-08-30:
+  4 of 62 declared clusters, two of them the party and identity golden-record databases, both
+  backing up to S3 with that backup state watched by nothing. **The fix is a denominator that
+  exists whether or not the subject does**: a constant `vector(1)` recording rule per declared
+  subject, `unless on(...)` the set derived from real `up`, so absence is a positive series. Derive
+  the constant series from the manifests and generate the rule — a hand-kept expected-list is the
+  same defect one layer up (`check-cnpg-scrape-coverage.py`, #7220).
+- **Two promtool traps that make a unit test pass while measuring nothing.** Both were live in the
+  first draft of `openbank-infra/tests/promtool/postgres_threshold_alerts_test.yaml`:
+  - **`time()` starts at the unix epoch.** A sentinel-zero guard (`... and metric > 0`, which
+    exists because `time() - 0` is ~56 years on a real cluster) tested at `eval_time: 45m` sees
+    `time() - 0 = 45 minutes` — under every threshold, so the case passes with the guard DELETED.
+    Push `eval_time` past the threshold (33h here) and give the series enough samples to reach it.
+  - **An input `interval:` wider than the 5m staleness window makes `for:` unreachable.** At
+    `interval: 10m` the series is stale for half of every gap, the condition flickers between
+    evaluations, and a `for: 30m` never matures — so the alert reads as "does not fire" for a
+    reason that has nothing to do with the rule. Keep test intervals at 1m.
+  Falsify every case by deleting the clause it covers and confirming it goes red; `promtool check
+  rules` proves a rule PARSES and has been green through every alerting defect recorded here.
+
 - **A recording rule's `interval` decides whether its output EXISTS for its consumers, not just
   how fresh it is.** Prometheus answers an instant query from a 5-minute lookback window, so a
   group at `interval: 1h` is resolvable for 5 of every 60 minutes — a 1-in-12 duty cycle.
