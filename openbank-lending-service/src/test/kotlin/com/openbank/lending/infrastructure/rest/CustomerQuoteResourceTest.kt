@@ -8,6 +8,7 @@ import com.openbank.lending.application.port.out.BorrowerDistressPort
 import com.openbank.lending.application.port.out.CreditOffersConsentPort
 import com.openbank.lending.application.usecase.CreditOfferEligibilityService
 import com.openbank.lending.domain.model.BorrowerDistressSignals
+import com.openbank.lending.domain.model.CourtRegisterSignalState
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import io.quarkus.security.identity.SecurityIdentity
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
@@ -38,8 +39,8 @@ class CustomerQuoteResourceTest {
     private val healthy = BorrowerDistressSignals(
         hasArrears = false,
         hasNegativeBalance = false,
-        hasEnforcementOrder = false,
-        hasInsolvencyProceeding = false,
+        enforcementSignal = CourtRegisterSignalState.CLEAR,
+        insolvencySignal = CourtRegisterSignalState.CLEAR,
         inHardshipArrangement = false,
         lastAffordabilityFailureAt = null,
         bufferDays = 90,
