@@ -109,22 +109,22 @@ function FailureState({ failure, retry, language }: { failure: LoadFailure; retr
   )
 }
 
-function ProjectionComparison({ currentStatus, auditStatus, language }: { currentStatus: string; auditStatus: string | null; language: 'cs' | 'en' }) {
+function ProjectionComparison({ currentStatus, auditStatus }: { currentStatus: string; auditStatus: string | null }) {
+  const { t } = useLanguage()
   const normalizedCurrent = currentStatus.toUpperCase()
   const state = auditStatus === null ? 'unknown' : auditStatus === normalizedCurrent ? 'match' : 'mismatch'
   return (
     <div className={styles.comparison} data-state={state} role={state === 'mismatch' ? 'status' : undefined}>
       {state === 'match' && <><Check size={14} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />
-        {language === 'cs'
-          ? <>Živý stav <strong>{normalizedCurrent}</strong> odpovídá poslednímu auditnímu přechodu.</>
-          : <>Live status <strong>{normalizedCurrent}</strong> matches the latest audited transition.</>}
+        {t('Živý stav', 'Live status')} <strong>{normalizedCurrent}</strong> {t('odpovídá poslednímu auditnímu přechodu.', 'matches the latest audited transition.')}
       </>}
-      {state === 'mismatch' && (language === 'cs'
-        ? <>Živý stav je <strong>{normalizedCurrent}</strong>, poslední auditní přechod vede na <strong>{auditStatus}</strong>. Může jít o zpoždění projekce nebo neúplnou historickou stopu; stav ověřte.</>
-        : <>Live status is <strong>{normalizedCurrent}</strong>, while the latest audited transition leads to <strong>{auditStatus}</strong>. This may be projection lag or incomplete legacy history; verify the state.</>)}
-      {state === 'unknown' && (language === 'cs'
-        ? 'Auditní evidence neobsahuje srovnatelný stavový přechod. Živý stav z ní nelze potvrdit ani vyvrátit.'
-        : 'The audit evidence has no comparable status transition. It can neither confirm nor contradict the live status.')}
+      {state === 'mismatch' && <>
+        {t('Živý stav je', 'Live status is')} <strong>{normalizedCurrent}</strong>, {t('poslední auditní přechod vede na', 'while the latest audited transition leads to')} <strong>{auditStatus}</strong>. {t('Může jít o zpoždění projekce nebo neúplnou historickou stopu; stav ověřte.', 'This may be projection lag or incomplete legacy history; verify the state.')}
+      </>}
+      {state === 'unknown' && t(
+        'Auditní evidence neobsahuje srovnatelný stavový přechod. Živý stav z ní nelze potvrdit ani vyvrátit.',
+        'The audit evidence has no comparable status transition. It can neither confirm nor contradict the live status.',
+      )}
     </div>
   )
 }
@@ -289,7 +289,7 @@ export function DelegationAuditTimeline({ grantId, currentStatus }: { grantId: s
 
       {result && hasEntries && (
         <>
-          <ProjectionComparison currentStatus={currentStatus} auditStatus={result.latestStatusAfter} language={language} />
+          <ProjectionComparison currentStatus={currentStatus} auditStatus={result.latestStatusAfter} />
           {failure && (
             <div className={styles.retainedWarning} role="status" aria-live="polite">
               {language === 'cs'
