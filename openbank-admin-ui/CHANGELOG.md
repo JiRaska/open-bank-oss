@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.230.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.229.1...admin-ui-v0.230.0) (2026-09-01)
+
+
+### Features
+
+* **admin-ui:** attest browser checks to build ([#7453](https://github.com/JiRaska/open-bank-oss/issues/7453)) ([e1ea859](https://github.com/JiRaska/open-bank-oss/commit/e1ea859c73c2a9eb44ec61a86ec9706f3f095d2d))
+* **admin-ui:** explain delegation history ([#7972](https://github.com/JiRaska/open-bank-oss/issues/7972)) ([8ea5df6](https://github.com/JiRaska/open-bank-oss/commit/8ea5df6e9119a7a1428239fa92a04b4808eb7bd6)), closes [#7971](https://github.com/JiRaska/open-bank-oss/issues/7971)
+* **consent:** expose pending approvals in unified inbox ([#7037](https://github.com/JiRaska/open-bank-oss/issues/7037)) ([77573dc](https://github.com/JiRaska/open-bank-oss/commit/77573dc07495e784dc325a656c47f067217606ba))
+
+
+### Bug Fixes
+
+* **admin-ui:** align PID console RBAC ([#7785](https://github.com/JiRaska/open-bank-oss/issues/7785)) ([1b01e15](https://github.com/JiRaska/open-bank-oss/commit/1b01e15a772a744420f0b74b942b5ac0453809f8)), closes [#7783](https://github.com/JiRaska/open-bank-oss/issues/7783)
+* **admin-ui:** report a failed BFF read as a failure, not an empty collection ([#7988](https://github.com/JiRaska/open-bank-oss/issues/7988)) ([d3bdc2f](https://github.com/JiRaska/open-bank-oss/commit/d3bdc2f44b50914bdfac4f1992c138c520e0629e)), closes [#7943](https://github.com/JiRaska/open-bank-oss/issues/7943)
+* **admin-ui:** restore incentive discovery and matrix access ([#8015](https://github.com/JiRaska/open-bank-oss/issues/8015)) ([5c5d3a8](https://github.com/JiRaska/open-bank-oss/commit/5c5d3a82e4a950a6cae83eb452d14cfd0ff4a022))
+* **admin-ui:** secure SWIFT outage recovery ([#7825](https://github.com/JiRaska/open-bank-oss/issues/7825)) ([93b999f](https://github.com/JiRaska/open-bank-oss/commit/93b999fbc36cd72053639d7a747c930efde0eedf))
+* **admin-ui:** stop the lending KPIs asserting an unconfirmed zero ([#7975](https://github.com/JiRaska/open-bank-oss/issues/7975)) ([20d1b4e](https://github.com/JiRaska/open-bank-oss/commit/20d1b4e78acaae2eb2ccc7cc063fd9a79669f94c)), closes [#7918](https://github.com/JiRaska/open-bank-oss/issues/7918)
+
 ## [0.229.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.229.0...admin-ui-v0.229.1) (2026-09-01)
 
 
