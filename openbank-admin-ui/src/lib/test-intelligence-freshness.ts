@@ -31,10 +31,14 @@ export function enforceRuntimeFreshness(report: TestIntelligenceReport): TestInt
     },
   }))
   const evidence = components.flatMap(component => component.evidence)
+  const requiredControls = report.requiredControls?.map(control => ({
+    ...control, state: runtimeFreshnessState(control.state, control.observedAt),
+  }))
   const { componentsWithExecutionEvidence, missingEvidence } = executionEvidenceTotals(components)
   return {
     ...report,
     components,
+    ...(requiredControls ? { requiredControls } : {}),
     contracts: (report.contracts ?? []).map(item => ({
       ...item, state: runtimeFreshnessState(item.state, item.observedAt),
     })),
@@ -70,6 +74,10 @@ export function enforceRuntimeFreshness(report: TestIntelligenceReport): TestInt
       staleEvidence: evidence.filter(item => item.state === 'stale').length,
       unknownEvidence: evidence.filter(item => item.state === 'unknown').length,
       unresolvedEvidence: evidence.filter(item => ['unknown', 'not-run', 'blocked'].includes(item.state)).length,
+      ...(requiredControls ? {
+        requiredControls: requiredControls.length,
+        requiredControlGaps: requiredControls.filter(control => control.state !== 'passed').length,
+      } : {}),
     },
   }
 }
