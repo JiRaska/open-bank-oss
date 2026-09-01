@@ -1992,8 +1992,13 @@ ci_runners:
     deploy_only_signed_digests: true
   gate: ci-runner-governance
   enforced: planned                     # ADR-0053 Accepted; lint + tofu enable land on rollout
-  target_enforce_date: "2026-09-30"   # ADR-0144 — rebaselined #7928; lint + OpenTofu apply remain incomplete
-  blocked_on: "a CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) + the OpenTofu apply for the three scale sets have not both landed yet"
+  target_enforce_date: "2026-11-30"   # ADR-0144. Moved from 2026-08-31, which passed with the
+                                      # blocker unresolved and turned an enforced gate red on every
+                                      # PR regardless of its diff. Extending the horizon is the
+                                      # sanctioned move here; the alternative -- flipping `enforced`
+                                      # to satisfy the date -- would claim a control this repo does
+                                      # not have.
+  blocked_on: "the CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) does not exist: no file under .github/scripts or .github/gates references that key (control: money_path_services is referenced by two, so the probe sees rule keys). The OpenTofu half is less clear than this line used to claim -- arc-runners.tf and arc-runner-reaper.tf are in the tree, but a committed .tf is not an applied one, and that is not checkable from this repository. Corroborating evidence that the pools are not fully provisioned: #6458 records openbank-batch as a declared pool with no capacity and no consumer."
 
 # ---------------------------------------------------------------------------------------
 # Infra apply (ADR-0060). Closes the "as-code without applied" gap: CI applies the

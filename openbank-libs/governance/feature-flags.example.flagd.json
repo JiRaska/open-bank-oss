@@ -1,6 +1,25 @@
 {
   "$comment": "ADR-0067 reference example of flag-as-code. The real per-service files live in the gitops repo, are synced to a ConfigMap by ArgoCD (ADR-0010) and hot-reloaded by the flagd sidecar. Standard flagd schema, extended with an `openbank` block per flag carrying the governance metadata modelled by libs/flags FlagDefinition.kt. A CI gate (follow-up) parses every flag and runs FlagDefinition.validate().",
   "flags": {
+    "sepa-instant-new-router": {
+      "state": "ENABLED",
+      "defaultVariant": "off",
+      "variants": { "on": true, "off": false },
+      "targeting": {
+        "fractional": [
+          { "var": "targetingKey" },
+          ["on", 10],
+          ["off", 90]
+        ]
+      },
+      "openbank": {
+        "classification": "MONEY_PATH",
+        "owner": "payments-team",
+        "fourEyes": true,
+        "expiresAt": "2026-12-01T00:00:00Z",
+        "description": "Route SEPA instant payments through the new corridor router."
+      }
+    },
     "copilot-assistant": {
       "state": "ENABLED",
       "defaultVariant": "off",
