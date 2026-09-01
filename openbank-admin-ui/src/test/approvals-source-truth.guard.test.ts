@@ -21,7 +21,8 @@ describe('approval inbox source truthfulness', () => {
 
   it('does not render an empty-state claim while a source is not configured', () => {
     expect(pageSource).toContain('const notConfiguredSources = useMemo(')
-    expect(pageSource).toContain('notConfiguredSources.length === 0 && domainItems.filter')
+    expect(pageSource).toContain('!domainLoadFailed && unavailableSources.length === 0')
+    expect(pageSource).toContain('notConfiguredSources.length === 0 && domainApprovalItems.length === 0')
     expect(pageSource).toContain('Decisions from these domains will not appear here until their read endpoint is available.')
   })
 

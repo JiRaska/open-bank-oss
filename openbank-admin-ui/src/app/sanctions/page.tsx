@@ -18,6 +18,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { statusTone } from '@/components/ui/tone'
 import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
+import { readApprovalId } from '@/lib/approvals/triage'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -239,6 +240,13 @@ export default function SanctionsPage() {
   const [decideMsg, setDecideMsg] = useState('')
   const [decisionIntent, setDecisionIntent] = useState<ApprovalDecisionIntent | null>(null)
   const decisionTriggerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const linkedApprovalId = readApprovalId(window.location.search)
+    if (!linkedApprovalId) return
+    const frame = requestAnimationFrame(() => setDecideId(linkedApprovalId))
+    return () => cancelAnimationFrame(frame)
+  }, [])
 
   const loadChecks = useCallback(async () => {
     setLoading(true)
