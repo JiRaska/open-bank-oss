@@ -8,6 +8,7 @@ import json
 import re
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 REQUIRED_SCHEMA = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
@@ -16,6 +17,54 @@ TESTCONTAINERS_EVIDENCE_BASELINE = "openbank-libs/governance/testcontainers-evid
 
 def text(path: Path) -> str:
     return path.read_text(errors="ignore") if path.exists() else ""
+
+
+def normalized_heading(value: str) -> str:
+    """Return a comparison form for GitHub-style Markdown heading fragments.
+
+    GitHub's precise slug algorithm deliberately preserves some punctuation.  Evidence
+    pointers need a stronger property than reproducing that implementation: the
+    declared fragment must still name an actual heading after punctuation and spacing
+    differences are ignored.  This catches a renamed or invented ADR section without
+    coupling the governance gate to a renderer implementation.
+    """
+    return "-".join(re.findall(r"[a-z0-9]+", value.lower()))
+
+
+def valid_capability_evidence(root: Path, evidence: str) -> bool:
+    """Accept an HTTPS primary source or an existing local document/heading pointer."""
+    if evidence.startswith("https://"):
+        parsed = urlsplit(evidence)
+        return (
+            parsed.scheme == "https"
+            and bool(parsed.netloc)
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+        )
+    if evidence.startswith(("http://", "/")):
+        return False
+
+    relative, separator, fragment = evidence.partition("#")
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        return False
+    if not relative or not candidate.is_file():
+        return False
+    if not separator:
+        return True
+
+    if candidate.suffix.lower() not in {".md", ".markdown"}:
+        return re.search(rf"(?<![a-zA-Z0-9_-]){re.escape(fragment)}(?![a-zA-Z0-9_-])", text(candidate)) is not None
+
+    target = normalized_heading(fragment)
+    return bool(target) and any(
+        normalized_heading(heading) == target
+        for heading in re.findall(r"(?m)^#{1,6}\s+(.+?)\s*#*\s*$", text(candidate))
+    )
 
 
 RECORD_CALL = re.compile(
@@ -241,10 +290,13 @@ def check(root: Path) -> list[str]:
         errors.append("test-intelligence capability register is empty or duplicated")
     for identifier, block in zip(ids, capability_blocks, strict=True):
         state = re.search(r"(?m)^    state: ([a-z-]+)$", block)
-        if not state or state.group(1) not in allowed or "\n    title:" not in block or "\n    evidence:" not in block:
+        evidence = re.search(r"(?m)^    evidence: (.+)$", block)
+        if not state or state.group(1) not in allowed or "\n    title:" not in block or not evidence:
             errors.append(f"test-intelligence capability is incomplete: {identifier}")
         if state and state.group(1) != "implemented" and "\n    blocker:" not in block:
             errors.append(f"blocked test-intelligence capability has no blocker: {identifier}")
+        if evidence and not valid_capability_evidence(root, evidence.group(1).strip()):
+            errors.append(f"test-intelligence capability has unresolvable evidence: {identifier}")
     for needle in ("function platformCapabilities()", "platformCapabilities: capabilities"):
         if needle not in collector:
             errors.append(f"admin projection loses operator-visible platform blockers: {needle}")
@@ -439,6 +491,26 @@ def self_test() -> int:
         if any(new_resource in failure for failure in check(root)):
             print("self-test failed: a genuine start/stop lifecycle pair was rejected")
             return 1
+        evidence_doc = root / "docs/adr/test-intelligence.md"
+        evidence_doc.parent.mkdir(parents=True, exist_ok=True)
+        evidence_doc.write_text("## D8 — Capability boundary\n")
+        evidence_yaml = root / ".github/gates/gates.yaml"
+        evidence_yaml.parent.mkdir(parents=True, exist_ok=True)
+        evidence_yaml.write_text("test-intelligence-ecosystem:\n")
+        if not valid_capability_evidence(root, "docs/adr/test-intelligence.md#d8--capability-boundary"):
+            print("self-test failed: a real Markdown evidence anchor was rejected")
+            return 1
+        for invalid in (
+            "docs/adr/test-intelligence.md#invented-boundary",
+            ".github/gates/gates.yaml#invented-control",
+            "../outside.md",
+            "http://untrusted.example/evidence",
+            "https://",
+            "https://user:password@trusted.example/evidence",
+        ):
+            if valid_capability_evidence(root, invalid):
+                print(f"self-test failed: invalid capability evidence was accepted: {invalid}")
+                return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0
 
