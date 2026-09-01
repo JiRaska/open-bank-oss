@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.232.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.231.0...admin-ui-v0.232.0) (2026-09-01)
+
+
+### Features
+
+* **admin-ui:** add immutable delegation audit timeline ([#8075](https://github.com/JiRaska/open-bank-oss/issues/8075)) ([151f5e8](https://github.com/JiRaska/open-bank-oss/commit/151f5e862389c83bbe10acbc3c69447165ffcb4f))
+* **admin-ui:** add truthful approval inbox triage ([#8061](https://github.com/JiRaska/open-bank-oss/issues/8061)) ([bf2eac1](https://github.com/JiRaska/open-bank-oss/commit/bf2eac1627a62cef9d2bf359471908d34e3b7f00))
+
+
+### Bug Fixes
+
+* **admin-ui:** cancel superseded BFF resource reads ([#8045](https://github.com/JiRaska/open-bank-oss/issues/8045)) ([2d1034c](https://github.com/JiRaska/open-bank-oss/commit/2d1034cad4cd6bda56187b61bfb39bfe3d6e7531)), closes [#8037](https://github.com/JiRaska/open-bank-oss/issues/8037)
+* **admin-ui:** keep staged namespaces outside discovery ([#8035](https://github.com/JiRaska/open-bank-oss/issues/8035)) ([3e1106c](https://github.com/JiRaska/open-bank-oss/commit/3e1106c7c65168a6e92e4329daafcea422c55b2a)), closes [#8030](https://github.com/JiRaska/open-bank-oss/issues/8030)
+* **admin-ui:** make card transition dialog outcomes accessible ([#8071](https://github.com/JiRaska/open-bank-oss/issues/8071)) ([2b1a6db](https://github.com/JiRaska/open-bank-oss/commit/2b1a6dbb82e9831dfa19c8d41f9f011a5ce43ea3))
+* **admin-ui:** make PID sync retries recoverable ([#8032](https://github.com/JiRaska/open-bank-oss/issues/8032)) ([0ff0c12](https://github.com/JiRaska/open-bank-oss/commit/0ff0c126b32b552dc1e0dee2fbb8de795b5457c0)), closes [#8025](https://github.com/JiRaska/open-bank-oss/issues/8025)
+* **admin-ui:** synchronize document language ([#8021](https://github.com/JiRaska/open-bank-oss/issues/8021)) ([c5508a4](https://github.com/JiRaska/open-bank-oss/commit/c5508a4abcac1fdaf4d107844423fb0149f01d97)), closes [#8019](https://github.com/JiRaska/open-bank-oss/issues/8019)
+
 ## [0.231.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.230.0...admin-ui-v0.231.0) (2026-09-01)
 
 
