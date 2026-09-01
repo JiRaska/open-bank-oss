@@ -1913,6 +1913,23 @@ gates:
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
 
+  - id: resolve-tracking-issue-selftest
+    name: "a machine-written ledger resolves to exactly one issue, or fails loudly (issue #5266, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It drives the real resolver against a
+      stub gh and asserts exit code AND resolved number for all 12 cases, including a control
+      asserting that the OLD `.[0]` expression is green on the very input the new one refuses.
+      Falsified before wiring in: reinstating `.[0]` turns 2 of the 12 assertions red.
+    budget_seconds: 30   # no network; ~1s observed
+    rationale: "The old `--search \"$TITLE in:title\" | .[0].number` never checked how many candidates it had. Two open issues shared the flake-ledger title, so 85 records went to #5285 and 1 to #5266 — the ledger silently migrated between them mid-life, and a split ledger reads as a low flake count to whoever opens either half."
+    review_after: "2027-02-28"
+    # Subjects are assertions, not files: the floor drops the day someone deletes a case.
+    min_subjects: 12
+    run: |
+      bash .github/scripts/resolve-tracking-issue.sh --self-test
+
   # Nothing in this repo has ever read a merged PR's required contexts: before #4240,
   # `grep -rl 'required_status_checks\|statusCheckRollup' .github/scripts .github/workflows`
   # returned one hit and it was a comment. A ruleset bypass is recorded only in
