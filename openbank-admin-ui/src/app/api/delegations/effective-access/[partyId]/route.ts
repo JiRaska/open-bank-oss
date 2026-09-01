@@ -39,6 +39,29 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
 
 const resourceKey = (resourceType: unknown, resourceId: unknown) => `${String(resourceType)}:${String(resourceId)}`
 
+const time = (value: unknown): number | null => {
+  if (typeof value !== 'string' || value.length === 0) return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const effectiveAt = (grant: Record<string, unknown>, now: number): boolean => {
+  if (grant.status !== 'ACTIVE') return false
+  const validFrom = time(grant.validFrom)
+  if (validFrom === null || validFrom > now) return false
+  if (grant.validTo === null || grant.validTo === undefined) return true
+  const validTo = time(grant.validTo)
+  return validTo !== null && now < validTo
+}
+
+const nextBoundary = (grants: Record<string, unknown>[], now: number): string | null => {
+  const candidates = grants.flatMap(grant => {
+    if (grant.status !== 'ACTIVE') return []
+    return [time(grant.validFrom), time(grant.validTo)].filter((value): value is number => value !== null && value > now)
+  })
+  return candidates.length === 0 ? null : new Date(Math.min(...candidates)).toISOString()
+}
+
 export async function GET(_request: Request, { params }: { params: Promise<{ partyId: string }> }) {
   const session = await auth()
   if (!session?.user?.accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
@@ -53,8 +76,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
     read(serverSvcUrl('delegation-service', 'delegation', 8126, '/api/v1/delegation-role-presets'), headers),
   ])
   const grantList = list(grants.data)
-  const activeResources = [...new Map(grantList
-    .filter(grant => grant.status === 'ACTIVE' && typeof grant.resourceId === 'string' && UUID_RE.test(grant.resourceId) &&
+  const evaluatedAt = new Date()
+  const nextChangeAt = nextBoundary(grantList, evaluatedAt.getTime())
+  const effectiveGrants = grantList.filter(grant => effectiveAt(grant, evaluatedAt.getTime()))
+  const activeResources = [...new Map(effectiveGrants
+    .filter(grant => typeof grant.resourceId === 'string' && UUID_RE.test(grant.resourceId) &&
       (grant.resourceType === 'ACCOUNT' || grant.resourceType === 'SAVINGS_GOAL' || grant.resourceType === 'CARD'))
     .map(grant => [resourceKey(grant.resourceType, grant.resourceId), grant])).values()]
   const resourcesToResolve = activeResources.slice(0, MAX_RESOURCE_DETAILS)
@@ -68,11 +94,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ par
     const result = await read(serverSvcUrl(service[0], service[1], service[2], path), headers)
     return { key: resourceKey(resourceType, resourceId), resourceType, resourceId, state: result.state, detail: object(result.data) }
   }))
+  // Detail lookups may consume most of the upstream timeout. Return the remaining server-clock
+  // delay at the instant the response is assembled so the browser never extends a stale snapshot.
+  const nextChangeMs = time(nextChangeAt)
+  const refreshAfterMs = nextChangeMs === null ? null : Math.max(nextChangeMs - Date.now(), 0)
 
   return NextResponse.json({
     partyId,
+    evaluatedAt: evaluatedAt.toISOString(),
+    nextChangeAt,
+    refreshAfterMs,
     accounts: list(accounts.data),
     cards: list(cards.data),
+    // Keep non-effective rows for the explicit "needs attention" explanation, but resolve
+    // concrete resource details only for grants effective at the BFF timestamp above.
     grants: grantList,
     presets: list(presets.data),
     resourceDetails,

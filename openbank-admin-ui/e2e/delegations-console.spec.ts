@@ -17,6 +17,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
 const PARTY = '018f4a3c-1b2d-7e00-9a11-000000000001'
+const PARTY_B = '018f4a3c-1b2d-7e00-9a11-00000000000b'
 const GRANTEE = '018f4a3c-1b2d-7e00-9a11-0000000000ff'
 const GRANT = '018f4a3c-1b2d-7e00-9a11-000000000002'
 const RESOURCE = '018f4a3c-1b2d-7e00-9a11-000000000003'
@@ -80,6 +81,9 @@ async function stubBff(page: Page): Promise<string[]> {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
+          evaluatedAt: '2026-09-01T12:00:00Z',
+          nextChangeAt: null,
+          refreshAfterMs: null,
           accounts: [{ id: RESOURCE, nickname: 'Provozní účet', accountNumber: 'CZ1234567890', currencyCode: 'CZK', status: 'ACTIVE' }],
           cards: [],
           grants: [],
@@ -169,6 +173,126 @@ test('a refused direction never renders as "no delegations"', async ({ page }) =
   await expect(main.getByText(/nebyl povolen|was refused for your role/)).toBeVisible()
   // The dangerous wrong answer must NOT be on screen for the refused direction.
   await expect(main.getByText(/Žádné delegace\.|No delegations\./)).toHaveCount(1)
+})
+
+test('a slow previous selection can never overwrite the newest customer', async ({ page }) => {
+  await page.route('**/api/entities/resolve**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      results: [
+        { type: 'party', id: PARTY, label: 'Klient A' },
+        { type: 'party', id: PARTY_B, label: 'Klient B' },
+      ],
+    }),
+  }))
+  await page.route('**/api/delegations/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/projection-health')) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ consumers: [], state: 'ok' }) })
+    }
+    const selectedParty = path.includes(PARTY_B) ? PARTY_B : PARTY
+    if (selectedParty === PARTY) await new Promise(resolve => setTimeout(resolve, 350))
+    if (path.includes('/effective-access/')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          evaluatedAt: '2026-09-01T12:00:00Z',
+          nextChangeAt: null,
+          refreshAfterMs: null,
+          accounts: [{ id: `${selectedParty}-account`, nickname: selectedParty === PARTY_B ? 'Účet klienta B' : 'Účet klienta A' }],
+          cards: [],
+          grants: [],
+          presets: [ROLE_PRESET],
+          resourceDetails: [],
+          sources: { accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' },
+        }),
+      })
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ partyId: selectedParty, granted: [], received: [], sources: { granted: 'ok', received: 'ok' } }),
+    })
+  })
+
+  await page.goto('/delegations')
+  await page.getByRole('textbox', { name: /Hledat stranu|Search party/ }).fill('Klient')
+  await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
+  await page.getByRole('button', { name: /Klient A/ }).click()
+  await page.getByRole('button', { name: /Klient B/ }).click()
+
+  const main = page.locator('main')
+  await expect(main.getByText('Účet klienta B')).toBeVisible()
+  await expect(main.getByText('Účet klienta A')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Klient B/ })).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('a newer search stays available and wins over a slower previous query', async ({ page }) => {
+  let slowSearchFinished = false
+  await page.route('**/api/entities/resolve**', async route => {
+    const query = new URL(route.request().url()).searchParams.get('q')
+    if (query === 'alfa') {
+      await new Promise(resolve => setTimeout(resolve, 800))
+      slowSearchFinished = true
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        results: [{ type: 'party', id: query === 'beta' ? PARTY_B : PARTY, label: query === 'beta' ? 'Výsledek Beta' : 'Výsledek Alfa' }],
+      }),
+    })
+  })
+
+  await page.goto('/delegations')
+  const input = page.getByRole('textbox', { name: /Hledat stranu|Search party/ })
+  const button = page.getByRole('button', { name: /Vyhledat|Search/ })
+  await input.fill('alfa')
+  await button.click()
+  await input.fill('beta')
+  await expect(button).toBeEnabled()
+  await button.click()
+
+  await expect(page.getByRole('button', { name: /Výsledek Beta/ })).toBeVisible()
+  await expect.poll(() => slowSearchFinished).toBe(true)
+  await expect(page.getByRole('button', { name: /Výsledek Alfa/ })).toHaveCount(0)
+})
+
+test('a failed effective summary does not hide successfully loaded grants', async ({ page }) => {
+  await stubBff(page)
+  await page.unroute('**/api/delegations/**')
+  let releaseProjection = () => {}
+  const projectionGate = new Promise<void>(resolve => { releaseProjection = resolve })
+  await page.route('**/api/delegations/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/projection-health')) {
+      await projectionGate
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ consumers: [], state: 'ok' }) })
+    }
+    if (path.includes('/effective-access/')) {
+      return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'upstream_unreachable' }) })
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ partyId: PARTY, granted: [GRANT_ROW], received: [], sources: { granted: 'ok', received: 'ok' } }),
+    })
+  })
+
+  await page.goto('/delegations')
+  await page.getByRole('textbox', { name: /Hledat stranu|Search party/ }).fill('Novák')
+  await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
+  await page.getByRole('button', { name: /Jan Novák/ }).click()
+
+  const main = page.locator('main')
+  await expect(main.getByText(/Souhrn efektivního přístupu je dočasně neúplný|effective-access summary is temporarily incomplete/)).toBeVisible()
+  await expect(main.getByTitle('ACCOUNT_INITIATE_PAYMENT').first()).toBeVisible()
+  await expect(main.getByRole('link', { name: /Detail/ }).first()).toBeVisible()
+  await expect(main.getByText(/Načítám zdraví projekcí|Loading projection health/)).toBeVisible()
+  releaseProjection()
+  await expect(main.getByText(/nemá žádnou konzumentskou skupinu|has no consumer group/)).toBeVisible()
 })
 
 test('role deletion explains impact and recovers from a failed request before removing the preset', async ({ page }) => {
@@ -293,7 +417,7 @@ test('the grant detail offers NO mutation — suspend, reinstate and revoke are 
   ])
 })
 
-test('the coverage probe asks the authority and shows its reason code', async ({ page }) => {
+test('the resource check explains its scope, asks the authority and shows its reason code', async ({ page }) => {
   await stubBff(page)
   await page.unroute('**/api/delegations/**')
 
@@ -313,6 +437,8 @@ test('the coverage probe asks the authority and shows its reason code', async ({
   })
 
   await page.goto(`/delegations/${GRANT}`)
+  await expect(page.getByText(/Nic nerezervuje|reserves nothing/)).toBeVisible()
+  await expect(page.getByText(/konkrétního grantu|specific grant/)).toBeVisible()
   await page.getByRole('textbox', { name: /Částka k ověření|Amount to probe/ }).fill('9000')
   await page.getByRole('button', { name: /^(Ověřit|Probe)$/ }).click()
 
