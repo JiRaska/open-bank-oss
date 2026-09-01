@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest'
-import { isEffectiveAccessPayload, matchedRoleName } from '@/components/delegations/EffectiveAccess'
+import { grantResourcePresentation, isEffectiveAccessPayload, matchedRoleName } from '@/components/delegations/EffectiveAccess'
 import type { Grant } from '@/components/delegations/GrantView'
 import type { RolePreset } from '@/lib/delegations/rolePresets'
 
@@ -18,6 +18,14 @@ describe('effective access role matching', () => {
 
   it('rejects a legacy grant payload instead of crashing the customer console', () => {
     expect(isEffectiveAccessPayload({ ...grant, id: 'g1' })).toBe(false)
-    expect(isEffectiveAccessPayload({ accounts: [], cards: [], grants: [], presets: [], sources: { accounts: 'ok' } })).toBe(true)
+    expect(isEffectiveAccessPayload({ accounts: [], cards: [], grants: [], presets: [], resourceDetails: [], sources: { accounts: 'ok' } })).toBe(true)
+  })
+
+  it('explains the concrete account behind a delegation instead of showing only its UUID', () => {
+    const details = [{ key: 'ACCOUNT:account-1', resourceType: 'ACCOUNT', resourceId: 'account-1', state: 'ok', detail: { accountNumber: 'CZ1234567890', currencyCode: 'CZK', status: 'ACTIVE' } }] as never
+    expect(grantResourcePresentation({ ...grant, resourceId: 'account-1' }, details, 'cs')).toEqual({
+      label: 'Účet •••• 7890',
+      meta: 'CZK · ACTIVE',
+    })
   })
 })

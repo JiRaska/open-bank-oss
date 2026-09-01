@@ -11,12 +11,15 @@ import { DelegationStatusBadge, type Grant } from '@/components/delegations/Gran
 type SourceState = 'ok' | 'forbidden' | 'unavailable'
 type Account = { id?: string; accountNumber?: string; nickname?: string | null; accountType?: string; currencyCode?: string; status?: string }
 type Card = { id?: string; maskedPan?: string; cardType?: string; network?: string; status?: string; delegated?: boolean; delegationGrantId?: string | null }
+type ResourceDetail = { key: string; resourceType: string; resourceId: string; state: SourceState; detail?: Account | Card }
 
 export type EffectiveAccessPayload = {
   accounts: Account[]
   cards: Card[]
   grants: Grant[]
   presets: RolePreset[]
+  resourceDetails: ResourceDetail[]
+  resourceDetailsTruncated?: boolean
   sources: { accounts: SourceState; cards: SourceState; grants: SourceState; presets: SourceState }
 }
 
@@ -24,7 +27,7 @@ export function isEffectiveAccessPayload(value: unknown): value is EffectiveAcce
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<EffectiveAccessPayload>
   return Array.isArray(candidate.accounts) && Array.isArray(candidate.cards) &&
-    Array.isArray(candidate.grants) && Array.isArray(candidate.presets) &&
+    Array.isArray(candidate.grants) && Array.isArray(candidate.presets) && Array.isArray(candidate.resourceDetails) &&
     !!candidate.sources && typeof candidate.sources === 'object'
 }
 
@@ -35,6 +38,21 @@ export function matchedRoleName(grant: Grant, presets: RolePreset[], language: '
   const preset = presets.find(item => item.resourceType === grant.resourceType && sameCapabilities(item.capabilities, grant.capabilities))
   if (preset) return preset.name
   return language === 'cs' ? 'Vlastní kombinace práv' : 'Custom rights set'
+}
+
+export function grantResourcePresentation(grant: Grant, details: ResourceDetail[], language: 'cs' | 'en') {
+  const resolved = details.find(item => item.key === `${grant.resourceType}:${grant.resourceId}`)
+  const detail = resolved?.detail
+  if (grant.resourceType === 'CARD' && detail) {
+    const card = detail as Card
+    return { label: card.maskedPan || resourceLabel(grant.resourceType, language), meta: [card.network, card.cardType, card.status].filter(Boolean).join(' · ') }
+  }
+  if (detail) {
+    const account = detail as Account & { goalName?: string | null }
+    const kind = grant.resourceType === 'SAVINGS_GOAL' ? (account.goalName || resourceLabel(grant.resourceType, language)) : resourceLabel(grant.resourceType, language)
+    return { label: account.nickname || maskedAccount(account.accountNumber, kind) || kind, meta: [account.accountType, account.currencyCode, account.status].filter(Boolean).join(' · ') }
+  }
+  return { label: `${resourceLabel(grant.resourceType, language)} · ${shortId(grant.resourceId)}`, meta: resolved?.state === 'forbidden' ? (language === 'cs' ? 'Detail zdroje není pro tuto roli povolen' : 'Resource detail is not permitted for this role') : '' }
 }
 
 export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
@@ -52,6 +70,7 @@ export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
       {t('Výsledek je částečný. Nedostupné nebo nepovolené zdroje:', 'The result is partial. Unavailable or forbidden sources:')} {' '}
       {partial.map(([source, state]) => `${source} (${state})`).join(', ')}
     </div>}
+    {data.resourceDetailsTruncated && <div role="status" style={{ marginTop: 12, fontSize: 12, color: 'var(--warning)' }}>{t('Zobrazen je detail prvních 50 delegovaných zdrojů.', 'Showing details for the first 50 delegated resources.')}</div>}
 
     <AccessSection title={t('Vlastní zdroje', 'Owned resources')} empty={data.accounts.length === 0 && data.cards.length === 0}>
       {data.accounts.map(account => <AccessCard key={`account-${account.id}`} icon={<Crown size={15} />} role={t('Majitel účtu', 'Account owner')} resource={account.nickname || maskedAccount(account.accountNumber, t('Účet', 'Account')) || t('Účet', 'Account')} meta={[account.accountType, account.currencyCode, account.status].filter(Boolean).join(' · ')} href={account.id ? `/accounts/${account.id}` : undefined} capabilities={[...CAPABILITIES_BY_RESOURCE.ACCOUNT]} />)}
@@ -59,7 +78,11 @@ export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
     </AccessSection>
 
     <AccessSection title={t('Delegovaná oprávnění', 'Delegated rights')} empty={!data.grants.some(grant => grant.status === 'ACTIVE')}>
-      {data.grants.filter(grant => grant.status === 'ACTIVE').map(grant => <AccessCard key={`grant-${grant.id}`} icon={<KeyRound size={15} />} role={matchedRoleName(grant, data.presets, language)} resource={`${resourceLabel(grant.resourceType, language)} · ${shortId(grant.resourceId)}`} meta={<DelegationStatusBadge status={grant.status} />} href={`/delegations/${grant.id}`} capabilities={grant.capabilities} />)}
+      {data.grants.filter(grant => grant.status === 'ACTIVE').map(grant => {
+        const resource = grantResourcePresentation(grant, data.resourceDetails, language)
+        const grantor = grant.grantorName?.trim() || shortId(grant.grantorPartyId)
+        return <AccessCard key={`grant-${grant.id}`} icon={<KeyRound size={15} />} role={matchedRoleName(grant, data.presets, language)} resource={resource.label} meta={<div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}><DelegationStatusBadge status={grant.status} /><span>{t('Udělil', 'Granted by')}: {grantor}</span>{resource.meta && <span>· {resource.meta}</span>}</div>} href={`/delegations/${grant.id}`} capabilities={grant.capabilities} />
+      })}
     </AccessSection>
   </section>
 }
