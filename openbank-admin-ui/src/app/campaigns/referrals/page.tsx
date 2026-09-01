@@ -17,11 +17,24 @@ interface ReferralProgram {
   version: number
 }
 
+interface ReferralFunnel {
+  programId: string
+  qualifiedInvites: number
+  rewardRequests: number
+  rewardedInvites: number
+  failedRewards: number
+  reversedRewards: number
+  requestedRewardAmount: number
+  currency: string
+}
+
 export default function ReferralProgramsPage() {
   const { t } = useLanguage()
   const [items, setItems] = useState<ReferralProgram[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
+  const [funnel, setFunnel] = useState<Record<string, ReferralFunnel>>({})
+  const [funnelState, setFunnelState] = useState<'ok' | 'unavailable'>('unavailable')
 
   useEffect(() => {
     fetch('/api/referral-programs')
@@ -35,6 +48,16 @@ export default function ReferralProgramsPage() {
       })
       .catch(() => setUnavailable('unreachable'))
       .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/referral-programs/funnel')
+      .then(response => response.json())
+      .then((body: { items?: ReferralFunnel[]; state?: string }) => {
+        setFunnelState(body.state === 'ok' ? 'ok' : 'unavailable')
+        setFunnel(Object.fromEntries((body.items ?? []).map(item => [item.programId, item])))
+      })
+      .catch(() => setFunnelState('unavailable'))
   }, [])
 
   return <AuthGuard permission="campaign:view">
@@ -59,6 +82,15 @@ export default function ReferralProgramsPage() {
         {items.map(program => <article key={program.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-referral-program={`${program.name}@${program.version}`}>
           <div><p className="text-xs font-bold uppercase tracking-[.12em] text-emerald-700">{t('Publikováno', 'Published')} · v{program.version}</p><h2 className="mt-1 text-lg font-semibold">{program.name}</h2></div>
           <p className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">{t('Katalog zveřejňuje pouze neměnnou referenci. Odměnu, kvalifikaci a schvalování spravuje Referral Service.', 'The catalogue publishes only the immutable reference. Referral Service owns reward, qualification, and approval.')}</p>
+          <div className="mt-4 rounded-xl border border-slate-200 p-4" data-referral-funnel={program.id}>
+            <p className="text-xs font-bold uppercase tracking-[.12em] text-slate-500">{t('Ověřený funnel', 'Verified funnel')}</p>
+            {funnelState !== 'ok' ? <p className="mt-2 text-sm text-slate-500">{t('Měření je dočasně nedostupné.', 'Measurement is temporarily unavailable.')}</p>
+              : funnel[program.id] ? <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+                <div><strong className="block text-lg">{funnel[program.id].qualifiedInvites}</strong><span className="text-xs text-slate-500">{t('kvalifikací', 'qualified')}</span></div>
+                <div><strong className="block text-lg">{funnel[program.id].rewardedInvites}</strong><span className="text-xs text-slate-500">{t('odměněno', 'rewarded')}</span></div>
+                <div><strong className="block text-lg">{funnel[program.id].qualifiedInvites > 0 ? `${Math.round(100 * funnel[program.id].rewardedInvites / funnel[program.id].qualifiedInvites)} %` : '—'}</strong><span className="text-xs text-slate-500">{t('konverze', 'conversion')}</span></div>
+              </div> : <p className="mt-2 text-sm text-slate-500">{t('Zatím bez ověřené kvalifikace.', 'No verified qualification yet.')}</p>}
+          </div>
           <Link href={`/campaigns/new?referralProgram=${encodeURIComponent(program.id)}`} className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-violet-700" data-use-referral-program={program.id}>{t('Použít v nové kampani', 'Use in a new campaign')} <ArrowRight className="h-4 w-4" /></Link>
         </article>)}
       </section>}

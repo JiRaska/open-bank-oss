@@ -61,6 +61,10 @@ class ClickHouseAnalyticsSinkIT {
                     MountableFile.forClasspathResource("clickhouse/V6__campaign_engagement.sql"),
                     "/docker-entrypoint-initdb.d/06-campaign-engagement.sql",
                 )
+                .withCopyFileToContainer(
+                    MountableFile.forClasspathResource("clickhouse/V11__referral_funnel.sql"),
+                    "/docker-entrypoint-initdb.d/09-referral-funnel.sql",
+                )
                 .withExposedPorts(8123)
                 // The mounted DDL triggers ClickHouse's initdb flow (temp server → run SQL → shut down →
                 // real server), far heavier than a plain boot. On a contended host (many other containers
@@ -189,6 +193,52 @@ class ClickHouseAnalyticsSinkIT {
         assertThat(columns).doesNotContain("party_id").doesNotContain("interaction_ref")
     }
 
+    @Test
+    fun `referral funnel deduplicates replayed reward facts by event id`() = runBlocking<Unit> {
+        val programId = UUID.randomUUID().toString()
+        val inviteId = UUID.randomUUID().toString()
+        val qualified = referralEvent(
+            "QualifiedV2",
+            mapOf(
+                "programId" to programId,
+                "programVersion" to 1,
+                "inviteId" to inviteId,
+                "qualificationEventId" to "qualification-1",
+            ),
+        )
+        val requested = referralEvent(
+            "RewardRequestedV2",
+            mapOf(
+                "programId" to programId,
+                "programVersion" to 1,
+                "inviteId" to inviteId,
+                "rewardReference" to "reward-1",
+                "amount" to 500,
+                "currency" to "CZK",
+            ),
+        )
+        val accepted = referralEvent(
+            "RewardOutcomeV2",
+            mapOf(
+                "programId" to programId,
+                "programVersion" to 1,
+                "inviteId" to inviteId,
+                "rewardReference" to "reward-1",
+                "outcome" to "ACCEPTED",
+            ),
+        )
+
+        // Replay the same request and outcome exactly as Kafka at-least-once delivery may do.
+        sink().writeBatch(listOf(qualified, requested, requested, accepted, accepted))
+
+        val row = reader.query(
+            "SELECT qualified_invites, reward_requests, rewarded_invites, failed_rewards, " +
+                "reversed_rewards, requested_reward_amount, currency " +
+                "FROM $DB.gold_referral_funnel WHERE program_id = '$programId' FORMAT TabSeparated",
+        ).trim()
+        assertThat(row).isEqualTo("1\t1\t1\t0\t0\t500\tCZK")
+    }
+
     // ---------------------------------------------------------------- dead-letter quarantine (#5761)
 
     private fun dlq() = ClickHouseDeadLetterSink().apply {
@@ -259,6 +309,18 @@ class ClickHouseAnalyticsSinkIT {
         occurredAt = Instant.now(),
         sourceService = "openbank-engagement-service",
         schemaVersion = 1,
+        payload = payload,
+    )
+
+    private fun referralEvent(eventType: String, payload: Map<String, Any>): AnalyticsEnvelope = AnalyticsEnvelope(
+        eventId = UUID.randomUUID(),
+        aggregateType = "REFERRAL",
+        aggregateId = UUID.randomUUID().toString(),
+        aggregateVersion = 0,
+        eventType = eventType,
+        occurredAt = Instant.now(),
+        sourceService = "openbank-referral-service",
+        schemaVersion = 2,
         payload = payload,
     )
 }

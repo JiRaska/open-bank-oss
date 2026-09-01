@@ -75,6 +75,10 @@ spec:
       - resource: { type: topic, name: openbank.engagement.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
+      # MGM qualification and reward lifecycle, projected idempotently by eventId.
+      - resource: { type: topic, name: openbank.referral.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
       - resource: { type: group, name: analytics-sink, patternType: literal }
         operations: [Read]
         host: "*"
