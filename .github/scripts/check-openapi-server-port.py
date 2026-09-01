@@ -33,6 +33,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SKIP_DIRS = {"openbank-libs", "openbank-libs-domain", "openbank-libs-runtime",
              "openbank-admin-ui", "openbank-infra"}
@@ -183,6 +185,7 @@ def main() -> int:
         return self_test()
 
     findings, examined = find_mismatches()
+    gatelib.subjects(examined, "openapi.yaml/application.yaml pairs examined")
     if reading_is_empty(examined):
         # Never report a pass about a corpus that was not read. Zero specs examined is what a
         # moved layout or a wrong CWD produces, and it prints identically to a clean fleet.

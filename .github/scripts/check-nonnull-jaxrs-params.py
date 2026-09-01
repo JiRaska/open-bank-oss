@@ -70,6 +70,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 PARAM_ANNOTATIONS = ("QueryParam", "HeaderParam", "MatrixParam")
 
 # JVM primitives: JAX-RS supplies the zero value, never null, so no NPE is possible here.
@@ -222,19 +224,23 @@ def scan_source(src: str, service: str, path: str):
 
 
 def scan(root: str):
+    """(findings, files_walked). The walked count is returned, not just the findings, so the
+    caller can tell 'no handler declares a non-nullable param' from 'no handler was read'."""
     base = pathlib.Path(root)
     findings = []
+    walked = 0
     for p in sorted(base.rglob("*.kt")):
         s = str(p)
         if "/src/test/" in s or "/build/" in s or "/src/nativeTest/" in s:
             continue
+        walked += 1
         raw = p.read_text(encoding="utf-8", errors="replace")
         if not any(a in raw for a in PARAM_ANNOTATIONS):
             continue
         rel = str(p.relative_to(base)) if p.is_relative_to(base) else s
         service = rel.split("/")[0]
         findings.extend(scan_source(strip_comments(raw), service, rel))
-    return findings
+    return findings, walked
 
 
 # --- self-test ---------------------------------------------------------------------------------
@@ -364,7 +370,8 @@ def main() -> int:
         print(f"::error::--root {args.root} is not a directory — the check could not run. NOT a pass.")
         return 2
 
-    findings = scan(args.root)
+    findings, walked = scan(args.root)
+    gatelib.subjects(walked, "non-test .kt files walked")
     if args.list:
         for f in sorted(findings, key=lambda x: (x["file"], x["line"])):
             mark = "baselined" if f["key"] in BASELINE else "NEW"

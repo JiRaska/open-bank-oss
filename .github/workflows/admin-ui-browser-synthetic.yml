@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: '13 */2 * * *'
   workflow_dispatch:
+    inputs:
+      expected_build_sha:
+        description: "Full or short SHA expected from the deployed Admin UI build attestation"
+        required: false
   push:
     branches: [main]
     paths:
@@ -37,6 +41,7 @@ jobs:
         working-directory: openbank-admin-ui
         env:
           OPENBANK_BROWSER: ${{ matrix.browser }}
+          ADMIN_UI_EXPECTED_BUILD_SHA: ${{ inputs.expected_build_sha }}
           OPENBANK_BROWSER_VITALS_OUTPUT: build/test-intelligence/browser-vitals-${{ matrix.browser }}.json
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/e2e/admin-login-synthetic-${{ matrix.browser }}.xml
         run: node scripts/admin-login-synthetic.mjs

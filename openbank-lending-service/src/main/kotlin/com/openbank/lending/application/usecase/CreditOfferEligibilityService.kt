@@ -7,6 +7,7 @@ package com.openbank.lending.application.usecase
 import com.openbank.lending.application.port.out.BorrowerDistressPort
 import com.openbank.lending.application.port.out.CreditOffersConsentPort
 import com.openbank.lending.domain.model.BorrowerDistressSignals
+import com.openbank.lending.domain.model.CourtRegisterSignalState
 import com.openbank.lending.domain.model.CreditOfferDecision
 import com.openbank.lending.domain.model.CreditOfferEligibility
 import com.openbank.lending.domain.model.CreditOfferPolicy
@@ -105,8 +106,8 @@ class CreditOfferEligibilityService(
         private val UNREADABLE = BorrowerDistressSignals(
             hasArrears = true,
             hasNegativeBalance = true,
-            hasEnforcementOrder = true,
-            hasInsolvencyProceeding = true,
+            enforcementSignal = CourtRegisterSignalState.MARKER_PRESENT,
+            insolvencySignal = CourtRegisterSignalState.MARKER_PRESENT,
             inHardshipArrangement = true,
             lastAffordabilityFailureAt = null,
             bufferDays = null,
