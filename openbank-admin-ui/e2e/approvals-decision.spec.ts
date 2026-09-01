@@ -109,4 +109,91 @@ test.describe('approval workbench', () => {
     await expect(page.getByRole('cell', { name: 'Evidence independently checked.' })).toBeVisible()
     expect(decisionRequests).toBe(2)
   })
+
+  test('filters domain work and hands a sanctions item to its governed checker', async ({ page }) => {
+    const sanctionsApproval = {
+      id: 'sanctions-approval / 42', domain: 'sanctions', action: 'sanctions.clear',
+      resourceId: 'check-42', maker: 'maker.sanctions', proposedAt: '2026-08-31T08:00:00Z',
+    }
+    const notificationApproval = {
+      id: 'notification-approval-7', domain: 'notification', action: 'opsmessage.compose',
+      resourceId: null, maker: 'maker.notifications', proposedAt: '2026-08-31T09:00:00Z',
+    }
+    const balanceApproval = {
+      id: 'balance-approval-3', domain: 'balance', action: 'balance.debit',
+      resourceId: 'account-3', maker: 'maker.balance', proposedAt: '2026-08-31T10:00:00Z',
+    }
+    const billingApproval = {
+      id: 'billing-approval-4', domain: 'billing', action: 'fee.post',
+      resourceId: 'fee-4', maker: 'maker.billing', proposedAt: '2026-08-31T11:00:00Z',
+    }
+
+    await page.route('**/api/agent/proposals*', route =>
+      route.fulfill({ contentType: 'application/json', body: '[]' }),
+    )
+    await page.route('**/api/approvals/pending', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: [billingApproval, balanceApproval, sanctionsApproval, notificationApproval],
+        sources: { sanctions: 'ok', notification: 'ok', balance: 'ok', billing: 'ok' },
+      }),
+    }))
+    await page.route('**/api/governance/agent-identities', route => route.fulfill({
+      contentType: 'application/json', body: JSON.stringify({ available: true, agents: [] }),
+    }))
+    await page.route('**/api/sanctions/checks', route =>
+      route.fulfill({ contentType: 'application/json', body: '[]' }),
+    )
+    await page.route('**/api/sanctions/lists', route =>
+      route.fulfill({ contentType: 'application/json', body: '[]' }),
+    )
+    await page.route('**/api/sanctions/approvals', route =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify([{
+        id: sanctionsApproval.id,
+        action: sanctionsApproval.action,
+        resourceId: sanctionsApproval.resourceId,
+        status: 'PENDING',
+        makerId: sanctionsApproval.maker,
+        createdAt: sanctionsApproval.proposedAt,
+      }]) }),
+    )
+
+    await page.goto('/approvals')
+
+    const rows = page.locator('[data-testid^="domain-approval-"]')
+    await expect(rows).toHaveCount(4)
+    await expect(rows.nth(0)).toContainText(sanctionsApproval.action)
+    await page.getByLabel(/^(Order|Pořadí)$/).selectOption('newest')
+    await expect(rows.nth(0)).toContainText(billingApproval.action)
+
+    await page.getByLabel(/^(Domain|Doména)$/).selectOption('sanctions')
+    await expect(rows).toHaveCount(1)
+    await expect(rows.first()).toContainText(sanctionsApproval.action)
+    await page.getByLabel(/Search queue|Hledat ve frontě/).fill('maker.sanctions')
+    await expect(rows).toHaveCount(1)
+
+    const handoff = page.getByRole('link', { name: new RegExp(`Open governed review for approval ${sanctionsApproval.id}|Otevřít řízenou kontrolu žádosti ${sanctionsApproval.id}`) })
+    await expect(handoff).toHaveAttribute('href', '/sanctions?approvalId=sanctions-approval%20%2F%2042#sanctions-approval-id')
+    await handoff.click()
+
+    await expect(page).toHaveURL(/\/sanctions\?approvalId=sanctions-approval%20%2F%2042#sanctions-approval-id$/)
+    await expect(page.getByLabel(/Approval id|ID žádosti/)).toHaveValue(sanctionsApproval.id)
+  })
+
+  test('never reports an empty domain queue when the federated read itself failed', async ({ page }) => {
+    await page.route('**/api/agent/proposals*', route =>
+      route.fulfill({ contentType: 'application/json', body: '[]' }),
+    )
+    await page.route('**/api/approvals/pending', route =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'aggregator unavailable' }) }),
+    )
+    await page.route('**/api/governance/agent-identities', route => route.fulfill({
+      contentType: 'application/json', body: JSON.stringify({ available: true, agents: [] }),
+    }))
+
+    await page.goto('/approvals')
+
+    await expect(page.getByText(/Domain approval inbox could not be loaded|Doménovou schvalovací frontu se nepodařilo načíst/)).toBeVisible()
+    await expect(page.getByText(/No domain approvals pending|Žádná doménová schvalování nečekají/)).toHaveCount(0)
+  })
 })
