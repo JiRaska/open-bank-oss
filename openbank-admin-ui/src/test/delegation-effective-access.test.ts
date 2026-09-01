@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest'
-import { delegationAttentionReasons, grantConditions, grantResourcePresentation, isEffectiveAccessPayload, matchedRoleName } from '@/components/delegations/EffectiveAccess'
+import { delegationAttentionReasons, effectiveResourceDetails, grantConditions, grantResourcePresentation, isEffectiveAccessPayload, matchedRoleName } from '@/components/delegations/EffectiveAccess'
 import type { Grant } from '@/components/delegations/GrantView'
 import type { RolePreset } from '@/lib/delegations/rolePresets'
 
@@ -27,6 +27,39 @@ describe('effective access role matching', () => {
       label: 'Účet •••• 7890',
       meta: 'CZK · ACTIVE',
     })
+  })
+
+  it('uses owned resources to explain grants made by the selected customer', () => {
+    const details = effectiveResourceDetails({
+      accounts: [{ id: 'account-1', accountNumber: 'CZ1234567890', nickname: 'Provozní účet', currencyCode: 'CZK' }],
+      cards: [{ id: 'card-1', maskedPan: '•••• 4321', network: 'VISA' }],
+      grants: [],
+      presets: [],
+      resourceDetails: [],
+      sources: { accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' },
+    })
+
+    expect(grantResourcePresentation({ ...grant, resourceId: 'account-1' }, details, 'cs')).toEqual({
+      label: 'Provozní účet',
+      meta: 'CZK',
+    })
+    expect(grantResourcePresentation({ ...grant, resourceType: 'CARD', resourceId: 'card-1' }, details, 'en')).toEqual({
+      label: '•••• 4321',
+      meta: 'VISA',
+    })
+  })
+
+  it('prefers an explicitly resolved detail over an ownership-list fallback', () => {
+    const details = effectiveResourceDetails({
+      accounts: [{ id: 'account-1', nickname: 'Old label' }],
+      cards: [],
+      grants: [],
+      presets: [],
+      resourceDetails: [{ key: 'ACCOUNT:account-1', resourceType: 'ACCOUNT', resourceId: 'account-1', state: 'ok', detail: { id: 'account-1', nickname: 'Current label' } }],
+      sources: { accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' },
+    })
+
+    expect(grantResourcePresentation({ ...grant, resourceId: 'account-1' }, details, 'en').label).toBe('Current label')
   })
 
   it('explains financial and approval guardrails for an active operation role', () => {
