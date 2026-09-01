@@ -8,6 +8,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { parse as parseYaml, parseDocument } from 'yaml'
 import { parseStringPromise } from 'xml2js'
+import { executionEvidenceTotals } from '../src/lib/test-intelligence-execution-evidence.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
@@ -849,14 +850,29 @@ async function main() {
   const unknownEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'unknown').length
   const unresolvedEvidence = components.flatMap(item => item.evidence)
     .filter(item => ['unknown', 'not-run', 'blocked'].includes(item.state)).length
-  const missingEvidence = components.filter(item => item.evidence.length === 0).length
+  // A Pact declaration can add an unresolved row without a provider replay. Conversely, an
+  // observed suite that skipped every test is still a real zero-execution result.
+  const { componentsWithExecutionEvidence, missingEvidence } = executionEvidenceTotals(components)
   const historyDir = path.join(repo, 'openbank-admin-ui', 'test-intelligence-history')
   const historicalSnapshots = allFiles(historyDir, file => file.endsWith('.json'))
     .map(readJson).filter(item => item?.collectedAt && item?.totals)
-  const historicalReports = historicalSnapshots
-    .map(item => ({ collectedAt: item.collectedAt, ...item.totals }))
+  const historicalEvidenceStates = new Set(['passed', 'failed', 'skipped', 'not-run', 'stale', 'blocked', 'unknown'])
+  const historicalReports = historicalSnapshots.map(item => {
+    const historicalComponents = Array.isArray(item.components)
+      && item.components.every(component => Array.isArray(component?.evidence)
+        && component.evidence.every(evidence => evidence && typeof evidence === 'object'
+          && !Array.isArray(evidence) && historicalEvidenceStates.has(evidence.state)
+          && (evidence.observedAt === undefined || evidence.observedAt === null
+            || typeof evidence.observedAt === 'string')))
+      ? item.components
+      : null
+    const correctedExecutionTotals = historicalComponents
+      ? { components: historicalComponents.length, ...executionEvidenceTotals(historicalComponents) }
+      : {}
+    return { collectedAt: item.collectedAt, ...item.totals, ...correctedExecutionTotals }
+  })
   const currentPoint = { collectedAt: collectedAt.toISOString(), components: components.length,
-    componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
+    componentsWithExecutionEvidence,
     failingEvidence, missingEvidence, staleEvidence, unknownEvidence, unresolvedEvidence }
   const history = [...historicalReports, currentPoint]
     .sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
@@ -925,7 +941,7 @@ async function main() {
     clientExperiences: clientExperience, requiredControls: controls, platformCapabilities: capabilities,
     totals: {
       components: components.length,
-      componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
+      componentsWithExecutionEvidence,
       moneyPathComponents: components.filter(item => item.moneyPath).length,
       failingEvidence, missingEvidence, staleEvidence, unknownEvidence, unresolvedEvidence,
       requiredControls: controls.length,
