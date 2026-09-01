@@ -141,6 +141,27 @@ def management_port(short: str) -> str:
     return "8085"
 
 
+def application_automated(short: str) -> bool | None:
+    """Whether the Argo Application owning this component declares automated sync.
+
+    A workload under a manual Application is desired state only: it is not evidence that Argo
+    has ever created a pod. Resolve ownership from the source path rather than a display name.
+    """
+    marker = f"path: openbank-infra/gitops/components/{short}"
+    for app in sorted((GITOPS / "apps").glob("*.yaml")):
+        text = read(app)
+        if marker not in text:
+            continue
+        sync_policy = re.search(r"^  syncPolicy:\s*$([\s\S]*?)(?=^\S|\Z)", text, re.M)
+        return bool(sync_policy and re.search(r"^\s+automated:\s*$", sync_policy.group(1), re.M))
+    return None
+
+
+def workload_live_unverified(short: str) -> bool:
+    """True only for a declared workload whose owning Application is manual-sync."""
+    return gitops_facts.service_namespace(short, GITOPS) is not None and application_automated(short) is False
+
+
 def deployment_status(short: str) -> str:
     """A banner for a service with NO workload in gitops — Deployment, Rollout or nothing.
 
@@ -162,6 +183,17 @@ def deployment_status(short: str) -> str:
             "\n"
         )
     if gitops_facts.service_namespace(short, GITOPS) is not None:
+        if workload_live_unverified(short):
+            return (
+                "## Deployment status — WORKLOAD DESIRED — LIVE STATUS UNVERIFIED\n"
+                "\n"
+                "The GitOps manifest declares this workload, but its owning ArgoCD Application has **no\n"
+                "automated sync**. This is desired state, not evidence that the Deployment, database,\n"
+                "metrics scrape, or traffic path exists in the cluster. Before using any command below\n"
+                "as an incident procedure, complete the separately reviewed manual sync and observe\n"
+                "the resulting deployment and health checks.\n"
+                "\n"
+            )
         return ""
     component = GITOPS / "components" / short
     data_plane = "\n".join(read(path) for path in component.glob("*.yaml"))
@@ -413,17 +445,30 @@ def runtime_sections(short: str, ns: str) -> str:
             f"`GET :{management_port(short)}/q/health/live`.\n"
         )
     commands = ops_commands(short, ns)
+    live_unverified = workload_live_unverified(short)
+    metrics = (
+        f"declared for the fleet PodMonitor (namespace `{ns}`), but live scrape status is unverified "
+        "until manual sync and health observation."
+        if live_unverified else
+        f"scraped by the fleet PodMonitor (namespace `{ns}`); dashboards in Grafana."
+    )
+    caveat = (
+        "> **Live status unverified:** the commands below are planned procedures until the manual "
+        "ArgoCD sync and cluster health checks have been observed.\n\n"
+        if live_unverified else ""
+    )
     return (
         "## Health & probes\n"
         "\n"
         f"- Readiness: `GET :{management_port(short)}/q/health/ready` · Liveness: "
         f"`GET :{management_port(short)}/q/health/live`\n"
-        f"- Metrics: scraped by the fleet PodMonitor (namespace `{ns}`); dashboards in Grafana.\n"
+        f"- Metrics: {metrics}\n"
         f"- Logs: {commands['logs_cmd']}, or Loki\n"
         f"  `{{namespace=\"{ns}\"}}`.\n"
         "\n"
         "## Routine operations\n"
         "\n"
+        f"{caveat}"
         f"- **Restart:** {commands['restart_cmd']}\n"
         f"- **Scale:** {commands['scale_cmd']} (or edit the GitOps manifest — GitOps is source of truth, "
         "a later ArgoCD sync reconciles manual changes).\n"
@@ -602,6 +647,17 @@ def self_test() -> int:
              "kubectl scale" not in t)
         case("a staged workload names its declared management health port",
              "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
+    # A manual-sync Application is a third state: its Deployment YAML is desired state, not proof
+    # that Argo has ever created a pod. Incentive is the fixture because it deliberately has no
+    # automated sync while this exact distinction is under rollout review.
+    if "incentive" in deployed:
+        incentive = render("incentive")
+        case("a manual-sync workload is explicitly live-unverified",
+             says(incentive, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
+        case("a manual-sync workload does not present declared metrics as a live scrape",
+             says(incentive, "live scrape status is unverified"))
+        case("a separate management listener is used for health commands",
+             "GET :8087/q/health/ready" in incentive and "GET :8156/q/health/ready" not in incentive)
     if undeployed:
         absent_data_plane = [
             x for x in undeployed if "namespace that does not exist" in deployment_status(x)

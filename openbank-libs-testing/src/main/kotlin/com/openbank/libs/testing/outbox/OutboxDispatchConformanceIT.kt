@@ -4,6 +4,7 @@
 
 package com.openbank.libs.testing.outbox
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -129,7 +130,27 @@ abstract class OutboxDispatchConformanceIT {
             assertThat(headerValue(produced, OutboxKafkaHeaders.HEADER_IDEMPOTENCY_KEY))
                 .isEqualTo(msg.eventId.toString())
             assertThat(headerValue(produced, OutboxKafkaHeaders.HEADER_EVENT_TYPE)).isEqualTo(msg.eventType)
-            assertThat(produced.payload).isEqualTo(msg.payload)
+            // NOT byte equality. A publisher may stamp `sourceService` onto the outgoing payload
+            // (ledger/sdd/interest/fraud/delegation do, so audit-service records the producer's own
+            // claim as AttributionSource.EVENT instead of deriving one from the topic name). What
+            // this suite must guarantee is that relaying never LOSES or REWRITES a field the
+            // producer wrote — an equality assertion cannot express that, and would force every
+            // stamping module to fork the shared harness.
+            val producedJson = PAYLOAD_MAPPER.readTree(produced.payload)
+            val seededJson = PAYLOAD_MAPPER.readTree(msg.payload)
+            seededJson.fieldNames().forEach { field ->
+                assertThat(producedJson.get(field))
+                    .describedAs("relay preserved producer field %s of %s", field, msg.eventId)
+                    .isEqualTo(seededJson.get(field))
+            }
+            // The only addition the relay is permitted to make is attribution. Anything else is a
+            // payload rewrite this suite exists to catch, and would pass silently once the equality
+            // assertion above was relaxed.
+            val added = producedJson.fieldNames().asSequence().toSet() -
+                seededJson.fieldNames().asSequence().toSet()
+            assertThat(added)
+                .describedAs("relay added only attribution to %s", msg.eventId)
+                .isSubsetOf(setOf("sourceService"))
         }
 
         // Persistence side committed: both rows are now SENT with a stamped sentAt and one attempt.
@@ -177,6 +198,14 @@ abstract class OutboxDispatchConformanceIT {
         assertThat(secondPassCount).describedAs("SENT row must not be re-published on replay").isEqualTo(1)
     }
     private companion object {
+        /**
+         * Payload comparison in this suite is STRUCTURAL, not textual — see the relay assertions.
+         * A byte-equality assertion conflated two different guarantees ("no field was lost or
+         * rewritten" and "nothing was added"), so a publisher that stamps attribution could not
+         * satisfy it without forking the harness.
+         */
+        val PAYLOAD_MAPPER: ObjectMapper = ObjectMapper()
+
         /**
          * Any real stamp is after this; `Instant.EPOCH` is not. Deliberately a floor rather than
          * "within N seconds of now" — the point is to catch a 1970 default, not to police clock
