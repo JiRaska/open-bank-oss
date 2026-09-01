@@ -89,6 +89,7 @@ export function useServiceResource<T = unknown>(
     const { select, maxWakeRetries = 3, retryDelayMs = 4000, timeoutMs = 10_000 } = optsRef.current
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    let activeController: AbortController | null = null
     let attempt = 0
 
     const scheduleRetry = (kind: BffFailure) => {
@@ -100,8 +101,11 @@ export function useServiceResource<T = unknown>(
     }
 
     async function run() {
+      const controller = new AbortController()
+      activeController = controller
+      const deadline = setTimeout(() => controller.abort(), timeoutMs)
       try {
-        const res = await fetch(url!, { signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' })
+        const res = await fetch(url!, { signal: controller.signal, cache: 'no-store' })
         if (cancelled) return
         if (!res.ok) {
           const kind = await classifyBffFailure(res)
@@ -131,6 +135,9 @@ export function useServiceResource<T = unknown>(
         setUnavailable({ kind: 'unreachable' })
         setWaking(false)
         setLoading(false)
+      } finally {
+        clearTimeout(deadline)
+        if (activeController === controller) activeController = null
       }
     }
 
@@ -142,6 +149,7 @@ export function useServiceResource<T = unknown>(
     return () => {
       cancelled = true
       if (timer) clearTimeout(timer)
+      activeController?.abort()
     }
     // `url` + `nonce` are the only real inputs; options are read via ref.
   }, [url, nonce])
