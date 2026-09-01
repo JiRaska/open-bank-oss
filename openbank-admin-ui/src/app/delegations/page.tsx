@@ -27,12 +27,19 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { EntityChip } from '@/components/entities/EntityChip'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { RoleCatalog } from '@/components/delegations/RoleCatalog'
-import { EffectiveAccess, isEffectiveAccessPayload, type EffectiveAccessPayload } from '@/components/delegations/EffectiveAccess'
+import {
+  EffectiveAccess,
+  effectiveResourceDetails,
+  grantConditions,
+  grantResourcePresentation,
+  isEffectiveAccessPayload,
+  matchedRoleName,
+  type EffectiveAccessPayload,
+} from '@/components/delegations/EffectiveAccess'
+import { capabilityLabel } from '@/lib/delegations/rolePresets'
 import {
   DelegationStatusBadge,
-  capabilityLabels,
   counterpartyLabel,
-  formatCeiling,
   grantCounterparty,
   type Grant,
 } from '@/components/delegations/GrantView'
@@ -228,6 +235,7 @@ export default function DelegationsPage() {
             grants={grants.granted}
             state={grants.sources.granted}
             direction="granted"
+            effectiveAccess={effectiveAccess}
           />
           <GrantTable
             title={t('Sdíleno s touto stranou', 'Shared with this party')}
@@ -235,6 +243,7 @@ export default function DelegationsPage() {
             grants={grants.received}
             state={grants.sources.received}
             direction="received"
+            effectiveAccess={effectiveAccess}
           />
           <ProjectionHealth consumers={consumers} known={projectionKnown} />
         </>
@@ -244,10 +253,10 @@ export default function DelegationsPage() {
 }
 
 function GrantTable({
-  title, subtitle, grants, state, direction,
-}: { title: string; subtitle: string; grants: Grant[]; state: DirectionState; direction: 'granted' | 'received' }) {
+  title, subtitle, grants, state, direction, effectiveAccess,
+}: { title: string; subtitle: string; grants: Grant[]; state: DirectionState; direction: 'granted' | 'received'; effectiveAccess: EffectiveAccessPayload | null }) {
   const { t, language } = useLanguage()
-  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const details = effectiveAccess ? effectiveResourceDetails(effectiveAccess) : []
 
   return (
     <div className="card" style={{ padding: '16px', marginBottom: '20px' }}>
@@ -277,23 +286,27 @@ function GrantTable({
               <tr>
                 <th>{t('Stav', 'Status')}</th>
                 <th>{t('Protistrana', 'Counterparty')}</th>
+                <th>{t('Role', 'Role')}</th>
                 <th>{t('Zdroj', 'Resource')}</th>
-                <th>{t('Oprávnění', 'Capabilities')}</th>
-                <th>{t('Strop na transakci', 'Per-transaction cap')}</th>
-                <th>{t('Platnost do', 'Valid until')}</th>
+                <th>{t('Práva', 'Rights')}</th>
+                <th>{t('Podmínky', 'Conditions')}</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {grants.map(g => {
                 const counterparty = grantCounterparty(g, direction)
+                const resource = grantResourcePresentation(g, details, language)
+                const role = effectiveAccess?.sources.presets === 'ok'
+                  ? matchedRoleName(g, effectiveAccess.presets, language)
+                  : t('Role není dostupná', 'Role unavailable')
                 return <tr key={g.id}>
                   <td><DelegationStatusBadge status={g.status} /></td>
                   <td><EntityChip type="party" id={counterparty.id} label={counterparty.name} /></td>
-                  <td style={{ fontSize: '12px' }}>{g.resourceType}</td>
-                  <td style={{ fontSize: '12px' }}>{capabilityLabels(g.capabilities)}</td>
-                  <td style={{ fontSize: '12px' }}>{formatCeiling(g.perTransactionLimit, numberLocale)}</td>
-                  <td style={{ fontSize: '12px' }}>{g.validTo ? g.validTo.slice(0, 10) : '—'}</td>
+                  <td style={{ fontSize: '12px', fontWeight: 650 }}>{role}</td>
+                  <td style={{ fontSize: '12px' }}><strong style={{ display: 'block' }}>{resource.label}</strong>{resource.meta && <span style={{ color: 'var(--text-tertiary)' }}>{resource.meta}</span>}</td>
+                  <td><div aria-label={t('Práva', 'Rights')} style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>{g.capabilities.map(capability => <span key={capability} title={capability} style={{ borderRadius: 999, padding: '3px 7px', fontSize: 10, background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{capabilityLabel(capability, language)}</span>)}</div></td>
+                  <td style={{ fontSize: '11px' }}>{grantConditions(g, language).map(condition => <div key={condition.label}><span style={{ color: 'var(--text-tertiary)' }}>{condition.label}:</span> <strong>{condition.value}</strong></div>)}</td>
                   <td>
                     <Link href={`/delegations/${g.id}`} className="btn btn-secondary" style={{ fontSize: '12px' }}>
                       {t('Detail', 'Detail')}

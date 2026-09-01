@@ -59,6 +59,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - reported as exit 2 by main()
@@ -188,13 +190,19 @@ def validate_baseline(baseline=None):
     return errors
 
 
+def config_paths(root):
+    """The corpus: the application.yaml set, not the occurrences found in it. A moved resource
+    root yields zero of both, and zero findings is the ordinary green."""
+    return sorted(pathlib.Path(root).glob("openbank-*/src/main/resources/application.yaml"))
+
+
 def scan(root):
     """Returns (findings, matched_baseline_keys)."""
     findings = []
     matched = set()
     overrides = load_overrides(root)
 
-    for path in sorted(pathlib.Path(root).glob("openbank-*/src/main/resources/application.yaml")):
+    for path in config_paths(root):
         service = path.parts[-5] if len(path.parts) >= 5 else path.parent.name
         doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         name = app_name(doc)
@@ -436,6 +444,7 @@ def main():
             print(f"::error::{e}")
         return 2
 
+    gatelib.subjects(len(config_paths(args.root)), "service application.yaml globbed")
     findings, matched = scan(args.root)
     stale = [k for k in BASELINE if k not in matched]
 

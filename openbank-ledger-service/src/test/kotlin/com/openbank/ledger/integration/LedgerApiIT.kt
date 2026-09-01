@@ -319,4 +319,53 @@ class LedgerApiIT {
         // Post + reverse must leave every account's net position exactly where it started.
         assertThat(netByAccount()).isEqualTo(netBefore)
     }
+
+    /**
+     * A `null` element inside the `lines` array, and an absent body.
+     *
+     * Kotlin's `List<PostJournalLineRequest>` is a compile-time promise Jackson does not keep: the
+     * Kotlin module null-checks CONSTRUCTOR PARAMETERS, never the ELEMENTS of a collection, so
+     * `"lines": [null]` deserialises to a list holding a null. `request.lines.map { it.toCommand() }`
+     * then threw NPE and `GenericExceptionMapper` answered 500 (#5913).
+     *
+     * The absent body is the same defect one level up. `postJournal` is a `suspend fun`, and the
+     * Kotlin compiler emits NO `Intrinsics.checkNotNullParameter` for a suspending function, so the
+     * null does not fail at offset 0 -- it flows into the body and dies at the first dereference.
+     *
+     * Both are malformed input, so both must be 400. A client cannot tell "I sent a bad request"
+     * from "the server is broken", and on a money path that difference decides whether it retries.
+     */
+    @Test
+    @Order(20)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `POST journals answers 400 for a null line and for an absent body`() {
+        val today = LocalDate.now().toString()
+        val withNullLine = """
+            {
+              "idempotencyKey": "${UUID.randomUUID()}",
+              "transactionId": "${UUID.randomUUID()}",
+              "entryDate": "$today",
+              "valueDate": "$today",
+              "createdBy": "$operatorId",
+              "lines": [null]
+            }
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(withNullLine)
+        } When {
+            post("/api/v1/journals")
+        } Then {
+            statusCode(400)
+        }
+
+        Given {
+            contentType("application/json")
+        } When {
+            post("/api/v1/journals")
+        } Then {
+            statusCode(400)
+        }
+    }
 }

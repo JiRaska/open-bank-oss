@@ -5,6 +5,7 @@
 package com.openbank.lending.domain
 
 import com.openbank.lending.domain.model.BorrowerDistressSignals
+import com.openbank.lending.domain.model.CourtRegisterSignalState
 import com.openbank.lending.domain.model.CreditOfferDecision
 import com.openbank.lending.domain.model.CreditOfferEligibility
 import com.openbank.lending.domain.model.CreditOfferPolicy
@@ -31,8 +32,8 @@ class CreditOfferEligibilityTest {
     private val healthy = BorrowerDistressSignals(
         hasArrears = false,
         hasNegativeBalance = false,
-        hasEnforcementOrder = false,
-        hasInsolvencyProceeding = false,
+        enforcementSignal = CourtRegisterSignalState.CLEAR,
+        insolvencySignal = CourtRegisterSignalState.CLEAR,
         inHardshipArrangement = false,
         lastAffordabilityFailureAt = null,
         bufferDays = 90,
@@ -87,8 +88,10 @@ class CreditOfferEligibilityTest {
     @Test
     fun `each distress signal alone suppresses the offer with its own reason code`() {
         val cases = listOf(
-            healthy.copy(hasInsolvencyProceeding = true) to CreditOfferSuppressionCode.INSOLVENCY,
-            healthy.copy(hasEnforcementOrder = true) to CreditOfferSuppressionCode.ENFORCEMENT,
+            healthy.copy(insolvencySignal = CourtRegisterSignalState.MARKER_PRESENT) to
+                CreditOfferSuppressionCode.INSOLVENCY,
+            healthy.copy(enforcementSignal = CourtRegisterSignalState.MARKER_PRESENT) to
+                CreditOfferSuppressionCode.ENFORCEMENT,
             healthy.copy(hasArrears = true) to CreditOfferSuppressionCode.ARREARS,
             healthy.copy(inHardshipArrangement = true) to CreditOfferSuppressionCode.HARDSHIP,
             healthy.copy(hasNegativeBalance = true) to CreditOfferSuppressionCode.NEGATIVE_BALANCE,

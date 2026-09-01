@@ -119,11 +119,16 @@ data class CreditProfileResponse(
  * to catch.
  *
  * Enforcement orders and insolvency proceedings still have **no source in this deployment** — no
- * service ingests a court register. They are reported as absent rather than unknown, deliberately:
- * treating them as unknown would make `complete = false` permanent and suppress every offer
- * forever, which is indistinguishable from the feature being switched off and would hide the
- * moment a real signal source arrives. The gap is real and is what an operational-risk review of
- * this gate should challenge first.
+ * service ingests a court register. [CourtRegisterSignalSource] says so in its own vocabulary:
+ * `NOT_CONFIGURED`, which is neither "a marker is on file" nor "we looked and there is none".
+ *
+ * The decision is unchanged by that state — making it suppress would make `complete = false`
+ * permanent and refuse every offer forever, indistinguishable from the feature being switched off,
+ * and would hide the moment a real source arrives. What changes is that the blind spot is now
+ * *stated*: it boots loudly (see `CourtRegisterFeedVerifier`) and is exported as a gauge, so an
+ * empty set of INSOLVENCY suppressions can be read as "no register is wired" instead of "no
+ * customer is insolvent". The gap itself is real and is what an operational-risk review of this
+ * gate should challenge first.
  *
  * A profile that cannot be read is NOT substituted with defaults — `complete = false` propagates
  * and the gate refuses. That is the difference between "the customer has no surplus" and "we could
@@ -133,6 +138,7 @@ data class CreditProfileResponse(
 class LoanBookDistressAdapter(
     private val loans: LoanRepository,
     @param:RestClient private val profiles: CreditProfileClient,
+    private val courtRegister: CourtRegisterSignalSource,
 ) : BorrowerDistressPort {
 
     override suspend fun signalsFor(partyId: UUID): BorrowerDistressSignals {
@@ -149,9 +155,11 @@ class LoanBookDistressAdapter(
             // overdraft" that the profile can see. It is not a live balance read, and it is not
             // claimed to be one.
             hasNegativeBalance = profile?.netMonthlyOrNull()?.signum()?.let { it < 0 } ?: false,
-            // No source in this deployment — see the class docs.
-            hasEnforcementOrder = false,
-            hasInsolvencyProceeding = false,
+            // No source in this deployment — see the class docs. Reported as NOT_CONFIGURED and
+            // never as CLEAR: this adapter did not consult a register and must not be readable as
+            // having done so.
+            enforcementSignal = courtRegister.enforcementState(),
+            insolvencySignal = courtRegister.insolvencyState(),
             lastAffordabilityFailureAt = null,
             bufferDays = profile?.let { coverDays(it) },
             monthsObserved = profile?.monthsObserved,

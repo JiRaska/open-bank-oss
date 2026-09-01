@@ -401,4 +401,40 @@ class PartyApiIT {
             statusCode(403)
         }
     }
+
+    /**
+     * An absent body, and a null element inside `phoneHashes`.
+     *
+     * `lookupDirectory` is a `suspend fun`, and the Kotlin compiler emits NO
+     * `Intrinsics.checkNotNullParameter` for a suspending function, so the null JAX-RS injects for
+     * an absent body did not fail at offset 0 -- it flowed into the body and died at the first
+     * dereference with `Parameter specified as non-null is null` (#5913).
+     *
+     * The null element is the same defect one level down: Jackson's Kotlin module null-checks
+     * constructor PARAMETERS, never the ELEMENTS of a collection, so `[null]` deserialises into a
+     * `List<String>` holding a null and `PartyService.lookupByPhoneHashes` NPEs on `it.trim()`.
+     *
+     * Both are malformed input from the customer edge, so both must be 400.
+     */
+    @Test
+    @Order(24)
+    @TestSecurity(user = "directory-lookup-it", roles = ["ROLE_API"])
+    fun `POST directory lookup answers 400 for an absent body and for a null hash`() {
+        Given {
+            contentType("application/json")
+        } When {
+            post("/api/v1/parties/directory/lookup")
+        } Then {
+            statusCode(400)
+        }
+
+        Given {
+            contentType("application/json")
+            body("""{"phoneHashes": [null]}""")
+        } When {
+            post("/api/v1/parties/directory/lookup")
+        } Then {
+            statusCode(400)
+        }
+    }
 }
