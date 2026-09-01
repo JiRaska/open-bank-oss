@@ -201,12 +201,17 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
         </table></div>
       </section>
       <section aria-label={t('Hranice schopností platformy', 'Platform capability boundaries')} style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t('Hranice schopností platformy', 'Platform capability boundaries')}</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>{(report.platformCapabilities ?? []).map(capability => <div key={capability.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14, background: 'var(--surface-1)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{capability.title}</strong><span style={{ color: capability.state === 'implemented' ? '#16a34a' : '#7c3aed', fontSize: 10, fontWeight: 700 }}>{capability.state}</span></div>
-          {capability.blocker && <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '8px 0 0' }}>{capability.blocker}</p>}
-          <code style={{ display: 'block', color: 'var(--text-tertiary)', fontSize: 9, marginTop: 8 }}>{capability.evidence}</code>
-        </div>)}</div>
+        <h2 style={{ fontSize: 16, marginBottom: 4 }}>{t('Matice hranic schopností', 'Platform capability boundary matrix')}</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jedna schopnost na řádek: stav, skutečný blokátor a ověřitelný zdroj jsou vedle sebe. Blokovaný stav není roadmapa ani skrytě hotová funkce.', 'One capability per row: state, actual blocker and verifiable source stay side by side. A blocked state is neither a roadmap nor a silently completed feature.')}</p>
+        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+          <thead><tr><th style={thStyle}>{t('Schopnost', 'Capability')}</th><th style={thStyle}>State</th><th style={thStyle}>{t('Hranice / blokátor', 'Boundary / blocker')}</th><th style={thStyle}>Evidence</th></tr></thead>
+          <tbody>{(report.platformCapabilities ?? []).map(capability => <tr key={capability.id}>
+            <td style={{ ...tdStyle, fontWeight: 650, minWidth: 210 }}>{capability.title}<div style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, marginTop: 3 }}>{capability.id}</div></td>
+            <td style={tdStyle}><span style={{ color: capability.state === 'implemented' ? '#16a34a' : '#7c3aed', fontSize: 10, fontWeight: 700 }}>{capability.state}</span></td>
+            <td style={{ ...tdStyle, minWidth: 360, color: 'var(--text-secondary)' }}>{capability.blocker ?? t('Implementováno; podrobnosti v evidenci.', 'Implemented; see the evidence pointer for detail.')}</td>
+            <td style={{ ...tdStyle, minWidth: 250, color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, overflowWrap: 'anywhere' }}>{capability.evidence}</td>
+          </tr>)}</tbody>
+        </table></div>
       </section>
     </>
   )

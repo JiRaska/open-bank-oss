@@ -36,7 +36,10 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(page.getByRole('region', { name: /Testing assurance map/ })).toBeVisible()
   await expect(page.getByText('Required-control gaps')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Deterministic required controls' })).toContainText('openbank-ledger-service:mutation')
-  await expect(page.getByRole('region', { name: 'Platform capability boundaries' })).toContainText('No separately operated probe fleet is provisioned.')
+  const capabilityMatrix = page.getByRole('region', { name: 'Platform capability boundaries' })
+  await expect(capabilityMatrix).toContainText('Platform capability boundary matrix')
+  await expect(capabilityMatrix).toContainText('No separately operated probe fleet is provisioned.')
+  await expect(capabilityMatrix.getByRole('columnheader', { name: 'Boundary / blocker' })).toBeVisible()
   // The queue must expose absent layers as evidence gaps instead of silently
   // treating the fixture's missing simulation evidence as a pass.
   await expect(page.getByText('Deterministic simulations', { exact: true })).toBeVisible()
