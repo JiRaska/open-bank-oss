@@ -5,8 +5,8 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { Crown, KeyRound, Layers3 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { CAPABILITIES_BY_RESOURCE, capabilityLabel, type RolePreset } from '@/lib/delegations/rolePresets'
-import { DelegationStatusBadge, type Grant } from '@/components/delegations/GrantView'
+import { CAPABILITIES_BY_RESOURCE, capabilityIntent, capabilityLabel, type RolePreset } from '@/lib/delegations/rolePresets'
+import { DelegationStatusBadge, formatCeiling, type Grant } from '@/components/delegations/GrantView'
 
 type SourceState = 'ok' | 'forbidden' | 'unavailable'
 type Account = { id?: string; accountNumber?: string; nickname?: string | null; accountType?: string; currencyCode?: string; status?: string }
@@ -55,6 +55,29 @@ export function grantResourcePresentation(grant: Grant, details: ResourceDetail[
   return { label: `${resourceLabel(grant.resourceType, language)} · ${shortId(grant.resourceId)}`, meta: resolved?.state === 'forbidden' ? (language === 'cs' ? 'Detail zdroje není pro tuto roli povolen' : 'Resource detail is not permitted for this role') : '' }
 }
 
+export function grantConditions(grant: Grant, language: 'cs' | 'en') {
+  const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const t = (cs: string, en: string) => language === 'cs' ? cs : en
+  const conditions = [{
+    label: t('Platnost', 'Validity'),
+    value: grant.validTo ? `${t('do', 'until')} ${new Date(grant.validTo).toLocaleDateString(locale)}` : t('bez časového omezení', 'no end date'),
+  }]
+  if (!grant.capabilities.some(capability => capabilityIntent(capability) === 'act')) return conditions
+  conditions.push({
+    label: t('Schválení', 'Approval'),
+    value: grant.approvalPolicy === 'N_OF_M'
+      ? `${grant.requiredApprovals ?? '—'} ${t('schválení', 'approvals')}`
+      : t('samostatně', 'independent'),
+  })
+  const limits = [
+    [t('Jedna operace', 'Per operation'), grant.perTransactionLimit],
+    [t('Denně', 'Daily'), grant.dailyLimit],
+    [t('Měsíčně', 'Monthly'), grant.monthlyLimit],
+  ] as const
+  limits.forEach(([label, limit]) => conditions.push({ label, value: limit ? formatCeiling(limit, locale) : t('bez limitu', 'uncapped') }))
+  return conditions
+}
+
 export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
   const { t, language } = useLanguage()
   const partial = Object.entries(data.sources).filter(([, state]) => state !== 'ok')
@@ -81,7 +104,7 @@ export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
       {data.grants.filter(grant => grant.status === 'ACTIVE').map(grant => {
         const resource = grantResourcePresentation(grant, data.resourceDetails, language)
         const grantor = grant.grantorName?.trim() || shortId(grant.grantorPartyId)
-        return <AccessCard key={`grant-${grant.id}`} icon={<KeyRound size={15} />} role={matchedRoleName(grant, data.presets, language)} resource={resource.label} meta={<div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}><DelegationStatusBadge status={grant.status} /><span>{t('Udělil', 'Granted by')}: {grantor}</span>{resource.meta && <span>· {resource.meta}</span>}</div>} href={`/delegations/${grant.id}`} capabilities={grant.capabilities} />
+        return <AccessCard key={`grant-${grant.id}`} icon={<KeyRound size={15} />} role={matchedRoleName(grant, data.presets, language)} resource={resource.label} meta={<div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}><DelegationStatusBadge status={grant.status} /><span>{t('Udělil', 'Granted by')}: {grantor}</span>{resource.meta && <span>· {resource.meta}</span>}</div>} href={`/delegations/${grant.id}`} capabilities={grant.capabilities} conditions={grantConditions(grant, language)} />
       })}
     </AccessSection>
   </section>
@@ -95,11 +118,12 @@ function AccessSection({ title, empty, children }: { title: string; empty: boole
   </div>
 }
 
-function AccessCard({ icon, role, resource, meta, href, capabilities }: { icon: ReactNode; role: string; resource: string; meta: ReactNode; href?: string; capabilities: string[] }) {
+function AccessCard({ icon, role, resource, meta, href, capabilities, conditions = [] }: { icon: ReactNode; role: string; resource: string; meta: ReactNode; href?: string; capabilities: string[]; conditions?: { label: string; value: string }[] }) {
   const { t, language } = useLanguage()
   const content = <><div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--accent)' }}>{icon}<strong style={{ color: 'var(--text-primary)' }}>{role}</strong></div>
     <div style={{ fontSize: 13, fontWeight: 650, marginTop: 9 }}>{resource}</div><div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 3 }}>{meta}</div>
-    <div aria-label={t('Práva', 'Rights')} style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 12 }}>{capabilities.map(capability => <span key={capability} title={capability} style={{ borderRadius: 999, padding: '4px 8px', fontSize: 10, background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{capabilityLabel(capability, language)}</span>)}</div></>
+    <div aria-label={t('Práva', 'Rights')} style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 12 }}>{capabilities.map(capability => <span key={capability} title={capability} style={{ borderRadius: 999, padding: '4px 8px', fontSize: 10, background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{capabilityLabel(capability, language)}</span>)}</div>
+    {conditions.length > 0 && <div aria-label={t('Podmínky oprávnění', 'Access conditions')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 6, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>{conditions.map(condition => <div key={condition.label} style={{ fontSize: 10 }}><span style={{ color: 'var(--text-tertiary)' }}>{condition.label}</span><strong style={{ display: 'block', marginTop: 2, color: 'var(--text-primary)' }}>{condition.value}</strong></div>)}</div>}</>
   const style = { display: 'block', padding: 14, border: '1px solid var(--border)', borderRadius: 11, background: 'var(--surface-1)', color: 'inherit', textDecoration: 'none' }
   return href ? <Link href={href} style={style}>{content}</Link> : <div style={style}>{content}</div>
 }

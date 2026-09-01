@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest'
-import { grantResourcePresentation, isEffectiveAccessPayload, matchedRoleName } from '@/components/delegations/EffectiveAccess'
+import { grantConditions, grantResourcePresentation, isEffectiveAccessPayload, matchedRoleName } from '@/components/delegations/EffectiveAccess'
 import type { Grant } from '@/components/delegations/GrantView'
 import type { RolePreset } from '@/lib/delegations/rolePresets'
 
@@ -27,5 +27,28 @@ describe('effective access role matching', () => {
       label: 'Účet •••• 7890',
       meta: 'CZK · ACTIVE',
     })
+  })
+
+  it('explains financial and approval guardrails for an active operation role', () => {
+    const conditions = grantConditions({
+      ...grant,
+      capabilities: ['ACCOUNT_INITIATE_PAYMENT'],
+      approvalPolicy: 'SOLO',
+      perTransactionLimit: { amount: 5000, currency: 'CZK' },
+      dailyLimit: null,
+      monthlyLimit: { amount: 20000, currency: 'CZK' },
+      validTo: '2026-12-31T12:00:00Z',
+    }, 'cs')
+    expect(conditions).toEqual([
+      { label: 'Platnost', value: 'do 31. 12. 2026' },
+      { label: 'Schválení', value: 'samostatně' },
+      { label: 'Jedna operace', value: '5 000 CZK' },
+      { label: 'Denně', value: 'bez limitu' },
+      { label: 'Měsíčně', value: '20 000 CZK' },
+    ])
+  })
+
+  it('does not imply financial limits for a read-only role', () => {
+    expect(grantConditions({ ...grant, validTo: null }, 'en')).toEqual([{ label: 'Validity', value: 'no end date' }])
   })
 })
