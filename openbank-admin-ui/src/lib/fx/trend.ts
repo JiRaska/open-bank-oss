@@ -8,6 +8,24 @@ export interface FxTrendSummary {
   changePercent: number
 }
 
+export type FxTrendDirection = 'up' | 'down' | 'flat'
+
+export function fxTrendDirection(changePercent: number): FxTrendDirection {
+  if (changePercent > 0) return 'up'
+  if (changePercent < 0) return 'down'
+  return 'flat'
+}
+
+/** Position fixings on the real elapsed-time axis instead of spacing sparse dates evenly. */
+export function fxTrendTimelinePositions(points: FxTrendPoint[]): number[] {
+  if (points.length < 2) return points.map(() => 0)
+  const start = Date.parse(points[0].timestamp)
+  const end = Date.parse(points.at(-1)!.timestamp)
+  const span = end - start
+  if (!Number.isFinite(span) || span <= 0) return points.map((_, index) => index / (points.length - 1))
+  return points.map(point => (Date.parse(point.timestamp) - start) / span)
+}
+
 /** Normalise a newest/oldest/mixed API response into one latest valid fixing per UTC day, oldest first. */
 export function normaliseFxTrend(rows: unknown[]): FxTrendPoint[] {
   const latestByDate = new Map<string, FxTrendPoint>()

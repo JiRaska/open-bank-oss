@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useId, useMemo, useState } from 'react'
-import { TrendingDown, TrendingUp } from 'lucide-react'
-import { fxTrendSummary, normaliseFxTrend, type FxTrendPoint } from '@/lib/fx/trend'
+import { Minus, TrendingDown, TrendingUp } from 'lucide-react'
+import { fxTrendDirection, fxTrendSummary, fxTrendTimelinePositions, normaliseFxTrend, type FxTrendPoint } from '@/lib/fx/trend'
 import styles from './FxTrendChart.module.css'
 
 const WIDTH = 320
@@ -21,8 +21,9 @@ function chartGeometry(points: FxTrendPoint[]) {
   const span = high - low
   const plotWidth = WIDTH - PADDING_X * 2
   const plotHeight = HEIGHT - PADDING_TOP - PADDING_BOTTOM
+  const positions = fxTrendTimelinePositions(points)
   const coordinates = points.map((point, index) => ({
-    x: PADDING_X + (index / (points.length - 1)) * plotWidth,
+    x: PADDING_X + positions[index] * plotWidth,
     y: PADDING_TOP + ((high - point.rate) / span) * plotHeight,
   }))
   const line = coordinates.map(({ x, y }, index) => `${index ? 'L' : 'M'} ${x.toFixed(2)} ${y.toFixed(2)}`).join(' ')
@@ -68,8 +69,8 @@ export function FxTrendChart({ bases, quote, lang }: { bases: string[]; quote: s
   // Do not label the newly selected pair with the previous pair's summary while its request is in flight.
   const summary = loading ? null : fxTrendSummary(points)
   const geometry = useMemo(() => loading ? null : chartGeometry(points), [loading, points])
-  const up = (summary?.changePercent ?? 0) >= 0
-  const tone = up ? 'var(--success)' : 'var(--danger)'
+  const direction = fxTrendDirection(summary?.changePercent ?? 0)
+  const tone = direction === 'up' ? 'var(--success)' : direction === 'down' ? 'var(--danger)' : 'var(--accent)'
   const locale = lang === 'cs' ? 'cs-CZ' : 'en-GB'
   const formatRate = (rate: number) => rate.toLocaleString(locale, { maximumFractionDigits: 6 })
   const formatDate = (timestamp: string) => new Date(timestamp).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
@@ -87,7 +88,7 @@ export function FxTrendChart({ bases, quote, lang }: { bases: string[]; quote: s
         </div>
       </div>
       {summary && <div className={styles.change} style={{ color: tone }} aria-label={lang === 'cs' ? `Změna za období ${summary.changePercent.toFixed(2)} procenta` : `Period change ${summary.changePercent.toFixed(2)} percent`}>
-        {up ? <TrendingUp size={16} aria-hidden="true" /> : <TrendingDown size={16} aria-hidden="true" />}
+        {direction === 'up' ? <TrendingUp size={16} aria-hidden="true" /> : direction === 'down' ? <TrendingDown size={16} aria-hidden="true" /> : <Minus size={16} aria-hidden="true" />}
         {summary.changePercent >= 0 ? '+' : ''}{summary.changePercent.toFixed(2)} %
       </div>}
     </div>
