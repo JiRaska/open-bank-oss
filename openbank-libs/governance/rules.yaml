@@ -1992,7 +1992,7 @@ ci_runners:
     deploy_only_signed_digests: true
   gate: ci-runner-governance
   enforced: planned                     # ADR-0053 Accepted; lint + tofu enable land on rollout
-  target_enforce_date: "2026-08-31"   # ADR-0144
+  target_enforce_date: "2026-09-30"   # ADR-0144 — rebaselined #7928; lint + OpenTofu apply remain incomplete
   blocked_on: "a CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) + the OpenTofu apply for the three scale sets have not both landed yet"
 
 # ---------------------------------------------------------------------------------------
