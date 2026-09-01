@@ -346,6 +346,26 @@ gates:
     run: |
       bash .github/scripts/supersede-deploy-prs.sh --self-test
 
+  - id: ci-runner-pool-capacity
+    name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      `rules.yaml: ci_runners` declares three ARC scale sets; the OpenTofu creates two.
+      `openbank-batch` is declared with an isolation_rationale and provisioned nowhere, and
+      `infra_apply.runner_routing` still routes the tofu plan lane to it — a job sent there
+      would sit `queued` forever, because "no runner has taken this yet" and "no runner will
+      ever exist" are the same state to every observer. The same gate carries the
+      `pr_jobs_allowed_pools` lint named verbatim in `ci_runners.blocked_on`: a pull_request
+      job must never reach the credential-carrying deploy pool. Declared capacity that does
+      not exist reads exactly like capacity that does.
+    review_after: "2027-08-30"
+    min_subjects: 5   # 3 declared pools + 4 self-hosted runs-on labels today (2026-08-30)
+    selftest: python3 .github/scripts/check-ci-runner-pools.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-ci-runner-pools.py
+
   - id: deploy-drift-declaration
     name: "deployed image pins name a commit (issue #3344, enforced)"
     group: gitops
