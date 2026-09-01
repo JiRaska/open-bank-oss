@@ -43,7 +43,7 @@ describe('audience library', () => {
     const session = { user: { roles: ['ROLE_OPERATOR'] }, expires: '2099-01-01' }
     render(React.createElement(SessionProvider, { session }, React.createElement(LanguageProvider, null, React.createElement(SegmentsPage))))
     const submit = await screen.findByRole('button', { name: 'Submit for approval' })
-    const approve = screen.getByRole('button', { name: 'Approve audience' })
+    const approve = screen.getByRole('button', { name: 'Review and approve' })
     await act(async () => {
       // Native activations share one React batch. This is the pre-render race that
       // `disabled` cannot stop; only the hook's synchronous ref claim can.
@@ -57,6 +57,38 @@ describe('audience library', () => {
 
     completeMutation?.({ ok: true, json: async () => ({}) })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeTruthy())
+  })
+
+  it('keeps the exact audience approval review open after failure and permits a safe retry', async () => {
+    let decisions = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/approve')) {
+        decisions += 1
+        return decisions === 1
+          ? { ok: false, json: async () => ({ error: 'temporarily unavailable' }) }
+          : { ok: true, json: async () => ({}) }
+      }
+      return { ok: true, json: async () => ({
+        state: 'ok',
+        items: decisions > 1 ? [] : [{ name: 'tenured', version: 3, rules: ['tenure >= 30 days'], state: 'PENDING_APPROVAL', createdBy: 'maker.operator' }],
+      }) }
+    }))
+
+    const session = { user: { roles: ['ROLE_OPERATOR'] }, expires: '2099-01-01' }
+    render(React.createElement(SessionProvider, { session }, React.createElement(LanguageProvider, null, React.createElement(SegmentsPage))))
+    fireEvent.click(await screen.findByRole('button', { name: 'Review and approve' }))
+
+    const dialog = screen.getByRole('alertdialog')
+    expect(dialog).toHaveTextContent('tenured · v3')
+    expect(dialog).toHaveTextContent('maker.operator')
+    expect(dialog).toHaveTextContent('tenure >= 30 days')
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm approval' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('state change did not complete')
+    expect(screen.getByRole('alertdialog')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm approval' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(decisions).toBe(2)
   })
 
   it('reports lifecycle mutation errors locally without replacing the loaded catalogue', async () => {

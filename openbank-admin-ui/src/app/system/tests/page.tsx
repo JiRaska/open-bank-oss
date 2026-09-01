@@ -173,6 +173,22 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
         <Stat label="Unresolved evidence" value={report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0} tone={(report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) ? 'neutral' : 'success'} />
         <Stat label="Required-control gaps" value={`${report.totals.requiredControlGaps ?? 0}/${report.totals.requiredControls ?? 0}`} tone={report.totals.requiredControlGaps ? 'danger' : 'success'} />
       </div>
+      <section aria-label={t('Matice důkazů komponent', 'Component evidence matrix')} style={{ marginBottom: 20 }}>
+        <h2 style={{ fontSize: 16, marginBottom: 4 }}>{t('Matice důkazů komponent', 'Component evidence matrix')}</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jeden řádek na komponentu: skenuj napříč druhy testů; peněžní toky jsou nahoře.', 'One row per component: scan across test kinds; money-path components are first.')}</p>
+        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+          <table style={tableStyle}>
+            <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
+            <tbody>{sorted.map(component => (
+              <tr key={component.component}>
+                <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: '#dc2626', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
+                {KINDS.map(kind => <td key={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
+                <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </section>
       <section aria-label={t('Deterministické povinné kontroly', 'Deterministic required controls')} style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t('Deterministické povinné kontroly', 'Deterministic required controls')}</h2>
         <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
@@ -185,25 +201,18 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
         </table></div>
       </section>
       <section aria-label={t('Hranice schopností platformy', 'Platform capability boundaries')} style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 8 }}>{t('Hranice schopností platformy', 'Platform capability boundaries')}</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>{(report.platformCapabilities ?? []).map(capability => <div key={capability.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14, background: 'var(--surface-1)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{capability.title}</strong><span style={{ color: capability.state === 'implemented' ? '#16a34a' : '#7c3aed', fontSize: 10, fontWeight: 700 }}>{capability.state}</span></div>
-          {capability.blocker && <p style={{ color: 'var(--text-secondary)', fontSize: 11, margin: '8px 0 0' }}>{capability.blocker}</p>}
-          <code style={{ display: 'block', color: 'var(--text-tertiary)', fontSize: 9, marginTop: 8 }}>{capability.evidence}</code>
-        </div>)}</div>
+        <h2 style={{ fontSize: 16, marginBottom: 4 }}>{t('Matice hranic schopností', 'Platform capability boundary matrix')}</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jedna schopnost na řádek: stav, skutečný blokátor a ověřitelný zdroj jsou vedle sebe. Blokovaný stav není roadmapa ani skrytě hotová funkce.', 'One capability per row: state, actual blocker and verifiable source stay side by side. A blocked state is neither a roadmap nor a silently completed feature.')}</p>
+        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+          <thead><tr><th style={thStyle}>{t('Schopnost', 'Capability')}</th><th style={thStyle}>State</th><th style={thStyle}>{t('Hranice / blokátor', 'Boundary / blocker')}</th><th style={thStyle}>Evidence</th></tr></thead>
+          <tbody>{(report.platformCapabilities ?? []).map(capability => <tr key={capability.id}>
+            <td style={{ ...tdStyle, fontWeight: 650, minWidth: 210 }}>{capability.title}<div style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, marginTop: 3 }}>{capability.id}</div></td>
+            <td style={tdStyle}><span style={{ color: capability.state === 'implemented' ? '#16a34a' : '#7c3aed', fontSize: 10, fontWeight: 700 }}>{capability.state}</span></td>
+            <td style={{ ...tdStyle, minWidth: 360, color: 'var(--text-secondary)' }}>{capability.blocker ?? t('Implementováno; podrobnosti v evidenci.', 'Implemented; see the evidence pointer for detail.')}</td>
+            <td style={{ ...tdStyle, minWidth: 250, color: 'var(--text-tertiary)', fontFamily: 'monospace', fontSize: 10, overflowWrap: 'anywhere' }}>{capability.evidence}</td>
+          </tr>)}</tbody>
+        </table></div>
       </section>
-      <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
-        <table style={tableStyle}>
-          <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
-          <tbody>{sorted.map(component => (
-            <tr key={component.component}>
-              <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: '#dc2626', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
-              {KINDS.map(kind => <td key={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
-              <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
     </>
   )
 }
@@ -317,12 +326,18 @@ function RuntimeInfrastructure({ report }: { report: TestIntelligenceReport }) {
       const completedLifecycles = Math.min(started.length, stopped.length)
       const unmatchedStarts = started.length - stopped.length
       const impossibleStops = stopped.length > started.length
+      const scoped = row.testInfrastructure.observed.filter(item => item.resourceScopeId)
+      const scopes = [...new Set(scoped.map(item => item.resourceScopeId!))]
+      const incompleteScopes = scopes.filter(scopeId => {
+        const scopeEvents = scoped.filter(item => item.resourceScopeId === scopeId)
+        return scopeEvents.filter(item => item.lifecycle === 'started').length !== scopeEvents.filter(item => item.lifecycle === 'stopped').length
+      })
       // The aggregate contains intentionally redacted observations, not a container identity or
       // resource-manager correlation key. An unequal count is a real finding, but it does not prove
       // that a container leaked; presenting it as failed would overclaim beyond the retained evidence.
       const state: EvidenceState = started.length === 0 || impossibleStops || unmatchedStarts > 0 ? 'unknown' : 'passed'
       const latest = row.testInfrastructure.observed.at(-1)?.observedAt
-      return <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.testInfrastructure.declared.join(' · ') || 'none'}</td><td style={tdStyle}><StateBadge state={state} /></td><td style={tdStyle}><strong>{completedLifecycles} {t('dokončených izolovaných cyklů', 'completed isolated cycles')}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{started.length} started · {stopped.length} stopped</div>{unmatchedStarts > 0 && <div role="status" style={{ color: '#a16207', fontSize: 10, marginTop: 3 }}>{t(`${unmatchedStarts} nepropojených startů: agregovaná evidence sama nepotvrzuje leak ani cleanup.`, `${unmatchedStarts} unmatched starts: aggregate evidence alone proves neither a leak nor cleanup.`)}</div>}{impossibleStops && <div role="status" style={{ color: '#64748b', fontSize: 10, marginTop: 3 }}>{t('Nekonzistentní lifecycle evidence: více stop než start.', 'Inconsistent lifecycle evidence: more stops than starts.')}</div>}</td><td style={tdStyle}>{latest ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(latest)) : 'not emitted by this run'}</td></tr>
+      return <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.testInfrastructure.declared.join(' · ') || 'none'}</td><td style={tdStyle}><StateBadge state={state} /></td><td style={tdStyle}><strong>{completedLifecycles} {t('dokončených izolovaných cyklů', 'completed isolated cycles')}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{started.length} started · {stopped.length} stopped</div>{scopes.length > 0 && <div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t(`${scopes.length} neprůhledných scopeů resource manageru · ${incompleteScopes.length} s neúplným lifecycle záznamem`, `${scopes.length} opaque resource-manager scopes · ${incompleteScopes.length} with incomplete lifecycle records`)}</div>}{unmatchedStarts > 0 && <div role="status" style={{ color: '#a16207', fontSize: 10, marginTop: 3 }}>{t(`${unmatchedStarts} nepropojených startů: agregovaná evidence sama nepotvrzuje leak ani cleanup.`, `${unmatchedStarts} unmatched starts: aggregate evidence alone proves neither a leak nor cleanup.`)}</div>}{impossibleStops && <div role="status" style={{ color: '#64748b', fontSize: 10, marginTop: 3 }}>{t('Nekonzistentní lifecycle evidence: více stop než start.', 'Inconsistent lifecycle evidence: more stops than starts.')}</div>}</td><td style={tdStyle}>{latest ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(latest)) : 'not emitted by this run'}</td></tr>
     })}</tbody>
   </table></div>
 }

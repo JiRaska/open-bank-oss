@@ -464,7 +464,6 @@ export default function ProductCatalogPage() {
         if (refreshed) setSelectedProduct(refreshed)
       }
     } catch (e) {
-      setProducts([])
       setUnavailable({ kind: e instanceof ApiError ? e.kind : 'unreachable' })
     } finally {
       setLoading(false)
@@ -599,6 +598,11 @@ export default function ProductCatalogPage() {
                 lang={language}
                 dense
               />
+              {products.length > 0 && (
+                <div role="status" aria-live="polite" style={{ padding: '0 16px 14px', color: 'var(--warning-text)', fontSize: '12px', fontWeight: 600 }}>
+                  {t('Zobrazené produkty a souhrny jsou poslední dostupná data; obnovení katalogu se nezdařilo.', 'Displayed products and summaries are the last available data; catalog refresh failed.')}
+                </div>
+              )}
             </div>
           )}
 

@@ -8,6 +8,7 @@ import json
 import re
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 REQUIRED_SCHEMA = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
@@ -16,6 +17,54 @@ TESTCONTAINERS_EVIDENCE_BASELINE = "openbank-libs/governance/testcontainers-evid
 
 def text(path: Path) -> str:
     return path.read_text(errors="ignore") if path.exists() else ""
+
+
+def normalized_heading(value: str) -> str:
+    """Return a comparison form for GitHub-style Markdown heading fragments.
+
+    GitHub's precise slug algorithm deliberately preserves some punctuation.  Evidence
+    pointers need a stronger property than reproducing that implementation: the
+    declared fragment must still name an actual heading after punctuation and spacing
+    differences are ignored.  This catches a renamed or invented ADR section without
+    coupling the governance gate to a renderer implementation.
+    """
+    return "-".join(re.findall(r"[a-z0-9]+", value.lower()))
+
+
+def valid_capability_evidence(root: Path, evidence: str) -> bool:
+    """Accept an HTTPS primary source or an existing local document/heading pointer."""
+    if evidence.startswith("https://"):
+        parsed = urlsplit(evidence)
+        return (
+            parsed.scheme == "https"
+            and bool(parsed.netloc)
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+        )
+    if evidence.startswith(("http://", "/")):
+        return False
+
+    relative, separator, fragment = evidence.partition("#")
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        return False
+    if not relative or not candidate.is_file():
+        return False
+    if not separator:
+        return True
+
+    if candidate.suffix.lower() not in {".md", ".markdown"}:
+        return re.search(rf"(?<![a-zA-Z0-9_-]){re.escape(fragment)}(?![a-zA-Z0-9_-])", text(candidate)) is not None
+
+    target = normalized_heading(fragment)
+    return bool(target) and any(
+        normalized_heading(heading) == target
+        for heading in re.findall(r"(?m)^#{1,6}\s+(.+?)\s*#*\s*$", text(candidate))
+    )
 
 
 RECORD_CALL = re.compile(
@@ -62,6 +111,15 @@ def check(root: Path) -> list[str]:
                                 .get("properties", {}).get("kind", {}).get("enum", []))
         if "trace" not in specialized_kinds:
             errors.append("run schema cannot represent executed trace-contract evidence")
+        runtime_observation = schema.get("$defs", {}).get("infrastructureObservation", {})
+        runtime_properties = runtime_observation.get("properties", {})
+        scope_pattern = runtime_properties.get("resourceScopeId", {}).get("pattern", "")
+        if ("resourceScopeId" in runtime_observation.get("required", [])
+                or not scope_pattern.startswith("^[0-9a-f]{8}-")):
+            errors.append("run schema cannot safely represent optional opaque Testcontainers resource scopes")
+        reprovisions = runtime_properties.get("reprovisions", {})
+        if reprovisions.get("type") != "integer" or reprovisions.get("minimum") != 1:
+            errors.append("run schema cannot safely represent positive logical-resource reprovision counts")
         diagnostic = schema.get("properties", {}).get("diagnostics", {})
         if diagnostic.get("items", {}).get("$ref") != "#/$defs/diagnosticArtifact":
             errors.append("run schema has no typed diagnostic artifact collection")
@@ -93,10 +151,17 @@ def check(root: Path) -> list[str]:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
     if "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport" not in workflow:
         errors.append("Kover evidence is not bounded with the money-path-safe timeout")
+    immutable_envelope_artifact = workflow.partition("Retain immutable Test Intelligence run envelope")[2].partition(
+        "Upload coverage to Codecov"
+    )[0]
+    if "build/test-intelligence/run.json" not in immutable_envelope_artifact or "runtime/" in immutable_envelope_artifact:
+        errors.append("immutable Test Intelligence artifact must retain only the redacted run envelope, never raw runtime evidence")
 
     convention = text(root / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts")
     if "OPENBANK_TEST_EVIDENCE_DIR" not in convention:
         errors.append("service test JVMs do not receive the runtime-evidence directory")
+    if "project.delete(testIntelligenceRuntimeDir)" not in convention:
+        errors.append("runtime evidence is not reset before each Test task and can mix local reruns")
     # Kover's agent otherwise transforms Testcontainers' shaded classes during Quarkus
     # integration tests.  That can leave the advisory report task green but no XML to
     # project, which is indistinguishable from absent coverage in the operator view.
@@ -106,10 +171,14 @@ def check(root: Path) -> list[str]:
     recorder = root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/evidence/TestInfrastructureEvidence.kt"
     if not recorder.exists():
         errors.append("openbank-libs-testing has no shared runtime evidence recorder")
+    elif "resourceScopeId" not in text(recorder) or "reprovisions" not in text(recorder):
+        errors.append("shared runtime evidence recorder cannot preserve opaque scopes and logical reprovisions")
     for name in ("PostgresBase.kt", "PostgresRedpandaTestResource.kt", "PostgresRedisTestResource.kt"):
         source = text(root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/containers" / name)
         if "TestInfrastructureEvidence.record" not in source:
             errors.append(f"shared Testcontainers resource emits no lifecycle proof: {name}")
+        if "resourceScopeId" not in source:
+            errors.append(f"shared Testcontainers resource lacks opaque lifecycle correlation: {name}")
 
     baseline_path = root / TESTCONTAINERS_EVIDENCE_BASELINE
     baseline = {
@@ -133,7 +202,8 @@ def check(root: Path) -> list[str]:
     for needle in ('"trace"', "def trace_contract_evidence", "OPENBANK_TRACE_CONTRACT_V1:",
                    "specialized.extend(trace_contract_evidence(service))", "def parse_timestamp(",
                    "run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW",
-                   "observed_at - run_observed_at > MAX_FUTURE_SKEW"):
+                   "observed_at - run_observed_at > MAX_FUTURE_SKEW", "def public_runtime_image",
+                   'item["image"] = public_runtime_image'):
         if needle not in run_collector:
             errors.append(f"run-envelope collector loses executed trace evidence: {needle}")
     tracing_pilot = text(root / "openbank-agent-service/src/test/kotlin/com/openbank/agent/application/AgentChatServiceTracingTest.kt")
@@ -220,10 +290,13 @@ def check(root: Path) -> list[str]:
         errors.append("test-intelligence capability register is empty or duplicated")
     for identifier, block in zip(ids, capability_blocks, strict=True):
         state = re.search(r"(?m)^    state: ([a-z-]+)$", block)
-        if not state or state.group(1) not in allowed or "\n    title:" not in block or "\n    evidence:" not in block:
+        evidence = re.search(r"(?m)^    evidence: (.+)$", block)
+        if not state or state.group(1) not in allowed or "\n    title:" not in block or not evidence:
             errors.append(f"test-intelligence capability is incomplete: {identifier}")
         if state and state.group(1) != "implemented" and "\n    blocker:" not in block:
             errors.append(f"blocked test-intelligence capability has no blocker: {identifier}")
+        if evidence and not valid_capability_evidence(root, evidence.group(1).strip()):
+            errors.append(f"test-intelligence capability has unresolvable evidence: {identifier}")
     for needle in ("function platformCapabilities()", "platformCapabilities: capabilities"):
         if needle not in collector:
             errors.append(f"admin projection loses operator-visible platform blockers: {needle}")
@@ -418,6 +491,26 @@ def self_test() -> int:
         if any(new_resource in failure for failure in check(root)):
             print("self-test failed: a genuine start/stop lifecycle pair was rejected")
             return 1
+        evidence_doc = root / "docs/adr/test-intelligence.md"
+        evidence_doc.parent.mkdir(parents=True, exist_ok=True)
+        evidence_doc.write_text("## D8 — Capability boundary\n")
+        evidence_yaml = root / ".github/gates/gates.yaml"
+        evidence_yaml.parent.mkdir(parents=True, exist_ok=True)
+        evidence_yaml.write_text("test-intelligence-ecosystem:\n")
+        if not valid_capability_evidence(root, "docs/adr/test-intelligence.md#d8--capability-boundary"):
+            print("self-test failed: a real Markdown evidence anchor was rejected")
+            return 1
+        for invalid in (
+            "docs/adr/test-intelligence.md#invented-boundary",
+            ".github/gates/gates.yaml#invented-control",
+            "../outside.md",
+            "http://untrusted.example/evidence",
+            "https://",
+            "https://user:password@trusted.example/evidence",
+        ):
+            if valid_capability_evidence(root, invalid):
+                print(f"self-test failed: invalid capability evidence was accepted: {invalid}")
+                return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0
 

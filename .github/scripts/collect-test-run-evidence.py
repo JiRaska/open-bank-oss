@@ -94,14 +94,20 @@ def validate_envelope(envelope: dict) -> None:
     if set(infrastructure) != {"declared", "observed"} or not set(infrastructure["declared"]).issubset(INFRASTRUCTURE):
         raise ValueError("declared test infrastructure is invalid")
     for item in infrastructure["observed"]:
+        required_runtime_fields = {"resource", "image", "lifecycle", "observedAt"}
         # `reprovisions` is optional and only ever present on a terminal `stopped`: it carries how
         # many times Quarkus physically reprovisioned that logical resource before it was stopped
         # (issue #7640). A record is one LOGICAL lifecycle, so without this field the reprovision
         # count would simply stop being observable rather than being reconciled.
-        if set(item) - {"reprovisions"} != {"resource", "image", "lifecycle", "observedAt"}:
+        if set(item) - (required_runtime_fields | {"resourceScopeId", "reprovisions"}) or not required_runtime_fields.issubset(item):
             raise ValueError("runtime observation contains unsafe or incomplete fields")
         if item["resource"] not in INFRASTRUCTURE or item["lifecycle"] not in {"started", "stopped"} or not item["image"]:
             raise ValueError("runtime observation values are invalid")
+        if "resourceScopeId" in item and not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            str(item["resourceScopeId"]),
+        ):
+            raise ValueError("runtime resource scope id is invalid")
         if "reprovisions" in item and (
             item["lifecycle"] != "stopped"
             or not isinstance(item["reprovisions"], int)
@@ -342,6 +348,23 @@ def runtime_image_identity(image: str) -> str:
     return image
 
 
+def public_runtime_image(resource: str, image: object) -> str:
+    """Project an untrusted image reference onto a safe runtime label.
+
+    The raw Docker/Testcontainers image can contain an internal registry hostname,
+    namespace, or (for a malformed local test input) credentials.  The aggregate
+    needs only the declared runtime family plus an optional immutable digest or
+    ordinary tag to reconcile its lifecycle; publishing the original reference
+    would turn a CI evidence artifact into an inventory of private infrastructure.
+    """
+    reference = str(image).rsplit("/", 1)[-1]
+    digest = re.search(r"@sha256:([0-9a-f]{64})$", reference, re.I)
+    if digest:
+        return f"{resource}@sha256:{digest.group(1).lower()}"
+    tag = re.search(r":([A-Za-z0-9][A-Za-z0-9._-]{0,127})$", reference)
+    return f"{resource}:{tag.group(1)}" if tag else resource
+
+
 def observations(service: Path) -> list[dict]:
     result = []
     for file in (service / "build" / "test-intelligence" / "runtime").glob("*.jsonl"):
@@ -354,13 +377,21 @@ def observations(service: Path) -> list[dict]:
                     resource = "postgres" if "postgres" in image else "redpanda" if "redpanda" in image else "valkey" if re.search(r"valkey|redis", image, re.I) else None
                     lifecycle = {"start": "started", "die": "stopped"}.get(item.get("lifecycle"))
                     if resource and lifecycle:
-                        result.append((1, {"resource": resource, "image": image, "lifecycle": lifecycle,
-                                          "observedAt": datetime.fromtimestamp(int(item["observedAtUnix"]), timezone.utc).isoformat().replace("+00:00", "Z")}))
+                        # Docker's daemon id is a transient correlation key only. It never
+                        # reaches the schema-valid observation returned below: an envelope
+                        # must not disclose a container identity, but two different daemon
+                        # containers of the same image must not be merged accidentally.
+                        result.append((1, {"resource": resource, "image": public_runtime_image(resource, image), "lifecycle": lifecycle,
+                                          "observedAt": datetime.fromtimestamp(int(item["observedAtUnix"]), timezone.utc).isoformat().replace("+00:00", "Z"),
+                                          "_dockerContainerId": item.get("containerId")}))
                 else:
                     # A resource's own recorder marks readiness and carries the
                     # stronger lifecycle observation than Docker's raw daemon
                     # stream. Keep that provenance only while deduplicating;
                     # the published schema deliberately contains no host data.
+                    resource = item.get("resource")
+                    if resource in INFRASTRUCTURE:
+                        item["image"] = public_runtime_image(resource, item.get("image", ""))
                     result.append((0 if file.name == "testcontainers.jsonl" else 1, item))
             except json.JSONDecodeError:
                 continue
@@ -373,18 +404,50 @@ def observations(service: Path) -> list[dict]:
         normalized.append((priority, observed_at, item))
     normalized.sort(key=lambda entry: (entry[0], entry[1]))
 
-    deduplicated = []
-    for _, observed_at, item in normalized:
-        duplicate = any(
+    def same_lifecycle(observed_at: datetime, item: dict, previous_at: datetime, previous: dict) -> bool:
+        return (
             item["resource"] == previous["resource"]
             and runtime_image_identity(item["image"]) == runtime_image_identity(previous["image"])
             and item["lifecycle"] == previous["lifecycle"]
             and abs(observed_at - previous_at) <= RUNTIME_OBSERVATION_DUPLICATE_WINDOW
-            for previous_at, previous in deduplicated
+        )
+
+    # First deduplicate recorder records only. Different opaque scopes are different logical
+    # resource managers even when their lifecycle events happen together.
+    recorder = []
+    docker = []
+    for priority, observed_at, item in normalized:
+        (docker if priority else recorder).append((observed_at, item))
+    deduplicated_recorder = []
+    for observed_at, item in recorder:
+        duplicate = any(
+            same_lifecycle(observed_at, item, previous_at, previous)
+            and (not item.get("resourceScopeId") or not previous.get("resourceScopeId")
+                 or item["resourceScopeId"] == previous["resourceScopeId"])
+            for previous_at, previous in deduplicated_recorder
         )
         if not duplicate:
-            deduplicated.append((observed_at, item))
-    return [item for _, item in sorted(deduplicated, key=lambda entry: entry[0])]
+            deduplicated_recorder.append((observed_at, item))
+
+    # Suppress a daemon event only for an unambiguous one-to-one recorder pairing. A raw stream
+    # with two different daemon ids near one recorder is evidence of two physical containers,
+    # not a reason to hide one. Legacy streams without an id retain the former compatibility
+    # behaviour, because their ambiguity cannot be resolved retrospectively.
+    published = list(deduplicated_recorder)
+    for observed_at, item in docker:
+        matches = [(previous_at, previous) for previous_at, previous in deduplicated_recorder
+                   if same_lifecycle(observed_at, item, previous_at, previous)]
+        docker_id = item.get("_dockerContainerId")
+        same_recorder_raw_count = sum(
+            1 for other_at, other in docker
+            if same_lifecycle(other_at, other, matches[0][0], matches[0][1])
+        ) if len(matches) == 1 else 0
+        if len(matches) == 1 and (not docker_id or same_recorder_raw_count == 1):
+            continue
+        published.append((observed_at, item))
+
+    return [{key: value for key, value in item.items() if key != "_dockerContainerId"}
+            for _, item in sorted(published, key=lambda entry: entry[0])]
 
 
 def trace_contract_evidence(service: Path) -> list[dict]:
@@ -515,16 +578,23 @@ def main() -> None:
             runtime = service / "build/test-intelligence/runtime"
             runtime.mkdir(parents=True)
             (runtime / "docker-events.jsonl").write_text(
-                '{"image":"docker.io/library/postgres:16.3-alpine","lifecycle":"start","observedAtUnix":1787433000}\n'
-                '{"image":"docker.io/library/postgres:16.3-alpine","lifecycle":"die","observedAtUnix":1787433060}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-one","lifecycle":"start","observedAtUnix":1787433000}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-one","lifecycle":"die","observedAtUnix":1787433060}\n'
+                # These are two physical daemon containers near the second shared
+                # recorder start. They must not disappear merely because the published
+                # schema intentionally redacts their identities.
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-two","lifecycle":"start","observedAtUnix":1787433010}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-three","lifecycle":"start","observedAtUnix":1787433010}\n'
             )
             # The shared recorder and daemon event stream observe the same
             # lifecycle at slightly different instants. Keep one event per
             # lifecycle rather than inflating the UI's runtime evidence count.
             (runtime / "testcontainers.jsonl").write_text(
-                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z"}\n'
-                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:11:01Z"}\n'
-                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:10Z"}\n'
+                # The shared recorder may be configured through an internal image
+                # mirror. Its hostname/namespace are not allowed in the aggregate.
+                '{"schemaVersion":1,"resource":"postgres","image":"registry.openbank.invalid/team/postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
+                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:11:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
+                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:10Z","resourceScopeId":"22222222-2222-4222-8222-222222222222"}\n'
             )
             performance = service / "perf.json"
             # This is k6's actual summary-export form: true means the threshold was crossed.
@@ -597,6 +667,12 @@ def main() -> None:
             base_observation = {"resource": "postgres", "image": "postgres:16.3-alpine",
                                 "observedAt": "2026-08-22T00:00:00Z"}
             validate_envelope(envelope_with({**base_observation, "lifecycle": "stopped", "reprovisions": 41}))
+            validate_envelope(envelope_with({
+                **base_observation,
+                "lifecycle": "stopped",
+                "resourceScopeId": "11111111-1111-4111-8111-111111111111",
+                "reprovisions": 41,
+            }))
             for rejected in ({**base_observation, "lifecycle": "started", "reprovisions": 41},
                              {**base_observation, "lifecycle": "stopped", "reprovisions": 0},
                              {**base_observation, "lifecycle": "stopped", "reprovisions": True}):
@@ -611,10 +687,20 @@ def main() -> None:
             assert classify("creates LOAN_PACK_E2E", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x") == "unit"
             assert classify("reads products", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x", service) == "integration"
             observed = observations(service)
-            assert [item["lifecycle"] for item in observed] == ["started", "started", "stopped"]
+            assert [item["lifecycle"] for item in observed] == ["started", "started", "started", "started", "stopped"]
             assert [item["observedAt"] for item in observed] == [
-                "2026-08-22T21:10:01Z", "2026-08-22T21:10:10Z", "2026-08-22T21:11:01Z",
+                "2026-08-22T21:10:01Z", "2026-08-22T21:10:10Z", "2026-08-22T21:10:10Z",
+                "2026-08-22T21:10:10Z", "2026-08-22T21:11:01Z",
             ]
+            assert [item.get("resourceScopeId") for item in observed] == [
+                "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", None,
+                None, "11111111-1111-4111-8111-111111111111",
+            ]
+            assert {item["image"] for item in observed} == {"postgres:16.3-alpine"}
+            assert all("openbank.invalid" not in item["image"] for item in observed)
+            assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres@sha256:" + "A" * 64) == "postgres@sha256:" + "a" * 64
+            assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres:tag?credential=secret") == "postgres"
+            assert all("containerId" not in item and "_dockerContainerId" not in item for item in observed)
             specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]
             assert "target 70%" in specialized[1]["detail"]

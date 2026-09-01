@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -32,28 +32,43 @@ export default function KycPage() {
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [search, setSearch]   = useState('')
   const [partyId, setPartyId] = useState('')
+  const [partyIdInput, setPartyIdInput] = useState('')
+  const [loadedPartyId, setLoadedPartyId] = useState<string | null>(null)
+  const loadedPartyIdRef = useRef<string | null>(null)
   const [selectedParty, setSelectedParty] = useState<PartyHit | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (requestedPartyId = partyId) => {
+    const scope = requestedPartyId || null
     setLoading(true); setUnavailable(null)
     try {
-      const url = partyId
-        ? `${KYC_SERVICE}/api/v1/kyc/cases/party/${partyId}`
+      const url = requestedPartyId
+        ? `${KYC_SERVICE}/api/v1/kyc/cases/party/${requestedPartyId}`
         : `${KYC_SERVICE}/api/v1/kyc/cases`
       const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
       if (!res.ok) {
         const kind = await classifyBffFailure(res)
-        setCases([])
         // A genuine 404/405 on the cases endpoint means "no case for this party",
         // not a broken app — degrade to the calm empty state rather than an error.
-        setUnavailable({ kind: res.status === 405 || kind === 'not_found' ? 'no_data' : kind })
+        const unavailableKind = res.status === 405 || kind === 'not_found' ? 'no_data' : kind
+        if (unavailableKind === 'no_data' || loadedPartyIdRef.current !== scope) {
+          setCases([])
+          loadedPartyIdRef.current = unavailableKind === 'no_data' ? scope : null
+          setLoadedPartyId(unavailableKind === 'no_data' ? scope : null)
+        }
+        setUnavailable({ kind: unavailableKind })
         return
       }
       const data = await res.json()
       setCases(Array.isArray(data) ? data : data.items ?? [data].filter(Boolean))
+      loadedPartyIdRef.current = scope
+      setLoadedPartyId(scope)
     } catch {
       // Timeout / abort / network — the BFF or kyc-service didn't answer.
-      setCases([])
+      if (loadedPartyIdRef.current !== scope) {
+        setCases([])
+        loadedPartyIdRef.current = null
+        setLoadedPartyId(null)
+      }
       setUnavailable({ kind: 'unreachable' })
     } finally { setLoading(false) }
   }, [partyId])
@@ -73,7 +88,7 @@ export default function KycPage() {
         actions={<button
           type="button"
           className="btn btn-secondary"
-          onClick={load}
+          onClick={() => void load()}
           disabled={loading}
           aria-busy={loading}
           aria-label={t('Obnovit KYC případy', 'Refresh KYC cases')}
@@ -86,7 +101,7 @@ export default function KycPage() {
       <PartySearch
         selectedId={selectedParty?.id}
         busy={loading}
-        onSelect={party => { setSelectedParty(party); setPartyId(party.id) }}
+        onSelect={party => { setSelectedParty(party); setPartyIdInput(party.id); setPartyId(party.id) }}
         placeholder={t('Jméno, příjmení, firma nebo Party UUID', 'Name, company, or Party UUID')}
       />
 
@@ -98,16 +113,20 @@ export default function KycPage() {
           <input id="kyc-search" className="input" style={{ paddingLeft: '32px', width: '100%' }} placeholder={t('Filtrovat načtené případy (ID / stav)…', 'Filter loaded cases (ID / status)…')} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <label className="sr-only" htmlFor="kyc-party-id">{t('Filtrovat podle Party ID', 'Filter by Party ID')}</label>
-        <input id="kyc-party-id" className="input" style={{ width: '280px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} placeholder={t('Filtrovat podle Party ID (UUID)…', 'Filter by Party ID (UUID)…')} value={partyId} onChange={e => setPartyId(e.target.value)} />
+        <input id="kyc-party-id" className="input" style={{ width: '280px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} placeholder={t('Filtrovat podle Party ID (UUID)…', 'Filter by Party ID (UUID)…')} value={partyIdInput} onChange={e => setPartyIdInput(e.target.value)} />
         <button
           type="button"
           className="btn btn-secondary"
-          onClick={load}
-          disabled={loading}
+          onClick={() => {
+            const nextPartyId = partyIdInput.trim()
+            if (nextPartyId === partyId) void load(nextPartyId)
+            else setPartyId(nextPartyId)
+          }}
+          disabled={loading || partyIdInput.trim() === ''}
           aria-busy={loading}
           aria-label={t('Vyhledat KYC případy', 'Search KYC cases')}
         >{t('Hledat', 'Search')}</button>
-        {selectedParty && <button type="button" className="btn btn-secondary" onClick={() => { setSelectedParty(null); setPartyId('') }}>{t('Všechny případy', 'All cases')}</button>}
+        {(selectedParty || partyId) && <button type="button" className="btn btn-secondary" onClick={() => { setSelectedParty(null); setPartyIdInput(''); setPartyId('') }}>{t('Všechny případy', 'All cases')}</button>}
       </div>
 
       {unavailable && (
@@ -119,7 +138,9 @@ export default function KycPage() {
             lang={language}
             detail={unavailable.kind === 'no_data' && partyId
               ? t('Pro tuto party nebyl nalezen žádný KYC případ.', 'No KYC case was found for this party.')
-              : undefined}
+              : cases.length > 0 && loadedPartyId === (partyId || null)
+                ? t('Zobrazen je poslední ověřený snapshot pro tento filtr; novější změny mohou chybět.', 'The last verified snapshot for this filter is shown; newer changes may be missing.')
+                : undefined}
             dense
           />
         </div>

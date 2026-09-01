@@ -27,11 +27,13 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { EntityChip } from '@/components/entities/EntityChip'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { RoleCatalog } from '@/components/delegations/RoleCatalog'
+import { EffectiveAccess, isEffectiveAccessPayload, type EffectiveAccessPayload } from '@/components/delegations/EffectiveAccess'
 import {
   DelegationStatusBadge,
   capabilityLabels,
   counterpartyLabel,
   formatCeiling,
+  grantCounterparty,
   type Grant,
 } from '@/components/delegations/GrantView'
 
@@ -59,6 +61,7 @@ export default function DelegationsPage() {
 
   const [party, setParty] = useState<EntityRef | null>(null)
   const [grants, setGrants] = useState<GrantsPayload | null>(null)
+  const [effectiveAccess, setEffectiveAccess] = useState<EffectiveAccessPayload | null>(null)
   const [grantsUnavail, setGrantsUnavail] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -89,11 +92,16 @@ export default function DelegationsPage() {
     setLoading(true)
     setGrantsUnavail(null)
     setGrants(null)
+    setEffectiveAccess(null)
     try {
-      const res = await fetch(`/api/delegations/party/${target.id}`, {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(8000),
-      })
+      const [res, effectiveRes] = await Promise.all([
+        fetch(`/api/delegations/party/${target.id}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) }),
+        fetch(`/api/delegations/effective-access/${target.id}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) }),
+      ])
+      if (effectiveRes.ok) {
+        const payload: unknown = await effectiveRes.json()
+        if (isEffectiveAccessPayload(payload)) setEffectiveAccess(payload)
+      }
       if (!res.ok) {
         setGrantsUnavail((await classifyBffFailure(res)) as BffFailure)
         return
@@ -210,6 +218,8 @@ export default function DelegationsPage() {
         />
       )}
 
+      {party && effectiveAccess && <EffectiveAccess data={effectiveAccess} />}
+
       {party && !grantsUnavail && grants && (
         <>
           <GrantTable
@@ -217,12 +227,14 @@ export default function DelegationsPage() {
             subtitle={t('Práva, která tato strana udělila jiným.', 'Rights this party has granted to others.')}
             grants={grants.granted}
             state={grants.sources.granted}
+            direction="granted"
           />
           <GrantTable
             title={t('Sdíleno s touto stranou', 'Shared with this party')}
             subtitle={t('Práva, která tato strana drží nad cizími zdroji.', 'Rights this party holds over other people’s resources.')}
             grants={grants.received}
             state={grants.sources.received}
+            direction="received"
           />
           <ProjectionHealth consumers={consumers} known={projectionKnown} />
         </>
@@ -232,8 +244,8 @@ export default function DelegationsPage() {
 }
 
 function GrantTable({
-  title, subtitle, grants, state,
-}: { title: string; subtitle: string; grants: Grant[]; state: DirectionState }) {
+  title, subtitle, grants, state, direction,
+}: { title: string; subtitle: string; grants: Grant[]; state: DirectionState; direction: 'granted' | 'received' }) {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
@@ -273,10 +285,11 @@ function GrantTable({
               </tr>
             </thead>
             <tbody>
-              {grants.map(g => (
-                <tr key={g.id}>
+              {grants.map(g => {
+                const counterparty = grantCounterparty(g, direction)
+                return <tr key={g.id}>
                   <td><DelegationStatusBadge status={g.status} /></td>
-                  <td><EntityChip type="party" id={g.granteePartyId} label={counterpartyLabel(g.granteeName)} /></td>
+                  <td><EntityChip type="party" id={counterparty.id} label={counterparty.name} /></td>
                   <td style={{ fontSize: '12px' }}>{g.resourceType}</td>
                   <td style={{ fontSize: '12px' }}>{capabilityLabels(g.capabilities)}</td>
                   <td style={{ fontSize: '12px' }}>{formatCeiling(g.perTransactionLimit, numberLocale)}</td>
@@ -287,7 +300,7 @@ function GrantTable({
                     </Link>
                   </td>
                 </tr>
-              ))}
+              })}
             </tbody>
           </table>
         </div>

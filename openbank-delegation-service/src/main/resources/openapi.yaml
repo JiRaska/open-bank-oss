@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.5.0
+  version: 1.6.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -419,8 +419,10 @@ components:
           type: array
           items:
             type: string
-            enum: [ACCOUNT_READ_BALANCES, ACCOUNT_READ_TRANSACTIONS, ACCOUNT_INITIATE_PAYMENT,
-                   ACCOUNT_PROPOSE_PAYMENT, CARD_VIEW, CARD_MANAGE_LIMITS, SAVINGS_DEPOSIT,
+            enum: [ACCOUNT_VIEW_DETAILS, ACCOUNT_READ_BALANCES, ACCOUNT_READ_TRANSACTIONS,
+                   ACCOUNT_DOWNLOAD_STATEMENTS, ACCOUNT_INITIATE_PAYMENT, ACCOUNT_PROPOSE_PAYMENT,
+                   ACCOUNT_MANAGE_BENEFICIARIES, ACCOUNT_MANAGE_LIMITS, CARD_VIEW,
+                   CARD_VIEW_TRANSACTIONS, CARD_MANAGE_LIMITS, CARD_MANAGE_STATUS, CARD_MANAGE_CHANNELS, SAVINGS_DEPOSIT,
                    SAVINGS_WITHDRAW, SAVINGS_PROPOSE_WITHDRAW, OBJECT_READ, DELEGATION_MANAGE]
         approvalPolicy:
           type: string

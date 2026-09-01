@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { describe, it, expect } from 'vitest'
-import { buildCnbTrend, defaultTrendWindow } from '@/lib/fx/trend'
+import { buildCnbTrend, defaultTrendWindow, fxTrendChange, normaliseFxTrend } from '@/lib/fx/trend'
 
 // The three-calendar-month CNB reference-mid trend (issue #7735). These tests mirror the
 // windowing and normalization semantics asserted server-side in customer-edge's
@@ -75,5 +75,36 @@ describe('buildCnbTrend', () => {
     const trend = buildCnbTrend([], 'EUR', 'CZK', false)
     expect(trend.indicative).toBe(true)
     expect(trend.points).toEqual([])
+  })
+})
+
+describe('FX trend normalisation', () => {
+  it('sorts chronologically, deduplicates snapshots and rejects invalid prices', () => {
+    expect(normaliseFxTrend([
+      { validFrom: '2026-03-01T00:00:00Z', midRate: '25.2' },
+      { timestamp: 'bad', rate: 999 },
+      { validFrom: '2026-01-01T00:00:00Z', midRate: '24.8' },
+      { validFrom: '2026-03-01T00:00:00Z', midRate: '25.2' },
+      { validFrom: '2026-02-01T00:00:00Z', midRate: '0' },
+    ])).toEqual([
+      { timestamp: '2026-01-01T00:00:00Z', rate: 24.8 },
+      { timestamp: '2026-03-01T00:00:00Z', rate: 25.2 },
+    ])
+  })
+
+  it('computes change from the oldest to newest valid point', () => {
+    expect(fxTrendChange([{ timestamp: 'a', rate: 25 }, { timestamp: 'b', rate: 26 }])).toBe(4)
+    expect(fxTrendChange([{ timestamp: 'a', rate: 25 }])).toBeNull()
+  })
+
+  it('keeps only the latest fixing for each UTC business day', () => {
+    expect(normaliseFxTrend([
+      { timestamp: '2026-08-31T08:00:00Z', rate: 25.1 },
+      { timestamp: '2026-08-31T14:30:00Z', rate: 25.2 },
+      { timestamp: '2026-05-31T12:00:00Z', rate: 25 },
+    ])).toEqual([
+      { timestamp: '2026-05-31T12:00:00Z', rate: 25 },
+      { timestamp: '2026-08-31T14:30:00Z', rate: 25.2 },
+    ])
   })
 })

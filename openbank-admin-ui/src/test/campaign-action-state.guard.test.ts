@@ -10,7 +10,10 @@ describe('campaign action state accessibility guard', () => {
 
     expect(composer).toMatch(/type="button"[\s\S]*?onClick=\{submit\}[\s\S]*?aria-busy=\{saving\}/)
     expect(detail).toContain('const [actingAction, setActingAction] = useState<string | null>(null)')
-    expect(detail).toContain('aria-busy={actingAction === a}')
+    expect(detail).toContain('role="alertdialog"')
+    expect(detail).toContain('aria-busy={busy}')
+    expect(detail).toContain('if (await runAction(actionIntent)) setActionIntent(null)')
+    expect(detail).toContain('trapDialogFocus(event, dialogRef.current)')
     expect(detail).toContain('aria-busy={duplicating}')
     expect(detail).toContain("aria-label={t('Předchozí stránka logu odeslání', 'Previous send-log page')}")
     expect(detail).toContain("aria-label={t('Další stránka logu odeslání', 'Next send-log page')}")

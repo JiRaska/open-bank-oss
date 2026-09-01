@@ -122,6 +122,62 @@ describe('GET /api/delegations/party/[partyId]', () => {
   })
 })
 
+describe('GET /api/delegations/effective-access/[partyId]', () => {
+  async function call(partyId: string) {
+    const { GET } = await import('@/app/api/delegations/effective-access/[partyId]/route')
+    return GET({} as never, { params: Promise.resolve({ partyId }) })
+  }
+
+  it('assembles owned resources, received grants and role presets from their authoritative services', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/accounts?')) return new Response(JSON.stringify({ data: [{ id: 'a1', accountNumber: '1234' }] }), { status: 200 })
+      if (url.includes(`/accounts/${RESOURCE}`)) return new Response(JSON.stringify({ id: RESOURCE, accountNumber: 'CZ1234567890', currencyCode: 'CZK' }), { status: 200 })
+      if (url.includes('/cards/party/')) return new Response(JSON.stringify([{ id: 'c1', maskedPan: '•••• 4321' }]), { status: 200 })
+      if (url.includes('/delegations/grantee/')) return new Response(JSON.stringify([grant('r1')]), { status: 200 })
+      return new Response(JSON.stringify([{ id: 'p1', name: 'Účetní', resourceType: 'ACCOUNT', capabilities: ['ACCOUNT_READ_BALANCES'] }]), { status: 200 })
+    }))
+
+    const response = await call(PARTY)
+    const body = await response.json()
+    expect(body.accounts[0].id).toBe('a1')
+    expect(body.cards[0].id).toBe('c1')
+    expect(body.grants[0].id).toBe('r1')
+    expect(body.presets[0].name).toBe('Účetní')
+    expect(body.resourceDetails[0]).toMatchObject({ key: `ACCOUNT:${RESOURCE}`, state: 'ok', detail: { accountNumber: 'CZ1234567890' } })
+    expect(body.sources).toEqual({ accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' })
+    expect(fetchCalls()).toHaveLength(5)
+  })
+
+  it('keeps successful ownership visible when another source is forbidden', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/cards/party/')) return new Response('{}', { status: 403 })
+      if (url.includes('/accounts?')) return new Response(JSON.stringify([{ id: 'a1' }]), { status: 200 })
+      return new Response('[]', { status: 200 })
+    }))
+
+    const body = await (await call(PARTY)).json()
+    expect(body.accounts).toEqual([{ id: 'a1' }])
+    expect(body.cards).toEqual([])
+    expect(body.sources.cards).toBe('forbidden')
+    expect(body.sources.accounts).toBe('ok')
+  })
+
+  it('keeps the grant visible when its concrete resource detail is forbidden', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/delegations/grantee/')) return new Response(JSON.stringify([grant('r1')]), { status: 200 })
+      if (url.includes(`/accounts/${RESOURCE}`)) return new Response('{}', { status: 403 })
+      return new Response('[]', { status: 200 })
+    }))
+
+    const body = await (await call(PARTY)).json()
+    expect(body.grants).toHaveLength(1)
+    expect(body.resourceDetails[0]).toMatchObject({ key: `ACCOUNT:${RESOURCE}`, state: 'forbidden' })
+  })
+})
+
 describe('GET /api/delegations/[id]', () => {
   async function call(id: string) {
     const { GET } = await import('@/app/api/delegations/[id]/route')

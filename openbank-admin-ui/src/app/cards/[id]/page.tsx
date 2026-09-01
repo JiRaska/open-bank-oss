@@ -83,6 +83,7 @@ export default function CardDetailPage() {
   const { data: card, loading, unavailable, waking, reload } = useServiceResource<Card>(
     id ? svcUrl('card-issuance-service', `/api/v1/cards/${id}`) : null,
   )
+  const showingRetainedSnapshot = unavailable !== null && card !== null
 
   const ops = useCardOperations(reload)
   const [pending, setPending] = useState<CardTransition | null>(null)
@@ -170,14 +171,14 @@ export default function CardDetailPage() {
           </Link>
         </div>
 
-        {loading ? (
+        {loading && !card ? (
           <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
             <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} />
             <div>{waking
               ? t('Služba se probouzí…', 'The service is waking up…')
               : t('Načítám kartu…', 'Loading the card…')}</div>
           </div>
-        ) : unavailable || !card ? (
+        ) : !card ? (
           <DataUnavailable
             kind={unavailable?.kind ?? 'not_found'}
             service={t('Card-issuance-service', 'Card-issuance-service')}
@@ -186,6 +187,26 @@ export default function CardDetailPage() {
           />
         ) : (
           <>
+            {showingRetainedSnapshot && <div role="status" aria-live="polite" style={{ marginBottom: 18 }}>
+              <DataUnavailable
+                kind={unavailable.kind}
+                service={t('Card-issuance-service', 'Card-issuance-service')}
+                feature={t('Aktualizace detailu karty', 'Card detail refresh')}
+                lang={language}
+                dense
+              />
+              <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+                {t(
+                  'Zobrazen je poslední úspěšný snapshot. Stav karty, limity i ovládací prvky se od té doby mohly změnit.',
+                  'Showing the last successful snapshot. Card status, limits, and controls may have changed since then.',
+                )}
+              </p>
+            </div>}
+
+            {loading && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+              {t('Aktualizuji kartu; poslední snapshot zůstává dostupný.', 'Refreshing the card; the last snapshot remains available.')}
+            </p>}
+
             <PageHeader
               icon={<CreditCard size={20} aria-hidden="true" />}
               title={card.maskedPan}
@@ -193,8 +214,8 @@ export default function CardDetailPage() {
               actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <CardStatusChip status={card.status} current />
                 {(canManage || canBlock) && <CardTransitionButtons card={card} busy={ops.busy} canManage={canManage} canBlock={canBlock} onSelect={onSelectTransition} />}
-                <button type="button" className="btn btn-ghost btn-sm" onClick={reload} disabled={ops.busy !== null} aria-label={t('Obnovit kartu', 'Refresh card')}>
-                  <RefreshCw size={12} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={reload} disabled={loading || ops.busy !== null} aria-busy={loading} aria-label={t('Obnovit kartu', 'Refresh card')}>
+                  <RefreshCw size={12} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
                 </button>
               </div>}
             />

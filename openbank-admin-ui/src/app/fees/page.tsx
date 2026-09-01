@@ -54,20 +54,17 @@ export default function FeesPage() {
       // auth-gated). product-catalog is the KEDA-scaled fees system of record.
       const res = await fetch(svcUrl('product-catalog', '/api/v1/fees'), { cache: 'no-store' })
       if (!res.ok) {
-        setFees([])
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
       const data = await res.json()
       if (!Array.isArray(data)) {
-        setFees([])
         setUnavailable({ kind: 'error' })
         return
       }
       setFees(data as FeeScheduleItem[])
     } catch {
       // Timeout / abort / network — product-catalog didn't answer.
-      setFees([])
       setUnavailable({ kind: 'unreachable' })
     } finally {
       setLoading(false)
@@ -145,6 +142,9 @@ export default function FeesPage() {
               service={t('Product-catalog', 'Product-catalog')}
               feature={t('Poplatky', 'Fees')}
               lang={language}
+              detail={fees.length > 0
+                ? t('Zobrazen je poslední úspěšně načtený ceník; údaje mohou být zastaralé.', 'The last successfully loaded fee schedule is shown; data may be stale.')
+                : undefined}
               dense
             />
           </div>
