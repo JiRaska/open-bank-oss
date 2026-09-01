@@ -39,6 +39,7 @@ dependencies {
     // IctIncidentDurabilityIT drives the real REST endpoints against a real Postgres: the row it
     // asserts is the whole point of #4728, and a mocked repository cannot show one.
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)

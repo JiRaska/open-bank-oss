@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Users, ArrowLeft, Save } from 'lucide-react'
@@ -19,6 +19,10 @@ export default function NewPartyPage() {
   const { t } = useLanguage()
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState<string | null>(null)
+  // State updates are asynchronous, so `saving` alone cannot stop two submit events in the
+  // same event turn. Creating a party is externally visible and the current service only
+  // de-duplicates by email, so take a synchronous client-side single-flight lock as well.
+  const createInFlight = useRef(false)
   const [form, setForm] = useState({
     partyType: 'INDIVIDUAL',
     legalName: '', tradingName: '', email: '', phone: '',
@@ -30,6 +34,8 @@ export default function NewPartyPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (createInFlight.current) return
+    createInFlight.current = true
     setSaving(true); setError(null)
     try {
       const idempotencyKey = crypto.randomUUID()
@@ -63,7 +69,10 @@ export default function NewPartyPage() {
       router.push(`/parties/${party.id}`)
     } catch {
       setError(t('Vytvoření strany selhalo. Zkuste to prosím znovu.', 'Failed to create party. Please try again.'))
-    } finally { setSaving(false) }
+    } finally {
+      createInFlight.current = false
+      setSaving(false)
+    }
   }
 
   return (

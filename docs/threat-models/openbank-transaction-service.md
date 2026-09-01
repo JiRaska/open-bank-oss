@@ -199,6 +199,8 @@ what the catalogue may hold.
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal balance, FX and ledger REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or transaction-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
   `transaction.reverse` four-eyes decision parked at 202 was discoverable only by whoever had been
   handed its approval id out of band — the ceremony completed only if the two operators were
@@ -309,3 +311,10 @@ what the catalogue may hold.
   Risk class = **integrity** (segregation of duties + auditability of a correction), mitigated by
   `MergeSweepDescriptionTest` and `TransactionResourceMergeSweepTest`. `authz.four-eyes.enforce`
   remains `false`; the verb is inert until that flip.
+- **2026-08-27** — Transaction-initiation trace contract. `TransactionService` emits the internal
+  `transaction.initiate` span only with the terminal transaction status. It deliberately excludes
+  amount, account/party identifiers, description, idempotency key and payment metadata. Risk class
+  = **confidentiality** (telemetry data minimisation) and **availability** (a trace exporter must not
+  alter initiation); the span is assertion-backed by `TransactionApiIT`, which drives the real HTTP
+  endpoint against PostgreSQL/Redpanda Testcontainers and the test Temporal terminal-write workflow.
+  The contract proves this service boundary only — it does not claim a distributed downstream trace.

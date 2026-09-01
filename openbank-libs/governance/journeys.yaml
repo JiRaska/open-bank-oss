@@ -39,12 +39,18 @@
 #   money_moving   true when the journey initiates a real payment or ledger posting.
 #   cronjob        path to the manifest that runs it — the CronJob and the ConfigMap holding
 #                  its k6 script live in that one file (active only). The script is embedded
-#                  rather than kept as a sibling .js so there is no second copy to drift:
-#                  the same reason the external-feed watch reads its URL out of the committed
-#                  config instead of keeping its own.
+#                  rather than kept as a sibling .js so there is no second copy to drift.
+#                  CI extracts this exact ConfigMap scalar for the PR and post-GitOps-merge
+#                  calls; the periodic CronJob mounts it directly. One executable artifact,
+#                  three call sites, enforced by check-journey-catalog.py.
 #   schedule       cron expression, mirrored from the manifest (active only).
+#   target_schedule intended cadence once a planned journey's blocker is removed. It is shown
+#                  in Test Intelligence but never interpreted as proof that a scheduler exists.
 #   falsification  how to make this journey go red on purpose. A journey that has only ever
 #                  been green is unfalsified — the same rule gates.yaml applies to CI gates.
+#   runtime_note    an active journey's known, evidence-backed runtime prerequisite. It is
+#                  rendered beside the live Kubernetes verdict; it never turns a red run
+#                  into a planned or passing one.
 #   blocked_by     what prevents this from running (planned only).
 
 version: 1
@@ -66,9 +72,52 @@ journeys:
       (or scale the customer-edge Rollout to zero) and the run must exit non-zero within one
       schedule interval. The script reads API_BASE / CUSTOMER_BASE / ADMIN_BASE from __ENV
       with the production hosts as defaults, so this is executable rather than a description.
-      The checks assert status < 500, so a backend outage fails the run while an auth
-      challenge does not. Measured against grafana/k6:1.2.0: a failing threshold exits 99, a
-      passing run exits 0.
+      The checks assert the actual edge contracts: 401 for protected API routes and an explicit
+      SSO redirect for Admin UI. A removed route returning 404 therefore fails rather than
+      reading as availability. Measured against grafana/k6:1.2.0: a failing threshold exits 99,
+      a passing run exits 0.
+
+  - id: product-catalog-read
+    title: "Product catalog read path"
+    capability: >-
+      The sandbox product catalog can serve a non-mutating product list through its real
+      HTTP handler and Postgres-backed projection. This is deliberately a service journey,
+      not a claim about an authenticated customer or a payment.
+    status: active
+    severity: ticket
+    money_moving: false
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-product-catalog-read.yaml
+    schedule: "*/10 * * * *"
+    runtime_note: >-
+      The in-cluster network edge is live, but this protected endpoint requires a dedicated
+      read-only client-credentials identity. Until the identity owner provisions that separate
+      Vault-backed secret, failed runs mean missing authentication evidence — not a green
+      catalog or network result. Tracked by #7324.
+    falsification: >-
+      Scale the product-catalog Deployment to zero, break its database connectivity, or set
+      CATALOG_BASE to a route that returns 5xx. The exact mounted k6 program must fail its
+      status, JSON-shape, and latency thresholds within one scheduled interval.
+
+  - id: admin-ui-sso-boundary
+    title: "Admin UI SSO boundary"
+    capability: >-
+      The public Admin UI reaches and renders its Keycloak SSO boundary in a real browser. This
+      proves the unauthenticated hand-off only; it does not claim an authenticated operator flow.
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
+    browser_variants: [chromium, firefox]
+    schedule: "13 */2 * * *"
+    environment: sandbox
+    falsification: >-
+      Return a 5xx from the Admin UI, remove the Keycloak SSO boundary, or point the browser
+      target at a host that cannot render it. Each scheduled browser variant must fail and retain
+      its immutable evidence envelope.
+    runtime_note: >-
+      This is deliberately credential-free. A separate least-privilege canary identity is still
+      required before an authenticated operator journey can be claimed.
 
   # ---------------------------------------------------------------------------------------
   # PLANNED — the journeys that would have caught the two reported outages. Both need a
@@ -83,6 +132,7 @@ journeys:
     status: planned
     severity: page
     money_moving: true
+    target_schedule: "*/15 * * * *"
     falsification: >-
       Blackhole the payment topic, or point the screening client at a dead host: the journey
       must go red rather than time out silently, and it must fail on the missing balance
@@ -101,6 +151,7 @@ journeys:
     status: planned
     severity: page
     money_moving: false
+    target_schedule: "*/15 * * * *"
     falsification: >-
       Revoke the APNs signing key in the sandbox, or set APNS_ENABLED=false: the journey must
       go red. Phase 0 already makes the second case visible as a metric
@@ -109,6 +160,170 @@ journeys:
       ADR-0252 phase 3 (#4348) — needs the canary device fleet and the /probe/ack endpoint.
       Delivery is not observable server-side at any effort: APNs issues no receipt, so no
       amount of in-cluster probing can substitute for a device acknowledging the push.
+
+  - id: customer-authentication
+    title: "Customer login and strong authentication"
+    capability: >-
+      A customer can authenticate, obtain the intended scopes and complete an SCA challenge
+      without a real person's credentials or device being used as monitoring infrastructure.
+    status: planned
+    severity: page
+    money_moving: false
+    target_schedule: "*/15 * * * *"
+    falsification: >-
+      Remove the synthetic client's SCA policy or break the challenge callback route: the
+      journey must fail on the missing authenticated session, not merely accept an OIDC redirect.
+    blocked_by: >-
+      ADR-0252 phase 1 and phase 3 (#4348) — requires a bank-owned synthetic identity plus a
+      canary authenticator whose secrets are held outside the script and whose sessions are tainted.
+
+  - id: account-overview
+    title: "Account overview and balances"
+    capability: >-
+      An authenticated customer can list their accounts and see a balance consistent with the
+      ledger after the read-model propagation window.
+    status: planned
+    severity: page
+    money_moving: false
+    target_schedule: "*/15 * * * *"
+    falsification: >-
+      Pause the balance projection consumer: authentication and account listing may still pass,
+      but the journey must fail when the expected ledger-backed balance does not converge.
+    blocked_by: >-
+      ADR-0252 phase 1 (#4348) — needs a durable synthetic party/account fixture and a cleanup
+      contract; a shared real account would make the assertion nondeterministic.
+
+  - id: sepa-credit-transfer
+    title: "SEPA credit-transfer lifecycle"
+    capability: >-
+      A customer can submit a SEPA transfer and observe its governed state progression through
+      screening, posting and outbound hand-off.
+    status: planned
+    severity: page
+    money_moving: true
+    target_schedule: "0 * * * *"
+    falsification: >-
+      Blackhole the SEPA instruction event after acceptance: the journey must fail on a stuck
+      lifecycle state and unchanged ledger, not report success from the initial HTTP response.
+    blocked_by: >-
+      ADR-0252 phase 1 (#4348) — synthetic taint must survive the payment, Kafka, ledger and
+      regulatory projections before an hourly transfer can safely run.
+
+  - id: standing-order-lifecycle
+    title: "Standing-order creation and execution"
+    capability: >-
+      A customer can create a standing order and its due execution becomes a posted payment
+      exactly once, including scheduler and idempotency behavior.
+    status: planned
+    severity: page
+    money_moving: true
+    target_schedule: "15 3 * * *"
+    falsification: >-
+      Disable the real scheduler or replay the due trigger: the journey must fail on no posting
+      or a duplicate posting, including when the create endpoint itself remains healthy.
+    blocked_by: >-
+      ADR-0252 phase 1 (#4348) plus a governed synthetic-clock/test-window contract. Moving the
+      production clock or leaving daily synthetic orders behind is not an acceptable probe.
+
+  - id: consent-revocation
+    title: "Consent grant and revocation"
+    capability: >-
+      A customer can grant a bounded consent, use it, revoke it and have subsequent access denied
+      across the consent and authorization projections.
+    status: planned
+    severity: page
+    money_moving: false
+    target_schedule: "0 * * * *"
+    falsification: >-
+      Stop the revocation event consumer: the revoke request can still return success, but the
+      journey must fail when the previously authorised read remains possible.
+    blocked_by: >-
+      ADR-0252 phase 1 (#4348) — needs synthetic customer/client identities, deterministic grants
+      and guaranteed cleanup so monitoring cannot accumulate live permissions.
+
+  - id: psd2-ais
+    title: "PSD2 account-information access"
+    capability: >-
+      A synthetic regulated client can complete the AIS authorization flow and retrieve only the
+      accounts and balances permitted by its consent.
+    status: planned
+    severity: page
+    money_moving: false
+    target_schedule: "*/15 * * * *"
+    falsification: >-
+      Break the consent-to-scope mapping or present an untrusted client certificate: the journey
+      must reject over-broad or unauthenticated access and fail if valid AIS access stops working.
+    blocked_by: >-
+      Requires a bank-owned synthetic TPP identity, test trust chain and consent fixture managed
+      by ADR-0252 phase 1 (#4348); production TPP credentials cannot be probe material.
+
+  - id: loan-origination
+    title: "Loan application to decision"
+    capability: >-
+      A synthetic applicant can submit an application and observe the asynchronous workflow reach
+      an auditable terminal decision with all required controls invoked.
+    status: planned
+    severity: ticket
+    money_moving: false
+    target_schedule: "30 4 * * *"
+    falsification: >-
+      Suspend one workflow activity or its event consumer: the journey must fail on the missing
+      terminal state and identify the stalled stage, not time out without provenance.
+    blocked_by: >-
+      Needs a synthetic applicant dataset with retention/deletion rules and deterministic policy
+      outcomes; ADR-0252 phase 1 (#4348) currently defines parties, not this richer fixture.
+
+  - id: statement-download
+    title: "Statement generation and download"
+    capability: >-
+      A customer can request a statement, wait for generation and download a non-empty document
+      whose account and period match the request.
+    status: planned
+    severity: ticket
+    money_moving: false
+    target_schedule: "0 5 * * *"
+    falsification: >-
+      Stop document generation or object-store access: the journey must fail on the missing or
+      mismatched document rather than treating request acceptance as completion.
+    blocked_by: >-
+      Needs a stable synthetic account history and an isolated document-retention prefix with
+      deterministic cleanup; tracked with the ADR-0252 phase-1 fixture work (#4348).
+
+  - id: mobile-critical-path
+    title: "Mobile login, overview and payment UI"
+    capability: >-
+      The shipped customer app can start, authenticate a canary, render account state and submit
+      a synthetic payment on Android and iOS through the same public edge customers use.
+    status: planned
+    severity: page
+    money_moving: true
+    target_schedule: "0 * * * *"
+    falsification: >-
+      Ship a build with a broken navigation route or point one platform at an invalid edge path:
+      the device journey must fail for that platform even when backend synthetics remain green.
+    blocked_by: >-
+      ADR-0252 phase 3 (#4348) — requires managed Android/iOS canary devices, signed builds,
+      synthetic credentials and acknowledgement/cleanup. JVM screenshot tests cannot substitute.
+
+  - id: admin-operator-access
+    title: "Admin operator sign-in and Test Intelligence access"
+    capability: >-
+      A least-privilege bank-owned operator can complete the sandbox SSO flow and reach the
+      Test Intelligence workspace with the intended role boundary. This proves the deployed
+      admin browser path, independently of the Admin UI's CI Playwright evidence.
+    status: planned
+    severity: ticket
+    money_moving: false
+    target_schedule: "*/30 * * * *"
+    falsification: >-
+      Remove the operator role mapping, break the SSO callback, or deny the Test Intelligence
+      API: the journey must fail after authentication on the missing protected workspace or its
+      authorization boundary, not pass merely because the public login page returned HTML.
+    blocked_by: >-
+      Needs a least-privilege bank-owned Keycloak canary identity plus a browser-capable,
+      digest-pinned runner isolated from the current protocol-only k6 CronJob. The existing
+      read-only k6 pod has no Chromium runtime; adding one without a separate security and
+      credential boundary would turn a monitoring gap into a privileged browser foothold.
 
 # ---------------------------------------------------------------------------------------
 # MONEY-PATH ACCOUNTABILITY (ADR-0252 phase 2, #4348)

@@ -112,6 +112,7 @@ class SepaPaymentOutboxRepositoryImpl(private val clock: Clock) :
 
     private fun SepaPaymentOutboxMessage.toEntity() = SepaPaymentOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload

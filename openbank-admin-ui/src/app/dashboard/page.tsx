@@ -15,6 +15,7 @@ import { hasPermission, type Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
 import { fleetHealthState, summarizeFleetHealth } from '@/lib/dashboard/fleetHealth'
 import styles from './Dashboard.module.css'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
 
 // Tri-state per fleet member. `deployed=false` is NEUTRAL (planned, not an outage) —
 // it must never be counted as an error, or the 23 not-yet-deployed services in the
@@ -168,13 +169,20 @@ export default function DashboardPage() {
               {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
-          <button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+          <button type="button" onClick={load} disabled={loading} aria-busy={loading} aria-label={t('Obnovit přehled platformy', 'Refresh platform overview')} className="btn btn-secondary btn-sm">
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
           </div>
         }
       />
+
+      <ExplorerGuide title={t('Vítejte ve svém operačním kokpitu', 'Welcome to your operations cockpit')}>
+        {t(
+          'Začněte pracovními frontami podle svých oprávnění. Červená znamená skutečný problém; šedá služba jen čeká na nasazení. Explorer nemá rád falešné poplachy — a vy je nemusíte řešit.',
+          'Start with the work queues matched to your permissions. Red means a real problem; a grey service is merely awaiting deployment. Explorer dislikes false alarms, so you do not have to chase them.',
+        )}
+      </ExplorerGuide>
 
       <section className={`card ${styles.workspace}`} aria-labelledby="workspace-heading">
         <div className={styles.workspaceHeading}>

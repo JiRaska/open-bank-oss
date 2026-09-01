@@ -66,9 +66,18 @@ locals {
   # in arc-runners.tf. Split out of that same string so the two can never disagree.
   ci_runner_repository = split("@", split("/", local.runner_image)[1])[0]
 
+  # A first image must exist before an independently reviewed GitOps workload can
+  # reference it. Incentive is the one bounded bootstrap exception: this creates
+  # its empty registry namespace only; it does not declare a workload, image tag,
+  # network edge, or live service. Remove this entry in the same PR that adds the
+  # first exact GitOps image pin. The resource precondition below prevents this exception from
+  # silently becoming permanent after that pin exists.
+  bootstrap_service_ecr_repositories = toset(["openbank-incentive-service"])
+
   service_ecr_repositories = setunion(
     local.gitops_image_repositories,
     toset([local.ci_runner_repository]),
+    local.bootstrap_service_ecr_repositories,
   )
 
   # Tag immutability, per repository, defaulting to MUTABLE.
@@ -122,6 +131,14 @@ resource "aws_ecr_repository" "service" {
   # window closes on the first apply, not on this merge.
   lifecycle {
     prevent_destroy = true
+
+    # Unlike a top-level check (which warns), a lifecycle precondition blocks
+    # both plan and apply. This forces the one-time bootstrap entry out in the
+    # same change that introduces its first exact GitOps image pin.
+    precondition {
+      condition     = length(setintersection(local.bootstrap_service_ecr_repositories, local.gitops_image_repositories)) == 0
+      error_message = "Remove a bootstrap ECR repository once its first GitOps image pin is declared."
+    }
   }
 }
 

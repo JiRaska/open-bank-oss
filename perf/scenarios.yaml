@@ -1,0 +1,15 @@
+version: 1
+scenarios:
+  - id: money-path-smoke
+    definition: perf/k6/money-path-smoke.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Runs only when a safe read-only money-path target is configured for the GitHub-hosted runner.
+    target_schedule: "0 5 * * *"
+    blocker: No isolated money-path target, dedicated runner, and verified least-privilege read identity are configured yet; a 401 is rejection evidence, not a handler performance baseline. The current scheduled performance gate measures the non-money-path openbank-product-catalog and openbank-flaky-test-hunter subjects only.
+
+  - id: money-path-write-benchmark
+    definition: perf/k6/money-path-write-benchmark.js
+    execution_mode: manual-local-isolated
+    safety_boundary: Mutates accounts and ledger journals; run only against an isolated disposable docker-compose stack, never the shared sandbox.
+    baseline_report: perf/reports/2026-07-10-money-path-write-benchmark.md
+    blocker: A repeatable isolated target and synthetic-data teardown are required before this can become a scheduled run.

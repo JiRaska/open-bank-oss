@@ -257,7 +257,10 @@ export default function LendingPage() {
         {(['queue', 'portfolio'] as const).map(id => (
           <button
             key={id}
+            type="button"
             onClick={() => setTab(id)}
+            aria-pressed={tab === id}
+            aria-label={id === 'queue' ? t('Zobrazit frontu žádostí', 'Show applications queue') : t('Zobrazit portfolio', 'Show portfolio')}
             style={{
               padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer',
               background: tab === id ? 'var(--accent)' : 'var(--surface-3)',
@@ -268,7 +271,7 @@ export default function LendingPage() {
           </button>
         ))}
         {stage && tab === 'queue' && (
-          <button onClick={() => setStage(null)} className="btn btn-secondary" style={{ fontSize: 11 }} data-testid="clear-stage">
+          <button type="button" onClick={() => setStage(null)} className="btn btn-secondary" style={{ fontSize: 11 }} data-testid="clear-stage" aria-label={t('Zrušit filtr fáze', 'Clear stage filter')}>
             {t('Filtr:', 'Filter:')} {label(stage)} ✕
           </button>
         )}

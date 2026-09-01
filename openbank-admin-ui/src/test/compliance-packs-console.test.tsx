@@ -35,6 +35,9 @@ const PENDING = [{
   proposedBy: 'maker@openbank.local',
   decidedBy: null,
   decidedAt: null,
+  proposedAt: '2026-08-20T08:00:00Z',
+  decisionReason: null,
+  pack: { jurisdiction: 'CZ', productType: 'CONSUMER_CREDIT', version: 1, coolingOffDays: 14 },
 }]
 
 const ACTIVE = [{ ...PENDING[0], id: '00000000-0000-0000-0000-000000000000', state: 'EXECUTED', proposedBy: '-' }]
@@ -107,6 +110,17 @@ describe('compliance pack activation console', () => {
     expect(screen.getAllByText(/b7c4d1e9a0f35286/).length).toBeGreaterThan(0)
   })
 
+  it('opens the exact reviewed pack and maker-checker audit detail', async () => {
+    vi.stubGlobal('fetch', mockFetch({ active: { status: 200, body: ACTIVE } }))
+    render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'View details' })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'View details' }))
+    expect(screen.getByText('Exact pack content')).toBeInTheDocument()
+    expect(screen.getByText(/"coolingOffDays": 14/)).toBeInTheDocument()
+    expect(screen.getByText(PENDING[0].contentHash)).toBeInTheDocument()
+  })
+
   it('an empty active list states the enforce-pack consequence, not just "none"', async () => {
     vi.stubGlobal('fetch', mockFetch({}))
     render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
@@ -145,6 +159,22 @@ describe('compliance pack activation console', () => {
 
     await waitFor(() => expect(screen.getByTestId('error')).toBeTruthy())
     expect(screen.getByTestId('error').textContent).toMatch(/must differ from maker/)
+  })
+
+  it('keeps decision controls separate from the pack-detail disclosure', async () => {
+    vi.stubGlobal('fetch', mockFetch({ pending: { status: 200, body: PENDING } }))
+    render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
+
+    await waitFor(() => expect(screen.getByTestId(`proposal-${PROPOSAL_ID}`)).toBeTruthy())
+    const reason = screen.getByRole('textbox', { name: 'Decision reason' })
+    fireEvent.click(reason)
+    fireEvent.change(reason, { target: { value: 'independent compliance review' } })
+
+    expect(reason).toHaveValue('independent compliance review')
+    expect(screen.queryByText('Exact pack content')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'View details' }))
+    expect(screen.getByText('Exact pack content')).toBeInTheDocument()
   })
 
   it('approving posts approve=true to the proposal decide route', async () => {

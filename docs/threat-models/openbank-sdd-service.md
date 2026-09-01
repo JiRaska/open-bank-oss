@@ -74,6 +74,8 @@ instruction, but the irreversible debit lives downstream.
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal transaction REST edge through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `accountId` on listMandates and `debitDate` on assessRefund. Both handlers are non-suspend and threw at the method boundary. `debitDate` is the input to the refund-window arithmetic (8-week / 13-month), so a request missing it must be rejected rather than defaulted — an UNPARSEABLE date is a different class and already 400 via `DateTimeExceptionMapper`. No new caller or boundary. Rollback: revert.
 - **2026-06-19** — Initial lightweight threat model (ADR-0030 D2).
 - **2026-08-06** — OPA PDP sidecar bootstrapped (#3679/#3807). Section 3 corrected: it had claimed

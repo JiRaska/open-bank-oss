@@ -112,7 +112,8 @@ mp:
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
-      # Onboarding AML screening (ADR-0073): open a screening case on PARTY_CREATED.
+      # Onboarding AML screening (ADR-0267 §2): open a screening case on PARTY_CREATED; the
+      # AML outcome is the second key of the party activation gate.
       party-events-in:
         # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
         # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows

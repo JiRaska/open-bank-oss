@@ -20,10 +20,11 @@ import org.jboss.logging.Logger
 import java.util.UUID
 
 /**
- * Opens an onboarding AML screening case when a party is created (ADR-0073), and — in the
- * sandbox — auto-clears it so the party clears the AML key of the activation gate without an
- * analyst. Emits aml.case.status_changed.v1 (CLEARED) on openbank.aml.events, which
- * party-service consumes for its KYC+AML two-key gate.
+ * Opens an onboarding AML screening case when a party is created (ADR-0267 §2 — the AML
+ * outcome is the second key of the party activation gate), and — in the sandbox — auto-clears
+ * it so the party clears the AML key of that gate without an analyst. Emits
+ * aml.case.status_changed.v1 (CLEARED) on openbank.aml.events, which party-service consumes
+ * for its KYC+AML two-key gate.
  *
  * Idempotent: the case idempotency key is "<partyId>:CUSTOMER_ONBOARDING", so a redelivered
  * PARTY_CREATED reuses the existing case; the auto-clear is skipped once the case is terminal.
@@ -39,7 +40,9 @@ import java.util.UUID
  * anywhere saying so.
  *
  * Auto-clear is sandbox-only (openbank.aml.auto-clear, default false). Production keeps the
- * four-eyes decision endpoint as the only path to CLEARED/BLOCKED.
+ * four-eyes decision endpoint as the only path to CLEARED/BLOCKED. No ADR decides this flag:
+ * ADR-0116 §4 decides only the KYC equivalent (openbank.kyc.auto-approve); the AML side is
+ * recorded in this service's docs/ only (#5785).
  */
 @ApplicationScoped
 class PartyEventConsumer(

@@ -5,6 +5,7 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignInteractionQuery
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -34,7 +35,8 @@ class CampaignInteractionResource(private val query: CampaignInteractionQuery) {
         @PathParam("interactionRef") interactionRef: UUID,
         @HeaderParam("X-Customer-Party-Id") partyId: String?,
     ): Response {
-        resolve(interactionRef, partyId) ?: return invalidInteractionResponse(partyId)
+        val parsedPartyId = parsePartyId(partyId) ?: return invalidInteractionResponse(partyId)
+        if (!query.validate(interactionRef, parsedPartyId)) return invalidInteractionResponse(partyId)
         return Response.noContent().build()
     }
 
@@ -46,20 +48,19 @@ class CampaignInteractionResource(private val query: CampaignInteractionQuery) {
         @PathParam("interactionRef") interactionRef: UUID,
         @HeaderParam("X-Customer-Party-Id") partyId: String?,
     ): Response {
-        val attribution = resolve(interactionRef, partyId)
+        val attribution = parsePartyId(partyId)?.let { query.resolveAttribution(interactionRef, it) }
             ?: return invalidInteractionResponse(partyId)
         return Response.ok(
             CampaignInteractionAttributionResponse(
                 campaignId = attribution.campaignId,
                 stepOrder = attribution.stepOrder,
                 channel = attribution.channel.name,
+                incentiveOfferRef = attribution.incentiveOfferRef,
             ),
         ).build()
     }
 
-    private suspend fun resolve(interactionRef: UUID, partyId: String?) = partyId
-        ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-        ?.let { query.resolve(interactionRef, it) }
+    private fun parsePartyId(partyId: String?): UUID? = partyId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
 
     private fun invalidInteractionResponse(partyId: String?): Response =
         if (partyId?.let { runCatching { UUID.fromString(it) }.isSuccess } == true) {
@@ -69,4 +70,9 @@ class CampaignInteractionResource(private val query: CampaignInteractionQuery) {
         }
 }
 
-data class CampaignInteractionAttributionResponse(val campaignId: UUID, val stepOrder: Int, val channel: String)
+data class CampaignInteractionAttributionResponse(
+    val campaignId: UUID,
+    val stepOrder: Int,
+    val channel: String,
+    val incentiveOfferRef: IncentiveOfferRef?,
+)

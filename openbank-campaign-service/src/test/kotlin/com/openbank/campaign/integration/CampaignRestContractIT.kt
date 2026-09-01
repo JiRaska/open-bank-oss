@@ -4,6 +4,8 @@
 
 package com.openbank.campaign.integration
 
+import com.openbank.campaign.domain.model.IncentiveOfferRef
+import com.openbank.campaign.infrastructure.incentive.LiveIncentiveOfferRegistry
 import com.openbank.campaign.infrastructure.segment.SilverSegmentEvaluator
 import com.openbank.campaign.it.CampaignPostgresRedisTestResource
 import io.agroal.api.AgroalDataSource
@@ -58,6 +60,7 @@ class CampaignRestContractIT {
 
     private val audienceJwt = mockk<JsonWebToken>()
     private val segmentEvaluator = mockk<SilverSegmentEvaluator>()
+    private val incentiveRegistry = mockk<LiveIncentiveOfferRegistry>()
 
     @BeforeEach
     fun installAudiencePrincipal() {
@@ -66,6 +69,7 @@ class CampaignRestContractIT {
         QuarkusMock.installMockForType(audienceJwt, JsonWebToken::class.java)
         coEvery { segmentEvaluator.evaluate(any()) } returns emptyList()
         QuarkusMock.installMockForType(segmentEvaluator, SilverSegmentEvaluator::class.java)
+        QuarkusMock.installMockForType(incentiveRegistry, LiveIncentiveOfferRegistry::class.java)
     }
 
     /**
@@ -89,6 +93,13 @@ class CampaignRestContractIT {
         {"name":"$name","goal":"prove the HTTP contract","segmentName":"$segmentName","segmentVersion":1,
          "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                    "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+    """.trimIndent()
+
+    private fun draftBodyWithIncentive(name: String, ref: IncentiveOfferRef) = """
+        {"name":"$name","goal":"prove immutable incentive selection","segmentName":"actives","segmentVersion":1,
+         "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                   "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
+         "incentiveOfferRef":{"id":"${ref.id}","name":"${ref.name}","version":${ref.version}}}
     """.trimIndent()
 
     private fun audienceBody(name: String) = """
@@ -203,6 +214,49 @@ class CampaignRestContractIT {
         } Then {
             statusCode(200)
             body("name", equalTo(revisedName))
+        }
+    }
+
+    @Test
+    fun `campaign pins and reloads the exact published incentive revision`() {
+        val ref = IncentiveOfferRef(UUID.randomUUID(), "summer-current-account", 3)
+        coEvery { incentiveRegistry.resolvePublished(ref) } returns ref
+
+        val id = Given {
+            contentType("application/json")
+            body(draftBodyWithIncentive("incentive-${UUID.randomUUID()}", ref))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("incentiveOfferRef.id", equalTo(ref.id.toString()))
+            body("incentiveOfferRef.name", equalTo(ref.name))
+            body("incentiveOfferRef.version", equalTo(ref.version))
+        } Extract {
+            path<String>("id")
+        }
+
+        When { get("/api/v1/campaigns/$id") } Then {
+            statusCode(200)
+            body("incentiveOfferRef.id", equalTo(ref.id.toString()))
+            body("incentiveOfferRef.name", equalTo(ref.name))
+            body("incentiveOfferRef.version", equalTo(ref.version))
+        }
+    }
+
+    @Test
+    fun `campaign rejects an incentive revision that is not published exactly`() {
+        val ref = IncentiveOfferRef(UUID.randomUUID(), "retired-reward", 1)
+        coEvery { incentiveRegistry.resolvePublished(ref) } returns null
+
+        Given {
+            contentType("application/json")
+            body(draftBodyWithIncentive("rejected-${UUID.randomUUID()}", ref))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("published incentive offer ${ref.name}@${ref.version} (${ref.id}) not found"))
         }
     }
 
@@ -380,14 +434,15 @@ class CampaignRestContractIT {
      * /api/v1/campaigns/planning` — then answers 400 for the entire portfolio because of one row the
      * HTTP API could never have created (#4825).
      */
-    private fun insertCampaignForSendLog(campaignId: UUID) {
+    private fun insertCampaignForSendLog(campaignId: UUID, incentiveOfferRef: IncentiveOfferRef? = null) {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """
                 INSERT INTO campaigns (
                     id, name, goal, segment_name, segment_version, steps_json, holdout_percent,
-                    state, created_by, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    state, created_by, created_at, updated_at,
+                    incentive_offer_id, incentive_offer_name, incentive_offer_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { statement ->
                 statement.setObject(1, campaignId)
@@ -401,6 +456,13 @@ class CampaignRestContractIT {
                 statement.setString(9, "fixture")
                 statement.setObject(10, OffsetDateTime.now())
                 statement.setObject(11, OffsetDateTime.now())
+                statement.setObject(12, incentiveOfferRef?.id)
+                statement.setString(13, incentiveOfferRef?.name)
+                if (incentiveOfferRef == null) {
+                    statement.setNull(14, java.sql.Types.INTEGER)
+                } else {
+                    statement.setInt(14, incentiveOfferRef.version)
+                }
                 statement.executeUpdate()
             }
         }
@@ -432,6 +494,31 @@ class CampaignRestContractIT {
         }
     }
 
+    private fun insertIncentiveOutcome(campaignId: UUID, status: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaign_incentive_outcome (
+                    event_id, reservation_id, campaign_id, step_order, attribution_ref,
+                    offer_id, offer_name, offer_version, status, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, UUID.randomUUID())
+                statement.setObject(3, campaignId)
+                statement.setInt(4, 0)
+                statement.setObject(5, UUID.randomUUID())
+                statement.setObject(6, UUID.randomUUID())
+                statement.setString(7, "term-deposit-welcome")
+                statement.setInt(8, 2)
+                statement.setString(9, status)
+                statement.setObject(10, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
     fun `interaction validation resolves only server-owned context for the owning party`() {
@@ -439,7 +526,8 @@ class CampaignRestContractIT {
         // durable parent directly, so this test runs entirely under the edge's ROLE_API identity
         // rather than borrowing an operator token to create a draft.
         val campaignId = UUID.randomUUID()
-        insertCampaignForSendLog(campaignId)
+        val offer = IncentiveOfferRef(UUID.randomUUID(), "term-deposit-welcome", 2)
+        insertCampaignForSendLog(campaignId, offer)
         val owner = UUID.randomUUID()
         val interactionRef = insertPushSend(campaignId, owner)
 
@@ -460,15 +548,37 @@ class CampaignRestContractIT {
             body("campaignId", equalTo(campaignId.toString()))
             body("stepOrder", equalTo(0))
             body("channel", equalTo("PUSH"))
+            body("incentiveOfferRef.id", equalTo(offer.id.toString()))
+            body("incentiveOfferRef.name", equalTo(offer.name))
+            body("incentiveOfferRef.version", equalTo(offer.version))
             body("partyId", nullValue())
         }
 
         Given {
             header("X-Customer-Party-Id", UUID.randomUUID().toString())
         } When {
-            get("/api/v1/campaigns/interactions/$interactionRef")
+            get("/api/v1/campaigns/interactions/$interactionRef/attribution")
         } Then {
             statusCode(404)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    fun `legacy campaign attribution keeps an explicit null incentive reference`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        val owner = UUID.randomUUID()
+        val interactionRef = insertPushSend(campaignId, owner)
+
+        Given {
+            header("X-Customer-Party-Id", owner.toString())
+        } When {
+            get("/api/v1/campaigns/interactions/$interactionRef/attribution")
+        } Then {
+            statusCode(200)
+            body("campaignId", equalTo(campaignId.toString()))
+            body("incentiveOfferRef", nullValue())
         }
     }
 
@@ -487,6 +597,24 @@ class CampaignRestContractIT {
             body("[0].surface", equalTo("STORIES"))
             body("[0].type", equalTo("IMPRESSION"))
             body("[0].count", equalTo(1))
+        }
+    }
+
+    @Test
+    fun `campaign incentive funnel distinguishes held inventory from redemption`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        insertIncentiveOutcome(campaignId, "RESERVED")
+        insertIncentiveOutcome(campaignId, "COMMITTED")
+
+        When {
+            get("/api/v1/campaigns/$campaignId/incentives")
+        } Then {
+            statusCode(200)
+            body("reserved", equalTo(1))
+            body("committed", equalTo(1))
+            body("released", equalTo(0))
+            body("expired", equalTo(0))
         }
     }
 

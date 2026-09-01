@@ -35,6 +35,18 @@
 name: Admin-UI deploy
 
 on:
+  # CI evidence changes far more frequently than the Admin UI source. A successful
+  # main Services CI and CI immediately rebuild the read-only evidence projection; the
+  # daily run is its recovery path when GitHub suppresses or delays an event. Both
+  # use the same signed image and GitOps-PR path as source-triggered deploys.
+  workflow_run:
+    # Services CI produces fleet envelopes; CI produces the Admin UI envelope.  Subscribe
+    # to both: refreshing after Services CI alone can snapshot a stale Admin UI verdict
+    # before the same main commit's UI test artifact is available.
+    workflows: ["Services CI", "CI"]
+    types: [completed]
+  schedule:
+    - cron: '17 3 * * *'
   push:
     branches: [main]
     paths:
@@ -47,7 +59,17 @@ on:
       - "openbank-infra/gitops/components/*/feature-flags.yaml"
       - "openbank-libs/governance/agents.yaml"
       - "openbank-libs/governance/compliance-controls.yaml"
+      # Test Intelligence's governed performance plans are baked into
+      # test-intelligence.json. Without these inputs a GitOps manifest can be Synced
+      # while the running UI still presents the prior plan/blocker snapshot.
+      - "perf/scenarios.yaml"
+      - "perf/k6/**"
       - "openbank-libs/governance/rules.yaml"
+      # Test Intelligence snapshot inputs. A journey catalog/manifest change must rebuild
+      # the image: the sandbox CronJob alone proves runtime, but the operator's bundled
+      # inventory and blockers would otherwise remain stale until an unrelated UI edit.
+      - "openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"
+      - "openbank-libs/governance/journeys.yaml"
       # openbank-libs/docs is the ONLY docs tree baked into the image: the Dockerfile's
       # docs-collector copies /repo/openbank-*/docs, and src/lib/services/docs.ts serves the
       # `libs` service from /app/docs-bundle rather than from a running pod. Every other
@@ -78,21 +100,78 @@ concurrency:
   # later, far from the cause (same hazard auto-deploy.yml documents). Queueing is
   # safe: GitHub keeps only the newest pending run per group, so the latest commit
   # still wins — it just waits for the in-flight deploy to finish signing.
-  group: admin-ui-deploy
+  # Job-level `if:` is evaluated only after concurrency admission. A workflow_run that is
+  # successful but belongs to an OLDER main SHA can therefore enter the shared queue, evict the
+  # pending deploy for a newer push, and only then discover that it must skip. That exact race
+  # cancelled the pending Test Intelligence deploy for 29dc20e2 in favour of a stale evidence
+  # refresh (#7211). Keep workflow-run events in a SHA-scoped queue; deploy-source independently
+  # rejects a source SHA that is no longer main before the privileged build. Push, dispatch and
+  # schedule retain one queue, so the newest operator/source-triggered deploy still wins normally.
+  group: >-
+    admin-ui-deploy-${{
+      github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'eligible'
+    }}
   cancel-in-progress: false
 
 jobs:
+  deploy-source:
+    name: Authorize deploy source
+    # A GitOps image bump runs the ordinary CI workflows on main. Their successful
+    # workflow_run event has no head_commit payload, so the old build-push condition
+    # could not recognise the self-generated `chore(admin-ui): deploy ...` commit and
+    # rebuilt the image again. Resolve the exact producer SHA before allocating the
+    # arm64/OIDC build job and expose one closed boolean to the downstream job.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      proceed: ${{ steps.source.outputs.proceed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.2
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 1
+      - id: source
+        name: Reject stale or self-generated deploy source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [ -z "$main_sha" ]; then
+            echo "::error::could not resolve origin/main; refusing a privileged build from an unverified source"
+            exit 1
+          fi
+          if [ "$source_sha" != "$main_sha" ]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping stale source $source_sha; main is now $main_sha. A newer push/workflow run owns deployment."
+            exit 0
+          fi
+
+          subject="$(git log -1 --format=%s)"
+          if [[ "$subject" == "chore(admin-ui): deploy "* ]]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping self-generated GitOps commit; its image is already built, signed and attested."
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build-push:
     name: Build + push admin-ui
     # Skip if the push was generated by this workflow's own GitOps PR (loop-breaker).
     # The GitOps commit message always starts with "chore(admin-ui): deploy".
     #
-    # It USED to also touch cluster-topology.json / infra-lifecycle.json, which match this
-    # workflow's own path filter — that is why the loop existed. `add-paths` on the PR step now
-    # scopes the deploy commit to the gitops manifest alone, so the loop can no longer form by
-    # that route. This guard is kept as belt-and-braces: it costs nothing and still holds if a
-    # future step writes into openbank-admin-ui/** again.
-    if: "!startsWith(github.event.head_commit.message, 'chore(admin-ui): deploy')"
+    # The PR step now scopes the deploy commit to the GitOps manifest, which prevents a direct
+    # push-path match. CI still runs for that main commit, though, and its workflow_run completion
+    # is a second trigger route; deploy-source closes that route using the producer's exact SHA.
+    # `deploy-source` resolves workflow_run.head_sha and rejects a deploy generated
+    # by this workflow before this privileged, arm64 build job can start.
+    needs: deploy-source
+    if: needs.deploy-source.outputs.proceed == 'true'
     # Native arm64 GitHub-hosted runner (free on public repos): the admin-ui image
     # is linux/arm64. ECR push + cosign use the same GitHub-OIDC role as before.
     runs-on: ubuntu-24.04-arm
@@ -112,6 +191,9 @@ jobs:
       # Mirrored into env because the `secrets` context is NOT available in a step-level `if:`
       # — only job-level env can read it. Used solely to decide whether to mint an App token.
       GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
+      # Read-only token for the separate private customer-app repository. It is optional:
+      # missing scope/evidence renders an explicit blocked client row; it never blocks deploy.
+      APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
 
     outputs:
       tag: ${{ steps.build.outputs.tag }}
@@ -123,6 +205,16 @@ jobs:
           fetch-depth: 0
           # persist-credentials: true (default) — needed so git in the collectors
           # can read the repo; the gitops step uses a separate checkout.
+
+      - name: Checkout mobile RUM capability metadata
+        if: env.APP_RO_TOKEN != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: JiRaska/openbank-app
+          token: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
+          path: .app-src
+          persist-credentials: false
+          fetch-depth: 1
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -273,16 +365,18 @@ jobs:
           done
           echo "SBOM staging complete."
 
-      - name: Stage JUnit test results (per-service latest artifact)
+      - name: Stage Test Intelligence evidence (per-service latest artifact)
         # services-ci.yml uploads one artifact per service: test-reports-{service}
         # (7-day retention). The old approach (download from ONE run) fails with
         # path-scoped CI: only recently-changed services have artifacts in any single
         # run, so unchanged services always show 0 tests in the UI.
         #
         # Fix: look up the most recent non-expired artifact for EACH known service
-        # independently via GET /actions/artifacts?name=test-reports-{svc}&per_page=1.
-        # This spans all runs — a service not touched for 6 days still shows its
-        # latest results, as long as the 7-day artifact retention hasn't lapsed.
+        # independently from the named-artifact endpoint.  A global artifact list
+        # with `per_page=1` is unsound here: its newest item can be an unmerged PR
+        # artifact, and filtering it out would hide the older valid main artifact.
+        # Scan a bounded number of pages for the latest non-expired main result,
+        # so unrelated frequent main runs cannot evict an unchanged service's proof.
         #
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
         # Best-effort: expired or absent → shows tests:0 (accurate "not run recently").
@@ -293,37 +387,60 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
 
-          # Must match KNOWN in scripts/collect-test-results.mjs and KNOWN_SERVICES in
-          # src/app/api/test-results/route.ts — keep all three lists in sync.
-          SERVICES=(
-            openbank-account-service openbank-aml-service openbank-audit-service
-            openbank-balance-service openbank-card-issuance-service openbank-clearing-service
-            openbank-consent-service openbank-dispute-service openbank-domestic-payment
-            openbank-fx-service openbank-interest-service openbank-kyc-service
-            openbank-ledger-service openbank-notification-service openbank-party-service
-            openbank-pid-service openbank-psd2-service openbank-sanctions-service
-            openbank-sca-service openbank-security-scanner openbank-sepa-instant
-            openbank-sepa-payment openbank-standing-order-service openbank-swift-service
-            openbank-tpp-registry-service openbank-transaction-service
+          # Released components come from version.txt. The deterministic-simulation
+          # harness is an explicitly governed tooling component without a release
+          # version; it emits the same v1 envelope and must not disappear between
+          # producer and deployment merely because it is intentionally unreleased.
+          mapfile -t SERVICES < <(
+            {
+              find . -mindepth 2 -maxdepth 2 -name version.txt -printf '%h\n' | sed 's#^./##'
+              [ ! -d openbank-simulation ] || printf '%s\n' openbank-simulation
+            } | sort -u
           )
+
+          latest_main_artifact() {
+            local artifact_name="$1" page artifact
+            # Artifact results are newest-first for this exact name.  Five pages
+            # cap this best-effort collector at 295 read calls for 59 components;
+            # a hit normally arrives on page one.
+            for page in 1 2 3 4 5; do
+              artifact="$(api "https://api.github.com/repos/${REPO}/actions/artifacts?name=${artifact_name}&per_page=100&page=${page}" \
+                | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; print(str(a[0]['id']) if a else '')" \
+                2>/dev/null || true)"
+              if [ -n "${artifact}" ]; then
+                printf '%s\n' "${artifact}"
+                return 0
+              fi
+            done
+            return 1
+          }
 
           DOWNLOADED=0
           for svc in "${SERVICES[@]}"; do
-            art_name="test-reports-${svc}"
-            ARTIFACT=$(api \
-              "https://api.github.com/repos/${REPO}/actions/artifacts?name=${art_name}&per_page=1" \
-              | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired']]; print(str(a[0]['id'])+' '+a[0]['name'] if a else '')" \
-              2>/dev/null || true)
-            if [ -z "${ARTIFACT}" ]; then
+            art_name="test-intelligence-${svc}"
+            # This image represents deployed main, not the newest PR candidate.
+            # Keep branch provenance explicit: an unmerged artifact must never be
+            # presented in the sandbox as evidence for the deployed revision.
+            art_id="$(latest_main_artifact "${art_name}" || true)"
+            if [ -z "${art_id}" ]; then
               echo "  ${svc}: no artifact (skip)"
               continue
             fi
-            art_id="${ARTIFACT%% *}"
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
                 -L -o "/tmp/${art_name}.zip" 2>/dev/null; then
               TMPDIR_ART="/tmp/${art_name}-extracted"
               rm -rf "${TMPDIR_ART}" && mkdir -p "${TMPDIR_ART}"
               unzip -q "/tmp/${art_name}.zip" -d "${TMPDIR_ART}" 2>/dev/null || true
+              # actions/upload-artifact strips the uploaded directory prefix: the
+              # service envelope is therefore normally `run.json` at the archive
+              # root.  Keep accepting the previous nested layout too, so the UI
+              # retains the latest per-service execution evidence across action
+              # layout changes rather than silently falling back to stale JUnit.
+              RUN_JSON="$(find "${TMPDIR_ART}" -type f \( -name 'run.json' -o -path '*/test-intelligence/run.json' \) -print -quit)"
+              if [ -n "${RUN_JSON}" ]; then
+                mkdir -p "${svc}/build/test-intelligence"
+                cp "${RUN_JSON}" "${svc}/build/test-intelligence/run.json"
+              fi
               # Inside the zip: test-results/*/TEST-*.xml (actions/upload-artifact@v7 strips
               # the leading service/build/ prefix). Reconstruct the full target path.
               find "${TMPDIR_ART}" -path "*/test-results/*/TEST-*.xml" | while read -r xml; do
@@ -332,6 +449,10 @@ jobs:
                 mkdir -p "$(dirname "${target}")"
                 cp "${xml}" "${target}"
               done
+              find "${TMPDIR_ART}" -path '*/reports/kover/report.xml' | while read -r xml; do
+                mkdir -p "${svc}/build/reports/kover"
+                cp "${xml}" "${svc}/build/reports/kover/report.xml"
+              done
               DOWNLOADED=$((DOWNLOADED + 1))
               echo "  ${svc}: staged"
             else
@@ -339,13 +460,78 @@ jobs:
             fi
           done
           COUNT=$(find . -path "*/build/test-results/*/TEST-*.xml" | wc -l | tr -d ' ')
-          echo "Staged ${COUNT} JUnit XML files from ${DOWNLOADED}/${#SERVICES[@]} services."
+          RUN_COUNT=$(find . -path "*/build/test-intelligence/run.json" | wc -l | tr -d ' ')
+          echo "Staged ${RUN_COUNT} run envelopes and ${COUNT} JUnit XML files from ${DOWNLOADED}/${#SERVICES[@]} services."
 
-      - name: Stage pitest mutation results from latest weekly run
+      - name: Stage customer-app Test Intelligence evidence
+        # Cross-repository evidence is read-only and best-effort. The compact JSON artifact
+        # contains counts and provenance only; it never imports private source or test output.
+        if: env.APP_RO_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
+          APP_REPO: JiRaska/openbank-app
+        run: |
+          set -u
+          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          mkdir -p openbank-admin-ui/client-test-evidence
+          # Only reviewed default-branch evidence may enter a deployed control plane. A newer
+          # PR artifact remains visible in GitHub but cannot replace the sandbox verdict.
+          ARTIFACTS="$(api "https://api.github.com/repos/${APP_REPO}/actions/artifacts?per_page=100" \
+            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('openbank-app-test-intelligence-') and not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; a.sort(key=lambda x:x['created_at'], reverse=True); [print(x['id']) for x in a[:20]]" 2>/dev/null || true)"
+          while read -r artifact_id; do
+            [ -n "${artifact_id}" ] || continue
+            archive="/tmp/openbank-app-test-intelligence-${artifact_id}.zip"
+            api "https://api.github.com/repos/${APP_REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
+            evidence="$(unzip -Z1 "${archive}" | awk '/\.json$/{print; exit}')"
+            [ -n "${evidence}" ] || continue
+            # Every producer artifact contains `openbank-app-unit.json`. Preserve a unique
+            # deployment-local name or older downloads overwrite the newest observation.
+            unzip -p "${archive}" "${evidence}" > "openbank-admin-ui/client-test-evidence/openbank-app-${artifact_id}.json"
+          done <<< "${ARTIFACTS}"
+          echo "Staged $(find openbank-admin-ui/client-test-evidence -name '*.json' | wc -l | tr -d ' ') mobile client evidence artifact(s)."
+
+      - name: Stage immutable per-attempt Test Intelligence history
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          mkdir -p openbank-admin-ui/test-run-history
+          MAX_ENVELOPES=100
+          # The workflow-runs endpoint is dominated by deploy-only Services CI runs, which
+          # produce no per-service envelope.  Even a 100-run scan can therefore find zero
+          # evidence while fresh immutable artifacts exist. Query the artifact inventory
+          # directly, retaining only non-expired main-branch envelopes. The artifact list is
+          # newest-first across the entire repository; one 100-item page is readily filled
+          # by per-service evidence, so page it before applying the bounded 100-envelope cap.
+          # GitHub's `name` filter is exact-match and cannot select run-id-suffixed artifacts.
+          for page in 1 2 3 4 5; do
+            api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
+              | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+          done \
+            | head -"${MAX_ENVELOPES}" \
+            | while read -r artifact_id artifact_name; do
+                [ "$(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ')" -lt "$MAX_ENVELOPES" ] || break
+                [ -n "${artifact_id}" ] || continue
+                archive="/tmp/${artifact_name}.zip"
+                api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
+                # actions/upload-artifact strips the uploaded directory prefix, so the
+                # immutable service envelope is normally `run.json` at the zip root.
+                # Keep accepting a nested path for compatibility with an artifact action
+                # layout change, but never require a source-tree path that is not retained.
+                envelope="$(unzip -Z1 "${archive}" | awk '$0 == "run.json" || /\/run\.json$/ { print; exit }' || true)"
+                [ -n "${envelope}" ] || continue
+                unzip -p "${archive}" "${envelope}" > "openbank-admin-ui/test-run-history/${artifact_name}.json"
+              done
+          echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes."
+
+      - name: Stage pitest mutation results from latest completed weekly run
         # pitest.yml uploads one artifact per service: pitest-{service} (30-day retention).
         # collect-quality-report.mjs reads openbank-*/build/reports/pitest/mutations.xml.
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
-        # Best-effort: absent → mutations tab stays empty (acceptable, never blocks build).
+        # Do not filter to success: a failed/latest attempt must not disappear behind an
+        # older green run. Best-effort absence stays visible as missing evidence.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -353,11 +539,11 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=success&per_page=1" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=1" \
             | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
             2>/dev/null || true)
           if [ -z "${RUN_ID}" ]; then
-            echo "No successful pitest run found — skipping pitest staging."
+            echo "No completed pitest run found — skipping pitest staging."
             exit 0
           fi
           echo "Staging pitest results from run ${RUN_ID}..."
@@ -389,6 +575,100 @@ jobs:
           done <<< "${ARTIFACTS}"
           COUNT=$(find . -path "*/build/reports/pitest/mutations.xml" | wc -l | tr -d ' ')
           echo "Staged ${COUNT} mutations.xml files from ${DOWNLOADED} artifacts."
+
+      - name: Stage performance evidence from latest complete k6 run
+        # The Test Intelligence collector reads k6 summaries only from the deployment-local
+        # perf-artifacts directory.  A declared scenario is deliberately not promoted to a
+        # result, so bring in only artifacts emitted by the latest successful main run of the
+        # governed performance workflows.  The money-path baseline may intentionally emit only
+        # a `not-run` envelope when no safe runner target exists; retain that provenance too.
+        # A manually narrowed perf-gate dispatch is useful for diagnosis, but must not replace
+        # the broader declared-scope snapshot with one service's result.  Select the newest
+        # successful run that retained BOTH declared v1 artifacts instead.
+        # Missing or expired evidence remains `not-run` in the
+        # UI; this best-effort staging step must never turn absence into a deployment failure.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" "$@"; }
+          mkdir -p openbank-admin-ui/perf-artifacts
+          RUN_ID=""
+          RUN_IDS=$(api \
+            "https://api.github.com/repos/${REPO}/actions/workflows/perf-gate.yml/runs?branch=main&status=success&per_page=20" \
+            | python3 -c "import json,sys; [print(r['id']) for r in json.load(sys.stdin).get('workflow_runs',[])]" \
+            2>/dev/null || true)
+          for candidate in ${RUN_IDS}; do
+            candidate_artifacts=$(api \
+              "https://api.github.com/repos/${REPO}/actions/runs/${candidate}/artifacts?per_page=100" \
+              | python3 -c "import json,sys; [print(a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if not a['expired']]" \
+              2>/dev/null || true)
+            if grep -qx 'perf-reports-openbank-product-catalog' <<< "${candidate_artifacts}" \
+              && grep -qx 'perf-reports-openbank-flaky-test-hunter' <<< "${candidate_artifacts}"; then
+              RUN_ID="${candidate}"
+              break
+            fi
+          done
+          if [ -z "${RUN_ID}" ]; then
+            echo "No successful complete declared-scope performance run found — performance evidence remains not-run."
+            exit 0
+          fi
+          ARTIFACTS=$(api \
+            "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
+            | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('perf-reports-') and not a['expired']]" \
+            2>/dev/null || true)
+          if [ -z "${ARTIFACTS}" ]; then
+            echo "No non-expired performance artifacts in run ${RUN_ID} — performance evidence remains not-run."
+            exit 0
+          fi
+          DOWNLOADED=0
+          while IFS=' ' read -r artifact_id artifact_name; do
+            [ -n "${artifact_id}" ] || continue
+            archive="/tmp/${artifact_name}.zip"
+            if api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null; then
+              unzip -q "${archive}" -d openbank-admin-ui/perf-artifacts 2>/dev/null || true
+              DOWNLOADED=$((DOWNLOADED + 1))
+            fi
+          done <<< "${ARTIFACTS}"
+          COUNT=$(find openbank-admin-ui/perf-artifacts -name '*-summary.json' | wc -l | tr -d ' ')
+          echo "Staged ${COUNT} k6 summary file(s) from ${DOWNLOADED} performance artifact(s), run ${RUN_ID}."
+
+          BASELINE_RUN_ID=$(api \
+            "https://api.github.com/repos/${REPO}/actions/workflows/perf-baseline.yml/runs?branch=main&status=success&per_page=1" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
+            2>/dev/null || true)
+          if [ -z "${BASELINE_RUN_ID}" ]; then
+            echo "No successful money-path baseline run found — it remains declared but unmeasured."
+            exit 0
+          fi
+          BASELINE_ARTIFACT=$(api \
+            "https://api.github.com/repos/${REPO}/actions/runs/${BASELINE_RUN_ID}/artifacts?per_page=100" \
+            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if x['name']=='k6-money-path-summary' and not x['expired']]; print(a[0]['id'] if a else '')" \
+            2>/dev/null || true)
+          if [ -z "${BASELINE_ARTIFACT}" ]; then
+            echo "Money-path baseline ${BASELINE_RUN_ID} has no retained evidence artifact."
+            exit 0
+          fi
+          BASELINE_DIR="$(mktemp -d)"
+          if ! api "https://api.github.com/repos/${REPO}/actions/artifacts/${BASELINE_ARTIFACT}/zip" -L -o /tmp/k6-money-path-summary.zip \
+            || ! unzip -q /tmp/k6-money-path-summary.zip -d "${BASELINE_DIR}"; then
+            echo "::warning::Could not stage money-path baseline evidence from run ${BASELINE_RUN_ID}."
+            exit 0
+          fi
+          BASELINE_SUMMARY=$(find "${BASELINE_DIR}" -name 'perf-summary.json' -print -quit)
+          BASELINE_ENVELOPE=$(find "${BASELINE_DIR}" -name 'perf-run.json' -print -quit)
+          SUMMARY_STATUS=no
+          if [ -n "${BASELINE_SUMMARY}" ]; then
+            cp "${BASELINE_SUMMARY}" openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json
+            SUMMARY_STATUS=yes
+          fi
+          ENVELOPE_STATUS=no
+          if [ -n "${BASELINE_ENVELOPE}" ]; then
+            cp "${BASELINE_ENVELOPE}" openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json
+            ENVELOPE_STATUS=yes
+          fi
+          echo "Staged money-path baseline ${BASELINE_RUN_ID}: summary=${SUMMARY_STATUS} envelope=${ENVELOPE_STATUS}."
 
       - name: Collect production-readiness scorecard
         # Derives C1–C9 maturity scores from the repo and writes
@@ -423,9 +703,51 @@ jobs:
         with:
           version: v0.72.0
 
+      - name: Stage Test Intelligence deployment history
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          mkdir -p openbank-admin-ui/test-intelligence-history
+          # Query the owning workflow's successful main runs, not the repository-wide artifact
+          # stream. Every services-ci run contributes many artifacts and previously pushed a
+          # snapshot beyond the fixed five-page search window. A successful Admin-UI deploy owns
+          # at most one immutable snapshot, so this route is complete without unrelated artifacts.
+          # Measured 2026-08-26: 30 retained snapshots were found in 51 runs (52 API calls).
+          # The 100-run ceiling bounds pathological missing-artifact cases;
+          # fewer results remain explicit in the rendered history (#6614).
+          snapshot_ids="${RUNNER_TEMP}/test-intelligence-snapshot-ids"
+          : > "${snapshot_ids}"
+          snapshot_count=0
+          run_ids="$(api "https://api.github.com/repos/${REPO}/actions/workflows/admin-ui-deploy.yml/runs?branch=main&status=success&per_page=100" \
+            | python3 -c "import json,sys; [print(x['id']) for x in json.load(sys.stdin).get('workflow_runs',[])]" 2>/dev/null || true)"
+          while read -r deploy_run_id; do
+            [ -n "${deploy_run_id}" ] || continue
+            [ "${snapshot_count}" -lt 30 ] || break
+            api "https://api.github.com/repos/${REPO}/actions/runs/${deploy_run_id}/artifacts?per_page=100" \
+              | python3 -c "import json,sys; [print(x['id']) for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('test-intelligence-snapshot-') and not x['expired']]" \
+              >> "${snapshot_ids}" 2>/dev/null || true
+            snapshot_count="$(awk '!seen[$0]++' "${snapshot_ids}" | wc -l | tr -d ' ')"
+          done <<< "${run_ids}"
+          awk '!seen[$0]++' "${snapshot_ids}" | head -30 \
+            | while read -r artifact_id; do
+                [ -n "${artifact_id}" ] || continue
+                api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "/tmp/test-intelligence-${artifact_id}.zip" 2>/dev/null || continue
+                unzip -joq "/tmp/test-intelligence-${artifact_id}.zip" '*.json' -d openbank-admin-ui/test-intelligence-history 2>/dev/null || true
+              done
+
       - name: Build, collect, push
         id: build
         env:
+          # The build script's quality collector reads these only to fetch the
+          # Pact Broker's per-Pact provider-verification verdict before the
+          # immutable Test Intelligence snapshot is baked. Docker receives no
+          # build arg for them, so they cannot enter the image or browser bundle.
+          PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
           # Optional: enables source-map upload to GlitchTip (#3235). Unset = no upload, normal
           # build — the maps are what turn a captured error into a file and a line.
           GLITCHTIP_AUTH_TOKEN: ${{ secrets.GLITCHTIP_AUTH_TOKEN }}
@@ -436,6 +758,12 @@ jobs:
           # skips ./gradlew sbomAll (too heavy for CI); SBOMs are staged from the
           # security workflow artifact in the preceding step instead.
           # --no-bump skips the sed+git step; the gitops PR job handles the bump.
+          # ECR tags are immutable. An operator-initiated or scheduled evidence
+          # refresh can intentionally rebuild the same commit after new artifacts
+          # arrive, so make that refresh unique while retaining commit provenance.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_run" ]; then
+            export ADMIN_UI_IMAGE_TAG_SUFFIX="run${GITHUB_RUN_ID}"
+          fi
           bash openbank-infra/scripts/build-push-admin-ui.sh --no-sbom --no-bump --no-login \
             2>&1 | tee /tmp/build-admin-ui.log
 
@@ -448,6 +776,14 @@ jobs:
           [ -n "${TAG}" ] || { echo "ERROR: could not extract pushed image tag"; exit 1; }
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Pushed tag: ${TAG}"
+
+      - name: Retain immutable Test Intelligence snapshot
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: openbank-admin-ui/test-intelligence.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Rewrite GitOps image tag
         id: rewrite

@@ -51,7 +51,9 @@ permissions:
 
 concurrency:
   # Don't let the nightly run cancel an in-flight PR/main run (or vice-versa): give the
-  # scheduled/manual fleet build its own concurrency lane.
+  # scheduled/manual fleet build its own concurrency lane. A manual fleet run is
+  # additionally keyed by its run id: it is an operator-requested diagnostic and
+  # must never cancel (or be cancelled by) the required PR gate on the same ref.
   #
   # For push-to-main, github.ref is always refs/heads/main regardless of commit — so
   # without a per-SHA key, any push landing while a prior main push is still building
@@ -62,7 +64,7 @@ concurrency:
   # (issue #846). Key push-to-main by SHA so every commit gets its own lane and is never
   # cancelled; PR pushes keep the superseding behavior (a new push to the same branch
   # should cancel the old run).
-  group: services-ci-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci') }}
+  group: services-ci-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (github.event_name == 'workflow_dispatch' && github.run_id || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci')) }}
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
@@ -174,7 +176,7 @@ jobs:
                   # (No dedup here: the matrix JSON below is built with `sort -u`, so a service
                   # named by both its src and a pact edge collapses to one job downstream.)
                   # DST-harness edge (ADR-0115/#267) — same as the PR path.
-                  if { grep -qE '(^| )openbank-(ledger|balance|transaction)-service( |$)' <<< " $CHANGED " \
+                  if { grep -qE '(^| )openbank-(ledger|balance|transaction|billing|interest|statement)-service( |$)' <<< " $CHANGED " \
                        || grep -qE '(^| )openbank-sepa-payment( |$)' <<< " $CHANGED " \
                        || grep -qE '(^| )openbank-settlement-service( |$)' <<< " $CHANGED "; } \
                      && ! grep -qE '(^| )openbank-simulation( |$)' <<< " $CHANGED "; then
@@ -276,9 +278,10 @@ jobs:
               # already build everything incl. the simulation, so this only matters per-module.
               # Issue #267 (ADR-0100 full-service adoption) extended the same project-dependency
               # binding to sepa-payment (directory openbank-sepa-payment, no "-service" suffix)
-              # and settlement-service — add both to the edge so a change to either also rebuilds
-              # the simulation, exactly like ledger/balance/transaction already do.
-              if { grep -qE '(^| )openbank-(ledger|balance|transaction)-service( |$)' <<< " $CHANGED " \
+              # and settlement-service. Billing, interest and statement are also imported into
+              # the DST runner: without these edges their domain changes could ship without
+              # running the invariant/fault sweep that exercises them.
+              if { grep -qE '(^| )openbank-(ledger|balance|transaction|billing|interest|statement)-service( |$)' <<< " $CHANGED " \
                    || grep -qE '(^| )openbank-sepa-payment( |$)' <<< " $CHANGED " \
                    || grep -qE '(^| )openbank-settlement-service( |$)' <<< " $CHANGED "; } \
                  && ! grep -qE '(^| )openbank-simulation( |$)' <<< " $CHANGED "; then

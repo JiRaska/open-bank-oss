@@ -10,7 +10,7 @@ import { Users, Plus, Search, RefreshCw, ChevronRight, ChevronDown } from 'lucid
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 
 const PAGE_SIZE = 25
@@ -31,19 +31,6 @@ interface Pagination {
   limit: number
   hasNextPage: boolean
   nextCursor?: string
-}
-
-const KYC_COLORS: Record<string, string> = {
-  APPROVED:    'var(--green)',
-  PENDING:     'var(--yellow)',
-  REJECTED:    'var(--red)',
-  NOT_STARTED: 'var(--text-muted)',
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  ACTIVE:   'var(--green)',
-  INACTIVE: 'var(--text-muted)',
-  BLOCKED:  'var(--red)',
 }
 
 export default function PartiesPage() {
@@ -250,16 +237,8 @@ export default function PartiesPage() {
                   </td>
                   <td><span className="tag">{p.partyType}</span></td>
                   <td style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{p.email}</td>
-                  <td>
-                    <span className="pill" style={{ background: `${STATUS_COLORS[p.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLORS[p.status] ?? 'var(--text-muted)' }}>
-                      {p.status}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="pill" style={{ background: `${KYC_COLORS[p.kycStatus] ?? 'var(--text-muted)'}22`, color: KYC_COLORS[p.kycStatus] ?? 'var(--text-muted)' }}>
-                      {p.kycStatus?.replace('_', ' ')}
-                    </span>
-                  </td>
+                  <td><StatusBadge status={p.status} /></td>
+                  <td><StatusBadge status={p.kycStatus} label={p.kycStatus?.replace('_', ' ')} /></td>
                   <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString(dateLocale)}</td>
                   <td>
                     <Link href={`/parties/${p.id}`} style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', textDecoration: 'none' }}>

@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.26.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.1...ledger-service-v1.26.2) (2026-08-30)
+
+
+### Bug Fixes
+
+* **ledger:** require human close draft maker ([#7624](https://github.com/JiRaska/open-bank-oss/issues/7624)) ([7b5d97e](https://github.com/JiRaska/open-bank-oss/commit/7b5d97eecc37f3f5d24dc76c1c7d06a7ad0933f9))
+
+## [1.26.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.0...ledger-service-v1.26.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **regulatory:** complete FINREP and COREP previews ([#7296](https://github.com/JiRaska/open-bank-oss/issues/7296)) ([d387b3e](https://github.com/JiRaska/open-bank-oss/commit/d387b3ea51293416dc15a243d248564c2eeacf84))
+
+## [1.26.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.25.0...ledger-service-v1.26.0) (2026-08-26)
+
+
+### Features
+
+* **ledger:** persist trusted synthetic taint ([#7176](https://github.com/JiRaska/open-bank-oss/issues/7176)) ([aee9dd8](https://github.com/JiRaska/open-bank-oss/commit/aee9dd800af708489bd75fb9e82f131a983e6a45))
+
+## [1.25.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.24.0...ledger-service-v1.25.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [1.24.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.23.0...ledger-service-v1.24.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
 ## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.22.0...ledger-service-v1.23.0) (2026-08-19)
 
 

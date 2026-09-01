@@ -43,6 +43,12 @@ export type Grant = {
   closedReason?: string | null
 }
 
+export function grantCounterparty(grant: Grant, direction: 'granted' | 'received') {
+  return direction === 'granted'
+    ? { id: grant.granteePartyId, name: counterpartyLabel(grant.granteeName) }
+    : { id: grant.grantorPartyId, name: counterpartyLabel(grant.grantorName) }
+}
+
 /**
  * OFFERED is the one delegation status the shared tone map cannot get right by default: it is
  * in-flight (awaiting the grantee's SCA-bound acceptance), not terminal, so it renders as a

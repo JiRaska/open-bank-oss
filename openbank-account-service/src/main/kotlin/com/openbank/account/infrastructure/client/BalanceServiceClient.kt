@@ -6,6 +6,7 @@ package com.openbank.account.infrastructure.client
 
 import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -35,6 +36,7 @@ import java.util.UUID
  * token is propagated outbound via [BalanceAuthPropagationFilter].
  */
 @RegisterRestClient(configKey = "balance-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(BalanceAuthPropagationFilter::class)
 @Path("/api/v1/balances")
 @Produces(MediaType.APPLICATION_JSON)

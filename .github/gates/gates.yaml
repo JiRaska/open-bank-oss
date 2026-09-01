@@ -76,6 +76,42 @@
 #
 gates:
 
+  - id: test-intelligence-ecosystem
+    name: "Test Intelligence producer/runtime/projection contract (ADR-0273, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A dashboard can look green while service CI, Testcontainers runtime proof and the shared schema drift independently; this gate keeps the complete evidence chain present."
+    review_after: "2027-08-23"
+    min_subjects: 50
+    selftest: python3 .github/scripts/collect-test-run-evidence.py --self-test && python3 .github/scripts/check-test-intelligence-ecosystem.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-test-intelligence-ecosystem.py
+
+  - id: synthetic-taint-rest-client-boundaries
+    name: "Synthetic taint reaches every internal REST edge (ADR-0252, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A synthetic journey that loses its marker at an unregistered REST client reaches downstream persistence as real activity; forwarding the marker to an external endpoint is a separate trust-boundary failure. Every client declaration must make exactly one of those decisions explicit."
+    review_after: "2027-08-24"
+    min_subjects: 110
+    selftest: python3 .github/scripts/check-synthetic-taint-rest-clients.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-synthetic-taint-rest-clients.py --enforce
+
+  - id: synthetic-outbox-taint-persistence
+    name: "Synthetic taint survives shared transactional outbox persistence (ADR-0252, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A synthetic marker forwarded over REST but replaced by a false default at the asynchronous event boundary makes test activity indistinguishable from real banking activity; both schema and writer mapping must survive together."
+    review_after: "2027-08-25"
+    min_subjects: 20
+    selftest: python3 .github/scripts/check-synthetic-outbox-taint.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-synthetic-outbox-taint.py --enforce
+
   # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an
@@ -1505,7 +1541,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-journey-catalog.py --self-test
     selftest_expect: pass
-    min_subjects: 3   # 3 journeys today (2026-08-09): 1 active, 2 planned
+    min_subjects: 12  # 12 governed journeys today (2026-08-26): 1 active, 11 planned
     run: |
       # Falsified against the REAL tree before wiring in, not only in the self-test's temp
       # trees: moving cronjob-journey-public-edge.yaml aside makes it exit 2 naming that
@@ -1810,6 +1846,44 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-main-red-watch.py --check-declaration
+
+  # The spot-kill auto-retry is a control with no audience: it is `workflow_run`-triggered, so
+  # its red is addressed to nobody, and its whole design is to act unattended. Until #6255 its
+  # decision logic was a `run:` block, which means GitHub Actions on a real `workflow_run` event
+  # was its ONLY executor — every error path was reachable only by waiting for the rare event
+  # that produces it. What that cost, measured: the detection `gh api` call had no transient
+  # handling while the `gh run rerun` call three lines away had three attempts with backoff, and
+  # one installation rate limit (HTTP 403 — indistinguishable from a permission denial except by
+  # message text) killed the step before it emitted any `decision=` line. Its target, run
+  # 32499371733, had two jobs interrupted mid-flight (22 and 20 recorded steps) and is still at
+  # `run_attempt: 1`. The mirror-image hole on the `failure` branch was worse: `|| echo ""`
+  # rendered the same rate limit as `jobs-unreadable` + exit 0, a GREEN run of the control about
+  # a reclaimed run it never re-ran.
+  #
+  # This gate is that logic's only falsification. It is the pair of prevent-proofs that matter —
+  # a reclaim IS re-run, a deliberate queue cancel is NOT — plus every error class, asserted on
+  # BOTH the exit code and the calls actually issued to a stub `gh`. The call log is the
+  # load-bearing half: an exit code alone cannot tell "declined to re-run" from "re-ran and the
+  # stub happened to succeed", which is exactly the confusion the queue-cancel case exists to
+  # prevent (#3208: a retry that silently undid a queue drain).
+  - id: spot-kill-retry-selftest
+    name: "spot-kill auto-retry decides correctly and survives a rate limit (issue #6255, enforced)"
+    group: registry
+    mode: enforced
+    # The gate IS the harness: its `run:` is the script's own falsification suite, so a separate
+    # `selftest:` would be the same command executed twice for one signal.
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It drives the real decision function
+      against a stub gh and asserts exit code AND issued calls for all 12 cases, so its red is
+      reachable by construction; falsified in both directions before wiring in (see the
+      rationale and the script header).
+    budget_seconds: 30   # no network, no sleeps (the backoff is 0 in the harness); ~1s observed
+    rationale: "Without it the script's error paths are exercised only when a real spot reclaim coincides with a real API failure — which is how #6255 shipped a detection call with no transient handling at all, stranding a reclaimed run at attempt 1 and telling nobody."
+    review_after: "2027-02-23"
+    # Subjects are assertions, not files: the floor drops the day someone deletes a case.
+    min_subjects: 12
+    run: |
+      bash .github/scripts/spot-kill-retry.sh --self-test
 
   # Nothing in this repo has ever read a merged PR's required contexts: before #4240,
   # `grep -rl 'required_status_checks\|statusCheckRollup' .github/scripts .github/workflows`
@@ -2403,13 +2477,43 @@ gates:
       python3 .github/scripts/check-outbox-has-writer.py .
 
   - id: pact-provider-replay-coverage
-    name: "Pact provider-replay coverage (issue #2338, enforced)"
+    name: "Pact provider replay + broker publication (issues #2338, #7621, enforced)"
     group: api
     mode: enforced
     selftest: |
       python3 .github/scripts/check-pact-provider-replay.py --selftest
     run: |
       python3 .github/scripts/check-pact-provider-replay.py
+
+  # Issue #7597. release-please.yml's "Map released components -> tags" step builds released.tsv
+  # from release-please-config.json's per-package `component` field; a package with a version.txt
+  # but no `component` produces no row, silently — no SBOM, no cosign provenance, no VEX for that
+  # package's release, while the release itself (tag, GitHub Release) looks completely normal.
+  # Measured today: openbank-campaign-service and openbank-tax-reporting-service both have a
+  # version.txt and a `packages` entry with no `component` key.
+  #
+  # This gate deliberately does NOT add the missing `component` keys — that changes the release
+  # tag name (`include-component-in-tag: true`), and version.txt / release-please-config.json /
+  # .release-please-manifest.json are a three-way lockstep for an ALREADY-RELEASED package
+  # (ADR-0029 rule 2), so retagging existing release history is a repo-owner decision, not CI-gate
+  # material. What this enforces is the durable half: a package with a version.txt must resolve to
+  # a component that reaches released.tsv, derived from release-please-config.json every run —
+  # never a hand-kept list — so a THIRD package cannot join the two above silently.
+  #
+  # RATCHET: today's two are baselined in the script with a reason citing #7597; the check fails on
+  # a stale baseline entry in either direction (fixed but still listed, or listed but no longer
+  # released), same contract as check-pact-provider-replay.py above.
+  - id: release-evidence-coverage
+    name: "released package resolves to a component that reaches released.tsv (issue #7597, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "A released package with no component key never enters released.tsv, so its release produces no SBOM, no provenance attestation and no VEX document — silently, since the release itself still succeeds. This gate makes that gap a finding instead of an absence nothing else can see."
+    review_after: "2027-08-31"
+    min_subjects: 60
+    selftest: |
+      python3 .github/scripts/check-release-evidence-coverage.py --self-test
+    run: |
+      python3 .github/scripts/check-release-evidence-coverage.py --enforce
 
   # openapi enum vs the Kotlin enum behind it (issue #5895 / #5962, enforced).
   #
@@ -2503,6 +2607,55 @@ gates:
       set -euo pipefail
       bash .github/scripts/install-oasdiff.sh
       python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}" --enforce
+
+  # The gate above classifies the bump against the MERGE-BASE, which is the right question for
+  # "is this bump big enough" and structurally blind to a number that someone else already took.
+  # Measured 2026-08-30: four PRs were green while claiming a version main had already released
+  # (account 1.11.0, consent 1.7.0, card-issuance 1.8.0, campaign 1.43.0). Each forked one minor
+  # lower and bumped by one; a competing PR then landed the same number first. The merge-base still
+  # holds the OLD value, so the contract gate sees a clean minor bump — and git sees nothing either,
+  # because identical text is not a conflict, so the merge is exit 0 and prints nothing. Two checks
+  # each answering a question that is individually right and jointly insufficient.
+  #
+  # This one asks whether the number is still free on the base branch AS IT IS NOW.
+  #
+  # DETECTION, NOT PREVENTION, and the distinction matters: a run is only as fresh as the moment it
+  # executes, so a PR whose last CI run predates a competing merge and then merges with no later run
+  # is invisible here as to any run-time check. Closing that needs a merge queue or up-to-date-branch
+  # enforcement; ADR-0048 deliberately chose detection. What this buys is that a stale claim goes RED
+  # ON THE NEXT RUN instead of merging silently — today all four collisions are green.
+  #
+  # The self-test drives the pure comparison directly and carries must-VIOLATE cases, not only
+  # passing ones, so it can detect its own vacuity. Falsified before merge against the four real
+  # colliding branches (exit 1 each, each naming the taken number) and against two non-colliding
+  # ones (#6486 1.16.0->1.17.0, #6481 1.5.0->1.6.0, exit 0) — it discriminates in both directions
+  # rather than failing everything.
+  - id: openapi-version-not-taken
+    name: "openapi-version-not-taken — info.version still free on the base tip (ADR-0048, enforced)"
+    group: api
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    # No min_subjects: this gate is DIFF-SCOPED, so most PRs legitimately have zero subjects
+    # (they touch no openapi.yaml). A floor here is the "declares a floor and never prints a
+    # count" failure the subject-floor gate exists to catch -- which is exactly how it caught
+    # this entry on its own first CI run. api-contract-gate, diff-scoped for the same reason,
+    # declares none either. The gate still prints SUBJECTS=, including zero, so that "no
+    # subjects" and "did not look" never render identically.
+    rationale: >-
+      api-contract-gate classifies a bump against the merge-base, so it cannot see a version a
+      competing PR already released; four PRs were green on 2026-08-30 claiming taken numbers.
+    review_after: 2027-03-01   # Re-examine if a merge queue or up-to-date-branch enforcement
+                               # lands: either would PREVENT this collision rather than detect
+                               # it late, making this gate redundant. ADR-0048 chose detection,
+                               # so until that changes it stays.
+    selftest: |
+      set -euo pipefail
+      python3 .github/scripts/check-openapi-version-not-taken.py --self-test
+    run: |
+      set -euo pipefail
+      git fetch -q origin main
+      python3 .github/scripts/check-openapi-version-not-taken.py --base "${PR_DIFF_BASE}" --base-ref origin/main --enforce
 
   # ENFORCED against a declared baseline (#2314). It landed advisory because 104 findings
   # cannot be a merge blocker on day one — but an advisory check over a GENERATED comparison
@@ -3309,6 +3462,16 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-oidc-client-configured.py
+  - id: pr-build-cloud-credentials
+    name: "reusable PR build lane carries no cloud credentials (enforced)"
+    group: security
+    mode: enforced
+    rationale: "The build lane executes pull-request code, so a deploy or registry role there is an exfiltrable credential rather than a cache optimization."
+    review_after: "2027-08-23"
+    selftest: python3 .github/scripts/check-pr-build-cloud-credentials.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-pr-build-cloud-credentials.py
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
   # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
   # artifact — and every one of them is perfectly happy with a document Keycloak refuses to
@@ -3924,3 +4087,21 @@ gates:
     min_subjects: 30   # 45 incoming channels today (2026-08-21, incl. audit-service agent-audit-events-in)
     run: |
       python3 .github/scripts/check-incoming-dlq-wiring.py --enforce
+
+  # #7645. The ClickHouse warehouse's schema is applied by a ConfigMap mounted into
+  # /docker-entrypoint-initdb.d, and ClickHouse only executes it when the data directory is EMPTY —
+  # so a schema change made after the cluster's first boot is real only for the NEXT fresh boot, and
+  # nothing scanned the migration directory to keep the ConfigMap in step with it. Two migrations
+  # (V9 synthetic_provenance, V10 credit_funnel) were merged and believed-deployed while absent from
+  # the ConfigMap, and a naming collision (two files both claiming V9) sat undetected alongside them.
+  - id: clickhouse-migration-configmap-sync
+    name: "every ClickHouse migration has a matching boot ConfigMap key (#7645, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "The ClickHouse init ConfigMap only runs on an empty data directory, so a migration added to the source-of-record directory without a matching ConfigMap key is invisible to every fresh boot; nothing scanned the two for drift before this gate, and two migrations plus a V9 naming collision had already accumulated unapplied."
+    review_after: "2027-02-28"
+    selftest: python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --self-test
+    selftest_expect: pass
+    min_subjects: 11   # 11 migrations today (2026-08-31)
+    run: |
+      python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --enforce

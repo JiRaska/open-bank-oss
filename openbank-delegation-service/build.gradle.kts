@@ -52,6 +52,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Secret-free Testcontainers lifecycle evidence for the immutable Test Intelligence envelope.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contracts for the four services delegation-service calls before it will
     // mint a grant (sca, pid, account, card-issuance) — issue #2991.

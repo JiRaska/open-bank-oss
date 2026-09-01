@@ -118,7 +118,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
         <kbd style={{
           fontSize: '10px', padding: '1px 5px',
           background: 'var(--surface-3)', border: '1px solid var(--border)',
-          borderRadius: '4px', color: 'var(--text-tertiary)', fontFamily: 'inherit',
+          borderRadius: '4px', color: 'var(--text-secondary)', fontFamily: 'inherit',
         }}>⌘K</kbd>
       </button>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
@@ -141,7 +141,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
               marginRight: '6px',
               borderRadius: '10px',
               background: 'var(--surface-3)',
-              color: 'var(--text-tertiary)',
+              color: 'var(--text-secondary)',
               border: '1px solid var(--border)',
               letterSpacing: '0.02em',
               cursor: 'pointer',
@@ -199,7 +199,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
             onMouseLeave={e => { if (!menuOpen) e.currentTarget.style.background = 'transparent' }}
           >
             <div style={{
-              width: '26px', height: '26px', background: 'var(--accent)', borderRadius: '50%',
+              width: '26px', height: '26px', background: 'var(--ob-accent-hover)', borderRadius: '50%',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: '11px', fontWeight: 700, color: '#fff', flexShrink: 0,
             }}>{initials}</div>

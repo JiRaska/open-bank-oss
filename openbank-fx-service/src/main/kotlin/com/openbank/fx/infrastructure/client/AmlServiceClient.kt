@@ -4,6 +4,7 @@
 
 package com.openbank.fx.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -23,6 +24,7 @@ import java.util.UUID
  * the call returns the raw [Response].
  */
 @RegisterRestClient(configKey = "aml-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/aml/cases")
 @Produces(MediaType.APPLICATION_JSON)
@@ -30,10 +32,7 @@ import java.util.UUID
 interface AmlServiceClient {
 
     @POST
-    fun createCase(
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
-        request: CreateAmlCaseRequest
-    ): Uni<Response>
+    fun createCase(@HeaderParam("Idempotency-Key") idempotencyKey: String, request: CreateAmlCaseRequest): Uni<Response>
 }
 
 /** Mirror of aml-service `CreateAmlCaseRequest`. */
@@ -46,5 +45,5 @@ data class CreateAmlCaseRequest(
     val riskLevel: String,
     val alertCode: String,
     val alertDetail: String?,
-    val matchedEntity: String?
+    val matchedEntity: String?,
 )

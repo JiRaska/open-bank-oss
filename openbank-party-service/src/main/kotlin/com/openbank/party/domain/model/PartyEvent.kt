@@ -146,6 +146,7 @@ object PartyEvents {
             "eventType" to eventType,
             "partyId" to party.id,
             "partyType" to party.partyType,
+            "classification" to party.classification,
             "status" to party.status,
             "kycStatus" to party.kycStatus,
             "legalName" to party.legalName,

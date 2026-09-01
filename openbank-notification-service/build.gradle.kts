@@ -36,6 +36,7 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
@@ -65,6 +66,16 @@ kover {
             }
         }
     }
+}
+
+tasks.withType<Test> {
+    // The notification suite has three @QuarkusTestProfile variants (fast scheduler, Slack
+    // oversight and default-off push fallback). Each variant forces another Quarkus bootstrap
+    // alongside Testcontainers in the same forked JVM. The Gradle default 512m heap exhausted
+    // in CI while Quarkus loaded Hibernate's parser, which then surfaced as unrelated OIDC
+    // availability failures. Keep the capacity correction local to this module: no test is
+    // skipped and fleet-wide test memory remains unchanged.
+    maxHeapSize = "2g"
 }
 
 // Pact: write generated consumer contracts to pacts/ and forward broker config.

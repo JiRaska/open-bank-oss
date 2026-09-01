@@ -13,18 +13,12 @@ import { useServiceResource } from '@/lib/services/useServiceResource'
 import { stashRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
+import { StatusBadge } from '@/components/ui'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 interface SwiftMessage {
   id: string; messageType: string; senderBic: string; receiverBic: string
   amount: number; currency: string; status: string; createdAt: string; reference: string
-}
-
-const STATUS_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  SENT:       { bg: 'var(--success-bg)',  text: 'var(--success-text)',  border: 'var(--success-border)' },
-  PENDING:    { bg: 'var(--warning-bg)',  text: 'var(--warning-text)',  border: 'var(--warning-border)' },
-  FAILED:     { bg: 'var(--danger-bg)',   text: 'var(--danger-text)',   border: 'var(--danger-border)' },
-  PROCESSING: { bg: 'var(--info-bg)',     text: 'var(--info-text)',     border: 'var(--info-border)' },
 }
 
 export default function SwiftPage() {
@@ -118,7 +112,6 @@ export default function SwiftPage() {
                 <th aria-label={t('Detail', 'Detail')} style={{ width: '36px' }} />
               </tr></thead>
               <tbody>{filtered.map(m => {
-                const sc = STATUS_COLORS[m.status] ?? STATUS_COLORS.PENDING
                 return (
                   <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
                     tabIndex={0}
@@ -135,10 +128,7 @@ export default function SwiftPage() {
                       {m.amount?.toLocaleString(numberLocale, { minimumFractionDigits: 2 })} {m.currency}
                     </td>
                     <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{m.reference}</td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-                        background: sc.bg, color: sc.text, border: `1px solid ${sc.border}` }}>{m.status}</span>
-                    </td>
+                    <td style={{ padding: '12px 16px' }}><StatusBadge status={m.status} tone={m.status === 'PROCESSING' ? 'info' : undefined} /></td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString(dateLocale) : '—'}</td>
                     <td style={{ padding: '12px 8px', textAlign: 'right' }}><ChevronRight size={14} style={{ color: 'var(--text-tertiary)' }} /></td>
                   </tr>

@@ -99,14 +99,12 @@ export default function TransactionsPage() {
         // sandbox), not that the search itself failed. Distinguish the cases so
         // the operator sees a meaningful state instead of a raw "HTTP 404".
         setFailure(await classifyBffFailure(res))
-        setResult(null)
         return
       }
       setResult(await res.json())
     } catch {
       // Network-level failure (BFF unreachable from the browser).
       setFailure('unreachable')
-      setResult(null)
     } finally {
       setLoading(false)
     }
@@ -152,7 +150,7 @@ export default function TransactionsPage() {
               value={bban} onChange={e => setBban(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()} />
           </div>
-          <button className="btn btn-secondary" onClick={() => setShowFilters(f => !f)} aria-expanded={showFilters} aria-controls="transaction-search-filters">
+          <button type="button" className="btn btn-secondary" onClick={() => setShowFilters(f => !f)} aria-expanded={showFilters} aria-controls="transaction-search-filters">
             <Filter size={13} />
             {hasFilters ? <span style={{ color: 'var(--accent)' }}>{t('Filtry', 'Filters')} ({[iban,bban,referenceNumber,endToEndId,counterparty,status,type,dateFrom,dateTo,amountMin,amountMax,channel].filter(Boolean).length})</span> : t('Filtry', 'Filters')}
           </button>
@@ -217,14 +215,14 @@ export default function TransactionsPage() {
               </div>
             </div>
             {hasFilters && (
-              <button className="btn btn-secondary" style={{ marginTop: '10px' }} onClick={clearFilters}>
+              <button type="button" className="btn btn-secondary" style={{ marginTop: '10px' }} onClick={clearFilters} aria-label={t('Vymazat filtry transakcí', 'Clear transaction filters')}>
                 <X size={12} /> {t('Vymazat filtry', 'Clear filters')}
               </button>
             )}
           </div>
         )}
 
-        {failure && <DataUnavailable kind={failure} service="Transaction-service" feature={t('Vyhledávání transakcí', 'Transaction search')} lang={language} />}
+        {failure && <DataUnavailable kind={failure} service="Transaction-service" feature={t('Vyhledávání transakcí', 'Transaction search')} lang={language} dense={result !== null} />}
 
         {/* Results */}
         {result && (

@@ -15,7 +15,16 @@ describe('payment initiation access boundary', () => {
   })
 
   it('does not change the backend-backed idempotent money path', () => {
-    expect(page).toContain("'Idempotency-Key': crypto.randomUUID()")
+    // This assertion used to read `'Idempotency-Key': crypto.randomUUID()` — it pinned
+    // the DEFECT in place under a name that claimed the opposite. A fresh UUID per
+    // submit throws away the server-side idempotency the payment services genuinely
+    // enforce, which is precisely what #7172 reported. What the money path must
+    // preserve is that a key is SENT and that it is STABLE across a retry; the
+    // behaviour is asserted for real (request counts and key equality) in
+    // payments-create-single-flight.test.tsx — this line only keeps the wiring honest.
+    expect(page).toContain("'Idempotency-Key': domesticIdem.forPayload(payload)")
+    expect(page).toContain("'Idempotency-Key': sepaIdem.forPayload(payload)")
+    expect(page).not.toContain('crypto.randomUUID()')
     expect(page).toContain('const SEPA_API         = \'/api/sepa-payments\'')
     expect(page).toContain('const DOMESTIC_API     = \'/api/domestic-payments\'')
     expect(page).toContain('f.vopStatus === \'no_match\'')

@@ -373,14 +373,10 @@ change_requirements:
         reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
-      - topic: "openbank.delegation.events"
-        reason: "Tracked future work (ADR-0232 D3): product-service enforcement projections (account/card/savings) are the next implementation slice and are the intended consumers — the publisher ships first so the event contract is stable before consumers land. Re-triage: remove this entry with the first projection consumer PR."
       - topic: "proposal-events"
         reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). Nothing is published today and three facts say so: the topic is declared nowhere under openbank-infra/, the service is absent from auto-deploy.yml's ALL_SERVICES, and no KafkaUser exists for it. The intended consumer is the oversight/review surface that ADR-0244 D7 describes, not yet built — the producer ships first so the wire shape is stable before consumers land, same shape as the delegation.events and engagement.events entries above. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
-      - topic: "openbank.billing.fee.event"
-        reason: "ADR-0248, temporary — the consumer exists but isn't on main yet: document-service's AnnualFeeSummaryReadyConsumer is in #4122 (open). This is a real cross-PR merge-order gap, not a #889-class abandoned producer. Re-triage: remove this entry once #4122 merges."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -1080,6 +1076,21 @@ feature_flags:
 coverage:
   tool: kover
   ratchet_only: true
+  # ADR-0273: one privacy-preserving evidence envelope joins CI execution, real Testcontainers
+  # starts, performance/mutation runs and sandbox synthetics.  It is additive: raw JUnit and Kover
+  # stay independently consumable until the projection has proven itself across the fleet.
+  test_intelligence:
+    schema: openbank-libs/governance/test-intelligence-run.schema.json
+    producer: .github/scripts/collect-test-run-evidence.py
+    fleet_ci: .github/workflows/_service-ci.yml
+    runtime_library: openbank-libs-testing
+    projection: openbank-admin-ui
+    states: [passed, failed, skipped, not-run, stale, blocked, unknown]
+    provenance_required: [commit, workflow, run_attempt, collected_at]
+    testcontainers_runtime_proof: required-when-shared-resource-is-used
+    run_history: immutable-per-attempt-artifact-30-days
+    browser_failure_diagnostics: metadata-only-authenticated-artifact-7-days
+    compatibility: raw-junit-and-kover-remain-readable-during-expand-migrate-verify
   floors:
     default: 39                         # current openbank-libs floor (ADR-0020)
     money_path_floor: 40                # enforced baseline (all 13 money-path services, ratchet-only)
@@ -1981,8 +1992,13 @@ ci_runners:
     deploy_only_signed_digests: true
   gate: ci-runner-governance
   enforced: planned                     # ADR-0053 Accepted; lint + tofu enable land on rollout
-  target_enforce_date: "2026-08-31"   # ADR-0144
-  blocked_on: "a CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) + the OpenTofu apply for the three scale sets have not both landed yet"
+  target_enforce_date: "2026-11-30"   # ADR-0144. Moved from 2026-08-31, which passed with the
+                                      # blocker unresolved and turned an enforced gate red on every
+                                      # PR regardless of its diff. Extending the horizon is the
+                                      # sanctioned move here; the alternative -- flipping `enforced`
+                                      # to satisfy the date -- would claim a control this repo does
+                                      # not have.
+  blocked_on: "the CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) does not exist: no file under .github/scripts or .github/gates references that key (control: money_path_services is referenced by two, so the probe sees rule keys). The OpenTofu half is less clear than this line used to claim -- arc-runners.tf and arc-runner-reaper.tf are in the tree, but a committed .tf is not an applied one, and that is not checkable from this repository. Corroborating evidence that the pools are not fully provisioned: #6458 records openbank-batch as a declared pool with no capacity and no consumer."
 
 # ---------------------------------------------------------------------------------------
 # Infra apply (ADR-0060). Closes the "as-code without applied" gap: CI applies the
@@ -2314,6 +2330,15 @@ gitops_ref_integrity:
   # layer down. Verified by REVERT: with #1232's ExternalSecret removed the guard fails
   # naming `Secret payments/vop-oidc`; restored, it passes.
   incident: 2026-07-16
+
+pr_build_cloud_credentials:
+  script: .github/scripts/check-pr-build-cloud-credentials.py
+  wired_into: .github/gates/gates.yaml    # gate id pr-build-cloud-credentials, group security, enforced
+  rule: >-
+    The reusable `_service-ci.yml` build job, which executes pull-request code on GitHub-hosted
+    runners, must not assume a cloud role or log in to a cloud registry. Credentialed cache,
+    contract and deployment work belongs only to a separately trusted lane.
+  basis: untrusted_code_must_not_receive_deploy_credentials
 
 oidc_secret_convention:
   script: .github/scripts/check-oidc-secret-convention.py

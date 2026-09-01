@@ -4,7 +4,7 @@
 
 `openbank-account-service` je **systém záznamu (system of record) pro definici účtů** v OpenBank platformě. Drží:
 
-- **Account aggregate** — IBAN, měna, vlastník (party-id), typ účtu (CURRENT / SAVINGS / TECHNICAL), stav (ACTIVE / FROZEN / CLOSED).
+- **Account aggregate** — IBAN, měna, vlastník (party-id), typ účtu (CURRENT / SAVINGS / TERM_DEPOSIT / TECHNICAL), stav (ACTIVE / FROZEN / CLOSED).
 - **AccountAuthorization** — kdo má jaké oprávnění k účtu (OWNER / SIGNATORY / VIEWER / TECHNICAL).
 - **AccountBalance** — denormalizovaný "rychlý" zůstatek pro UI; **autoritativní zdroj je `openbank-balance-service`** (event-driven sync).
 

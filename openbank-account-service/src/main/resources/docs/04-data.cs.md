@@ -15,7 +15,7 @@ erDiagram
     text public_id UK "acc-xxxx"
     text iban UK
     text owner_party_id "FK to party-svc, no DB FK"
-    text type "CURRENT|SAVINGS|TECHNICAL"
+    text type "CURRENT|SAVINGS|TERM_DEPOSIT|TECHNICAL"
     text currency "ISO 4217"
     text status "ACTIVE|FROZEN|CLOSED"
     text freeze_reason

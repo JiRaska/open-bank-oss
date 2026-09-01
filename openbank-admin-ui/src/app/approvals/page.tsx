@@ -10,14 +10,16 @@
 // recorded sign-off; the agent never executes. Segregation of duties (approver ≠
 // author) is enforced by the agent.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
-import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle } from 'lucide-react'
+import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot, UserRound } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
 import { resolveAgentIdentity, type AgentIdentityRegistry } from '@/lib/governance/agentIdentity'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 
 interface Proposal {
   id: string
@@ -31,6 +33,7 @@ interface Proposal {
   decidedAt: string | null
   decisionReason: string | null
   modelId: string | null
+  agent?: { id: string; displayName: string; icon: 'bot' | 'user'; charterKnown: boolean }
 }
 
 interface InboxItem {
@@ -41,6 +44,8 @@ interface InboxItem {
   maker: string | null
   proposedAt: string | null
 }
+
+type DecisionIntent = { proposal: Proposal; approve: boolean }
 
 const STATE_META: Record<string, { color: string; bg: string; border: string; Icon: React.ElementType; cs: string; en: string }> = {
   PROPOSED: { color: '#d97706', bg: '#fffbeb', border: '#fcd34d', Icon: Clock, cs: 'Čeká na rozhodnutí', en: 'Pending' },
@@ -58,8 +63,9 @@ export default function ApprovalsPage() {
   const [domainItems, setDomainItems] = useState<InboxItem[]>([])
   const [domainSources, setDomainSources] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
-  const [busyId, setBusyId] = useState<string | null>(null)
-  const [reasons, setReasons] = useState<Record<string, string>>({})
+  const flight = useSingleFlight()
+  const [decisionIntent, setDecisionIntent] = useState<DecisionIntent | null>(null)
+  const decisionTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   // The enforced charter registry (agents.yaml). `null` while it is still being fetched or
   // after the fetch failed — resolveAgentIdentity turns both into `unverifiable`, and
@@ -110,13 +116,17 @@ export default function ApprovalsPage() {
     return () => { cancelled = true }
   }, [])
 
-  const decide = async (p: Proposal, approve: boolean) => {
-    setBusyId(p.id)
+  // Keyed per proposal so approve and reject of the SAME proposal contend, while
+  // two different proposals stay independent (#7104). Segregation of duties is
+  // enforced server-side and is untouched by this lock.
+  const decide = async (p: Proposal, approve: boolean, reason: string): Promise<boolean> => {
+    let succeeded = false
+    const outcome = await flight.run(`proposal:${p.id}`, async () => {
     try {
       const res = await fetch('/api/agent/proposals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ proposalId: p.id, approve, decidedBy, reason: reasons[p.id] || null }),
+        body: JSON.stringify({ proposalId: p.id, approve, decidedBy, reason }),
       })
       if (!res.ok) {
         const e = await res.json().catch(() => ({}))
@@ -124,12 +134,27 @@ export default function ApprovalsPage() {
       } else {
         setError(null)
         await load()
+        succeeded = true
       }
     } catch {
       setError('unreachable')
-    } finally {
-      setBusyId(null)
     }
+    })
+    if (wasSkipped(outcome)) return false
+    return succeeded
+  }
+
+  const requestDecision = (proposal: Proposal, approve: boolean, trigger: HTMLButtonElement) => {
+    decisionTriggerRef.current = trigger
+    setError(null)
+    setDecisionIntent({ proposal, approve })
+  }
+
+  const closeDecision = () => {
+    const trigger = decisionTriggerRef.current
+    setDecisionIntent(null)
+    setError(null)
+    requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus() })
   }
 
   const pending = useMemo(() => rows.filter(r => r.state === 'PROPOSED'), [rows])
@@ -240,10 +265,13 @@ export default function ApprovalsPage() {
           // The ADR-0080 caution stands whenever AI authorship is established OR cannot be
           // ruled out. Only a positively unchartered actor drops it.
           const cautionAi = identity.status !== 'unresolved'
+          const aiGenerated = p.agent ? p.agent.icon === 'bot' : /assistant|agent|\bai\b/i.test(p.proposedBy)
+          const ProposerIcon = aiGenerated ? Bot : UserRound
           return (
             <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${chartered ? '#d97706' : m.color}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 8, background: aiGenerated ? '#fffbeb' : 'var(--surface-2)', color: aiGenerated ? '#b45309' : 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><ProposerIcon size={15} /></span>
                   {p.title}
                   <AgentIdentityBadge identity={identity} loading={registryLoading} lang={language} />
                 </div>
@@ -265,22 +293,17 @@ export default function ApprovalsPage() {
                 <span style={{ fontWeight: 700 }}>{t('Navrhovaná akce: ', 'Suggested action: ')}</span>{p.suggestedAction}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 10 }}>
-                {t('Navrhl', 'Proposed by')} <b>{p.proposedBy}</b> · {new Date(p.proposedAt).toLocaleString(dateLocale)}
+                {t('Navrhl', 'Proposed by')} <b>{p.agent?.displayName ?? p.proposedBy}</b>
+                <span className="mono"> · {p.agent?.id ?? p.proposedBy}</span>
+                {p.modelId ? <span className="mono"> · {p.modelId}</span> : null} · {new Date(p.proposedAt).toLocaleString(dateLocale)}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <Can permission="agent:decide" fallback={<span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Rozhodování vyžaduje oprávnění agenta.', 'Decision access requires agent authorization.')}</span>}>
-                  <input
-                    aria-label={t('Důvod rozhodnutí návrhu', 'Proposal decision reason')}
-                    placeholder={t('Důvod rozhodnutí (volitelné)', 'Decision reason (optional)')}
-                    value={reasons[p.id] || ''}
-                    onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}
-                    style={{ flex: 1, minWidth: 180, fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}
-                  />
-                  <button type="button" aria-label={t(`Schválit návrh ${p.title}`, `Approve proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, true)} disabled={busyId === p.id}
+                  <button type="button" aria-label={t(`Zkontrolovat a schválit návrh ${p.title}`, `Review and approve proposal ${p.title}`)} aria-busy={flight.isRunning(`proposal:${p.id}`)} onClick={event => requestDecision(p, true, event.currentTarget)} disabled={flight.isRunning(`proposal:${p.id}`)}
                     style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #6ee7b7', background: '#ecfdf5', color: '#059669', cursor: 'pointer' }}>
                     <CheckCircle2 aria-hidden="true" size={14} /> {t('Schválit', 'Approve')}
                   </button>
-                  <button type="button" aria-label={t(`Zamítnout návrh ${p.title}`, `Reject proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, false)} disabled={busyId === p.id}
+                  <button type="button" aria-label={t(`Zkontrolovat a zamítnout návrh ${p.title}`, `Review and reject proposal ${p.title}`)} aria-busy={flight.isRunning(`proposal:${p.id}`)} onClick={event => requestDecision(p, false, event.currentTarget)} disabled={flight.isRunning(`proposal:${p.id}`)}
                     style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
                     <XCircle aria-hidden="true" size={14} /> {t('Zamítnout', 'Reject')}
                   </button>
@@ -325,7 +348,85 @@ export default function ApprovalsPage() {
           </div>
         </>
       )}
+      {decisionIntent && <ApprovalDecisionDialog
+        intent={decisionIntent}
+        busy={flight.isRunning(`proposal:${decisionIntent.proposal.id}`)}
+        failed={error !== null}
+        onCancel={closeDecision}
+        onConfirm={async reason => {
+          const succeeded = await decide(decisionIntent.proposal, decisionIntent.approve, reason)
+          if (succeeded) setDecisionIntent(null)
+        }}
+      />}
     </div>
     </AuthGuard>
   )
+}
+
+function ApprovalDecisionDialog({ intent, busy, failed, onCancel, onConfirm }: {
+  intent: DecisionIntent
+  busy: boolean
+  failed: boolean
+  onCancel: () => void
+  onConfirm: (reason: string) => Promise<void>
+}) {
+  const { t } = useLanguage()
+  const [reason, setReason] = useState('')
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const action = intent.approve ? t('Schválit návrh', 'Approve proposal') : t('Zamítnout návrh', 'Reject proposal')
+  const titleId = `approval-decision-${intent.proposal.id}-title`
+  const impactId = `approval-decision-${intent.proposal.id}-impact`
+
+  return <div
+    ref={dialogRef}
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby={titleId}
+    aria-describedby={impactId}
+    aria-busy={busy}
+    onKeyDown={event => {
+      if (event.key === 'Escape' && !busy) onCancel()
+      trapDialogFocus(event, dialogRef.current)
+    }}
+    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'grid', placeItems: 'center', padding: 20 }}
+  ><div className="card" style={{ width: 'min(560px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
+    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <AlertTriangle aria-hidden="true" size={19} style={{ color: intent.approve ? 'var(--warning)' : 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
+      <div>
+        <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{action}: {intent.proposal.title}</h2>
+        <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+          {intent.approve
+            ? t('Tímto zaznamenáte lidské schválení. Návrh smí pokračovat jen podle svého řízeného následného procesu; AI tím nezískává oprávnění jednat sama.', 'This records human approval. The proposal may proceed only through its governed follow-up process; this does not authorize the AI to act on its own.')
+            : t('Tímto zaznamenáte lidské zamítnutí. Návrh se neprovede a důvod zůstane v auditní stopě.', 'This records human rejection. The proposal will not be executed and the reason remains in the audit trail.')}
+        </p>
+      </div>
+    </div>
+    <div style={{ marginTop: 14, padding: '11px 12px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12.5 }}>
+      <div><strong>{t('Navrhl', 'Proposed by')}:</strong> {intent.proposal.agent?.displayName ?? intent.proposal.proposedBy}</div>
+      <div style={{ marginTop: 5 }}><strong>{t('Navrhovaná akce', 'Suggested action')}:</strong> {intent.proposal.suggestedAction}</div>
+    </div>
+    <label htmlFor="approval-decision-reason" style={{ display: 'block', marginTop: 14, fontSize: 12.5, fontWeight: 700 }}>
+      {t('Důvod rozhodnutí (povinný, součást auditní stopy)', 'Decision reason (required, recorded in the audit trail)')}
+    </label>
+    <textarea
+      id="approval-decision-reason"
+      aria-label={t('Důvod rozhodnutí návrhu', 'Decision reason for proposal')}
+      autoFocus
+      rows={4}
+      maxLength={1000}
+      value={reason}
+      onChange={event => setReason(event.target.value)}
+      disabled={busy}
+      style={{ width: '100%', marginTop: 6, padding: '9px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', resize: 'vertical', font: 'inherit' }}
+    />
+    {failed && <p role="alert" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>
+      {t('Rozhodnutí se nepodařilo uložit. Nic se nezměnilo; zkontrolujte připojení a zkuste to znovu.', 'The decision could not be recorded. Nothing changed; check the connection and try again.')}
+    </p>}
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+      <button type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>{t('Zpět ke kontrole', 'Back to review')}</button>
+      <button type="button" className={intent.approve ? 'btn btn-primary' : 'btn btn-danger'} disabled={busy || !reason.trim()} aria-busy={busy} onClick={() => void onConfirm(reason.trim())}>
+        {busy ? t('Ukládám rozhodnutí…', 'Recording decision…') : intent.approve ? t('Potvrdit schválení', 'Confirm approval') : t('Potvrdit zamítnutí', 'Confirm rejection')}
+      </button>
+    </div>
+  </div></div>
 }

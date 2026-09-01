@@ -16,6 +16,7 @@ import { CURRENCY_META } from '@/lib/currency-meta'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { FxTrendChart } from '@/components/fx/FxTrendChart'
 
 interface FxRate { baseCurrency: string; quoteCurrency: string; rate: number; timestamp: string }
 interface FxConversion { id: string; fromCurrency: string; toCurrency: string; fromAmount: number; toAmount: number; rate: number; status: string; createdAt: string }
@@ -312,9 +313,9 @@ export default function FxPage() {
           title={t('Devizové operace', 'Foreign Exchange')}
           subtitle={t('CNB, ECB & Bankovní kurzovní lístek', 'CNB, ECB & bank rate sheet')}
           actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button onClick={loadData} disabled={loading} className="btn btn-secondary btn-sm"><RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>
-            <button onClick={() => manualRefresh('all')} disabled={!!refreshing || loading} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
-              <Download size={13} style={{ animation: refreshing === 'all' ? 'spin 1s linear infinite' : 'none' }} />
+            <button type="button" onClick={loadData} disabled={loading} aria-busy={loading} aria-label={t('Obnovit kurzy FX', 'Refresh FX rates')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>
+            <button type="button" onClick={() => manualRefresh('all')} disabled={!!refreshing || loading} aria-busy={refreshing === 'all'} aria-label={t('Stáhnout všechny kurzy FX', 'Fetch all FX rates')} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+              <Download size={13} aria-hidden="true" style={{ animation: refreshing === 'all' ? 'spin 1s linear infinite' : 'none' }} />
               {t('Stáhnout vše', 'Fetch All')}
             </button>
             {(() => {
@@ -741,6 +742,10 @@ export default function FxPage() {
               </div>
             ))}
           </div>
+        </div>
+
+        <div style={{ marginBottom: '20px' }}>
+          <FxTrendChart bases={cnbRates.map(rate => rate.currencyCode)} quote="CZK" lang={language} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>

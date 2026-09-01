@@ -86,6 +86,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass: screening and SCA still run. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
   `sctInstPayment.recall` four-eyes decision parked at 202 was discoverable only by whoever had
   been handed its approval id out of band — the ceremony completed only if the two operators were

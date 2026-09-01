@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: copilot-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-e584c061
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-3b62a4a5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -94,6 +94,20 @@ spec:
                   name: copilot-service-secrets
                   key: COPILOT_MODEL_API_KEY
                   optional: true
+            # openbank-services client secret (ADR-0269 slice 4) — lets ConsentQueryClient and
+            # CreditProfileReadClient's OidcClientRequestReactiveFilter mint a client-credentials
+            # token for the two calls that do not propagate the customer's own bearer. Same shared
+            # KV entry every other projection reads (rules.yaml: oidc_secret_convention, #3485).
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: copilot-service-secrets
+                  key: OIDC_CLIENT_SECRET
+                  # NOT optional (issue #2929): a missing key here must not silently degrade to
+                  # UNAUTHENTICATED outbound calls — CrashLoop is the correct failure mode for a
+                  # credential this security-relevant, not a quiet 401 from consent-service/
+                  # analytics-sink.
+                  optional: false
             # Postgres conversation history (#3710). The CNPG operator injects
             # copilot-db-app with PG_USER/PG_PASSWORD; REACTIVE_URL and JDBC_URL resolve them.
             #

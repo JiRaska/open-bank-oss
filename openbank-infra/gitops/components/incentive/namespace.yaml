@@ -1,0 +1,12 @@
+# Incentive domain (ADR-0037: domain = namespace). This foundation intentionally contains no
+# service Deployment, image reference, or secret projection. Those arrive only after the signed
+# image, backup identity, and externally seeded promo-code pepper are independently evidenced.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: incentive
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

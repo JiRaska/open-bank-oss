@@ -37,7 +37,11 @@ data class CreateDomesticPaymentRequest(
     val statementLabel: String?,
     val endToEndId: String?,
 ) {
-    fun toCommand(idempotencyKey: String, actorId: UUID? = null) = CreateDomesticPaymentCommand(
+    fun toCommand(
+        idempotencyKey: String,
+        actorId: UUID? = null,
+        synthetic: Boolean = false,
+    ): CreateDomesticPaymentCommand = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
         debtorAccountId = debtorAccountId,
         debtorAccountNumber = debtorAccountNumber,
@@ -57,6 +61,7 @@ data class CreateDomesticPaymentRequest(
         statementLabel = statementLabel,
         endToEndId = endToEndId,
         actorId = actorId,
+        synthetic = synthetic,
     )
 }
 

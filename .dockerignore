@@ -29,6 +29,9 @@
 **/dist/
 **/.cache/
 .gradle/
+# Read-only private mobile-app checkout used only by the deploy-time client-evidence
+# collector. It must never become part of the public admin-ui build context or image.
+/.app-src/
 
 # --- Reports / artefacts ---
 **/build/reports/
