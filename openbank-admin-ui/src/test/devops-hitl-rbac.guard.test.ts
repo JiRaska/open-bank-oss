@@ -12,8 +12,11 @@ describe('DevOps HITL authority contract', () => {
     expect(roles).toContain('"devops:decide":             [ROLES.ADMIN]')
     expect(page).toContain("<AuthGuard permission=\"system:view\">")
     expect(page).toContain("hasPermission('devops:decide')")
-    expect(page).toContain("onApprove={canDecide ? id => decide(id, 'approve') : undefined}")
-    expect(page).toContain("onReject={canDecide ? id => decide(id, 'reject') : undefined}")
+    expect(page).toContain('onApprove={canDecide ? id => {')
+    expect(page).toContain("setPendingDecision({ finding, action: 'approve' })")
+    expect(page).toContain('onReject={canDecide ? id => {')
+    expect(page).toContain("setPendingDecision({ finding, action: 'reject' })")
+    expect(page).toContain('onClick={() => void decide(pendingDecision.finding.id, pendingDecision.action)}')
   })
 
   it('reports failed decision writes instead of silently refreshing', () => {

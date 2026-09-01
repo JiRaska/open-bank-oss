@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   GitBranch, RefreshCw, Rocket, Clock, AlertTriangle, Wrench,
   Info, Zap,
@@ -196,6 +196,9 @@ function DevOpsContent() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [deciding, setDeciding] = useState<string | null>(null)
   const [decisionError, setDecisionError] = useState<string | null>(null)
+  const [pendingDecision, setPendingDecision] = useState<{ finding: DevOpsFinding; action: 'approve' | 'reject' } | null>(null)
+  const decisionCancelRef = useRef<HTMLButtonElement>(null)
+  const decisionConfirmRef = useRef<HTMLButtonElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -240,6 +243,7 @@ function DevOpsContent() {
         ))
         return
       }
+      setPendingDecision(null)
       await load()
     } catch {
       setDecisionError(t('Služba DevOps neodpovídá. Zkuste to prosím znovu.', 'The DevOps service did not respond. Please try again.'))
@@ -380,14 +384,78 @@ function DevOpsContent() {
             )}
             findings={findings.map(f => toAgentFinding(f, t))}
             emptyMessage={t('Žádné aktivní DevOps nálezy — pipeline v pořádku', 'No active DevOps findings — pipeline healthy')}
-            onApprove={canDecide ? id => decide(id, 'approve') : undefined}
-            onReject={canDecide ? id => decide(id, 'reject') : undefined}
+            onApprove={canDecide ? id => {
+              const finding = findings.find(candidate => candidate.id === id)
+              if (finding) { setDecisionError(null); setPendingDecision({ finding, action: 'approve' }) }
+            } : undefined}
+            onReject={canDecide ? id => {
+              const finding = findings.find(candidate => candidate.id === id)
+              if (finding) { setDecisionError(null); setPendingDecision({ finding, action: 'reject' }) }
+            } : undefined}
             decideLabels={canDecide ? { approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Reject') } : undefined}
             decidingId={canDecide ? deciding : null}
           />
           {decisionError && (
             <div role="alert" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger-text)', fontSize: '12px' }}>
               {decisionError}
+            </div>
+          )}
+
+          {pendingDecision && (
+            <div
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="devops-decision-review-title"
+              aria-describedby="devops-decision-review-impact"
+              onKeyDown={event => {
+                if (event.key === 'Escape' && deciding !== pendingDecision.finding.id) {
+                  setPendingDecision(null)
+                  setDecisionError(null)
+                }
+                if (event.key === 'Tab') {
+                  const first = decisionCancelRef.current
+                  const last = decisionConfirmRef.current
+                  if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault()
+                    last?.focus()
+                  } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault()
+                    first?.focus()
+                  }
+                }
+              }}
+              style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+            >
+              <div className="card" style={{ width: 'min(620px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}>
+                <h2 id="devops-decision-review-title" style={{ margin: 0, fontSize: 17 }}>
+                  {pendingDecision.action === 'approve' ? t('Zkontrolovat schválení remediace', 'Review remediation approval') : t('Zkontrolovat odmítnutí remediace', 'Review remediation rejection')}
+                </h2>
+                <p id="devops-decision-review-impact" style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
+                  {pendingDecision.action === 'approve'
+                    ? t('Schválením povolíte navrženou operátorskou remediaci. Samotný nález vytvořil AI agent; rozhodnutí a odpovědnost zůstávají na člověku.', 'Approval authorizes the proposed operator remediation. The finding was produced by an AI agent; the decision and accountability remain human.')
+                    : t('Odmítnutím uzavřete tento návrh bez schválení remediace.', 'Rejection closes this proposal without authorizing the remediation.')}
+                </p>
+                <dl style={{ display: 'grid', gridTemplateColumns: '145px minmax(0, 1fr)', gap: '8px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
+                  <dt>{t('Nález', 'Finding')}</dt><dd>{pendingDecision.finding.title}</dd>
+                  <dt>ID</dt><dd className="mono" style={{ overflowWrap: 'anywhere' }}>{pendingDecision.finding.id}</dd>
+                  <dt>{t('Detektor', 'Detector')}</dt><dd className="mono">{pendingDecision.finding.detector}</dd>
+                  <dt>{t('Závažnost', 'Severity')}</dt><dd>{pendingDecision.finding.severity}</dd>
+                  <dt>{t('Stav', 'Status')}</dt><dd>{pendingDecision.finding.status}</dd>
+                  <dt>{t('Dotčený zdroj', 'Affected resource')}</dt><dd>{pendingDecision.finding.affectedResource}</dd>
+                  <dt>{t('Typ remediace', 'Remediation kind')}</dt><dd>{pendingDecision.finding.remediationKind}</dd>
+                  <dt>{t('DORA dopad', 'DORA impact')}</dt><dd>{pendingDecision.finding.doraMetricImpacted ?? t('Neuveden', 'Not specified')}</dd>
+                  <dt>{t('Kořenová příčina', 'Root cause')}</dt><dd>{pendingDecision.finding.rootCause ?? t('Neuvedena', 'Not specified')}</dd>
+                  <dt>{t('Navržená remediace', 'Proposed remediation')}</dt><dd>{pendingDecision.finding.proposedRemediation ?? t('Neuvedena', 'Not specified')}</dd>
+                </dl>
+                {pendingDecision.finding.proposalPrUrl && <p style={{ fontSize: 12 }}><a href={pendingDecision.finding.proposalPrUrl} target="_blank" rel="noopener noreferrer">{t('Otevřít návrh v novém panelu', 'Open proposal in a new tab')} →</a></p>}
+                {decisionError && <div role="alert" data-testid="devops-decision-review-error" style={{ padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{decisionError}</div>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+                  <button ref={decisionCancelRef} autoFocus type="button" className="btn btn-secondary" disabled={deciding === pendingDecision.finding.id} onClick={() => { setPendingDecision(null); setDecisionError(null) }}>{t('Zpět', 'Back')}</button>
+                  <button ref={decisionConfirmRef} type="button" className="btn btn-primary" aria-busy={deciding === pendingDecision.finding.id} disabled={deciding === pendingDecision.finding.id} onClick={() => void decide(pendingDecision.finding.id, pendingDecision.action)}>
+                    {deciding === pendingDecision.finding.id ? t('Odesílám…', 'Submitting…') : pendingDecision.action === 'approve' ? t('Potvrdit schválení', 'Confirm approval') : t('Potvrdit odmítnutí', 'Confirm rejection')}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
