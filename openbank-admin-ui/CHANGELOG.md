@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.227.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.226.3...admin-ui-v0.227.0) (2026-09-01)
+
+
+### Features
+
+* **admin-ui:** explain delegated resource context ([#7925](https://github.com/JiRaska/open-bank-oss/issues/7925)) ([0fb3458](https://github.com/JiRaska/open-bank-oss/commit/0fb3458f71910ea609d2c1a79e8e34d29f555329))
+
 ## [0.226.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.226.2...admin-ui-v0.226.3) (2026-09-01)
 
 
