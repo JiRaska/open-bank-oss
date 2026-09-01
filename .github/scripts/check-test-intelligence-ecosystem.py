@@ -316,8 +316,7 @@ def check(root: Path) -> list[str]:
         ("workflow_run.conclusion == 'success'", "admin deployment accepts unsuccessful Services CI evidence"),
         ("workflow_run.head_branch == 'main'", "admin deployment accepts non-main Services CI evidence"),
         ("github.event.workflow_run.head_sha", "admin deployment cannot inspect the exact workflow-run source commit"),
-        ('subject="$(git log -1 --format=%s)"', "admin deployment does not inspect the workflow-run commit subject"),
-        ('proceed=false', "admin deployment cannot reject its own GitOps commit"),
+        ("authorize-admin-ui-deploy-source.sh", "admin deployment bypasses its source-ancestry guard"),
         ("needs.deploy-source.outputs.proceed == 'true'", "privileged admin image build bypasses the deploy-source guard"),
         ("latest_main_artifact", "admin deployment cannot select main-only service evidence"),
         ("per_page=100&page=${page}",
@@ -328,13 +327,31 @@ def check(root: Path) -> list[str]:
         ("github.event_name }}\" = \"workflow_run\"", "event-driven snapshot refresh does not use a unique immutable image tag"),
         ("github.event.workflow_run.head_sha || 'eligible'", "workflow-run events can evict the current push/dispatch Admin UI deploy queue"),
         ("git ls-remote origin refs/heads/main", "admin deployment does not reject a source commit that is stale before privileged build"),
-        ("Skipping stale source", "admin deployment does not make stale-source rejection observable"),
+        ('git fetch --no-tags --depth=64 origin "$main_sha"',
+         "admin deployment cannot inspect current main after checking out a waiting source"),
         ('"openbank-libs/governance/journeys.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the journey catalog changes"),
         ('"perf/scenarios.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the performance catalog changes"),
         ('"perf/k6/**"', "admin deployment does not rebuild the Test Intelligence snapshot when a performance definition changes"),
         ('"openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when a synthetic runtime manifest changes"),
     ):
         if needle not in deploy:
+            errors.append(message)
+    deploy_source_guard = text(root / ".github/scripts/authorize-admin-ui-deploy-source.sh")
+    for needle, message in (
+        ('source_subject="$(git log -1 --format=%s "$SOURCE_SHA")"',
+         "admin deployment does not inspect the source commit subject"),
+        ('git merge-base --is-ancestor "$SOURCE_SHA" "$MAIN_SHA"',
+         "admin deployment accepts a stale source outside main ancestry"),
+        ('git rev-list --reverse "${SOURCE_SHA}..${MAIN_SHA}"',
+         "admin deployment cannot inspect every commit that overtook a waiting source"),
+        ('git diff-tree --first-parent --no-commit-id --name-only -r "$commit_sha"',
+         "admin deployment trusts a deploy-looking commit without verifying its changed paths"),
+        ('openbank-infra/gitops/components/admin-ui/admin-ui.yaml',
+         "admin deployment does not restrict the harmless-advance exception to its image manifest"),
+        ("Skipping stale source", "admin deployment does not make stale-source rejection observable"),
+        ("echo false", "admin deployment cannot reject its own GitOps commit"),
+    ):
+        if needle not in deploy_source_guard:
             errors.append(message)
     history_stage = deploy.partition("Stage immutable per-attempt Test Intelligence history")[2].partition(
         "Stage pitest mutation results"
