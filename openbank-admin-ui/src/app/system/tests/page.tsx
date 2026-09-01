@@ -145,9 +145,8 @@ function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceRepor
 }
 
 function EvidenceCell({ component, kind }: { component: ComponentTestPosture; kind: EvidenceKind }) {
-  const evidence = component.evidence.find(item => item.kind === kind)
-  if (!evidence) return <StateBadge state="not-run" />
-  return <StateBadge state={evidence.state} />
+  const states = component.evidence.filter(item => item.kind === kind).map(item => item.state)
+  return <StateBadge state={aggregateEvidenceState(states, 'not-run')} />
 }
 
 const tableStyle = { width: '100%', borderCollapse: 'collapse' as const, fontSize: 12 }
@@ -182,7 +181,7 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
             <tbody>{sorted.map(component => (
               <tr key={component.component}>
                 <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: '#dc2626', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
-                {KINDS.map(kind => <td key={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
+                {KINDS.map(kind => <td key={kind} data-component={component.component} data-evidence-kind={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
                 <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
               </tr>
             ))}</tbody>
