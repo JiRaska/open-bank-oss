@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.12.0...billing-service-v0.13.0) (2026-09-01)
+
+
+### Features
+
+* **billing:** expose pending approvals in unified inbox ([#7034](https://github.com/JiRaska/open-bank-oss/issues/7034)) ([234f53f](https://github.com/JiRaska/open-bank-oss/commit/234f53f7fe84db29ab40b5ed9d25b9439f99f273))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.11.0...billing-service-v0.12.0) (2026-08-24)
 
 

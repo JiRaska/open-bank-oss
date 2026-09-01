@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.25.0...agent-service-v1.25.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **agent:** reject a null array element with 400 instead of 500 ([#8008](https://github.com/JiRaska/open-bank-oss/issues/8008)) ([f7beb2d](https://github.com/JiRaska/open-bank-oss/commit/f7beb2d9653a67b048fce01139a352d73428a29a)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
 ## [1.25.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.24.0...agent-service-v1.25.0) (2026-08-25)
 
 
