@@ -16,7 +16,7 @@
         "classification": "MONEY_PATH",
         "owner": "payments-team",
         "fourEyes": true,
-        "expiresAt": "2026-09-01T00:00:00Z",
+        "expiresAt": "2027-12-31T00:00:00Z",
         "description": "Route SEPA instant payments through the new corridor router."
       }
     },
