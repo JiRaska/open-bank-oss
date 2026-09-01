@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.229.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.229.0...admin-ui-v0.229.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **admin-ui:** review compliance pack decisions ([#7894](https://github.com/JiRaska/open-bank-oss/issues/7894)) ([d0de712](https://github.com/JiRaska/open-bank-oss/commit/d0de712ed6bc460f2c2e02a41d7088a94f8d0f30))
+* **admin-ui:** unify the three-month FX rate trend on a real CNB series ([#7744](https://github.com/JiRaska/open-bank-oss/issues/7744)) ([630d5af](https://github.com/JiRaska/open-bank-oss/commit/630d5af952613e9dbd5385853dd6319bddf04462))
+* **test-intelligence:** validate capability register structure ([#7959](https://github.com/JiRaska/open-bank-oss/issues/7959)) ([9e2b0c3](https://github.com/JiRaska/open-bank-oss/commit/9e2b0c32ce6a046f4f4c56d12e785f4cbc903f0a))
+
 ## [0.229.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.228.1...admin-ui-v0.229.0) (2026-09-01)
 
 
