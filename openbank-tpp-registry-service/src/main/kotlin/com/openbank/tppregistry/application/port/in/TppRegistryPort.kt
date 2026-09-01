@@ -27,7 +27,7 @@ data class RegisterTppCommand(
      */
     val roles: Set<TppRole?>,
     val qwacSubjectDn: String?,
-    val qsealSubjectDn: String?
+    val qsealSubjectDn: String?,
 ) {
     /**
      * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`;
