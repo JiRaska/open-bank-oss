@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.228.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.228.0...admin-ui-v0.228.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **admin-ui:** relay the operator bearer to fx-service, and report a failed read ([#7945](https://github.com/JiRaska/open-bank-oss/issues/7945)) ([1de03f3](https://github.com/JiRaska/open-bank-oss/commit/1de03f3ddf69cf822e3eaee928fba7cce4fc188c)), closes [#7943](https://github.com/JiRaska/open-bank-oss/issues/7943)
+
 ## [0.228.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.227.0...admin-ui-v0.228.0) (2026-09-01)
 
 
