@@ -1,0 +1,189 @@
+# -----------------------------------------------------------------------------
+# Governance deadlines arriving soon (issue #7941).
+#
+# WHAT THIS CLOSES. `check-gate-graduation.sh` and `validate-flags.py` both compare
+# against TODAY, and both run only inside `Validate manifests` on a PR. So the first
+# signal that a governance deadline exists is the day it passes and turns EVERY PR
+# red regardless of its diff. That is not hypothetical: on 2026-09-01 the ADR-0067
+# flag `sepa-instant-new-router` and ADR-0144's `ci_runner_governance` deadline
+# expired within hours of each other and froze a ~80-PR queue (#7897, fixed by
+# #7919). Nothing warned, because there was nothing that could.
+#
+# WHY IT IS A SEPARATE LANE, NOT A LOOSER GATE. The hard fail on an expired date is
+# correct and stays exactly as it is. Warning and enforcing want opposite failure
+# modes — an enforcing gate must be able to go red, a warner must never, or it is
+# one more red check somebody learns to ignore. Both scripts' `--warn-days` lanes
+# therefore exit 0 unconditionally, including for dates already in the past.
+#
+# ESCALATION, not redness (#4019). A red scheduled workflow is addressed to nobody,
+# which is the same blind spot this closes. One issue, refreshed in place, closed
+# when the horizon clears.
+#
+# WHY IT IS NOT A REQUIRED CHECK. Scheduled workflows cannot be required contexts
+# here. The PR lane below is what a PR sees, and it only runs the two self-tests —
+# which is the load-bearing half: a warner that reports "0 due" is indistinguishable
+# from one that walked nothing, so both self-tests assert the window DISCRIMINATES
+# (same input, different windows, different answers) rather than merely runs.
+# -----------------------------------------------------------------------------
+name: governance horizon watch
+
+on:
+  schedule:
+    # Monday morning. The horizon is 30 days, so a weekly tick gives every deadline
+    # at least four notices before it lands.
+    - cron: "23 6 * * 1"
+  pull_request:
+    paths:
+      - ".github/workflows/governance-horizon-watch.yml"
+      - ".github/scripts/check-gate-graduation.sh"
+      - ".github/scripts/validate-flags.py"
+  workflow_dispatch:
+    inputs:
+      warn_days:
+        description: "Horizon in days. Never leave it defaulted when investigating."
+        required: false
+        default: "30"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: governance-horizon-watch
+  cancel-in-progress: false
+
+jobs:
+  # PR lane: offline, seconds, and the only lane a PR sees. It proves the two
+  # warners still discriminate between an in-window and an out-of-window date, and
+  # that adding warn mode did not soften either enforcing lane.
+  declaration:
+    name: governance horizon declaration
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test the graduation guard
+        run: bash .github/scripts/check-gate-graduation.sh --self-test
+
+      - name: Self-test the flag validator
+        run: python3 .github/scripts/validate-flags.py --self-test
+
+      # The enforcing lanes must still be exactly what CI ran before this workflow
+      # existed. Warn mode is additive or it is a regression.
+      - name: The enforcing lanes are unchanged
+        run: |
+          bash .github/scripts/check-gate-graduation.sh
+          python3 .github/scripts/validate-flags.py
+
+  watch:
+    name: governance horizon watch
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A report that has only ever said "0 due" is indistinguishable from a scan
+      # that walked nothing. This step failing voids the run.
+      - name: Self-test both warners
+        run: |
+          bash .github/scripts/check-gate-graduation.sh --self-test
+          python3 .github/scripts/validate-flags.py --self-test
+
+      - name: Scan the horizon
+        id: scan
+        env:
+          WARN_DAYS: ${{ inputs.warn_days || '30' }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Advisory/planned rules (ADR-0144)"
+            echo
+            echo '```'
+            bash .github/scripts/check-gate-graduation.sh --warn-days "$WARN_DAYS"
+            echo '```'
+            echo
+            echo "### Feature flags (ADR-0067 §7)"
+            echo
+            echo '```'
+            python3 .github/scripts/validate-flags.py --warn-days "$WARN_DAYS"
+            echo '```'
+          } > /tmp/horizon.md
+          cat /tmp/horizon.md
+          # The COUNT decides whether an issue is opened, and it is derived from the
+          # same output the issue body carries — not recomputed, so the two cannot
+          # disagree about what was found.
+          due=$(grep -cE '  (due within|due in|ALREADY (PASSED|EXPIRED))' /tmp/horizon.md || true)
+          echo "due=$due" >> "$GITHUB_OUTPUT"
+          echo "warn_days=$WARN_DAYS" >> "$GITHUB_OUTPUT"
+
+      - name: Escalate or stand down
+        if: ${{ !cancelled() && steps.scan.outcome != 'skipped' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DUE: ${{ steps.scan.outputs.due }}
+          WARN_DAYS: ${{ steps.scan.outputs.warn_days }}
+        with:
+          script: |
+            const fs = require('fs')
+            const LABEL = 'governance'
+            const marker = '<!-- governance-horizon-watch -->'
+            const due = Number(process.env.DUE || '0')
+            const warnDays = process.env.WARN_DAYS
+            const report = fs.readFileSync('/tmp/horizon.md', 'utf8')
+
+            // Find by MARKER, not by title: the title carries a count and moves.
+            const findByMarker = async (state) => {
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                ...context.repo, state, labels: LABEL, per_page: 100,
+                sort: 'updated', direction: 'desc',
+              })
+              return issues.find(i => (i.body || '').includes(marker))
+            }
+
+            const open = await findByMarker('open')
+
+            if (due === 0) {
+              if (open) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: open.number,
+                  body: `Horizon clear: nothing due within ${warnDays} days as of this run. Closing.`,
+                })
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: open.number, state: 'closed',
+                })
+              }
+              core.notice(`Nothing due within ${warnDays} days.`)
+              return
+            }
+
+            const title = `Governance: ${due} deadline(s) due within ${warnDays} days`
+            const body = [
+              marker,
+              `## ${due} governance deadline(s) land within ${warnDays} days`,
+              '',
+              'Each of these fails **every PR in the repository** on the day it passes, regardless',
+              'of the PR\'s diff — that is what happened on 2026-09-01 (#7897, #7919). Either ship',
+              'the producer and flip the rule to `enforce`/`block`, retire the flag, or move the',
+              'date forward with a one-line reason in the commit body (ADR-0144).',
+              '',
+              report,
+              '',
+              `_Refreshed by \`governance-horizon-watch\`. Closes itself when the ${warnDays}-day horizon is clear._`,
+            ].join('\n')
+
+            if (open) {
+              await github.rest.issues.update({
+                ...context.repo, issue_number: open.number, title, body,
+              })
+              core.notice(`Refreshed #${open.number} (${due} due).`)
+            } else {
+              const created = await github.rest.issues.create({
+                ...context.repo, title, body, labels: [LABEL],
+              })
+              core.notice(`Opened #${created.data.number} (${due} due).`)
+            }
