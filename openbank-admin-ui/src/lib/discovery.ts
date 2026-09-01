@@ -80,7 +80,6 @@ const NS_GROUP: Record<string, ServiceGroup> = {
   documents:          'platform',    // document-service (ADR-0161/0162)
   engagement:         'platform',    // engagement-service (ADR-0220 in-app surfaces)
   referral:           'platform',    // referral-service (ADR-0266 MGM attribution)
-  incentive:          'platform',    // incentive/promo service (ADR-0266)
 }
 
 export function inCluster(): boolean {
