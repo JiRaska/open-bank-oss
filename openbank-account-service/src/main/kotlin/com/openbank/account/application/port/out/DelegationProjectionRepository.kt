@@ -18,6 +18,15 @@ interface DelegationProjectionRepository {
 
     suspend fun findActiveByAccountAndParty(accountId: UUID, partyId: UUID): List<DelegatedAccessGrant>
 
+    /**
+     * Every active grant on an account, whoever holds it.
+     *
+     * The guard only ever asks about one candidate party at a time, so nothing needed this until
+     * the account owner had to be shown who can act on their account. Answering that from
+     * per-party lookups would require already knowing the answer.
+     */
+    suspend fun findActiveByAccount(accountId: UUID): List<DelegatedAccessGrant>
+
     /** Same lookup restricted to one resource type (ACCOUNT guard vs SAVINGS_GOAL guard). */
     suspend fun findActiveByAccountPartyAndType(
         accountId: UUID,

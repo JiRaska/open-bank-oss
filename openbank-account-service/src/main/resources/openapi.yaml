@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.12.0
+  version: 1.13.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -660,6 +660,46 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/accounts/{accountId}/authorizations/effective:
+    get:
+      tags: [Accounts]
+      summary: Everyone who can act on the account, from both authorization stores
+      description: |
+        The account owner's transparency view. Unlike `/authorizations`, which returns only the
+        `account_authorizations` table, this unifies BOTH stores the payment guard consults —
+        bank mandates and customer delegation grants — so an owner is not shown a half-truth
+        about who can take money out.
+
+        Customer-facing through the customer-edge, which stamps the validated caller party in
+        `X-Customer-Party-Id`. When that header is present the caller MUST own the account;
+        a mismatch returns 404, and an unknown account returns an empty list, so neither
+        response distinguishes "not yours" from "does not exist".
+      operationId: listEffectiveAccountAccess
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: Caller party stamped by the customer-edge; enforces owner-only when present.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Effective access entries, owner first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountAccessResponse'
+        '404':
+          description: Account not found, or not owned by the customer-scoped caller
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/accounts/{accountId}/authorizations/check:
     get:
       tags: [Accounts]
@@ -988,6 +1028,47 @@ components:
           format: uuid
         reason:
           type: string
+
+    AccountAccessResponse:
+      type: object
+      description: |
+        One party's effective ability to act on the account. Carries the party id and nothing else
+        identifying — the caller resolves a display name from a party the customer already knows,
+        so this cannot turn an account id into a person's details.
+      required: [partyId, source, canInitiatePayments, capabilities]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [OWNER, BANK_MANDATE, CUSTOMER_DELEGATION]
+          description: |
+            Which store the entry came from. OWNER is the account holder; BANK_MANDATE is an
+            operator-set `account_authorizations` row; CUSTOMER_DELEGATION is a grant the customer
+            issued themselves and can revoke.
+        canInitiatePayments:
+          type: boolean
+          description: Whether this entry, on its own, permits a debit today.
+        capabilities:
+          type: array
+          items:
+            type: string
+        perTransactionLimit:
+          type: string
+          description: |
+            This entry's own ceiling, when it has one. Absent means the entry carries no ceiling of
+            its own — NOT that it is unlimited, since account and product limits still apply.
+        perTransactionLimitCurrency:
+          type: string
+        validFrom:
+          type: string
+        validTo:
+          type: string
+        grantId:
+          type: string
+          format: uuid
+          description: Present for CUSTOMER_DELEGATION — the grant the owner can revoke.
 
     AuthorizationResponse:
       type: object

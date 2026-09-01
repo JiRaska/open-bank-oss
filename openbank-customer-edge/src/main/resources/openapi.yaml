@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.46.1
+  version: 1.47.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -410,6 +410,35 @@ paths:
                 $ref: '#/components/schemas/Account'
         '403':
           description: Not the owner
+
+  /accounts/{accountId}/access:
+    get:
+      tags: [Accounts]
+      summary: Who can act on the caller's own account (ADR-0232)
+      description: |
+        Owner-only. A delegate may read the account itself but not this: the list of everyone else
+        who holds access is the grantor's business, and a delegate reading it would learn about the
+        owner's other delegates and the bank mandates on the account.
+
+        Unifies both stores the payment guard consults — bank mandates and customer delegations —
+        so an owner shown only their own delegations is not left with a half-truth about who can
+        take money out. Party ids only; no names or contact details.
+      operationId: getAccountAccess
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Effective access entries, owner first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountAccessEntry'
+        '403':
+          description: Account does not belong to the caller
 
   /accounts/{accountId}/goal:
     put:
@@ -3767,6 +3796,43 @@ components:
 
     # Mirrors openbank-account-service AccountPage (GET /api/v1/accounts is cursor-paginated,
     # not a bare array).
+    AccountAccessEntry:
+      type: object
+      description: |
+        One party's effective ability to act on the account, as the payment guard would see it.
+        Built from the same two stores with the same validity filters, so what the owner reads
+        here and what a debit actually gets are the same fact.
+      required: [partyId, source, canInitiatePayments, capabilities]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [OWNER, BANK_MANDATE, CUSTOMER_DELEGATION]
+        canInitiatePayments:
+          type: boolean
+          description: Whether this entry, on its own, permits a debit today.
+        capabilities:
+          type: array
+          items:
+            type: string
+        perTransactionLimit:
+          type: string
+          description: |
+            This entry's own ceiling, when it has one. Absent means no ceiling of its own — NOT
+            unlimited, since account and product limits still apply.
+        perTransactionLimitCurrency:
+          type: string
+        validFrom:
+          type: string
+        validTo:
+          type: string
+        grantId:
+          type: string
+          format: uuid
+          description: Present for CUSTOMER_DELEGATION — the grant the owner can revoke.
+
     AccountList:
       type: object
       properties:
