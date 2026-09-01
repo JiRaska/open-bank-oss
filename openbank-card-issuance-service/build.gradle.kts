@@ -43,6 +43,7 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Consumer-driven contract tests: the product-catalog card-entitlement lookup (ADR-0063) and
     // the `openbank.delegation.events` message contract this service projects (ADR-0232 D3).
