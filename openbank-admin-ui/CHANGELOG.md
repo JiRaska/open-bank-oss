@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.228.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.227.0...admin-ui-v0.228.0) (2026-09-01)
+
+
+### Features
+
+* **admin-ui:** explain delegation guardrails ([#7939](https://github.com/JiRaska/open-bank-oss/issues/7939)) ([4844624](https://github.com/JiRaska/open-bank-oss/commit/4844624814bf2209f2e8b42f4a57388030299e90))
+* **admin-ui:** explain FX trend at a glance ([#7902](https://github.com/JiRaska/open-bank-oss/issues/7902)) ([b62d9be](https://github.com/JiRaska/open-bank-oss/commit/b62d9be8ae47e4d7c6aa0debba200b1f2b0fca10))
+
 ## [0.227.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.226.3...admin-ui-v0.227.0) (2026-09-01)
 
 
