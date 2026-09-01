@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.226.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.226.2...admin-ui-v0.226.3) (2026-09-01)
+
+
+### Bug Fixes
+
+* **admin-ui:** require review for agent decisions ([#7875](https://github.com/JiRaska/open-bank-oss/issues/7875)) ([4e5f925](https://github.com/JiRaska/open-bank-oss/commit/4e5f925697920e85910b999ca120e7e47e379377))
+* **admin-ui:** restore capability matrix ([#7927](https://github.com/JiRaska/open-bank-oss/issues/7927)) ([cd1f704](https://github.com/JiRaska/open-bank-oss/commit/cd1f70453a2ada0bee43c7b9910300b08f3e85bf)), closes [#7926](https://github.com/JiRaska/open-bank-oss/issues/7926)
+* **admin-ui:** review audience approvals ([#7883](https://github.com/JiRaska/open-bank-oss/issues/7883)) ([a1d7db9](https://github.com/JiRaska/open-bank-oss/commit/a1d7db9586a05a03baaa7a882196c338f05a94e1))
+* **admin-ui:** review campaign lifecycle actions ([#7886](https://github.com/JiRaska/open-bank-oss/issues/7886)) ([786a19d](https://github.com/JiRaska/open-bank-oss/commit/786a19dff95557aff26bb59ee164379872c3baa4))
+* **admin-ui:** review identity case decisions ([#7889](https://github.com/JiRaska/open-bank-oss/issues/7889)) ([b02a856](https://github.com/JiRaska/open-bank-oss/commit/b02a856e5ed39e3bb82062c8180f54db5994c43e))
+* **admin-ui:** review manual catch-up close ([#7892](https://github.com/JiRaska/open-bank-oss/issues/7892)) ([8bf04c4](https://github.com/JiRaska/open-bank-oss/commit/8bf04c407078e1955d4afb0121ab78a60211e18c))
+* **admin-ui:** review sanctions approval decisions ([#7879](https://github.com/JiRaska/open-bank-oss/issues/7879)) ([8711245](https://github.com/JiRaska/open-bank-oss/commit/87112456f47dc5a983a602e0db1a57467bfd095e))
+
 ## [0.226.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.226.1...admin-ui-v0.226.2) (2026-08-31)
 
 
