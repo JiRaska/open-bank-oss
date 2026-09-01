@@ -10,9 +10,47 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import yaml
 
 REQUIRED_SCHEMA = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
 TESTCONTAINERS_EVIDENCE_BASELINE = "openbank-libs/governance/testcontainers-evidence-baseline.txt"
+CAPABILITY_REGISTER = "openbank-libs/governance/test-intelligence-capabilities.yaml"
+CAPABILITY_STATES = {
+    "implemented",
+    "external-blocked",
+    "ownership-blocked",
+    "safety-blocked",
+    "intentionally-deferred",
+}
+CAPABILITY_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+
+
+class DuplicateYamlKeyError(yaml.YAMLError):
+    """A YAML mapping whose apparent source and effective value would diverge."""
+
+
+class CapabilityLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate keys instead of silently keeping the last."""
+
+
+def construct_unique_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            duplicate = key in mapping
+        except TypeError as exc:
+            raise yaml.YAMLError(f"unhashable mapping key {key!r}") from exc
+        if duplicate:
+            raise DuplicateYamlKeyError(f"duplicate YAML key {key!r}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+CapabilityLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    construct_unique_mapping,
+)
 
 
 def text(path: Path) -> str:
@@ -65,6 +103,65 @@ def valid_capability_evidence(root: Path, evidence: str) -> bool:
         normalized_heading(heading) == target
         for heading in re.findall(r"(?m)^#{1,6}\s+(.+?)\s*#*\s*$", text(candidate))
     )
+
+
+def capability_register_errors(root: Path) -> list[str]:
+    """Validate the exact operator contract read by the Admin capability matrix.
+
+    This must parse YAML rather than recognise its indentation.  The collector parses the
+    same file, and ordinary YAML loaders silently retain a duplicate key's final value;
+    accepting the earlier textual value here would let CI certify a different UI state.
+    """
+    register_path = root / CAPABILITY_REGISTER
+    try:
+        register = yaml.load(register_path.read_text(encoding="utf-8"), Loader=CapabilityLoader)
+    except (OSError, yaml.YAMLError) as exc:
+        return [f"test-intelligence capability register unavailable: {exc}"]
+    if not isinstance(register, dict):
+        return ["test-intelligence capability register must be a YAML mapping"]
+
+    errors: list[str] = []
+    if set(register) != {"version", "capabilities"}:
+        errors.append("test-intelligence capability register has unsupported or missing top-level fields")
+    if type(register.get("version")) is not int or register.get("version") != 1:
+        errors.append("test-intelligence capability register must declare integer version 1")
+    capabilities = register.get("capabilities")
+    if not isinstance(capabilities, list) or not capabilities:
+        return errors + ["test-intelligence capability register must declare a non-empty capability list"]
+
+    seen_ids: set[str] = set()
+    for index, capability in enumerate(capabilities, start=1):
+        prefix = f"test-intelligence capability #{index}"
+        if not isinstance(capability, dict):
+            errors.append(f"{prefix} must be a mapping")
+            continue
+        identifier = capability.get("id")
+        title = capability.get("title")
+        state = capability.get("state")
+        evidence = capability.get("evidence")
+        blocker = capability.get("blocker")
+        required = {"id", "title", "state", "evidence"}
+        permitted = required | {"blocker"}
+        if not required.issubset(capability) or not set(capability).issubset(permitted):
+            errors.append(f"{prefix} has unsupported or missing fields")
+        if not isinstance(identifier, str) or not CAPABILITY_ID.fullmatch(identifier):
+            errors.append(f"{prefix} has an invalid id")
+        elif identifier in seen_ids:
+            errors.append(f"test-intelligence capability id is duplicated: {identifier}")
+        else:
+            seen_ids.add(identifier)
+        if not isinstance(title, str) or not title.strip():
+            errors.append(f"{prefix} has an empty or non-string title")
+        if not isinstance(state, str) or state not in CAPABILITY_STATES:
+            errors.append(f"{prefix} has an unsupported state")
+        if not isinstance(evidence, str) or not valid_capability_evidence(root, evidence.strip()):
+            errors.append(f"{prefix} has unresolvable evidence")
+        if state == "implemented":
+            if "blocker" in capability:
+                errors.append(f"implemented test-intelligence capability has a blocker: {identifier}")
+        elif not isinstance(blocker, str) or not blocker.strip():
+            errors.append(f"blocked test-intelligence capability has no non-empty blocker: {identifier}")
+    return errors
 
 
 RECORD_CALL = re.compile(
@@ -282,21 +379,7 @@ def check(root: Path) -> list[str]:
                    "requiredControlGaps: controls.filter"):
         if needle not in collector:
             errors.append(f"admin projection loses an independent required-control denominator: {needle}")
-    capability_text = text(root / "openbank-libs/governance/test-intelligence-capabilities.yaml")
-    capability_blocks = re.split(r"(?m)^  - id: ", capability_text)[1:]
-    ids = [block.splitlines()[0].strip() for block in capability_blocks]
-    allowed = {"implemented", "external-blocked", "ownership-blocked", "safety-blocked", "intentionally-deferred"}
-    if not capability_blocks or len(ids) != len(set(ids)):
-        errors.append("test-intelligence capability register is empty or duplicated")
-    for identifier, block in zip(ids, capability_blocks, strict=True):
-        state = re.search(r"(?m)^    state: ([a-z-]+)$", block)
-        evidence = re.search(r"(?m)^    evidence: (.+)$", block)
-        if not state or state.group(1) not in allowed or "\n    title:" not in block or not evidence:
-            errors.append(f"test-intelligence capability is incomplete: {identifier}")
-        if state and state.group(1) != "implemented" and "\n    blocker:" not in block:
-            errors.append(f"blocked test-intelligence capability has no blocker: {identifier}")
-        if evidence and not valid_capability_evidence(root, evidence.group(1).strip()):
-            errors.append(f"test-intelligence capability has unresolvable evidence: {identifier}")
+    errors.extend(capability_register_errors(root))
     for needle in ("function platformCapabilities()", "platformCapabilities: capabilities"):
         if needle not in collector:
             errors.append(f"admin projection loses operator-visible platform blockers: {needle}")
@@ -510,6 +593,40 @@ def self_test() -> int:
         ):
             if valid_capability_evidence(root, invalid):
                 print(f"self-test failed: invalid capability evidence was accepted: {invalid}")
+                return 1
+        register = root / CAPABILITY_REGISTER
+        register.write_text(
+            "version: 1\ncapabilities:\n"
+            "  - id: verified-capability\n"
+            "    title: Verified capability\n"
+            "    state: implemented\n"
+            "    evidence: docs/adr/test-intelligence.md#d8--capability-boundary\n"
+        )
+        if capability_register_errors(root):
+            print("self-test failed: a valid capability register was rejected")
+            return 1
+        cases = {
+            "duplicate YAML key": register.read_text().replace(
+                "    state: implemented\n", "    state: implemented\n    state: external-blocked\n"
+            ),
+            "duplicate capability id": register.read_text() + (
+                "  - id: verified-capability\n"
+                "    title: Duplicate capability\n"
+                "    state: implemented\n"
+                "    evidence: docs/adr/test-intelligence.md#d8--capability-boundary\n"
+            ),
+            "mapping instead of list": "version: 1\ncapabilities: {}\n",
+            "missing blocked capability reason": register.read_text().replace(
+                "state: implemented", "state: safety-blocked"
+            ),
+            "non-string evidence": register.read_text().replace(
+                "evidence: docs/adr/test-intelligence.md#d8--capability-boundary", "evidence: 42"
+            ),
+        }
+        for label, candidate in cases.items():
+            register.write_text(candidate)
+            if not capability_register_errors(root):
+                print(f"self-test failed: {label} was accepted")
                 return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0

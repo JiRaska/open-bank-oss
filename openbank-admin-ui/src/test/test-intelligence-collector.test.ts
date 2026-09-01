@@ -191,6 +191,30 @@ scenarios:
     expect(report.platformCapabilities).toContainEqual(expect.objectContaining({ id: 'probes', state: 'external-blocked' }))
   })
 
+  it('does not project a malformed capability register as a partial platform matrix', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-capability-register-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-libs/governance/test-intelligence-capabilities.yaml', `version: 1
+capabilities:
+  - id: probes
+    title: Independent probes
+    state: implemented
+    state: external-blocked
+    evidence: issue-1
+`)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.platformCapabilities).toEqual([])
+    expect(report.warnings).toEqual(expect.arrayContaining([
+      expect.stringMatching(/capability register unavailable:.*unique/i),
+    ]))
+  })
+
   it('keeps Vitest and multi-suite Playwright fallback evidence when no CI envelope was retained', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-xml-fallback-'))
     dirs.push(repo)
