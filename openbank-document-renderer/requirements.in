@@ -12,4 +12,4 @@ weasyprint==69.0
 # Pinned so the Dockerfile's `pip install --upgrade pip` step is itself
 # hash-verifiable (Scorecard Pinned-Dependencies) instead of floating to
 # whatever pip resolves as "latest" at build time.
-pip==26.1.2
+pip==26.2

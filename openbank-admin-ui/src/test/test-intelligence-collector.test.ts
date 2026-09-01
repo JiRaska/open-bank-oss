@@ -171,6 +171,78 @@ scenarios:
     ]))
   })
 
+  it('does not count an unobserved contract declaration as execution evidence', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-execution-evidence-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-beta-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'pacts/alpha-external.json', JSON.stringify({
+      consumer: { name: 'openbank-alpha-service' },
+      provider: { name: 'external-provider' },
+      interactions: [{ description: 'declared but not verified' }],
+    }))
+    write(
+      repo,
+      'openbank-beta-service/build/test-results/test/TEST-com.openbank.beta.AllSkippedTest.xml',
+      '<testsuite name="com.openbank.beta.AllSkippedTest" tests="1" failures="0" errors="0" skipped="1" time="0"><testcase classname="com.openbank.beta.AllSkippedTest"><skipped/></testcase></testsuite>',
+    )
+    write(repo, 'openbank-admin-ui/test-intelligence-history/previous.json', JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-01T00:00:00.000Z',
+      components: [
+        { component: 'openbank-alpha-service', evidence: [{ state: 'unknown', observedAt: null }] },
+        { component: 'openbank-beta-service', evidence: [{ state: 'skipped', observedAt: '2026-08-01T00:00:00.000Z' }] },
+      ],
+      totals: { components: 2, componentsWithExecutionEvidence: 2, missingEvidence: 0 },
+    }))
+    write(repo, 'openbank-admin-ui/test-intelligence-history/malformed-null.json', JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-07-30T00:00:00.000Z',
+      components: [{ component: 'openbank-legacy-service', evidence: [null] }],
+      totals: { components: 7, componentsWithExecutionEvidence: 6, missingEvidence: 1 },
+    }))
+    write(repo, 'openbank-admin-ui/test-intelligence-history/malformed-shape.json', JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-07-31T00:00:00.000Z',
+      components: [
+        { component: 'openbank-invalid-state', evidence: [{ state: 'invented', observedAt: '2026-07-31T00:00:00.000Z' }] },
+        { component: 'openbank-invalid-time', evidence: [{ state: 'passed', observedAt: 123 }] },
+      ],
+      totals: { components: 9, componentsWithExecutionEvidence: 8, missingEvidence: 1 },
+    }))
+
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.components.find(item => item.component === 'openbank-alpha-service')?.evidence).toEqual([
+      expect.objectContaining({ kind: 'contract', state: 'unknown', observedAt: null }),
+    ])
+    expect(report.components.find(item => item.component === 'openbank-beta-service')?.evidence).toEqual([
+      expect.objectContaining({
+        kind: 'unit', state: 'skipped', observedAt: expect.any(String),
+        counts: expect.objectContaining({ discovered: 1, executed: 0, skipped: 1 }),
+      }),
+    ])
+    expect(report.totals).toMatchObject({
+      components: 2, componentsWithExecutionEvidence: 1, missingEvidence: 1,
+    })
+    expect(report.history[0]).toMatchObject({
+      collectedAt: '2026-07-30T00:00:00.000Z',
+      components: 7, componentsWithExecutionEvidence: 6, missingEvidence: 1,
+    })
+    expect(report.history[1]).toMatchObject({
+      collectedAt: '2026-07-31T00:00:00.000Z',
+      components: 9, componentsWithExecutionEvidence: 8, missingEvidence: 1,
+    })
+    expect(report.history[2]).toMatchObject({
+      collectedAt: '2026-08-01T00:00:00.000Z',
+      components: 2, componentsWithExecutionEvidence: 1, missingEvidence: 1,
+    })
+    expect(report.history.at(-1)).toMatchObject({
+      components: 2, componentsWithExecutionEvidence: 1, missingEvidence: 1,
+    })
+  })
+
   it('derives required mutation controls from the full commented Pitest matrix', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-required-mutation-'))
     dirs.push(repo)
@@ -189,6 +261,30 @@ scenarios:
     ])
     expect(report.totals).toMatchObject({ requiredControls: 4, requiredControlGaps: 4 })
     expect(report.platformCapabilities).toContainEqual(expect.objectContaining({ id: 'probes', state: 'external-blocked' }))
+  })
+
+  it('does not project a malformed capability register as a partial platform matrix', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-capability-register-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-libs/governance/test-intelligence-capabilities.yaml', `version: 1
+capabilities:
+  - id: probes
+    title: Independent probes
+    state: implemented
+    state: external-blocked
+    evidence: issue-1
+`)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.platformCapabilities).toEqual([])
+    expect(report.warnings).toEqual(expect.arrayContaining([
+      expect.stringMatching(/capability register unavailable:.*unique/i),
+    ]))
   })
 
   it('keeps Vitest and multi-suite Playwright fallback evidence when no CI envelope was retained', () => {

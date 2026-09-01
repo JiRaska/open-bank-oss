@@ -11,15 +11,23 @@
 // author) is enforced by the agent.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
-import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot, UserRound } from 'lucide-react'
+import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot, UserRound, ExternalLink, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
 import { resolveAgentIdentity, type AgentIdentityRegistry } from '@/lib/governance/agentIdentity'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
+import {
+  approvalWorkbenchHref,
+  filterAndSortDomainApprovals,
+  type ApprovalDomain,
+  type ApprovalSortOrder,
+  type DomainApprovalItem,
+} from '@/lib/approvals/triage'
 
 interface Proposal {
   id: string
@@ -36,9 +44,9 @@ interface Proposal {
   agent?: { id: string; displayName: string; icon: 'bot' | 'user'; charterKnown: boolean }
 }
 
-interface InboxItem {
+interface InboxItem extends Omit<DomainApprovalItem, 'domain'> {
   id: string
-  domain: 'lending' | 'agent'
+  domain: ApprovalDomain | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -62,6 +70,7 @@ export default function ApprovalsPage() {
   const [rows, setRows] = useState<Proposal[]>([])
   const [domainItems, setDomainItems] = useState<InboxItem[]>([])
   const [domainSources, setDomainSources] = useState<Record<string, string>>({})
+  const [domainLoadFailed, setDomainLoadFailed] = useState(false)
   const [loading, setLoading] = useState(true)
   const flight = useSingleFlight()
   const [decisionIntent, setDecisionIntent] = useState<DecisionIntent | null>(null)
@@ -72,27 +81,44 @@ export default function ApprovalsPage() {
   // `registryLoading` keeps the two apart in the UI (#5904).
   const [registry, setRegistry] = useState<AgentIdentityRegistry | null>(null)
   const [registryLoading, setRegistryLoading] = useState(true)
+  const [domainFilter, setDomainFilter] = useState<ApprovalDomain | 'all'>('all')
+  const [domainQuery, setDomainQuery] = useState('')
+  const [domainSort, setDomainSort] = useState<ApprovalSortOrder>('oldest')
 
   const load = useCallback(async () => {
     setLoading(true)
-    try {
-      const [proposalsRes, inboxRes] = await Promise.all([
-        fetch('/api/agent/proposals?state=all', { cache: 'no-store' }),
-        fetch('/api/approvals/pending', { cache: 'no-store' }),
-      ])
-      const data = await proposalsRes.json()
-      setRows(Array.isArray(data) ? data : [])
-      if (inboxRes.ok) {
-        const inbox = await inboxRes.json()
-        setDomainItems(Array.isArray(inbox.items) ? inbox.items : [])
-        setDomainSources(inbox.sources ?? {})
-      }
+    const [proposalsResult, inboxResult] = await Promise.allSettled([
+      fetch('/api/agent/proposals?state=all', { cache: 'no-store' }).then(async response => {
+        if (!response.ok) throw new Error('agent proposals unavailable')
+        const data = await response.json()
+        return Array.isArray(data) ? data as Proposal[] : []
+      }),
+      fetch('/api/approvals/pending', { cache: 'no-store' }).then(async response => {
+        if (!response.ok) throw new Error('domain approvals unavailable')
+        const inbox = await response.json()
+        return {
+          items: Array.isArray(inbox.items) ? inbox.items as InboxItem[] : [],
+          sources: inbox.sources && typeof inbox.sources === 'object' ? inbox.sources as Record<string, string> : {},
+        }
+      }),
+    ])
+
+    if (proposalsResult.status === 'fulfilled') {
+      setRows(proposalsResult.value)
       setError(null)
-    } catch {
+    } else {
       setError('unreachable')
-    } finally {
-      setLoading(false)
     }
+
+    if (inboxResult.status === 'fulfilled') {
+      setDomainItems(inboxResult.value.items)
+      setDomainSources(inboxResult.value.sources)
+      setDomainLoadFailed(false)
+    } else {
+      // Retain any last successful snapshot, but never let it look current or empty.
+      setDomainLoadFailed(true)
+    }
+    setLoading(false)
   }, [])
 
   useEffect(() => { void load() }, [load])
@@ -169,6 +195,18 @@ export default function ApprovalsPage() {
     () => Object.entries(domainSources).filter(([, v]) => v === 'not-configured').map(([k]) => k),
     [domainSources],
   )
+  const domainApprovalItems = useMemo(
+    () => domainItems.filter((item): item is DomainApprovalItem => item.domain !== 'agent'),
+    [domainItems],
+  )
+  const domainOptions = useMemo(
+    () => [...new Set(domainApprovalItems.map(item => item.domain))].sort(),
+    [domainApprovalItems],
+  )
+  const visibleDomainItems = useMemo(
+    () => filterAndSortDomainApprovals(domainApprovalItems, domainFilter, domainSort, domainQuery),
+    [domainApprovalItems, domainFilter, domainQuery, domainSort],
+  )
 
   return (
     <AuthGuard permission="approvals:view">
@@ -193,8 +231,19 @@ export default function ApprovalsPage() {
       {/* ADR-0227 D2/D4: domain maker-checker queues, federated. Read-only here — disposal
           belongs to the governed per-domain flows (money-path adds SCA). */}
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>
-        {t('Doménová schvalování (money-path)', 'Domain approvals (money-path)')} ({domainItems.filter(i => i.domain !== 'agent').length})
+        {t('Doménová schvalování (money-path)', 'Domain approvals (money-path)')} ({domainApprovalItems.length})
       </div>
+      {domainLoadFailed && (
+        <div className="card" role="alert" style={{
+          padding: 14, marginBottom: 16, fontSize: 13,
+          color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d',
+        }}>
+          {t(
+            'Doménovou schvalovací frontu se nepodařilo načíst. Případná zobrazená data jsou z posledního úspěšného načtení; prázdný seznam neznamená, že nic nečeká.',
+            'Domain approval inbox could not be loaded. Any displayed data is from the last successful read; an empty list does not mean nothing is pending.',
+          )}
+        </div>
+      )}
       {unavailableSources.length > 0 && (
         <div className="card" style={{
           padding: 14, marginBottom: 16, fontSize: 13,
@@ -217,14 +266,48 @@ export default function ApprovalsPage() {
           )}
         </div>
       )}
-      {!loading && unavailableSources.length === 0 && notConfiguredSources.length === 0 && domainItems.filter(i => i.domain !== 'agent').length === 0 && (
+      {!loading && !domainLoadFailed && unavailableSources.length === 0 && notConfiguredSources.length === 0 && domainApprovalItems.length === 0 && (
         <div className="card" style={{ padding: 16, marginBottom: 16, color: 'var(--text-secondary)', fontSize: 13 }}>
           {t('Žádná doménová schvalování nečekají.', 'No domain approvals pending.')}
         </div>
       )}
+      {domainApprovalItems.length > 0 && (
+        <div className="card" role="group" aria-label={t('Filtry doménové fronty', 'Domain queue filters')} style={{ padding: 14, marginBottom: 12, display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
+          <div style={{ flex: '2 1 240px' }}>
+            <label htmlFor="approval-domain-search" style={{ display: 'block', marginBottom: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{t('Hledat ve frontě', 'Search queue')}</label>
+            <div style={{ position: 'relative' }}>
+              <Search aria-hidden="true" size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <input id="approval-domain-search" className="input" type="search" value={domainQuery} onChange={event => setDomainQuery(event.target.value)} placeholder={t('ID, akce, zdroj nebo maker', 'ID, action, resource or maker')} style={{ width: '100%', paddingLeft: 32 }} />
+            </div>
+          </div>
+          <div style={{ flex: '1 1 180px' }}>
+            <label htmlFor="approval-domain-filter" style={{ display: 'block', marginBottom: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{t('Doména', 'Domain')}</label>
+            <select id="approval-domain-filter" className="input" value={domainFilter} onChange={event => setDomainFilter(event.target.value as ApprovalDomain | 'all')} style={{ width: '100%' }}>
+              <option value="all">{t('Všechny domény', 'All domains')}</option>
+              {domainOptions.map(domain => <option key={domain} value={domain}>{domain}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: '1 1 180px' }}>
+            <label htmlFor="approval-domain-sort" style={{ display: 'block', marginBottom: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{t('Pořadí', 'Order')}</label>
+            <select id="approval-domain-sort" className="input" value={domainSort} onChange={event => setDomainSort(event.target.value as ApprovalSortOrder)} style={{ width: '100%' }}>
+              <option value="oldest">{t('Nejstarší první', 'Oldest first')}</option>
+              <option value="newest">{t('Nejnovější první', 'Newest first')}</option>
+            </select>
+          </div>
+          <span role="status" aria-live="polite" style={{ flex: '0 0 auto', paddingBottom: 9, fontSize: 11, color: 'var(--text-tertiary)' }}>
+            {t(`Zobrazeno ${visibleDomainItems.length} z ${domainApprovalItems.length}`, `Showing ${visibleDomainItems.length} of ${domainApprovalItems.length}`)}
+          </span>
+        </div>
+      )}
+      {!loading && domainApprovalItems.length > 0 && visibleDomainItems.length === 0 && (
+        <div className="card" style={{ padding: 16, marginBottom: 12, color: 'var(--text-secondary)', fontSize: 13 }}>
+          {t('Žádné čekající žádosti neodpovídají vybraným filtrům.', 'No pending approvals match the selected filters.')}
+        </div>
+      )}
       <div style={{ display: 'grid', gap: 10, marginBottom: 24 }}>
-        {domainItems.filter(i => i.domain !== 'agent').map(item => (
-          <div key={`${item.domain}:${item.id}`} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+        {visibleDomainItems.map(item => {
+          const workbenchHref = approvalWorkbenchHref(item)
+          return <div key={`${item.domain}:${item.id}`} data-testid={`domain-approval-${item.domain}:${item.id}`} className="card" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{
               fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase',
               color: '#1d4ed8', background: '#eff6ff', border: '1px solid #bfdbfe', flexShrink: 0,
@@ -242,8 +325,11 @@ export default function ApprovalsPage() {
             <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: '#fffbeb', border: '1px solid #fcd34d', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
               {t('Čeká', 'Pending')}
             </span>
+            {workbenchHref && <Link href={workbenchHref} className="btn btn-secondary" aria-label={t(`Otevřít řízenou kontrolu žádosti ${item.id}`, `Open governed review for approval ${item.id}`)} style={{ fontSize: 11, textDecoration: 'none' }}>
+              {t('Otevřít řízenou kontrolu', 'Open governed review')} <ExternalLink aria-hidden="true" size={12} />
+            </Link>}
           </div>
-        ))}
+        })}
       </div>
 
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>

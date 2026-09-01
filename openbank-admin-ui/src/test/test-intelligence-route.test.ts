@@ -46,6 +46,52 @@ describe('GET /api/test-intelligence', () => {
     expect(body.warnings[0]).toMatch(/not bundled/i)
   })
 
+  it('does not promote an unobserved contract declaration into runtime execution evidence', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-runtime-evidence-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: new Date().toISOString(),
+      components: [
+        {
+          component: 'openbank-alpha-service', released: true, moneyPath: false,
+          evidence: [{ kind: 'contract', state: 'unknown', observedAt: null, source: 'pacts/alpha.json', environment: 'ci' }],
+          coverage: { state: 'not-run' },
+        },
+        {
+          component: 'openbank-beta-service', released: true, moneyPath: false,
+          evidence: [{
+            kind: 'unit', state: 'skipped', observedAt: new Date().toISOString(), source: 'junit', environment: 'ci',
+            counts: { discovered: 1, executed: 0, passed: 0, failed: 0, skipped: 1, errors: 0 },
+          }],
+          coverage: { state: 'not-run' },
+        },
+        {
+          component: 'openbank-gamma-service', released: true, moneyPath: false,
+          evidence: [{ kind: 'integration', state: 'not-run', observedAt: new Date().toISOString(), source: 'junit', environment: 'ci' }],
+          coverage: { state: 'not-run' },
+        },
+        {
+          component: 'openbank-delta-service', released: true, moneyPath: false,
+          evidence: [{ kind: 'integration', state: 'blocked', observedAt: new Date().toISOString(), source: 'junit', environment: 'ci' }],
+          coverage: { state: 'not-run' },
+        },
+      ],
+      contracts: [], mutations: [], performance: [], syntheticJourneys: [], history: [],
+      totals: { components: 4, componentsWithExecutionEvidence: 1, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 3, staleEvidence: 0 },
+      warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+
+    expect(body.components.map((component: { evidence: Array<{ state: string }> }) => component.evidence[0].state))
+      .toEqual(['unknown', 'skipped', 'not-run', 'blocked'])
+    expect(body.totals).toMatchObject({
+      components: 4, componentsWithExecutionEvidence: 1, missingEvidence: 3,
+    })
+  })
+
   it('ages a deployed successful snapshot at request time while preserving failures and recomputing totals', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-runtime-freshness-'))
     dirs.push(dir)

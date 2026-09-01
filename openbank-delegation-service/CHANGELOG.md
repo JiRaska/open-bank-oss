@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.11.0...delegation-service-v0.12.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.10.0...delegation-service-v0.11.0) (2026-08-31)
 
 

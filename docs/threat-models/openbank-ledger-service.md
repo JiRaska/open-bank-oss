@@ -242,6 +242,23 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-09-01** — `POST /api/v1/journals` answered **500** rather than 400 for two shapes of
+  malformed input: a `null` element inside the `lines` array, and an absent request body. Neither
+  crossed a trust boundary, moved money or bypassed a control — `@RolesAllowed(OPERATOR)`, the
+  `@Authorize(action = "ledger.create")` OPA gate and `validateBalance()` all run unchanged, and
+  the request failed before reaching the domain in both cases. It is recorded here because the
+  inbound REST surface changed shape: `PostJournalRequest.lines` is now `List<PostJournalLineRequest?>`
+  and the body parameter is nullable, so the `requireNotNull` guards are reachable instead of dead
+  code (Jackson's Kotlin module null-checks constructor parameters, never collection elements; and
+  a `suspend fun` emits no `Intrinsics.checkNotNullParameter`, so the injected null flowed into the
+  body and died at the first dereference). **STRIDE-D:** the 5xx was the availability-signal defect
+  — a caller could not distinguish "I sent a bad request" from "the server is broken", which on a
+  money path decides whether it retries, and it burned SLO error budget on client error. Both now
+  raise `IllegalArgumentException`, mapped to 400 by libs-runtime's `CommonExceptionMappers`; no
+  service-local mapper is added (#526). No new caller, endpoint, role, network edge or privilege.
+  Rollback: revert the two declarations to their non-nullable form, restoring the 500.
+  Refs #5913.
+
 - **2026-08-26** — `POST /api/v1/journals` now copies the trusted synthetic classification from
   `SyntheticTaintRequestFilter` into the `JournalPosted` and derived `AccountBookedChanged` outbox
   rows for that posting. The REST resource reads only the server-side request property after the

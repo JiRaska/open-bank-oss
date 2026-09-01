@@ -34,4 +34,50 @@ class TestIntelligenceEvidenceRoutingIT {
             .then()
             .statusCode(403)
     }
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `a null components element is rejected as a bad request`() {
+        given()
+            .contentType("application/json")
+            .body("""{"snapshotId":"run-42","collectedAt":"2026-08-22T12:00:00Z","components":[null]}""")
+            .post("/api/v1/flaky-test-hunter/evidence/analyze")
+            .then()
+            .statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `a null evidence element is rejected as a bad request`() {
+        given()
+            .contentType("application/json")
+            .body(
+                """
+                {"snapshotId":"run-42","collectedAt":"2026-08-22T12:00:00Z","components":[
+                  {"component":"openbank-ledger-service","moneyPath":false,"evidence":[null],
+                   "declaredInfrastructure":[],"observedInfrastructureStarts":0}]}
+                """.trimIndent(),
+            )
+            .post("/api/v1/flaky-test-hunter/evidence/analyze")
+            .then()
+            .statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `a null requiredControls element is rejected as a bad request`() {
+        given()
+            .contentType("application/json")
+            .body(
+                """
+                {"snapshotId":"run-42","collectedAt":"2026-08-22T12:00:00Z","components":[
+                  {"component":"openbank-ledger-service","moneyPath":false,
+                   "evidence":[{"kind":"unit","state":"passed"}],"requiredControls":[null],
+                   "declaredInfrastructure":[],"observedInfrastructureStarts":0}]}
+                """.trimIndent(),
+            )
+            .post("/api/v1/flaky-test-hunter/evidence/analyze")
+            .then()
+            .statusCode(400)
+    }
 }

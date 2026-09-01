@@ -1,9 +1,14 @@
-# Incentive domain (ADR-0037: domain = namespace). This foundation intentionally contains no
-# service Deployment, image reference, or secret projection. Those arrive only after the signed
-# image, backup identity, and externally seeded promo-code pepper are independently evidenced.
+# Incentive domain (ADR-0037: domain = namespace). This component contains reviewed desired
+# workload, image, Service, NetworkPolicy, and prerequisite secret projections, but its manual
+# owning Application is not live evidence. Customer-edge wiring and traffic activation remain
+# separately reviewed steps after manual sync and observed health.
 apiVersion: v1
 kind: Namespace
 metadata:
+  annotations:
+    # A clean manual/DR sync must create the namespace before the wave -1
+    # ExternalSecrets that target it. Keep this earlier than every namespaced prerequisite.
+    argocd.argoproj.io/sync-wave: "-3"
   name: incentive
   labels:
     openbank.io/plane: app

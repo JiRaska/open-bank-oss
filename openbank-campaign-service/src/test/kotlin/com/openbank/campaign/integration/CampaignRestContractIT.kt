@@ -1381,6 +1381,62 @@ class CampaignRestContractIT {
         }
     }
 
+    /**
+     * Jackson's Kotlin module null-checks a data class's CONSTRUCTOR PARAMETERS; it does not check
+     * the ELEMENTS of a collection, so a null array element used to reach the mapping code and be
+     * dereferenced there — answering 500 where 400 belongs. Driven over real HTTP because the
+     * defect lives in deserialisation, which a direct call to the resource never performs.
+     */
+    @Test
+    fun `a null steps element is rejected with 400, not 500`() {
+        Given {
+            contentType("application/json")
+            body(
+                """
+                {"name":"null-step-${UUID.randomUUID()}","goal":"reject a null array element",
+                 "segmentName":"actives","segmentVersion":1,
+                 "steps":[null]}
+                """.trimIndent(),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    fun `a null decisions element is rejected with 400, not 500`() {
+        Given {
+            contentType("application/json")
+            body(
+                """
+                {"name":"null-decision-${UUID.randomUUID()}","goal":"reject a null array element",
+                 "segmentName":"actives","segmentVersion":1,
+                 "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                           "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
+                 "decisions":[null]}
+                """.trimIndent(),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    fun `a null audience rules element is rejected with 400, not 500`() {
+        Given {
+            contentType("application/json")
+            body("""{"name":"null-rule-${UUID.randomUUID()}","rules":[null]}""")
+        } When {
+            post("/api/v1/audiences")
+        } Then {
+            statusCode(400)
+        }
+    }
+
     companion object {
         /**
          * The same single step [draftBody] posts. A JDBC-written fixture has to be a campaign the

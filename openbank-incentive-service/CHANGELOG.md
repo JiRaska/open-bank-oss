@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.6.0...incentive-service-v0.6.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **incentive:** reject a null array element with 400 instead of 500 ([#8006](https://github.com/JiRaska/open-bank-oss/issues/8006)) ([2377a2c](https://github.com/JiRaska/open-bank-oss/commit/2377a2cece50951415248e6f51baf00077292a58)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.5.0...incentive-service-v0.6.0) (2026-08-27)
 
 

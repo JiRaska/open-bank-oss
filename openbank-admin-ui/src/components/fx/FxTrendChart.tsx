@@ -1,7 +1,39 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
-import { TrendingDown, TrendingUp } from 'lucide-react'
-import { fxTrendChange, normaliseFxTrend, type FxTrendPoint } from '@/lib/fx/trend'
+import { useEffect, useId, useMemo, useState } from 'react'
+import { Minus, TrendingDown, TrendingUp } from 'lucide-react'
+import { fxTrendDirection, fxTrendSummary, fxTrendTimelinePositions, normaliseFxTrend, type FxTrendPoint } from '@/lib/fx/trend'
+import styles from './FxTrendChart.module.css'
+
+const WIDTH = 320
+const HEIGHT = 104
+const PADDING_X = 4
+const PADDING_TOP = 12
+const PADDING_BOTTOM = 12
+
+function chartGeometry(points: FxTrendPoint[]) {
+  if (points.length < 2) return null
+  const values = points.map(point => point.rate)
+  const minimum = Math.min(...values)
+  const maximum = Math.max(...values)
+  const padding = Math.max((maximum - minimum) * .12, maximum * .002, .000001)
+  const low = minimum - padding
+  const high = maximum + padding
+  const span = high - low
+  const plotWidth = WIDTH - PADDING_X * 2
+  const plotHeight = HEIGHT - PADDING_TOP - PADDING_BOTTOM
+  const positions = fxTrendTimelinePositions(points)
+  const coordinates = points.map((point, index) => ({
+    x: PADDING_X + positions[index] * plotWidth,
+    y: PADDING_TOP + ((high - point.rate) / span) * plotHeight,
+  }))
+  const line = coordinates.map(({ x, y }, index) => `${index ? 'L' : 'M'} ${x.toFixed(2)} ${y.toFixed(2)}`).join(' ')
+  return {
+    line,
+    area: `${line} L ${coordinates.at(-1)!.x.toFixed(2)} ${HEIGHT - PADDING_BOTTOM} L ${coordinates[0].x.toFixed(2)} ${HEIGHT - PADDING_BOTTOM} Z`,
+    first: coordinates[0],
+    last: coordinates.at(-1)!,
+  }
+}
 
 export function FxTrendChart({ bases, quote, lang }: { bases: string[]; quote: string; lang: 'cs' | 'en' }) {
   const availableBases = useMemo(() => [...new Set(['EUR', ...bases])].sort(), [bases])
@@ -10,14 +42,14 @@ export function FxTrendChart({ bases, quote, lang }: { bases: string[]; quote: s
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const gradientId = `fx-trend-${useId().replace(/:/g, '')}`
+
   useEffect(() => {
     const controller = new AbortController()
-    setLoading(true)
-    setFailed(false)
     fetch(`/api/fx/history/${base}/${quote}`, { cache: 'no-store', signal: controller.signal })
-      .then(r => {
-        if (!r.ok) throw new Error(`FX history HTTP ${r.status}`)
-        return r.json()
+      .then(response => {
+        if (!response.ok) throw new Error(`FX history HTTP ${response.status}`)
+        return response.json()
       })
       .then(rows => {
         if (!controller.signal.aborted) setPoints(normaliseFxTrend(Array.isArray(rows) ? rows : []))
@@ -33,24 +65,55 @@ export function FxTrendChart({ bases, quote, lang }: { bases: string[]; quote: s
       })
     return () => controller.abort()
   }, [attempt, base, quote])
-  const change = fxTrendChange(points)
-  const geometry = useMemo(() => {
-    if (points.length < 2) return ''
-    const values = points.map(p => p.rate), min = Math.min(...values), max = Math.max(...values)
-    const range = max - min || 1
-    return points.map((p, i) => `${i ? 'L' : 'M'} ${(i / (points.length - 1)) * 100} ${44 - ((p.rate - min) / range) * 40}`).join(' ')
-  }, [points])
-  const up = (change ?? 0) >= 0
-  const tone = up ? 'var(--success)' : 'var(--danger)'
-  return <section className="card" aria-label={lang === 'cs' ? `Tříměsíční trend ${base}/${quote}` : `Three-month ${base}/${quote} trend`} style={{ padding: 20 }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 16 }}>
-      <div><div style={{ fontSize: 11, fontWeight: 750, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '.07em' }}>{lang === 'cs' ? 'Referenční trend ČNB · 3 měsíce' : 'CNB reference trend · 3 months'}</div><div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}><select value={base} onChange={event => setBase(event.target.value)} aria-label={lang === 'cs' ? 'Měna trendu' : 'Trend currency'} style={{ border: '1px solid var(--border)', borderRadius: 7, background: 'var(--surface-2)', color: 'var(--text-primary)', padding: '5px 8px', fontWeight: 750 }}>{availableBases.map(currency => <option key={currency} value={currency}>{currency}</option>)}</select><h2 style={{ margin: 0, fontSize: 18 }}>/ {quote}</h2></div></div>
-      {change !== null && <div style={{ color: tone, display: 'flex', alignItems: 'center', gap: 5, fontWeight: 750 }}>{up ? <TrendingUp size={16} aria-hidden="true" /> : <TrendingDown size={16} aria-hidden="true" />}{change >= 0 ? '+' : ''}{change.toFixed(2)} %</div>}
+
+  // Do not label the newly selected pair with the previous pair's summary while its request is in flight.
+  const summary = loading ? null : fxTrendSummary(points)
+  const geometry = useMemo(() => loading ? null : chartGeometry(points), [loading, points])
+  const direction = fxTrendDirection(summary?.changePercent ?? 0)
+  const tone = direction === 'up' ? 'var(--success)' : direction === 'down' ? 'var(--danger)' : 'var(--accent)'
+  const locale = lang === 'cs' ? 'cs-CZ' : 'en-GB'
+  const formatRate = (rate: number) => rate.toLocaleString(locale, { maximumFractionDigits: 6 })
+  const formatDate = (timestamp: string) => new Date(timestamp).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+  const chartLabel = summary && (lang === 'cs'
+    ? `${base}/${quote}: z ${formatRate(summary.first.rate)} na ${formatRate(summary.last.rate)}, změna ${summary.changePercent.toFixed(2)} procenta; minimum ${formatRate(summary.minimum.rate)}, maximum ${formatRate(summary.maximum.rate)}`
+    : `${base}/${quote}: from ${formatRate(summary.first.rate)} to ${formatRate(summary.last.rate)}, a ${summary.changePercent.toFixed(2)} percent change; minimum ${formatRate(summary.minimum.rate)}, maximum ${formatRate(summary.maximum.rate)}`)
+
+  return <section className={`card ${styles.card}`} data-testid="fx-trend-chart" aria-label={lang === 'cs' ? `Tříměsíční trend ${base}/${quote}` : `Three-month ${base}/${quote} trend`}>
+    <div className={styles.header}>
+      <div>
+        <div className={styles.eyebrow}>{lang === 'cs' ? 'Referenční trend ČNB · 3 kalendářní měsíce' : 'CNB reference trend · 3 calendar months'}</div>
+        <div className={styles.pair}>
+          <select value={base} onChange={event => { setLoading(true); setFailed(false); setBase(event.target.value) }} aria-label={lang === 'cs' ? 'Měna trendu' : 'Trend currency'}>{availableBases.map(currency => <option key={currency} value={currency}>{currency}</option>)}</select>
+          <h2>/ {quote}</h2>
+        </div>
+      </div>
+      {summary && <div className={styles.change} style={{ color: tone }} aria-label={lang === 'cs' ? `Změna za období ${summary.changePercent.toFixed(2)} procenta` : `Period change ${summary.changePercent.toFixed(2)} percent`}>
+        {direction === 'up' ? <TrendingUp size={16} aria-hidden="true" /> : direction === 'down' ? <TrendingDown size={16} aria-hidden="true" /> : <Minus size={16} aria-hidden="true" />}
+        {summary.changePercent >= 0 ? '+' : ''}{summary.changePercent.toFixed(2)} %
+      </div>}
     </div>
-    {loading ? <div style={{ height: 150, display: 'grid', placeItems: 'center', color: 'var(--text-tertiary)' }}>{lang === 'cs' ? 'Načítám trend…' : 'Loading trend…'}</div> : failed ? <div style={{ minHeight: 150, display: 'grid', placeItems: 'center', color: 'var(--text-tertiary)', textAlign: 'center' }}><div><p>{lang === 'cs' ? 'Historický trend teď nelze načíst.' : 'Historical trend is unavailable right now.'}</p><button type="button" onClick={() => setAttempt(value => value + 1)} style={{ border: '1px solid var(--border)', borderRadius: 7, background: 'var(--surface-2)', color: 'var(--text-primary)', cursor: 'pointer', padding: '7px 12px', fontWeight: 650 }}>{lang === 'cs' ? 'Zkusit znovu' : 'Try again'}</button></div></div> : points.length < 2 ? <div style={{ height: 150, display: 'grid', placeItems: 'center', color: 'var(--text-tertiary)', textAlign: 'center' }}>{lang === 'cs' ? 'Pro tento pár zatím není dost historických fixingů.' : 'There are not enough historical fixings for this pair yet.'}</div> : <>
-      <svg viewBox="0 0 100 48" role="img" aria-label={lang === 'cs' ? `Kurz se změnil o ${change?.toFixed(2)} procenta` : `Rate changed by ${change?.toFixed(2)} percent`} style={{ width: '100%', height: 150, marginTop: 12, overflow: 'visible' }} preserveAspectRatio="none"><path d={geometry} fill="none" stroke={tone} strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" /><line x1="0" y1="46" x2="100" y2="46" stroke="var(--border)" vectorEffect="non-scaling-stroke" /></svg>
-      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-tertiary)', fontSize: 11 }}><span>{new Date(points[0].timestamp).toLocaleDateString(lang === 'cs' ? 'cs-CZ' : 'en-GB')}</span><span>{points.at(-1)!.rate.toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB', { maximumFractionDigits: 6 })} {quote}</span></div>
+
+    {loading ? <div className={styles.state} aria-live="polite">{lang === 'cs' ? 'Načítám trend…' : 'Loading trend…'}</div> : failed ? <div className={styles.state} role="alert"><div><p>{lang === 'cs' ? 'Historický trend teď nelze načíst.' : 'Historical trend is unavailable right now.'}</p><button type="button" className="btn btn-secondary btn-sm" onClick={() => { setLoading(true); setFailed(false); setAttempt(value => value + 1) }}>{lang === 'cs' ? 'Zkusit znovu' : 'Try again'}</button></div></div> : !summary || !geometry ? <div className={styles.state}>{lang === 'cs' ? 'Pro tento pár zatím není dost historických fixingů.' : 'There are not enough historical fixings for this pair yet.'}</div> : <>
+      <div className={styles.chartShell}>
+        <svg className={styles.chart} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={chartLabel || undefined} preserveAspectRatio="none">
+          <defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={tone} stopOpacity=".24" /><stop offset="1" stopColor={tone} stopOpacity=".02" /></linearGradient></defs>
+          {[.25, .5, .75].map(fraction => <line key={fraction} x1={PADDING_X} y1={PADDING_TOP + fraction * (HEIGHT - PADDING_TOP - PADDING_BOTTOM)} x2={WIDTH - PADDING_X} y2={PADDING_TOP + fraction * (HEIGHT - PADDING_TOP - PADDING_BOTTOM)} stroke="var(--border)" strokeWidth=".6" vectorEffect="non-scaling-stroke" />)}
+          <path d={geometry.area} fill={`url(#${gradientId})`} />
+          <path d={geometry.line} fill="none" stroke={tone} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx={geometry.first.x} cy={geometry.first.y} r="3" fill="var(--surface)" stroke={tone} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+          <circle cx={geometry.last.x} cy={geometry.last.y} r="3" fill={tone} stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <div className={styles.axis} aria-hidden="true"><span>{formatDate(summary.first.timestamp)}</span><span>{formatDate(summary.last.timestamp)}</span></div>
+      </div>
+      <div className={styles.metrics}>
+        {[
+          { label: lang === 'cs' ? 'Začátek' : 'Start', point: summary.first },
+          { label: lang === 'cs' ? 'Aktuálně' : 'Latest', point: summary.last },
+          { label: lang === 'cs' ? 'Minimum' : 'Minimum', point: summary.minimum },
+          { label: lang === 'cs' ? 'Maximum' : 'Maximum', point: summary.maximum },
+        ].map(metric => <div className={styles.metric} key={metric.label}><span className={styles.metricLabel}>{metric.label}</span><span className={styles.metricValue}>{formatRate(metric.point.rate)} {quote}</span><span className={styles.metricDate}>{formatDate(metric.point.timestamp)}</span></div>)}
+      </div>
     </>}
-    <p style={{ margin: '12px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>{lang === 'cs' ? 'Orientační střed ČNB; nejde o historickou závaznou klientskou nabídku.' : 'Indicative CNB mid-rate; not a binding historical customer quote.'}</p>
+    <p className={styles.note}><strong>{lang === 'cs' ? 'Jak číst graf:' : 'How to read this:'}</strong> {lang === 'cs' ? `kladná změna znamená, že za jednu jednotku ${base} je nyní potřeba více ${quote}. Orientační střed ČNB; nejde o historickou závaznou klientskou nabídku.` : `a positive change means one unit of ${base} now costs more ${quote}. Indicative CNB mid-rate; not a binding historical customer quote.`}</p>
   </section>
 }
