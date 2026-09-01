@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Hand-written must-FIRE controls for the pre-existing threshold alerts in
+# prometheus-rules-db.yaml. These are the counterweight to the generated coverage tests: those
+# prove absence is now expressible, and these prove the change did not shadow, weaken or
+# re-scope the behaviour #5755/#5756 established on a cluster that IS scraped.
+#
+# Deliberately NOT generated -- the input series here encode measured semantics (a replica
+# legitimately reports 0; the sentinel-zero guard) rather than the cluster set, so there is no
+# list to fall behind.
+rule_files:
+  - prometheus-rules-db.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "a scraped primary with no recovery point fires PostgresNoRecoveryPoint"
+    input_series:
+      - series: 'cnpg_collector_first_recoverability_point{namespace="pricing",pod="pricing-db-1"}'
+        values: "0+0x60"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="pricing",pod="pricing-db-1"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: PostgresNoRecoveryPoint
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: pricing
+              pod: pricing-db-1
+            exp_annotations:
+              summary: "Postgres has NO recovery point on pricing/pricing-db-1"
+              description: "This primary has no first recoverability point — no base backup exists, so the database cannot be restored to any moment. WAL archiving alone is not a backup. Check `kubectl get cluster -n pricing` for a barmanObjectStore, then force a base backup with an on-demand `kind: Backup`. Verify by listing the destination in S3, never by reading ContinuousArchiving (runbook 0003)."
+
+  - interval: 1m
+    # The primary filter is load-bearing and the rule's comment says so: unfiltered, the
+    # expression matches every healthy replica (19 of them, measured 2026-08-19). This is the
+    # must-NOT-fire half.
+    name: "a replica with no recovery point does NOT fire PostgresNoRecoveryPoint"
+    input_series:
+      - series: 'cnpg_collector_first_recoverability_point{namespace="pricing",pod="pricing-db-2"}'
+        values: "0+0x60"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="pricing",pod="pricing-db-2"}'
+        values: "1+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: PostgresNoRecoveryPoint
+        exp_alerts: []
+
+  - interval: 1m
+    # interval MUST stay at 1m here: a sample gap wider than the 5m staleness window makes the
+    # series flicker in and out between evaluations, so a `for: 30m` never matures and the case
+    # reads as "does not fire" for a reason that has nothing to do with the rule.
+    #
+    # The `> 0` guard, and the reason eval_time is past 30h: promtool's `time()` starts at the
+    # unix epoch, so at a 45m eval_time `time() - 0` is 45 minutes, not the ~56 YEARS a real
+    # never-backed-up cluster produces. Written that way the case passes with the guard DELETED
+    # -- decoration, not a test. Falsified by removing the guard from the rule: this case then
+    # goes red, and the stale case below stays green.
+    name: "a never-backed-up primary does NOT also fire PostgresBackupStale (sentinel-zero guard)"
+    input_series:
+      - series: 'cnpg_collector_last_available_backup_timestamp{namespace="pricing",pod="pricing-db-1"}'
+        values: "0+0x2100"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="pricing",pod="pricing-db-1"}'
+        values: "0+0x2100"
+    alert_rule_test:
+      - eval_time: 33h
+        alertname: PostgresBackupStale
+        exp_alerts: []
+      # ...and PostgresNoRecoveryPoint is NOT the alert for this cluster either, because the
+      # recovery-point metric is absent here. Two alerts, one condition, no double-page.
+      - eval_time: 33h
+        alertname: PostgresNoRecoveryPoint
+        exp_alerts: []
+
+  - interval: 1m
+    # The must-FIRE half of the same rule: a real backup that has stopped advancing. Backup at
+    # t=1800s, evaluated at 31h -> age 30.5h, over the 30h threshold.
+    name: "a primary whose backup chain stopped advancing fires PostgresBackupStale"
+    input_series:
+      - series: 'cnpg_collector_last_available_backup_timestamp{namespace="pricing",pod="pricing-db-1"}'
+        values: "1800+0x2100"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="pricing",pod="pricing-db-1"}'
+        values: "0+0x2100"
+    alert_rule_test:
+      - eval_time: 33h
+        alertname: PostgresBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: pricing
+              pod: pricing-db-1
+            exp_annotations:
+              summary: "Postgres base backup has gone stale on pricing/pricing-db-1"
+              description: "This primary's newest completed base backup is over 30h old and every ScheduledBackup in the fleet is daily, so at least one run has been missed. A recovery point still exists, so this is not PostgresNoRecoveryPoint -- the chain has stopped advancing. Check `kubectl get scheduledbackup -n pricing` and `kubectl get backup -n pricing` for the newest attempt and its failure, and confirm against the Cluster's own .status.lastSuccessfulBackup, which is what this metric mirrors (runbook 0003)."

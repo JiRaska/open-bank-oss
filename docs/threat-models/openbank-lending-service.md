@@ -437,10 +437,11 @@ outbound: consent-service for `CREDIT_OFFERS`, and analytics-sink for the 360 cr
 | **S**poofing | An unauthenticated caller reads a customer's cash-flow profile from analytics-sink | The route is `@RolesAllowed(OPERATOR, AUDITOR, ADMIN)`; the party id is parsed as a UUID *before* interpolation, which is also the injection boundary — ClickHouse's HTTP interface has no bound-parameter path. |
 
 **Known gap, stated rather than modelled away:** enforcement orders and insolvency proceedings have
-no source in this deployment — no service ingests a court register. They are reported as absent, not
-unknown, because permanent `complete = false` would suppress every offer forever and be
-indistinguishable from the feature being switched off. This is the first thing an operational-risk
-review of this gate should challenge.
+no source in this deployment — no service ingests a court register. The decision still treats them
+as non-suppressing, because a permanent `complete = false` would refuse every offer forever and be
+indistinguishable from the feature being switched off. What changed (#6646) is that the *state* is
+no longer indistinguishable from a clean answer: see section 9d. This remains the first thing an
+operational-risk review of this gate should challenge.
 
 ## 9c. Customer financial health (ADR-0269 rule 5) — STRIDE supplement
 
@@ -455,6 +456,31 @@ book, so it concentrates in one response things that until now lived in separate
 | **T**ampering / misleading | An unavailable upstream produces a flattering view | Every pillar can answer UNKNOWN and does so independently: a failed profile read greys out cashflow and obligations while the loan-derived pillars stand. Nothing is approximated — in particular the reserve is left UNKNOWN rather than inferred from unspent cashflow, which would show a customer a buffer they do not have. |
 | **T**ampering / misleading | No live loans reads as a healthy debt ratio | An empty loan book gives debt service 0; an *unreadable* one gives null, and null makes the obligations pillar UNKNOWN. The two are not collapsed, because only one of them means "this customer has no debts". |
 | **D**oS | The route fans out to two upstreams per call | Both reads are best-effort with the service's existing timeouts; a slow upstream costs a greyed-out pillar, never a hung request. |
+
+## 9d. The court-register signal source (ADR-0269 rule 2, #6646) — STRIDE supplement
+
+`CourtRegisterSignalSource` is declared as an outbound client edge for the INSOLVENCY and
+ENFORCEMENT suppression facts. **No upstream is configured in any environment, so no traffic
+crosses this boundary today** — the class exists to make the unconfigured state nameable, not to
+call anything. It is modelled here because the edge is now declared in code, and because the
+threat picture changes materially the day a register is procured.
+
+The defect it closes is not an exposure but an ambiguity. Both facts were previously hardcoded
+`false`, which is the identical value a genuinely consulted, empty register returns — so an empty
+INSOLVENCY set read as *no customer is insolvent* rather than *we never looked*, and the gap never
+reached the `complete` flag. On the two hardest facts in a hard suppression floor, the gate was
+therefore fail-**open** while reading as fail-closed.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **T**ampering / misleading | An unconfigured feed is read as a clean register, so a customer with an insolvency marker is offered credit | `CourtRegisterSignalState` has no default: `NOT_CONFIGURED`, `CLEAR` and `MARKER_PRESENT` are distinct values and every call site must state which it means. A regression test asserts an unconfigured register is not reported as clear. |
+| **R**epudiation | The bank cannot show whether a register was consulted for a given decision | `openbank_lending_court_register_feed_configured{signal}` is 0/1 per signal, and is named for whether the feed is *configured* — not for a findings count, which would need rewriting the day one is procured, and which cannot distinguish "no markers" from "no feed". |
+| **D**oS / availability (future) | Once a register is procured, an outage silently reverts the gate to the current permissive behaviour | The state is explicit, so an outage maps to `NOT_CONFIGURED` rather than to `CLEAR`. Whether that should suppress is a policy decision recorded in #6646 and deliberately unchanged here; the point of this slice is that it becomes a decision rather than an accident. |
+| **I**nformation disclosure (future) | Court-register queries reveal which customers the bank is assessing | No upstream exists, so nothing is disclosed today. A procured register puts customer identifiers on an external boundary and needs its own entry here before it is wired. |
+
+**Boot-time visibility:** the bean is `@Startup`, not plain `@ApplicationScoped`. A lazy bean's
+`init` gate does not run until first use, which for a rarely-exercised path can be never — the
+warning that the code cannot fire would itself never fire.
 
 ## 10. Change log
 

@@ -57,6 +57,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 # Baselined violations. Each is a service that ships an outbox nothing writes to, measured
 # 2026-08-07. Removing one from this list is the definition of done for that service.
 BASELINE = {
@@ -274,9 +276,15 @@ def classify_service(files: dict[str, str]) -> tuple[bool, bool]:
     return dispatcher, writes
 
 
-def scan(root: pathlib.Path) -> dict[str, bool]:
-    """service -> constructs_a_message, for every service that ships a dispatcher."""
+def scan(root: pathlib.Path) -> tuple[dict[str, bool], int]:
+    """(service -> constructs_a_message for every service that ships a dispatcher, services walked).
+
+    The walked count is returned as well because the dispatcher-shipping set is a SUBSET: an
+    empty result is what a renamed module prefix or a moved source root produces, and it prints
+    identically to a fleet where nothing ships an outbox.
+    """
     result: dict[str, bool] = {}
+    walked = 0
     for svc in sorted(p for p in root.glob("openbank-*") if p.is_dir()):
         # openbank-libs-* ships the ABSTRACT dispatcher every service extends. It owns no table and
         # constructs no message by design, so including it is a permanent false positive.
@@ -285,6 +293,7 @@ def scan(root: pathlib.Path) -> dict[str, bool]:
         main = svc / "src" / "main" / "kotlin"
         if not main.is_dir():
             continue
+        walked += 1
         files = {}
         for kt in main.rglob("*.kt"):
             try:
@@ -294,7 +303,7 @@ def scan(root: pathlib.Path) -> dict[str, bool]:
         dispatcher, writes = classify_service(files)
         if dispatcher:
             result[svc.name] = writes
-    return result
+    return result, walked
 
 
 def self_test() -> int:
@@ -468,7 +477,8 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    found = scan(pathlib.Path(args.root))
+    found, walked = scan(pathlib.Path(args.root))
+    gatelib.subjects(walked, "service Kotlin main source trees walked")
     violations = sorted(svc for svc, writes in found.items() if not writes)
     new = [v for v in violations if v not in BASELINE]
     stale = sorted(b for b in BASELINE if b not in violations)

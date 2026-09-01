@@ -307,7 +307,10 @@ computing once there is a debit to refuse.
   (ADR-0030 — it is money-path-adjacent: it mints payment rights).
 - Event-fed projection is eventually consistent: a revocation takes
   seconds, not milliseconds, to reach enforcement points — accepted,
-  and mitigated by suspend-now fraud hooks consuming the same topic.
+  and **not** mitigated by suspend-now fraud hooks: no such hook exists.
+  Fraud scoring is shadow-only on every rail and its verdict is discarded at
+  the activity boundary (#4403), so the revocation lag is currently accepted
+  unmitigated rather than covered.
 - `AccountAuthorization` migration needs a dual-run period and a
   backfill; until it completes, two grant sources exist for accounts.
 - External disclosure links are an exfiltration surface: OTP + expiry +

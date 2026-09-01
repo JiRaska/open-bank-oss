@@ -72,6 +72,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 SCHEDULED_RE = re.compile(r"^\s*@Scheduled\b")
 FUN_RE = re.compile(r"\bfun\s+`?(\w+)`?\s*\(")
 RUNBLOCKING_RE = re.compile(r"\brunBlocking\b")
@@ -344,6 +346,9 @@ def main() -> int:
     sources = sorted(
         p for p in root.glob("openbank-*/src/main/kotlin/**/*.kt") if "/build/" not in str(p)
     )
+    # The corpus is the FILE SET, not the 94 @Scheduled methods inside it: a moved source root
+    # takes the files, and "no @Scheduled found" then reads exactly like a clean fleet.
+    gatelib.subjects(len(sources), "main-source .kt files scanned")
 
     scheduled = 0
     fail = 0
