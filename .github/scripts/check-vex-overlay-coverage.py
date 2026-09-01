@@ -70,9 +70,6 @@ NO_RELEASE_COMPONENT: dict[str, str] = {
 # component -> issue that tracks writing its overlay. Reason required; stale either direction.
 NO_OVERLAY_YET: dict[str, str] = {
     "admin-ui": "#6719 - released component, no triage overlay written yet",
-    "case-coordinator-agent": "#6719 - released component, no triage overlay written yet",
-    "incentive-service": "#6719 - released component, no triage overlay written yet",
-    "referral-service": "#6719 - missed the whole CVE-2025-14969 fan-out for this reason",
 }
 
 
