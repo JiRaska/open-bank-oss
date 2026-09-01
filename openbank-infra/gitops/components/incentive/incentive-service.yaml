@@ -1,0 +1,164 @@
+# Incentive service workload. This is deliberately a separate, manual-sync rollout after the
+# namespace/CNPG, Vault and Kafka prerequisites. The exact image was signed and attested before
+# this desired-state pin; merging does not start a pod, create customer traffic, or prove health.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    # CNPG and its backup remain wave 0. Do not create a pod until that data plane is healthy.
+    argocd.argoproj.io/sync-wave: "1"
+  name: incentive-service
+  namespace: incentive
+  labels:
+    app.kubernetes.io/name: incentive-service
+    app.kubernetes.io/part-of: incentive
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: incentive-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: incentive-service
+        app.kubernetes.io/part-of: incentive
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: incentive-service
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-incentive-service:sandbox-1a489fe7
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8156
+            - name: management
+              containerPort: 8087
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://incentive-db-rw.incentive.svc:5432/openbank_incentive
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://incentive-db-rw.incentive.svc:5432/openbank_incentive
+            - name: DB_USER
+              value: openbank
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: incentive-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: incentive-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
+            - name: KEYCLOAK_URL
+              value: http://keycloak.iam.svc:8080
+            # The customer edge obtains this M2M identity from Keycloak. The service rejects every
+            # other ROLE_API caller and has no fallback, so a missing/wrong value fails closed.
+            - name: INCENTIVE_CUSTOMER_CALLER_PRINCIPAL
+              value: service-account-openbank-edge
+            - name: PROMO_CODE_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: incentive-service-promo-code-pepper
+                  key: PROMO_CODE_PEPPER
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          startupProbe:
+            httpGet:
+              path: /q/health/started
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: management
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        # Do not make these projections optional. A pod that cannot authenticate to Kafka must
+        # remain visibly unready rather than starting a plaintext-shaped outbox producer.
+        - name: kafka-keystore
+          secret:
+            secretName: incentive-service-kafka-keystore
+            optional: false
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
+            optional: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  name: incentive-service
+  namespace: incentive
+  labels:
+    app.kubernetes.io/name: incentive-service
+    app.kubernetes.io/part-of: incentive
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: incentive-service
+  ports:
+    - name: http
+      port: 8156
+      targetPort: http

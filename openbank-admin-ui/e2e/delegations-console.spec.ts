@@ -25,7 +25,7 @@ const ROLE_PRESET = {
   name: 'Účetní',
   description: 'Čte zůstatky a historii účtu.',
   resourceType: 'ACCOUNT',
-  capabilities: ['ACCOUNT_READ_BALANCES'],
+  capabilities: ['ACCOUNT_READ_BALANCES', 'ACCOUNT_INITIATE_PAYMENT'],
 }
 
 const GRANT_ROW = {
@@ -75,6 +75,20 @@ async function stubBff(page: Page): Promise<string[]> {
         }),
       })
     }
+    if (path.includes('/effective-access/')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          accounts: [{ id: RESOURCE, nickname: 'Provozní účet', accountNumber: 'CZ1234567890', currencyCode: 'CZK', status: 'ACTIVE' }],
+          cards: [],
+          grants: [],
+          presets: [ROLE_PRESET],
+          resourceDetails: [],
+          sources: { accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' },
+        }),
+      })
+    }
     if (path.includes('/party/')) {
       return route.fulfill({
         status: 200,
@@ -117,8 +131,12 @@ test('finds a party through entity resolution and renders its grants', async ({ 
   await page.getByRole('button', { name: /Jan Novák/ }).click()
 
   const main = page.locator('main')
-  await expect(main.getByText('ACCOUNT_READ_BALANCES, ACCOUNT_INITIATE_PAYMENT')).toBeVisible()
-  await expect(main.getByText('5 000 CZK')).toBeVisible()
+  await expect(main.getByText('Účetní').first()).toBeVisible()
+  await expect(main.getByText('Provozní účet').first()).toBeVisible()
+  await expect(main.getByText('Zůstatky').first()).toBeVisible()
+  await expect(main.getByText('Provést platbu').first()).toBeVisible()
+  await expect(main.getByText('5 000 CZK').first()).toBeVisible()
+  await expect(main.getByText('bez limitu').first()).toBeVisible()
   await expect(main.getByText('ACTIVE').first()).toBeVisible()
 
   // The grant list came through the console's own BFF route, and party lookup through the

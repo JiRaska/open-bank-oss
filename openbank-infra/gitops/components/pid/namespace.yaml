@@ -19,6 +19,12 @@ metadata:
   name: pid-db
   namespace: pid
 spec:
+  # Without this there is no PodMonitor, so no scrape target, so no `up` and no `cnpg_*`
+  # series -- and every alert in prometheus-rules-db.yaml, PostgresInstanceDown included,
+  # is structurally incapable of firing for this cluster. Its backup state would read as
+  # healthy by being unobservable (#7220).
+  monitoring:
+    enablePodMonitor: true
   instances: 1
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   storage:
