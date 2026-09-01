@@ -101,6 +101,17 @@ DECLARED_BYPASS_ACTORS: dict[tuple[int, str, str], str] = {
 TARGET_REF = "refs/heads/main"
 
 
+class Unreadable(RuntimeError):
+    """The subject could not be READ — distinct from the subject being clean, and from a broken call.
+
+    A non-admin token omits `bypass_actors` entirely, and CI runs as `GITHUB_TOKEN`. Raising the
+    same `RuntimeError` a failed `gh api` raises made the gate exit 1 on every CI run, so an
+    enforced gate that has never once been evaluable was red on every pull request — including the
+    pull request adding it. Reporting UNRESOLVED is the honest answer: it is not a pass (nothing was
+    checked) and not a finding (nothing was seen).
+    """
+
+
 def gh_api(path: str) -> list | dict:
     """`gh api <path>`, parsed. Raises RuntimeError on every failure mode.
 
@@ -146,7 +157,7 @@ def live_bypass_actors(repo: str) -> list[tuple[int, str, str]]:
         # exists to catch could never make it fire. CI runs with GITHUB_TOKEN, which is not an
         # admin, so that was every CI run. Fail as unreadable instead.
         if "bypass_actors" not in detail:
-            raise RuntimeError(
+            raise Unreadable(
                 f"ruleset {summary['id']} ({summary.get('name')}) returned no `bypass_actors` "
                 f"field — the token cannot see bypass actors (admin scope required), so this "
                 f"gate CANNOT be evaluated. Not a finding: an unreadable subject is UNRESOLVED, "
@@ -176,6 +187,16 @@ def findings(
 
 def _fmt(a: tuple[int, str, str]) -> str:
     return f"{a[1]}#{a[0]} (bypass_mode={a[2]})"
+
+
+def _run_main(argv: list[str]) -> int:
+    """Run main() with a synthetic argv, so the self-test can assert EXIT CODES, not just types."""
+    saved = sys.argv
+    sys.argv = ["check-ruleset-bypass-actors.py", *argv]
+    try:
+        return main()
+    finally:
+        sys.argv = saved
 
 
 def self_test() -> int:
@@ -227,8 +248,40 @@ def self_test() -> int:
         try:
             live_bypass_actors("o/r")
             fails.append("an unreadable ruleset (no bypass_actors key) must RAISE, not return []")
-        except RuntimeError:
+        except Unreadable:
             pass
+        except RuntimeError:
+            fails.append("an unreadable ruleset must raise Unreadable, not a bare RuntimeError")
+
+        # The exit code for "could not look" is the whole point of the Unreadable/RuntimeError
+        # split: an enforced gate that answers 1 here is red on every CI run and never once says
+        # anything about bypass actors. Assert the code, not just the exception type.
+        rc = _run_main(["--enforce"])
+        if rc != 0:
+            fails.append(f"an unreadable subject must exit 0 (UNRESOLVED), got {rc}")
+
+        # ...and the opposite direction, or "exit 0" would just mean "never fails".
+        globals()["gh_api"] = _fake_detail(
+            {
+                "conditions": {"ref_name": {"include": [TARGET_REF]}},
+                "bypass_actors": [{"actor_id": 999, "actor_type": "Team", "bypass_mode": "always"}],
+            }
+        )
+        rc = _run_main(["--enforce"])
+        if rc != 1:
+            fails.append(f"an undeclared live bypass actor must exit 1 under --enforce, got {rc}")
+
+        def _broken(path):
+            raise RuntimeError("gh api exploded")
+
+        globals()["gh_api"] = _broken
+        rc = _run_main(["--enforce"])
+        if rc != 1:
+            fails.append(f"a broken API call must still exit 1, got {rc}")
+
+        globals()["gh_api"] = _fake_detail(
+            {"conditions": {"ref_name": {"include": [TARGET_REF]}}}  # back to unreadable
+        )
         globals()["gh_api"] = _fake_detail(
             {"conditions": {"ref_name": {"include": [TARGET_REF]}}, "bypass_actors": []}
         )
@@ -251,7 +304,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: ruleset-bypass-actors is falsifiable (8 cases, both directions)")
+    print("self-test ok: ruleset-bypass-actors is falsifiable (12 cases, both directions, exit codes included)")
     return 0
 
 
@@ -266,6 +319,18 @@ def main() -> int:
 
     try:
         live = live_bypass_actors(args.repo)
+    except Unreadable as exc:
+        # NOT a pass: say out loud that nothing was checked, and let the runner's floor logic know
+        # the corpus was never read, so this run cannot be mistaken for a clean one.
+        gatelib.subjects_unresolved("bypass_actors is not visible to this token (admin scope required)")
+        print(f"::warning::ruleset-bypass-actors: {exc}")
+        print(
+            "ruleset-bypass-actors: NOT EVALUATED on this run. The check has teeth only where the "
+            "token can read `bypass_actors` — run it with an admin token to get a verdict. Treating "
+            "an unreadable subject as red would make the gate permanently and uninformatively red; "
+            "treating it as green would be a lie. UNRESOLVED is neither."
+        )
+        return 0
     except RuntimeError as exc:
         sys.stderr.write(f"::error::ruleset-bypass-actors: {exc}\n")
         return 1
