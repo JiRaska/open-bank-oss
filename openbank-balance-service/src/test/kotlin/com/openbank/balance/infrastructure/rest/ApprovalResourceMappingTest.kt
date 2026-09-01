@@ -5,7 +5,12 @@
 package com.openbank.balance.infrastructure.rest
 
 import com.openbank.libs.approval.ApprovalStatus
+import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.OffsetDateTime
@@ -33,6 +38,8 @@ class ApprovalResourceMappingTest {
         assertThat(response.action).isEqualTo("balance.credit")
         assertThat(response.resourceId).isEqualTo("acc-1")
         assertThat(response.status).isEqualTo("APPROVED")
+        assertThat(response.makerId).isEqualTo("maker")
+        assertThat(response.createdAt).isEqualTo("2026-07-11T23:00Z")
         assertThat(response.decidedBy).isEqualTo("checker")
     }
 
@@ -52,5 +59,46 @@ class ApprovalResourceMappingTest {
         assertThat(response.resourceId).isNull()
         assertThat(response.status).isEqualTo("PENDING")
         assertThat(response.decidedBy).isNull()
+    }
+
+    /**
+     * The read side of the unified approval inbox (issue #5679, ADR-0227 D2). `makerId` and
+     * `createdAt` are the two fields the inbox renders and neither existed on this service's
+     * response shape before, so the assertions on them are what fails if the mapping is dropped.
+     */
+    @Test
+    fun `listPending exposes the mapped checker queue`(): Unit = runBlocking {
+        val store = mockk<ApprovalStore>()
+        coEvery { store.findPending(50) } returns listOf(
+            PendingApproval(
+                id = "appr-3",
+                action = "balance.debit",
+                resourceId = "acc-9",
+                makerId = "maker",
+                status = ApprovalStatus.PENDING,
+                createdAt = OffsetDateTime.parse("2026-07-12T00:00:00Z"),
+            ),
+        )
+
+        val response = ApprovalResource(store).listPending(50)
+
+        assertThat(response.status).isEqualTo(200)
+        @Suppress("UNCHECKED_CAST")
+        val body = response.entity as List<ApprovalResponse>
+        assertThat(body).hasSize(1)
+        assertThat(body.single().action).isEqualTo("balance.debit")
+        assertThat(body.single().makerId).isEqualTo("maker")
+        assertThat(body.single().createdAt).isEqualTo("2026-07-12T00:00Z")
+    }
+
+    /** The store performs a Redis SCAN; a caller-controlled limit must not decide how big it is. */
+    @Test
+    fun `listPending clamps a caller-controlled limit`(): Unit = runBlocking {
+        val store = mockk<ApprovalStore>()
+        coEvery { store.findPending(200) } returns emptyList()
+
+        ApprovalResource(store).listPending(10_000)
+
+        coVerify(exactly = 1) { store.findPending(200) }
     }
 }

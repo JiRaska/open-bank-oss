@@ -9,10 +9,32 @@ const routeSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/approv
 const pageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/approvals/page.tsx'), 'utf8')
 
 describe('approval inbox source truthfulness', () => {
-  it('exposes known-but-unwired queues instead of treating them as empty', () => {
-    expect(routeSource).toContain("'not-configured'")
-    expect(routeSource).toContain("balance: 'not-configured'")
-    expect(routeSource).toContain('...NOT_CONFIGURED_SOURCES')
+  // Was three `toContain` string assertions naming `balance: 'not-configured'` and the
+  // NOT_CONFIGURED_SOURCES spread. Once balance gained its read (#5679) that set is empty and
+  // gone, and those assertions would have had to be deleted — leaving nothing behind. A guard
+  // that asserts a literal only ever describes the state it was written in; this one asserts the
+  // invariant that state existed to protect: every domain the route can EMIT is a domain the
+  // route actually READS. A source added to the response without a fetcher — the shape that made
+  // an unwired queue render as an empty one — fails here regardless of what it is called.
+  it('reads every source it reports, so no queue can render as empty without being read', () => {
+    const declaredDomains = [...routeSource.matchAll(/domain: '([\w-]+)' as const/g)].map(m => m[1])
+    const fetchers = [...routeSource.matchAll(/^async function (\w+)Pending/gm)].map(m => m[1])
+    const reported = [...routeSource.matchAll(/^ {6}'?([\w-]+)'?: (\w+)\.state,$/gm)].map(m => m[2])
+
+    expect(declaredDomains.length).toBeGreaterThan(15)
+    // Every reported source is backed by a fetcher of the same name...
+    expect([...new Set(reported)].sort()).toEqual([...new Set(fetchers)].sort())
+    // ...and every fetcher is awaited in the fan-out rather than declared and forgotten.
+    for (const f of fetchers) {
+      expect(routeSource).toContain(`${f}Pending(headers).catch(() => unavailable)`)
+    }
+  })
+
+  it('still distinguishes an unreadable source from an empty one', () => {
+    // `stateFor` is the whole reason a 403 does not read as "no approvals pending" — the most
+    // dangerous thing an approvals screen can say wrongly.
+    expect(routeSource).toContain("return status === 401 || status === 403 ? 'forbidden' : 'unavailable'")
+    expect(routeSource).toContain("const unavailable: SourceResult = { items: [], state: 'unavailable' }")
   })
 
   it('does not render an empty-state claim while a source is not configured', () => {

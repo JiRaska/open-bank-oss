@@ -17,17 +17,15 @@ export const dynamic = 'force-dynamic'
 
 type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 
-// These domains already persist maker-checker decisions, but do not yet expose the
-// pending-list read required by ADR-0227 D2. Keep them in the response explicitly so
-// the inbox can distinguish "not wired" from an empty queue. Omitting them would make
-// the most dangerous state look healthy to an operator.
-const NOT_CONFIGURED_SOURCES = {
-  balance: 'not-configured',
-} as const satisfies Record<string, SourceState>
-
+// Every domain that persists a maker-checker decision now also serves the pending-list read
+// required by ADR-0227 D2, so there is no longer a NOT_CONFIGURED_SOURCES set — balance was the
+// last entry (#5679). The constant is deliberately gone rather than left empty: an empty
+// placeholder invites the next unwired service to be added to a list nothing reads, and
+// "not wired" must stay distinguishable from "empty queue" by being IMPOSSIBLE to omit — a new
+// source without a fetcher fails `approvals-source-truth.guard.test.ts` and the type below.
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'billing' | 'consent' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'billing' | 'consent' | 'balance' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -108,6 +106,12 @@ type BillingApproval = LendingApproval
 // consent-service serves the same libs `PendingApproval` shape (issue #5679), for the gated
 // `consent.grant` / `consent.revoke` actions.
 type ConsentApproval = LendingApproval
+
+// balance-service serves the same libs `PendingApproval` shape (issue #5679). Both of its gated
+// actions MOVE MONEY (`balance.credit`, `balance.debit`), so this was the most consequential
+// remaining hole in the inbox: a parked credit/debit decision was discoverable only by whoever
+// had been handed its id out of band, and expired silently after 24 hours.
+type BalanceApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -364,6 +368,24 @@ async function consentPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function balancePending(headers: HeadersInit): Promise<SourceResult> {
+  // k8s workload is `balance-service` in the `balances` namespace (plural) — see
+  // openbank-infra/gitops/components/balances/balance-service.yaml. Getting the namespace wrong
+  // here surfaces as a permanently 'unavailable' source, not an error anyone sees.
+  const res = await fetch(serverSvcUrl('balance-service', 'balances', 8103, '/api/v1/balances/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as BalanceApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'balance' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -391,7 +413,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, billing, consent, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, billing, consent, balance, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -407,14 +429,14 @@ export async function GET() {
     accountPending(headers).catch(() => unavailable),
     billingPending(headers).catch(() => unavailable),
     consentPending(headers).catch(() => unavailable),
+    balancePending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...billing.items, ...consent.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...billing.items, ...consent.items, ...balance.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
     sources: {
-      ...NOT_CONFIGURED_SOURCES,
       lending: lending.state,
       sanctions: sanctions.state,
       transaction: transaction.state,
@@ -430,6 +452,7 @@ export async function GET() {
       account: account.state,
       billing: billing.state,
       consent: consent.state,
+      balance: balance.state,
       agent: agent.state,
     },
   })

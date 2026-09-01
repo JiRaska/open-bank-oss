@@ -116,6 +116,11 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
           { id: 'CO-1', action: 'consent.revoke', resourceId: 'consent-7', makerId: 'operator.j', createdAt: '2026-07-29T11:57:00Z' },
         ]), { status: 200 }))
       }
+      if (url.includes('balances/approvals') || url.includes('balance-service')) {
+        return Promise.resolve(new Response(JSON.stringify([
+          { id: 'BA-1', action: 'balance.debit', resourceId: 'account-9', makerId: 'operator.k', createdAt: '2026-07-29T11:58:00Z' },
+        ]), { status: 200 }))
+      }
       return Promise.resolve(new Response(JSON.stringify([
         { id: 'P-1', suggestedAction: 'agent.research', proposedBy: 'ui-assistant', proposedAt: '2026-07-30T08:00:00Z' },
       ]), { status: 200 }))
@@ -128,7 +133,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     // sepaPayment); F-1 and I-1 both sit at 11:30 (fx before sepa-instant) — both ties resolved
     // by the stable-sort's concat order in route.ts. N-1 sits at 10:30, between L-1 and the
     // 11:00 tie.
-    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'N-1', 'D-1', 'C-1', 'J-1', 'W-1', 'SP-1', 'F-1', 'I-1', 'PT-1', 'A-1', 'B-1', 'CO-1', 'S-1', 'P-1', 'T-1', 'L-2'])
+    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'N-1', 'D-1', 'C-1', 'J-1', 'W-1', 'SP-1', 'F-1', 'I-1', 'PT-1', 'A-1', 'B-1', 'CO-1', 'BA-1', 'S-1', 'P-1', 'T-1', 'L-2'])
     expect(body.items[0]).toMatchObject({ domain: 'lending', action: 'lending.writeoff', maker: 'officer.a' })
     expect(body.items[1]).toMatchObject({ domain: 'notification', action: 'opsmessage.compose', maker: 'operator.f' })
     expect(body.items[2]).toMatchObject({ domain: 'domestic-payment', action: 'domestic-payment.transitionStatus', maker: 'operator.d' })
@@ -142,13 +147,15 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.items[10]).toMatchObject({ domain: 'account', action: 'account.freeze', maker: 'operator.h' })
     expect(body.items[11]).toMatchObject({ domain: 'billing', action: 'billing.post', maker: 'operator.i' })
     expect(body.items[12]).toMatchObject({ domain: 'consent', action: 'consent.revoke', maker: 'operator.j' })
-    expect(body.items[13]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
-    expect(body.items[14]).toMatchObject({ domain: 'agent', action: 'agent.research' })
-    expect(body.items[15]).toMatchObject({ domain: 'transaction', action: 'transaction.reverse', maker: 'teller.d' })
+    expect(body.items[13]).toMatchObject({ domain: 'balance', action: 'balance.debit', maker: 'operator.k' })
+    expect(body.items[14]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
+    expect(body.items[15]).toMatchObject({ domain: 'agent', action: 'agent.research' })
+    expect(body.items[16]).toMatchObject({ domain: 'transaction', action: 'transaction.reverse', maker: 'teller.d' })
     expect(body.sources.party).toBe('ok')
     expect(body.sources.account).toBe('ok')
     expect(body.sources.billing).toBe('ok')
     expect(body.sources.consent).toBe('ok')
+    expect(body.sources.balance).toBe('ok')
   })
 
   // The regression this file exists to prevent, stated as a test for the transaction slice of
@@ -343,9 +350,24 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(seen.some(u => u.includes('/api/v1/consents/approvals'))).toBe(true)
     expect(body.sources.billing).toBe('ok')
     expect(body.sources.consent).toBe('ok')
-    // balance is the one remaining service with a decide endpoint and no pending read (#5679);
-    // it must keep reporting not-configured rather than a healthy-looking empty queue.
-    expect(body.sources.balance).toBe('not-configured')
+    // balance was the last service with a decide endpoint and no pending read (#5679); it now
+    // serves one, so every source in the response is genuinely read and 'not-configured' is no
+    // longer reachable for any of them.
+    expect(body.sources.balance).toBe('ok')
+    expect(Object.values(body.sources)).not.toContain('not-configured')
+  })
+
+  it('reads the balance queue at all — both its gated actions move money', async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      seen.push(String(url))
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+    }))
+
+    const body = await (await (await route()).GET()).json()
+
+    expect(seen.some(u => u.includes('/api/v1/balances/approvals'))).toBe(true)
+    expect(body.sources.balance).toBe('ok')
   })
 
   it('reads the account queue at all — an unread money-path source must never look empty', async () => {

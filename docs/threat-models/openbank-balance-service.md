@@ -173,6 +173,25 @@ also be deleted (nothing else in balance-service depends on it).
 
 ## 7. Change log
 
+- **2026-09-01** — The operator approval inbox gains a bounded, read-only
+  `GET /api/v1/balances/approvals` edge (issue #5679, ADR-0227 D2). It returns only the pending
+  approval id, action, resource id, maker id and creation time, to callers already holding
+  `ROLE_OPERATOR` or `ROLE_ADMIN`, behind the same OPA boundary as the checker decision endpoint
+  (`balance.approval.read`, admitted by base `rest.rego`'s `operator-read-any` on the `.read`
+  suffix — no policy change). Results are capped at 200 and ordered oldest first; the endpoint
+  cannot approve, reject or execute anything, and `ApprovalStore.decide`'s maker != checker
+  invariant, the random ids, the 24-hour Redis TTL and one-time `EXECUTED` consumption are all
+  untouched. **Risk class:** confidentiality of operator workflow metadata (account ids of parked
+  credit/debit requests become visible to any operator, not only the one holding the id out of
+  band) plus a bounded Redis SCAN load. No new principal, no service-to-service edge, no money
+  mutation. The countervailing risk it removes is the larger one: until now a parked
+  `balance.credit`/`balance.debit` decision was findable only by whoever had been handed its id,
+  and expired silently after 24 hours — a maker-checker control nobody can see is a control that
+  fails open by attrition. Deliberately NOT added: a decide button on the inbox — money-path
+  disposal additionally requires SCA (ADR-0227 D4) and stays on the per-domain flow. Rollback:
+  remove the GET route; the decision path is unaffected and the admin UI reports the balance
+  source unavailable.
+
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass: downstream controls still see the journey. It prevents synthetic activity from becoming indistinguishable before a downstream persistence/event boundary; a fleet gate now requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-08-05** — Prohibit the customer-edge M2M principal from balance writes (#3734). The
