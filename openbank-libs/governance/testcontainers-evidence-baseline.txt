@@ -14,7 +14,6 @@ openbank-account-service/src/test/kotlin/com/openbank/account/it/PostgresRedpand
 openbank-aml-service/src/test/kotlin/com/openbank/aml/it/PostgresRedisTestResource.kt
 openbank-balance-service/src/test/kotlin/com/openbank/balance/it/PostgresRedpandaTestResource.kt
 openbank-billing-service/src/test/kotlin/com/openbank/billing/it/PostgresRedisTestResource.kt
-openbank-card-issuance-service/src/test/kotlin/com/openbank/cardissuance/it/PostgresRedisTestResource.kt
 openbank-clearing-service/src/test/kotlin/com/openbank/clearing/it/PostgresRedpandaRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/ConsentPostgresRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/PostgresTestResource.kt
