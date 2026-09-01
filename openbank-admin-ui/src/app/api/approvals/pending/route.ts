@@ -23,13 +23,11 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 // the most dangerous state look healthy to an operator.
 const NOT_CONFIGURED_SOURCES = {
   balance: 'not-configured',
-  billing: 'not-configured',
-  consent: 'not-configured',
 } as const satisfies Record<string, SourceState>
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'billing' | 'consent' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -101,6 +99,15 @@ type PartyApproval = LendingApproval
 // account-service serves the shared PendingApproval shape for gated account lifecycle actions.
 // Surfacing it here makes a parked freeze or other protected action discoverable before TTL expiry.
 type AccountApproval = LendingApproval
+
+// billing-service serves the same libs `PendingApproval` shape (issue #5679). Before this, a
+// parked `billing.post` / `billing.reverse` four-eyes decision was discoverable only by whoever
+// had been handed its id out of band, and expired silently after the store's 24-hour TTL.
+type BillingApproval = LendingApproval
+
+// consent-service serves the same libs `PendingApproval` shape (issue #5679), for the gated
+// `consent.grant` / `consent.revoke` actions.
+type ConsentApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -327,6 +334,36 @@ async function accountPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function billingPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('billing-service', 'billing', 8132, '/api/v1/fees/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as BillingApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'billing' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
+async function consentPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('consent-service', 'consent', 8106, '/api/v1/consents/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as ConsentApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'consent' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -354,7 +391,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, billing, consent, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -368,9 +405,11 @@ export async function GET() {
     notificationPending(headers).catch(() => unavailable),
     partyPending(headers).catch(() => unavailable),
     accountPending(headers).catch(() => unavailable),
+    billingPending(headers).catch(() => unavailable),
+    consentPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...billing.items, ...consent.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -389,6 +428,8 @@ export async function GET() {
       notification: notification.state,
       party: party.state,
       account: account.state,
+      billing: billing.state,
+      consent: consent.state,
       agent: agent.state,
     },
   })

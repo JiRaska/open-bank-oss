@@ -5,7 +5,7 @@ info:
   title: Consent Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. PATCH
     /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
@@ -253,6 +253,37 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/consents/approvals:
+    get:
+      tags: [Consents]
+      summary: List pending consent approvals, oldest first (ADR-0227 D2)
+      description: >-
+        PENDING maker-checker approvals for gated consent actions (consent.grant /
+        consent.revoke), oldest first. This is the read side consumed by the unified approval
+        inbox; deciding remains on PATCH /api/v1/consents/approvals/{id}. Requires ROLE_OPERATOR
+        or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending consent approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/consents/approvals/{id}:
     patch:
       tags: [Consents]
@@ -387,6 +418,31 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ApprovalResponse:
+      type: object
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+          description: The gated consent action this approval was raised for.
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          description: Request time; pending approvals expire after 24 hours.
+        decidedBy:
+          type: string
+          nullable: true
+
     CreateConsentRequest:
       type: object
       required: [partyId, granteeId, scopes, expiresAt]
