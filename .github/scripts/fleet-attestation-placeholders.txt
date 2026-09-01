@@ -17,40 +17,15 @@
 #
 # Remove an entry the moment the service is genuinely built + pushed. One image ref per
 # line, exact match, full registry path.
-
-# finrep-service: first ArgoCD registration (ADR-0097); never built via build-push-service.sh.
-# See the header note in openbank-infra/gitops/components/finrep/finrep-service.yaml.
-265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finrep-service:sandbox-init
-
-# vop-service: first registration from #1195 (ADR-0095 Verification of Payee). Same shape as
-# finrep — module and gitops manifest merged, but no Dockerfile, no ECR repo, absent from
-# auto-deploy's ALL_SERVICES, so the tag has never been built. Tracked in #1205 alongside the
-# guard that should have refused to merge a released component in this state.
-265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-placeholder
-
-# delegation-service: first ArgoCD registration (ADR-0232, #2992). The module, the OPA bundle
-# and the enforcement projections all merged before anything could deploy it — it was absent
-# from auto-deploy's ALL_SERVICES (added in the same PR as this line), so the tag has never
-# been built. Unlike finrep/vop this one has a Dockerfile and an ALL_SERVICES entry from day
-# one, so the fix is a single dispatched build rather than more missing pieces:
-#   gh workflow run auto-deploy.yml -f services=openbank-delegation-service
-# DELETE THIS ENTRY once that build lands and the auto-deploy gitops PR rewrites the pin.
-265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-900c64bbf
-
-# case-coordinator-agent: first ArgoCD registration (ADR-0244 Phase 4, #4187). Same shape as
-# delegation-service above — the module, its Dockerfile and its auto-deploy ALL_SERVICES entry
-# all land in this PR, so the tag has never been built and the image is absent from ECR.
-# The ECR REPOSITORY does not exist either (verified: DescribeRepositories -> RepositoryNotFound),
-# so the first build both creates the repo and pushes the image; that works only while the CI
-# role still holds ecr:CreateRepository. Dropping that grant (#3661) before this service's first
-# build would break it — sequence the two.
-#   gh workflow run auto-deploy.yml -f services=openbank-case-coordinator-agent
-# DELETE THIS ENTRY once that build lands and the auto-deploy gitops PR rewrites the pin.
-265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-4405a74fa
-
-# referral-service: first sandbox registration. The service existed before its GitOps workload,
-# so auto-deploy could not build it and this source tag is absent from ECR. The Deployment is
-# deliberately held at replicas=0; scheduled/manual reconcile builds, signs and attests the image
-# through the normal contract gate, then rewrites this pin in a reviewed GitOps PR.
-# DELETE THIS ENTRY as part of that image-pin PR, before the separate replicas=1 activation.
-265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-referral-service:sandbox-d92d20f5
+#
+# THAT INSTRUCTION IS NOW ENFORCED, in both directions (#7740). An entry whose image ref is
+# no longer declared under openbank-infra/gitops/ suppresses nothing — the ABSENT branch can
+# never be reached for a ref nothing declares — so it survives only as prose asserting
+# something about the fleet that is no longer true. check-fleet-attestations.sh
+# --check-placeholders fails on one. All five original entries (finrep sandbox-init, vop
+# sandbox-placeholder, delegation sandbox-900c64bbf, case-coordinator-agent sandbox-4405a74fa,
+# referral sandbox-d92d20f5) had reached exactly that state — every pin has since moved to a
+# real built tag — and two of them additionally justified themselves with prose main
+# contradicts (vop's "no Dockerfile ... absent from auto-deploy's ALL_SERVICES": it has both).
+# The file is deliberately empty of entries; the gate reports 0 allowlisted placeholders and
+# that is the correct reading, not a missing file.
