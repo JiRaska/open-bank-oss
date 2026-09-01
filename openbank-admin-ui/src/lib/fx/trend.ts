@@ -4,7 +4,7 @@
 
 /**
  * The three-calendar-month ČNB reference-mid trend (issue #7735). This module is the admin-ui
- * mirror of `mapCnbTrend`/`fxRateHistory` in openbank-customer-edge's `CustomerEdgeResource.kt` —
+ * mirror of `mapFxHistoryList`/`fxRateHistory` in openbank-customer-edge's `CustomerEdgeResource.kt` —
  * SAME windowing (by calendar date, never by row count) and SAME normalization (validate, dedup
  * by date keeping the latest observation, chronological ascending, inverse-pair support) so the
  * admin portal and the customer app render consistent data for the same pair, by construction.

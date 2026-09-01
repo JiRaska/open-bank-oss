@@ -181,7 +181,7 @@ export default function FxPage() {
 
   // The three-calendar-month ČNB reference-mid trend (issue #7735) — real chronological data
   // from fx-service via /api/fx/history, the SAME normalization the customer app renders
-  // (src/lib/fx/trend.ts mirrors customer-edge's mapCnbTrend). Never a client-memory snapshot.
+  // (src/lib/fx/trend.ts mirrors customer-edge's mapFxHistoryList). Never a client-memory snapshot.
   const [trend, setTrend] = useState<FxTrend | null>(null)
   const [trendPair] = useState<{ base: string; quote: string }>({ base: 'EUR', quote: 'CZK' })
 

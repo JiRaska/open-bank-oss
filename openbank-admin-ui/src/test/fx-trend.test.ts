@@ -7,7 +7,7 @@ import { buildCnbTrend, defaultTrendWindow, fxTrendChange, normaliseFxTrend } fr
 
 // The three-calendar-month CNB reference-mid trend (issue #7735). These tests mirror the
 // windowing and normalization semantics asserted server-side in customer-edge's
-// CustomerEdgeResourceTest.kt (mapCnbTrend) so admin-ui and the customer app cannot silently
+// CustomerEdgeResourceTest.kt (mapFxHistoryList) so admin-ui and the customer app cannot silently
 // drift — same date-window rule, same dedup/order/inverse-pair rules.
 
 describe('defaultTrendWindow', () => {
