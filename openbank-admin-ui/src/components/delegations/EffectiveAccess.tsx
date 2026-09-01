@@ -11,7 +11,7 @@ import { DelegationStatusBadge, formatCeiling, type Grant } from '@/components/d
 type SourceState = 'ok' | 'forbidden' | 'unavailable'
 type Account = { id?: string; accountNumber?: string; nickname?: string | null; accountType?: string; currencyCode?: string; status?: string }
 type Card = { id?: string; maskedPan?: string; cardType?: string; network?: string; status?: string; delegated?: boolean; delegationGrantId?: string | null }
-type ResourceDetail = { key: string; resourceType: string; resourceId: string; state: SourceState; detail?: Account | Card }
+export type ResourceDetail = { key: string; resourceType: string; resourceId: string; state: SourceState; detail?: Account | Card }
 
 export type EffectiveAccessPayload = {
   accounts: Account[]
@@ -53,6 +53,18 @@ export function grantResourcePresentation(grant: Grant, details: ResourceDetail[
     return { label: account.nickname || maskedAccount(account.accountNumber, kind) || kind, meta: [account.accountType, account.currencyCode, account.status].filter(Boolean).join(' · ') }
   }
   return { label: `${resourceLabel(grant.resourceType, language)} · ${shortId(grant.resourceId)}`, meta: resolved?.state === 'forbidden' ? (language === 'cs' ? 'Detail zdroje není pro tuto roli povolen' : 'Resource detail is not permitted for this role') : '' }
+}
+
+/**
+ * Resource details for both received grants and grants made over the selected party's own
+ * resources. Explicitly resolved grant details win over the ownership-list fallback.
+ */
+export function effectiveResourceDetails(data: EffectiveAccessPayload): ResourceDetail[] {
+  const owned = [
+    ...data.accounts.filter(account => account.id).map(account => ({ key: `ACCOUNT:${account.id}`, resourceType: 'ACCOUNT', resourceId: account.id!, state: 'ok' as const, detail: account })),
+    ...data.cards.filter(card => card.id).map(card => ({ key: `CARD:${card.id}`, resourceType: 'CARD', resourceId: card.id!, state: 'ok' as const, detail: card })),
+  ]
+  return [...new Map([...owned, ...data.resourceDetails].map(detail => [detail.key, detail])).values()]
 }
 
 export function grantConditions(grant: Grant, language: 'cs' | 'en') {
