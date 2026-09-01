@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.0...standing-order-service-v0.16.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **standing-order:** disable outbox dispatcher scheduler under %test ([#7709](https://github.com/JiRaska/open-bank-oss/issues/7709)) ([5877a81](https://github.com/JiRaska/open-bank-oss/commit/5877a81cde80f3a906e1a9831c3b8aab9cd24746)), closes [#7539](https://github.com/JiRaska/open-bank-oss/issues/7539)
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.15.0...standing-order-service-v0.16.0) (2026-08-24)
 
 

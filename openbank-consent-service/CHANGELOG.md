@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.22.0...consent-service-v0.23.0) (2026-09-01)
+
+
+### Features
+
+* **consent:** expose pending approvals in unified inbox ([#7037](https://github.com/JiRaska/open-bank-oss/issues/7037)) ([77573dc](https://github.com/JiRaska/open-bank-oss/commit/77573dc07495e784dc325a656c47f067217606ba))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.21.0...consent-service-v0.22.0) (2026-08-27)
 
 

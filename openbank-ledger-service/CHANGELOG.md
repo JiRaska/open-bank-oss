@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.27.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.2...ledger-service-v1.27.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
+
+### Bug Fixes
+
+* **ledger:** answer 400 for a null journal line and an absent body, not 500 ([#7860](https://github.com/JiRaska/open-bank-oss/issues/7860)) ([b8c7461](https://github.com/JiRaska/open-bank-oss/commit/b8c746157bc8e1ce121f5528f093423c29c46f31))
+
 ## [1.26.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.1...ledger-service-v1.26.2) (2026-08-30)
 
 
