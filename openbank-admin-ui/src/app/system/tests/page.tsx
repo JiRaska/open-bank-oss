@@ -176,7 +176,7 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
       <section aria-label={t('Matice důkazů komponent', 'Component evidence matrix')} style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, marginBottom: 4 }}>{t('Matice důkazů komponent', 'Component evidence matrix')}</h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jeden řádek na komponentu: skenuj napříč druhy testů; peněžní toky jsou nahoře.', 'One row per component: scan across test kinds; money-path components are first.')}</p>
-        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+        <div tabIndex={0} style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
           <table style={tableStyle}>
             <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
             <tbody>{sorted.map(component => (
