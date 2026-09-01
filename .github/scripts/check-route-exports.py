@@ -42,6 +42,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 APP_DIR = REPO / "openbank-admin-ui/src/app"
 
@@ -166,6 +168,7 @@ def main() -> int:
         return selftest()
 
     found, count = findings()
+    gatelib.subjects(count, "App Router route files scanned")
     for line in found:
         print(("::error::" if args.enforce else "::warning::") + line)
     print(f"check-route-exports: {count} App Router route file(s) — "

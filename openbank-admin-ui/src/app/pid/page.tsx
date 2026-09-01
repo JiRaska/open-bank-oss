@@ -191,7 +191,7 @@ export default function PidPage() {
   }
 
   return (
-    <AuthGuard>
+    <AuthGuard permission="pid:view">
       <div style={{ animation: 'fadeIn 0.2s ease-out', maxWidth: '1400px', margin: '0 auto' }}>
         <PageHeader
           icon={<Map size={18} aria-hidden="true" />}
