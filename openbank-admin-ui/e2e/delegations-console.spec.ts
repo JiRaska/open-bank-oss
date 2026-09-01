@@ -4,11 +4,12 @@
 
 // ADR-0076 Layer 2 — the delegation console end-to-end (ADR-0230 / ADR-0232).
 //
-// Three properties are worth an e2e rather than a route test:
+// Four properties are worth an e2e rather than a route test:
 //   1. the grant list renders from a REAL BFF response (the page, its own route handler and the
 //      upstream shape agreeing — a route test proves only the middle one),
 //   2. party lookup goes through the ADR-0228 entity-resolution facade, never a UUID field,
 //   3. there is NO direct mutation path — asserted by watching the wire, not by reading source.
+//   4. a grant detail joins the live grant with its narrow, payload-free audit projection.
 //
 // Only the CLUSTER hop is stubbed (page.route intercepts the browser's call to admin-ui's own
 // BFF); the BFF handlers themselves are the real ones running in `next dev`.
@@ -43,6 +44,29 @@ const GRANT_ROW = {
   status: 'ACTIVE',
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
+}
+
+const AUDIT_TIMELINE = {
+  grantId: GRANT,
+  latestStatusAfter: 'ACTIVE',
+  mayBeTruncated: false,
+  entries: [{
+    evidenceId: '018f4a3c-1b2d-7e00-9a11-000000000101',
+    eventType: 'DelegationActivated',
+    occurredAt: '2026-01-01T00:00:00Z',
+    recordedAt: '2026-01-01T00:00:01Z',
+    timeSource: 'event',
+    actorId: null,
+    actorType: null,
+    actorProvenance: 'absent',
+    reason: null,
+    reasonState: 'not_recorded',
+    reasonTruncated: false,
+    statusAfter: 'ACTIVE',
+    sourceService: 'delegation-service',
+    sourceAttribution: 'event',
+    correlationId: 'e2e-correlation',
+  }],
 }
 
 /** Stubs admin-ui's own BFF surface. Returns every request path the page actually issued. */
@@ -104,6 +128,9 @@ async function stubBff(page: Page): Promise<string[]> {
           sources: { granted: 'ok', received: 'ok' },
         }),
       })
+    }
+    if (path.endsWith(`/${GRANT}/audit`)) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(AUDIT_TIMELINE) })
     }
     // grant detail
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(GRANT_ROW) })
@@ -394,6 +421,10 @@ test('the grant detail offers NO mutation — suspend, reinstate and revoke are 
   const main = page.locator('main')
   await expect(main.getByText(/Zásahy banky|Bank-side actions/)).toBeVisible()
   await expect(main.getByText(/nejdou|not available from this console/)).toBeVisible()
+  await expect(main.getByRole('heading', { name: /Neměnná auditní časová osa|Immutable audit timeline/ })).toBeVisible()
+  await expect(main.getByText(/Delegace přijata a aktivována|Delegation accepted and activated/)).toBeVisible()
+  await expect(main.getByText(/odpovídá poslednímu auditnímu přechodu|matches the latest audited transition/)).toBeVisible()
+  await expect(main.getByText(/Aktér v události neuveden|Actor not recorded in the event/)).toBeVisible()
 
   // No control anywhere on the page offers the bank-side mutations.
   await expect(page.getByRole('button', { name: /Pozastavit|Suspend/ })).toHaveCount(0)
