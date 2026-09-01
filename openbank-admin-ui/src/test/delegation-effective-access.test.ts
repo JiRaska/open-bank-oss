@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest'
-import { grantConditions, grantResourcePresentation, isEffectiveAccessPayload, matchedRoleName } from '@/components/delegations/EffectiveAccess'
+import { delegationAttentionReasons, grantConditions, grantResourcePresentation, isEffectiveAccessPayload, matchedRoleName } from '@/components/delegations/EffectiveAccess'
 import type { Grant } from '@/components/delegations/GrantView'
 import type { RolePreset } from '@/lib/delegations/rolePresets'
 
@@ -50,5 +50,59 @@ describe('effective access role matching', () => {
 
   it('does not imply financial limits for a read-only role', () => {
     expect(grantConditions({ ...grant, validTo: null }, 'en')).toEqual([{ label: 'Validity', value: 'no end date' }])
+  })
+
+  it('shows the exact uncapped windows and missing end date for active action rights', () => {
+    const reasons = delegationAttentionReasons({
+      ...grant,
+      status: 'ACTIVE',
+      validTo: null,
+      capabilities: ['ACCOUNT_INITIATE_PAYMENT'],
+      perTransactionLimit: { amount: 5000, currency: 'CZK' },
+      dailyLimit: null,
+      monthlyLimit: null,
+    }, new Date('2026-09-01T12:00:00Z'), 'en')
+
+    expect(reasons).toEqual([
+      {
+        kind: 'no-end-date',
+        label: 'Action rights without an end date',
+        detail: 'Access remains active until someone changes or revokes it.',
+      },
+      {
+        kind: 'uncapped',
+        label: 'Action rights without a financial ceiling',
+        detail: 'Uncapped: daily, monthly.',
+      },
+    ])
+  })
+
+  it('flags an active grant that expires within the review window', () => {
+    expect(delegationAttentionReasons({
+      ...grant,
+      status: 'ACTIVE',
+      validTo: '2026-09-20T12:00:00Z',
+    }, new Date('2026-09-01T12:00:00Z'), 'cs')).toEqual([{
+      kind: 'expiring',
+      label: 'Končí do 19 dnů',
+      detail: 'Ověřte, zda má přístup pokračovat.',
+    }])
+  })
+
+  it('flags an inconsistent active grant whose validity already ended', () => {
+    expect(delegationAttentionReasons({
+      ...grant,
+      status: 'ACTIVE',
+      validTo: '2026-08-31T12:00:00Z',
+    }, new Date('2026-09-01T12:00:00Z'), 'en')[0]).toEqual({
+      kind: 'expired',
+      label: 'Validity has ended',
+      detail: 'The delegation is still marked active. Verify its status.',
+    })
+  })
+
+  it('does not flag read-only access without an end date or inactive grants', () => {
+    expect(delegationAttentionReasons({ ...grant, status: 'ACTIVE', validTo: null }, new Date('2026-09-01T12:00:00Z'), 'en')).toEqual([])
+    expect(delegationAttentionReasons({ ...grant, status: 'REVOKED', validTo: '2026-09-02T12:00:00Z' }, new Date('2026-09-01T12:00:00Z'), 'en')).toEqual([])
   })
 })
