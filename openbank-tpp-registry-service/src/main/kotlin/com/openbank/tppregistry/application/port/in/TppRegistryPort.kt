@@ -7,10 +7,7 @@ package com.openbank.tppregistry.application.port.`in`
 import com.openbank.tppregistry.domain.model.*
 import java.util.UUID
 
-data class CheckTppAuthorizationQuery(
-    val tppId: String,
-    val requiredRole: TppRole
-)
+data class CheckTppAuthorizationQuery(val tppId: String, val requiredRole: TppRole)
 
 data class RegisterTppCommand(
     val tppId: String,
@@ -38,13 +35,16 @@ data class RegisterTppCommand(
     }.toSet()
 }
 
-data class BlacklistTppCommand(
-    val tppId: String,
-    val reason: String
-)
+data class BlacklistTppCommand(val tppId: String, val reason: String)
 
 data class GetTppQuery(val tppId: String)
-data class ListTppsQuery(val countryCode: String?, val role: TppRole?, val status: TppStatus?, val limit: Int, val afterCursor: String?)
+data class ListTppsQuery(
+    val countryCode: String?,
+    val role: TppRole?,
+    val status: TppStatus?,
+    val limit: Int,
+    val afterCursor: String?,
+)
 
 interface TppRegistryUseCase {
     suspend fun checkAuthorization(query: CheckTppAuthorizationQuery): TppAuthorizationResult
