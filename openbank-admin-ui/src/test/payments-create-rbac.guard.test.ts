@@ -14,8 +14,10 @@ describe('payment initiation access boundary', () => {
     expect(page).toContain('{canCreate && (')
   })
 
-  it('does not change the backend-backed idempotent money path', () => {
-    expect(page).toContain("'Idempotency-Key': crypto.randomUUID()")
+  it('keeps the backend-backed money path and stable attempt idempotency', () => {
+    expect(page).toContain("'Idempotency-Key': idempotencyKey")
+    expect(page).toContain('idempotencyKeyForPayload(domesticAttempt, body')
+    expect(page).toContain('idempotencyKeyForPayload(sepaAttempt, body')
     expect(page).toContain('const SEPA_API         = \'/api/sepa-payments\'')
     expect(page).toContain('const DOMESTIC_API     = \'/api/domestic-payments\'')
     expect(page).toContain('f.vopStatus === \'no_match\'')
