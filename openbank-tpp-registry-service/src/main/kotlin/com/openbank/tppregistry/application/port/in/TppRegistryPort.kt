@@ -17,10 +17,26 @@ data class RegisterTppCommand(
     val name: String,
     val countryCode: String,
     val nca: String,
-    val roles: Set<TppRole>,
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire —
+     * this command doubles as the JSON body of `POST /api/v1/tpp-registry`, with no mapping layer
+     * in between. Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check
+     * the ELEMENTS of a collection, so `{"roles": [null]}` deserialises happily into a
+     * `Set<TppRole>` holding a null. Writing the type honestly is what makes [requireRoles]
+     * reachable instead of dead code.
+     */
+    val roles: Set<TppRole?>,
     val qwacSubjectDn: String?,
     val qsealSubjectDn: String?
-)
+) {
+    /**
+     * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`;
+     * no service-local mapper is added (#526).
+     */
+    fun requireRoles(): Set<TppRole> = roles.mapIndexed { index, role ->
+        requireNotNull(role) { "roles[$index] must not be null" }
+    }.toSet()
+}
 
 data class BlacklistTppCommand(
     val tppId: String,

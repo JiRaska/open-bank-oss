@@ -55,7 +55,7 @@ class TppRegistryService(private val repo: TppRepository, private val clock: Clo
             name = cmd.name,
             countryCode = cmd.countryCode,
             nca = cmd.nca,
-            roles = cmd.roles,
+            roles = cmd.requireRoles(),
             status = TppStatus.ACTIVE,
             qwacSubjectDn = cmd.qwacSubjectDn,
             qsealSubjectDn = cmd.qsealSubjectDn,
