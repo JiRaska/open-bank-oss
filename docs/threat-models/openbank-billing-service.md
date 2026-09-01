@@ -226,8 +226,11 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
 
 - **2026-08-26** — The operator approval inbox gains a bounded, read-only
   `GET /api/v1/fees/approvals` edge. It returns pending approval workflow metadata
-  (random id, action, resource id, maker id and creation time) only to `ROLE_OPERATOR` or
-  `ROLE_ADMIN` callers behind the existing OPA boundary. Results are capped at 200 and ordered
+  (random id, action, resource id, maker id and creation time) only to human `ROLE_OPERATOR` or
+  `ROLE_ADMIN` callers behind the existing OPA boundary. The billing policy explicitly vetoes
+  `service-account-openbank-edge` for `billing.approval.read`, even though that client carries
+  `ROLE_OPERATOR`, so customer-facing machine traffic cannot enumerate approval metadata.
+  Results are capped at 200 and ordered
   oldest first; the endpoint cannot decide, post or reverse a fee. Existing maker/checker
   separation, one-time execution and 24-hour Redis TTL controls remain unchanged. **Risk class:**
   confidentiality of operator workflow metadata and bounded Redis read load; no new caller,

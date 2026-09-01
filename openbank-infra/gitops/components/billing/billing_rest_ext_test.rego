@@ -41,7 +41,12 @@ test_admin_reverses if {
 		with data.rules as rules_mock
 }
 
-# --- edge: no legitimate M2M access exists; all three writes closed on BOTH paths ---
+# --- edge: no legitimate M2M access exists; writes and the sensitive approval read are closed ---
+
+test_operator_reads_pending_approvals if {
+	rest.allow with input as {"principal": operator, "action": "billing.approval.read"}
+		with data.rules as rules_mock
+}
 
 test_edge_denied_post if {
 	not rest.allow with input as {"principal": edge, "action": "billing.post"}
@@ -55,6 +60,18 @@ test_edge_denied_reverse if {
 
 test_edge_denied_approval_decide if {
 	not rest.allow with input as {"principal": edge, "action": "billing.approval.decide"}
+		with data.rules as rules_mock
+}
+
+# billing.approval.read ends in `.read`, so base operator-read-any admits the edge's
+# ROLE_OPERATOR-shaped client_credentials principal unless the billing-specific veto fires.
+test_edge_denied_approval_read if {
+	not rest.allow with input as {"principal": edge, "action": "billing.approval.read"}
+		with data.rules as rules_mock
+}
+
+test_edge_veto_fires_on_approval_read if {
+	rest.prohibited with input as {"principal": edge, "action": "billing.approval.read"}
 		with data.rules as rules_mock
 }
 

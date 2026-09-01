@@ -45,14 +45,16 @@ allowed_reasons contains "operator-billing-write" if {
 # account-service's billing-discovery read is INBOUND from billing, and product-catalog fees are
 # read via catalog, not billing), so there is no identity-scoped grant to preserve: the
 # exclusion closes the role-only path and this veto closes the matrix path for the edge (base
-# rest.rego gates its allow head on `not prohibited`). billing.read stays reachable to M2M via
-# base operator-read-any — the fleet-wide M2M read over-grant is tracked separately in #3734.
+# rest.rego gates its allow head on `not prohibited`). Ordinary billing.read stays reachable to
+# M2M via base operator-read-any, but billing.approval.read is different: it exposes the maker,
+# action and resource id of every pending four-eyes decision and therefore gets the same veto as
+# deciding that approval.
 prohibited if {
 	input.principal.id == "service-account-openbank-edge"
 	input.action in {
+        "billing.approval.read",
 		"billing.post",
 		"billing.reverse",
 		"billing.approval.decide",
 	}
 }
-
