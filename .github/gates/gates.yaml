@@ -3440,6 +3440,32 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
+  # The console-side twin of the gate above. That one asks whether the role an endpoint NAMES
+  # can exist; this one asks whether the roles the admin-ui SHOWS a page to are the roles that
+  # endpoint actually admits. Neither is a security control — the service enforces, and OPA sits
+  # behind it — so a divergence leaks nothing. It does something quieter: the console tells an
+  # operator they may do something they may not, and they find out by clicking a link and
+  # getting a 403.
+  # One line held twelve unrelated routes (/payments /product-catalog /standing-orders /sdd
+  # /sepa-instant /clearing /fx /swift /interest /pid /fees /lending) behind a single
+  # `payments:view` with five personas. Measured 2026-09-01: ROLE_SUPERVISOR was granted on all
+  # twelve and admitted by NONE; ROLE_VIEWER and ROLE_PAYMENTS were over-granted on five more;
+  # and /pid's list call targets `/api/v1/pids`, a path no Kotlin resource in the fleet serves.
+  # Nothing could see it — the two sides are different languages in different trees, and the
+  # divergence produces no failing test, no log line and no metric. The pre-existing guard for
+  # the neighbouring party permission asserts the roles LINE AS A STRING, which pins the file
+  # against itself: red when the line is edited, green while the backend moves underneath it.
+  # min_subjects is the known-positive: a subset assertion over an empty corpus is vacuous, so
+  # the gate fails if fewer than 10 permissions are actually pinned rather than reporting OK.
+  - id: admin-ui-rbac-alignment
+    name: "admin-ui route permissions ⇒ backend @RolesAllowed (issues #7790/#7783/#7788/#7824)"
+    group: security
+    mode: enforced
+    min_subjects: 10   # 10 route permissions pinned, 28 declared unpinned (2026-09-01)
+    selftest: python3 .github/scripts/check-admin-ui-rbac-alignment.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-admin-ui-rbac-alignment.py
   # The sibling of the gate above, one layer earlier: that one asks whether the role a caller
   # NEEDS can exist, this one whether the caller can present a token at all. An outbound client
   # annotated @RegisterProvider(OidcClientRequest*Filter) mints from `quarkus.oidc-client`, a

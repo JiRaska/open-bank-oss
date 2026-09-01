@@ -47,7 +47,7 @@ export default function ClearingPage() {
   const totalVolume = batches.reduce((s, b) => s + (b.totalAmount ?? 0), 0)
 
   return (
-    <AuthGuard permission="payments:view">
+    <AuthGuard permission="clearing:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <PageHeader
           icon={<Layers size={20} aria-hidden="true" />}

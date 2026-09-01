@@ -24,9 +24,14 @@ const WORKSPACES: Record<Persona, WorkspaceLink[]> = {
   ],
   payments: [
     { href: '/payments', nameCs: 'Platby', nameEn: 'Payments', permission: 'payments:view' },
-    { href: '/standing-orders', nameCs: 'Trvalé příkazy', nameEn: 'Standing Orders', permission: 'payments:view' },
-    { href: '/clearing', nameCs: 'Clearing', nameEn: 'Clearing', permission: 'payments:view' },
-    { href: '/fx', nameCs: 'FX', nameEn: 'FX', permission: 'payments:view' },
+    // NOT /standing-orders (#7790): StandingOrderResource admits ROLE_API/OPERATOR/ADMIN and
+    // no ROLE_PAYMENTS on any method, so this persona's own shortcut was a 403 trap. It
+    // passed review only because the old `payments:view` bucket granted twelve routes to
+    // five personas at once. /sdd is the payment-ops queue that sepa-direct-debit really
+    // does admit ROLE_PAYMENTS on.
+    { href: '/sdd', nameCs: 'Inkasa (SDD)', nameEn: 'Direct Debits', permission: 'sdd:view' },
+    { href: '/clearing', nameCs: 'Clearing', nameEn: 'Clearing', permission: 'clearing:view' },
+    { href: '/fx', nameCs: 'FX', nameEn: 'FX', permission: 'fx:view' },
   ],
   compliance: [
     { href: '/kyc', nameCs: 'KYC', nameEn: 'KYC', permission: 'kyc:view' },
@@ -37,7 +42,12 @@ const WORKSPACES: Record<Persona, WorkspaceLink[]> = {
   supervisor: [
     // A supervisor can review, but cannot use the platform-admin approvals queue or the
     // operator-only closing trigger. Keep this workspace aligned to the actual RBAC matrix.
-    { href: '/payments', nameCs: 'Platební dohled', nameEn: 'Payment oversight', permission: 'payments:view' },
+    //
+    // There is deliberately NO payment-oversight link here any more (#7790). ROLE_SUPERVISOR is
+    // admitted by none of the payment read endpoints — not sepa-payment, domestic-payment,
+    // sepa-instant, clearing, sdd, fx or swift — so this shortcut led straight to a 403. The
+    // supervisor's real payment authority is `payments:approve`, which gates an action, not this
+    // page. Restoring the link needs a backend that accepts the role, not a wider UI permission.
     { href: '/aml', nameCs: 'AML dohled', nameEn: 'AML oversight', permission: 'compliance:view' },
     { href: '/sanctions', nameCs: 'Sankční dohled', nameEn: 'Sanctions oversight', permission: 'compliance:view' },
     { href: '/audit', nameCs: 'Audit', nameEn: 'Audit', permission: 'audit:view' },

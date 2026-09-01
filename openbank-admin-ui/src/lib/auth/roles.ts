@@ -47,8 +47,72 @@ export const PERMISSIONS = {
   // Closings (EoD/EoM close cockpit, ADR-0069 D3) — the manual catch-up trigger
   // mirrors statement-service's CloseRunResource POST gate (ROLE_OPERATOR/ADMIN)
   "closings:run":             [ROLES.ADMIN, ROLES.OPERATOR],
-  // Payments
-  "payments:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.SUPERVISOR],
+  // Payments and the payment-adjacent consoles.
+  //
+  // These ten permissions were ONE (`payments:view`, five personas over twelve routes) until
+  // #7790. The twelve backends never agreed with each other: ROLE_SUPERVISOR was granted on all
+  // twelve and admitted by none, and ROLE_VIEWER/ROLE_PAYMENTS were over-granted on five more.
+  // Nothing failed — the service enforces correctly — so the only symptom was an operator being
+  // shown a link that answered 403 on click. Each permission below is now pinned to the
+  // `@RolesAllowed` of the resource its page actually reads, and
+  // `.github/scripts/check-admin-ui-rbac-alignment.py` fails the build if the two drift apart.
+  //
+  // `@rbac-source <file>#<method>` — a read the page performs on load. Several sources are
+  // INTERSECTED, because a page that Promise.all's its reads is only as usable as its narrowest.
+  // `@rbac-exclude` — a role the backend admits that cannot hold a browser session (ROLE_API is
+  // the M2M service-account identity); listing it here would render a section for a principal
+  // that never logs in.
+  //
+  // @rbac-source openbank-sepa-payment/src/main/kotlin/com/openbank/sepa/infrastructure/rest/SepaPaymentResource.kt#listPayments
+  // @rbac-source openbank-domestic-payment/src/main/kotlin/com/openbank/domestic/infrastructure/rest/DomesticPaymentResource.kt#listPayments
+  // @rbac-source openbank-sepa-instant/src/main/kotlin/com/openbank/sepainstant/infrastructure/rest/SctInstResource.kt#listAll
+  // @rbac-exclude ROLE_API
+  "payments:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS],
+  // @rbac-source openbank-clearing-service/src/main/kotlin/com/openbank/clearing/infrastructure/rest/ClearingResource.kt#listBatches
+  // @rbac-exclude ROLE_API
+  "clearing:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS],
+  // @rbac-source openbank-sdd-service/src/main/kotlin/com/openbank/sdd/infrastructure/rest/SddMandateQueueResource.kt#listRecentMandates
+  "sdd:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS],
+  // @rbac-source openbank-swift-service/src/main/kotlin/com/openbank/swift/infrastructure/rest/SwiftResource.kt#listAll
+  "swift:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS],
+  // @rbac-source openbank-fx-service/src/main/kotlin/com/openbank/fx/infrastructure/rest/FxResource.kt#getRates
+  // @rbac-source openbank-fx-service/src/main/kotlin/com/openbank/fx/infrastructure/rest/FxResource.kt#getRateHistory
+  "fx:view":              [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS],
+  // Product catalogue reads (products + the fee schedule) are one service and one role set.
+  // ROLE_PAYMENTS is NOT among them — the old bucket granted it, and it 403s.
+  // CATALOG_SCOPE_READ is minted from an OAuth scope by CatalogScopeIdentityAugmentor; the
+  // AUTHOR/PUBLISH scopes are deliberately absent because the read endpoints require READ
+  // specifically, so listing them would be the same over-grant one layer down.
+  // @rbac-source openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/infrastructure/rest/ProductCatalogResource.kt#list
+  // @rbac-source openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/infrastructure/rest/FeesResource.kt#list
+  // @rbac-exclude ROLE_API
+  "product-catalog:view": [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.CATALOG_READ],
+  // The narrowest of the twelve: StandingOrderResource admits no ROLE_VIEWER on ANY method,
+  // read or write. The bucket showed the page to viewers, payments ops and supervisors alike.
+  // @rbac-source openbank-standing-order-service/src/main/kotlin/com/openbank/standingorder/infrastructure/rest/StandingOrderResource.kt#listAll
+  // @rbac-exclude ROLE_API
+  "standing-orders:view": [ROLES.ADMIN, ROLES.OPERATOR],
+  // InterestResource carries no method-level annotation on the accrual list, so its class-level
+  // set applies (#7789).
+  // @rbac-source openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/rest/InterestResource.kt#listAllAccruals
+  // @rbac-exclude ROLE_API
+  "interest:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER],
+  // The /pid console's list call goes to `/api/v1/pids`, which exists in NO Kotlin resource in
+  // the fleet — it 404s and the page treats that as an empty list. The read that actually backs
+  // the page is pid-service PartyResource.search, OPERATOR/ADMIN only (#7785). ROLE_API appears
+  // on PartyResource's register/resolve POSTs, not on this read path.
+  // @rbac-source openbank-pid-service/src/main/kotlin/com/openbank/pid/infrastructure/rest/PartyResource.kt#search
+  "pid:view":             [ROLES.ADMIN, ROLES.OPERATOR],
+  // INTERSECTION, deliberately. LendingResource disagrees with itself: the two `applications/*`
+  // reads exclude VIEWER/COMPLIANCE while the two `loans/*` reads admit them, and the page
+  // Promise.all's `applications/recent` with `loans/active`, so a VIEWER or COMPLIANCE principal
+  // gets the whole page blanked as "unreachable" rather than a partial view. Showing it to them
+  // is the lie this change removes, so the union is not an option here.
+  // @rbac-source openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/rest/LendingResource.kt#listRecentApplications
+  // @rbac-source openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/rest/LendingResource.kt#listActiveLoans
+  // @rbac-source openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/rest/LendingResource.kt#summariseApplications
+  // @rbac-source openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/rest/LendingResource.kt#summariseLoans
+  "lending:view":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.LENDING_OFFICER, ROLES.CREDIT_RISK],
   "payments:create":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.PAYMENTS],
   "payments:approve":     [ROLES.ADMIN, ROLES.PAYMENTS, ROLES.SUPERVISOR],
   // Lending compliance-pack reads include the operational lending roles accepted by
@@ -231,10 +295,20 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['accounts:create', ['/accounts/new']],
   ['accounts:view', ['/accounts', '/ledger', '/day-end']],
   ['cards:view', ['/cards']],
-  ['payments:view', [
-    '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant', '/clearing',
-    '/fx', '/swift', '/interest', '/pid', '/fees', '/lending',
-  ]],
+  // One permission per backing service (#7790). '/sepa-instant' redirects to '/payments' and
+  // reads the same three payment resources, so it belongs with them; '/fees' is served by
+  // product-catalog, so it belongs with '/product-catalog'. '/lending/compliance-packs' keeps
+  // its own stricter permission via the longest-prefix rule.
+  ['payments:view', ['/payments', '/sepa-instant']],
+  ['clearing:view', ['/clearing']],
+  ['sdd:view', ['/sdd']],
+  ['swift:view', ['/swift']],
+  ['fx:view', ['/fx']],
+  ['product-catalog:view', ['/product-catalog', '/fees']],
+  ['standing-orders:view', ['/standing-orders']],
+  ['interest:view', ['/interest']],
+  ['pid:view', ['/pid']],
+  ['lending:view', ['/lending']],
   ['sanctions:view', ['/sanctions']],
   ['compliance:view', [
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360',

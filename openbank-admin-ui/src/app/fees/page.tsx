@@ -94,7 +94,7 @@ export default function FeesPage() {
   const activeCount = fees.filter(f => f.status === 'ACTIVE').length
 
   return (
-    <AuthGuard permission="payments:view">
+    <AuthGuard permission="product-catalog:view">
       <div>
         <PageHeader
           icon={<Receipt size={20} aria-hidden="true" />}
