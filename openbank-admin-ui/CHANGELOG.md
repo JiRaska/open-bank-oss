@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.229.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.228.1...admin-ui-v0.229.0) (2026-09-01)
+
+
+### Features
+
+* **admin-ui:** surface delegation review conditions ([#7958](https://github.com/JiRaska/open-bank-oss/issues/7958)) ([106e50c](https://github.com/JiRaska/open-bank-oss/commit/106e50c1d2acf66c416a6304c9ba66f143c59af6)), closes [#7956](https://github.com/JiRaska/open-bank-oss/issues/7956)
+
 ## [0.228.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.228.0...admin-ui-v0.228.1) (2026-09-01)
 
 
