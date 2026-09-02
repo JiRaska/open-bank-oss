@@ -40,6 +40,10 @@ interface SanctionsListChangeIntent {
   enabled: boolean
 }
 
+interface ListChangeFocusRequest {
+  listId: string
+}
+
 interface ApiError {
   error?: string
 }
@@ -238,6 +242,8 @@ export default function SanctionsPage() {
   const [pendingListChange, setPendingListChange] = useState<SanctionsListChangeIntent | null>(null)
   const [listChangeBusy, setListChangeBusy] = useState(false)
   const [listChangeError, setListChangeError] = useState<SanctionsListChangeError>(null)
+  const [listChangeFocusRequest, setListChangeFocusRequest] = useState<ListChangeFocusRequest | null>(null)
+  const handledListChangeFocusRef = useRef<ListChangeFocusRequest | null>(null)
   const listChangeTriggerRef = useRef<HTMLButtonElement | null>(null)
 
   // Manual disposition of a hit (issue #3334). POST /api/v1/sanctions/review existed, was
@@ -340,6 +346,23 @@ export default function SanctionsPage() {
     }
   }, [lists, listScopeInitialised])
 
+  // Restore focus only after React commits both dialog removal and the reconciled list controls.
+  // A one-shot animation frame can run while the loading branch still owns the panel, leaving only
+  // the detached initiating button to focus. A fresh request object also supports the same list
+  // being changed repeatedly without refocusing it on unrelated later renders.
+  useEffect(() => {
+    const request = listChangeFocusRequest
+    if (!request || handledListChangeFocusRef.current === request || pendingListChange || listsLoading) return
+
+    const stableControl = document.getElementById(listToggleControlId(request.listId))
+    const originalTrigger = listChangeTriggerRef.current
+    const target = stableControl instanceof HTMLButtonElement
+      ? stableControl
+      : originalTrigger?.isConnected ? originalTrigger : null
+    target?.focus()
+    handledListChangeFocusRef.current = request
+  }, [listChangeFocusRequest, listsLoading, pendingListChange])
+
   const handleScreen = async () => {
     if (!searchName.trim()) return
     setScreening(true); setScreenResult(null); setScreenError('')
@@ -377,11 +400,7 @@ export default function SanctionsPage() {
   }
 
   const restoreListChangeFocus = (listId: string) => {
-    requestAnimationFrame(() => {
-      const stableControl = document.getElementById(listToggleControlId(listId))
-      if (stableControl instanceof HTMLButtonElement) stableControl.focus()
-      else listChangeTriggerRef.current?.focus()
-    })
+    setListChangeFocusRequest({ listId })
   }
 
   const closeListChange = async () => {
