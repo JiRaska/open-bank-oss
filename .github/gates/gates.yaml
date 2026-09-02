@@ -4627,6 +4627,9 @@ gates:
   - id: argocd-sync-integrity-unit-test
     name: "the ArgoCD Synced-but-applying-nothing detector still classifies, and is still wired (#6371, enforced)"
     group: gitops
+    budget_seconds: 30   # 2.0-2.8s locally over 3 runs; no CI observation yet, so set
+                        # generously rather than risk a false red on a slower runner.
+                        # Retune from the warehouse once it has run.
     mode: enforced
     rationale: "ArgoCD reported Synced/Healthy on an app it had applied nothing to for three weeks, and no metric exposes the condition that recorded it; the replacement detector runs in-cluster, so only this gate can notice it being unwired or its comparison being broken."
     review_after: "2027-02-23"
