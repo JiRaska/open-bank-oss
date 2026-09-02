@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.236.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.235.0...admin-ui-v0.236.0) (2026-09-02)
+
+
+### Features
+
+* **admin-ui:** capture Core Web Vitals ([#8223](https://github.com/JiRaska/open-bank-oss/issues/8223)) ([6adc1c3](https://github.com/JiRaska/open-bank-oss/commit/6adc1c3c37bf4ed1cbbcfaa528c161b0a1ad5309))
+
+
+### Bug Fixes
+
+* **admin-ui:** retain onboarding analytics context ([#8231](https://github.com/JiRaska/open-bank-oss/issues/8231)) ([dc801c6](https://github.com/JiRaska/open-bank-oss/commit/dc801c6bd656e982c07288683c8fc9c37cbadffb))
+
 ## [0.235.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.234.0...admin-ui-v0.235.0) (2026-09-02)
 
 
