@@ -42,6 +42,7 @@ class DelegatedDomesticPaymentTest {
 
     private val accountSvc = "http://account"
     private val domesticSvc = "http://dompay"
+    private val delegationSvc = "http://delegation"
 
     private fun resource(upstream: UpstreamClient, audit: EdgeAuditPublisher): CustomerEdgeResource =
         CustomerEdgeResource(
@@ -65,6 +66,7 @@ class DelegatedDomesticPaymentTest {
             domesticPaymentServiceUrl = domesticSvc
             partyServiceUrl = "http://party"
             scaServiceUrl = "http://sca"
+            delegationServiceUrl = delegationSvc
         }
 
     private fun body(amount: String = "1500.00") = """
@@ -78,8 +80,27 @@ class DelegatedDomesticPaymentTest {
      * that is the behaviour that made this route refuse a delegate in the first place, and a test
      * that stubbed it as 200 would prove nothing.
      */
-    private fun upstreamWith(decision: Response, scaOk: Boolean = true, createStatus: Int = 201): UpstreamClient =
+    private fun upstreamWith(
+        decision: Response,
+        scaOk: Boolean = true,
+        createStatus: Int = 201,
+        reserveOk: Boolean = true,
+    ): UpstreamClient =
         mockk<UpstreamClient>().also { upstream ->
+            // ADR-0249 D3: the cumulative counter the edge reserves against before it pays. A 409
+            // here is delegation-service refusing the ceiling, which is a different refusal from
+            // account-service's per-transaction one and has to be exercised separately.
+            every { upstream.post(match { it.endsWith("/reservations") }, any(), any()) } returns
+                if (reserveOk) {
+                    Response.status(201)
+                        .entity("""{"reservationId":"$RESERVATION_ID","delegationId":"$grantId"}""")
+                        .build()
+                } else {
+                    Response.status(409).entity("""{"reason":"DAILY"}""").build()
+                }
+            every {
+                upstream.post(match { it.contains("/reservations/") }, any(), any())
+            } returns Response.ok("{}").build()
             every {
                 upstream.get(
                     match {
@@ -335,9 +356,135 @@ class DelegatedDomesticPaymentTest {
         ).isEqualTo(403)
     }
 
+    // ── the cumulative ceiling (ADR-0249 D3) ───────────────────────────────────────────────
+
+    /**
+     * Reserve BEFORE the money moves, confirm after. The per-transaction ceiling account-service
+     * already checked cannot see a second concurrent payment; only a reservation held across the
+     * call can, which is why "count what settled afterwards" is not a limit.
+     */
+    @Test
+    fun `a delegated payment reserves the amount and confirms it once the rail accepts`() {
+        val upstream = upstreamWith(authorizedDecision())
+        val reserveBody = slot<String>()
+        every {
+            upstream.post(match { it.endsWith("/reservations") }, any(), capture(reserveBody))
+        } returns Response.status(201).entity("""{"reservationId":"$RESERVATION_ID"}""").build()
+
+        val resp = resource(upstream, mockk(relaxed = true)).createDomesticPayment(body(), "idem-r1", SCA_ID)
+
+        assertThat(resp.status).isEqualTo(201)
+        // The PAYMENT's key, not a per-attempt one: a replayed rail call must take the headroom once.
+        assertThat(reserveBody.captured).contains(""""idempotencyKey":"idem-r1"""")
+        assertThat(reserveBody.captured).contains(""""amount":"1500.00"""")
+        verify {
+            upstream.post(eq("$delegationSvc/api/v1/delegations/$grantId/reservations"), eq(delegate.toString()), any())
+            upstream.post(
+                eq("$delegationSvc/api/v1/delegations/$grantId/reservations/$RESERVATION_ID/confirm"),
+                any(),
+                any(),
+            )
+        }
+    }
+
+    /**
+     * The refusal that only a cumulative counter can produce: this amount is inside the
+     * per-transaction ceiling account-service authorised, and still over the daily one.
+     *
+     * Reserved BEFORE the SCA gate on purpose — a payment the ceiling will refuse must not first
+     * cost the customer a biometric prompt and a single-use challenge they cannot get back.
+     */
+    @Test
+    fun `a payment over the cumulative ceiling is refused before SCA and never reaches the rail`() {
+        val upstream = upstreamWith(authorizedDecision(), reserveOk = false)
+
+        val resp = resource(upstream, mockk(relaxed = true)).createDomesticPayment(body(), "idem-r2", SCA_ID)
+
+        assertThat(resp.status).isEqualTo(403)
+        assertThat(resp.entity.toString()).contains("DELEGATED_SPEND_LIMIT_EXCEEDED")
+        verify(exactly = 0) { upstream.post(match { it.contains("/api/v1/domestic-payments") }, any(), any(), any()) }
+        verify(exactly = 0) { upstream.post(match { it.contains("/sca/challenges/") }, any(), any()) }
+    }
+
+    /**
+     * Release on every failure branch. A leaked reservation silently shrinks the delegate's ceiling
+     * until it expires — a defect the customer experiences as their limit quietly closing in for no
+     * stated reason, which is why release is pinned alongside confirm rather than after it.
+     */
+    @Test
+    fun `a reservation is released when the rail refuses the payment`() {
+        val upstream = upstreamWith(authorizedDecision(), createStatus = 422)
+
+        resource(upstream, mockk(relaxed = true)).createDomesticPayment(body(), "idem-r3", SCA_ID)
+
+        verify {
+            upstream.post(
+                eq("$delegationSvc/api/v1/delegations/$grantId/reservations/$RESERVATION_ID/release"),
+                any(),
+                any(),
+            )
+        }
+    }
+
+    @Test
+    fun `a reservation is released when SCA is rejected`() {
+        val upstream = upstreamWith(authorizedDecision(), scaOk = false)
+
+        resource(upstream, mockk(relaxed = true)).createDomesticPayment(body(), "idem-r4", SCA_ID)
+
+        verify {
+            upstream.post(
+                eq("$delegationSvc/api/v1/delegations/$grantId/reservations/$RESERVATION_ID/release"),
+                any(),
+                any(),
+            )
+        }
+    }
+
+    /**
+     * A counter that cannot be consulted must stop the payment. An advisory ceiling is not a
+     * ceiling, and "delegation-service was down so we let it through" is exactly the failure mode
+     * ADR-0249 D3 exists to prevent.
+     */
+    @Test
+    fun `a payment is refused when the reservation cannot be established at all`() {
+        val upstream = upstreamWith(authorizedDecision())
+        every { upstream.post(match { it.endsWith("/reservations") }, any(), any()) } throws
+            RuntimeException("delegation-service unreachable")
+
+        val resp = resource(upstream, mockk(relaxed = true)).createDomesticPayment(body(), "idem-r5", SCA_ID)
+
+        assertThat(resp.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(match { it.contains("/api/v1/domestic-payments") }, any(), any(), any()) }
+    }
+
+    /**
+     * The control that keeps every test above from being vacuous: an OWNER paying from their own
+     * account has no grant and so no ceiling to count against. A reservation attempted here would
+     * 404 on a delegation id that does not exist and turn every ordinary payment into a 403.
+     */
+    @Test
+    fun `an owner's own payment reserves nothing`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$account") }, any()) } returns
+            Response.ok("""{"id":"$account","partyId":"$delegate","accountNumber":"$OWNER_IBAN"}""").build()
+        every { upstream.get(match { it.contains("/parties/") }, any()) } returns
+            Response.ok("""{"legalName":"Delegate Name"}""").build()
+        every { upstream.post(match { it.contains("/sca/challenges/") }, any(), any()) } returns
+            Response.ok("""{"status":"CONSUMED"}""").build()
+        every { upstream.post(match { it.contains("/domestic-payments") }, any(), any(), any()) } returns
+            Response.status(201).entity("""{"id":"$PAYMENT_ID"}""").build()
+
+        val resp = resource(upstream, mockk(relaxed = true)).createDomesticPayment(body(), "idem-r6", SCA_ID)
+
+        assertThat(resp.status).isEqualTo(201)
+        verify(exactly = 0) { upstream.post(match { it.contains("/reservations") }, any(), any()) }
+    }
+
     private companion object {
         const val OWNER_IBAN = "CZ6508000000192000145399"
         const val SCA_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        const val RESERVATION_ID = "11111111-2222-3333-4444-555555555555"
         val PAYMENT_ID: UUID = UUID.fromString("99999999-8888-7777-6666-555555555555")
     }
 }

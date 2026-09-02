@@ -2409,6 +2409,106 @@ class CustomerEdgeResource(
         )
     }
 
+    /**
+     * Reserve cumulative headroom against the grant before a delegated payment is initiated
+     * (ADR-0249 D3). Returns [SpendReservationOutcome.NotDelegated] untouched for an owner's own
+     * payment — the counter exists to bound what a DELEGATE may spend, and an owner has no ceiling
+     * to count against.
+     *
+     * Reserve-then-confirm, never count-after: counting settled payments lets two concurrent
+     * requests both pass a check that neither would pass alone, and "we noticed afterwards" is not
+     * a limit. delegation-service owns the arithmetic because one grant can be spent through
+     * domestic, SEPA, instant and cards — a counter per rail cannot see the others.
+     *
+     * The reservation carries the PAYMENT's idempotency key, not a per-attempt one, so a rail
+     * replay takes the headroom exactly once. When the caller supplied no key there is nothing
+     * stable to key on, so each attempt reserves separately: that over-counts a retry rather than
+     * under-counting a ceiling, and over-counting is the direction a limit may safely fail in.
+     *
+     * A reservation that cannot be established at all — upstream down, unparseable answer — is a
+     * refusal. The ceiling is not advisory, so being unable to consult it must stop the payment.
+     */
+    private fun reserveDelegatedSpend(
+        debit: DebitAuthority,
+        customer: CustomerIdentity,
+        amount: String,
+        currency: String,
+        idempotencyKey: String?,
+    ): SpendReservationOutcome {
+        val grantId = debit.delegationId ?: return SpendReservationOutcome.NotDelegated
+        val body = objectMapper.createObjectNode().apply {
+            put("amount", amount)
+            put("currency", currency)
+            put("idempotencyKey", idempotencyKey?.takeIf { it.isNotBlank() } ?: Ids.randomId().toString())
+            put("operationType", "DOMESTIC_PAYMENT")
+        }
+        val resp = runCatching {
+            upstream.post(
+                "$delegationServiceUrl/api/v1/delegations/$grantId/reservations",
+                customer.partyId.toString(),
+                objectMapper.writeValueAsString(body),
+            )
+        }.getOrNull()
+        val reservationId = resp
+            ?.takeIf { it.statusInfo.family == Response.Status.Family.SUCCESSFUL }
+            ?.let { extractTextField(objectMapper, (it.entity as? String).orEmpty(), "reservationId") }
+        if (reservationId == null) {
+            audit.emit(
+                eventType = "CUSTOMER_PAYMENT_REFUSED",
+                partyId = customer.partyId.toString(),
+                operation = "payments.domestic",
+                result = "DENIED",
+                resourceId = debit.delegationId,
+                details = mapOf(
+                    "reason" to "DELEGATED_SPEND_CEILING",
+                    "upstreamStatus" to (resp?.status?.toString() ?: "UNAVAILABLE"),
+                    "amount" to amount,
+                    "currency" to currency,
+                ),
+            )
+            // The delegate already knows they hold this grant — the authorization decision said so
+            // one call ago — so naming their own ceiling is not an oracle about anyone else's
+            // account. How much headroom is left is deliberately NOT echoed: that is the grantor's
+            // configuration, and the 409 body carrying it stays in the audit trail.
+            return SpendReservationOutcome.Refused(
+                Response.status(Response.Status.FORBIDDEN)
+                    .entity(
+                        """{"error":"This payment is over the spending limit set for you on this account",""" +
+                            """"code":"DELEGATED_SPEND_LIMIT_EXCEEDED"}""",
+                    )
+                    .type(MediaType.APPLICATION_JSON)
+                    .build(),
+            )
+        }
+        return SpendReservationOutcome.Held(SpendReservation(grantId, reservationId))
+    }
+
+    /**
+     * Settle a held reservation: [confirmed] keeps the headroom consumed, otherwise it comes back.
+     *
+     * Every failure branch after a successful reserve must reach this with `confirmed = false`. A
+     * leaked reservation silently shrinks the delegate's ceiling until it expires, which is a
+     * defect the customer experiences as their limit quietly shrinking for no stated reason.
+     *
+     * "Confirmed" here means the instruction was ACCEPTED by the rail, not that it settled in
+     * clearing. Tracking true settlement would need an async outcome this synchronous route does
+     * not have; a payment that is accepted and later fails in clearing therefore leaves the
+     * headroom consumed. That over-counts rather than under-counts, which is the safe direction
+     * for a ceiling, and it is stated here rather than implied.
+     */
+    private fun settleDelegatedSpend(reservation: SpendReservation?, customer: CustomerIdentity, confirmed: Boolean) {
+        if (reservation == null) return
+        val verb = if (confirmed) "confirm" else "release"
+        runCatching {
+            upstream.post(
+                "$delegationServiceUrl/api/v1/delegations/${reservation.delegationId}" +
+                    "/reservations/${reservation.reservationId}/$verb",
+                customer.partyId.toString(),
+                "{}",
+            )
+        }
+    }
+
     // Resolve the caller's legal name from party-service (for the debtorName a domestic payment needs).
     // Party-scoped by the JWT party; null on any non-200 / missing field.
     private fun fetchPartyLegalName(partyId: UUID): String? {
@@ -2571,17 +2671,33 @@ class CustomerEdgeResource(
             creditorAcctNo,
             creditorBank,
         ) ?: return badRequest("Malformed or incomplete payment body")
+        // Cumulative ceiling (ADR-0249 D3) BEFORE the SCA gate, not after: a payment that the
+        // delegate's monthly limit will refuse must not first cost them a biometric prompt and a
+        // single-use challenge they cannot get back. Every return below this point releases.
+        val reservation = when (val held = reserveDelegatedSpend(debit, customer, amount, currency, idempotencyKey)) {
+            is SpendReservationOutcome.Refused -> return held.response
+            is SpendReservationOutcome.Held -> held.reservation
+            SpendReservationOutcome.NotDelegated -> null
+        }
         // Settlement gate (ADR-0021): no money path without a device-signed, amount+payee-bound,
         // single-use SCA approval. The compare-and-consume happens in sca-service, atomically.
         // The challenge belongs to the INITIATOR (the delegate's own device), not to the account
         // holder — a delegate authenticates as themselves; the grant is what makes it their debit
         // to make. So `customer` here stays the delegate on the delegated path, deliberately.
-        scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")?.let { return it }
+        scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")?.let {
+            settleDelegatedSpend(reservation, customer, confirmed = false)
+            return it
+        }
         val resp = upstream.post(
             "$domesticPaymentServiceUrl/api/v1/domestic-payments",
             customer.partyId.toString(),
             enriched,
             idempotencyKey,
+        )
+        settleDelegatedSpend(
+            reservation,
+            customer,
+            confirmed = resp.statusInfo.family == Response.Status.Family.SUCCESSFUL,
         )
         // Receiver-side honesty (ADR-0108): a 2xx here means the instruction was ACCEPTED, not that
         // the money settled. Bind the created payment id to the session so the receiver's status poll
@@ -5790,6 +5906,20 @@ internal data class DebitAuthority(
     val onBehalfOf: UUID? = null,
     val delegationId: String? = null,
 )
+
+/** Cumulative headroom held against a grant while one delegated payment is in flight (ADR-0249 D3). */
+internal data class SpendReservation(val delegationId: String, val reservationId: String)
+
+/**
+ * The three ways asking for headroom can end. [NotDelegated] is not a failure — it is an owner
+ * paying from their own account, where there is no grant and so no ceiling to count against, and
+ * it is kept distinct from a refusal so the two can never be collapsed by accident.
+ */
+internal sealed interface SpendReservationOutcome {
+    data class Held(val reservation: SpendReservation) : SpendReservationOutcome
+    data class Refused(val response: Response) : SpendReservationOutcome
+    data object NotDelegated : SpendReservationOutcome
+}
 
 /** Allowed-with-authority, or an already-audited refusal to hand straight back to the caller. */
 internal sealed interface DebitAuthorityResult {
