@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.232.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.232.1...admin-ui-v0.232.2) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** distinguish ownership from delegated authority ([#8101](https://github.com/JiRaska/open-bank-oss/issues/8101)) ([c649eb9](https://github.com/JiRaska/open-bank-oss/commit/c649eb99e737cf98f26ecad093bce889ea6412ae))
+
 ## [0.232.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.232.0...admin-ui-v0.232.1) (2026-09-02)
 
 
