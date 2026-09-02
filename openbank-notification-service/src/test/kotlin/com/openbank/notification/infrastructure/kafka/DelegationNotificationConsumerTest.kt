@@ -75,6 +75,7 @@ class DelegationNotificationConsumerTest {
         assertThat(req.channel).isEqualTo(NotificationChannel.PUSH)
         assertThat(req.variables).isEqualTo(mapOf("resourceType" to "CARD"))
         assertThat(req.correlationId).isEqualTo(grantId)
+        assertThat(req.deepLink).isEqualTo("openbank://delegations/$grantId")
     }
 
     @Test
@@ -115,10 +116,37 @@ class DelegationNotificationConsumerTest {
     }
 
     @Test
-    fun `out-of-scope lifecycle types are not notified`() {
-        for (type in listOf("DelegationSuspended", "DelegationReinstated", "DelegationRenounced", "SomethingElse")) {
+    fun `bank suspension and reinstatement notify both parties`() {
+        for (type in listOf("DelegationSuspended", "DelegationReinstated")) {
             consumer.consume(eventPayload(type)).subscribe().with({}, {})
         }
+
+        val requests = capturedRequests()
+        assertThat(requests).hasSize(4)
+        assertThat(requests.groupingBy { it.template }.eachCount()).containsExactlyInAnyOrderEntriesOf(
+            mapOf(
+                NotificationTemplate.DELEGATION_SUSPENDED to 2,
+                NotificationTemplate.DELEGATION_REINSTATED to 2,
+            ),
+        )
+        assertThat(requests).allSatisfy {
+            assertThat(it.partyId).isIn(grantorPartyId, granteePartyId)
+            assertThat(it.deepLink).isEqualTo("openbank://delegations/$grantId")
+        }
+    }
+
+    @Test
+    fun `renunciation notifies the grantor`() {
+        consumer.consume(eventPayload("DelegationRenounced")).subscribe().with({}, {})
+
+        val request = capturedRequests().single()
+        assertThat(request.partyId).isEqualTo(grantorPartyId)
+        assertThat(request.template).isEqualTo(NotificationTemplate.DELEGATION_RENOUNCED)
+    }
+
+    @Test
+    fun `unknown lifecycle types are not notified`() {
+        consumer.consume(eventPayload("SomethingElse")).subscribe().with({}, {})
 
         verify(exactly = 0) { notificationConsumer.consume(any()) }
     }

@@ -163,13 +163,14 @@ export async function providerHasMainVersion(baseUrl, auth, provider) {
 export async function fetchPairVerification(baseUrl, auth, consumer, consumerVersion, provider) {
   if (!consumerVersion) return { status: 'pending', verifiedAt: null, providerVersion: null }
   // Matrix API — pin the consumer to the commit that authored this exact pact
-  // file. The provider remains latest because it is the provider replay asked
-  // to validate that consumer version. Pact Broker documents `version` as a
-  // pacticipant build/version selector, normally a Git SHA.
+  // file. Pin the provider to its latest main-branch version so a newer feature
+  // verification cannot mask the verdict operators will deploy. Pact Broker
+  // documents `version` as a pacticipant build/version selector, normally a Git SHA.
   const qs = new URLSearchParams()
   qs.append('q[][pacticipant]', consumer)
   qs.append('q[][version]', consumerVersion)
   qs.append('q[][pacticipant]', provider)
+  qs.append('q[][branch]', 'main')
   qs.append('q[][latest]', 'true')
   qs.append('latestby', 'cvpv')
   const url = `${baseUrl.replace(/\/$/, '')}/matrix?${qs.toString()}`

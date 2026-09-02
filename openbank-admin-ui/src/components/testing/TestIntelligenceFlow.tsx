@@ -96,17 +96,40 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
   const current = stages.find(stage => stage.id === selected) ?? stages[1]
   const evidenced = report?.totals.componentsWithExecutionEvidence ?? 0
   const total = report?.totals.components ?? 0
-  // `unknown`, `not-run` and `blocked` are unresolved evidence, never an implicit green.
-  // The collector/runtime route keeps this total disjoint from failures, missing components and
-  // stale observations, so the hero can expose every state that needs an operator's attention.
+  // `unknown`, `not-run` and `blocked` are unresolved evidence, never an implicit green. A wholly
+  // skipped suite is observed execution evidence, but still needs attention. The collector/runtime
+  // route keeps the unresolved total disjoint from failures, missing components and stale rows.
+  const skippedComponentEvidence = report?.components.reduce(
+    (sum, component) => sum + component.evidence.filter(item => item.state === 'skipped').length,
+    0,
+  ) ?? 0
   const componentAttention = (report?.totals.failingEvidence ?? 0) + (report?.totals.missingEvidence ?? 0)
     + (report?.totals.staleEvidence ?? 0) + (report?.totals.unresolvedEvidence ?? report?.totals.unknownEvidence ?? 0)
-  // The fleet totals cover component evidence only. The journey catalog, performance plans and
-  // per-platform mobile runtime proof are distinct operator surfaces, so a page with only those
-  // gaps must not announce itself healthy just because the component envelope is green.
+    + skippedComponentEvidence
+  // The fleet totals cover service-component evidence only. Client CI/RUM, journey catalog and
+  // performance plans are distinct operator surfaces, so a page with only one of those gaps must
+  // not announce itself healthy just because the service-component envelope is green.
+  const componentIds = new Set(report?.components.map(component => component.component) ?? [])
+  const clientAttention = (report?.clientExperiences ?? []).reduce((sum, client) => {
+    // Admin UI CI is projected both as the released openbank-admin-ui component and as a client
+    // surface. Its component verdict is already in fleet totals; only private-client execution
+    // evidence adds a distinct signal here. RUM remains independent for every client.
+    const componentBackedExecution = componentIds.has(`openbank-${client.id}`)
+    let executionGaps = 0
+    if (!componentBackedExecution) {
+      executionGaps = client.evidence.length === 0
+        ? 1
+        : client.evidence.filter(item => item.state !== 'passed').length
+    }
+    const platformGaps = client.rum.platforms
+      ?.filter(platform => platform.capability !== 'passed' || platform.runtime !== 'passed').length ?? 0
+    const rumGap = client.rum.state === 'passed' ? 0 : 1
+    const auditGap = client.rum.audit && client.rum.audit.state !== 'passed' ? 1 : 0
+    return sum + executionGaps + platformGaps + rumGap + auditGap
+  }, 0)
   const crossLayerAttention = (report?.performance ?? []).filter(item => item.state !== 'passed' || item.plan?.blocker).length
     + (report?.syntheticJourneys ?? []).filter(item => item.status === 'planned' || item.state !== 'passed').length
-    + (report?.clientExperiences ?? []).reduce((sum, client) => sum + (client.rum.platforms?.filter(platform => platform.runtime !== 'passed').length ?? 0), 0)
+    + clientAttention
   const collectionAttention = testIntelligenceCollectionNeedsAttention(report) ? 1 : 0
   const attention = componentAttention + crossLayerAttention + collectionAttention
   const activeJourneys = report?.syntheticJourneys.filter(item => item.status === 'active').length ?? 0

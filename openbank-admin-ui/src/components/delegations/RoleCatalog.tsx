@@ -102,7 +102,7 @@ export function RoleCatalog() {
     }
   }
 
-  return <section className="card" style={{ padding: 16, marginBottom: 20 }} aria-labelledby="role-catalog-title">
+  return <section id="delegation-role-catalog" className="card" style={{ padding: 16, marginBottom: 20, scrollMarginTop: 16 }} aria-labelledby="role-catalog-title">
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', marginBottom: 14 }}>
       <div><h2 ref={catalogTitleRef} tabIndex={-1} id="role-catalog-title" style={{ fontSize: 16, fontWeight: 700, display: 'flex', gap: 8, alignItems: 'center' }}><Shield size={17} aria-hidden="true" color="var(--accent)" />{t('Dispoziční role a práva', 'Delegation roles and rights')}</h2>
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>{t('Centrální presety pro nové delegace. Změna presetu nemění již udělená práva.', 'Central presets for new delegations. Changing one never alters existing grants.')}</p></div>
@@ -131,9 +131,9 @@ export function RoleCatalog() {
       </div>
       {view === 'overview' && <RoleOverview roles={visibleRoles} canManage={canManage} edit={openEditor} remove={requestRemoval} />}
       {view === 'matrix' && <div style={{ overflowX: 'auto' }}><table className="table" style={{ width: '100%', minWidth: 760 }}><thead><tr><th style={stickyRoleStyle}>{t('Role', 'Role')}</th>
-      {rights.map(right => <th key={right} title={rightLabel(right, t)} style={{ textAlign: 'center', fontSize: 10, minWidth: 92 }}>{rightLabel(right, t)}</th>)}{canManage && <th aria-label={t('Akce', 'Actions')} />}</tr></thead>
+        {rights.map(right => <th key={right} title={rightLabel(right, t)} style={{ textAlign: 'center', fontSize: 10, minWidth: 92 }}>{rightLabel(right, t)}</th>)}{canManage && <th aria-label={t('Akce', 'Actions')} />}</tr></thead>
       <tbody>{visibleRoles.map(role => <tr key={role.id}><td style={stickyRoleStyle}><strong>{truthfulPresetName(role)}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)', maxWidth: 280 }}>{role.description}</div><LegacyOwnershipNameEvidence rolePreset={role} /><LegacyCapabilityEvidence capabilities={role.capabilities} /></td>
-        {rights.map(right => <td key={right} style={{ textAlign: 'center' }}>{role.capabilities.includes(right) ? <Check size={15} color="var(--success)" aria-label={t('Povoleno', 'Allowed')} /> : '—'}</td>)}
+        {rights.map(right => <td key={right} style={{ textAlign: 'center' }}>{role.capabilities.includes(right) ? <Check size={15} color="var(--success)" aria-label={t('Součást šablony', 'Included in preset')} /> : <><span className="sr-only">{t('Není součástí šablony', 'Not included in preset')}</span><span aria-hidden="true">—</span></>}</td>)}
         {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={() => openEditor({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${truthfulPresetName(role)}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => requestRemoval(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${truthfulPresetName(role)}`}><Trash2 size={13} aria-hidden="true" /></button></div></td>}</tr>)}</tbody></table></div>
       }
     </>}

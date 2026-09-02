@@ -151,7 +151,7 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
             <Search size={15} aria-hidden="true" /> {searching ? t('Hledám…', 'Searching…') : t('Vyhledat', 'Search')}
           </button>
         </div>
-        <p style={{ margin: '10px 0 0', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+        <p style={{ margin: '10px 0 0', fontSize: '11px', color: 'var(--text-secondary)' }}>
           {t(
             'Začněte jménem klienta nebo názvem firmy. Pokud už máte Party ID, můžete ho vložit přímo.',
             'Start with the customer or company name. If you already have a Party ID, paste it directly.',
