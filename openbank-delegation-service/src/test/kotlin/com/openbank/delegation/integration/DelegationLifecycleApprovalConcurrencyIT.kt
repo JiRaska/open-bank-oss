@@ -5,10 +5,10 @@
 package com.openbank.delegation.integration
 
 import com.openbank.delegation.it.PostgresTestResource
-import io.quarkus.test.common.QuarkusTestProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured

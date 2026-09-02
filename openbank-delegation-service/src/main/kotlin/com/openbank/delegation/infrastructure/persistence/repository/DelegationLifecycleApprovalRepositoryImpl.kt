@@ -26,7 +26,8 @@ import java.util.UUID
  * lifecycle revision/CAS seam; no detached grant entity is merged here.
  */
 @ApplicationScoped
-class DelegationLifecycleApprovalRepositoryImpl : DelegationLifecycleApprovalRepository,
+class DelegationLifecycleApprovalRepositoryImpl :
+    DelegationLifecycleApprovalRepository,
     PanacheRepository<DelegationLifecycleApprovalEntity> {
 
     override suspend fun create(candidate: DelegationLifecycleApproval): LifecycleApprovalCreateOutcome =
@@ -67,15 +68,22 @@ class DelegationLifecycleApprovalRepositoryImpl : DelegationLifecycleApprovalRep
         find("requestKey", requestKey).firstResult<DelegationLifecycleApprovalEntity>()
     }.awaitSuspending()?.toDomain()
 
-    override suspend fun list(state: ProposalState?, limit: Int): List<DelegationLifecycleApproval> =
-        Panache.withSession {
-            val query = if (state == null) {
-                find("order by proposedAt asc")
-            } else {
-                find("state = ?1 order by proposedAt asc", state)
-            }
-            query.range(0, limit.coerceAtLeast(1) - 1).list<DelegationLifecycleApprovalEntity>()
-        }.awaitSuspending().map { it.toDomain() }
+    override suspend fun list(state: ProposalState?, limit: Int): List<DelegationLifecycleApproval> {
+        val rows = Panache.withSession {
+            Panache.getSession().map { session ->
+                val query = session.createQuery(
+                    if (state == null) {
+                        "from DelegationLifecycleApprovalEntity order by proposedAt asc"
+                    } else {
+                        "from DelegationLifecycleApprovalEntity where state = :state order by proposedAt asc"
+                    },
+                    DelegationLifecycleApprovalEntity::class.java,
+                ).setMaxResults(limit.coerceAtLeast(1))
+                if (state == null) query else query.setParameter("state", state)
+            }.flatMap { query -> query.resultList }
+        }.awaitSuspending()
+        return rows.map { it.toDomain() }
+    }
 
     override suspend fun decideAtomically(
         id: UUID,
@@ -103,10 +111,7 @@ class DelegationLifecycleApprovalRepositoryImpl : DelegationLifecycleApprovalRep
         }
     }
 
-    private fun lockApproval(
-        session: Mutiny.Session,
-        id: UUID,
-    ): Uni<List<DelegationLifecycleApprovalEntity>> = session
+    private fun lockApproval(session: Mutiny.Session, id: UUID): Uni<List<DelegationLifecycleApprovalEntity>> = session
         .createNativeQuery(LOCK_APPROVAL_SQL, DelegationLifecycleApprovalEntity::class.java)
         .setParameter("id", id)
         .resultList

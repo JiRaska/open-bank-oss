@@ -21,7 +21,6 @@ import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.governance.ProposalState
 import io.mockk.coEvery
 import io.mockk.mockk
-import io.mockk.secondArg
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -66,7 +65,7 @@ class DelegationLifecycleApprovalServiceTest {
     fun `maker cannot reject their own proposal`(): Unit = runBlocking {
         val approval = proposed("maker")
         coEvery { approvals.decideAtomically(approval.id, any()) } coAnswers {
-            secondArg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>()
+            arg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>(1)
                 .invoke(approval).approval
         }
 
@@ -81,7 +80,7 @@ class DelegationLifecycleApprovalServiceTest {
     fun `approval execution stays fail closed before the revision safe lifecycle seam`(): Unit = runBlocking {
         val approval = proposed("maker")
         coEvery { approvals.decideAtomically(approval.id, any()) } coAnswers {
-            secondArg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>()
+            arg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>(1)
                 .invoke(approval).approval
         }
 
@@ -100,7 +99,7 @@ class DelegationLifecycleApprovalServiceTest {
         val approval = proposed("maker")
         var plan: LifecycleApprovalDecision? = null
         coEvery { approvals.decideAtomically(approval.id, any()) } coAnswers {
-            plan = secondArg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>()
+            plan = arg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>(1)
                 .invoke(approval)
             plan!!.approval
         }
@@ -125,7 +124,7 @@ class DelegationLifecycleApprovalServiceTest {
         )
         var plan: LifecycleApprovalDecision? = null
         coEvery { approvals.decideAtomically(terminal.id, any()) } coAnswers {
-            plan = secondArg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>()
+            plan = arg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>(1)
                 .invoke(terminal)
             plan!!.approval
         }

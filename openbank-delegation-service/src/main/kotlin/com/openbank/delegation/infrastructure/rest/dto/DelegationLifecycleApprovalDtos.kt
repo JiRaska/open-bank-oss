@@ -16,10 +16,7 @@ data class ProposeDelegationLifecycleRequest(
     val reason: String,
 )
 
-data class DecideDelegationLifecycleRequest(
-    val approve: Boolean,
-    val reason: String,
-)
+data class DecideDelegationLifecycleRequest(val approve: Boolean, val reason: String)
 
 data class DelegationLifecycleApprovalResponse(
     val id: UUID,
