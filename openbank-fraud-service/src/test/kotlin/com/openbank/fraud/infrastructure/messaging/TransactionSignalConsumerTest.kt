@@ -17,11 +17,14 @@ import io.mockk.mockk
 import io.mockk.slot
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
+
+private class TransientDbFailure : RuntimeException("DB down")
 
 class TransactionSignalConsumerTest {
 
@@ -208,14 +211,17 @@ class TransactionSignalConsumerTest {
     }
 
     @Test
-    fun `repository exception is caught and does not propagate`() {
+    fun `repository exception is RETHROWN so the connector dead-letters`() {
         val accountId = UUID.randomUUID()
-        coEvery { velocityRepo.recordTransaction(any(), any(), any(), any(), any()) } throws RuntimeException("DB down")
+        coEvery { velocityRepo.recordTransaction(any(), any(), any(), any(), any()) } throws TransientDbFailure()
 
         val payload = """{"sourceAccountId": "$accountId", "amount": "100.00", "currencyCode": "CZK"}"""
 
-        // Must not throw
-        consumer.onTransactionInitiated(payload)
+        // Replaces a test that asserted the swallow. The velocity aggregate is what every velocity
+        // rule reads: dropping an update weakens fraud detection for that account, silently (#5698).
+        assertThrows<TransientDbFailure> { consumer.onTransactionInitiated(payload) }
+
+        coVerify(exactly = 3) { velocityRepo.recordTransaction(any(), any(), any(), any(), any()) }
     }
 
     // ── Payee history (ADR-0084 §3 v4) ────────────────────────────────────────
@@ -275,12 +281,12 @@ class TransactionSignalConsumerTest {
     }
 
     @Test
-    fun `payee history exception is caught and does not propagate`() {
+    fun `payee history exception is RETHROWN so the connector dead-letters`() {
         val accountId = UUID.randomUUID()
         val targetAccountId = UUID.randomUUID()
         coEvery {
             payeeHistoryRepo.recordPayment(any(), any(), any(), any())
-        } throws RuntimeException("DB down")
+        } throws TransientDbFailure()
 
         val payload = """
             {
@@ -291,9 +297,8 @@ class TransactionSignalConsumerTest {
             }
         """.trimIndent()
 
-        // Must not throw, and must not prevent the velocity path from running
-        consumer.onTransactionInitiated(payload)
-
-        coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("100.00"), "CZK", any(), any()) }
+        // A hole in payee history reads as a first-time payee forever after — a fraud
+        // discriminator quietly degraded. Replaces a test that asserted the swallow (#5698).
+        assertThrows<TransientDbFailure> { consumer.onTransactionInitiated(payload) }
     }
 }

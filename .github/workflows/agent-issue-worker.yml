@@ -1,0 +1,334 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Autonomous issue worker — one open issue per run, one draft PR, on OUR runners.
+#
+# WHY THIS EXISTS, AND WHY IT IS NOT THE CLOUD ROUTINE IT REPLACES
+#   The first version of this worker ran as a Claude Code cloud routine. It worked, in the
+#   sense that it picked an issue, wrote a test, proved the negative case and refused to open
+#   an unverified PR. It could not do the job, for one measured reason: that sandbox cannot
+#   run Testcontainers. `dockerd` starts, but every container registry except
+#   mcr.microsoft.com is refused at its egress proxy (403 to CONNECT — a policy denial, not a
+#   network fault), and MCR carries no Postgres. Measured 2026-08-22 across ghcr.io, quay.io,
+#   public.ecr.aws and registry.k8s.io. So every issue whose proof needs a real database was
+#   unreachable, and on a 93-issue backlog the worker correctly opened nothing.
+#
+#   The fix is not exotic: the fleet's own per-service build+test lane runs on `ubuntu-latest`
+#   and Testcontainers work there, because GitHub-hosted runners ship Docker at the standard
+#   socket and can reach Docker Hub. `_service-ci.yml` says so in place. This repository is
+#   public, so standard GitHub-hosted runners cost nothing, and nothing about this touches the
+#   EKS cluster, the fck-nat instance, or the account's cross-AZ transfer.
+#
+#   NOT `openbank-batch`, and the reason is worth recording. rules.yaml
+#   `ci_runners.pools.batch` describes it as "a separate low-capped pool so a scan/cron burst
+#   cannot starve the merge-required build lane", and seven workflows mention it in comments,
+#   so it reads as the obvious home for a scheduled agent. It does not exist: the sandbox
+#   Terraform defines exactly two scale sets, `openbank-build` and `openbank-deploy`, and no
+#   workflow anywhere carries `runs-on: openbank-batch`. The first version of this file did,
+#   and its job sat queued with no runner ever assigned — the pool is documentation of an
+#   intention, not capacity. Tracked separately; do not "fix" this by pointing the job there.
+#
+#   NOT `openbank-build` either: that is the merge-required lane, and a 30-minute agent job
+#   every 6h would occupy a runner that PR builds are waiting on.
+#
+# WHAT IT MAY NOT DO
+#   Never merges, never approves, never closes an issue, never touches main. Its branch is
+#   `agent/...`, which puts every PR it opens under the enforced `agent-pr-guard` gate — so a
+#   change reaching money-path services, CI definitions, governance sources or authorization
+#   policy goes red and waits for a human. The agent cannot clear that red, and this workflow
+#   file is itself one of the protected paths, so the worker cannot widen its own mandate.
+#
+# THE PROBE IS NOT DECORATION
+#   `agent-review.yml` learned this the hard way twice: a driver can be dead while the job is
+#   green, and a probe whose output nobody asserts on is worthless. So the probe here ASSERTS
+#   (no continue-on-error on the assert), and it asserts on the model's REPLY TEXT — an exit
+#   code proves nothing, because the CLI exits 0 on its own recorded failure. A missing
+#   transcript is NOT ALIVE.
+#
+#   It also measures the runner itself, because the whole point of moving here is a set of
+#   capabilities the previous host lacked. On a pull_request touching this file, ONLY the
+#   probe runs: that is how the capability claim gets checked before anyone merges the thing
+#   that depends on it.
+#
+# COST
+#   Zero. Standard GitHub-hosted runners are free for public repositories, and this job never
+#   touches the AWS account: no ARC runner, no Karpenter node, no image pull over fck-nat, no
+#   cross-AZ byte. An earlier draft of this file proposed the in-cluster batch pool at an
+#   estimated ~$3/month; that estimate is superseded and the cluster is not involved at all.
+#
+#   Also considered and REFUSED on cost: pointing a runner at this project's own ECR to feed
+#   Testcontainers. ~180 GB/month of egress against a measured baseline of $0.63/fortnight is
+#   more than a tenfold jump — a jump, therefore a fail.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Agent issue worker
+
+on:
+  schedule:
+    # Every 6h at :17 — off the hour, to avoid the cron congestion every other job piles into.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "probe = measure the runner and the credential only; work = also do an issue"
+        type: choice
+        options: [probe, work]
+        default: probe
+  pull_request:
+    # Self-scoped: a PR editing this file runs the PROBE, so the capability claim in the
+    # header is checked against the real runner before the schedule is ever trusted.
+    paths:
+      - .github/workflows/agent-issue-worker.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two workers at once: two runs would pick the same issue, because the claim (a
+  # pushed `agent/` branch) does not exist until one of them is well underway.
+  group: agent-issue-worker
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    name: Pick one issue, open one draft PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write        # push an agent/ branch — never main, enforced by branch rules
+      pull-requests: write   # open a draft PR
+      issues: write          # comment on the issue it worked
+    env:
+      AGENT_APP_ID: ${{ secrets.AGENT_APP_ID }}
+    steps:
+      # ---- identity ------------------------------------------------------------------------
+      # A PR opened with the workflow's own GITHUB_TOKEN does not get its checks run. Measured
+      # on #6547: all NINE workflow runs on its head sat at `conclusion: action_required`,
+      # waiting for a maintainer to click "Approve and run". Nothing had failed — nothing had
+      # STARTED. That is GitHub refusing to let a token trigger further automation, and it
+      # stalls this loop at its first step: the steward has no verdict to act on, the PR sits,
+      # and a human has to click before any of it moves.
+      #
+      # An App token is not subject to that. `auto-deploy.yml` learned the same lesson for a
+      # second reason worth keeping in view: GitHub signs API-created commits only for Apps and
+      # the web UI, never for a user PAT — an assumption that was wrong for five days and
+      # stranded seven deploy PRs (#1269).
+      #
+      # It must be `openbank-agent-bot`, NOT the gitops App. `openbank-gitops-bot` is declared
+      # in `rules.yaml: autonomous_agent_prs.automation_accounts`, so `agent-pr-guard` treats
+      # its PRs as out of scope by design — borrowing that identity here would silently switch
+      # the guard OFF for every agent PR. `openbank-agent-bot` is in `agent_accounts`, which is
+      # what keeps the guard pointed at this work.
+      - name: Mint the agent App token
+        id: apptoken
+        if: env.AGENT_APP_ID != ''
+        env:
+          AGENT_APP_ID: ${{ secrets.AGENT_APP_ID }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.AGENT_APP_ID }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+
+      # Fall back rather than fail: without the secrets this still works, it just produces PRs
+      # whose checks need a manual "Approve and run". Say so loudly instead of leaving somebody
+      # to rediscover it from a PR that looks stuck for no reason.
+      - name: Resolve the token to use
+        id: token
+        env:
+          APP_TOKEN: ${{ steps.apptoken.outputs.token }}
+          FALLBACK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${APP_TOKEN:-}" ]; then
+            echo "identity: openbank-agent-bot (App token)"
+            echo "token=${APP_TOKEN}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::AGENT_APP_ID/AGENT_APP_PRIVATE_KEY are not set — falling back to GITHUB_TOKEN. Any PR opened by this run will have its checks stuck at 'action_required' until a maintainer approves them by hand."
+            echo "identity: github-actions (GITHUB_TOKEN fallback)"
+            echo "token=${FALLBACK}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # actions/checkout persists whatever token it is given as the git credential.
+          # Without this, `git push` would go out as GITHUB_TOKEN no matter what the
+          # steps below mint, and the PR's checks would sit at `action_required` again.
+          token: ${{ steps.token.outputs.token }}
+
+      - name: Decide mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            mode=probe
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            mode="${{ inputs.mode }}"
+          else
+            mode=work
+          fi
+          echo "mode=${mode}" >> "$GITHUB_OUTPUT"
+          echo "mode: ${mode} (event: ${{ github.event_name }})"
+
+      # ---- capability measurement -------------------------------------------------------
+      # Every line here answers a question the cloud sandbox answered WRONGLY, which is the
+      # entire justification for this workflow existing. Advisory: a missing capability must
+      # be REPORTED, not silently turn into a worker that quietly cannot verify its own work.
+      - name: Measure this runner
+        continue-on-error: true
+        run: |
+          echo "runner: ${RUNNER_NAME:-?}  os=${RUNNER_OS:-?} arch=${RUNNER_ARCH:-?}"
+          echo "locale: LANG=${LANG:-unset} LC_ALL=${LC_ALL:-unset}"
+          echo "--- JDKs (build-logic pins jvmToolchain(25); a few modules use 21) ---"
+          ls /usr/lib/jvm 2>/dev/null || echo "no /usr/lib/jvm"
+          echo "--- docker ---"
+          if docker info >/dev/null 2>&1; then
+            echo "docker daemon: UP"
+            echo "--- the question the cloud sandbox failed: can we pull a real database image? ---"
+            if timeout 180 docker pull postgres:16.3-alpine >/dev/null 2>&1; then
+              echo "TESTCONTAINERS-CAPABLE: yes (postgres:16.3-alpine pulled)"
+            else
+              echo "::warning::postgres image pull FAILED on this runner — Testcontainers-backed issues are out of scope here too"
+            fi
+          else
+            echo "::warning::no docker daemon on this runner — Testcontainers unavailable"
+          fi
+
+      # ---- credential liveness, ASSERTED --------------------------------------------------
+      # NO continue-on-error, deliberately. This repo has shipped a dead CLAUDE_CODE_OAUTH_TOKEN
+      # for over a month without noticing, because two independent copies of it exist (the repo
+      # secret and a local launchd env file) and they rotate separately. A worker that runs on a
+      # dead credential burns a runner and reports nothing; that must be a red, immediately.
+      - name: Assert the Claude credential is alive
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is not set for this job. Re-mint with \`claude setup-token\` and update BOTH copies."
+            exit 1
+          fi
+          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+          probe=$(claude -p "Reply with exactly the word ALIVE and nothing else." \
+                    --max-turns 3 \
+                    --disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit BashOutput KillShell ReportFindings 2>&1 | tail -3)
+          echo "control-probe: ${probe}"
+          # Assert on the REPLY, never on the exit code: the CLI exits 0 on its own recorded
+          # failure, so an exit-code check is green about a dead driver. Absence of a
+          # transcript is NOT ALIVE.
+          case "${probe}" in
+            *ALIVE*) echo "credential: alive" ;;
+            *) echo "::error::control probe did not answer ALIVE — the credential or the invocation is broken, not this run's task."; exit 1 ;;
+          esac
+
+      - name: Stop here when probing
+        if: steps.mode.outputs.mode == 'probe'
+        run: |
+          echo "probe mode: runner measured and credential asserted; not touching any issue."
+          echo "Merge this workflow, then run it with mode=work (or wait for the schedule)."
+
+      # ---- the actual work ----------------------------------------------------------------
+      # `--permission-mode acceptEdits` was the first attempt and it does not work here: it
+      # auto-accepts FILE EDITS only. Every Bash command still asks, and in a non-interactive
+      # run there is nobody to ask, so the tool is denied instantly. The first live run spent
+      # its whole session discovering that `gh`, `python3` and `curl` were all refused — it
+      # could not list issues, could not run the guard's self-test, could not open a PR. It
+      # reported that honestly and the job still went green, which is the second half of the
+      # defect and is fixed by the assertion below.
+      #
+      # `bypassPermissions` is the right mode for this specific context and not a shortcut:
+      # the container is ephemeral and discarded, the token is a job-scoped GITHUB_TOKEN with
+      # the three narrow permissions declared above, and everything the agent can actually
+      # land is still gated by `agent-pr-guard` and by branch protection. The blast radius is
+      # bounded by the credential, not by the prompt.
+      - name: Work one issue
+        if: steps.mode.outputs.mode == 'work'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -uo pipefail
+          git config user.name  "openbank-issue-worker"
+          git config user.email "openbank-issue-worker@users.noreply.github.com"
+          claude -p "$(cat .github/agent-prompts/issue-worker.md)" \
+            --max-turns 200 \
+            --permission-mode bypassPermissions \
+          | tee /tmp/worker-output.txt
+          echo "--- worker output above ---"
+
+      # ---- did it actually run? -----------------------------------------------------------
+      # The run this replaces exited 0 having done nothing at all, because `claude -p` exits 0
+      # when it finishes talking, whatever it managed to accomplish. An exit code is not a
+      # verdict. So the agent must END with one of three explicit lines, and this step fails
+      # the job when none is present: "the session produced prose" and "the session did the
+      # job" are otherwise the same green.
+      - name: Assert the worker reached a verdict
+        if: steps.mode.outputs.mode == 'work'
+        run: |
+          set -uo pipefail
+          if [ ! -s /tmp/worker-output.txt ]; then
+            echo "::error::the worker produced no output at all — it did not run, which is not the same as having nothing to do"
+            exit 1
+          fi
+          verdict=$(grep -oE '^WORKER-VERDICT: (OPENED|NOTHING QUALIFIED|BLOCKED).*$' /tmp/worker-output.txt | tail -1)
+          if [ -z "${verdict}" ]; then
+            echo "::error::the worker never stated a verdict. It talked, but nothing here can tell whether it worked an issue, found nothing to do, or was blocked. Treating as NOT having run."
+            echo "--- last 20 lines of what it did say ---"
+            tail -20 /tmp/worker-output.txt
+            exit 1
+          fi
+          echo "verdict: ${verdict}"
+          # BLOCKED is a real outcome and must be loud: it means the runner or the credential
+          # could not do what the task needs, which is a defect in this workflow, not in the
+          # backlog. NOTHING QUALIFIED is a legitimate, quiet success.
+          case "${verdict}" in
+            "WORKER-VERDICT: BLOCKED"*)
+              echo "::error::${verdict}"
+              exit 1 ;;
+          esac
+
+      # ---- reclaim abandoned claims ---------------------------------------------------------
+      # The prompt tells the agent to delete its claim branch when it gives up. That only covers
+      # the case where it gives up ON PURPOSE. A run that DIES mid-flight — hit its turn limit,
+      # ended a turn waiting for a background task that never reports, timed out — cannot clean
+      # up after itself, and the claim it already pushed is then permanent.
+      #
+      # That is not a tidiness problem. STEP 1 discards any issue that already has an `agent/`
+      # branch naming it, so an orphan silently removes that issue from the backlog forever,
+      # with nothing anywhere to explain why it is never picked. Two runs died that way on
+      # 2026-08-22 (15:14 and the 18:17 schedule), each leaving one.
+      #
+      # An EMPTY claim is unambiguous: a branch under `agent/` with no open PR and no commit of
+      # its own beyond origin/main is a ref that was pushed at the claim step and never built
+      # on. Deleting exactly that set can never destroy work — a branch carrying a single
+      # commit is left alone and reported instead.
+      - name: Release claim branches that carry no work
+        if: always() && steps.mode.outputs.mode == 'work'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          git fetch origin main --quiet
+          released=0; kept=0
+          for ref in $(git ls-remote --heads origin 'refs/heads/agent/*' | awk '{print $2}' | sed 's|refs/heads/||'); do
+            if [ -n "$(gh pr list -R "${GITHUB_REPOSITORY}" --head "$ref" --state all --json number --jq '.[0].number // empty')" ]; then
+              continue                                  # has a PR: it is real work, leave it
+            fi
+            git fetch origin "refs/heads/${ref}" --quiet
+            ahead=$(git rev-list --count origin/main..FETCH_HEAD)
+            if [ "$ahead" -eq 0 ]; then
+              git push origin --delete "$ref" && echo "released empty claim: $ref" && released=$((released+1))
+            else
+              echo "::warning::branch ${ref} has ${ahead} commit(s) and no PR — a human should decide; not deleting it"
+              kept=$((kept+1))
+            fi
+          done
+          echo "claim gc: ${released} released, ${kept} left for a human"
+
+      - name: Summarise
+        if: always() && steps.mode.outputs.mode == 'work'
+        run: |
+          {
+            echo "### Agent issue worker"
+            echo
+            if [ -s /tmp/worker-output.txt ]; then
+              tail -40 /tmp/worker-output.txt
+            else
+              echo "No output produced — treat as NOT having run, not as 'nothing to do'."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

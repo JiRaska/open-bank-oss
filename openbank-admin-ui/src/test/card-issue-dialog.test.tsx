@@ -63,6 +63,20 @@ async function walkToReview() {
 }
 
 describe('issue-card flow', () => {
+  it('keeps keyboard focus inside the modal', () => {
+    mount()
+    const dialog = screen.getByRole('dialog', { name: 'Issue a card' })
+    const close = screen.getByRole('button', { name: 'Close' })
+    const search = screen.getByLabelText('Search for a client')
+
+    search.focus()
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(document.activeElement).toBe(close)
+
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(search)
+  })
+
   it('walks party → account → product and shows the entitlement context', async () => {
     mount()
     await walkToReview()
@@ -95,6 +109,23 @@ describe('issue-card flow', () => {
     // The BFF stamps the operator identity server-side; a client-set one would be
     // an audit field the audited party controls.
     expect(JSON.stringify(init.headers)).not.toContain('Operator')
+  })
+
+  it('rejects a double click before React can render the issue button disabled', async () => {
+    const randomUUID = vi.fn().mockReturnValueOnce('idem-key-first').mockReturnValueOnce('idem-key-second')
+    vi.stubGlobal('crypto', { ...globalThis.crypto, randomUUID })
+    mount()
+    await walkToReview()
+    fireEvent.click(screen.getByText('Continue'))
+    await waitFor(() => expect(screen.getByText('Issue the card')).toBeTruthy())
+
+    const issueButton = screen.getByText('Issue the card').closest('button') as HTMLButtonElement
+    fireEvent.click(issueButton)
+    fireEvent.click(issueButton)
+
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect((posted[0].init.headers as Record<string, string>)['Idempotency-Key']).toBe('idem-key-first')
+    expect(randomUUID).toHaveBeenCalledTimes(1)
   })
 
   it('refuses an exhausted quota up front and says why', async () => {

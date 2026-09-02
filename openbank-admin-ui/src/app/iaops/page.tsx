@@ -21,6 +21,7 @@ import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
 import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { StatusBadge, type Tone } from '@/components/ui'
 import styles from './IAOps.module.css'
 
 // ── Types (mirror /api/iaops/governance) ───────────────────────────────────
@@ -57,6 +58,15 @@ interface AgentCostEntry {
   burnRate: 'low' | 'normal' | 'high' | 'exceeded'
 }
 
+interface MetricsCoverage {
+  source: string
+  retentionHours: number
+  dataFrom: string
+  dataTo: string
+  lastSuccessfulLoad: string | null
+  windows: Record<'24h' | '7d' | '30d', { requestedHours: number; availableHours: number; partial: boolean }>
+}
+
 interface FinOpsAnomaly {
   id: string
   detectedAt: string
@@ -90,23 +100,16 @@ function toAgentFinding(a: FinOpsAnomaly, t: (cs: string, en: string) => string)
 }
 
 // ── Status visual helpers ───────────────────────────────────────────────────
-const STATUS_CFG: Record<DStatus, { color: string; bg: string; border: string; en: string; cs: string; icon: React.ReactNode }> = {
-  built:   { color: '#16a34a', bg: '#dcfce7', border: '#86efac', en: 'Built',   cs: 'Hotovo',   icon: <CheckCircle2 size={13} /> },
-  partial: { color: '#d97706', bg: '#fef9c3', border: '#fde047', en: 'Partial', cs: 'Částečně', icon: <CircleDot size={13} /> },
-  planned: { color: '#6366f1', bg: '#ede9fe', border: '#c4b5fd', en: 'Planned', cs: 'Plánováno', icon: <CircleDashed size={13} /> },
+const STATUS_CFG: Record<DStatus, { tone: Tone; en: string; cs: string }> = {
+  built: { tone: 'success', en: 'Built', cs: 'Hotovo' },
+  partial: { tone: 'warning', en: 'Partial', cs: 'Částečně' },
+  planned: { tone: 'accent', en: 'Planned', cs: 'Plánováno' },
 }
 
-function StatusPill({ status, large }: { status: DStatus; large?: boolean }) {
+function StatusPill({ status }: { status: DStatus }) {
   const { language } = useLanguage()
   const c = STATUS_CFG[status]
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px',
-      fontSize: large ? '12px' : '10px', fontWeight: 700, padding: large ? '3px 10px' : '2px 8px',
-      borderRadius: '10px', color: c.color, background: c.bg, border: `1px solid ${c.border}`,
-      letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-      {c.icon}{language === 'cs' ? c.cs : c.en}
-    </span>
-  )
+  return <StatusBadge status={status} tone={c.tone} label={language === 'cs' ? c.cs : c.en} withDot />
 }
 
 function Card({ children, accent, id }: { children: React.ReactNode; accent?: string; id?: string }) {
@@ -153,6 +156,7 @@ function IAOpsContent() {
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [data, setData] = useState<GovData | null>(null)
   const [agentCosts, setAgentCosts] = useState<AgentCostEntry[]>([])
+  const [costCoverage, setCostCoverage] = useState<MetricsCoverage | null>(null)
   const [costAnomalies, setCostAnomalies] = useState<FinOpsAnomaly[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -175,8 +179,9 @@ function IAOpsContent() {
       if (!govRes.ok) { setUnavailable({ kind: 'error' }); return }
       setData(await govRes.json())
       if (aiCostRes.ok) {
-        const ac = await aiCostRes.json() as { available: boolean; agents?: AgentCostEntry[] }
+        const ac = await aiCostRes.json() as { available: boolean; agents?: AgentCostEntry[]; coverage?: MetricsCoverage }
         setAgentCosts(ac.agents ?? [])
+        setCostCoverage(ac.coverage ?? null)
       }
       if (anomalyRes.ok) {
         const an = await anomalyRes.json() as { anomalies?: FinOpsAnomaly[] }
@@ -244,7 +249,7 @@ function IAOpsContent() {
 
       <PageHeader
         icon={<Bot size={20} aria-hidden="true" />}
-        title={t('IAOps — governance AI', 'IAOps — AI Governance')}
+        title={t('Řídicí centrum agentů', 'Agent Control Room')}
         subtitle={t(
           'Co AI děláme, proč, jak je to řízené a jak jsme compliant — ADR-0031',
           'What AI we run, why, how it is governed, and how we stay compliant — ADR-0031',
@@ -252,7 +257,8 @@ function IAOpsContent() {
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">IAOps</span></div>}
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {lastRefresh && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{lastRefresh.toLocaleTimeString(dateLocale)}</span>}
-          <button onClick={load} disabled={loading}
+          <button onClick={load} disabled={loading} type="button" aria-busy={loading}
+            aria-label={t('Obnovit IAOPS', 'Refresh IAOPS')}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px',
               border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)',
               fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}>
@@ -567,11 +573,11 @@ function IAOpsContent() {
                             {t('Náklady / rozpočet', 'Cost / Budget status')}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                              24h: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast24hUsd.toFixed(2)}</strong>
+                            <span title={costCoverage ? `${costCoverage.dataFrom} → ${costCoverage.dataTo}` : undefined} style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                              {costCoverage?.windows['24h'].partial ? `${costCoverage.windows['24h'].availableHours}h / 24h` : '24h'}: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast24hUsd.toFixed(2)}</strong>
                             </span>
-                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                              7d: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast7dUsd.toFixed(2)}</strong>
+                            <span title={costCoverage ? `${costCoverage.dataFrom} → ${costCoverage.dataTo}` : undefined} style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                              {costCoverage?.windows['7d'].partial ? `${costCoverage.windows['7d'].availableHours}h / 7d` : '7d'}: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast7dUsd.toFixed(2)}</strong>
                             </span>
                             {budgetPct != null && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '120px' }}>
@@ -589,6 +595,11 @@ function IAOpsContent() {
                               </span>
                             )}
                           </div>
+                          {costCoverage && (
+                            <div role="status" style={{ marginTop: '7px', fontSize: '9px', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                              {costCoverage.source} · retention {costCoverage.retentionHours}h · {costCoverage.dataFrom} → {costCoverage.dataTo} · last successful load {costCoverage.lastSuccessfulLoad ?? 'unavailable'}
+                            </div>
+                          )}
                         </div>
                       )}
 

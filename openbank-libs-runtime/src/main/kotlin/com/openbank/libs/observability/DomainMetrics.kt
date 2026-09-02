@@ -378,6 +378,36 @@ class DomainMetrics {
     }
 
     /**
+     * Register the outbox **dead-letter** gauge: rows parked in terminal [
+     * com.openbank.libs.persistence.outbox.OutboxStatus.DEAD] (ADR-0050 N5) and therefore excluded
+     * from `listProcessable`/`claimProcessable` forever. `openbank.outbox.backlog` cannot see them
+     * — its whole point is that DEAD is *not* backlog — so a service that has dead-lettered every
+     * event it ever produced reads as a flat zero backlog, which is indistinguishable from healthy
+     * (#4005).
+     *
+     * A **gauge and not the [outboxDead] counter**, because the counter answers "did we dead-letter
+     * anything since this process started" and the operational question is "are there dead rows
+     * sitting in the table right now". A pod restart resets the counter while the rows remain, and
+     * a Micrometer counter is not even *created* until its first increment — so a service whose
+     * dead-lettering happened before the current pod exports no `openbank_outbox_dead_total` series
+     * at all, and any alert on it silently matches nothing.
+     *
+     * Same lifecycle contract as [registerOutboxBacklog]: call once at startup with a cheap
+     * supplier (`SELECT count(*) ... WHERE status = 'DEAD'`), re-registration is a no-op.
+     *
+     * @param service      service name (e.g. `card-issuance`)
+     * @param deadLettered cheap supplier of the current DEAD row count
+     */
+    fun registerOutboxDeadLettered(service: String, deadLettered: () -> Number) {
+        reg()?.let { r ->
+            Gauge.builder("openbank.outbox.dead_lettered", deadLettered) { it.invoke().toDouble() }
+                .tag("service", service)
+                .strongReference(true)
+                .register(r)
+        }
+    }
+
+    /**
      * Register the **stuck payment saga** gauge: how many payment sagas have sat in a
      * non-terminal state (`PENDING` / `PROCESSING`) for longer than the service's stuck
      * threshold. A payment saga that wedges leaves money in a terminal-unknown state, so this
@@ -482,6 +512,72 @@ class DomainMetrics {
             }.tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow).strongReference(true).register(r)
         }
         return WorkflowLivenessRecorder(lastSuccessEpochMillis, successRecorded)
+    }
+
+    // ── Workflow run duration (issue #6169) ────────────────────────────────────
+
+    /**
+     * Register the per-run DURATION instrument for a scheduled workflow: a timer the job records
+     * once per run, and a gauge carrying the duration budget above which its mean run is degraded.
+     *
+     * **Why this exists next to [registerWorkflowLiveness] and not instead of it.** That primitive
+     * answers *did it run*. This one answers *how long did it take*, and nothing in the fleet
+     * answered it: the only duration signal for `agent-oversight-sweep` was
+     * `traces_spanmetrics_latency_bucket`, whose top finite bucket is `5` — every sweep lands in
+     * `(5s, +Inf]`, so `histogram_quantile(0.99, …)` returns exactly `5.00` forever and **no
+     * threshold above 5s is expressible from that instrument at all** (#6169, measured in #6168).
+     * A job that degrades from 6s to 300s is invisible there. Re-deriving a duration from traces is
+     * the mistake; the job owning its own timer is the fix.
+     *
+     * **What the timer measures, stated exactly:** wall-clock elapsed *in this process*, from the
+     * caller's start to its end, for the whole run — including anything it waits on. For a run that
+     * makes an LLM call that is not the model's latency: it is this pod's view of the run, which is
+     * what a scheduler alert wants (a run that overruns its slot overruns it regardless of which
+     * hop was slow). Name it that way and no one mistakes it for an upstream SLI.
+     *
+     * **Both series exist from pod start, at zero.** The timer is registered here rather than
+     * lazily on the first record, so an ABSENT `openbank_workflow_run_duration_seconds_count` means
+     * "this workflow is not instrumented", not "it has never run" — the same distinction
+     * [registerFeedFetch] documents for its five outcome counters. What a cold pod reports at t=0
+     * is therefore `count = 0`, `sum = 0` and `budget = <declared>`, and the alert's own arithmetic
+     * (`sum / count` over a window with no runs in it) yields no series rather than a `0` that
+     * reads as "instant" or a breach that reads as "broken". A fresh pod is silent by construction,
+     * with no `for:` needed to hide a boot-time value — which is the lesson `WorkflowLivenessStale`
+     * cost (#2239, #4208): a metric whose t=0 value was never re-derived fired 15 minutes after
+     * every deploy, on the control whose whole job is to make a dead scheduler visible.
+     *
+     * **No percentiles are published**, unlike [timer]. A 30-minute job puts ~4 observations into a
+     * 2-hour window and a quantile over four samples is the maximum with extra steps — publishing
+     * `{quantile="0.99"}` here would recreate the saturated number this primitive replaces. See
+     * [WorkflowRunMetrics] for why `_max` is also not alertable.
+     *
+     * @param workflow  the SAME stable name passed to [registerWorkflowLiveness], so the two
+     *                  signals join on one tag value and triage reads one workflow, not two.
+     * @param budget    mean-run duration above which the run is degraded. Pick it against the
+     *                  job's own cadence: a run approaching its period starts having the NEXT run
+     *                  skipped (`ConcurrentExecution.SKIP`) with nothing logged, so the budget
+     *                  belongs well below the period, not at it.
+     */
+    fun registerWorkflowRun(workflow: String, budget: Duration): WorkflowRunRecorder {
+        val registry = reg() ?: return WorkflowRunRecorder(null, null)
+        Gauge.builder(WorkflowRunMetrics.RUN_BUDGET_SECONDS) { budget.toSeconds().toDouble() }
+            .description("Mean run duration above which this workflow is considered degraded")
+            .tag(WorkflowRunMetrics.WORKFLOW_TAG, workflow)
+            .strongReference(true)
+            .register(registry)
+        // Registered eagerly, both outcomes, so absence means "not instrumented" — see the KDoc.
+        val timers = listOf(WorkflowRunMetrics.OUTCOME_SUCCESS, WorkflowRunMetrics.OUTCOME_FAILURE)
+            .associateWith { outcome ->
+                Timer.builder(WorkflowRunMetrics.RUN_DURATION)
+                    .description("Wall-clock duration of one workflow run, as measured in this process")
+                    .tag(WorkflowRunMetrics.WORKFLOW_TAG, workflow)
+                    .tag(WorkflowRunMetrics.OUTCOME_TAG, outcome)
+                    .register(registry)
+            }
+        return WorkflowRunRecorder(
+            timers[WorkflowRunMetrics.OUTCOME_SUCCESS],
+            timers[WorkflowRunMetrics.OUTCOME_FAILURE],
+        )
     }
 
     // ── External-feed fetch outcome (ADR-0237 point 2, issue #4743) ─────────────
@@ -665,6 +761,30 @@ class FeedFetchRecorder internal constructor(
     fun record(outcome: FeedFetchOutcome) {
         counters[outcome]?.increment()
         if (outcome == FeedFetchOutcome.FETCHED) freshness.recordSuccess()
+    }
+}
+
+/**
+ * Handle returned by [DomainMetrics.registerWorkflowRun]; call [record] exactly once per run,
+ * whatever the outcome — a run that threw still consumed wall-clock, and a job that fails slowly is
+ * the case a duration alert exists for.
+ *
+ * Not a CDI bean — a plain value object held by the scheduled job that registered it, exactly like
+ * [WorkflowLivenessRecorder]. Both timers are null when no [io.micrometer.core.instrument.MeterRegistry]
+ * was resolvable, and [record] is then a silent no-op (the fleet-wide fallback of every method on
+ * [DomainMetrics]).
+ */
+class WorkflowRunRecorder internal constructor(private val success: Timer?, private val failure: Timer?) {
+    /**
+     * Record one run.
+     *
+     * @param elapsed  wall-clock measured around the run IN THIS PROCESS — not an upstream latency.
+     * @param succeeded false when the run threw; the sample is still recorded, under
+     *                  `outcome="failure"`, so a fail-fast run cannot silently pull the mean down
+     *                  without being separable at triage time.
+     */
+    fun record(elapsed: Duration, succeeded: Boolean = true) {
+        (if (succeeded) success else failure)?.record(elapsed)
     }
 }
 

@@ -6,6 +6,7 @@ package com.openbank.finrep.application.usecase
 
 import com.openbank.finrep.application.port.inbound.FinrepUseCase
 import com.openbank.finrep.application.port.inbound.GetFinrepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.application.port.out.FinrepMetricsPort
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.RegulatoryFramework
@@ -13,6 +14,8 @@ import com.openbank.finrep.application.port.out.TemplateFailureReason
 import com.openbank.finrep.application.port.out.TemplateRender
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.F0101Mapper
+import com.openbank.finrep.domain.mapper.F0102Mapper
+import com.openbank.finrep.domain.mapper.F0103Mapper
 import com.openbank.finrep.domain.mapper.F0200Mapper
 import com.openbank.finrep.domain.model.FinrepTemplate
 import jakarta.enterprise.context.ApplicationScoped
@@ -38,9 +41,11 @@ class FinrepService(private val ledgerPort: LedgerPort, private val metrics: Fin
 
     override suspend fun getTemplate(query: GetFinrepTemplateQuery): FinrepTemplate {
         val startedAt = System.nanoTime()
-        val snapshot = trialBalance(query.asOf)
+        val snapshot = trialBalance(query.asOf, query.evidence)
         val template = when (query.templateId) {
             "F01.01" -> F0101Mapper.map(snapshot, query.asOf)
+            "F01.02" -> F0102Mapper.map(snapshot, query.asOf)
+            "F01.03" -> F0103Mapper.map(snapshot, query.asOf)
             "F02.00" -> F0200Mapper.map(snapshot, query.asOf)
             else -> {
                 metrics.templateFailed(RegulatoryFramework.FINREP, TemplateFailureReason.UNKNOWN_TEMPLATE)
@@ -53,8 +58,7 @@ class FinrepService(private val ledgerPort: LedgerPort, private val metrics: Fin
                 templateId = template.templateId,
                 trialBalanceLines = snapshot.lines.size,
                 cells = template.cells.size,
-                // FINREP cells carry no data-gap flag; only COREP C 01.00 has unavailable inputs today.
-                dataGapCells = 0,
+                dataGapCells = template.dataGaps.size,
                 balanced = template.isBalanced,
                 balanceVerdict = template.balanceVerdict,
                 duration = Duration.ofNanos(System.nanoTime() - startedAt),
@@ -69,8 +73,11 @@ class FinrepService(private val ledgerPort: LedgerPort, private val metrics: Fin
      * REST-client failure mode (connect, timeout, 5xx, deserialisation) means the same thing here.
      */
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun trialBalance(asOf: LocalDate): TrialBalanceSnapshot = try {
-        ledgerPort.getTrialBalance(asOf)
+    private suspend fun trialBalance(asOf: LocalDate, evidence: TrialBalanceEvidence): TrialBalanceSnapshot = try {
+        when (evidence) {
+            TrialBalanceEvidence.FROZEN -> ledgerPort.getTrialBalance(asOf)
+            TrialBalanceEvidence.LIVE_PREVIEW -> ledgerPort.getLiveTrialBalance(asOf)
+        }
     } catch (e: Exception) {
         metrics.templateFailed(RegulatoryFramework.FINREP, TemplateFailureReason.LEDGER_UNAVAILABLE)
         throw e

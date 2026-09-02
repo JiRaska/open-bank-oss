@@ -26,10 +26,37 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => { setMobileNavOpen(false) }, [pathname])
   useEffect(() => {
     if (!mobileNavOpen) return
+    const focusableInSidebar = () => Array.from(
+      document.querySelectorAll<HTMLElement>('#admin-sidebar a, #admin-sidebar button:not([disabled])'),
+    )
     const frame = requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>('#admin-sidebar a, #admin-sidebar button')?.focus()
+      focusableInSidebar()[0]?.focus()
     })
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setMobileNavOpen(false) }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMobileNavOpen(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const focusable = focusableInSidebar()
+      const first = focusable[0]
+      const last = focusable.at(-1)
+      if (!first || !last) return
+
+      if (!document.querySelector('#admin-sidebar')?.contains(document.activeElement)) {
+        event.preventDefault()
+        const nextFocus = event.shiftKey ? last : first
+        nextFocus.focus()
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
     window.addEventListener('keydown', onKeyDown)
     return () => { cancelAnimationFrame(frame); window.removeEventListener('keydown', onKeyDown) }
   }, [mobileNavOpen])

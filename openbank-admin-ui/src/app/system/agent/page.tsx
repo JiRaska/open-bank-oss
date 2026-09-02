@@ -89,8 +89,8 @@ export default function AgentPage() {
         title={t('Agent služba', 'Agent Service')}
         subtitle={t('MCP server zpřístupňující nástroje OpenBank AI agentům · JSON-RPC 2.0 přes HTTP', 'MCP server exposing OpenBank tools to AI agents · JSON-RPC 2.0 over HTTP')}
         icon={<Bot aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
-        actions={<button type="button" className="btn btn-secondary" onClick={loadTools} disabled={loading}>
-          <RefreshCw size={13} className={cn(loading && 'animate-spin')} />
+        actions={<button type="button" className="btn btn-secondary" onClick={loadTools} disabled={loading} aria-busy={loading} aria-label={t('Obnovit nástroje agenta', 'Refresh agent tools')}>
+          <RefreshCw size={13} aria-hidden="true" className={cn(loading && 'animate-spin')} />
           {t('Obnovit', 'Refresh')}
         </button>}
       />
@@ -170,8 +170,8 @@ export default function AgentPage() {
 
       {/* Loading */}
       {loading && !error && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-          <RefreshCw size={15} className="animate-spin" style={{ color: 'var(--accent)' }} />
+        <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+          <RefreshCw size={15} aria-hidden="true" className="animate-spin" style={{ color: 'var(--accent)' }} />
           {t('Připojování k MCP serveru…', 'Connecting to MCP server…')}
         </div>
       )}

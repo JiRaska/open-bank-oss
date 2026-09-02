@@ -61,6 +61,12 @@ spec:
       - resource: { type: topic, name: openbank.onboarding.funnel.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
+      # ADR-0269 rule 8 credit-journey funnel. Separate from the onboarding funnel above because
+      # that one is written from an anonymous public endpoint and this one only from an
+      # authenticated request — the trust levels must not be merged into one stream.
+      - resource: { type: topic, name: openbank.credit.funnel.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
       # ADR-0192 in-app screen feedback (metadata + screenshot object key; never image bytes).
       - resource: { type: topic, name: openbank.feedback.events, patternType: literal }
         operations: [Read, Describe]
@@ -71,6 +77,16 @@ spec:
         host: "*"
       - resource: { type: group, name: analytics-sink, patternType: literal }
         operations: [Read]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `analytics-events-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.analytics-sink.analytics-events-in
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
 ---
 apiVersion: external-secrets.io/v1beta1

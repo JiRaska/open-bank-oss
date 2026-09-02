@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fraud-service
     app.kubernetes.io/part-of: fraud
   annotations:
-    openbank.tech/policy-checksum: "0f4cd0af45c217ef"
+    openbank.tech/policy-checksum: "0d7216cda1279981"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1126,12 +1126,19 @@ data:
       - openbank-delegation-service            # ADR-0232: mints payment rights (customer-to-party grants) without moving
                                                 # money itself — money-path for the same reason consent/vop are. Threat
                                                 # model: docs/threat-models/openbank-delegation-service.md. four-eyes assessed:
-                                                # delegation.offer/revoke/suspend are self-service or fraud-signal actions
-                                                # with SCA-bound ceremonies on both ends; the bank-side suspend lands via
-                                                # the fraud pipeline, not an operator console, so there is no
-                                                # maker/checker pair to gate yet. Revisit when the operator
-                                                # backoffice surface ships.
-      - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
+                                                # delegation.offer/revoke are self-service with SCA-bound ceremonies on both
+                                                # ends. The bank-side suspend was justified here as landing "via the fraud
+                                                # pipeline, not an operator console" — that is NOT true (#4403): fraud scoring
+                                                # is shadow-only and drives no suspension, so this exemption rested on a
+                                                # control that does not exist. The exemption still holds on the narrower and
+                                                # true ground that no operator suspend endpoint has shipped, so there is no
+                                                # maker/checker pair to gate yet. Revisit when the operator backoffice
+                                                # surface ships, and do not re-derive it from the fraud pipeline.
+      - openbank-fraud-service                # ADR-0084: v4 rule engine live; scoring is SHADOW-ONLY on every rail. The domestic-payment
+                                               # enforcement gate (issue #667) was MERGED AND THEN DELETED by 189fe7b03 (PR #2122,
+                                               # closing issue #1917) — this comment credited it as merely flag-gated until #4403.
+                                               # No fraud verdict changes any payment outcome today: the four wired rails call
+                                               # POST /fraud/score and log the result. See ADR-0084's 2026-08-09 correction block.
                                                # four-eyes assessed (issue #938 follow-up): the only REST surface today is a stateless
                                                # POST /fraud/score (fraud.score) — no operator case-decision, rule-config, or manual
                                                # override endpoint exists yet, so there is nothing real to maker-checker gate. Revisit
@@ -1377,6 +1384,7 @@ data:
             - sanctions.create
             - sanctions.trigger
             - sanctions.update
+            - sctInstPayment.approval.decide
             - sctInstPayment.create
             - sepaPayment.approval.decide
             - sepaPayment.create

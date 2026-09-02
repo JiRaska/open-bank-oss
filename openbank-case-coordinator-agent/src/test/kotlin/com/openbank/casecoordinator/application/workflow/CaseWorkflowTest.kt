@@ -9,6 +9,7 @@ import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.casecoordinator.domain.model.CaseClass
 import com.openbank.casecoordinator.domain.model.CaseDeliveryMode
 import com.openbank.casecoordinator.domain.model.CaseOutcome
+import com.openbank.casecoordinator.domain.model.CaseSignalEvidenceStage
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.domain.model.CaseStatus
 import com.openbank.casecoordinator.domain.model.ContributeSignal
@@ -116,9 +117,23 @@ class CaseWorkflowTest {
     @Test
     fun `join contribute then synthesis emits exactly one proposal`() {
         val stub = start()
-        stub.join(JoinSignal("incident-responder", "investigator"))
+        stub.join(
+            JoinSignal(
+                "incident-responder",
+                "investigator",
+                "11111111-1111-1111-1111-111111111111",
+                "rollout-shadow-1",
+            ),
+        )
         stub.contribute(
-            ContributeSignal("incident-responder", "consumer lag spike after deploy", listOf("grafana/x"), false),
+            ContributeSignal(
+                "incident-responder",
+                "consumer lag spike after deploy",
+                listOf("grafana/x"),
+                false,
+                "22222222-2222-2222-2222-222222222222",
+                "rollout-shadow-1",
+            ),
         )
         stub.requestSynthesis(SynthesisRequest("case-coordinator"))
 
@@ -134,6 +149,18 @@ class CaseWorkflowTest {
                 any(),
                 false,
                 false,
+            )
+        }
+        verify(exactly = 1) {
+            persistence.recordSignalEvidence(
+                match { evidence ->
+                    evidence.size == 2 &&
+                        evidence.all { it.stage == CaseSignalEvidenceStage.CONSUMED } &&
+                        evidence.map { it.signalId }.toSet() == setOf(
+                            "11111111-1111-1111-1111-111111111111",
+                            "22222222-2222-2222-2222-222222222222",
+                        )
+                },
             )
         }
     }

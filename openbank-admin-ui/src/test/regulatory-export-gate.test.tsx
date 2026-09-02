@@ -46,6 +46,7 @@ describe('evaluateExportReadiness', () => {
     ['not_loaded', { status: 'idle' as const }],
     ['no_data_source', { status: 'unsupported' as const }],
     ['source_unavailable', { status: 'unavailable' as const, kind: 'unreachable' }],
+    ['no_closed_periods', { status: 'no-periods' as const }],
   ])('blocks with %s when the data was never obtained', (reason, data) => {
     const verdict = evaluateExportReadiness(data)
     expect(verdict.ok).toBe(false)
@@ -58,6 +59,15 @@ describe('evaluateExportReadiness', () => {
       templates: [{ templateId: 'C_01.00', cells: [cell({ isDataGap: true, gapReason: 'no capital GL accounts' })] }],
     })
     expect(verdict).toEqual({ ok: false, reason: 'data_gaps', templateIds: ['C_01.00'] })
+  })
+
+  it('shows live values for review but blocks exporting them as a sealed return', () => {
+    const verdict = evaluateExportReadiness({
+      status: 'ready',
+      evidence: 'LIVE_PREVIEW',
+      templates: [{ templateId: 'F01.01', cells: [cell()], isBalanced: true, hasDataGaps: false }],
+    })
+    expect(verdict).toEqual({ ok: false, reason: 'provisional_data', templateIds: ['F01.01'] })
   })
 
   it('blocks as INCOMPLETE on the derived hasDataGaps flag alone', () => {
@@ -187,7 +197,12 @@ describe('blockReasonCopy for the balance verdicts', () => {
 const FINREP_CARD = 'CNB — Finanční výkazy (FINREP)'
 
 async function openPreview(fetchImpl: (url: string) => Promise<Response>) {
-  vi.stubGlobal('fetch', vi.fn(fetchImpl))
+  vi.stubGlobal('fetch', vi.fn((url: string) => url.includes('/api/v1/finrep/periods')
+    ? Promise.resolve(new Response(JSON.stringify({ latest: '2026-06-30', periods: ['2026-06-30'] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+    : fetchImpl(url)))
   render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
   const card = (await screen.findAllByText(FINREP_CARD))[0].closest('.card')
   if (!card) throw new Error(`no .card ancestor for "${FINREP_CARD}" — the report card markup changed`)
@@ -205,8 +220,8 @@ describe('Regulatory export gate — the surface', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('export-blocked')).not.toBeInTheDocument()
     })
-    expect(screen.getByRole('button', { name: /Export JSON/i })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /Export CSV/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /JSON/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /CSV/i })).toBeEnabled()
   })
 
   it('BLOCKS export, with a named reason, when a cell is a flagged data gap', async () => {
@@ -214,8 +229,8 @@ describe('Regulatory export gate — the surface', () => {
 
     const banner = await screen.findByTestId('export-blocked')
     expect(banner).toHaveAttribute('data-block-reason', 'data_gaps')
-    expect(screen.getByRole('button', { name: /Export JSON/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /Export CSV/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /JSON/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /CSV/i })).toBeDisabled()
   })
 
   it('BLOCKS export when the data source is unreachable', async () => {
@@ -223,7 +238,7 @@ describe('Regulatory export gate — the surface', () => {
 
     const banner = await screen.findByTestId('export-blocked')
     expect(banner).toHaveAttribute('data-block-reason', 'source_unavailable')
-    expect(screen.getByRole('button', { name: /Export JSON/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /JSON/i })).toBeDisabled()
   })
 
   it('produces NO file when a blocked export is invoked anyway', async () => {
@@ -233,7 +248,7 @@ describe('Regulatory export gate — the surface', () => {
     await openPreview(async () => template({ cells: [cell({ isDataGap: true })], hasDataGaps: true }))
     await screen.findByTestId('export-blocked')
 
-    const jsonButton = screen.getByRole('button', { name: /Export JSON/i })
+    const jsonButton = screen.getByRole('button', { name: /JSON/i })
     fireEvent.click(jsonButton)
     // Fire the handler directly too, past the disabled attribute.
     jsonButton.removeAttribute('disabled')

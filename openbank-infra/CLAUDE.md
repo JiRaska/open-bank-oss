@@ -8,6 +8,25 @@ out of it (they are path-scoped, not less important — several are live-inciden
 ## Engineering notes (common pitfalls)
 
 ### GitOps / Kubernetes
+- **ArgoCD reports `Synced / Healthy` when it cannot compute a diff at all, and will then apply
+  NOTHING for as long as that lasts — measured at three weeks.** With `ServerSideApply=true` the
+  controller runs a server-side dry-run to diff; if that dry-run is rejected the comparison ERRORS,
+  and the app keeps serving its last known status. The condition lands in
+  `.status.conditions[].type == ComparisonError`, which **no ArgoCD metric exposes** — `argocd_app_info`
+  carries only `sync_status` and `health_status`, so `ArgoCDAppDegraded` and `ArgoCDAppHealthUnknown`
+  in `prometheus-rules-argocd.yaml` both stay quiet by construction. The trigger is any change to an
+  IMMUTABLE field: on 2026-08-21 the `loki` app had `singleBinary.persistence.size` raised 10Gi ->
+  30Gi (#3278), StatefulSet `volumeClaimTemplates` is immutable, and every values change merged
+  after that — including #6032's ruler fix — was never applied. `kubectl get application` showed
+  `Synced Healthy` throughout.
+  **Read `.status.operationState.finishedAt`, not `.status.sync.status`.** A last successful sync
+  three weeks old on an app whose values have changed since is the tell; `Synced` is not evidence.
+  The confirming probe is to render the chart locally with the app's own live values
+  (`kubectl get application <n> -o jsonpath='{.spec.source.helm.valuesObject}'` -> `helm template`)
+  and diff against the live ConfigMap — that is what turned "Argo says Synced" into "the ruler block
+  is the only thing missing". Fix without downtime: `kubectl delete sts <n> --cascade=orphan` leaves
+  the pod and the PVC running and lets Argo recreate the object with the new template; the PVC keeps
+  whatever size it was expanded to separately.
 - **`realm-template.json` is read ONLY on Keycloak's cold start (`--import-realm`), so editing it
   changes nothing on a running realm — and ArgoCD reports `Synced/Healthy` throughout.** ArgoCD
   manages the ConfigMap, and the ConfigMap does match the repo; the drift is one layer below what it
@@ -154,6 +173,19 @@ out of it (they are path-scoped, not less important — several are live-inciden
   egress policy in the same namespace and curl the target (HTTP 200 there + timeout from the
   policed pod pins it to egress, not to the Service, DNS or the ingress allow-list). Note the
   throwaway pod needs a `restricted` PodSecurity context or the namespace refuses it.
+- **`psql -tA` still prints the command-status line (`DELETE <n>`) interleaved with `RETURNING`
+  data rows — `wc -l` on that output overcounts by exactly one.** `-q` (quiet) is what suppresses
+  it; `-tA` alone is not enough. Measured against a real Postgres: `psql -tA -c "DELETE ... RETURNING
+  1"` on a single-row delete emits `1\nDELETE 1\n` (two lines), `psql -qtA` emits `1\n` (one).
+  A retention sweep counting deletions this way silently reports one MORE row deleted than actually
+  happened, every single run — verified by seeding an old/new row pair and checking the sweep's
+  reported count against the real remaining row count after (`langfuse-retention-cronjob.yaml`).
+- **`gen-network-policies-drift-gate`'s `git add -A --intent-to-add openbank-infra/gitops/components/`
+  stages EVERY untracked file under that tree, not just generated NetworkPolicy output — a brand-new,
+  unrelated manifest in the same PR reads as "drift" until it is `git add`ed for real.** Not a bug in
+  your manifest: it self-resolves the moment the file is staged as part of the normal commit, which
+  is exactly what a real PR does. Only surprising when running the gate by hand against an untracked
+  new file before committing it.
 - **A ConfigMap a pod parses ONCE at startup needs a pod-roll annotation, or the edit is a no-op
   against a green ArgoCD.** LiteLLM reads `--config` at boot and the ConfigMap is a plain volume
   mount, so a new model route reaches the pod's filesystem and the proxy keeps serving the list it
@@ -335,6 +367,31 @@ out of it (they are path-scoped, not less important — several are live-inciden
 
 ### Prometheus / Loki rules — configured-looking and inert
 
+- **An alert built on a threshold cannot see a subject that emits NOTHING, and `up` does not
+  save you — Prometheus writes `up` per TARGET, so a workload nobody scrapes has no `up` either.**
+  `PostgresInstanceDown` documents at length that `cnpg_collector_up` cannot report its own
+  exporter's death and that `up` survives instead; that is right and stops one level short. A CNPG
+  `Cluster` without `spec.monitoring.enablePodMonitor` creates no PodMonitor, so all nine Postgres
+  alerts — `PostgresInstanceDown` included — matched an empty vector forever. Measured 2026-08-30:
+  4 of 62 declared clusters, two of them the party and identity golden-record databases, both
+  backing up to S3 with that backup state watched by nothing. **The fix is a denominator that
+  exists whether or not the subject does**: a constant `vector(1)` recording rule per declared
+  subject, `unless on(...)` the set derived from real `up`, so absence is a positive series. Derive
+  the constant series from the manifests and generate the rule — a hand-kept expected-list is the
+  same defect one layer up (`check-cnpg-scrape-coverage.py`, #7220).
+- **Two promtool traps that make a unit test pass while measuring nothing.** Both were live in the
+  first draft of `openbank-infra/tests/promtool/postgres_threshold_alerts_test.yaml`:
+  - **`time()` starts at the unix epoch.** A sentinel-zero guard (`... and metric > 0`, which
+    exists because `time() - 0` is ~56 years on a real cluster) tested at `eval_time: 45m` sees
+    `time() - 0 = 45 minutes` — under every threshold, so the case passes with the guard DELETED.
+    Push `eval_time` past the threshold (33h here) and give the series enough samples to reach it.
+  - **An input `interval:` wider than the 5m staleness window makes `for:` unreachable.** At
+    `interval: 10m` the series is stale for half of every gap, the condition flickers between
+    evaluations, and a `for: 30m` never matures — so the alert reads as "does not fire" for a
+    reason that has nothing to do with the rule. Keep test intervals at 1m.
+  Falsify every case by deleting the clause it covers and confirming it goes red; `promtool check
+  rules` proves a rule PARSES and has been green through every alerting defect recorded here.
+
 - **A recording rule's `interval` decides whether its output EXISTS for its consumers, not just
   how fresh it is.** Prometheus answers an instant query from a 5-minute lookback window, so a
   group at `interval: 1h` is resolvable for 5 of every 60 minutes — a 1-in-12 duty cycle.
@@ -345,6 +402,20 @@ out of it (they are path-scoped, not less important — several are live-inciden
   unpriced, so the check meant to prove the price book complete was reporting the lookback window
   instead. Measured at the group's own `lastEvaluation`: 9 series at eval+60s, 0 at eval+600s
   (#6151). For a `vector(<constant>)` rule the interval is not a cost knob — evaluation is free.
+- **An agent's own metrics `interval` is how often it RECOMPUTES, not how often you scrape — and
+  the two are set in different files.** Falco's chart defaults to `metrics.interval: 1h`, so a 30s
+  ServiceMonitor returns the same hour-old numbers 120 times and every gauge lags reality by up to
+  an hour, with nothing anywhere looking broken. Set it to `1m` (#6322) and prove it by EFFECT, not
+  by reading the config back: `falcosecurity_falco_duration_seconds_total` grew by exactly 90.0s
+  over 90s of wall clock; at the default it would not have moved. Same family as the recording-rule
+  bullet above, one layer further out.
+- **A metric name is an unverified claim about someone else's build.** Falco's prefix is
+  `falcosecurity_`, NOT `falco_` — a probe written against the obvious guess reported zero for ten
+  minutes against a perfectly working agent serving 44 metrics on 12 scrape targets, all `up`. The
+  zero is indistinguishable from "the feature did not work". Read the names off the running
+  endpoint (`kubectl exec <pod> -- curl -s localhost:<port>/metrics`) or off
+  `/api/v1/label/__name__/values` before writing any rule, and when a probe returns nothing, check
+  the SCRAPE TARGETS before believing it.
 - **`loki.ruler` is not a chart key; it is `loki.rulerConfig`.** Helm drops unknown keys silently,
   so a detailed, well-commented ruler block can sit in git while the deployed config has
   `alertmanager_url` EMPTY and `storage.type: s3` instead of the sidecar's local directory. Three

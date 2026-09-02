@@ -34,8 +34,10 @@ class StubUpstreamResource : QuarkusTestResourceLifecycleManager {
 
         /** path (no query string) -> fixed (status, contentType, body) the stub answers with. */
         private val routes = ConcurrentHashMap<String, Fixture>()
+        private val requests = mutableListOf<Request>()
 
         data class Fixture(val status: Int, val contentType: String, val body: String)
+        data class Request(val path: String, val headers: Map<String, List<String>>, val body: String)
 
         /** Registers (or replaces) the fixed response for [path]. Call from a `@State` handler. */
         fun stub(path: String, status: Int = 200, contentType: String = "application/json", body: String) {
@@ -43,7 +45,12 @@ class StubUpstreamResource : QuarkusTestResourceLifecycleManager {
         }
 
         /** Clears every registered route — call at the start of each `@State` handler. */
-        fun reset() = routes.clear()
+        fun reset() {
+            routes.clear()
+            synchronized(requests) { requests.clear() }
+        }
+
+        fun requests(path: String): List<Request> = synchronized(requests) { requests.filter { it.path == path } }
     }
 
     override fun start(): Map<String, String> {
@@ -53,6 +60,10 @@ class StubUpstreamResource : QuarkusTestResourceLifecycleManager {
         }
         s.createContext("/") { exchange ->
             val path = exchange.requestURI.path
+            val requestBody = exchange.requestBody.bufferedReader().use { it.readText() }
+            synchronized(requests) {
+                requests += Request(path, exchange.requestHeaders.mapValues { it.value.toList() }, requestBody)
+            }
             val fixture = routes[path]
             if (fixture != null) {
                 respond(exchange, fixture.status, fixture.contentType, fixture.body)
@@ -73,6 +84,10 @@ class StubUpstreamResource : QuarkusTestResourceLifecycleManager {
             "openbank.edge.standing-order-service-url" to base,
             "openbank.edge.fx-service-url" to base,
             "openbank.edge.card-issuance-service-url" to base,
+            "openbank.edge.party-service-url" to base,
+            "openbank.edge.product-catalog-url" to base,
+            "openbank.edge.campaign-service-url" to base,
+            "openbank.edge.incentive-service-url" to base,
         )
     }
 
@@ -80,6 +95,7 @@ class StubUpstreamResource : QuarkusTestResourceLifecycleManager {
         server?.stop(0)
         server = null
         routes.clear()
+        synchronized(requests) { requests.clear() }
     }
 
     private fun respond(exchange: HttpExchange, status: Int, contentType: String, body: String) {

@@ -8,6 +8,19 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `tax-reporting` service. Data domain **platform**,
 > classification **confidential**, datastore **PostgreSQL**.
 
+## Deployment status — NOT DEPLOYED
+
+**This service has no workload anywhere in `openbank-infra/gitops/`** — no Deployment,
+no Rollout, and therefore no namespace, no CNPG cluster, no NetworkPolicy and no
+PodMonitor coverage. It is a released component (it has a `version.txt`) that has never
+run, so **every `kubectl` command below names a namespace that does not exist** and every
+procedure here is a plan rather than a rehearsed one.
+
+The production-readiness matrix reports it as **NOT-DEPLOYED** rather than NO-GO for the
+same reason: the cells it fails are consequences of the absent workload, not controls
+someone skipped, and none of them can be closed by a repo change. Whether this service
+should be deployed is an owner decision — see the service's own `CLAUDE.md`.
+
 ## Service identity
 
 | Field | Value |
@@ -30,7 +43,7 @@ triaging an incident that starts on `tax-reporting`.
 
 ## Health & probes
 
-- Readiness: `GET :8152/q/health/ready` · Liveness: `GET :8152/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `tax-reporting`); dashboards in Grafana.
 - Logs: `kubectl logs -n tax-reporting deploy/tax-reporting-service -f`, or Loki
   `{namespace="tax-reporting"}`.
@@ -38,7 +51,7 @@ triaging an incident that starts on `tax-reporting`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/tax-reporting-service -n tax-reporting` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/tax-reporting-service -n tax-reporting --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/tax-reporting-service -n tax-reporting --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

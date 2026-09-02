@@ -5,6 +5,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { Bot, Boxes, CheckCircle2, CircleAlert, Eye, FileJson, Link2, ListChecks, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { canReviewPrivateCatalogDraft, type AgentModelDescriptor } from '@/lib/catalog-review-capability'
@@ -101,6 +102,7 @@ export default function ProductStudioPage() {
   const [draftText, setDraftText] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const flight = useSingleFlight()
   const [newSpecCode, setNewSpecCode] = useState('')
   const [newOfferingCode, setNewOfferingCode] = useState('')
   const [marketContextInput, setMarketContextInput] = useState<MarketContextInput>(defaultMarketContextInput)
@@ -239,11 +241,19 @@ export default function ProductStudioPage() {
     setReview(null)
   }
 
-  const run = async (work: () => Promise<unknown>, success: string) => {
-    setBusy(true); setMessage('')
-    try { await work(); setMessage(success); await load(); if (offeringId) await loadRevisions(offeringId) }
-    catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
-    finally { setBusy(false) }
+  // Every Product Studio remote mutation already funnelled through `run`, but `busy`
+  // was React state — set, then awaited in the same tick — and the create/save/publish
+  // buttons never read it at all. The lock is claimed synchronously here, and
+  // `flight.isRunning(key)` names WHICH operation is running (#7083), even if
+  // another key starts before React can render.
+  const run = async (key: string, work: () => Promise<unknown>, success: string) => {
+    const outcome = await flight.run(key, async () => {
+      setBusy(true); setMessage('')
+      try { await work(); setMessage(success); await load(); if (offeringId) await loadRevisions(offeringId) }
+      catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+      finally { setBusy(false) }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   const createSpecification = () => {
@@ -252,7 +262,7 @@ export default function ProductStudioPage() {
     const body: SpecificationRequest = {
       code: newSpecCode.trim().toUpperCase(), schemaRef: { id: schema.id, version: schema.version },
     }
-    void run(() => catalogV2Operation('createSpecificationV2', {
+    void run('spec:create', () => catalogV2Operation('createSpecificationV2', {
       body,
     }), t('Specifikace vytvořena', 'Specification created'))
   }
@@ -263,7 +273,7 @@ export default function ProductStudioPage() {
       specificationId: selectedSpec.id, code: newOfferingCode.trim().toUpperCase(),
       market: marketContextFromInput(marketContextInput),
     }
-    void run(() => catalogV2Operation('createOfferingV2', {
+    void run('offering:create', () => catalogV2Operation('createOfferingV2', {
       body,
     }), t('Nabídka vytvořena', 'Offering created'))
   }
@@ -317,7 +327,7 @@ export default function ProductStudioPage() {
       attributes: seed(schema.document) as Record<string, unknown>,
       prices: [], eligibility: [], relationships: [], documentCodes: [],
     }
-    void run(() => catalogV2Operation('createOfferingRevisionV2', {
+    void run('revision:create', () => catalogV2Operation('createOfferingRevisionV2', {
       pathParameters: { id: selectedOffering.id }, body,
     }), t('Draft vytvořen; doplňte povinná pole schématu', 'Draft created; complete the schema-required fields'))
   }
@@ -325,7 +335,7 @@ export default function ProductStudioPage() {
   const saveDraft = () => {
     if (!selectedRevision || selectedRevision.state !== 'DRAFT') return
     if (!parsedDraft) { setMessage(t('Draft není validní JSON', 'Draft is not valid JSON')); return }
-    void run(() => catalogV2Operation('replaceOfferingRevisionV2', {
+    void run('revision:save', () => catalogV2Operation('replaceOfferingRevisionV2', {
       pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
       headers: { 'If-Match': `"${selectedRevision.revision}"` }, body: parsedDraft as RevisionRequest,
     }), t('Draft uložen', 'Draft saved'))
@@ -346,7 +356,7 @@ export default function ProductStudioPage() {
 
   const publish = () => {
     if (!selectedRevision || !publishReason.trim()) return
-    void run(() => catalogV2Operation('publishOfferingRevisionV2', {
+    void run('revision:publish', () => catalogV2Operation('publishOfferingRevisionV2', {
       pathParameters: { offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id },
       headers: { 'If-Match': `"${selectedRevision.revision}"` },
       body: { reason: publishReason.trim() },
@@ -423,7 +433,7 @@ export default function ProductStudioPage() {
             <select id="studio-new-spec-schema" className="input" value={newSpecSchema} onChange={event => setNewSpecSchema(event.target.value)}>
               {schemas.map(item => <option key={`${item.id}:${item.version}`} value={`${item.id}:${item.version}`}>{item.id}:{item.version}</option>)}
             </select>
-            <div style={{ display: 'flex', gap: 7, marginTop: 7 }}><input id="studio-new-spec-code" className="input" aria-label={t('Kód nové specifikace', 'New specification code')} value={newSpecCode} onChange={e => setNewSpecCode(e.target.value)} placeholder="TERM_LIFE" /><button className="btn btn-secondary" onClick={createSpecification} aria-label={t('Vytvořit specifikaci', 'Create specification')}><Plus size={13} aria-hidden="true" /></button></div>
+            <div style={{ display: 'flex', gap: 7, marginTop: 7 }}><input id="studio-new-spec-code" className="input" aria-label={t('Kód nové specifikace', 'New specification code')} value={newSpecCode} onChange={e => setNewSpecCode(e.target.value)} placeholder="TERM_LIFE" /><button className="btn btn-secondary" type="button" onClick={createSpecification} disabled={busy} aria-busy={flight.isRunning('spec:create')} aria-label={flight.isRunning('spec:create') ? t('Vytvářím specifikaci…', 'Creating specification…') : t('Vytvořit specifikaci', 'Create specification')}><Plus size={13} aria-hidden="true" /></button></div>
           </Can>
           <div className={styles.schemaHint}>{t('Aktivní schema:', 'Active schema:')} <strong>{activeSchema ? `${activeSchema.id}:${activeSchema.version}` : '—'}</strong><br />{t('Formulář respektuje verzi schématu; publikovaný obsah se nemění.', 'The form respects its schema version; published content never mutates.')}</div>
         </div>
@@ -438,7 +448,7 @@ export default function ProductStudioPage() {
             {offerings.filter(item => !specificationId || item.specificationId === specificationId).map(item => <option key={item.id} value={item.id}>{item.code}</option>)}
           </select>
           <Can permission="catalog:author">
-            <div style={{ display: 'flex', gap: 7, marginTop: 8 }}><input id="studio-new-offering-code" className="input" aria-label={t('Kód nové nabídky', 'New offer code')} value={newOfferingCode} onChange={e => setNewOfferingCode(e.target.value)} placeholder="TERM_LIFE_CZ_WEB" /><button className="btn btn-secondary" onClick={createOffering} aria-label={t('Vytvořit nabídku', 'Create offering')}><Plus size={13} aria-hidden="true" /></button></div>
+            <div style={{ display: 'flex', gap: 7, marginTop: 8 }}><input id="studio-new-offering-code" className="input" aria-label={t('Kód nové nabídky', 'New offer code')} value={newOfferingCode} onChange={e => setNewOfferingCode(e.target.value)} placeholder="TERM_LIFE_CZ_WEB" /><button className="btn btn-secondary" type="button" onClick={createOffering} disabled={busy} aria-busy={flight.isRunning('offering:create')} aria-label={flight.isRunning('offering:create') ? t('Vytvářím nabídku…', 'Creating offering…') : t('Vytvořit nabídku', 'Create offering')}><Plus size={13} aria-hidden="true" /></button></div>
             <div className={styles.marketContext}>
               <div className={styles.marketTitle}><LockKeyhole size={13} aria-hidden="true" /><span>{t('Dostupnost nabídky', 'Offer availability')}</span></div>
               <p>{t('Neveřejná nabídka používá obchodní segment, nikoli identitu zákazníka. Katalog neobsahuje osobní údaje.', 'A private offer uses a commercial segment, never a customer identity. The catalog contains no personal data.')}</p>
@@ -450,7 +460,7 @@ export default function ProductStudioPage() {
                 <label><span>{t('Lokality', 'Locales')}</span><input className="input" value={marketContextInput.locales} onChange={event => updateMarketContext('locales', event.target.value)} placeholder="cs-CZ, en" /></label>
               </div>
             </div>
-            <button className="btn btn-primary" style={{ width: '100%', marginTop: 8 }} disabled={!selectedOffering} onClick={createDraft}><Plus size={13} aria-hidden="true" />{t('Založit novou revizi', 'Create a new revision')}</button>
+            <button className="btn btn-primary" type="button" style={{ width: '100%', marginTop: 8 }} disabled={!selectedOffering || busy} aria-busy={flight.isRunning('revision:create')} onClick={createDraft}><Plus size={13} aria-hidden="true" />{flight.isRunning('revision:create') ? t('Zakládám…', 'Creating…') : t('Založit novou revizi', 'Create a new revision')}</button>
           </Can>
           <div className={styles.revisionList}>{revisions.length === 0 && <div className={styles.schemaHint}>{t('Vyberte nabídku a otevřete její rozhodovací historii.', 'Select an offer to open its decision history.')}</div>}{revisions.map(item => <button key={item.id} onClick={() => { setRevisionId(item.id); setReview(null) }} className={`${styles.revision} ${revisionId === item.id ? styles.revisionSelected : ''}`}>
             <span><strong>#{item.number}</strong> <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>· schema {item.schemaRef.version}</span></span><Badge state={item.state} />
@@ -503,9 +513,9 @@ export default function ProductStudioPage() {
             <details className={styles.expertDetails}><summary>{t('Expert režim · úplný dokument', 'Expert mode · full document')}</summary>
               <textarea className={`input ${styles.editor}`} value={draftText} onChange={e => { setDraftText(e.target.value); setValidationState('idle'); setReview(null) }} disabled={!selectedRevision || selectedRevision.state !== 'DRAFT'} />
             </details>
-            <div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision} onClick={() => void validateDraft()}><CheckCircle2 size={13} aria-hidden="true" />{t('Ověřit schéma', 'Validate schema')}</button><button className="btn btn-primary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT'} onClick={saveDraft}><Send size={13} aria-hidden="true" />{t('Uložit draft', 'Save draft')}</button></div>
+            <div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision} onClick={() => void validateDraft()}><CheckCircle2 size={13} aria-hidden="true" />{t('Ověřit schéma', 'Validate schema')}</button><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || busy} aria-busy={flight.isRunning('revision:save')} onClick={saveDraft}><Send size={13} aria-hidden="true" />{flight.isRunning('revision:save') ? t('Ukládám…', 'Saving…') : t('Uložit draft', 'Save draft')}</button></div>
           </Can>
-          <Can permission="catalog:publish"><div className={styles.approvalPanel}><div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Nezávislé schválení', 'Independent approval')}</span></div><p>{t('Publikace je nevratné rozhodnutí. Služba ověří, že autor a schvalovatel jsou rozdílné identity — tento formulář to nemůže obejít.', 'Publication is an irreversible decision. The service verifies that maker and checker are different identities — this form cannot bypass it.')}</p><div className={styles.approvalMeta}><span>{t('Autor draftu', 'Draft maker')}: <b>{selectedRevision?.makerId ?? '—'}</b></span><span>{t('Stav ověření', 'Validation')}: <b>{validationState === 'valid' ? t('ověřeno', 'verified') : t('čeká na ověření', 'awaiting validation')}</b></span></div><div style={{ display: 'flex', gap: 7 }}><label className="sr-only" htmlFor="studio-publish-reason">{t('Důvod schválení', 'Approval reason')}</label><input id="studio-publish-reason" className="input" value={publishReason} onChange={e => setPublishReason(e.target.value)} placeholder={t('Důvod schválení', 'Approval reason')} /><button className="btn btn-primary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || !publishReason.trim()} onClick={publish}><ShieldCheck size={13} aria-hidden="true" />{t('Publikovat', 'Publish')}</button></div></div></Can>
+          <Can permission="catalog:publish"><div className={styles.approvalPanel}><div className={styles.approvalHead}><ShieldCheck size={15} aria-hidden="true" /><span>{t('Nezávislé schválení', 'Independent approval')}</span></div><p>{t('Publikace je nevratné rozhodnutí. Služba ověří, že autor a schvalovatel jsou rozdílné identity — tento formulář to nemůže obejít.', 'Publication is an irreversible decision. The service verifies that maker and checker are different identities — this form cannot bypass it.')}</p><div className={styles.approvalMeta}><span>{t('Autor draftu', 'Draft maker')}: <b>{selectedRevision?.makerId ?? '—'}</b></span><span>{t('Stav ověření', 'Validation')}: <b>{validationState === 'valid' ? t('ověřeno', 'verified') : t('čeká na ověření', 'awaiting validation')}</b></span></div><div style={{ display: 'flex', gap: 7 }}><label className="sr-only" htmlFor="studio-publish-reason">{t('Důvod schválení', 'Approval reason')}</label><input id="studio-publish-reason" className="input" value={publishReason} onChange={e => setPublishReason(e.target.value)} placeholder={t('Důvod schválení', 'Approval reason')} /><button className="btn btn-primary" type="button" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || !publishReason.trim() || busy} aria-busy={flight.isRunning('revision:publish')} onClick={publish}><ShieldCheck size={13} aria-hidden="true" />{flight.isRunning('revision:publish') ? t('Publikuji…', 'Publishing…') : t('Publikovat', 'Publish')}</button></div></div></Can>
         </div>
       </section>
     </div>
@@ -520,7 +530,7 @@ export default function ProductStudioPage() {
 
           <div className={styles.aiPanel}>
             <div className={styles.aiHead}><div><div className={styles.aiTitle}><Bot size={15} aria-hidden="true" />{t('Catalog intelligence review', 'Catalog intelligence review')}</div><div className={styles.aiCopy}>{t('Připne přesný draft, vytvoří pouze návrh pro lidské posouzení a nikdy nemění ani nepublikuje nabídku.', 'Pins the exact draft, creates only a human-review proposal and never changes or publishes an offer.')}</div></div><span className={styles.aiGuard}><ShieldCheck size={11} aria-hidden="true" />HITL</span></div>
-            <Can permission="catalog:author"><div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewing || reviewCapability !== 'available'} onClick={() => void reviewDraft()}><Sparkles size={13} aria-hidden="true" />{reviewing ? t('Kontroluji…', 'Reviewing…') : reviewCapability === 'checking' ? t('Ověřuji AI kapacitu…', 'Checking AI availability…') : reviewCapability === 'available' ? t('Spustit AI kontrolu', 'Run AI review') : t('Privátní AI kontrola nedostupná', 'Private AI review unavailable')}</button></div></Can>
+            <Can permission="catalog:author"><div className={styles.actions}><button className="btn btn-secondary" type="button" aria-busy={reviewing} aria-label={reviewing ? t('Kontroluji draft', 'Reviewing draft') : t('Spustit AI kontrolu draftu', 'Run AI review for draft')} disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewing || reviewCapability !== 'available'} onClick={() => void reviewDraft()}><Sparkles size={13} aria-hidden="true" />{reviewing ? t('Kontroluji…', 'Reviewing…') : reviewCapability === 'checking' ? t('Ověřuji AI kapacitu…', 'Checking AI availability…') : reviewCapability === 'available' ? t('Spustit AI kontrolu', 'Run AI review') : t('Privátní AI kontrola nedostupná', 'Private AI review unavailable')}</button></div></Can>
             {reviewCapability === 'unavailable' && <div className={styles.aiUnavailable}><ShieldCheck size={13} aria-hidden="true" /><span>{t('Toto prostředí nemá schválený interní model pro neveřejné drafty. Nic se neposílá do hostovaného modelu — k dispozici zůstává deterministická kontrola schématu a dopadu.', 'This environment has no approved internal model for unpublished drafts. Nothing is sent to a hosted model — deterministic schema and change-impact checks remain available.')}</span></div>}
             {!selectedRevision && <div className={styles.schemaHint}>{t('Vyberte draft revizi; review nikdy nepracuje s neurčitým nebo živým obsahem.', 'Select a draft revision; review never works from an ambiguous or live document.')}</div>}
             {review && <div aria-live="polite"><div className={styles.findingText} style={{ marginTop: 11, fontWeight: 700 }}>{review.summary}</div>{review.findings.length === 0 && <div className={styles.schemaHint}>{t('Model nenašel strukturované nálezy. To nenahrazuje lidskou obchodní kontrolu.', 'The model found no structured findings. That never replaces human business review.')}</div>}{review.findings.map(finding => <div key={`${finding.category}:${finding.instancePath}`} className={`${styles.finding} ${finding.severity === 'HIGH' ? styles.findingHigh : finding.severity === 'WARNING' ? styles.findingWarning : ''}`}><div className={styles.findingTitle}><span>{finding.category}</span><span>{finding.severity}</span></div><div className={styles.findingText}>{finding.recommendation}</div><div className={styles.evidence}>{finding.instancePath} · {finding.evidence}</div></div>)}<div className={styles.provenance}><span>proposal {review.proposalId.slice(0, 8)}</span><span>model {review.model}</span><span>context {review.contextHash.slice(0, 12)}…</span></div></div>}

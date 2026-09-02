@@ -11,6 +11,7 @@ import com.openbank.agent.domain.model.ChatRole
 import com.openbank.agent.domain.policy.AgentIdentity
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.libs.observability.WorkflowRunRecorder
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
@@ -54,11 +55,26 @@ class OversightService {
 
     private val log = Logger.getLogger(OversightService::class.java)
     private var liveness: WorkflowLivenessRecorder? = null
+    private var runMetrics: WorkflowRunRecorder? = null
 
     fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
-        if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+        if (!enabled) return
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+        // Registered at startup, not on the first sweep, so `count = 0` on a cold pod means
+        // "instrumented, has not run yet" rather than "not instrumented" — and so the duration
+        // alert has a budget series to compare against before the first run exists.
+        runMetrics = domainMetrics.registerWorkflowRun(WORKFLOW_NAME, RUN_BUDGET)
     }
 
+    /**
+     * The cron entry point, and the only one that is timed.
+     *
+     * The timer wraps THIS method rather than [sweep] because the alert is about the scheduled
+     * cadence: a manually triggered sweep is an operator action whose duration says nothing about
+     * whether the job is degrading, and mixing the two into one series would let a burst of manual
+     * runs move a mean the alert reads. `finally` rather than the success path, because a run that
+     * throws still consumed wall-clock — a job that fails slowly is exactly what this measures.
+     */
     @Scheduled(cron = "{agent.oversight.cron}", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     suspend fun scheduledSweep() {
         if (!enabled) return
@@ -79,8 +95,15 @@ class OversightService {
         //
         // Only the SCHEDULED path needs this. A sweep triggered over HTTP or Kafka already arrives
         // on a worker thread; wrapping there would add a hop for nothing.
-        withContext(Dispatchers.IO) { sweep(trigger = "scheduled") }
-        liveness?.recordSuccess()
+        val startedAt = System.nanoTime()
+        var succeeded = false
+        try {
+            withContext(Dispatchers.IO) { sweep(trigger = "scheduled") }
+            succeeded = true
+            liveness?.recordSuccess()
+        } finally {
+            runMetrics?.record(Duration.ofNanos(System.nanoTime() - startedAt), succeeded)
+        }
     }
 
     suspend fun sweep(trigger: String): AgentChatService.ChatOutcome {
@@ -113,6 +136,17 @@ class OversightService {
     companion object {
         private const val WORKFLOW_NAME = "agent-oversight-sweep"
         private val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
+
+        /**
+         * Mean-run budget for `WorkflowRunDurationHigh`. Derived from the cadence, not from taste:
+         * the cron is every 30 minutes and the scheduler is `ConcurrentExecution.SKIP`, so once a
+         * run approaches 30 minutes the NEXT run is silently dropped — no log line, and the
+         * liveness heartbeat still looks healthy for a while because the run that IS in flight
+         * eventually succeeds. Five minutes is a sixth of that period: comfortably above anything
+         * an LLM sweep does when healthy (the saturated span histogram could only establish
+         * "> 5 s"), and far enough below the cadence to warn before runs start being skipped.
+         */
+        private val RUN_BUDGET: Duration = Duration.ofMinutes(5)
         val OVERSIGHT_IDENTITY = AgentIdentity(agentId = "compliance-officer", plane = "control")
         const val SWEEP_REQUEST =
             "Run the compliance oversight sweep now. Check sanctions screenings pending review, " +

@@ -4,8 +4,10 @@
 
 package com.openbank.party.infrastructure.kafka
 
+import com.fasterxml.jackson.core.JacksonException
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.messaging.EventRetry
 import com.openbank.party.application.port.`in`.MarketingConsentProjectionUseCase
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -36,13 +38,19 @@ class MarketingConsentEventConsumer(
     }
 
     @Incoming("consent-events-in")
-    @Suppress("TooGenericExceptionCaught") // poison-pill safety: catch-all so one malformed or
-    // unexpected record can never wedge the consumer group — same convention as
-    // KycAmlEventConsumer's identical catch (grandfathered into this service's detekt baseline;
-    // this is a new file, so it needs its own suppression rather than relying on that baseline).
     suspend fun consume(payload: String) {
-        try {
-            val node = objectMapper.readTree(payload)
+        // The catch-all this used to carry ("poison-pill safety … same convention as
+        // KycAmlEventConsumer") acked a lost projection: a revocation that failed to apply leaves
+        // the party marked as consenting, i.e. still receiving marketing they withdrew consent for.
+        // Only an UNPARSEABLE payload is a poison pill (#5698); a party-db failure is retried and
+        // rethrown below.
+        val node = try {
+            objectMapper.readTree(payload)
+        } catch (e: JacksonException) {
+            log.errorf(e, "Unparseable marketing consent event, acking: %.300s", payload)
+            return
+        }
+        run {
             if (node.path("granteeId").asText() != MARKETING_GRANTEE_ID) return
 
             val partyId = node.path("partyId").asUuidOrNull() ?: return
@@ -59,24 +67,24 @@ class MarketingConsentEventConsumer(
                 Instant.now()
             }
 
-            when (node.path("eventType").asText()) {
-                "ConsentGranted" -> {
-                    projectionUseCase.applyGranted(partyId, consentId, occurredAt)
-                    log.infof("Marketing consent GRANTED projected for party %s", partyId)
+            EventRetry.withRetry(log, "marketing consent projection", partyId) {
+                when (node.path("eventType").asText()) {
+                    "ConsentGranted" -> {
+                        projectionUseCase.applyGranted(partyId, consentId, occurredAt)
+                        log.infof("Marketing consent GRANTED projected for party %s", partyId)
+                    }
+                    "ConsentRevoked", "ConsentExpired" -> {
+                        val applied = projectionUseCase.applyRevokedOrExpired(partyId, consentId, occurredAt)
+                        log.infof(
+                            "Marketing consent %s for party %s: applied=%s",
+                            node.path("eventType").asText(),
+                            partyId,
+                            applied,
+                        )
+                    }
+                    else -> Unit // ConsentRejected or any future event type: nothing to project.
                 }
-                "ConsentRevoked", "ConsentExpired" -> {
-                    val applied = projectionUseCase.applyRevokedOrExpired(partyId, consentId, occurredAt)
-                    log.infof(
-                        "Marketing consent %s for party %s: applied=%s",
-                        node.path("eventType").asText(),
-                        partyId,
-                        applied,
-                    )
-                }
-                else -> return // ConsentRejected or any future event type: nothing to project.
             }
-        } catch (e: Exception) {
-            log.errorf(e, "Failed to handle marketing consent event: %.300s", payload)
         }
     }
 

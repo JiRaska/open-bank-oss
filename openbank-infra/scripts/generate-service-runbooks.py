@@ -83,8 +83,165 @@ def service_namespace(short: str) -> str:
     and the PodMonitor coverage gate — three tools were each growing their own copy of this
     question, and two of them had already answered it wrong in two different ways (#2255). Only
     the display fallback is local: a service with no workload still needs *something* to render.
+
+    That fallback is a LIE for the one service it applies to, which is why
+    [deployment_status] exists: with no workload anywhere in gitops the runbook silently
+    interpolated the short name and told the on-call engineer to run `kubectl -n tax-reporting`
+    against a namespace that has never existed — the exact defect this function's second
+    paragraph records as fixed, surviving in the one case the fix could not resolve. The
+    fallback stays (the commands need to render as something) and the banner now says the
+    commands do not apply.
     """
     return gitops_facts.service_namespace(short, GITOPS) or short
+
+
+def zero_replica_workload(short: str) -> bool:
+    """True when GitOps deliberately stages this service with no runnable replicas.
+
+    A Deployment object is desired state, not proof of a running service. In particular, a
+    reviewed zero-replica manifest is an activation gate: treating it like an operational workload
+    would hand an operator a `kubectl scale` bypass before the image, sync, and live-health gates
+    have been satisfied.
+    """
+    component = GITOPS / "components" / short
+    for path in component.glob("*.yaml"):
+        for document in re.split(r"^---\s*$", read(path), flags=re.M):
+            if not re.search(r"^kind:\s*(?:Deployment|Rollout)\s*$", document, re.M):
+                continue
+            if re.search(r"^\s{2}replicas:\s*0\s*$", document, re.M):
+                return True
+    return False
+
+
+def management_port(short: str) -> str:
+    """The management endpoint port declared by the workload, with config fallback.
+
+    Health and metrics are served on the named management port for several services, not the
+    public HTTP listener. Prefer the workload declaration because it is the exact deployed
+    contract; retain the shared Quarkus default only when no workload declares one.
+    """
+    component = GITOPS / "components" / short
+    for path in component.glob("*.yaml"):
+        match = re.search(
+            r"(?ms)^\s*- name:\s*management\s*\n\s*containerPort:\s*(\d+)\s*$",
+            read(path),
+        )
+        if match:
+            return match.group(1)
+    lines = read(
+        gitops_facts.module_dir(short, REPO) / "src" / "main" / "resources" / "application.yaml"
+    ).splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() != "management:":
+            continue
+        for nested in lines[index + 1:index + 12]:
+            match = re.match(r"^\s*port:\s*(\d+)\s*$", nested)
+            if match:
+                return match.group(1)
+    return "8085"
+
+
+def application_automated(short: str) -> bool | None:
+    """Whether the Argo Application owning this component declares automated sync.
+
+    A workload under a manual Application is desired state only: it is not evidence that Argo
+    has ever created a pod. Resolve ownership from the source path rather than a display name.
+    """
+    marker = f"path: openbank-infra/gitops/components/{short}"
+    for app in sorted((GITOPS / "apps").glob("*.yaml")):
+        text = read(app)
+        if marker not in text:
+            continue
+        sync_policy = re.search(r"^  syncPolicy:\s*$([\s\S]*?)(?=^\S|\Z)", text, re.M)
+        return bool(sync_policy and re.search(r"^\s+automated:\s*$", sync_policy.group(1), re.M))
+    return None
+
+
+def workload_live_unverified(short: str) -> bool:
+    """True only for a declared workload whose owning Application is manual-sync."""
+    return gitops_facts.service_namespace(short, GITOPS) is not None and application_automated(short) is False
+
+
+def deployment_status(short: str) -> str:
+    """A banner for a service with NO workload in gitops — Deployment, Rollout or nothing.
+
+    Derived, never declared: the same `gitops_facts.service_namespace` question the
+    prod-readiness collector asks for its NOT-DEPLOYED verdict (#5706, #5760), so the runbook
+    and the matrix cannot disagree about whether a service runs. Empty for every deployed
+    service, so this changes no committed runbook but the undeployed one.
+    """
+    if zero_replica_workload(short):
+        return (
+            "## Deployment status — WORKLOAD STAGED, ACTIVATION PENDING\n"
+            "\n"
+            "**GitOps deliberately declares zero replicas for this workload.** This is not a live\n"
+            "service and does not authorize a replica increase, restart, log inspection, traffic claim,\n"
+            "or metrics/health assertion. Activation remains the separately reviewed step after the\n"
+            "pinned image, GitOps sync, and live cluster-health evidence are available. After that\n"
+            f"step, health must be checked on the management endpoint `:{management_port(short)}`;\n"
+            "the public HTTP port is not a health-evidence substitute.\n"
+            "\n"
+        )
+    if gitops_facts.service_namespace(short, GITOPS) is not None:
+        if workload_live_unverified(short):
+            return (
+                "## Deployment status — WORKLOAD DESIRED — LIVE STATUS UNVERIFIED\n"
+                "\n"
+                "The GitOps manifest declares this workload, but its owning ArgoCD Application has **no\n"
+                "automated sync**. This is desired state, not evidence that the Deployment, database,\n"
+                "metrics scrape, or traffic path exists in the cluster. Before using any command below\n"
+                "as an incident procedure, complete the separately reviewed manual sync and observe\n"
+                "the resulting deployment and health checks.\n"
+                "\n"
+            )
+        return ""
+    component = GITOPS / "components" / short
+    data_plane = "\n".join(read(path) for path in component.glob("*.yaml"))
+    staged_namespace = re.search(
+        r"^kind:\s*Namespace\s*$.*?^\s{2}name:\s*(\S+)", data_plane, re.M | re.S
+    )
+    staged_cnpg = bool(re.search(
+        r"^apiVersion:\s*postgresql\.cnpg\.io/\S+\s*$.*?^kind:\s*Cluster\s*$",
+        data_plane,
+        re.M | re.S,
+    ))
+    if staged_namespace or staged_cnpg:
+        namespace = staged_namespace.group(1) if staged_namespace else short
+        data_plane_facts = []
+        if staged_namespace:
+            data_plane_facts.append(f"Namespace `{namespace}`")
+        if staged_cnpg:
+            data_plane_facts.append("CNPG cluster")
+        data_plane_description = " and ".join(data_plane_facts)
+        return (
+            "## Deployment status — WORKLOAD NOT DEPLOYED\n"
+            "\n"
+            "**This service has no workload anywhere in `openbank-infra/gitops/`** — no Deployment\n"
+            f"or Rollout. Its data plane is declared separately ({data_plane_description}), but\n"
+            "declared GitOps state is not live evidence: do not run the workload, claim\n"
+            "traffic, or treat backup configuration as healthy until the separately reviewed sync and\n"
+            "cluster-health checks have completed. The operational commands below remain plans for the\n"
+            "absent workload, not proof that it has ever run.\n"
+            "\n"
+            "The production-readiness matrix reports this as **NOT-DEPLOYED** because the service\n"
+            "workload is absent; a staged namespace or database cannot close runtime-readiness cells.\n"
+            "\n"
+        )
+    return (
+        "## Deployment status — NOT DEPLOYED\n"
+        "\n"
+        "**This service has no workload anywhere in `openbank-infra/gitops/`** — no Deployment,\n"
+        "no Rollout, and therefore no namespace, no CNPG cluster, no NetworkPolicy and no\n"
+        "PodMonitor coverage. It is a released component (it has a `version.txt`) that has never\n"
+        "run, so **every `kubectl` command below names a namespace that does not exist** and every\n"
+        "procedure here is a plan rather than a rehearsed one.\n"
+        "\n"
+        "The production-readiness matrix reports it as **NOT-DEPLOYED** rather than NO-GO for the\n"
+        "same reason: the cells it fails are consequences of the absent workload, not controls\n"
+        "someone skipped, and none of them can be closed by a repo change. Whether this service\n"
+        "should be deployed is an owner decision — see the service's own `CLAUDE.md`.\n"
+        "\n"
+    )
 
 
 def is_stateless(datastore: str) -> bool:
@@ -189,7 +346,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `{short}` service. Data domain **{domain}**,
 > classification **{classification}**, datastore **{datastore}**.
 
-## Service identity
+{deployment_status}## Service identity
 
 | Field | Value |
 |---|---|
@@ -209,18 +366,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `{short}`.
 
-## Health & probes
-
-- Readiness: `GET :{port}/q/health/ready` · Liveness: `GET :{port}/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `{ns}`); dashboards in Grafana.
-- Logs: {logs_cmd}, or Loki
-  `{{namespace="{ns}"}}`.
-
-## Routine operations
-
-- **Restart:** {restart_cmd}
-- **Scale:** {scale_cmd} (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
-- **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
+{runtime_sections}
 
 ## Common failure modes
 
@@ -286,6 +432,50 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
     }
 
 
+def runtime_sections(short: str, ns: str) -> str:
+    """Render operational commands only for a workload that is intended to run."""
+    if zero_replica_workload(short):
+        return (
+            "## Runtime operations — DEFERRED\n"
+            "\n"
+            "Do not increase replicas, restart, or use log/metrics commands to activate this staged\n"
+            "workload. The reviewed activation procedure must first establish the signed image,\n"
+            "GitOps sync, and actual cluster health. It will then use management health endpoints\n"
+            f"`GET :{management_port(short)}/q/health/ready` and\n"
+            f"`GET :{management_port(short)}/q/health/live`.\n"
+        )
+    commands = ops_commands(short, ns)
+    live_unverified = workload_live_unverified(short)
+    metrics = (
+        f"declared for the fleet PodMonitor (namespace `{ns}`), but live scrape status is unverified "
+        "until manual sync and health observation."
+        if live_unverified else
+        f"scraped by the fleet PodMonitor (namespace `{ns}`); dashboards in Grafana."
+    )
+    caveat = (
+        "> **Live status unverified:** the commands below are planned procedures until the manual "
+        "ArgoCD sync and cluster health checks have been observed.\n\n"
+        if live_unverified else ""
+    )
+    return (
+        "## Health & probes\n"
+        "\n"
+        f"- Readiness: `GET :{management_port(short)}/q/health/ready` · Liveness: "
+        f"`GET :{management_port(short)}/q/health/live`\n"
+        f"- Metrics: {metrics}\n"
+        f"- Logs: {commands['logs_cmd']}, or Loki\n"
+        f"  `{{namespace=\"{ns}\"}}`.\n"
+        "\n"
+        "## Routine operations\n"
+        "\n"
+        f"{caveat}"
+        f"- **Restart:** {commands['restart_cmd']}\n"
+        f"- **Scale:** {commands['scale_cmd']} (or edit the GitOps manifest — GitOps is source of truth, "
+        "a later ArgoCD sync reconciles manual changes).\n"
+        "- **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.\n"
+    )
+
+
 def render(short: str) -> str:
     f = gov_facts(short)
     up = ", ".join(f"`{s}`" for s in f.get("upstream", [])) or "_none declared_"
@@ -336,6 +526,7 @@ def render(short: str) -> str:
         short=short,
         module=gitops_facts.module_dir(short, REPO).name,
         ns=service_namespace(short),
+        deployment_status=deployment_status(short),
         failure_modes=failure_modes,
         domain=f.get("dataDomain", "—"),
         datastore=datastore,
@@ -348,7 +539,7 @@ def render(short: str) -> str:
         downstream=down,
         rpo=rpo,
         dr=dr_for(datastore, has_backup, owns_none),
-        **ops_commands(short, service_namespace(short)),
+        runtime_sections=runtime_sections(short, service_namespace(short)).rstrip(),
     )
 
 
@@ -436,6 +627,62 @@ def self_test() -> int:
          dr_for("Redis", has_backup=False, owns_no_db=True)
          != dr_for("Redis", has_backup=False, owns_no_db=False))
 
+    # --- the NOT-DEPLOYED banner (#5706, #5760) ---------------------------------------------
+    # Falsified against a real repo fact rather than a fixture, because the whole point is that
+    # the banner and the readiness matrix answer the SAME question from the SAME resolver: if
+    # gitops_facts ever starts resolving a namespace for an undeployed service, both this and
+    # the collector's NOT-DEPLOYED verdict go wrong together and this case is what says so.
+    undeployed = [x for x in all_services() if gitops_facts.service_namespace(x, GITOPS) is None]
+    deployed = [x for x in all_services() if gitops_facts.service_namespace(x, GITOPS) is not None]
+    case("a deployed service gets no deployment banner",
+         all(deployment_status(x) == "" for x in deployed[:5]))
+    # A zero-replica Deployment is a deliberate activation gate, not an operational workload.
+    # Referral is the real staged instance in this repository; using it keeps the guard coupled to
+    # the manifest that must not regress into an accidental manual-scale playbook.
+    if "referral" in deployed:
+        t = render("referral")
+        case("a zero-replica workload is rendered as staged rather than operational",
+             says(t, "WORKLOAD STAGED", "ACTIVATION PENDING", "Runtime operations — DEFERRED"))
+        case("a zero-replica workload never offers a manual scale bypass",
+             "kubectl scale" not in t)
+        case("a staged workload names its declared management health port",
+             "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
+    # A manual-sync Application is a third state: its Deployment YAML is desired state, not proof
+    # that Argo has ever created a pod. Incentive is the fixture because it deliberately has no
+    # automated sync while this exact distinction is under rollout review.
+    if "incentive" in deployed:
+        incentive = render("incentive")
+        case("a manual-sync workload is explicitly live-unverified",
+             says(incentive, "WORKLOAD DESIRED — LIVE STATUS UNVERIFIED", "no\nautomated sync"))
+        case("a manual-sync workload does not present declared metrics as a live scrape",
+             says(incentive, "live scrape status is unverified"))
+        case("a separate management listener is used for health commands",
+             "GET :8087/q/health/ready" in incentive and "GET :8156/q/health/ready" not in incentive)
+    if undeployed:
+        absent_data_plane = [
+            x for x in undeployed if "namespace that does not exist" in deployment_status(x)
+        ]
+        if absent_data_plane:
+            t = deployment_status(absent_data_plane[0])
+            case(
+                "an undeployed service without a staged data plane is told its kubectl commands name a namespace that does not exist",
+                says(t, "NOT DEPLOYED", "namespace that does not exist"),
+            )
+        staged_data_plane = [
+            x for x in undeployed if "data plane is declared separately" in deployment_status(x)
+        ]
+        if staged_data_plane:
+            t = deployment_status(staged_data_plane[0])
+            case(
+                "an undeployed service with a staged data plane never calls that declared namespace absent",
+                says(t, "WORKLOAD NOT DEPLOYED", "data plane is declared separately")
+                and "namespace that does not exist" not in t,
+            )
+        case("...and every undeployed banner reaches its rendered runbook",
+             all("NOT DEPLOYED" in render(x) for x in undeployed))
+    # No `else` that passes: an empty undeployed set is the expected steady state (every released
+    # component deployed), and the two cases above are then vacuous rather than wrong.
+
     # --- the ownsNoDatabase assertion itself ------------------------------------------------
     case("an explicit ownsNoDatabase: true is honoured",
          owns_no_database({"ownsNoDatabase": "true", "primaryDatastore": "Redis"}) is True)
@@ -455,7 +702,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: runbook DR classifier is falsifiable (17 cases)")
+    print("self-test ok: runbook deployment/DR classifier is falsifiable (20 cases)")
     return 0
 
 def main():

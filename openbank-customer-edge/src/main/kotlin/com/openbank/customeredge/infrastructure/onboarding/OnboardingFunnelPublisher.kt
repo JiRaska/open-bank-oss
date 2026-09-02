@@ -69,7 +69,12 @@ class OnboardingFunnelPublisher(
             attributes.forEach { (k, v) -> v?.let { payload.put(k, it) } }
 
             val node = objectMapper.createObjectNode()
-            node.put("eventType", EVENT_TYPE)
+            // Bound to a local rather than passed straight in, because the ADR-0006
+            // contract/code-agreement gate reads this source and cannot evaluate a constant: it
+            // matches `eventType = "<literal>"`, and without that shape a documented message looks
+            // to it like one nobody emits. EVENT_TYPE below stays as the published name.
+            val eventType = "onboarding.funnel.step"
+            node.put("eventType", eventType)
             node.put("aggregateType", AGGREGATE_TYPE)
             // The session id is the aggregate: every event of one onboarding attempt shares it, so the
             // warehouse funnel groups an attempt without ever keying on the (later) party identity.
@@ -90,6 +95,7 @@ class OnboardingFunnelPublisher(
     }
 
     companion object {
+        /** The contract message name (openbank-contracts/openbank-customer-edge/asyncapi.yaml). */
         const val EVENT_TYPE = "onboarding.funnel.step"
         const val AGGREGATE_TYPE = "ONBOARDING_FUNNEL"
 

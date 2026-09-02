@@ -18,6 +18,7 @@ import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { StatusBadge, type Tone } from '@/components/ui'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -118,7 +119,7 @@ interface AgentCostEntry {
   agentId: string
   model: string
   tokensLast24h: number
-  tokensLast7d: number
+  tokensLast7d: number | null
   costLast24hUsd: number
   costLast7dUsd: number
   budgetMonthlyUsd: number | null
@@ -143,8 +144,16 @@ interface AiCostsData {
   available: boolean
   collectedAt: string
   totalCostLast7dUsd: number
-  totalCostLast30dUsd: number
-  selfHostedPct: number
+  totalCostLast30dUsd: number | null
+  selfHostedPct: number | null
+  coverage: {
+    source: 'prometheus'
+    retentionHours: number
+    dataFrom: string
+    dataTo: string
+    lastSuccessfulLoad: string | null
+    windows: Record<'24h' | '7d' | '30d', { requestedHours: number; availableHours: number; partial: boolean }>
+  }
   agents: AgentCostEntry[]
   anomalies: FinOpsAnomaly[]
 }
@@ -173,7 +182,7 @@ function KpiCard({ icon, label, value, sub, color, accent }: {
 
 function RunwayBar({ days, max }: { days: number; max: number }) {
   const pct = Math.min(Math.round((days / max) * 100), 100)
-  const color = days > 180 ? '#16a34a' : days > 90 ? '#d97706' : '#dc2626'
+  const color = days > 180 ? 'var(--success-text)' : days > 90 ? 'var(--warning-text)' : 'var(--danger-text)'
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
       <div style={{ flex: 1, height: '6px', background: 'var(--surface-3)', borderRadius: '3px', overflow: 'hidden', minWidth: '60px' }}>
@@ -187,22 +196,17 @@ function RunwayBar({ days, max }: { days: number; max: number }) {
 }
 
 function TierBadge({ tier }: { tier: string }) {
-  const cfg: Record<string, { label: string; color: string; bg: string }> = {
-    standard:  { label: 'Standard',  color: '#16a34a', bg: '#dcfce7' },
-    supported: { label: 'Supported', color: '#16a34a', bg: '#dcfce7' },
-    lts:       { label: 'LTS',       color: '#16a34a', bg: '#dcfce7' },
-    rolling:   { label: 'Rolling',   color: '#2563eb', bg: '#dbeafe' },
-    extended:  { label: 'Extended',  color: '#d97706', bg: '#fef9c3' },
-    end_of_life: { label: 'EOL',     color: '#dc2626', bg: '#fee2e2' },
-    upcoming:  { label: 'Upcoming',  color: '#6366f1', bg: '#ede9fe' },
+  const cfg: Record<string, { label: string; tone: Tone }> = {
+    standard: { label: 'Standard', tone: 'success' },
+    supported: { label: 'Supported', tone: 'success' },
+    lts: { label: 'LTS', tone: 'success' },
+    rolling: { label: 'Rolling', tone: 'info' },
+    extended: { label: 'Extended', tone: 'warning' },
+    end_of_life: { label: 'EOL', tone: 'danger' },
+    upcoming: { label: 'Upcoming', tone: 'accent' },
   }
-  const c = cfg[tier] ?? { label: tier, color: 'var(--text-secondary)', bg: 'var(--surface-2)' }
-  return (
-    <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
-      color: c.color, background: c.bg, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-      {c.label}
-    </span>
-  )
+  const c = cfg[tier] ?? { label: tier, tone: 'neutral' as Tone }
+  return <StatusBadge status={tier} label={c.label} tone={c.tone} />
 }
 
 function KindIcon({ kind }: { kind: string }) {
@@ -218,7 +222,11 @@ function KindIcon({ kind }: { kind: string }) {
 
 function HeapBar({ pct, efficiency }: { pct: number | null; efficiency: string }) {
   if (pct === null) return <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>
-  const color = efficiency === 'high' ? '#dc2626' : efficiency === 'normal' ? '#16a34a' : '#6366f1'
+  const color = efficiency === 'high'
+    ? 'var(--danger-text)'
+    : efficiency === 'normal'
+      ? 'var(--success-text)'
+      : 'var(--accent-text)'
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
       <div style={{ flex: 1, height: '5px', background: 'var(--surface-3)', borderRadius: '3px', overflow: 'hidden', minWidth: '60px' }}>
@@ -429,8 +437,11 @@ function FinOpsContent() {
             {t('Rozpad nákladů', 'Cost allocation')}
           </Link>
           <button
+            type="button"
             onClick={load}
             disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit FinOps náklady', 'Refresh FinOps costs')}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px',
               borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)',
               color: 'var(--text-secondary)', fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}
@@ -962,13 +973,29 @@ function FinOpsContent() {
                       {t('Celkem AI náklady — posledních 7 dní', 'Total AI costs — last 7 days')}
                     </div>
                   </div>
-                  <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
-                    background: '#dcfce7', color: '#16a34a' }}>
-                    {t(`${aiCosts.selfHostedPct}% self-hosted vLLM`, `${aiCosts.selfHostedPct}% self-hosted vLLM`)}
-                  </span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                    {t(`${100 - aiCosts.selfHostedPct}% Anthropic API`, `${100 - aiCosts.selfHostedPct}% Anthropic API`)}
-                  </span>
+                  {aiCosts.selfHostedPct == null ? (
+                    <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                      {t('Rozdělení podle poskytovatele bridge neexportuje.', 'Provider split is not exported by the bridge.')}
+                    </span>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
+                        background: '#dcfce7', color: '#16a34a' }}>
+                        {aiCosts.selfHostedPct}% self-hosted vLLM
+                      </span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                        {100 - aiCosts.selfHostedPct}% Anthropic API
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div role="status" style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '-10px 0 16px' }}>
+                  {t('Pokrytí', 'Coverage')}: {aiCosts.coverage.windows['7d'].availableHours}h / 7d
+                  {' · '}{t('retence', 'retention')} {aiCosts.coverage.retentionHours}h
+                  {' · '}{t('poslední úspěšné načtení', 'last successful load')}:{' '}
+                  {aiCosts.coverage.lastSuccessfulLoad
+                    ? new Date(aiCosts.coverage.lastSuccessfulLoad).toLocaleString(locale)
+                    : t('žádné', 'none')}
                 </div>
 
                 {/* Per-agent rows */}

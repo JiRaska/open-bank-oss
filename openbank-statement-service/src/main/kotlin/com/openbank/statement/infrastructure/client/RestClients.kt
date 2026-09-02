@@ -4,6 +4,7 @@
 package com.openbank.statement.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -40,6 +41,7 @@ data class TransactionSearchResponse(val data: List<TransactionDto> = emptyList(
 
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "transaction-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface TransactionRestClient {
     // No Kotlin default-valued parameter here: a default on an interface method compiles to a
@@ -75,6 +77,7 @@ data class BalanceDto(
 
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "balance-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface BalanceRestClient {
     // No Kotlin default-valued parameter (synthetic JVM default method → Quarkus REST client rejects);
@@ -106,6 +109,7 @@ data class PartyDto(val id: UUID? = null, val legalName: String? = null)
 
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "party-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface PartyRestClient {
     @GET
@@ -122,6 +126,7 @@ data class PocketDto(val currencyCode: String? = null, val status: String? = nul
 
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "account-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface AccountRestClient {
     @GET

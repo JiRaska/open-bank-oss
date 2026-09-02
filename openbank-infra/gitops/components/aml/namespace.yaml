@@ -1,6 +1,6 @@
 # aml namespace (ADR-0037: domain = namespace). App plane. Holds aml-service plus its
 # single-owner CNPG Postgres. Publishes AML case lifecycle to openbank.aml.events
-# (consumed by party-service for the KYC+AML activation gate, ADR-0073).
+# (consumed by party-service for the KYC+AML activation gate, ADR-0267 §2).
 apiVersion: v1
 kind: Namespace
 metadata:

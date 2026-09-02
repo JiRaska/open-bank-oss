@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.HeaderParam
@@ -13,11 +14,13 @@ import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import java.math.BigDecimal
 import java.util.UUID
 
 @RegisterRestClient(configKey = "transaction-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/transactions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

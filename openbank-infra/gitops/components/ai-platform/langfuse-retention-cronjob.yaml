@@ -1,0 +1,165 @@
+# Trace retention for the self-hosted Langfuse database (ADR-0265 follow-up, #5671).
+#
+# WHY THIS EXISTS AS A HAND-ROLLED CRONJOB. Langfuse's UI-configurable "Data Retention" feature
+# requires the Self-Hosted Enterprise Edition — verified against upstream docs before building
+# this: the OSS self-host this cluster runs (docker.io/langfuse/langfuse:2.95.4, see langfuse.yaml)
+# stores data indefinitely with no retention control of its own. Buying a licence for one knob
+# would break ADR-0027's in-cluster-OSS posture; the alternative upstream itself documents for
+# self-hosters without EE is exactly this — periodic DELETE statements against the Postgres tables.
+#
+# WHY POSTGRES DIRECTLY AND NOT THE LANGFUSE API. Langfuse v2 stores traces/observations/scores in
+# Postgres (v3 moves this to ClickHouse; this cluster runs v2 — see langfuse.yaml's version pin).
+# The public API's delete path is documented as asynchronous and rate-limited, which is the wrong
+# shape for a nightly sweep that needs to reason about how much it actually freed. A direct DELETE
+# against the CNPG cluster this component already owns is synchronous and countable.
+#
+# SCHEMA FACTS THIS DEPENDS ON (langfuse v2, verified against upstream docs and discussions before
+# writing the DELETE statements, not assumed):
+#   - `traces.timestamp`, `observations.start_time`, `scores.timestamp` are the age columns —
+#     three DIFFERENT column names, not one.
+#   - There are NO foreign-key CASCADE constraints between them (deliberate upstream design, so
+#     ingestion order and GDPR-style row deletion are never blocked by FK ordering). That means
+#     this job must delete from all three tables independently — a single CASCADE delete on
+#     `traces` would silently orphan `observations`/`scores` rows instead of removing them.
+#   - Deleting children (`observations`, `scores`) before the parent (`traces`) anyway, so a job
+#     killed mid-run leaves orphaned children rather than a trace with missing children — the
+#     safer of the two half-finished states, since the UI already tolerates a trace with no
+#     observations (a cold ingest) but not an observation with no trace.
+#
+# RETENTION WINDOW: 30 days. Matches this cluster's shortest existing data-retention precedent
+# (Loki logs, prometheus-rules) rather than inventing a new number; traces are debugging evidence
+# for a live incident, not a compliance record — the durable AI-attribution record is the
+# hash-chained audit_entries table (ADR-0031 D5), which this job never touches.
+#
+# PSS restricted: non-root, no capabilities, seccompProfile RuntimeDefault — same posture as
+# secret-rotator-cronjob.yaml, which this manifest's shape otherwise follows.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: langfuse-retention-sweep
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/part-of: ai-platform
+data:
+  sweep.sh: |
+    #!/bin/sh
+    set -eu
+
+    # ---------------------------------------------------------------------------
+    # Langfuse trace retention sweep — deletes rows older than RETENTION_DAYS.
+    # ---------------------------------------------------------------------------
+    RETENTION_DAYS="${RETENTION_DAYS:-30}"
+
+    # `-v ON_ERROR_STOP=1`: a failed statement must fail the job, not print an error and continue
+    # to the next table looking green. ONE statement, ONE connection — an earlier version of this
+    # ran the DELETE twice (once discarded, once counted via RETURNING) and would have reported
+    # "0 deleted" every single night while actually deleting the rows on the first, uncounted call.
+    #
+    # `-q` is not cosmetic: without it, `psql -tA` still prints psql's OWN "DELETE <n>" command-
+    # status line interleaved with the `RETURNING 1` data rows, so `wc -l` counts BOTH and reports
+    # exactly one more deletion than actually happened. Measured locally against a real Postgres
+    # before trusting this: `psql -tA` on a single-row delete emitted `1\nDELETE 1\n` (two lines),
+    # `psql -qtA` emitted `1\n` (one). Verified end to end with a seeded old/new row pair per table:
+    # the sweep must report the same count the database shows afterward, not one more.
+    delete_older_than() {
+      table="$1"
+      column="$2"
+      deleted="$(psql -v ON_ERROR_STOP=1 -qtA -c \
+        "DELETE FROM ${table} WHERE ${column} < now() - interval '${RETENTION_DAYS} days' RETURNING 1" \
+        | wc -l | tr -d ' ')"
+      echo "langfuse-retention: ${table} (${column}) -> deleted ${deleted} row(s) older than ${RETENTION_DAYS}d"
+    }
+
+    echo "langfuse-retention: sweep start, retention=${RETENTION_DAYS}d"
+    # Children first (see the manifest header: no FK cascade, so ordering is the only thing
+    # standing between "orphaned children" and "orphaned parent" on a mid-run failure).
+    delete_older_than observations start_time
+    delete_older_than scores timestamp
+    delete_older_than traces timestamp
+    echo "langfuse-retention: sweep complete"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: langfuse-retention-sweep
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  # 03:15 UTC daily — outside the litellm-db-daily (04:49) and langfuse-db-daily (04:19) backup
+  # windows in postgres.yaml/langfuse-postgres.yaml, so a large delete's WAL churn does not
+  # overlap the nightly backup taking its own base-backup snapshot.
+  schedule: "15 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: ai-platform
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: sweep
+              # Same image family as the CNPG cluster it targets (postgres.yaml /
+              # langfuse-postgres.yaml), pulled through the ECR cache (#1290) — psql client only,
+              # no server role, so the small size difference from a dedicated psql-only image is
+              # not worth a second pinned image to track.
+              image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.1
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "/scripts/sweep.sh"]
+              env:
+                - name: RETENTION_DAYS
+                  value: "30"
+                # psql looks for $HOME/.psql_history and $HOME/.pgpass; runAsUser 1000 has no
+                # /etc/passwd entry in this image, so $HOME is otherwise unset and psql falls back
+                # to writing under `/`, which readOnlyRootFilesystem blocks with a warning (not a
+                # failure — psql doesn't need the history file — but a needless stderr line on
+                # every run). Point it at the writable emptyDir mounted below instead.
+                - name: HOME
+                  value: /tmp
+                # langfuse-db-app is the CNPG-generated app-role secret (langfuse-postgres.yaml
+                # bootstrap.initdb.owner: langfuse) — same credential the Langfuse pod itself uses,
+                # so this job needs no new OpenBao seeding step and no elevated (superuser) access:
+                # DELETE on your own rows only requires ownership, which the app role already has.
+                - name: PGHOST
+                  value: langfuse-db-rw.ai-platform.svc
+                - name: PGDATABASE
+                  value: langfuse
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: {name: langfuse-db-app, key: user}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: langfuse-db-app, key: password}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: ["ALL"]}
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {cpu: 500m, memory: 256Mi}
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                # psql writes its history file under $HOME by default; readOnlyRootFilesystem
+                # leaves no writable $HOME, so point it at a mounted emptyDir instead of disabling
+                # the root-fs restriction for one non-essential feature.
+                - name: home
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: langfuse-retention-sweep
+                defaultMode: 0o555
+            - name: home
+              emptyDir: {}

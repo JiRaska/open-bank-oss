@@ -74,6 +74,39 @@ class CardOutboxRepositoryImpl(private val clock: Clock) :
         )
     }.awaitSuspending()
 
+    override suspend fun countDead(): Long = Panache.withSession {
+        count("status = ?1", OutboxStatus.DEAD.name)
+    }.awaitSuspending()
+
+    /**
+     * A **bulk HQL update**, not a read-modify-persist loop. Two reasons beyond efficiency: an
+     * application-assigned `@Id` makes Panache reactive `persist()` INSERT-only, so a per-row
+     * rewrite would need `session.merge`; and this runs against rows an operator has decided to
+     * replay, where "requeued 24, silently wrote 0" is exactly the failure that must not be
+     * possible — a bulk update returns the affected row count from the database itself.
+     */
+    override suspend fun requeueDead(eventId: UUID?): Int {
+        val now = Instant.now(clock)
+        return Panache.withTransaction {
+            if (eventId == null) {
+                update(
+                    REQUEUE_HQL,
+                    OutboxStatus.PENDING.name,
+                    now,
+                    OutboxStatus.DEAD.name,
+                )
+            } else {
+                update(
+                    "$REQUEUE_HQL and eventId = ?4",
+                    OutboxStatus.PENDING.name,
+                    now,
+                    OutboxStatus.DEAD.name,
+                    eventId,
+                )
+            }
+        }.awaitSuspending()
+    }
+
     override suspend fun markSent(eventId: UUID, sentAt: Instant) {
         Panache.withTransaction {
             find("eventId", eventId).firstResult().invoke { e ->
@@ -118,6 +151,7 @@ class CardOutboxRepositoryImpl(private val clock: Clock) :
 
     private fun OutboxMessage.toEntity() = CardOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload
@@ -129,6 +163,16 @@ class CardOutboxRepositoryImpl(private val clock: Clock) :
 
     companion object {
         private val log: Logger = Logger.getLogger(CardOutboxRepositoryImpl::class.java)
+
+        /**
+         * `attemptCount = 0` and `lastError = null` are the load-bearing half. Leaving the counter
+         * at its ceiling would hand the requeued row straight back to
+         * `OutboxFailurePolicy.statusAfterFailure`, which re-parks it as DEAD on the very first
+         * failed publish — a requeue that undoes itself and reads as "the requeue didn't work".
+         * `createdAt` is untouched on purpose (see `CardOutboxRepository.requeueDead`).
+         */
+        private const val REQUEUE_HQL =
+            "status = ?1, attemptCount = 0, lastError = null, claimedAt = null, updatedAt = ?2 where status = ?3"
 
         @Suppress("MaxLineLength")
         private const val CLAIM_SQL = """

@@ -4,6 +4,7 @@
 
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
@@ -46,32 +47,62 @@ interface RegulatoryTemplate {
 type PreviewData =
   | { status: 'idle' | 'loading' }
   | { status: 'unavailable'; kind: BffFailure }
+  | { status: 'no-periods' }
   | { status: 'unsupported' }
-  | { status: 'ready'; templates: RegulatoryTemplate[] }
+  | { status: 'ready'; templates: RegulatoryTemplate[]; evidence: 'FROZEN' | 'LIVE_PREVIEW' }
 
 type TemplateLoadResult = { template: RegulatoryTemplate } | { kind: BffFailure }
 
 const TEMPLATE_PATHS: Record<string, string[]> = {
   'cnb-finrep': [
     '/api/v1/finrep/templates/F01.01',
+    '/api/v1/finrep/templates/F01.02',
+    '/api/v1/finrep/templates/F01.03',
     '/api/v1/finrep/templates/F02.00',
   ],
   'cnb-capital': ['/api/v1/corep/templates/C_01.00'],
 }
 
-const CELL_LABELS: Record<string, string> = {
-  'F01.01:r010:c010': 'Celková aktiva',
-  'F01.01:r380:c010': 'Celkové závazky',
-  'F01.01:r490:c010': 'Vlastní kapitál',
-  'F02.00:r010:c010': 'Celkové výnosy',
-  'F02.00:r030:c010': 'Celkové náklady',
-  'F02.00:r450:c010': 'Čistý zisk / ztráta',
-}
+// This is the canonical environment tag already embedded in the browser bundle. Unknown
+// environments fail safe as non-production: missing deployment metadata must never remove a
+// TEST_ONLY mark from a regulatory artefact.
+const DEPLOYMENT_ENVIRONMENT = process.env.NEXT_PUBLIC_GLITCHTIP_ENVIRONMENT?.trim() || 'unknown'
+const IS_TEST_ENVIRONMENT = DEPLOYMENT_ENVIRONMENT !== 'production'
 
-/** The latest fully completed calendar quarter, never a moving live-date report. */
-function defaultReportingDate(now = new Date()): string {
-  const quarterStart = Math.floor(now.getUTCMonth() / 3) * 3
-  return new Date(Date.UTC(now.getUTCFullYear(), quarterStart, 0)).toISOString().slice(0, 10)
+const CELL_LABELS: Record<string, string> = {
+  'F01.01:r0010:c0010': 'Hotovost, centrální banky a vklady na požádání',
+  'F01.01:r0040:c0010': 'Ostatní vklady na požádání',
+  'F01.01:r0181:c0010': 'Finanční aktiva v naběhlé hodnotě',
+  'F01.01:r0183:c0010': 'Úvěry a pohledávky',
+  'F01.01:r0360:c0010': 'Ostatní aktiva',
+  'F01.01:r0380:c0010': 'Celková aktiva',
+  'F01.02:r0110:c0010': 'Finanční závazky v naběhlé hodnotě',
+  'F01.02:r0120:c0010': 'Vklady klientů',
+  'F01.02:r0240:c0010': 'Daňové závazky',
+  'F01.02:r0250:c0010': 'Splatná daň',
+  'F01.02:r0300:c0010': 'Celkové závazky',
+  'F01.03:r0010:c0010': 'Kapitál',
+  'F01.03:r0020:c0010': 'Splacený kapitál',
+  'F01.03:r0040:c0010': 'Emisní ážio',
+  'F01.03:r0070:c0010': 'Ostatní vydané kapitálové nástroje',
+  'F01.03:r0190:c0010': 'Nerozdělený zisk',
+  'F01.03:r0210:c0010': 'Ostatní rezervy',
+  'F01.03:r0250:c0010': 'Zisk nebo ztráta vlastníků mateřské společnosti',
+  'F01.03:r0300:c0010': 'Celkový vlastní kapitál',
+  'F01.03:r0310:c0010': 'Celkový vlastní kapitál a závazky',
+  'F02.00:r0010:c0010': 'Úrokové výnosy',
+  'F02.00:r0051:c0010': 'Úrokové výnosy z aktiv v naběhlé hodnotě',
+  'F02.00:r0090:c0010': 'Úrokové náklady',
+  'F02.00:r0120:c0010': 'Úrokové náklady ze závazků v naběhlé hodnotě',
+  'F02.00:r0200:c0010': 'Výnosy z poplatků a provizí',
+  'F02.00:r0310:c0010': 'Kurzové rozdíly',
+  'F02.00:r0355:c0010': 'Čistý provozní výnos',
+  'F02.00:r0460:c0010': 'Znehodnocení finančních aktiv',
+  'F02.00:r0491:c0010': 'Znehodnocení aktiv v naběhlé hodnotě',
+  'F02.00:r0610:c0010': 'Zisk před zdaněním z pokračujících činností',
+  'F02.00:r0630:c0010': 'Zisk po zdanění z pokračujících činností',
+  'F02.00:r0670:c0010': 'Zisk / ztráta za období',
+  'F02.00:r0690:c0010': 'Zisk / ztráta vlastníků mateřské společnosti',
 }
 
 function cellLabel(template: RegulatoryTemplate, cell: RegulatoryCell): string {
@@ -82,8 +113,21 @@ function money(value: number, currency: string): string {
   return new Intl.NumberFormat('cs-CZ', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value)
 }
 
+function lastCompletedMonthEnd(): string {
+  const now = new Date()
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)).toISOString().slice(0, 10)
+}
+
 function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
   const meta: ExportRow[] = [
+    { field: 'Klasifikace artefaktu', value: IS_TEST_ENVIRONMENT ? 'TEST_ONLY' : 'INTERNÍ REGULATORNÍ NÁHLED' },
+    { field: 'Prostředí', value: DEPLOYMENT_ENVIRONMENT },
+    {
+      field: 'Povolené použití',
+      value: IS_TEST_ENVIRONMENT
+        ? 'TESTOVACÍ DATA — NESMÍ BÝT ODESLÁNO REGULÁTOROVI'
+        : 'Interní kontrola; odeslání regulátorovi není připojeno',
+    },
     { field: 'ID výkazu', value: report.id },
     { field: 'Název', value: report.name },
     { field: 'Autorita', value: report.authority },
@@ -103,7 +147,10 @@ function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
         value: `${money(cell.value, cell.currency)}${cell.isDataGap ? ' · DATOVÁ MEZERA' : ''}`,
       })),
     ])
-    return [...meta, { field: 'Zdroj', value: 'finrep-service ← ledger trial balance (ne ClickHouse)' }, ...rendered]
+    const source = data.evidence === 'FROZEN'
+      ? 'finrep-service ← zmrazená ledger předvaha (FROZEN / LINES_V1)'
+      : 'finrep-service ← živá ledger předvaha (PRACOVNÍ NÁHLED, měnitelná)'
+    return [...meta, { field: 'Zdroj', value: source }, ...rendered]
   }
   const message = data.status === 'loading' || data.status === 'idle'
     ? 'Načítám…'
@@ -247,9 +294,15 @@ export default function RegulatoryPage() {
   // export is being inspected.
   const [preview, setPreview] = useState<Report | null>(null)
   const [previewData, setPreviewData] = useState<PreviewData>({ status: 'idle' })
-  const [reportingDate, setReportingDate] = useState(() => defaultReportingDate())
+  const [reportingDate, setReportingDate] = useState('')
+  const [reportingPeriods, setReportingPeriods] = useState<string[]>([])
+  const [reportingEvidence, setReportingEvidence] = useState<'FROZEN' | 'LIVE_PREVIEW'>('FROZEN')
 
-  async function loadPreview(report: Report, asOf = reportingDate) {
+  async function loadPreview(
+    report: Report,
+    requestedAsOf?: string,
+    requestedEvidence: 'FROZEN' | 'LIVE_PREVIEW' = 'FROZEN',
+  ) {
     const paths = TEMPLATE_PATHS[report.id]
     if (!paths) {
       setPreviewData({ status: 'unsupported' })
@@ -257,8 +310,32 @@ export default function RegulatoryPage() {
     }
     setPreviewData({ status: 'loading' })
     try {
+      let asOf = requestedAsOf
+      let evidence = requestedEvidence
+      if (!asOf) {
+        const periodsResponse = await fetch(svcUrl('finrep-service', '/api/v1/finrep/periods'), {
+          cache: 'no-store', signal: AbortSignal.timeout(15_000),
+        })
+        if (!periodsResponse.ok) {
+          setPreviewData({ status: 'unavailable', kind: await classifyBffFailure(periodsResponse) })
+          return
+        }
+        const available = await periodsResponse.json() as { latest: string | null; periods: string[] }
+        setReportingPeriods(available.periods)
+        if (!available.latest) {
+          asOf = lastCompletedMonthEnd()
+          evidence = 'LIVE_PREVIEW'
+          setReportingPeriods([asOf])
+          setReportingDate(asOf)
+          setReportingEvidence(evidence)
+        } else {
+          asOf = available.latest
+          setReportingDate(asOf)
+          setReportingEvidence(evidence)
+        }
+      }
       const results: TemplateLoadResult[] = await Promise.all(paths.map(async (path): Promise<TemplateLoadResult> => {
-        const response = await fetch(svcUrl('finrep-service', path, { asOf }), {
+        const response = await fetch(svcUrl('finrep-service', path, { asOf, evidence }), {
           cache: 'no-store', signal: AbortSignal.timeout(15_000),
         })
         return response.ok
@@ -272,6 +349,7 @@ export default function RegulatoryPage() {
       }
       setPreviewData({
         status: 'ready',
+        evidence,
         templates: results.filter((result): result is { template: RegulatoryTemplate } => 'template' in result).map(result => result.template),
       })
     } catch {
@@ -299,7 +377,7 @@ export default function RegulatoryPage() {
       exportedAt: new Date().toISOString(),
     }
     triggerDownload(
-      `report_${report.sdatCode}_${new Date().toISOString().slice(0, 10)}.json`,
+      `${IS_TEST_ENVIRONMENT ? 'TEST_ONLY_' : ''}report_${report.sdatCode}_${new Date().toISOString().slice(0, 10)}.json`,
       JSON.stringify(data, null, 2),
       'application/json',
     )
@@ -312,7 +390,7 @@ export default function RegulatoryPage() {
     const header = `${csvCell(t('Pole', 'Field'))},${csvCell(t('Hodnota', 'Value'))}`
     const body = rows.map(r => `${csvCell(r.field)},${csvCell(r.value)}`).join('\n')
     triggerDownload(
-      `report_${report.sdatCode}_${new Date().toISOString().slice(0, 10)}.csv`,
+      `${IS_TEST_ENVIRONMENT ? 'TEST_ONLY_' : ''}report_${report.sdatCode}_${new Date().toISOString().slice(0, 10)}.csv`,
       `${header}\n${body}\n`,
       'text/csv;charset=utf-8',
     )
@@ -475,10 +553,16 @@ export default function RegulatoryPage() {
 
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-                  <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}
-                    onClick={(e) => openPreview(report.id, e)}>
-                    {downloadMessage === report.id ? <><Check size={11} style={{ color: '#16a34a' }} /> {t('Staženo', 'Downloaded')}</> : <><Eye size={11} /> {t('Náhled exportu', 'Preview export')}</>}
-                  </button>
+                  {source === 'implemented' ? (
+                    <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}
+                      onClick={(e) => openPreview(report.id, e)}>
+                      {downloadMessage === report.id ? <><Check size={11} style={{ color: '#16a34a' }} /> {t('Staženo', 'Downloaded')}</> : <><Eye size={11} /> {t('Náhled exportu', 'Preview export')}</>}
+                    </button>
+                  ) : (
+                    <span role="status" style={{ fontSize: '11px', padding: '5px 10px', color: 'var(--text-tertiary)' }}>
+                      {t('Náhled není dostupný', 'Preview unavailable')}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -556,8 +640,8 @@ export default function RegulatoryPage() {
                   <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{preview.name}</div>
                 </div>
               </div>
-              <button className="btn btn-secondary" style={{ padding: '5px', flexShrink: 0 }} onClick={() => setPreview(null)} aria-label={t('Zavřít', 'Close')}>
-                <X size={15} />
+              <button type="button" className="btn btn-secondary" style={{ padding: '5px', flexShrink: 0 }} onClick={() => setPreview(null)} aria-label={t('Zavřít náhled exportu', 'Close export preview')}>
+                <X size={15} aria-hidden="true" />
               </button>
             </div>
 
@@ -565,17 +649,24 @@ export default function RegulatoryPage() {
               <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', background: 'var(--surface-2)' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
                   {t('Referenční datum', 'Reference date')}
-                  <input
-                    type="date"
+                  <select
                     value={reportingDate}
                     onChange={e => setReportingDate(e.target.value)}
                     style={{ font: 'inherit', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 6px', background: 'var(--surface-1)' }}
-                  />
+                  >
+                    {reportingPeriods.map(period => <option key={period} value={period}>{period}</option>)}
+                  </select>
                 </label>
-                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview)} disabled={previewData.status === 'loading'}>
-                  <RefreshCw size={13} className={previewData.status === 'loading' ? 'animate-spin' : ''} />
+                <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview, reportingDate || undefined, reportingEvidence)} disabled={previewData.status === 'loading' || !reportingDate} aria-busy={previewData.status === 'loading'} aria-label={t('Načíst data pro náhled', 'Load preview data')}>
+                  <RefreshCw size={13} aria-hidden="true" className={previewData.status === 'loading' ? 'animate-spin' : ''} />
                   {t('Načíst data', 'Load data')}
                 </button>
+              </div>
+            )}
+
+            {IS_TEST_ENVIRONMENT && (
+              <div role="status" data-testid="test-data-watermark" style={{ padding: '10px 20px', color: '#991b1b', background: '#fef2f2', borderBottom: '1px solid #fecaca', fontSize: '12px', fontWeight: 700 }}>
+                {DEPLOYMENT_ENVIRONMENT.toUpperCase()} / {t('TESTOVACÍ DATA — náhled ani stažený soubor nesmí být odeslán regulátorovi.', 'TEST DATA — neither this preview nor a downloaded file may be submitted to a regulator.')}
               </div>
             )}
 
@@ -584,6 +675,13 @@ export default function RegulatoryPage() {
               {previewData.status === 'unavailable' ? (
                 <DataUnavailable kind={previewData.kind} service="FINREP / COREP service" feature={t('regulatorní šablony', 'regulatory templates')} lang="cs" dense />
               ) : (
+                <>
+                {previewData.status === 'ready' && previewData.evidence === 'LIVE_PREVIEW' && (
+                  <div role="status" style={{ padding: '12px 20px', color: '#92400e', background: '#fffbeb', borderBottom: '1px solid #fde68a', fontSize: '12px' }}>
+                    <strong>{t('Pracovní náhled skutečných hodnot', 'Working preview of actual values')}</strong>
+                    {' — '}{t('období ještě není zapečetěné. Hodnoty se mohou změnit; finální regulatorní export zůstává zablokovaný.', 'the period is not sealed yet. Values may change; final regulatory export remains blocked.')}
+                  </div>
+                )}
                 <table className="data-table" style={{ width: '100%' }}>
                   <thead>
                     <tr>
@@ -600,17 +698,26 @@ export default function RegulatoryPage() {
                     ))}
                   </tbody>
                 </table>
+                </>
               )}
             </div>
 
             {/* Footer: note + export actions */}
             <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', maxWidth: '320px' }}>
-                {!exportReadiness.ok && (() => {
+              <div
+                role="status"
+                data-testid="export-readiness"
+                style={{ fontSize: '11px', color: 'var(--text-tertiary)', maxWidth: '320px' }}
+              >
+                {exportReadiness.ok ? (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '8px', color: 'var(--success)' }}>
+                    <CheckCircle2 size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: '1px' }} />
+                    <strong>{t('Připraveno pro interní export', 'Ready for internal export')}</strong>
+                  </div>
+                ) : (() => {
                   const copy = blockReasonCopy(exportReadiness.reason, exportReadiness.templateIds, t('cs', 'en') as 'cs' | 'en')
                   return (
                     <div
-                      role="status"
                       data-testid="export-blocked"
                       data-block-reason={exportReadiness.reason}
                       style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '8px', color: 'var(--danger)' }}
@@ -623,16 +730,21 @@ export default function RegulatoryPage() {
                     </div>
                   )
                 })()}
+                {!exportReadiness.ok && (exportReadiness.reason === 'no_closed_periods' || exportReadiness.reason === 'provisional_data') && (
+                  <Link href="/day-end?tab=regulatory" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginBottom: '8px', color: 'var(--accent)', fontWeight: 700 }}>
+                    {t('Otevřít regulatorní uzávěrku', 'Open regulatory close')} <ExternalLink size={11} aria-hidden="true" />
+                  </Link>
+                )}
                 {previewData.status === 'unsupported'
                   ? t('Tento katalogový výkaz zatím nemá implementovaný datový zdroj ani odeslání. Nezobrazuje fiktivní hodnoty.', 'This catalogue report has no implemented data source or submission path yet. It does not show fictional values.')
                   : t('FINREP/COREP se při načtení ověřují ve finrep-service nad ledger trial balance; při nedostupnosti se hodnoty nezobrazí. ClickHouse ani ČNB XBRL/SDAT přenos nejsou součástí tohoto náhledu.', 'FINREP/COREP are verified on load from finrep-service over the ledger trial balance; values are not shown when unavailable. ClickHouse and ČNB XBRL/SDAT transmission are not part of this preview.')}
               </div>
               <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)} disabled={!exportReadiness.ok}>
-                  <FileSpreadsheet size={13} /> {t('Export CSV', 'Export CSV')}
+                <button type="button" className="btn btn-secondary" aria-label={t('Exportovat náhled jako CSV', 'Export preview as CSV')} style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)} disabled={!exportReadiness.ok}>
+                  <FileSpreadsheet size={13} aria-hidden="true" /> {t('Export CSV', 'Export CSV')}
                 </button>
-                <button className="btn btn-primary" style={{ fontSize: '12px' }} onClick={() => exportJson(preview)} disabled={!exportReadiness.ok}>
-                  <FileJson size={13} /> {t('Export JSON', 'Export JSON')}
+                <button type="button" className="btn btn-primary" aria-label={t('Exportovat náhled jako JSON', 'Export preview as JSON')} style={{ fontSize: '12px' }} onClick={() => exportJson(preview)} disabled={!exportReadiness.ok}>
+                  <FileJson size={13} aria-hidden="true" /> {t('Export JSON', 'Export JSON')}
                 </button>
               </div>
             </div>

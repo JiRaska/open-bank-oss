@@ -59,9 +59,9 @@ The use-case orchestration and ports:
 4. **Audit.** Every decision (ALLOW/DENY) becomes an `AuditEvent` with `actorType=AI_AGENT`, operation `agent.mcp.tool_call`.
 5. **Outbound auth.** If allowed, the tool's REST client mints an `openbank-services` token (client credentials) and attaches it as a Bearer to the downstream call — least-privilege service principal, never the operator's token.
 
-## No outbox, but audited
+## Durable audit outbox
 
-There is no domain outbox table because there is no domain state. Instead the two trust boundaries — the **model gateway** and the **policy gate** — each publish an AI-attributed `AuditEvent` through `openbank-libs` `AuditEventPublisher`, which carries them to `audit-service` over Kafka. This is the AI-attribution evidence required by ADR-0031 D5.
+The service has no domain-event outbox, but its `agent_audit_outbox` durably records AI-attributed `AuditEvent`s before Kafka delivery. The **model gateway** and **policy gate** publish through `AuditEventPublisher`; a dispatcher retries broker delivery and `audit-service` deduplicates the producer event id before extending its hash chain. Kafka activation remains explicitly controlled until the runtime rollout is attested.
 
 ## Resilience
 

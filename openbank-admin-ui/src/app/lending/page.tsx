@@ -68,6 +68,10 @@ const LOAN_TROUBLE = new Set(['DELINQUENT', 'DEFAULTED', 'WRITTEN_OFF'])
 
 const STALE_HOURS = 72
 
+/** What a tile shows when nothing has confirmed the figure yet. Not `0`, and not a spinner:
+ *  the tile has no number to give, and says exactly that. */
+const UNKNOWN = '—'
+
 export default function LendingPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -82,6 +86,13 @@ export default function LendingPage() {
   const [tab, setTab] = useState<'queue' | 'portfolio'>('queue')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  /** Has a load ever SUCCEEDED? The KPI tiles derive from `loans`/`applications`, which start as
+   *  `[]` — so without this the pre-load state, a post-outage state and a genuinely empty book are
+   *  one number: `0`. A zero exposure is a claim about the bank, and the console may only make it
+   *  once it has actually been told. Note this is deliberately not `!loading && !error`: a failed
+   *  refresh must not turn a previously-confirmed figure into a dash, and a stale-but-confirmed
+   *  figure is more useful than a placeholder (#7918). */
+  const [loaded, setLoaded] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -107,6 +118,7 @@ export default function LendingPage() {
       setAppSummary(Array.isArray(appSum) ? appSum : null)
       setLoanSummary(Array.isArray(loanSum) ? loanSum : null)
       setError(null)
+      setLoaded(true)
     } catch {
       setError('unreachable')
     } finally {
@@ -123,6 +135,10 @@ export default function LendingPage() {
 
   const fmt = (m?: { amount: number; currency: string }) =>
     m ? `${m.amount.toLocaleString(numberLocale)} ${m.currency}` : '—'
+
+  const unknownHint = error
+    ? t('nedostupné', 'unavailable')
+    : t('načítá se…', 'loading…')
 
   const money = (n: number, ccy: string) => `${Math.round(n).toLocaleString(numberLocale)} ${ccy}`
 
@@ -142,6 +158,7 @@ export default function LendingPage() {
       // eslint-disable-next-line react-hooks/purity -- staleness comparison is inherently time-relative; the timestamps are stable server data.
       const now = Date.now()
       return {
+        confirmed: loaded,
         exact: true,
         ccy,
         // The label says "active", so count ACTIVE — the aggregate carries every status, and
@@ -169,6 +186,7 @@ export default function LendingPage() {
     const open = applications.filter(a => !TERMINAL.has(a.status))
     const stale = open.filter(a => a.createdAt && now - new Date(a.createdAt).getTime() > STALE_HOURS * 3_600_000)
     return {
+      confirmed: loaded,
       exact: false,
       ccy,
       loanCount: loans.length,
@@ -178,7 +196,7 @@ export default function LendingPage() {
       staleStates: stale.length,
       trouble: trouble.length,
     }
-  }, [loans, applications, appSummary, loanSummary])
+  }, [loans, applications, appSummary, loanSummary, loaded])
 
   const visibleApps = useMemo(
     () => (stage ? applications.filter(a => a.status === stage) : applications),
@@ -198,8 +216,9 @@ export default function LendingPage() {
         )}
         icon={<TrendingUp size={18} style={{ color: 'var(--accent)' }} />}
         actions={
-          <button onClick={load} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+          <button onClick={load} disabled={loading} type="button" aria-busy={loading}
+            aria-label={t('Obnovit lending', 'Refresh lending')} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+            <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
           </button>
         }
       />
@@ -210,33 +229,43 @@ export default function LendingPage() {
         </div>
       )}
 
+      {/* An unconfirmed figure is rendered as an em dash, never as a number. `kpi.confirmed` is
+          false only until the FIRST successful load, so a genuinely empty book still reads `0`
+          the moment the service answers with nothing — the placeholder tracks whether we were
+          told, not whether the total happens to be zero. */}
       <div className="grid-4" style={{ marginBottom: 20 }}>
         <StatCard
           label={t('Aktivní úvěry', 'Active loans')}
-          value={kpi.loanCount}
-          hint={t(`jistina ${money(kpi.book, kpi.ccy)}`, `principal ${money(kpi.book, kpi.ccy)}`)}
+          value={kpi.confirmed ? kpi.loanCount : UNKNOWN}
+          hint={kpi.confirmed
+            ? t(`jistina ${money(kpi.book, kpi.ccy)}`, `principal ${money(kpi.book, kpi.ccy)}`)
+            : unknownHint}
           icon={<Wallet size={13} />}
         />
         <StatCard
           label={t('Žádosti v běhu', 'Applications in flight')}
-          value={kpi.openCount}
-          hint={t(`požadováno ${money(kpi.requested, kpi.ccy)}`, `requested ${money(kpi.requested, kpi.ccy)}`)}
+          value={kpi.confirmed ? kpi.openCount : UNKNOWN}
+          hint={kpi.confirmed
+            ? t(`požadováno ${money(kpi.requested, kpi.ccy)}`, `requested ${money(kpi.requested, kpi.ccy)}`)
+            : unknownHint}
           icon={<Layers size={13} />}
         />
         <StatCard
           label={t('Čeká přes 72 h', 'Waiting over 72h')}
-          value={kpi.staleStates}
-          tone={kpi.staleStates > 0 ? 'warning' : undefined}
-          hint={kpi.exact
+          value={kpi.confirmed ? kpi.staleStates : UNKNOWN}
+          tone={kpi.confirmed && kpi.staleStates > 0 ? 'warning' : undefined}
+          hint={!kpi.confirmed ? unknownHint : kpi.exact
             ? t('stavů se stárnoucí frontou', 'states with an aging queue')
             : t('nerozhodnuté a stárnoucí', 'undecided and aging')}
           icon={<Clock size={13} />}
         />
         <StatCard
           label={t('Problémové úvěry', 'Loans in trouble')}
-          value={kpi.trouble}
-          tone={kpi.trouble > 0 ? 'danger' : undefined}
-          hint={t('po splatnosti / default / odpis', 'delinquent / default / written off')}
+          value={kpi.confirmed ? kpi.trouble : UNKNOWN}
+          tone={kpi.confirmed && kpi.trouble > 0 ? 'danger' : undefined}
+          hint={kpi.confirmed
+            ? t('po splatnosti / default / odpis', 'delinquent / default / written off')
+            : unknownHint}
           icon={<AlertTriangle size={13} />}
         />
       </div>
@@ -256,7 +285,10 @@ export default function LendingPage() {
         {(['queue', 'portfolio'] as const).map(id => (
           <button
             key={id}
+            type="button"
             onClick={() => setTab(id)}
+            aria-pressed={tab === id}
+            aria-label={id === 'queue' ? t('Zobrazit frontu žádostí', 'Show applications queue') : t('Zobrazit portfolio', 'Show portfolio')}
             style={{
               padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6, border: 'none', cursor: 'pointer',
               background: tab === id ? 'var(--accent)' : 'var(--surface-3)',
@@ -267,7 +299,7 @@ export default function LendingPage() {
           </button>
         ))}
         {stage && tab === 'queue' && (
-          <button onClick={() => setStage(null)} className="btn btn-secondary" style={{ fontSize: 11 }} data-testid="clear-stage">
+          <button type="button" onClick={() => setStage(null)} className="btn btn-secondary" style={{ fontSize: 11 }} data-testid="clear-stage" aria-label={t('Zrušit filtr fáze', 'Clear stage filter')}>
             {t('Filtr:', 'Filter:')} {label(stage)} ✕
           </button>
         )}

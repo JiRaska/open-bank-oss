@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { BADGE_CLASS, DOT_CLASS, type Tone, statusTone } from './tone'
 
@@ -14,6 +15,8 @@ type StatusBadgeProps = {
   label?: string
   /** Renders a leading status dot alongside the text. */
   withDot?: boolean
+  /** Decorative leading icon when the status has a recognizable domain symbol. */
+  leading?: ReactNode
   className?: string
 }
 
@@ -25,11 +28,12 @@ type StatusBadgeProps = {
  * domain value: translating the value first and then colouring it is how a Czech-locale page ends up
  * with every badge neutral.
  */
-export function StatusBadge({ status, tone, label, withDot = false, className }: StatusBadgeProps) {
+export function StatusBadge({ status, tone, label, withDot = false, leading, className }: StatusBadgeProps) {
   const resolved = tone ?? statusTone(status)
   return (
     <span className={cn(BADGE_CLASS[resolved], className)}>
       {withDot && <span className={DOT_CLASS[resolved]} aria-hidden="true" />}
+      {leading && <span aria-hidden="true">{leading}</span>}
       {label ?? status ?? '—'}
     </span>
   )

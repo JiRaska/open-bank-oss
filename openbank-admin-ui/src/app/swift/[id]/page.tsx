@@ -9,6 +9,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { readStashedRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -67,6 +68,7 @@ export default function SwiftDetailPage() {
   useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id])
 
   return (
+    <AuthGuard permission="payments:view">
     <div>
       <PageHeader
         title={message?.messageType ?? t('SWIFT zpráva', 'SWIFT message')}
@@ -75,15 +77,22 @@ export default function SwiftDetailPage() {
         actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {message?.status && <span className="pill" style={{ background: `${STATUS_COLOR[message.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[message.status] ?? 'var(--text-muted)' }}>{message.status}</span>}
           <Link href="/swift" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>
-          <button className="btn btn-secondary" onClick={load} disabled={loading}>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={load}
+            disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit SWIFT zprávu', 'Refresh SWIFT message')}
+          >
             <RefreshCw size={13} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
           </button>
         </div>}
       />
 
       {loading && !message ? (
-        <div style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <RefreshCw size={14} className="animate-spin" /> {t('Načítám zprávu…', 'Loading message…')}
+        <div role="status" aria-live="polite" style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <RefreshCw size={14} aria-hidden="true" className="animate-spin" /> {t('Načítám zprávu…', 'Loading message…')}
         </div>
       ) : !message && unavailable ? (
         <div className="card"><DataUnavailable kind={unavailable.kind} service={t('SWIFT-service', 'SWIFT-service')} feature={t('SWIFT zpráva', 'SWIFT message')} lang={language} /></div>
@@ -108,13 +117,13 @@ export default function SwiftDetailPage() {
             ]} />
           </div>
           <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <button onClick={() => setShowRaw(s => !s)}
+            <button type="button" aria-expanded={showRaw} aria-controls="swift-raw-payload" aria-label={showRaw ? t('Skrýt surový payload', 'Hide raw payload') : t('Zobrazit surový payload', 'Show raw payload')} onClick={() => setShowRaw(s => !s)}
               style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '6px', padding: '12px 18px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600 }}>
-              {showRaw ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              {showRaw ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
               {t('Surová data (JSON)', 'Raw payload (JSON)')}
             </button>
             {showRaw && (
-              <pre style={{ margin: 0, padding: '0 18px 18px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflowX: 'auto' }}>
+              <pre id="swift-raw-payload" style={{ margin: 0, padding: '0 18px 18px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflowX: 'auto' }}>
                 {JSON.stringify(message, null, 2)}
               </pre>
             )}
@@ -122,6 +131,7 @@ export default function SwiftDetailPage() {
         </div>
       ) : null}
     </div>
+    </AuthGuard>
   )
 }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-simulator-v0.5.0...clearing-simulator-v0.6.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-simulator-v0.4.7...clearing-simulator-v0.5.0) (2026-08-18)
 
 

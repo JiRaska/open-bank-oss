@@ -90,7 +90,7 @@ const complianceNav: NavItem[] = [
 ]
 
 const opsNav: NavItem[] = [
-  { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'payments:view' },
+  { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'pid:view' },
   { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
@@ -115,9 +115,13 @@ const docsNav: NavItem[] = [
 ]
 
 const platformNav: NavItem[] = [
+  // Test evidence is a first-class platform capability. Keeping the only link
+  // near the bottom of System made an implemented route effectively invisible.
+  { nameCs: 'Test Intelligence', nameEn: 'Test Intelligence', href: '/system/tests', icon: FlaskConical, permission: 'system:view', badge: 'LIVE' },
   { nameCs: 'FinOps',   nameEn: 'FinOps',   href: '/finops',   icon: PiggyBank,  permission: 'system:view' },
   { nameCs: 'DevOps',   nameEn: 'DevOps',   href: '/devops',   icon: GitBranch,  permission: 'system:view' },
-  { nameCs: 'IAOps',    nameEn: 'IAOps',    href: '/iaops',    icon: Bot,        permission: 'system:view' },
+  { nameCs: 'Řídicí centrum agentů', nameEn: 'Agent Control Room', href: '/iaops', icon: Bot, permission: 'system:view' },
+  { nameCs: 'Živé agentní případy', nameEn: 'Live Agent Cases', href: '/iaops/cases', icon: GitBranch, permission: 'system:view' },
   { nameCs: 'Flaky testy', nameEn: 'Flaky Tests', href: '/iaops/flaky-test-hunter', icon: Bug, permission: 'system:view' },
   { nameCs: 'Temporal', nameEn: 'Temporal', href: '/temporal', icon: Zap,        permission: 'system:view' },
   { nameCs: 'Tok workflow', nameEn: 'Workflow Flow', href: '/temporal/flow', icon: Workflow, permission: 'system:view' },
@@ -142,7 +146,6 @@ const sysNav: NavItem[] = [
   { nameCs: 'Tech Inventory',   nameEn: 'Tech Inventory',  href: '/system/inventory', icon: Package,           permission: 'system:view' },
   { nameCs: 'Infrastruktura',   nameEn: 'Infrastructure',  href: '/infrastructure',   icon: Server,            permission: 'system:view' },
   { nameCs: 'Topologie infra',  nameEn: 'Infra Topology',  href: '/infrastructure/topology', icon: Network,     permission: 'system:view' },
-  { nameCs: 'Test Coverage',    nameEn: 'Test Coverage',   href: '/system/tests',     icon: FlaskConical,      permission: 'system:view' },
   { nameCs: 'Připravenost prod',nameEn: 'Prod Readiness',  href: '/system/readiness', icon: ClipboardCheck,    permission: 'system:view' },
   { nameCs: 'Konfigurace',      nameEn: 'Configuration',   href: '/system/config',    icon: SlidersHorizontal, permission: 'system:config' },
   { nameCs: 'Agent (MCP)',      nameEn: 'Agent (MCP)',     href: '/system/agent',     icon: Bot,               permission: 'agent:view' },

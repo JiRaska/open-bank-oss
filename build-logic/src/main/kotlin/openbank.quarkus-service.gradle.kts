@@ -99,6 +99,17 @@ tasks.withType<Test>().configureEach {
         providers.environmentVariable("DOCKER_HOST").orElse("unix:///var/run/docker.sock").get(),
     )
     environment("TESTCONTAINERS_RYUK_DISABLED", "true")
+    // A shared Testcontainers resource emits a deliberately secret-free lifecycle
+    // observation here. The CI envelope is evidence, not a container inventory:
+    // ports, hosts, credentials and ids must never leave the test runner.
+    val testIntelligenceRuntimeDir = layout.buildDirectory.dir("test-intelligence/runtime")
+    environment("OPENBANK_TEST_EVIDENCE_DIR", testIntelligenceRuntimeDir.get().asFile.absolutePath)
+    // Recorder output is append-only within one test task so concurrently managed resources do
+    // not lose transitions. Reset only this generated task directory before each invocation:
+    // otherwise a local re-run mixes prior lifecycle evidence into the next envelope.
+    doFirst {
+        project.delete(testIntelligenceRuntimeDir)
+    }
 
     // Committed pacts are derived data (ADR-0063), so a regenerated pact must be AUTHORITATIVE —
     // it has to be able to remove an interaction, not only add one. pact-jvm's default writer
@@ -195,6 +206,20 @@ tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
     setProjectType("application")
     setSchemaVersion("1.5")
+}
+
+// Kover instruments every class that a Quarkus test JVM loads unless told otherwise.
+// Testcontainers is third-party test infrastructure, never part of this module's coverage
+// denominator; attempting to transform its shaded classes has produced invalid frames and a
+// missing XML report while the advisory CI step still looked green.  Exclude it at the
+// instrumentation boundary (rather than report filtering) so application classes remain
+// measured and a Testcontainers-heavy integration suite can still publish its evidence.
+kover {
+    currentProject {
+        instrumentation {
+            excludedClasses.add("org.testcontainers.*")
+        }
+    }
 }
 
 // Coverage gate (ADR-0020, ratchet-only — sweep #466). koverVerify is wired into

@@ -15,7 +15,7 @@ stateDiagram-v2
     COMPLETED --> [*]
     FAILED --> [*]
 
-    note on join ACTIVE
+    note right of ACTIVE
         Each execution: next_execution_date advances by frequency,
         execution_count++, last_execution_date updated.
         Actual payment triggered downstream (transaction-service).

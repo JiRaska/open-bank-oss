@@ -13,6 +13,9 @@ import type { Customer360 } from '@/app/api/customer-360/[partyId]/route'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
 import { DevicesPanel } from '@/components/party/DevicesPanel'
+import { DocumentsPanel } from '@/components/party/DocumentsPanel'
+import { CustomerPortfolioPanel } from '@/components/party/CustomerPortfolioPanel'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
 
 // ADR-0210: a lookup over the analytics silver layer, not a customer list. There is no
 // crm-service and no "list all customers" surface here — party-service owns that.
@@ -84,14 +87,25 @@ export default function Customer360Page() {
         )}
       />
 
+      {!selected && (
+        <ExplorerGuide compact mascot="lioness" title={t('Začněte člověkem, ne UUID', 'Start with a person, not a UUID')}>
+          {t(
+            'Hledejte přirozeně podle jména nebo e-mailu a vyberte správnou party. Explorer pak poskládá odvozený pohled napříč doménami — autoritativní detail vždy zůstává ve zdrojové službě.',
+            'Search naturally by name or email, then select the right party. Explorer will assemble the derived cross-domain view — authoritative detail always remains in the source service.',
+          )}
+        </ExplorerGuide>
+      )}
+
       <PartySearch onSelect={load360} selectedId={selected?.id} busy={loading} />
 
       {/* Issue #4265. Deliberately OUTSIDE every `data`/`loading`/`failure` branch below: this panel
           reads engagement-service, not ClickHouse, so a silver layer that is down or a party with no
           projected events must not hide an active fraud hold. Those are independent sources and the
           page now degrades independently for each. */}
-      {selected && <AdverseStatePanel key={selected.id} partyId={selected.id} />}
-      {selected && <DevicesPanel key={selected.id} partyId={selected.id} />}
+      {selected && <AdverseStatePanel key={`adverse:${selected.id}`} partyId={selected.id} />}
+      {selected && <CustomerPortfolioPanel key={`portfolio:${selected.id}`} partyId={selected.id} />}
+      {selected && <DevicesPanel key={`devices:${selected.id}`} partyId={selected.id} />}
+      {selected && <DocumentsPanel key={`documents:${selected.id}`} partyId={selected.id} />}
 
       {loading && (
         <div style={{ color: 'var(--text-secondary)', padding: '40px', textAlign: 'center' }}>

@@ -21,10 +21,9 @@
  *   - INCOMPLETE  — `CorepCell.isDataGap` / `CorepTemplate.hasDataGaps`. Contract-REQUIRED
  *                   fields (openbank-finrep-service/src/main/resources/openapi.yaml
  *                   `required: [templateId, period, cells, hasDataGaps]`), genuinely computed
- *                   by `C0100Mapper`, and documented there as "MUST NOT be read as an attested
- *                   zero balance". This is the reason that actually fires today: the ledger's
- *                   chart of accounts has no capital-structure GL accounts, so every C 01.00
- *                   capital row is a flagged zero.
+ *                   by the backend mappers, and documented there as "MUST NOT be read as an
+ *                   attested zero balance". It fires for an unclassified active FINREP account
+ *                   or a COREP trial balance with no recognised capital source.
  *   - UNBALANCED  — `FinrepTemplate.isBalanced === false`, refined by the optional
  *                   `balanceVerdict` into the three distinct defects below.
  *
@@ -54,8 +53,9 @@
 export type PreviewLike =
   | { status: 'idle' | 'loading' }
   | { status: 'unavailable'; kind: string }
+  | { status: 'no-periods' }
   | { status: 'unsupported' }
-  | { status: 'ready'; templates: ReadonlyArray<TemplateLike> }
+  | { status: 'ready'; templates: ReadonlyArray<TemplateLike>; evidence?: 'FROZEN' | 'LIVE_PREVIEW' }
 
 export interface CellLike {
   isDataGap?: boolean
@@ -83,6 +83,10 @@ export type ExportBlockReason =
   | 'no_data_source'
   /** The fetch to finrep-service failed (unreachable, unauthorized, …). */
   | 'source_unavailable'
+  /** Ledger has no immutable frozen month evidence from which a return may be rendered. */
+  | 'no_closed_periods'
+  /** Values are real, but sourced from a mutable working trial balance rather than frozen evidence. */
+  | 'provisional_data'
   /** A template came back with no cells — malformed against the contract. */
   | 'missing_cells'
   /** At least one cell is a flagged data gap (`isDataGap`). */
@@ -109,6 +113,9 @@ export function evaluateExportReadiness(data: PreviewLike): ExportReadiness {
   }
   if (data.status === 'unavailable') {
     return { ok: false, reason: 'source_unavailable', templateIds: [] }
+  }
+  if (data.status === 'no-periods') {
+    return { ok: false, reason: 'no_closed_periods', templateIds: [] }
   }
   // Everything that is not `ready` is data we do not have: idle or still in flight. Tested via
   // `!== 'ready'` rather than by listing the two so that a future PreviewData variant defaults to
@@ -157,6 +164,10 @@ export function evaluateExportReadiness(data: PreviewLike): ExportReadiness {
     return { ok: false, reason: 'data_gaps', templateIds: gapped.map(template => template.templateId) }
   }
 
+  if (data.evidence === 'LIVE_PREVIEW') {
+    return { ok: false, reason: 'provisional_data', templateIds: data.templates.map(template => template.templateId) }
+  }
+
   return { ok: true }
 }
 
@@ -181,6 +192,14 @@ export function blockReasonCopy(
       return cs
         ? { title: 'Export je zablokován: zdroj dat není dostupný', detail: 'finrep-service neodpověděla, takže hodnoty nelze ověřit. Zkuste načtení zopakovat.' }
         : { title: 'Export blocked: data source unavailable', detail: 'finrep-service did not answer, so the values cannot be verified. Try loading again.' }
+    case 'no_closed_periods':
+      return cs
+        ? { title: 'Export je zablokován: chybí uzavřené období', detail: 'Ledger nemá žádné zmrazené měsíční období s neměnnou řádkovou evidencí (FROZEN / LINES_V1). Dokončete uzávěrku; živá předvaha se pro regulatorní výkaz nikdy nepoužije.' }
+        : { title: 'Export blocked: no closed reporting period', detail: 'The ledger has no frozen monthly period with immutable line evidence (FROZEN / LINES_V1). Complete the close; a live trial balance is never used for a regulatory return.' }
+    case 'provisional_data':
+      return cs
+        ? { title: 'Export je zablokován: pracovní náhled není zapečetěný', detail: `Šablona ${list} zobrazuje skutečné hodnoty z živé předvahy, ale období ještě nemá FROZEN / LINES_V1 evidenci. Hodnoty lze kontrolovat, nelze je vydat za regulatorní artefakt.` }
+        : { title: 'Export blocked: working preview is not sealed', detail: `Template ${list} shows real values from the live trial balance, but the period has no FROZEN / LINES_V1 evidence yet. Values may be reviewed, not represented as a regulatory artefact.` }
     case 'missing_cells':
       return cs
         ? { title: 'Export je zablokován: šablona je prázdná', detail: `Šablona ${list} se vrátila bez buněk. Podle kontraktu se vykresluje vždy každý řádek, takže jde o vadnou odpověď.` }

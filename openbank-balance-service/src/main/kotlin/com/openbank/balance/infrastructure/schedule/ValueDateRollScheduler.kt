@@ -109,8 +109,11 @@ class ValueDateRollScheduler(
                 // most days.
                 liveness?.recordSuccess()
             } catch (ex: Exception) {
-                // Never crash the runtime: the money figures are derived and already correct
-                // without this job, so a failure here costs a notification, not a balance.
+                // observed-by: the workflow-liveness gauge for JOB_NAME. `recordSuccess()` above runs
+                // only on the completed path, so a permanently failing roll leaves the gauge climbing
+                // until WorkflowLivenessStale fires (ADR-0237) — the failure IS visible, just not
+                // through a DLQ. Never crash the runtime: the money figures are derived and already
+                // correct without this job, so a failure here costs a notification, not a balance.
                 log.errorf(ex, "Value-date roll failed: %s", ex.message)
             }
         }

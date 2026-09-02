@@ -4,6 +4,7 @@
 
 package com.openbank.engagement.integration
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -24,7 +25,7 @@ class EngagementPostgresTestResource : QuarkusTestResourceLifecycleManager {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
         val pg = PostgreSQLContainer(
-            DockerImageName.parse("docker.io/library/postgres:16.3-alpine")
+            DockerImageName.parse(POSTGRES_IMAGE)
                 .asCompatibleSubstituteFor("postgres"),
         )
             .withUsername("openbank")
@@ -32,6 +33,7 @@ class EngagementPostgresTestResource : QuarkusTestResourceLifecycleManager {
             .withDatabaseName("openbank_engagement_it")
         pg.start()
         postgres = pg
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
 
         return mapOf(
             "quarkus.datasource.reactive.url" to
@@ -49,6 +51,13 @@ class EngagementPostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        postgres?.stop()
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
+    }
+
+    private companion object {
+        const val POSTGRES_IMAGE = "docker.io/library/postgres:16.3-alpine"
     }
 }

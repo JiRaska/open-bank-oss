@@ -233,6 +233,7 @@ class ConsentTest {
             ConsentScope.MARKETING_COMMS_INAPP,
             ConsentScope.CREDIT_OFFERS,
             ConsentScope.CREDIT_PROFILE_USE,
+            ConsentScope.CREDIT_AI_AGENT,
         )
     }
 

@@ -186,6 +186,22 @@ internal data class ChatRequest(
 @JsonInclude(JsonInclude.Include.NON_NULL)
 internal data class ChatMetadata(@JsonProperty("trace_id") val traceId: String)
 
+// ignoreUnknown, like every other wire type here — and it is NOT cosmetic. Providers return extra
+// fields INSIDE the message object: `tool_calls` and `function_call` (null on a plain answer, but
+// present), and `reasoning_content` from every reasoning model. Without this annotation Jackson
+// throws on the whole response:
+//
+//   Unrecognized field "tool_calls" (class ...ChatMessage), not marked as ignorable
+//
+// Measured live on 2026-08-21: EVERY content-safety classification came back `unavailable` with
+// reason=transport because of this line, so the guardrail was deployed, enabled, and classifying
+// nothing. The shared gateway client parses through the same type, so the defect was not confined
+// to the guardrail — it was one provider response shape away from silencing every LLM caller that
+// routes through here.
+//
+// It surfaced only because the verdict is three-valued: had `unavailable` been folded into `safe`,
+// a guardrail answering nothing would have looked exactly like a guardrail seeing nothing wrong.
+@JsonIgnoreProperties(ignoreUnknown = true)
 internal data class ChatMessage(val role: String, val content: String)
 
 @JsonIgnoreProperties(ignoreUnknown = true)

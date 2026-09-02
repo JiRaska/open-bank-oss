@@ -55,7 +55,12 @@ data class AmlCase(
         decisionReason: String?,
         assignedAnalyst: String?,
         decidedBy: String,
-        now: Instant = Instant.EPOCH,
+        // No default. It used to be `Instant.EPOCH`, and the one caller that took the default was
+        // production (`AmlCaseService.updateDecision`), so every terminal AML decision — an
+        // analyst's and the sandbox auto-clear alike — recorded `decidedAt`/`updatedAt` as
+        // 1970-01-01, straight into the DB columns and onto `aml.case.status_changed.v1`. Both
+        // unit-test callers already passed a real value, so nothing observed it (#5837).
+        now: Instant,
     ): AmlCase {
         require(canTransitionTo(targetStatus)) { "Invalid AML case status transition: $status -> $targetStatus" }
         require(decidedBy.isNotBlank()) { "decidedBy is required" }

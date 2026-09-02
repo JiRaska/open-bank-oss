@@ -7,10 +7,10 @@
 # tap -> ledger). Crash-free health lives on the companion "Mobile Crashes" board
 # (GlitchTip).
 #
-# ANDROID ONLY, as of 2026-08-20 (#5735). ADR-0088 D4c (iOS parity) is still a no-op
-# stub pending SPM vendoring; this header used to claim an "iOS Ktor OTLP exporter"
-# was live, and it is not. Delivery for both halves is in JiRaska/openbank-app, a
-# separate repo (ADR-0147) -- nothing in THIS repo can change what the app emits.
+# Current customer-app source implements consent-gated OTLP export on Android and iOS.
+# That is capability evidence, not runtime proof: the span-metrics below establish sampled
+# mobile arrival but do not reliably identify the emitting OS. Delivery for both halves is
+# in JiRaska/openbank-app, a separate repo (ADR-0147).
 #
 # READING AN EMPTY BOARD -- see docs/runbooks/0013-rum-cardinality.md.
 # Empty is the normal state and does not mean the app has no traffic. RUM is off by
@@ -21,9 +21,9 @@
 # so ingest and context propagation both work -- it is volume that is absent.
 #
 # The per-screen panels below key on span_name (the app names screen spans
-# "screen.<NAME>", e.g. screen.HOME), NOT on the screen.name ATTRIBUTE. The attribute
-# is currently never set by the app, but that does not break these panels.
-# app.version / device.model are likewise unset app-side; no panel here uses them.
+# "screen.<NAME>", e.g. screen.HOME), NOT on the screen.name ATTRIBUTE. Current Android
+# and iOS source also sets bounded screen.name/app.version/os/device attributes, but older
+# deployed clients may not; no panel here depends on those optional dimensions.
 #
 # openbank-admin-ui is deliberately NOT on this board: ADR-0088 D4 rejected browser
 # RUM as the wrong surface (internal operator console). The gateway also emits no
@@ -57,7 +57,7 @@ data:
           "title": "How to read this board",
           "type": "text",
           "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
-          "options": { "mode": "markdown", "content": "**Mobile RUM** \u2014 device-side spans from the KMP app (**Android only** \u2014 iOS is still a stub, ADR-0088 D4c) through the hardened ingest gateway \u2192 Tempo.\n\n- **Empty is normal.** RUM is off by default, OIDC/consent-gated, debug builds only, and the gateway samples at 25%. Measured 2026-08-20: ~1 trace per 6h. An empty board is **not** evidence the app has no traffic \u2014 see `docs/runbooks/0013-rum-cardinality.md` before escalating.\n- **R/E/D** come from Tempo span-metrics (`service=openbank-app`), no extra instrumentation.\n- **Screen panels key on `span_name`** (`screen.<NAME>`), not on the `screen.name` attribute \u2014 which the app does not currently set. Fixing that is app-side work in `JiRaska/openbank-app`.\n- Tap \u2192 ledger works: a device span and the backend span share one trace id. Open one in the *RUM traces* panel.\n- **admin-ui is not here on purpose**: ADR-0088 D4 rejected browser RUM as the wrong surface.\n- Only the pseudonymous `party_id` identifies a session. Crash-free health \u2192 *Mobile Crashes* board." }
+          "options": { "mode": "markdown", "content": "**Mobile RUM** \u2014 device-side spans from the KMP app through the hardened ingest gateway \u2192 Tempo. Android and iOS exporters exist in current app source; this board proves sampled arrival, not per-OS deployment.\n\n- **Empty is normal.** RUM is off by default, OIDC/consent-gated, debug builds only, and the gateway samples at 25%. Measured 2026-08-20: ~1 trace per 6h. An empty board is **not** evidence the app has no traffic \u2014 see `docs/runbooks/0013-rum-cardinality.md` before escalating.\n- **R/E/D** come from Tempo span-metrics (`service=openbank-app`), no extra instrumentation.\n- **Screen panels key on `span_name`** (`screen.<NAME>`). Current Android/iOS source also emits bounded `screen.name`, `app.version`, `os.*` and `device.model`; live values appear only after a newly built, consented client is sampled.\n- Tap \u2192 ledger works: a device span and the backend span share one trace id. Open one in the *RUM traces* panel.\n- **admin-ui is not here on purpose**: ADR-0088 D4 rejected browser RUM as the wrong surface.\n- Only the pseudonymous `party_id` identifies a session. Crash-free health \u2192 *Mobile Crashes* board." }
         },
         {
           "title": "Screen-view rate (per screen)",

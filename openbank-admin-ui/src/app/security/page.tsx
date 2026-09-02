@@ -152,8 +152,15 @@ export default function SecurityPage() {
                 <Shield size={12} /> {platformGrade} · {avgScore}/100
               </span>
             )}
-            <button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-              <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <button
+              type="button"
+              onClick={load}
+              disabled={loading}
+              aria-busy={loading}
+              aria-label={t('Obnovit bezpečnostní sken', 'Refresh security scan')}
+              className="btn btn-secondary btn-sm"
+            >
+              <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
               {t('Obnovit', 'Refresh')}
             </button>
           </div>}
@@ -244,8 +251,8 @@ export default function SecurityPage() {
         )}
 
         {loading ? (
-          <div className="card" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-            <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám výsledky…', 'Loading results…')}</div>
+          <div role="status" aria-live="polite" className="card" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+            <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám výsledky…', 'Loading results…')}</div>
           </div>
         ) : unavailable ? (
           <div className="card" style={{ padding: 0 }}>

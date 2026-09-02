@@ -48,6 +48,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Secret-free Testcontainers lifecycle evidence for the immutable Test Intelligence envelope.
+    testImplementation(project(":openbank-libs-testing"))
     // @TestSecurity for the boot smoke-test's DB-touch assertion (calls /resolve with a role).
     testImplementation(libs.quarkus.test.security)
     // PidApiContractTest compares the served API against the committed openapi.yaml, which it PARSES

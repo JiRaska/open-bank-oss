@@ -105,6 +105,11 @@ class SanctionsListService(
             try {
                 refresh(list.listType)
             } catch (ex: Exception) {
+                // observed-by: the list's own due-ness. A failed refresh does not advance
+                // lastRefreshedAt, so `isDueForScheduledRefresh` stays true and the next tick
+                // re-attempts it — the work is rescheduled rather than lost, which is why this
+                // per-item catch is not the #5698 swallow even though it logs and continues.
+                // Aborting the batch instead would let one unreachable list starve every other.
                 Log.warnf(
                     "Scheduled refresh failed for %s (%s: %s) — will retry next due tick",
                     list.listType,

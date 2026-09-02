@@ -3,7 +3,10 @@
 openapi: 3.1.0
 info:
   title: SEPA Instant (SCT Inst) Service API
-  version: 1.5.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
+  # only — GET /sepa-instant/approvals (the checker's queue, issue #5679) plus two additive
+  # fields on ApprovalResponse (makerId, createdAt). No breaking change.
+  version: 1.6.0
   description: >-
     SEPA Instant Credit Transfer — sub-10s settlement, recall support. On submit, debtor and creditor
     names are synchronously screened against the sanctions lists (ADR-0032): a clean payment proceeds
@@ -130,6 +133,39 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/sepa-instant/approvals:
+    get:
+      tags: [SCT Inst]
+      summary: >-
+        List pending four-eyes approvals, oldest first — the checker's queue (ADR-0227 D2).
+        Without it a decision parked at 202 is discoverable only by whoever was handed its id.
+      description: >-
+        PENDING maker-checker approvals on `sctInstPayment.recall`, oldest first. The read side of
+        the unified approval inbox — deciding stays on
+        PATCH /api/v1/sepa-instant/approvals/{id}. Requires ROLE_OPERATOR, ROLE_ADMIN or
+        ROLE_PAYMENTS.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/sepa-instant/approvals/{id}:
     patch:
       tags: [SCT Inst]
@@ -162,22 +198,11 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [id, action, status]
-                properties:
-                  id:
-                    type: string
-                  action:
-                    type: string
-                    description: The gated action this approval was raised for.
-                  resourceId:
-                    type: string
-                    nullable: true
-                  status:
-                    type: string
-                  decidedBy:
-                    type: string
-                    nullable: true
+                $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          description: >-
+            The caller is the maker of this approval. Segregation of duties is enforced in
+            RedisApprovalStore.decide, not per-service.
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -296,3 +321,36 @@ components:
           type: string
         message:
           type: string
+
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes approval record (ADR-0155). `makerId` is the principal that requested the
+        gated action; a DIFFERENT principal must decide it — enforced in
+        RedisApprovalStore.decide, so the queue is readable by anyone who may decide, including
+        the maker (seeing a request is not authority over it).
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+          description: The value the maker replays as the X-Approval-Id header once approved.
+        action:
+          type: string
+          example: sctInstPayment.recall
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, EXECUTED]
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          description: >-
+            Request time. The store expires a PENDING approval after 24h, so age is the only
+            visible sign of one about to lapse.
+        decidedBy:
+          type: string
+          nullable: true

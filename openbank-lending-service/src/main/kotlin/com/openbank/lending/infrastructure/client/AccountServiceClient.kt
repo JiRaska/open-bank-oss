@@ -4,6 +4,7 @@
 package com.openbank.lending.infrastructure.client
 
 import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.arc.properties.IfBuildProperty
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
@@ -33,6 +34,7 @@ import java.util.UUID
  * a state that should be reachable.
  */
 @RegisterRestClient(configKey = "account-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)

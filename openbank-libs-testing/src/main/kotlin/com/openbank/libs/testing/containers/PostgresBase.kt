@@ -4,6 +4,7 @@
 
 package com.openbank.libs.testing.containers
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -22,7 +23,11 @@ import org.testcontainers.utility.DockerImageName
  * should always set it explicitly to avoid cross-service collisions if tests ever run in a
  * shared Postgres instance.
  */
-abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
+abstract class PostgresBase(
+    // Quarkus reprovisions a fresh manager instance; this scope must therefore identify the
+    // logical shared-resource family for the test JVM, not the individual object instance.
+    protected val resourceScopeId: String,
+) : QuarkusTestResourceLifecycleManager {
 
     private var postgres: PostgreSQLContainer<*>? = null
     private var dbName: String = "openbank_it"
@@ -40,6 +45,7 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
             .withPassword("openbank_secret")
             .withDatabaseName(dbName)
         pg.start()
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started", resourceScopeId)
         postgres = pg
         return pg
     }
@@ -58,5 +64,10 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
 
     override fun stop() {
         postgres?.stop()
+        if (postgres != null) TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped", resourceScopeId)
+    }
+
+    private companion object {
+        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
     }
 }

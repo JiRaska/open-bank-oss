@@ -4,7 +4,7 @@
 
 `openbank-account-service` is the **system of record for account definitions** in the OpenBank platform. It holds:
 
-- **Account aggregate** — IBAN, currency, owner (party-id), account type (CURRENT / SAVINGS / TECHNICAL), state (ACTIVE / FROZEN / CLOSED).
+- **Account aggregate** — IBAN, currency, owner (party-id), account type (CURRENT / SAVINGS / TERM_DEPOSIT / TECHNICAL), state (ACTIVE / FROZEN / CLOSED).
 - **AccountAuthorization** — who has which permissions on the account (OWNER / SIGNATORY / VIEWER / TECHNICAL).
 - **AccountBalance** — a denormalized "fast" balance for the UI; **the authoritative source is `openbank-balance-service`** (event-driven sync).
 

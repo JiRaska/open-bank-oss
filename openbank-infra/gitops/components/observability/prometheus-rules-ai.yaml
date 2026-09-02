@@ -382,3 +382,64 @@ spec:
               to the deterministic fallback. This is the documented safe mode (an unseeded key must
               not CrashLoop the pod), but it is not a steady state: the feature is off. Seed the key
               via ESO/OpenBao.
+
+        # ── Guardrail and retrieval: alert on the SUCCESS state, not an error rate ──────────
+        #
+        # These two controls are designed to degrade quietly — that is the correct behaviour on a
+        # customer-help surface, and it is exactly why an error-rate alert cannot see them. An
+        # unconfigured content-safety guardrail makes no FAILING calls; it makes none at all, and
+        # reports `unavailable` for every message. A retrieval index that never got built produces
+        # keyword-only answers that look like slightly worse search. Both are silent by
+        # construction, so the alert has to be about the control WORKING, not about it erroring.
+        #
+        # This is the shape the fleet has now shipped twice: a push adapter that counted every
+        # skipped notification as delivered, and a liveness gauge nobody re-derived at t=0. The
+        # metric exists here specifically so the third instance is visible.
+        - alert: ContentSafetyClassifyingNothing
+          # Ratio, not a count: a low-traffic hour must not fire, and a busy one must not need a
+          # retuned threshold. 90% rather than 100% because a genuinely unreachable provider for a
+          # few minutes is normal and self-heals; a control that is OFF stays at 1.0 forever.
+          expr: |
+            sum by (model) (increase(openbank_guardrail_classifications_total{decision="unavailable"}[1h]))
+            /
+            sum by (model) (increase(openbank_guardrail_classifications_total[1h])) > 0.9
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            subject_period: continuous
+            summary: "content-safety guardrail for {{ $labels.model }} is classifying nothing"
+            description: >-
+              Over 90% of classifications returned `unavailable` for the last 30 minutes, so the
+              model-based guardrail is effectively absent — on a fail-open surface every message is
+              going out unclassified, and on a fail-closed one every request is being refused. The
+              deterministic prompt-injection filter is unaffected either way. Causes, in the order
+              they occur: the API key is not seeded, the gateway route was removed or renamed, or
+              the provider decommissioned the model (which is how llama-guard-4-12b left Groq).
+              Check `openbank_llm_requests_total{model=~".*guard.*"}` for which one.
+
+        - alert: CopilotRetrievalKeywordOnly
+          # Same reasoning as above. Fires only where semantic retrieval is supposed to be on: with
+          # the feature off there are no `hybrid` samples at all, the ratio is a constant 1, and
+          # `openbank_copilot_retrieval_total{mode="hybrid"}` being ABSENT is what the second clause
+          # checks — an absent series and a series pinned at zero are different facts.
+          expr: |
+            sum(increase(openbank_copilot_retrieval_total{mode="keyword_only"}[1h]))
+            /
+            sum(increase(openbank_copilot_retrieval_total[1h])) > 0.9
+            and on() (sum(openbank_copilot_retrieval_total{mode="hybrid"}) > 0)
+          for: 30m
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            subject_period: continuous
+            summary: "copilot help search has fallen back to keyword-only"
+            description: >-
+              Semantic retrieval has produced results before (so it is configured) but over 90% of
+              searches in the last hour used the keyword scorer alone. Answers are still grounded
+              and cited — this is a quality regression, not an outage, hence info. Check the
+              embedding route on the gateway and whether `help_passage_embedding` still holds rows
+              for the CURRENT embedding model: a model swap without a re-index leaves the table
+              full and the query returning nothing, because rows are filtered by model id.

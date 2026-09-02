@@ -163,10 +163,10 @@ def claim_audit_producers(root: pathlib.Path) -> dict:
 
 
 def claim_image_pins(root: pathlib.Path) -> dict[str, str]:
-    """Every `openbank-*:sandbox-<sha>` image gitops pins. The fact side asks whether it exists."""
+    """Every immutable GitOps pin, including manual-refresh run provenance suffixes."""
     pins: dict[str, str] = {}
     for path in sorted(root.glob("openbank-infra/gitops/**/*.yaml")):
-        for repo, tag in re.findall(r"/(openbank-[a-z0-9-]+):(sandbox-[0-9a-f]+)", _read(path)):
+        for repo, tag in re.findall(r"/(openbank-[a-z0-9-]+):(sandbox-[0-9a-f]+(?:-run[1-9][0-9]*)?)", _read(path)):
             pins[repo] = tag
     return pins
 
@@ -521,10 +521,20 @@ def self_test() -> int:
             {"openbank-sepa-payment": {"constructs_outbox_message": True}},
             {"openbank-sepa": {"total": 1, "dead": 1}, "openbank-s": {"total": 9, "dead": 9}}),
         [])
+    # This pair reads the REAL tree, so it needs a known-positive next to the exclusion.
+    # `"openbank-libs-runtime" not in {}` is True, so the exclusion case alone passed from an
+    # empty directory — measured 2026-09-01, the whole self-test exited 0 with cwd on an empty
+    # tree. The exclusion is load-bearing (libs-runtime really does ship AbstractOutboxDispatcher),
+    # and a test that cannot detect the absence of its own corpus is decoration.
+    _real_outbox = claim_outbox_services(pathlib.Path("."))
     expect(
         "outbox: libs are excluded from the claim side entirely",
-        "openbank-libs-runtime" in claim_outbox_services(pathlib.Path(".")),
+        "openbank-libs-runtime" in _real_outbox,
         False)
+    expect(
+        "outbox: the real tree yields dispatcher services (else the exclusion above is vacuous)",
+        len(_real_outbox) > 0,
+        True)
 
     # canary: 1 replica + setWeight 10 => flagged; 10 replicas => clean; traffic router => exempt
     expect(

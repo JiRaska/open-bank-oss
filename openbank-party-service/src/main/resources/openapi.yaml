@@ -3,10 +3,10 @@
 openapi: 3.1.0
 info:
   title: Party Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
-  # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
-  # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.18.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.19 -> 1.20): additive
+  # only — GET /api/v1/parties/approvals exposes the existing maker-checker queue and
+  # ApprovalResponse gains makerId/createdAt so the checker can understand age and provenance.
+  version: 1.20.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -194,6 +194,36 @@ paths:
             A merge precondition failed — already merged, the target is itself merged (chains are
             refused), a party is erased, or the duplicate still owns an open account.
 
+  /api/v1/parties/approvals:
+    get:
+      tags: [Parties]
+      summary: List pending four-eyes approvals, oldest first
+      description: >-
+        PENDING maker-checker approvals on party.merge, oldest first. This is the read side of the
+        unified approval inbox; deciding remains on PATCH /api/v1/parties/approvals/{id}. Requires
+        ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          description: Caller lacks ROLE_OPERATOR or ROLE_ADMIN
+
   /api/v1/parties/approvals/{id}:
     patch:
       tags: [Parties]
@@ -223,6 +253,10 @@ paths:
       responses:
         '200':
           description: The decided approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
         '403':
           description: >-
             The decider is the original maker — segregation of duties (SelfApprovalNotAllowedMapper
@@ -596,6 +630,35 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes approval record. makerId identifies who requested the gated action; a different
+        principal must decide it, which is enforced by the shared ApprovalStore.
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+          example: party.merge
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          description: Shared ApprovalStatus value; deliberately not narrowed to the party KYC enum.
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          description: Request time; pending approvals expire after 24 hours.
+        decidedBy:
+          type: string
+          nullable: true
+
     GdprExport:
       type: object
       description: GDPR Art. 15 subject-access export (party-service-direct PII).
@@ -681,6 +744,13 @@ components:
         consentMarketing:
           type: boolean
           description: Optional marketing-communications consent from the same onboarding step.
+        classification:
+          type: string
+          enum: [CUSTOMER, SYNTHETIC]
+          default: CUSTOMER
+          description: >-
+            Bank-owned synthetic canary only. Requires ROLE_ADMIN and is immutable once created;
+            ordinary self-service onboarding always creates CUSTOMER.
 
     UpdatePartyRequest:
       type: object

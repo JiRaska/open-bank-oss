@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.38.2](https://github.com/JiRaska/open-bank-oss/compare/v0.38.1...v0.38.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **campaign:** reject a null array element with 400 instead of 500 ([#7995](https://github.com/JiRaska/open-bank-oss/issues/7995)) ([5f01839](https://github.com/JiRaska/open-bank-oss/commit/5f01839622eb2388ca6e644de9a4e7b577e5802a)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [0.38.1](https://github.com/JiRaska/open-bank-oss/compare/v0.38.0...v0.38.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **campaign:** document CONVERTED in SendRecord.outcome ([#5962](https://github.com/JiRaska/open-bank-oss/issues/5962)) ([#7573](https://github.com/JiRaska/open-bank-oss/issues/7573)) ([35c82f9](https://github.com/JiRaska/open-bank-oss/commit/35c82f92b1375850adffb5a20be54f5c07d8be61))
+
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/v0.37.0...v0.38.0) (2026-08-27)
+
+
+### Features
+
+* **campaign:** project incentive outcomes ([#7289](https://github.com/JiRaska/open-bank-oss/issues/7289)) ([3a89e9a](https://github.com/JiRaska/open-bank-oss/commit/3a89e9a2c4c809f1bc6edfb155bf3c67bbcebb73))
+
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/v0.36.0...v0.37.0) (2026-08-27)
+
+
+### Features
+
+* **campaign:** expose trusted incentive attribution ([#7271](https://github.com/JiRaska/open-bank-oss/issues/7271)) ([b2ac0cc](https://github.com/JiRaska/open-bank-oss/commit/b2ac0cc004e875171c5ae65d808d39611db2d446))
+
+## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/v0.35.0...v0.36.0) (2026-08-27)
+
+
+### Features
+
+* **campaign:** pin immutable incentive offers ([#7254](https://github.com/JiRaska/open-bank-oss/issues/7254)) ([fb31090](https://github.com/JiRaska/open-bank-oss/commit/fb31090f44a50bb685d082c7814594dd21c9574a))
+
+## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/v0.34.1...v0.35.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.34.1](https://github.com/JiRaska/open-bank-oss/compare/v0.34.0...v0.34.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
 ## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/v0.33.3...v0.34.0) (2026-08-20)
 
 

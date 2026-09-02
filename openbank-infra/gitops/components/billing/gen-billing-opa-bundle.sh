@@ -38,7 +38,7 @@ OUT=$REPO/openbank-infra/gitops/components/billing/billing-opa-bundle.yaml
   echo "  rest.rego: |"
   sed 's/^/    /' "$REST_REGO" | sed 's/[[:space:]]*$//'
   echo "  billing_rest_ext.rego: |"
-  sed 's/^/    /' "$EXT_REGO" | sed 's/[[:space:]]*$//'
+  expand -t 4 "$EXT_REGO" | sed 's/^/    /' | sed 's/[[:space:]]*$//'
   echo "  agents.rego: |"
   sed 's/^/    /' "$AGENTS_REGO" | sed 's/[[:space:]]*$//'
   echo "  agents-data.yaml: |"

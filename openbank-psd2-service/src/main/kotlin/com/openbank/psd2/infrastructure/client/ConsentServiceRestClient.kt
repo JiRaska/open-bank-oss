@@ -5,6 +5,7 @@
 package com.openbank.psd2.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.psd2.application.port.out.ConsentServiceClient
 import com.openbank.psd2.application.port.out.ConsentSnapshot
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
@@ -36,6 +37,7 @@ import java.time.LocalDate
  * robust against a consent-service response-schema addition.
  */
 @RegisterRestClient(configKey = "consent-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/consents")
 @Produces(MediaType.APPLICATION_JSON)

@@ -44,6 +44,12 @@ spec:
     acls:
       - resource:
           type: topic
+          name: openbank.agent.audit.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.accounts.account.created
           patternType: literal
         operations: [Read, Describe]
@@ -179,11 +185,79 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # Issue #5728 (ADR-0249 D4): audit-service did not subscribe to the delegation topic at
+      # all, so no grant lifecycle event was audited and the new spend-reservation events would
+      # have been ACL-denied on arrival. The KafkaTopic resource already exists (owned by its
+      # producer, components/delegation/kafka-topic.yaml) -- this is only the Read grant.
+      - resource:
+          type: topic
+          name: openbank.delegation.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # Issue #6035: four money-path produced topics had no Read grant here, so even after
+      # being added to the subscription list they would have been ACL-denied at runtime with
+      # no error surfaced anywhere (the #5338 shape) -- the poll fails silently and the audit
+      # trail simply has no rows. Each KafkaTopic resource already exists and is owned by its
+      # producer; these are Read grants only, no topic is created here.
+      # components/ledger/kafka-topic.yaml -- the posting record itself.
+      - resource:
+          type: topic
+          name: openbank.ledger.journal.posted
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # components/sdd/kafka-topic.yaml
+      - resource:
+          type: topic
+          name: openbank.sdd.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # components/interest-service/kafka-topic.yaml
+      - resource:
+          type: topic
+          name: openbank.interest.accrual.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # components/fraud-service/kafka-topics.yaml
+      - resource:
+          type: topic
+          name: openbank.fraud.hold.changed
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: group
           name: audit-service
           patternType: literal
         operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: audit-service-agent-provenance
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `agent-audit-events-in` channel (the D5
+      # provenance stream — AgentAuditConsumer acks only after append-only persistence, so it
+      # rethrows by design). Write, not Read: the connector PARKS a failed record by PRODUCING.
+      - resource:
+          type: topic
+          name: openbank.dlq.audit.agent-audit-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `audit-events-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.audit.audit-events-in
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
 ---
 # Projects the Strimzi-minted keystore secret (messaging/audit-service) into
