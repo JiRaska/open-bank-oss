@@ -538,13 +538,16 @@ change_requirements:
     detect: ["money-path <service> trust-boundary paths in the PR diff"]
     require:
       - "docs/threat-models/<service>.md updated in the SAME PR"   # ADR-0030 D2
-    gate: threat-model-diff
-    enforced: advisory
-    target_enforce_date: "2026-09-15"   # ADR-0144
-    # CI producer is LIVE (advisory): openbank-infra/scripts/check-threat-model-diff.py runs
-    # in the "Validate manifests" job on every PR, right after the coverage gate — diff-scoped
-    # (3-dot against the PR base). Findings are ::warning annotations. Flip to enforced =
-    # pass --enforce to the script in ci.yml (one-line change).
+    gate: threat-model-updated-on-trust-boundary-change
+    enforced: enforced
+    # GRADUATED in #3431, after the #3438 scope fix took the false-positive rate from 7-of-60
+    # to 2-of-60 (both survivors real). This block said `advisory` with a target_enforce_date
+    # of 2026-09-15 and described findings as "::warning annotations" with the flip still to
+    # come — all three were already untrue. The gate runs `mode: enforced` AND passes
+    # --enforce (both are required, #2392), so findings are ::error and fail the build.
+    # Corrected 2026-09-02, found by reading gates.yaml against this file rather than either
+    # alone: nothing cross-checks a rule's `enforced:` against the mode of the gate that
+    # implements it, so this record could drift for as long as it did.
     ci_producer: "openbank-infra/scripts/check-threat-model-diff.py"
   mp_messaging_dotted_keys:
     # SmallRye reactive-messaging config written as a DOTTED key
