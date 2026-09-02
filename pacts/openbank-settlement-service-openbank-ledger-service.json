@@ -4,6 +4,27 @@
   },
   "interactions": [
     {
+      "description": "GET journals for a transaction the ledger has never seen",
+      "providerStates": [
+        {
+          "name": "ledger has no journal entries"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/journals/transaction/99999999-9999-9999-9999-999999999999"
+      },
+      "response": {
+        "body": [
+
+        ],
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "POST a balanced two-line CZK settlement journal",
       "providerStates": [
         {
