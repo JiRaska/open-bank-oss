@@ -62,11 +62,16 @@ class CardDelegationProjectionIT {
         val source: InMemorySource<String> = connector.source("delegation-events-in")
         source.runOnVertxContext(true)
 
-        source.send(delegationEvent("DelegationActivated", cardId))
+        source.send(delegationEvent("DelegationActivated", cardId, lifecycleRevision = 1))
         assertThat(awaitAuthorized(cardId, expected = true)).isTrue()
 
-        source.send(delegationEvent("DelegationRevoked", cardId))
+        source.send(delegationEvent("DelegationRevoked", cardId, lifecycleRevision = 2))
         assertThat(awaitAuthorized(cardId, expected = false)).isTrue()
+
+        source.send(delegationEvent("DelegationReinstated", cardId, lifecycleRevision = 1))
+        assertThat(awaitAuthorized(cardId, expected = false))
+            .describedAs("a delayed older opening must not resurrect revoked card authority")
+            .isTrue()
     }
 
     private fun seedCard(): UUID {
@@ -111,7 +116,7 @@ class CardDelegationProjectionIT {
         return false
     }
 
-    private fun delegationEvent(type: String, cardId: UUID): String =
+    private fun delegationEvent(type: String, cardId: UUID, lifecycleRevision: Long): String =
         """
         {
           "eventType": "$type",
@@ -123,6 +128,7 @@ class CardDelegationProjectionIT {
           "capabilities": ["CARD_VIEW"],
           "validFrom": "2026-01-01T00:00:00Z",
           "occurredAt": "2026-08-01T12:00:00Z"
+          ,"lifecycleRevision": $lifecycleRevision
         }
         """.trimIndent()
 }

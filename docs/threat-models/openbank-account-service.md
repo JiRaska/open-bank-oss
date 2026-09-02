@@ -521,3 +521,10 @@ not change any existing request's outcome until explicitly flipped.
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+## Delegation lifecycle ordering
+
+The local enforcement projection accepts authority-opening events only with a positive,
+monotonically increasing `lifecycleRevision`. A revisionless close remains accepted and installs a
+permanent legacy tombstone; a revisionless activate/reinstate is ignored. This deliberately favors
+temporary unavailability during a consumer-first rolling upgrade over resurrecting revoked access.
+Recovery from a legacy tombstone is a newly issued grant, never replaying the same grant id.
