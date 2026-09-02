@@ -95,6 +95,19 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-02** — **New inbound endpoint: `GET /api/v1/accounts/{accountId}/authorizations/effective`
+  (ADR-0232).** The owner's unified view of everyone who can act on their account — bank mandates
+  and customer delegations merged through the same rules the payment guard applies, so what the
+  owner reads here and what a debit actually gets are the same fact. No new caller: reached only
+  through customer-edge's existing `service-edge-account-m2m` identity and `account.read` action
+  (unchanged `@RolesAllowed`/`@Authorize`, same as every other endpoint on this resource), and
+  customer-edge itself repeats the ownership check server-side rather than trusting the header
+  alone — a compromised or newly added edge route cannot use this to read a stranger's account.
+  Returns 404 rather than 403 on an ownership mismatch and an empty list for an unknown account, so
+  neither response distinguishes "not yours" from "does not exist" — the same enumeration posture
+  as the rest of this resource. No DB schema change; the endpoint composes existing mandate and
+  delegation reads. Rollback: revert the commit; the route is additive.
+
 - **2026-08-27** — **New tightly scoped inbound diagnostic edge:** the sandbox's
   `journey-product-catalog-read` k6 CronJob may make one read-only request to
   product-catalog `:8104`. The additive NetworkPolicy selects both its `observability`
