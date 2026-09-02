@@ -28,13 +28,18 @@ class FlakyTestTriggerPactConsumerTest {
     fun asyncTriggerPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("an administrator may admit a flaky-test workflow")
         .uponReceiving("admit the bounded flaky-test workflow")
-        .path("/api/v1/flaky-test-hunter/check/trigger-async")
+        .path("/api/v1/flaky-test-hunter/check/trigger-async-idempotent")
         .method("POST")
         .matchHeader("Authorization", "Bearer [A-Za-z0-9._-]+", "Bearer pact-admin-token")
+        .matchHeader(
+            "Idempotency-Key",
+            "^flaky-test-hunter-operator-manual-\\d{4}-\\d{2}-\\d{2}$",
+            IDEMPOTENCY_KEY,
+        )
         .willRespondWith()
         .status(202)
         .headers(mapOf("Content-Type" to "application/json"))
-        .body("""{"workflowId":"flaky-test-check-operator_manual-2026-08-18"}""")
+        .body("""{"workflowId":"$WORKFLOW_ID"}""")
         .toPact()
 
     @Test
@@ -42,10 +47,16 @@ class FlakyTestTriggerPactConsumerTest {
     fun `admin UI receives an admission handle`(mockServer: MockServer) {
         val workflowId = given()
             .header("Authorization", "Bearer pact-admin-token")
-            .`when`().post("${mockServer.getUrl()}/api/v1/flaky-test-hunter/check/trigger-async")
+            .header("Idempotency-Key", IDEMPOTENCY_KEY)
+            .`when`().post("${mockServer.getUrl()}/api/v1/flaky-test-hunter/check/trigger-async-idempotent")
             .then().statusCode(202)
             .extract().jsonPath().getString("workflowId")
 
-        assertThat(workflowId).isEqualTo("flaky-test-check-operator_manual-2026-08-18")
+        assertThat(workflowId).isEqualTo(WORKFLOW_ID)
+    }
+
+    private companion object {
+        const val IDEMPOTENCY_KEY = "flaky-test-hunter-operator-manual-2026-08-18"
+        const val WORKFLOW_ID = "flaky-test-hunter-check-operator_manual-2026-08-18"
     }
 }
