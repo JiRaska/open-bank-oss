@@ -49,8 +49,10 @@ import java.util.concurrent.TimeUnit
 class DelegationLifecycleRevisionIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("delegation-events-out")
+        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory(
+            "delegation-events-out",
+            "spend-reservation-state-out",
+        )
 
         override fun stop() = InMemoryConnector.clear()
     }

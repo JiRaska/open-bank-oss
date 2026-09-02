@@ -6,6 +6,7 @@ package com.openbank.delegation.infrastructure.messaging
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.delegation.domain.event.DelegationSpendReservationStateChanged
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -17,10 +18,12 @@ import org.apache.kafka.common.header.internals.RecordHeaders
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.jboss.logging.Logger
+import java.util.UUID
 
 @ApplicationScoped
 class KafkaDelegationOutboxEventPublisher(
-    @Channel("delegation-events-out") private val emitter: MutinyEmitter<String>,
+    @Channel("delegation-events-out") private val delegationEventsEmitter: MutinyEmitter<String>,
+    @Channel("spend-reservation-state-out") private val spendReservationStateEmitter: MutinyEmitter<String>,
     private val objectMapper: ObjectMapper,
 ) : OutboxEventPublisher {
 
@@ -28,10 +31,37 @@ class KafkaDelegationOutboxEventPublisher(
         val kafkaHeaders = RecordHeaders()
         OutboxKafkaHeaders.headersFor(entry).forEach { (k, v) -> kafkaHeaders.add(k, v.toByteArray()) }
         val meta = OutgoingKafkaRecordMetadata.builder<String>()
-            .withKey(OutboxKafkaHeaders.partitionKey(entry))
+            .withKey(partitionKey(entry))
             .withHeaders(kafkaHeaders)
             .build()
-        emitter.sendMessage(Message.of(withSourceService(entry.payload)).addMetadata(meta)).awaitSuspending()
+        emitterFor(entry).sendMessage(Message.of(withSourceService(entry.payload)).addMetadata(meta)).awaitSuspending()
+    }
+
+    private fun emitterFor(entry: OutboxEntry): MutinyEmitter<String> =
+        if (entry.eventType == DelegationSpendReservationStateChanged.EVENT_TYPE) {
+            spendReservationStateEmitter
+        } else {
+            delegationEventsEmitter
+        }
+
+    private fun partitionKey(entry: OutboxEntry): String {
+        if (entry.eventType != DelegationSpendReservationStateChanged.EVENT_TYPE) {
+            return OutboxKafkaHeaders.partitionKey(entry)
+        }
+        val payload = try {
+            objectMapper.readTree(entry.payload)
+        } catch (exception: JsonProcessingException) {
+            throw IllegalArgumentException("reservation state payload is not valid JSON", exception)
+        }
+        require(payload != null && payload.isObject) { "reservation state payload must be a JSON object" }
+        val reservationId = runCatching { UUID.fromString(payload.required("reservationId").textValue()) }
+            .getOrElse { throw IllegalArgumentException("reservation state reservationId is not a UUID", it) }
+        require(reservationId == entry.aggregateId) { "reservationId must equal outbox aggregateId" }
+        val revision = payload.required("reservationVersion")
+        require(revision.isIntegralNumber && revision.canConvertToLong()) {
+            "reservationVersion must be an integer"
+        }
+        return DelegationSpendReservationStateChanged.compactionKey(reservationId, revision.longValue())
     }
 
     /**

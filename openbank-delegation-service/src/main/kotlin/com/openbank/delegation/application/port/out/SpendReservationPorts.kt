@@ -5,6 +5,7 @@
 package com.openbank.delegation.application.port.out
 
 import com.openbank.delegation.domain.model.CountedSpend
+import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendDecision
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationState
@@ -16,6 +17,8 @@ import java.util.UUID
 sealed interface ReserveOutcome {
     data class Created(val reservation: SpendReservation) : ReserveOutcome
     data class Replayed(val reservation: SpendReservation) : ReserveOutcome
+    data object IdempotencyConflict : ReserveOutcome
+    data object StateStreamUnavailable : ReserveOutcome
     data class Refused(val decision: SpendDecision.Refused) : ReserveOutcome
 }
 
@@ -40,7 +43,7 @@ interface SpendReservationRepository {
     suspend fun reserve(
         candidate: SpendReservation,
         window: SpendWindow,
-        decide: (CountedSpend) -> SpendDecision,
+        decide: (DelegationGrant, CountedSpend) -> SpendDecision,
     ): ReserveOutcome
 
     suspend fun findById(grantId: UUID, reservationId: UUID): SpendReservation?
