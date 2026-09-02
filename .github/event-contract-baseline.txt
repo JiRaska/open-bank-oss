@@ -18,7 +18,6 @@ openbank-clearing-service:openbank.clearing.batch.event
 openbank-consent-service:openbank.consent.events
 openbank-dispute-service:openbank.dispute.events
 openbank-document-service:openbank.documents.document.event
-openbank-domestic-payment:openbank.domestic.payment.events
 openbank-fx-service:openbank.fx.conversion.completed
 openbank-interest-service:openbank.interest.accrual.event
 openbank-kyc-service:openbank.kyc.events

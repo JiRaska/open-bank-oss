@@ -6,6 +6,7 @@ package com.openbank.domestic.application.usecase
 
 import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.application.port.out.AccountLookupPort
+import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepository
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
@@ -37,6 +38,7 @@ import java.util.UUID
 class DomesticPaymentServiceTemporalTest {
 
     private val repo: DomesticPaymentRepository = mockk()
+    private val delegatedSpendBindingRepository: DelegatedSpendBindingRepository = mockk()
     private val eventPublisher: DomesticPaymentEventPublisher = mockk()
     private val accountLookupPort: AccountLookupPort = mockk()
     private val metrics: DomainMetrics = mockk(relaxed = true)
@@ -57,6 +59,7 @@ class DomesticPaymentServiceTemporalTest {
         env.start()
         service = DomesticPaymentService(
             repo,
+            delegatedSpendBindingRepository,
             eventPublisher,
             accountLookupPort,
             metrics,
@@ -82,8 +85,10 @@ class DomesticPaymentServiceTemporalTest {
 
         // createPayment returns the freshly-persisted RECEIVED row; the workflow drives it onward
         // asynchronously (routing verified in DomesticPaymentWorkflowImplTest).
-        assertThat(result.status).isEqualTo(DomesticPaymentStatus.RECEIVED)
-        assertThat(result.currency).isEqualTo("CZK")
+        assertThat(result.payment.status).isEqualTo(DomesticPaymentStatus.RECEIVED)
+        assertThat(result.payment.currency).isEqualTo("CZK")
+        assertThat(result.replayed).isFalse()
+        assertThat(result.payment.requestFingerprint).matches("[0-9a-f]{64}")
     }
 
     @Test
@@ -97,7 +102,7 @@ class DomesticPaymentServiceTemporalTest {
         // discarded before reaching the wire — this is what makes it survive onto the payment so
         // DomesticPaymentCreatedEvent (and, via AuditConsumer's existing initiatedByPartyId
         // fallback, the audit trail) can name an actor.
-        assertThat(result.initiatedByPartyId).isEqualTo(actorId)
+        assertThat(result.payment.initiatedByPartyId).isEqualTo(actorId)
     }
 
     @Test
@@ -106,7 +111,7 @@ class DomesticPaymentServiceTemporalTest {
 
         val result = runBlocking { service.createPayment(command(actorId = null)) }
 
-        assertThat(result.initiatedByPartyId).isNull()
+        assertThat(result.payment.initiatedByPartyId).isNull()
     }
 
     @Test
@@ -126,7 +131,7 @@ class DomesticPaymentServiceTemporalTest {
 
         val result = runBlocking { service.createPayment(command(creditorBankCode = " 0100 ")) }
 
-        assertThat(result.transferScope).isEqualTo(DomesticTransferScope.EXTERNAL)
+        assertThat(result.payment.transferScope).isEqualTo(DomesticTransferScope.EXTERNAL)
     }
 
     @Test
@@ -135,7 +140,7 @@ class DomesticPaymentServiceTemporalTest {
 
         val result = runBlocking { service.createPayment(command(creditorBankCode = "0000")) }
 
-        assertThat(result.transferScope).isEqualTo(DomesticTransferScope.INTERNAL_CLIENT)
+        assertThat(result.payment.transferScope).isEqualTo(DomesticTransferScope.INTERNAL_CLIENT)
     }
 
     @Test
@@ -146,7 +151,7 @@ class DomesticPaymentServiceTemporalTest {
 
         val result = runBlocking { service.createPayment(command(creditorBankCode = "0000", actorId = actorId)) }
 
-        assertThat(result.transferScope).isEqualTo(DomesticTransferScope.OWN_ACCOUNTS)
+        assertThat(result.payment.transferScope).isEqualTo(DomesticTransferScope.OWN_ACCOUNTS)
     }
 
     private fun command(

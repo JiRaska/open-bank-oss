@@ -18,7 +18,11 @@ import java.util.UUID
 
 class DomesticPaymentEventsTest {
 
-    private fun payment(initiatedByPartyId: UUID? = UUID.randomUUID()) = DomesticPayment(
+    private fun payment(
+        initiatedByPartyId: UUID? = UUID.randomUUID(),
+        delegationId: UUID? = null,
+        reservationId: UUID? = null,
+    ) = DomesticPayment(
         id = UUID.randomUUID(),
         idempotencyKey = "idem-event",
         status = DomesticPaymentStatus.VALIDATED,
@@ -47,6 +51,8 @@ class DomesticPaymentEventsTest {
         createdAt = Instant.parse("2026-06-01T09:00:00Z"),
         updatedAt = Instant.parse("2026-06-01T09:00:00Z"),
         initiatedByPartyId = initiatedByPartyId,
+        delegationId = delegationId,
+        reservationId = reservationId,
     )
 
     @Test
@@ -92,6 +98,26 @@ class DomesticPaymentEventsTest {
 
         val clock = Clock.fixed(now, ZoneOffset.UTC)
         assertThat(payment.toCreatedEvent(clock)).isEqualTo(payment.toCreatedEvent(clock))
+    }
+
+    @Test
+    fun `created and status events carry the same delegated spend context`() {
+        val initiator = UUID.randomUUID()
+        val delegation = UUID.randomUUID()
+        val reservation = UUID.randomUUID()
+        val previous = payment(initiator, delegation, reservation)
+        val current = previous.copy(status = DomesticPaymentStatus.SENT_TO_CLEARING)
+        val clock = Clock.fixed(Instant.parse("2026-06-01T10:00:00Z"), ZoneOffset.UTC)
+
+        val created = current.toCreatedEvent(clock)
+        val changed = current.toStatusChangedEvent(previous, clock)
+
+        assertThat(created.initiatedByPartyId).isEqualTo(initiator)
+        assertThat(created.delegationId).isEqualTo(delegation)
+        assertThat(created.reservationId).isEqualTo(reservation)
+        assertThat(changed.initiatedByPartyId).isEqualTo(initiator)
+        assertThat(changed.delegationId).isEqualTo(delegation)
+        assertThat(changed.reservationId).isEqualTo(reservation)
     }
 
     @Test
