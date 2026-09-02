@@ -40,7 +40,7 @@ describe('useServiceResource', () => {
     vi.stubGlobal('fetch', fetchMock)
     const { result } = renderHook(() => useServiceResource('/api/svc/x/api/v1/items'))
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.unavailable).toEqual({ kind: 'not_deployed' })
+    expect(result.current.unavailable).toEqual({ kind: 'not_deployed', status: 404 })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -56,7 +56,7 @@ describe('useServiceResource', () => {
     )
     // While waking, it shows the calm scaled_to_zero panel, not a hard failure.
     await waitFor(() => expect(result.current.waking).toBe(true))
-    expect(result.current.unavailable).toEqual({ kind: 'scaled_to_zero' })
+    expect(result.current.unavailable).toEqual({ kind: 'scaled_to_zero', status: 503 })
     // Then the retry succeeds and the data lands.
     await waitFor(() => expect(result.current.data).toEqual([{ id: 'woke' }]))
     expect(result.current.unavailable).toBeNull()
@@ -71,7 +71,7 @@ describe('useServiceResource', () => {
       useServiceResource('/api/svc/x/api/v1/items', { retryDelayMs: 5, maxWakeRetries: 2 }),
     )
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.unavailable).toEqual({ kind: 'scaled_to_zero' })
+    expect(result.current.unavailable).toEqual({ kind: 'scaled_to_zero', status: 503 })
     // initial attempt + 2 retries
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
@@ -91,6 +91,14 @@ describe('useServiceResource', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(signal?.aborted).toBe(true)
     expect(result.current.unavailable).toEqual({ kind: 'unreachable' })
+  })
+
+  it('exposes HTTP status metadata without changing the shared failure classification', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes(403, { error: 'forbidden' })))
+    const { result } = renderHook(() => useServiceResource('/api/svc/x/api/v1/items'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.unavailable).toEqual({ kind: 'error', status: 403 })
   })
 
   it('does nothing when url is null', async () => {
