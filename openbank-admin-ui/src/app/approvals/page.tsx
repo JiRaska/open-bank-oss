@@ -223,8 +223,8 @@ export default function ApprovalsPage() {
       />
 
       {error && (
-        <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid #dc2626', display: 'flex', gap: 8, alignItems: 'center', color: '#dc2626', fontSize: 13 }}>
-          <AlertTriangle size={15} /> {error === 'unreachable' ? t('Agent je nedostupný.', 'Agent unreachable.') : error}
+        <div role="alert" className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--danger)', display: 'flex', gap: 8, alignItems: 'center', color: 'var(--danger-text)', background: 'var(--danger-bg)', fontSize: 13 }}>
+          <AlertTriangle aria-hidden="true" size={15} /> {error === 'unreachable' ? t('Agent je nedostupný.', 'Agent unreachable.') : error}
         </div>
       )}
 
