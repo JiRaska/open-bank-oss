@@ -36,7 +36,8 @@ import {
   matchedRoleName,
   type EffectiveAccessPayload,
 } from '@/components/delegations/EffectiveAccess'
-import { capabilityLabel } from '@/lib/delegations/rolePresets'
+import { capabilityLabel, isAssignablePresetCapability } from '@/lib/delegations/rolePresets'
+import { LegacyCapabilityEvidence } from '@/components/delegations/LegacyCapabilityEvidence'
 import {
   DelegationStatusBadge,
   counterpartyLabel,
@@ -335,7 +336,7 @@ export default function DelegationsPage() {
   )
 }
 
-function GrantTable({
+export function GrantTable({
   title, subtitle, grants, state, direction, effectiveAccess,
 }: { title: string; subtitle: string; grants: Grant[]; state: DirectionState; direction: 'granted' | 'received'; effectiveAccess: EffectiveAccessPayload | null }) {
   const { t, language } = useLanguage()
@@ -388,7 +389,7 @@ function GrantTable({
                   <td><EntityChip type="party" id={counterparty.id} label={counterparty.name} /></td>
                   <td style={{ fontSize: '12px', fontWeight: 650 }}>{role}</td>
                   <td style={{ fontSize: '12px' }}><strong style={{ display: 'block' }}>{resource.label}</strong>{resource.meta && <span style={{ color: 'var(--text-tertiary)' }}>{resource.meta}</span>}</td>
-                  <td><div aria-label={t('Práva', 'Rights')} style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>{g.capabilities.map(capability => <span key={capability} title={capability} style={{ borderRadius: 999, padding: '3px 7px', fontSize: 10, background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{capabilityLabel(capability, language)}</span>)}</div></td>
+                  <td><div aria-label={t('Účinná práva', 'Effective rights')} style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>{g.capabilities.filter(isAssignablePresetCapability).map(capability => <span key={capability} title={capability} style={{ borderRadius: 999, padding: '3px 7px', fontSize: 10, background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{capabilityLabel(capability, language)}</span>)}</div><LegacyCapabilityEvidence capabilities={g.capabilities} /></td>
                   <td style={{ fontSize: '11px' }}>{grantConditions(g, language).map(condition => <div key={condition.label}><span style={{ color: 'var(--text-tertiary)' }}>{condition.label}:</span> <strong>{condition.value}</strong></div>)}</td>
                   <td>
                     <Link href={`/delegations/${g.id}`} className="btn btn-secondary" style={{ fontSize: '12px' }}>

@@ -164,6 +164,8 @@ test('finds a party through entity resolution and renders its grants', async ({ 
   const main = page.locator('main')
   await expect(main.getByText('Účetní').first()).toBeVisible()
   await expect(main.getByText('Provozní účet').first()).toBeVisible()
+  await expect(main.getByText('Odvozeno z evidence produktu').first()).toBeVisible()
+  await expect(main.getByText('Vlastnictví se nepřiřazuje').first()).toBeVisible()
   await expect(main.getByText('Zůstatky').first()).toBeVisible()
   await expect(main.getByText('Provést platbu').first()).toBeVisible()
   await expect(main.getByText('5 000 CZK').first()).toBeVisible()

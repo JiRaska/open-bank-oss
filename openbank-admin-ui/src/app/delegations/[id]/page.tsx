@@ -24,6 +24,8 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { DelegationAuditTimeline } from '@/components/delegations/DelegationAuditTimeline'
+import { LegacyCapabilityEvidence } from '@/components/delegations/LegacyCapabilityEvidence'
+import { isAssignablePresetCapability } from '@/lib/delegations/rolePresets'
 import {
   DelegationStatusBadge,
   capabilityLabels,
@@ -54,20 +56,35 @@ export default function DelegationDetailPage() {
   const [grant, setGrant] = useState<Grant | null>(null)
   const [unavail, setUnavail] = useState<UnavailableKind | null>(null)
 
-  const load = useCallback(async () => {
+  useEffect(() => {
     if (!id) return
-    setUnavail(null)
-    try {
-      const res = await fetch(`/api/delegations/${id}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
-      if (!res.ok) { setUnavail(await classifyBffFailure(res)); setGrant(null); return }
-      setGrant((await res.json()) as Grant)
-    } catch {
-      setUnavail('unreachable')
+    const controller = new AbortController()
+    void (async () => {
+      // Cross the effect boundary before updating React state and abort the old request when the
+      // route changes. A slow response for grant A must never overwrite already-selected grant B.
+      await Promise.resolve()
+      if (controller.signal.aborted) return
+      setUnavail(null)
       setGrant(null)
-    }
+      try {
+        const res = await fetch(`/api/delegations/${id}`, {
+          cache: 'no-store',
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]),
+        })
+        if (controller.signal.aborted) return
+        if (!res.ok) {
+          const failure = await classifyBffFailure(res)
+          if (!controller.signal.aborted) setUnavail(failure)
+          return
+        }
+        const nextGrant = (await res.json()) as Grant
+        if (!controller.signal.aborted) setGrant(nextGrant)
+      } catch {
+        if (!controller.signal.aborted) setUnavail('unreachable')
+      }
+    })()
+    return () => controller.abort()
   }, [id])
-
-  useEffect(() => { load() }, [load])
 
   return (
     <div>
@@ -105,7 +122,7 @@ export default function DelegationDetailPage() {
               <dd>{grant.resourceType}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Oprávnění', 'Capabilities')}</dt>
-              <dd>{capabilityLabels(grant.capabilities)}</dd>
+              <dd>{capabilityLabels(grant.capabilities.filter(isAssignablePresetCapability))}<LegacyCapabilityEvidence capabilities={grant.capabilities} /></dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Režim schvalování', 'Approval policy')}</dt>
               <dd>{grant.approvalPolicy ?? '—'}</dd>
@@ -137,7 +154,7 @@ export default function DelegationDetailPage() {
           </div>
 
           <DelegationAuditTimeline grantId={grant.id} currentStatus={grant.status} />
-          <CoverageProbe grant={grant} />
+          <CoverageProbe key={grant.id} grant={grant} />
           <BankSideActions />
         </>
       )}
@@ -151,9 +168,10 @@ export default function DelegationDetailPage() {
  * not prove cumulative headroom: only the payment reservation path can atomically consume
  * daily/monthly capacity without racing another payment.
  */
-function CoverageProbe({ grant }: { grant: Grant }) {
+export function CoverageProbe({ grant }: { grant: Grant }) {
   const { t } = useLanguage()
-  const [capability, setCapability] = useState(grant.capabilities?.[0] ?? '')
+  const supportedCapabilities = (grant.capabilities ?? []).filter(isAssignablePresetCapability)
+  const [capability, setCapability] = useState(supportedCapabilities[0] ?? '')
   const [amount, setAmount] = useState('')
   const [outcome, setOutcome] = useState<CheckOutcome | null>(null)
   const [failed, setFailed] = useState(false)
@@ -198,14 +216,19 @@ function CoverageProbe({ grant }: { grant: Grant }) {
         )}
       </p>
 
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+      {supportedCapabilities.length === 0 ? <p role="note" style={{ fontSize: '12px', color: 'var(--warning-text)' }}>
+        {t(
+          'Tento historický grant neobsahuje žádné účinné právo, které lze ověřit.',
+          'This historical grant contains no effective authority that can be probed.',
+        )}
+      </p> : <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
         <select
           className="input"
           value={capability}
           onChange={e => setCapability(e.target.value)}
           aria-label={t('Oprávnění k ověření', 'Capability to probe')}
         >
-          {(grant.capabilities ?? []).map(c => <option key={c} value={c}>{c}</option>)}
+          {supportedCapabilities.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
         <input
           className="input"
@@ -218,7 +241,7 @@ function CoverageProbe({ grant }: { grant: Grant }) {
         <button className="btn btn-primary" onClick={run} disabled={!capability}>
           {t('Ověřit', 'Probe')}
         </button>
-      </div>
+      </div>}
 
       {failed && (
         <p style={{ marginTop: '10px', fontSize: '13px', color: 'var(--text-tertiary)' }}>
