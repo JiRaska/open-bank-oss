@@ -8,7 +8,7 @@ info:
   # Minor bump (1.7 -> 1.8): additive only — GET /fx/approvals (the checker's queue, issue #5679)
   # plus two additive fields on ApprovalResponse (makerId, createdAt), and a shared
   # ApprovalResponse schema now $ref'd from PATCH /approvals/{id} too. No breaking change.
-  version: 1.8.0
+  version: 1.8.1
   description: >-
     Foreign exchange rates and currency conversion. On convert, the converting party's name is
     synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
@@ -124,7 +124,7 @@ paths:
   /api/v1/fx/rates/{base}/{quote}/history:
     get:
       tags: [FX]
-      summary: Historical rates for a currency pair, newest first
+      summary: Historical rates for a currency pair, newest first (including derived inverse pairs)
       operationId: getRateHistory
       parameters:
         - name: base

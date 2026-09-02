@@ -6,6 +6,7 @@ package com.openbank.standingorder.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.messaging.EventRetry
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.infrastructure.client.AccountServiceClient
 import com.openbank.standingorder.infrastructure.client.CreateSepaPaymentRequest
@@ -63,19 +64,29 @@ class StandingOrderDueConsumer(
     private val log = Logger.getLogger(StandingOrderDueConsumer::class.java)
 
     @Incoming("standing-order-due-in")
-    // Poison-pill safety: the consumer boundary must swallow ANY failure (parse, rail call, DB) and
-    // ack, so one bad event cannot wedge the consumer group — hence the deliberately broad catch.
+    // Poison-pill safety applies to the PAYLOAD only: an unparseable event, or one with no valid
+    // orderId, is acked because a redelivery fails identically forever. Executing the order is NOT
+    // in that class — it moves real customer money through sepaClient/transactionClient — so a
+    // failing execution is retried and rethrown for the connector to dead-letter (#5698). The
+    // previous comment claimed the boundary "must swallow ANY failure (parse, rail call, DB) and
+    // ack": under it, a transient rail or DB outage acked a due standing order that never executed,
+    // and nothing re-drives it — the due event only fires once per schedule.
     @Suppress("TooGenericExceptionCaught")
     suspend fun consume(payload: String) {
-        try {
-            val node = objectMapper.readTree(payload)
-            // Only the due event carries paymentType; failed events (failureCount/status) are skipped.
-            if (node.path("paymentType").isMissingNode) return
-            val orderId = runCatching { UUID.fromString(node.path("orderId").asText()) }.getOrNull()
-                ?: run {
-                    log.warnf("[standing-order-exec] due event without a valid orderId — skipping: %.300s", payload)
-                    return
-                }
+        val node = try {
+            objectMapper.readTree(payload)
+        } catch (e: Exception) {
+            log.errorf(e, "[standing-order-exec] unparseable due event, acking: %.300s", payload)
+            return
+        }
+        // Only the due event carries paymentType; failed events (failureCount/status) are skipped.
+        if (node.path("paymentType").isMissingNode) return
+        val orderId = runCatching { UUID.fromString(node.path("orderId").asText()) }.getOrNull()
+            ?: run {
+                log.warnf("[standing-order-exec] due event without a valid orderId — skipping: %.300s", payload)
+                return
+            }
+        EventRetry.withRetry(log, "standing-order execution", orderId) {
             when (val paymentType = node.path("paymentType").asText()) {
                 "SEPA_CREDIT" -> executeSepa(orderId, node)
                 "DOMESTIC", "INTERNAL" -> executeDomesticOrInternal(orderId, node)
@@ -88,8 +99,6 @@ class StandingOrderDueConsumer(
                     recordFailureSafely(orderId)
                 }
             }
-        } catch (e: Exception) {
-            log.errorf(e, "[standing-order-exec] failed to handle due event: %.300s", payload)
         }
     }
 
@@ -243,6 +252,11 @@ class StandingOrderDueConsumer(
     private fun toMajorUnits(minorUnits: Long, currency: String): BigDecimal =
         BigDecimal.valueOf(minorUnits, CurrencyCode.of(currency).defaultFractionDigits)
 
+    // best-effort: this is the COMPENSATING write on the failure path — it runs while an execution
+    // failure is already being handled, so letting it throw would replace the real error with the
+    // error of recording it, and the caller would dead-letter on the wrong cause. The order stays
+    // due and the next tick re-executes it, so nothing is silently dropped. Stated because
+    // runCatching + onFailure is otherwise indistinguishable from the #5698 swallow.
     private suspend fun recordFailureSafely(orderId: UUID) {
         runCatching { useCase.recordFailure(orderId) }
             .onFailure { log.warnf(it, "[standing-order-exec] recordFailure failed for order %s", orderId) }

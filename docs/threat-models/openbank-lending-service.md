@@ -392,7 +392,116 @@ against `lending.intake.caller-principal`, which refuses every call when unset.
   caller, but `operator-lending-write` already grants the same action more broadly; the rule only
   becomes load-bearing if that blanket operator grant is narrowed.
 
+## 9a. Customer credit journey read and indicative quotes (ADR-0269) — STRIDE supplement
+
+Two new inbound surfaces on the same customer-edge trust boundary as section 9, and both are read
+paths, which changes what can go wrong: section 9's risk is a fraudulent WRITE, these risk a
+DISCLOSURE and a MIS-DISCLOSURE.
+
+- `CustomerCreditJourneyResource` — `GET /api/v1/lending/intake/applications[/{id}]`. Returns the
+  caller's own applications as customer-readable journeys.
+- `CustomerQuoteResource` — `POST /api/v1/lending/intake/quotes`. Returns an indicative,
+  non-binding price. Persists nothing.
+
+Both reuse section 9's caller control verbatim: the handler compares `SecurityIdentity.principal.name`
+to `lending.intake.caller-principal` and refuses when it does not match or is unset, and the party id
+comes only from `X-Customer-Party-Id`.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **I**nformation disclosure | An operator, or the edge with a forged header, reads another customer's credit history | Rows are filtered by the header party id; a foreign application id is answered **404, not 403**, so a not-found and a not-yours are indistinguishable and the id space does not leak. Covered by `CustomerCreditJourneyResourceTest`. |
+| **I**nformation disclosure | The journey leaks the bank's internal assessment | The projection exposes canonical states, step codes and the decision engine's machine-readable reason codes only. A human checker's free-text `decisionReason` is deliberately NOT exposed, and a reason code is dropped on any non-refused state. |
+| **T**ampering | A caller prices their own loan by supplying a rate | The quote body carries only amount and term. Rate, currency, bounds and product all come from `CustomerIntakeConfig`; an unconfigured rate refuses the call rather than quoting zero interest. |
+| **R**epudiation / mis-disclosure | The customer is shown an instalment or APRC that the contract later contradicts | The instalment comes from the shared `Amortization` schedule the loan would actually be booked against, and the APRC from `Aprc`, the single implementation permitted to compute it (ADR-0269 rule 4). No client, campaign template or model may compute either. |
+| **I**nformation disclosure | A customer in financial distress is handed a tailored instalment | The ADR-0269 rule-2 distress floor gates pricing as well as offers: a suppressed quote is a **409 with a reason code and no price fields**, never a 200 with empty numbers (which a client renders as "0"). |
+| **D**oS | An app floods the quote endpoint | Pricing is pure computation with no persistence and no upstream call beyond the eligibility read; throttling is customer-edge's `RateLimitFilter`, as in section 9. The same per-party gap noted there applies. |
+| **E**oP | A quote becomes a commitment | Structurally prevented: `CustomerQuote` has no id and no accept path, and the wire DTO carries `binding: false` explicitly. A binding offer is a separate object from the decision engine and does not exist yet (#6214 follow-on). |
+
+**Deliberate asymmetry worth recording:** the quote endpoint does NOT require `credit_offers`
+consent, while the pre-approved read will. ADR-0269's rule is that the bank must not *initiate*;
+refusing to answer a price question the customer just asked would be the same dark pattern pointing
+the other way. The distress floor applies to both, because there the answer itself is the harm.
+
+## 9b. The credit-offer gate's own dependencies (ADR-0269 #6215) — STRIDE supplement
+
+The gate that decides whether a customer may be offered or quoted credit now reaches two services
+outbound: consent-service for `CREDIT_OFFERS`, and analytics-sink for the 360 credit profile
+(`gold_party_credit_profile`). Both are new outbound client edges from a money-path service.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **T**ampering / **E**oP | A compromised or misconfigured upstream answers "consent granted" or "healthy cash flow" for everyone | Neither answer can *grant* anything on its own: consent only unlocks the PUSH surface, and the profile only relaxes thresholds the hard-fact rules (arrears, hardship) apply independently from lending's own book. A single upstream cannot manufacture an offer. |
+| **D**oS / availability | consent-service or analytics-sink is slow or down | Both reads fail CLOSED with a 2s timeout: an unreadable consent yields `SIGNALS_UNAVAILABLE`, an unreadable profile yields `complete = false` and a refusal. The cost of an outage is a suppressed offer, never an unconsented or unassessed one. |
+| **I**nformation disclosure | The credit profile leaks another party's finances into a decision | The profile is fetched by party id on an internal, OIDC-authenticated route restricted to operator/auditor/admin roles; the party id comes from the same trusted header the rest of section 9 uses, never from a request body. |
+| **R**epudiation | The bank cannot show what a creditworthiness decision was based on | The profile is a query over the ADR-0023 tamper-evident bronze layer, so the inputs can be recomputed as at a date; `monthsObserved` records how much history actually existed. |
+| **S**poofing | An unauthenticated caller reads a customer's cash-flow profile from analytics-sink | The route is `@RolesAllowed(OPERATOR, AUDITOR, ADMIN)`; the party id is parsed as a UUID *before* interpolation, which is also the injection boundary — ClickHouse's HTTP interface has no bound-parameter path. |
+
+**Known gap, stated rather than modelled away:** enforcement orders and insolvency proceedings have
+no source in this deployment — no service ingests a court register. The decision still treats them
+as non-suppressing, because a permanent `complete = false` would refuse every offer forever and be
+indistinguishable from the feature being switched off. What changed (#6646) is that the *state* is
+no longer indistinguishable from a clean answer: see section 9d. This remains the first thing an
+operational-risk review of this gate should challenge.
+
+## 9c. Customer financial health (ADR-0269 rule 5) — STRIDE supplement
+
+`GET /api/v1/lending/intake/financial-health` — a third read on the section 9 trust boundary, with
+the same caller and party-header controls. It composes the ADR-0269 credit profile with the loan
+book, so it concentrates in one response things that until now lived in separate services.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **I**nformation disclosure | The route becomes a convenient summary of another customer's finances | Party comes only from the header the edge sets from the JWT; the loan read and the profile read are both scoped by it. Same 403/400 split as section 9a — an authorised caller with no scope is a bad request, not a forbidden one. |
+| **I**nformation disclosure | The view leaks the bank's assessment of the customer | It carries zones and the working behind them, never a score, a rating, an eligibility or a reason code. The credit decision remains the ADR-0213 engine's and is not reachable from here. |
+| **T**ampering / misleading | An unavailable upstream produces a flattering view | Every pillar can answer UNKNOWN and does so independently: a failed profile read greys out cashflow and obligations while the loan-derived pillars stand. Nothing is approximated — in particular the reserve is left UNKNOWN rather than inferred from unspent cashflow, which would show a customer a buffer they do not have. |
+| **T**ampering / misleading | No live loans reads as a healthy debt ratio | An empty loan book gives debt service 0; an *unreadable* one gives null, and null makes the obligations pillar UNKNOWN. The two are not collapsed, because only one of them means "this customer has no debts". |
+| **D**oS | The route fans out to two upstreams per call | Both reads are best-effort with the service's existing timeouts; a slow upstream costs a greyed-out pillar, never a hung request. |
+
+## 9d. The court-register signal source (ADR-0269 rule 2, #6646) — STRIDE supplement
+
+`CourtRegisterSignalSource` is declared as an outbound client edge for the INSOLVENCY and
+ENFORCEMENT suppression facts. **No upstream is configured in any environment, so no traffic
+crosses this boundary today** — the class exists to make the unconfigured state nameable, not to
+call anything. It is modelled here because the edge is now declared in code, and because the
+threat picture changes materially the day a register is procured.
+
+The defect it closes is not an exposure but an ambiguity. Both facts were previously hardcoded
+`false`, which is the identical value a genuinely consulted, empty register returns — so an empty
+INSOLVENCY set read as *no customer is insolvent* rather than *we never looked*, and the gap never
+reached the `complete` flag. On the two hardest facts in a hard suppression floor, the gate was
+therefore fail-**open** while reading as fail-closed.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **T**ampering / misleading | An unconfigured feed is read as a clean register, so a customer with an insolvency marker is offered credit | `CourtRegisterSignalState` has no default: `NOT_CONFIGURED`, `CLEAR` and `MARKER_PRESENT` are distinct values and every call site must state which it means. A regression test asserts an unconfigured register is not reported as clear. |
+| **R**epudiation | The bank cannot show whether a register was consulted for a given decision | `openbank_lending_court_register_feed_configured{signal}` is 0/1 per signal, and is named for whether the feed is *configured* — not for a findings count, which would need rewriting the day one is procured, and which cannot distinguish "no markers" from "no feed". |
+| **D**oS / availability (future) | Once a register is procured, an outage silently reverts the gate to the current permissive behaviour | The state is explicit, so an outage maps to `NOT_CONFIGURED` rather than to `CLEAR`. Whether that should suppress is a policy decision recorded in #6646 and deliberately unchanged here; the point of this slice is that it becomes a decision rather than an accident. |
+| **I**nformation disclosure (future) | Court-register queries reveal which customers the bank is assessing | No upstream exists, so nothing is disclosed today. A procured register puts customer identifiers on an external boundary and needs its own entry here before it is wired. |
+
+**Boot-time visibility:** the bean is `@Startup`, not plain `@ApplicationScoped`. A lazy bean's
+`init` gate does not run until first use, which for a rarely-exercised path can be never — the
+warning that the code cannot fire would itself never fire.
+
 ## 10. Change log
+
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or credit-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
+- **2026-08-21** — Trust-boundary change (ADR-0269 rule 5): `GET /api/v1/lending/intake/financial-health`,
+  a customer-facing read that composes the credit profile with the loan book. See section 9c. No
+  score and no eligibility; every pillar degrades to UNKNOWN independently, and an unreadable loan
+  book is deliberately distinguished from a customer with no loans.
+
+- **2026-08-21** — Trust-boundary change (ADR-0269 slice 3, #6215): two new outbound client edges
+  from the credit-offer gate — consent-service (`CREDIT_OFFERS`) and analytics-sink (the 360 credit
+  profile) — plus their `rest-client` configuration. See section 9b. Both fail closed on timeout or
+  error; neither can grant an offer on its own, because the hard-fact rules read lending's own book.
+
+- **2026-08-21** — Trust-boundary change (ADR-0269 slices 1-2): two new customer-edge-facing read
+  surfaces, `GET /api/v1/lending/intake/applications[/{id}]` and `POST /api/v1/lending/intake/quotes`.
+  See section 9a. Same caller and party-header controls as section 9; new risks are disclosure of
+  another party's credit history (closed by owner filtering plus a 404-not-403 answer) and
+  mis-disclosure of price (closed by server-only pricing through `Amortization`/`Aprc` and a
+  reason-coded 409 when the distress floor suppresses).
 
 - **2026-08-20** — Catalog-governed loan origination (#668). Adds the product-catalog OIDC read edge
   described in §2 item 9. The caller may select an offering, never a revision or a rate: the service
@@ -530,3 +639,11 @@ against `lending.intake.caller-principal`, which refuses every call when unset.
   Default OFF (`lending.intake.enabled=false`) and refuses everything while
   `lending.intake.caller-principal` is unset. No DB schema change; maker leg only, so the four-eyes
   disbursement control is untouched; rollback = revert the commit or leave the flag false.
+- **2026-08-20** — Compliance-pack operator detail. The existing authenticated
+  compliance-pack read endpoints now return the exact stored pack together with proposal/decision
+  audit metadata so the admin console can inspect what was activated instead of showing only a
+  hash. Authorization is unchanged (`ROLE_COMPLIANCE`/`ROLE_ADMIN` on the existing resource), no
+  new endpoint, trust boundary, persistence, or write path is introduced, and the response contains
+  the already-stored jurisdiction/product rule document rather than credentials or deployment
+  configuration. Integration tests cover both pending and active projections. Rollback: revert the
+  response projection and additive OpenAPI schema fields.

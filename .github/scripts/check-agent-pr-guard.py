@@ -174,7 +174,10 @@ def in_scope(author, is_bot, branch, cfg):
     return False, f"author `{author}` is a human account on a non-agent branch"
 
 
-def protected_reasons(files, cfg):
+NEW_COMPONENT_RE = re.compile(r"^(openbank-[^/]+)/version\.txt$")
+
+
+def protected_reasons(files, cfg, added=frozenset()):
     """Every protected-path clause this file list trips, as (clause, matched paths).
 
     Returns ALL of them rather than the first: a reason list that stops at the first hit
@@ -203,6 +206,24 @@ def protected_reasons(files, cfg):
     if authz:
         out.append(("authz-policy", authz))
 
+    # A BRAND-NEW released component (#6560). Every clause above is name-based: it matches
+    # changed paths against tokens derived from `money_path_services` + `extra_protected_tokens`,
+    # both hand-kept lists of services that already exist. A directory that is not on main
+    # cannot be in either list, so a PR introducing a whole new service — money-path or not —
+    # trips no clause and the guard returns "touches no protected path". The scope of the check
+    # is a list of the very thing it checks, which reads as PASSING when the list is short
+    # rather than as UNCHECKED.
+    #
+    # The test here is structural instead of nominal, and uses the repo's own definition:
+    # "a module is a released component IFF it has a version.txt" (CLAUDE.md rule 2). An
+    # ADDED `openbank-*/version.txt` is therefore exactly "this PR creates a new released
+    # component", with no list to keep. `added` comes from the GitHub files API `status`
+    # field, so a release-please bump of an EXISTING version.txt (status "modified") is not
+    # caught here — and release-please is out of scope anyway as declared automation.
+    new_component = sorted(f for f in files if f in added and NEW_COMPONENT_RE.match(f))
+    if new_component:
+        out.append(("new-released-component", new_component))
+
     gov_globs = cfg.get("governance_path_globs") or []
     gov = [f for f in files if any(fnmatch.fnmatch(f, g) for g in gov_globs)]
     if gov:
@@ -225,10 +246,15 @@ REASON_TEXT = {
         "changes governance sources or CI gate machinery — these decide what the whole fleet "
         "enforces."
     ),
+    "new-released-component": (
+        "creates a NEW released component (adds an openbank-*/version.txt). A new service has "
+        "no classification yet — it is in no money-path list, has no threat model and no "
+        "owner — so no clause above can speak for it. That is a human's call, not an agent's."
+    ),
 }
 
 
-def verdict(author, is_bot, branch, files, cfg):
+def verdict(author, is_bot, branch, files, cfg, added=frozenset()):
     """(exit_code, message). Raises Undetermined when it cannot decide."""
     scoped, why = in_scope(author, is_bot, branch, cfg)
     if not scoped:
@@ -237,7 +263,7 @@ def verdict(author, is_bot, branch, files, cfg):
         raise Undetermined(
             "the changed-file list is empty — an agent PR that changes nothing is not a clean verdict"
         )
-    hits = protected_reasons(files, cfg)
+    hits = protected_reasons(files, cfg, added)
     if not hits:
         return 0, f"in scope ({why}) and touches no protected path — {len(files)} file(s) checked"
     lines = [f"BLOCKED: this PR is agent-authored ({why}) and:"]
@@ -277,8 +303,10 @@ def fetch_pr(n):
     if not author or not branch:
         raise Undetermined(f"PR #{n}: could not read author/headRefName")
     pages = _gh(["api", f"repos/{REPO}/pulls/{n}/files?per_page=100", "--paginate", "--slurp"])
-    files = [f["filename"] for page in pages for f in page]
-    return author, is_bot, branch, files
+    flat = [f for page in pages for f in page]
+    files = [f["filename"] for f in flat]
+    added = frozenset(f["filename"] for f in flat if f.get("status") == "added")
+    return author, is_bot, branch, files, added
 
 
 def resolve_pr_number(explicit):
@@ -313,6 +341,7 @@ FIXTURE = {
         "openbank-libs/governance/*",
         ".github/gates/*",
         ".github/scripts/*",
+        ".github/agent-prompts/*",
     ],
     "_money_path_services": ["openbank-ledger-service", "openbank-balance-service"],
 }
@@ -357,6 +386,11 @@ def self_test():
             [".github/scripts/check-something.py"], 1, "governance sources",
         ),
         (
+            "an agent's own PROMPT is its program — it may not edit its mandate",
+            "openbank-agent-bot[bot]", True, "agent/x",
+            [".github/agent-prompts/issue-worker.md"], 1, "governance sources",
+        ),
+        (
             "docs ABOUT authz are NOT the control (#3888)",
             "openbank-agent-bot[bot]", True, "agent/x",
             ["docs/adr/0034-authz.md"], 0, "touches no protected path",
@@ -392,12 +426,52 @@ def self_test():
             "openbank-agent-bot[bot]", True, "agent/x",
             ["openbank-kyc-service/src/main/kotlin/A.kt"], 1, "money-path",
         ),
+        # ---- #6560: a WHOLE NEW service trips no name-based clause ---------------------
+        (
+            "a brand-new released component is blocked even though its name is in no list",
+            "openbank-agent-bot[bot]", True, "agent/x",
+            [
+                "openbank-referral-service/version.txt",
+                "openbank-referral-service/src/main/kotlin/Referral.kt",
+                "release-please-config.json",
+            ], 1, "NEW released component",
+            {"openbank-referral-service/version.txt"},
+        ),
+        (
+            # THE NEGATIVE CONTROL for the clause above. Same paths, same author, same
+            # branch — only `added` differs. Without the status discriminator this case
+            # would also go red, and the clause would be blocking every /bump instead of
+            # every new component. The two cases only pass together if `status` is what
+            # decides.
+            "an EXISTING component's version.txt bump is NOT a new component",
+            "openbank-agent-bot[bot]", True, "agent/x",
+            [
+                "openbank-referral-service/version.txt",
+                "openbank-referral-service/src/main/kotlin/Referral.kt",
+                "release-please-config.json",
+            ], 0, "touches no protected path",
+            frozenset(),
+        ),
+        (
+            # The measured #5979 file list, which returned exit 0 on origin/main.
+            "the #5979 shape: new service + release registry, no protected token anywhere",
+            "openbank-agent-bot[bot]", True, "feat/referral-mgm",
+            [
+                "openbank-referral-service/version.txt",
+                "openbank-referral-service/build.gradle.kts",
+                ".release-please-manifest.json",
+                "docs/threat-models/openbank-referral-service.md",
+            ], 1, "NEW released component",
+            {"openbank-referral-service/version.txt"},
+        ),
     ]
 
     failures = []
-    for name, author, is_bot, branch, files, want_code, want_sub in cases:
+    for case in cases:
+        name, author, is_bot, branch, files, want_code, want_sub = case[:7]
+        added = frozenset(case[7]) if len(case) > 7 else frozenset()
         try:
-            code, msg = verdict(author, is_bot, branch, files, dict(FIXTURE))
+            code, msg = verdict(author, is_bot, branch, files, dict(FIXTURE), added)
         except Undetermined as e:
             failures.append(f"{name}: raised Undetermined ({e})")
             continue
@@ -469,10 +543,42 @@ def main():
     ap = argparse.ArgumentParser(description="agent PR guard")
     ap.add_argument("--pr")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument(
+        "--paths", nargs="+", metavar="PATH",
+        help="classify a file list directly, with no PR: exit 1 if any path is protected. "
+             "For an agent deciding whether a change is in scope BEFORE writing it.",
+    )
     args = ap.parse_args()
 
     if args.self_test:
         return self_test()
+
+    # --paths: ask the gate instead of reasoning about it.
+    #
+    # The worker's own instructions tell it to discard an issue whose fix would land on a
+    # protected path. On 2026-08-24 it reasoned about that and got it wrong: it picked the
+    # party-service slice of #5679, having weighed `money_path_services` and overlooked
+    # `extra_protected_tokens`, where `party` sits. The PR (#6607) was red from its first
+    # check and could never merge — a whole run spent on work the gate was always going to
+    # refuse.
+    #
+    # A rule an agent must APPLY BY REASONING is a rule it can misread. This makes the same
+    # question answerable by running one command, before any code is written.
+    if args.paths:
+        try:
+            cfg = load_rules()
+        except Undetermined as e:
+            print(f"::error::agent-pr-guard --paths could not read the rules: {e}")
+            return 2
+        hits = protected_reasons(list(args.paths), cfg, frozenset(args.paths))
+        if not hits:
+            print(f"in scope: none of the {len(args.paths)} path(s) given are protected")
+            return 0
+        print("PROTECTED — an agent PR touching these will be refused by the gate:")
+        for clause, matched in hits:
+            print(f"  * {REASON_TEXT[clause]}")
+            print(f"    matched: {' '.join(sorted(matched)[:3])}")
+        return 1
 
     try:
         cfg = load_rules()
@@ -488,8 +594,8 @@ def main():
         if n is None:
             print("agent-pr-guard: no pull request in context — nothing to judge")
             return 0
-        author, is_bot, branch, files = fetch_pr(n)
-        code, msg = verdict(author, is_bot, branch, files, cfg)
+        author, is_bot, branch, files, added = fetch_pr(n)
+        code, msg = verdict(author, is_bot, branch, files, cfg, added)
     except Undetermined as e:
         # Third state: the verdict could not be computed. The floor must not then convert an
         # unreachable API into a lost-corpus red one layer up.

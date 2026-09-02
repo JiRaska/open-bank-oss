@@ -157,3 +157,42 @@ enum class OccurredAtSource {
      */
     INGEST,
 }
+
+/**
+ * Who decided the value of [AuditEntry.aggregateId] — the producer, or this consumer's inference
+ * chain (#6318).
+ *
+ * **Not persisted, for the same reason as [ActorProvenance] and NOT for the reason
+ * [AttributionSource] is.** `aggregate_id` does carry a sentinel (`"unknown"`), so ABSENT is
+ * already readable off the column; what a column could add is only the DECLARED/INFERRED split,
+ * and that split is derivable from the stored payload — `payload::jsonb ? 'aggregateId'` — because
+ * this table stores the producer's whole envelope alongside the extracted columns. A fifth
+ * `*_source` column would restate that at the cost of growing the chain-hashed record.
+ *
+ * What was genuinely unavailable is a TIME SERIES: nothing could alert on a producer that stops
+ * naming its resource, or on the inference chain quietly taking over a topic. See
+ * `openbank.audit.aggregate.id.provenance`.
+ */
+enum class AggregateIdProvenance {
+    /**
+     * The producer named the resource itself, in the envelope's own `aggregateId`. The strongest
+     * claim available, and the one [AttributionSource.EVENT] already represents for the sibling
+     * field — every Jackson-serialised `DomainEvent` puts this key on the wire.
+     */
+    DECLARED,
+
+    /**
+     * No usable envelope `aggregateId`; the value came from the ordered business-id chain
+     * (`accountId`, `partyId`, …). Sound where the payload has exactly one identifying id, and a
+     * guess where it has several — the chain takes the first it recognises, not the one the event
+     * is about.
+     */
+    INFERRED,
+
+    /**
+     * Neither: the row holds the `"unknown"` sentinel and is not joinable to any resource. Kept
+     * distinct from INFERRED so "the producer said nothing and we could not guess" cannot hide
+     * inside "we guessed" — the two need different fixes and only one of them is a producer bug.
+     */
+    ABSENT,
+}

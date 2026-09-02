@@ -1,0 +1,303 @@
+{
+  "consumer": {
+    "name": "openbank-customer-edge"
+  },
+  "interactions": [
+    {
+      "description": "POST an attributed customer reservation with trusted party identity",
+      "providerStates": [
+        {
+          "name": "a published offer contains the pact promo code for the pact product"
+        }
+      ],
+      "request": {
+        "body": {
+          "attributionRef": "22222222-2222-4222-8222-222222222222",
+          "code": "WELCOME10",
+          "productRef": "33333333-3333-4333-8333-333333333333"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "claim-pact-once",
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "POST",
+        "path": "/api/v1/customer-incentives/offers/44444444-4444-4444-8444-444444444444/reservations"
+      },
+      "response": {
+        "body": {
+          "attributionRef": "22222222-2222-4222-8222-222222222222",
+          "expiresAt": "2026-08-27T00:15:00Z",
+          "id": "55555555-5555-4555-8555-555555555555",
+          "offerRef": {
+            "id": "44444444-4444-4444-8444-444444444444",
+            "name": "WELCOME",
+            "version": 1
+          },
+          "productRef": "33333333-3333-4333-8333-333333333333",
+          "reservedAt": "2026-08-27T00:00:00Z",
+          "status": "RESERVED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.attributionRef": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.expiresAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.offerRef.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.offerRef.version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.reservedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "POST a trusted deterministic qualifying rejection",
+      "providerStates": [
+        {
+          "name": "an attributed reservation is reserved for deterministic release"
+        }
+      ],
+      "request": {
+        "body": {
+          "productRef": "33333333-3333-4333-8333-333333333333"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "open-pact-once",
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "POST",
+        "path": "/api/v1/customer-incentives/reservations/55555555-5555-4555-8555-555555555555/release"
+      },
+      "response": {
+        "body": {
+          "attributionRef": "22222222-2222-4222-8222-222222222222",
+          "expiresAt": "2026-08-28T00:00:00Z",
+          "id": "55555555-5555-4555-8555-555555555555",
+          "offerRef": {
+            "id": "44444444-4444-4444-8444-444444444444",
+            "name": "WELCOME",
+            "version": 1
+          },
+          "productRef": "33333333-3333-4333-8333-333333333333",
+          "reservedAt": "2026-08-27T00:00:00Z",
+          "status": "RELEASED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.attributionRef": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.expiresAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.offerRef.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.offerRef.version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.reservedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a trusted qualifying account outcome",
+      "providerStates": [
+        {
+          "name": "an attributed reservation is reserved for qualifying commit"
+        }
+      ],
+      "request": {
+        "body": {
+          "productRef": "33333333-3333-4333-8333-333333333333",
+          "qualifiedAt": "2026-08-27T03:00:00Z"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "open-pact-once",
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "POST",
+        "path": "/api/v1/customer-incentives/reservations/55555555-5555-4555-8555-555555555555/commit"
+      },
+      "response": {
+        "body": {
+          "attributionRef": "22222222-2222-4222-8222-222222222222",
+          "expiresAt": "2026-08-28T00:00:00Z",
+          "id": "55555555-5555-4555-8555-555555555555",
+          "offerRef": {
+            "id": "44444444-4444-4444-8444-444444444444",
+            "name": "WELCOME",
+            "version": 1
+          },
+          "productRef": "33333333-3333-4333-8333-333333333333",
+          "reservedAt": "2026-08-27T00:00:00Z",
+          "status": "COMMITTED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.attributionRef": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.expiresAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.offerRef.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.offerRef.version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.reservedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-incentive-service"
+  }
+}

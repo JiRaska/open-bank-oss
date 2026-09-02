@@ -10,7 +10,7 @@ describe('product catalog lifecycle action accessibility', () => {
     expect(page).toContain("aria-label={t('Zavřít detail produktu', 'Close product details')}")
     expect(page).toContain("aria-label={product.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}")
     expect(page).toContain('<button type="button"')
-    expect(page).toContain('onClick={() => handleToggleStatus(p)}')
+    expect(page).toContain('onClick={() => requestLifecycleChange(p)}')
     expect(page).toContain('disabled={p.status === \'ACTIVE\'}')
   })
 })

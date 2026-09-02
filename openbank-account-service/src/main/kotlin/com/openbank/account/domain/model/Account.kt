@@ -85,6 +85,7 @@ data class Account(
 enum class AccountType {
     CURRENT,
     SAVINGS,
+    TERM_DEPOSIT,
     NOSTRO,
     GL_ASSET,
     GL_LIABILITY,

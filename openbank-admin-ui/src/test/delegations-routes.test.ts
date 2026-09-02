@@ -23,6 +23,8 @@ function grant(id: string, status = 'ACTIVE') {
     resourceType: 'ACCOUNT',
     resourceId: RESOURCE,
     capabilities: ['ACCOUNT_READ_BALANCES'],
+    validFrom: '2026-01-01T00:00:00Z',
+    validTo: null,
     status,
   }
 }
@@ -36,6 +38,7 @@ beforeEach(() => {
   vi.mocked(auth).mockResolvedValue(SESSION as never)
 })
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -119,6 +122,111 @@ describe('GET /api/delegations/party/[partyId]', () => {
     const body = await (await call(PARTY)).json()
     expect(body.granted).toEqual([])
     expect(body.received).toEqual([])
+  })
+})
+
+describe('GET /api/delegations/effective-access/[partyId]', () => {
+  async function call(partyId: string) {
+    const { GET } = await import('@/app/api/delegations/effective-access/[partyId]/route')
+    return GET({} as never, { params: Promise.resolve({ partyId }) })
+  }
+
+  it('assembles owned resources, received grants and role presets from their authoritative services', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/accounts?')) return new Response(JSON.stringify({ data: [{ id: 'a1', accountNumber: '1234' }] }), { status: 200 })
+      if (url.includes(`/accounts/${RESOURCE}`)) return new Response(JSON.stringify({ id: RESOURCE, accountNumber: 'CZ1234567890', currencyCode: 'CZK' }), { status: 200 })
+      if (url.includes('/cards/party/')) return new Response(JSON.stringify([{ id: 'c1', maskedPan: '•••• 4321' }]), { status: 200 })
+      if (url.includes('/delegations/grantee/')) return new Response(JSON.stringify([grant('r1')]), { status: 200 })
+      return new Response(JSON.stringify([{ id: 'p1', name: 'Účetní', resourceType: 'ACCOUNT', capabilities: ['ACCOUNT_READ_BALANCES'] }]), { status: 200 })
+    }))
+
+    const response = await call(PARTY)
+    const body = await response.json()
+    expect(body.accounts[0].id).toBe('a1')
+    expect(body.cards[0].id).toBe('c1')
+    expect(body.grants[0].id).toBe('r1')
+    expect(Number.isNaN(Date.parse(body.evaluatedAt))).toBe(false)
+    expect(body.nextChangeAt).toBeNull()
+    expect(body.refreshAfterMs).toBeNull()
+    expect(body.presets[0].name).toBe('Účetní')
+    expect(body.resourceDetails[0]).toMatchObject({ key: `ACCOUNT:${RESOURCE}`, state: 'ok', detail: { accountNumber: 'CZ1234567890' } })
+    expect(body.sources).toEqual({ accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' })
+    expect(fetchCalls()).toHaveLength(5)
+  })
+
+  it('uses the BFF clock and resolves details only inside a valid interval', async () => {
+    const futureResource = '018f4a3c-1b2d-7e00-9a11-000000000004'
+    const expiredResource = '018f4a3c-1b2d-7e00-9a11-000000000005'
+    const malformedResource = '018f4a3c-1b2d-7e00-9a11-000000000006'
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/delegations/grantee/')) {
+        return new Response(JSON.stringify([
+          grant('effective'),
+          { ...grant('future'), resourceId: futureResource, validFrom: '2099-01-01T00:00:00Z' },
+          { ...grant('expired'), resourceId: expiredResource, validFrom: '2000-01-01T00:00:00Z', validTo: '2001-01-01T00:00:00Z' },
+          { ...grant('malformed'), resourceId: malformedResource, validFrom: '' },
+        ]), { status: 200 })
+      }
+      return new Response('[]', { status: 200 })
+    }))
+
+    const body = await (await call(PARTY)).json()
+    expect(body.grants.map((item: { id: string }) => item.id)).toEqual(['effective', 'future', 'expired', 'malformed'])
+    expect(body.nextChangeAt).toBe('2099-01-01T00:00:00.000Z')
+    expect(body.refreshAfterMs).toBeGreaterThan(0)
+    const resolvedResources = fetchCalls().map(([url]) => String(url)).filter(url => /\/api\/v1\/accounts\/[0-9a-f-]+$/.test(url))
+    expect(resolvedResources).toEqual([expect.stringContaining(`/api/v1/accounts/${RESOURCE}`)])
+  })
+
+  it('requests an immediate refresh when a validity boundary passes during detail resolution', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime('2026-09-01T12:00:00Z')
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/delegations/grantee/')) {
+        return new Response(JSON.stringify([{ ...grant('ending'), validTo: '2026-09-01T12:00:01Z' }]), { status: 200 })
+      }
+      if (url.includes(`/accounts/${RESOURCE}`)) {
+        vi.setSystemTime('2026-09-01T12:00:02Z')
+        return new Response(JSON.stringify({ id: RESOURCE }), { status: 200 })
+      }
+      return new Response('[]', { status: 200 })
+    }))
+
+    const body = await (await call(PARTY)).json()
+    expect(body.evaluatedAt).toBe('2026-09-01T12:00:00.000Z')
+    expect(body.nextChangeAt).toBe('2026-09-01T12:00:01.000Z')
+    expect(body.refreshAfterMs).toBe(0)
+  })
+
+  it('keeps successful ownership visible when another source is forbidden', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/cards/party/')) return new Response('{}', { status: 403 })
+      if (url.includes('/accounts?')) return new Response(JSON.stringify([{ id: 'a1' }]), { status: 200 })
+      return new Response('[]', { status: 200 })
+    }))
+
+    const body = await (await call(PARTY)).json()
+    expect(body.accounts).toEqual([{ id: 'a1' }])
+    expect(body.cards).toEqual([])
+    expect(body.sources.cards).toBe('forbidden')
+    expect(body.sources.accounts).toBe('ok')
+  })
+
+  it('keeps the grant visible when its concrete resource detail is forbidden', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/delegations/grantee/')) return new Response(JSON.stringify([grant('r1')]), { status: 200 })
+      if (url.includes(`/accounts/${RESOURCE}`)) return new Response('{}', { status: 403 })
+      return new Response('[]', { status: 200 })
+    }))
+
+    const body = await (await call(PARTY)).json()
+    expect(body.grants).toHaveLength(1)
+    expect(body.resourceDetails[0]).toMatchObject({ key: `ACCOUNT:${RESOURCE}`, state: 'forbidden' })
   })
 })
 

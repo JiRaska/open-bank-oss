@@ -60,6 +60,24 @@ class PushMetricsAdapterTest {
     }
 
     @Test
+    fun `fallback metric says routed, keeps its closed policy labels, and exposes activation`() {
+        adapter.recordFallbackEnabled(true)
+        adapter.recordFallbackRouted(
+            NotificationTemplate.ACCOUNT_FROZEN,
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationOutcome.REROUTED,
+        )
+
+        val routed = registry.find("openbank.notification.fallback.routed").counter()
+        assertThat(routed?.count()).isEqualTo(1.0)
+        assertThat(routed?.id?.getTag("from_channel")).isEqualTo("PUSH")
+        assertThat(routed?.id?.getTag("to_channel")).isEqualTo("EMAIL")
+        assertThat(routed?.id?.getTag("outcome")).isEqualTo("REROUTED")
+        assertThat(registry.find("openbank.notification.push.fallback.enabled").gauge()?.value()).isEqualTo(1.0)
+    }
+
+    @Test
     fun `the template tag distinguishes one template's failures from another's`() {
         adapter.recordFanOut(NotificationTemplate.SCA_APPROVAL, NotificationOutcome.FAILED, 0)
         adapter.recordFanOut(NotificationTemplate.TRANSACTION_COMPLETED, NotificationOutcome.FAILED, 0)

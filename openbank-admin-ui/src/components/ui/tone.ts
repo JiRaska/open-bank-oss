@@ -56,6 +56,16 @@ export const TONE_TEXT_CLASS: Record<Tone, string> = {
   accent: 'tone-text-accent',
 }
 
+/** Semantic left-border classes for status-bearing cards and panels. */
+export const TONE_BORDER_LEFT_CLASS: Record<Tone, string> = {
+  success: 'tone-border-left-success',
+  warning: 'tone-border-left-warning',
+  danger: 'tone-border-left-danger',
+  info: 'tone-border-left-info',
+  neutral: 'tone-border-left-neutral',
+  accent: 'tone-border-left-accent',
+}
+
 export const DOT_CLASS: Record<Tone, string> = {
   success: 'status-dot status-dot-green',
   warning: 'status-dot status-dot-yellow',
@@ -88,10 +98,12 @@ const TONE_BY_STATUS: Record<string, Tone> = {
   RESOLVED: 'success',
   SENT: 'success',
   SETTLED: 'success',
+  UP: 'success',
   VERIFIED: 'success',
 
   // In-flight / needs attention but not wrong
   DEGRADED: 'warning',
+  DOWN: 'danger',
   DRAFT: 'warning',
   IN_PROGRESS: 'warning',
   PENDING: 'warning',
@@ -126,8 +138,10 @@ const TONE_BY_STATUS: Record<string, Tone> = {
   // withdrawn for cause). Those pages must pass an explicit `tone` to StatusBadge when they migrate
   // — see its `tone` prop. Do not "fix" this map to match one domain; that just moves the conflict.
   CANCELLED: 'neutral',
+  ARCHIVED: 'neutral',
   CLOSED: 'neutral',
   CLEAN: 'neutral',
+  INACTIVE: 'neutral',
   DISABLED: 'neutral',
   EXPIRED: 'neutral',
   MERGED: 'neutral',
@@ -135,6 +149,9 @@ const TONE_BY_STATUS: Record<string, Tone> = {
   SUPERSEDED: 'neutral',
   SUPPRESSED: 'neutral',
   UNKNOWN: 'neutral',
+
+  // Retained in the catalog for auditability, but intentionally not offered to customers.
+  DEPRECATED: 'danger',
 
   // Severity scales, which share the vocabulary
   HIGH: 'danger',

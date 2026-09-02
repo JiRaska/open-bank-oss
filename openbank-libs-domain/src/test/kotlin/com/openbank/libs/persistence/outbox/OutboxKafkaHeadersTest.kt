@@ -46,4 +46,18 @@ class OutboxKafkaHeadersTest {
         assertThat(headers[OutboxKafkaHeaders.HEADER_EVENT_ID])
             .isEqualTo(headers[OutboxKafkaHeaders.HEADER_IDEMPOTENCY_KEY])
     }
+
+    @Test
+    fun `synthetic entry carries the durable taint header`() {
+        val headers = OutboxKafkaHeaders.headersFor(entry().copy(synthetic = true))
+
+        assertThat(headers).containsEntry(OutboxKafkaHeaders.HEADER_SYNTHETIC, "true")
+    }
+
+    @Test
+    fun `real entry does not carry a synthetic header`() {
+        val headers = OutboxKafkaHeaders.headersFor(entry())
+
+        assertThat(headers).doesNotContainKey(OutboxKafkaHeaders.HEADER_SYNTHETIC)
+    }
 }

@@ -52,6 +52,11 @@ MANIFEST = ".github/gates/gates.yaml"
 
 # A gate with no repo corpus to count. Stated, not inferred.
 NO_CORPUS = {
+    # SELF-TEST SUITES: the gate's `run:` IS a `--self-test`/unit-test invocation, so its subjects
+    # are in-script fixtures, not repo files. Audited 2026-09-01 by RUNNING all 19 and reading each
+    # `run:` — every one below exits 0 offline with no AWS/gh credentials, and the four that name
+    # `gh`/`aws`/`curl` stub them inside the self-test (ensure-ecr-repository.sh even validates its
+    # own stub first). No repo corpus to floor.
     "agent-review-proof-falsifiable",
     "agent-review-scope-falsifiable",
     "auto-deploy-reconcile-probe-unit-test",
@@ -61,14 +66,43 @@ NO_CORPUS = {
     "co-deploy-set-derivation-unit-test",
     "ensure-ecr-repository",
     "gate-runner-self-test",
-    "governance-script-unit-tests",
-    "libs-change-dependents",
-    "pact-version-probe-fail-closed-unit-test",
     "pact-provider-version-proof-unit-test",
+    "pact-version-probe-fail-closed-unit-test",
     "pact-version-tree-equivalence-unit-test",
     "record-deployment-version-resolver",
     "runtime-conformance-comparators",
     "supersede-deploy-prs-ancestry",
+
+    # SELF-TEST SUITES THAT DO READ THE REAL TREE, and are fail-closed about it. These are the
+    # honest shape: the self-test carries its own known-positive, so a collapsed corpus goes RED
+    # instead of passing vacuously. A `min_subjects:` floor would be redundant with a mechanism
+    # that is already stronger than a floor.
+    #   libs-change-dependents: asserts fx-service IS detected as a libs-temporal consumer.
+    #   runtime-conformance-comparators (above): gained the same positive control on 2026-09-01
+    #     after this audit measured its whole self-test passing from an EMPTY directory.
+    "libs-change-dependents",
+
+    # GLOB-DISCOVERED TEST CORPUS, fail-closed by the runtime. `unittest discover` finds 15 files /
+    # 176 tests today (156 + 20, confirmed in CI run 33444342095 on ubuntu-24.04). Zero discovered
+    # tests exits 5 ("NO TESTS RAN") on Python >= 3.12 -- measured on python:3.12-slim, the CI
+    # image's interpreter -- and run-gates.py executes `run:` under `bash -euo pipefail`, so either
+    # discover collapsing to zero fails the gate. What a floor WOULD add is coverage of partial
+    # narrowing (176 -> 20 is currently green); left unfloored deliberately, since a test count
+    # drifts upward normally and floors here catch collapse, not drift.
+    "governance-script-unit-tests",
+
+    # VALIDATES ONE NAMED FILE, fail-closed. Not a test suite: it reads
+    # .github/workflows/_service-ci.yml and greps its `build:` job. Its corpus is exactly 1, and a
+    # `build:` job it cannot locate is returned as a finding ("missing build job fails closed"),
+    # which is the collapse case a floor would otherwise cover.
+    "pr-build-cloud-credentials",
+
+    # DIFF-SCOPED: its corpus is the PR's own changed files, so zero is the ordinary case (most
+    # PRs touch no openapi.yaml) and a floor would fail every one of them. It is not exempt from
+    # the underlying question -- it prints SUBJECTS= including zero, so "no specs changed" and
+    # "did not look" stay distinguishable in the log. This is the shape to copy for any future
+    # entry here that prints nothing at all about what it looked at.
+    "openapi-version-not-taken",
 }
 
 # Gates that examine a real corpus and do not yet report how much of it they found. This list
@@ -96,7 +130,6 @@ DEBT = {
     "db-migration-gate": DEBT_MARKER,
     "deploy-drift-declaration": DEBT_MARKER,
     "dockerfile-runtime-only": DEBT_MARKER,
-    "domain-purity-gate": DEBT_MARKER,
     "dotted-mp-messaging-key-guard": DEBT_MARKER,
     "enforcement-reachability": DEBT_MARKER,
     "eu-ai-act-inventory-drift": DEBT_MARKER,
@@ -107,7 +140,6 @@ DEBT = {
     "extension-bean-config": DEBT_MARKER,
     "external-feed-declaration-drift": DEBT_MARKER,
     "feature-flag-governance": DEBT_MARKER,
-    "flyway-default-datasource": DEBT_MARKER,
     "gate-graduation-guard": DEBT_MARKER,
     "gate-script-registration": DEBT_MARKER,
     "gate-selftest-declaration": DEBT_MARKER,
@@ -122,11 +154,9 @@ DEBT = {
     "incluster-hostname-resolution": DEBT_MARKER,
     "kafka-acl-coverage": DEBT_MARKER,
     "kafka-cert-reader-grant": DEBT_MARKER,
-    "kafka-dotted-key-ratchet": DEBT_MARKER,
     "kafka-topic-existence": DEBT_MARKER,
     "label-description-length": DEBT_MARKER,
     "libs-annotations-implemented": DEBT_MARKER,
-    "license-header-consistency": DEBT_MARKER,
     "litellm-model-costs": DEBT_MARKER,
     "loki-rule-load-test": DEBT_MARKER,
     "main-red-watch-declaration": DEBT_MARKER,
@@ -138,18 +168,14 @@ DEBT = {
     "nat-ami-pinned": DEBT_MARKER,
     "network-policy-code-edges": DEBT_MARKER,
     "no-dead-code-service-principal-rego-rule": DEBT_MARKER,
-    "no-runblocking-in-a-scheduled-body": DEBT_MARKER,
-    "nonnull-jaxrs-param-ratchet": DEBT_MARKER,
     "object-store-blobs-migration": DEBT_MARKER,
     "oidc-client-secret-wiring": DEBT_MARKER,
     "oidc-secret-convention": DEBT_MARKER,
     "opa-bundle-apply-size": DEBT_MARKER,
     "opa-bundle-parses": DEBT_MARKER,
     "openapi-route-conformance": DEBT_MARKER,
-    "openapi-server-port": DEBT_MARKER,
     "openssf-gold-evidence": DEBT_MARKER,
     "operator-write-naming": DEBT_MARKER,
-    "outbox-has-writer": DEBT_MARKER,
     "pact-provider-replay-coverage": DEBT_MARKER,
     "pacticipant-matches-module": DEBT_MARKER,
     "pr-file-overlap": DEBT_MARKER,
@@ -160,10 +186,8 @@ DEBT = {
     "realm-template-importable": DEBT_MARKER,
     "release-registration-consistency": DEBT_MARKER,
     "release-scope-mismatch-gate": DEBT_MARKER,
-    "route-exports": DEBT_MARKER,
     "scheduled-trigger-emitted": DEBT_MARKER,
     "scheduler-cron-syntax": DEBT_MARKER,
-    "scheduler-exercised-in-tests": DEBT_MARKER,
     "scheduler-liveness-adoption": DEBT_MARKER,
     "schema-compat-gate": DEBT_MARKER,
     "service-runbook-drift": DEBT_MARKER,

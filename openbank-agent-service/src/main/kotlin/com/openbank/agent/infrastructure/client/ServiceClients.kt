@@ -6,6 +6,8 @@
 package com.openbank.agent.infrastructure.client
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.libs.web.SyntheticTaintClientFilter
+import com.openbank.libs.web.SyntheticTaintExternalBoundary
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
@@ -23,6 +25,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 // client (default quarkus.oidc-client) and attaches it as Authorization: Bearer on every call,
 // so the assistant's read tools reach real data as a least-privilege service principal.
 @RegisterRestClient(configKey = "account-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
@@ -47,6 +50,7 @@ interface AccountServiceClient {
 }
 
 @RegisterRestClient(configKey = "transaction-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
@@ -67,6 +71,7 @@ interface TransactionServiceClient {
 }
 
 @RegisterRestClient(configKey = "balance-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
@@ -83,6 +88,7 @@ interface BalanceServiceClient {
 }
 
 @RegisterRestClient(configKey = "consent-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
@@ -98,6 +104,7 @@ interface ConsentServiceClient {
 // token, so propagate the openbank-services bearer like every other client here. The MCP
 // list_products/get_product/get_product_fees tools would otherwise 401 once #743 deploys.
 @RegisterRestClient(configKey = "product-catalog")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
@@ -126,6 +133,7 @@ interface ProductCatalogClient {
  * same OIDC filter, and the interface exposes no mutation method.
  */
 @RegisterRestClient(configKey = "product-catalog")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v2")
 @Produces(MediaType.APPLICATION_JSON)
@@ -138,6 +146,7 @@ interface GenericCatalogReadClient {
 }
 
 @RegisterRestClient(configKey = "ledger-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
@@ -162,6 +171,7 @@ interface LedgerServiceClient {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @RegisterRestClient(configKey = "aml-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/aml")
 @Produces(MediaType.APPLICATION_JSON)
@@ -183,6 +193,7 @@ interface AmlServiceClient {
 }
 
 @RegisterRestClient(configKey = "sanctions-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/sanctions")
 @Produces(MediaType.APPLICATION_JSON)
@@ -202,6 +213,7 @@ interface SanctionsServiceClient {
 }
 
 @RegisterRestClient(configKey = "fx-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/fx")
 @Produces(MediaType.APPLICATION_JSON)
@@ -222,6 +234,7 @@ interface FxServiceClient {
 }
 
 @RegisterRestClient(configKey = "clearing-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/clearing")
 @Produces(MediaType.APPLICATION_JSON)
@@ -246,6 +259,7 @@ interface ClearingServiceClient {
 }
 
 @RegisterRestClient(configKey = "interest-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/interest")
 @Produces(MediaType.APPLICATION_JSON)
@@ -274,6 +288,7 @@ interface InterestServiceClient {
 }
 
 @RegisterRestClient(configKey = "dispute-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/disputes")
 @Produces(MediaType.APPLICATION_JSON)
@@ -297,6 +312,7 @@ interface DisputeServiceClient {
 }
 
 @RegisterRestClient(configKey = "sepa-instant-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/sepa-instant")
 @Produces(MediaType.APPLICATION_JSON)
@@ -328,6 +344,7 @@ interface SepaInstantServiceClient {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @RegisterRestClient(configKey = "prometheus")
+@SyntheticTaintExternalBoundary("Prometheus is an observability read endpoint, not a banking service edge")
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
 interface PrometheusClient {
@@ -347,6 +364,7 @@ interface PrometheusClient {
 }
 
 @RegisterRestClient(configKey = "loki")
+@SyntheticTaintExternalBoundary("Loki is an observability read endpoint, not a banking service edge")
 @Path("/loki/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
 interface LokiClient {
@@ -363,6 +381,7 @@ interface LokiClient {
 }
 
 @RegisterRestClient(configKey = "alertmanager")
+@SyntheticTaintExternalBoundary("Alertmanager is an observability read endpoint, not a banking service edge")
 @Path("/api/v2")
 @Produces(MediaType.APPLICATION_JSON)
 interface AlertmanagerClient {

@@ -23,11 +23,13 @@ export default function DisputesPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
-  const { data, loading, unavailable, waking } = useServiceResource<Dispute[]>(
+  const { data, loading, unavailable, waking, reload } = useServiceResource<Dispute[]>(
     svcUrl('dispute-service', '/api/v1/disputes'),
     { select: (raw) => (Array.isArray(raw) ? (raw as Dispute[]) : ((raw as { disputes?: Dispute[] }).disputes ?? [])) },
   )
   const disputes = data ?? []
+  const hasSnapshot = data !== null
+  const showingRetainedSnapshot = unavailable !== null && hasSnapshot
 
   const filtered = disputes.filter(d =>
     d.referenceNumber?.toLowerCase().includes(search.toLowerCase()) ||
@@ -57,21 +59,37 @@ export default function DisputesPage() {
           title={t('Reklamace & Spory', 'Disputes & Complaints')}
           subtitle={t('Správa sporů — chargeback · SLA 45 dní · PSD2 čl. 73', 'Dispute management — chargeback · SLA 45 days · PSD2 Art. 73')}
           icon={<MessageSquareWarning size={18} aria-hidden="true" />}
-          actions={<ServiceStatusBadge
-            label="dispute-service :8135"
-            loading={loading}
-            waking={waking}
-            unavailable={unavailable}
-            copy={{
-              up: t('dispute-service běží', 'dispute-service is up'),
-              idle: t('dispute-service spí (scale-to-zero), probouzí se…', 'dispute-service idle (scaled to zero), waking…'),
-              down: t('dispute-service neodpovídá', 'dispute-service is not responding'),
-              checking: t('Zjišťuji stav služby…', 'Checking service…'),
-            }}
-          />}
+          actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ServiceStatusBadge
+              label="dispute-service :8135"
+              loading={loading}
+              waking={waking}
+              unavailable={unavailable}
+              copy={{
+                up: t('dispute-service běží', 'dispute-service is up'),
+                idle: t('dispute-service spí (scale-to-zero), probouzí se…', 'dispute-service idle (scaled to zero), waking…'),
+                down: t('dispute-service neodpovídá', 'dispute-service is not responding'),
+                checking: t('Zjišťuji stav služby…', 'Checking service…'),
+              }}
+            />
+            <button type="button" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit seznam sporů', 'Refresh disputes')} className="btn btn-secondary btn-sm">
+              <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+            </button>
+          </div>}
         />
 
-        {slaBreached.length > 0 && (
+        {showingRetainedSnapshot && <div role="status" aria-live="polite" style={{ marginBottom: 20 }}>
+          <DataUnavailable kind={unavailable.kind} service={t('Dispute-service', 'Dispute-service')} feature={t('Aktualizace sporů', 'Dispute refresh')} lang={language} dense />
+          <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+            {t('Zobrazen je poslední úspěšný snapshot; spory i SLA se od té doby mohly změnit.', 'Showing the last successful snapshot; disputes and SLA status may have changed since then.')}
+          </p>
+        </div>}
+
+        {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {t('Aktualizuji spory; poslední snapshot zůstává dostupný.', 'Refreshing disputes; the last snapshot remains available.')}
+        </p>}
+
+        {hasSnapshot && slaBreached.length > 0 && (
           <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
             background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
             display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -82,7 +100,7 @@ export default function DisputesPage() {
           </div>
         )}
 
-        <div className="grid-4" style={{ marginBottom: '24px' }}>
+        {hasSnapshot && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
             { label: t('Spory celkem', 'Total disputes'), value: disputes.length, icon: <MessageSquareWarning size={16} />, tone: undefined },
             { label: t('Otevřené', 'Open'), value: open.length, icon: <Clock size={16} />, tone: 'warning' },
@@ -91,7 +109,7 @@ export default function DisputesPage() {
           ].map(k => (
             <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone as Tone | undefined} />
           ))}
-        </div>
+        </div>}
 
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -100,11 +118,11 @@ export default function DisputesPage() {
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat referenci, typ, status…', 'Search reference, type, status…')} aria-label={t('Hledat spory', 'Search disputes')} className="input" style={{ paddingLeft: '30px', height: '32px' }} />
             </div>
           </div>
-          {loading ? (
+          {loading && !hasSnapshot ? (
             <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} aria-hidden="true" className="animate-spin" style={{ marginBottom: '8px', margin: '0 auto', display: 'block' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
-          ) : unavailable ? (
+          ) : unavailable && !hasSnapshot ? (
             <DataUnavailable kind={unavailable.kind} service={t('Dispute-service', 'Dispute-service')} feature={t('Spory', 'Disputes')} lang={language} />
           ) : filtered.length === 0 ? (
             <DataUnavailable kind="no_data" feature={t('Spory', 'Disputes')} lang={language}

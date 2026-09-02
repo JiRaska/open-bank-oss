@@ -114,6 +114,7 @@ class LendingOutboxRepositoryImpl(private val clock: Clock) :
 
     private fun LendingOutboxMessage.toEntity() = LendingOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload

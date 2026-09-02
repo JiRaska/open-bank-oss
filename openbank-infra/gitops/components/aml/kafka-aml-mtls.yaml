@@ -1,7 +1,7 @@
 # Strimzi mTLS identity + ACLs for aml-service (ADR-0137 #2665 Tier 2c).
 #
 # aml-service publishes openbank.aml.events (outbox egress, ADR-0050) and
-# consumes openbank.party.events to auto-open onboarding screenings (ADR-0073).
+# consumes openbank.party.events to auto-open onboarding screenings (ADR-0267 §2).
 #
 # Identity model (ADR-0137): one KafkaUser = one client cert = one mTLS
 # principal for ALL Kafka traffic from this service. The KafkaUser ACLs list
@@ -36,7 +36,7 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
-      # Onboarding trigger: consume PARTY_CREATED to auto-open screenings (ADR-0073)
+      # Onboarding trigger: consume PARTY_CREATED to auto-open screenings (ADR-0267 §2)
       - resource:
           type: topic
           name: openbank.party.events

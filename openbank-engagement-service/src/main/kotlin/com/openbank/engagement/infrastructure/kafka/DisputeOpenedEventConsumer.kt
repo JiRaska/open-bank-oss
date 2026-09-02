@@ -7,6 +7,7 @@ package com.openbank.engagement.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.AdverseStateRepository
 import com.openbank.engagement.domain.model.AdverseState
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
@@ -47,7 +48,7 @@ class DisputeOpenedEventConsumer(
     @Incoming("dispute-events-in")
     suspend fun consume(payload: String) {
         val signal = parse(payload) ?: return
-        withBoundedRetry(log, "dispute exclusion for party ${signal.partyId} (${signal.eventType})") {
+        EventRetry.withRetry(log, "dispute exclusion for party ${signal.partyId} (${signal.eventType})", null) {
             if (signal.opened) {
                 adverseState.setActive(signal.partyId, AdverseState.DISPUTE_OPENED, Instant.now())
                 log.infof("ADR-0220 D3.5: excluded party %s from targeting (dispute.opened)", signal.partyId)

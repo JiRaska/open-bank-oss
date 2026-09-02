@@ -92,7 +92,8 @@ export default function SddPage() {
       </div>}
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {unavailable ? <DataUnavailable kind={unavailable.kind} service="sdd-service" feature={t('Mandáty inkas', 'Direct debit mandates')} lang={language} dense /> : (
+        {unavailable && <DataUnavailable kind={unavailable.kind} service="sdd-service" feature={t('Mandáty inkas', 'Direct debit mandates')} lang={language} dense={rows.length > 0} />}
+        {(!unavailable || rows.length > 0) && (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>

@@ -4,11 +4,13 @@
 
 package com.openbank.domestic.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import java.math.BigDecimal
 import java.util.UUID
@@ -21,6 +23,7 @@ import java.util.UUID
  * duplicated Vert.x context, causing 401s (same root cause as ADR-0104 BUG #3 for SEPA).
  */
 @RegisterRestClient(configKey = "transaction-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/transactions")
 interface TransactionServiceClient {
 

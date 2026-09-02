@@ -22,6 +22,7 @@ export {
   BADGE_CLASS,
   DOT_CLASS,
   SWATCH_CLASS,
+  TONE_BORDER_LEFT_CLASS,
   TONE_TEXT_CLASS,
   type Tone,
   statusBadgeClass,

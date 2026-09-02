@@ -79,6 +79,15 @@ while IFS= read -r pin; do
   tag="${pin##*:sandbox-}"
   [ -n "$svc" ] && [ -n "$tag" ] || continue
 
+  # Manual evidence refreshes rebuild an already-tested commit under ECR's immutable
+  # tag policy, carrying a provenance-only `-run<GitHub run id>` suffix. Resolve the
+  # commit part only; an arbitrary suffix remains a placeholder and is re-driven.
+  if [[ "$tag" =~ ^([0-9a-f]{8,40})(-run[1-9][0-9]*)?$ ]]; then
+    commit="${BASH_REMATCH[1]}"
+  else
+    commit=""
+  fi
+
   # Restrict to the buildable fleet when an allowlist was supplied.
   if [ -n "$ALLOWLIST" ] && ! grep -qxF "$svc" <<< "$ALLOWLIST"; then
     continue
@@ -86,15 +95,15 @@ while IFS= read -r pin; do
 
   # A pin that is not a resolvable commit is a placeholder (never really deployed) -> stale,
   # sortkey 0 so placeholders re-drive before any real-but-old pin.
-  if ! git rev-parse -q --verify "${tag}^{commit}" >/dev/null 2>&1; then
+  if [ -z "$commit" ] || ! git rev-parse -q --verify "${commit}^{commit}" >/dev/null 2>&1; then
     lagging+=("0	$svc")
     continue
   fi
 
   # Any build-relevant commit on this checkout's HEAD since the pinned image was built?
-  if [ -n "$(git log --format=%H "${tag}..HEAD" -- \
+  if [ -n "$(git log --format=%H "${commit}..HEAD" -- \
               "${svc}/src/main" "${svc}/build.gradle.kts" 2>/dev/null)" ]; then
-    epoch="$(git log -1 --format=%ct "${tag}^{commit}" 2>/dev/null || echo 0)"
+    epoch="$(git log -1 --format=%ct "${commit}^{commit}" 2>/dev/null || echo 0)"
     lagging+=("${epoch}	$svc")
   fi
 done < <(

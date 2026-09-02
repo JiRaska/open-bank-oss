@@ -77,7 +77,26 @@ kover {
                     // CnbResource, FxWorkflowImpl, the sanctions/AML/fraud/ČNB REST-client adapters, the
                     // outbox dispatcher, and the daily ingestion scheduler gained real unit tests. Kept a
                     // few points below the measured figure for headroom, never below the prior floor.
-                    minValue = 65
+                    //
+                    // LOWERED 65 -> 60 on 2026-08-22, owner decision, and this is a RATCHET EXCEPTION
+                    // against the convention in openbank.quarkus-service.gradle.kts ("floors ... only
+                    // ever go up"). Nothing enforces that convention in code; it is being broken
+                    // deliberately, not by accident.
+                    //
+                    // Why: this number is not fx's coverage. Kover measures com/openbank/libs here too
+                    // (fx's own report contains both packages), and fx's tests cover a lot of libs well,
+                    // so the figure is an fx+libs aggregate that sits ABOVE fx alone. Measured on #5719:
+                    //     libs included  60.504200%   <- what this floor is compared against
+                    //     libs excluded  30.905700%   <- fx's own line coverage
+                    // #5719 added 13 uncovered lines to libs-runtime's EventRetry and touched no fx
+                    // file, which moved the aggregate from over 65 to 60.5 and reddened fx's build on
+                    // an unrelated PR.
+                    //
+                    // So this buys room, it does not fix anything: the next libs-runtime addition moves
+                    // the number again, and 60 is no more principled than 65 was. The real fix is to
+                    // stop a dependent's floor being a function of shared-library size — issue #6384.
+                    // Raising this back is welcome the moment fx's own coverage justifies it.
+                    minValue = 60
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

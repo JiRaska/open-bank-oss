@@ -6,17 +6,17 @@ sequenceDiagram
     participant KC as Keycloak :8080
     participant US as Upstream Service<br/>host.docker.internal:81xx
 
-    C->>K: HTTP request<br/>Authorization: Bearer &lt;jwt&gt;<br/>X-Request-Id, X-Correlation-Id
+    C->>K: HTTP request<br/>Authorization: Bearer #lt;jwt#gt;<br/>X-Request-Id, X-Correlation-Id
 
     note over K: Route match (kong/kong.yml)<br/>strip_path: false → full path forwarded<br/>No JWT inspection (passthrough mode)
 
-    alt path matches /api/v1/<resource>
+    alt path matches /api/v1/#lt;resource#gt;
         K->>US: Proxy request verbatim<br/>retries: 2, connect: 5s, r/w: 30s
         US->>KC: OIDC token validation<br/>(Quarkus SmallRye JWT)
         KC-->>US: 200 OK / 401 Unauthorized
         US-->>K: Upstream response
         K-->>C: Response (status, headers, body)
-    else path matches /health/<service>/*
+    else path matches /health/#lt;service#gt;/*
         note over K: strip_path: true<br/>/health/account/ready → /q/health/ready
         K->>US: GET /q/health/ready
         US-->>K: 200 OK {"status":"UP"}

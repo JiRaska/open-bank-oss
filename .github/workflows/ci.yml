@@ -114,7 +114,7 @@ jobs:
       # `pretest` still regenerates governance.json for the suite below.
 
       - name: Test (unit + integration)
-        run: npm run test
+        run: npm run test -- --reporter=default --reporter=junit --outputFile.junit=build/test-results/test/vitest.xml
         # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
         # health-route integration tests all run here via Vitest.
 
@@ -137,6 +137,7 @@ jobs:
         continue-on-error: true
 
       - name: E2E tests (Playwright)
+        id: browser_e2e
         run: npm run test:e2e
         # ADR-0076 Phase 2: Playwright E2E for /services docs-coverage page.
         # Mocks all BFF endpoints via page.route() — no live services required.
@@ -151,12 +152,44 @@ jobs:
           NEXTAUTH_URL: "http://localhost:3001"
           NEXTAUTH_SECRET: "ci-e2e-secret"
           OPENBANK_REPO_ROOT: "${{ github.workspace }}"
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
+
+      - name: Build Admin UI Test Intelligence envelope
+        if: always()
+        continue-on-error: true
+        run: |
+          DIAGNOSTIC_ARGS=()
+          if [[ "${{ steps.browser_e2e.outcome }}" == "failure" ]]; then
+            DIAGNOSTIC_ARGS+=(--browser-report-dir playwright-report)
+          fi
+          python3 ../.github/scripts/collect-test-run-evidence.py \
+            --service . --component openbank-admin-ui --out build/test-intelligence/run.json \
+            "${DIAGNOSTIC_ARGS[@]}"
+
+      - name: Retain Admin UI test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-run-openbank-admin-ui-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-admin-ui/build/test-intelligence/run.json
+          retention-days: 30
+
+      - name: Publish latest Admin UI test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-openbank-admin-ui
+          path: |
+            openbank-admin-ui/build/test-intelligence/run.json
+            openbank-admin-ui/build/test-results/**/*.xml
+          retention-days: 14
+          overwrite: true
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
+        if: steps.browser_e2e.outcome == 'failure'
         with:
-          name: playwright-report
+          name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}
           path: openbank-admin-ui/playwright-report/
           retention-days: 7
 

@@ -5,6 +5,7 @@
 package com.openbank.finrep.contract
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.finrep.application.port.out.ClosedPeriodDto
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.infrastructure.client.LedgerAdapter
@@ -71,25 +72,25 @@ class TemplateWireFormatTest {
      */
     private val trialBalance = listOf(
         TrialBalanceLineDto(
-            code = "1100-CASH-CZK",
+            code = "1100",
             accountType = "ASSET",
             net = BigDecimal("150000.00"),
             currency = "CZK",
         ),
         TrialBalanceLineDto(
-            code = "2100-DEPOSITS-CZK",
+            code = "2100",
             accountType = "LIABILITY",
             net = BigDecimal("-125000.00"),
             currency = "CZK",
         ),
         TrialBalanceLineDto(
-            code = "4100-FEE-INCOME-CZK",
+            code = "4100",
             accountType = "INCOME",
             net = BigDecimal("-28000.00"),
             currency = "CZK",
         ),
         TrialBalanceLineDto(
-            code = "5100-STAFF-COST-CZK",
+            code = "5100",
             accountType = "EXPENSE",
             net = BigDecimal("3000.00"),
             currency = "CZK",
@@ -104,7 +105,26 @@ class TemplateWireFormatTest {
             // Ledger's own verdict for this fixture, passed explicitly: it ties out (issue #6011).
             ledgerReportsBalanced = true,
         )
+        coEvery { ledger.listClosedPeriods() } returns listOf(
+            ClosedPeriodDto("MONTH", LocalDate.of(2026, 6, 30), "FROZEN", "LINES_V1"),
+            ClosedPeriodDto("MONTH", LocalDate.of(2026, 5, 31), "DRAFT", "LINES_V1"),
+        )
         QuarkusMock.installMockForType(ledger, LedgerAdapter::class.java)
+    }
+
+    @Test
+    fun `reporting periods expose only immutable evidence`() {
+        val body = given()
+            .accept("application/json")
+            .get("/api/v1/finrep/periods")
+            .then()
+            .statusCode(200)
+            .extract().body().asString()
+        val json = mapper.readValue(body, Map::class.java)
+
+        assertThat(json.keys).containsExactlyInAnyOrder("latest", "periods")
+        assertThat(json["latest"]).isEqualTo("2026-06-30")
+        assertThat(json["periods"]).isEqualTo(listOf("2026-06-30"))
     }
 
     private fun getJson(path: String, asOf: LocalDate): Map<*, *> {
@@ -122,25 +142,64 @@ class TemplateWireFormatTest {
     fun `the FINREP template wire format matches the published openapi schema`() {
         val json = getJson("/api/v1/finrep/templates/F01.01", LocalDate.of(2026, 6, 30))
 
-        assertThat(json.keys).containsExactlyInAnyOrder("templateId", "period", "cells", "isBalanced", "balanceVerdict")
+        assertThat(json.keys).containsExactlyInAnyOrder(
+            "templateId",
+            "period",
+            "cells",
+            "dataGaps",
+            "hasDataGaps",
+            "isBalanced",
+            "balanceVerdict",
+        )
         assertThat(json["templateId"]).isEqualTo("F01.01")
         assertThat(json["period"]).isEqualTo("2026-06-30")
         assertThat(json["isBalanced"]).isEqualTo(true)
         // The verdict is served as the ENUM NAME, which is what `openapi.yaml` documents (#6011).
         assertThat(json["balanceVerdict"]).isEqualTo("AGREED_BALANCED")
+        assertThat(json["hasDataGaps"]).isEqualTo(false)
+
+        @Suppress("UNCHECKED_CAST")
+        val gaps = json["dataGaps"] as List<Map<*, *>>
+        assertThat(gaps).isEmpty()
 
         @Suppress("UNCHECKED_CAST")
         val cells = json["cells"] as List<Map<*, *>>
-        assertThat(cells).hasSize(3)
+        assertThat(cells).hasSize(6)
         assertThat(cells.first().keys).containsExactlyInAnyOrder("rowRef", "colRef", "value", "currency")
-        assertThat(cells.map { it["rowRef"] }).containsExactly("r010", "r380", "r490")
+        assertThat(cells.map { it["rowRef"] }).contains("r0010", "r0040", "r0181", "r0183", "r0360", "r0380")
+        assertThat(cells.map { it["colRef"] }).containsOnly("c0010")
         assertThat(cells.first()["currency"]).isEqualTo("CZK")
-        // r010 total assets, r380 total liabilities, r490 total equity — proves the cells are
-        // really derived from the ledger trial balance, not a fixed skeleton. `value` is a JSON
+        // Official F 01.01 r0380 total assets — proves the cell is really derived from the ledger
+        // trial balance, not a fixed skeleton. `value` is a JSON
         // NUMBER (schema `type: number`), so compare numerically — an untyped parse of `150000.00`
         // yields a Double whose toString drops the scale.
-        assertThat(cells.map { (it["value"] as Number).toDouble() })
-            .containsExactly(150_000.00, 125_000.00, 25_000.00)
+        assertThat((cells.single { it["rowRef"] == "r0380" }["value"] as Number).toDouble())
+            .isEqualTo(150_000.00)
+    }
+
+    @Test
+    fun `the XBRL CSV preflight is ready when the governed mapping is complete and the trial balance agrees`() {
+        val json = getJson("/api/v1/finrep/templates/F01.01/xbrl-csv/preflight", LocalDate.of(2026, 6, 30))
+
+        assertThat(json.keys).containsExactlyInAnyOrder(
+            "templateId",
+            "period",
+            "reportingFrameworkVersion",
+            "dpmVersion",
+            "taxonomyVersion",
+            "state",
+            "blockers",
+        )
+        assertThat(json["templateId"]).isEqualTo("F01.01")
+        assertThat(json["period"]).isEqualTo("2026-06-30")
+        assertThat(json["reportingFrameworkVersion"]).isEqualTo("4.2")
+        assertThat(json["dpmVersion"]).isEqualTo("4.2.1")
+        assertThat(json["taxonomyVersion"]).isEqualTo("4.2.0.0")
+        assertThat(json["state"]).isEqualTo("READY_FOR_RENDERING")
+
+        @Suppress("UNCHECKED_CAST")
+        val blockers = json["blockers"] as List<Map<*, *>>
+        assertThat(blockers).isEmpty()
     }
 
     @Test
@@ -150,7 +209,7 @@ class TemplateWireFormatTest {
         assertThat(json.keys).containsExactlyInAnyOrder("templateId", "period", "cells", "hasDataGaps")
         assertThat(json["templateId"]).isEqualTo("C_01.00")
         assertThat(json["period"]).isEqualTo("2026-06-30")
-        // No EQUITY line in the stubbed trial balance — every capital row is a flagged zero.
+        // No recognised capital line in the stubbed trial balance — every capital row is a flagged zero.
         assertThat(json["hasDataGaps"]).isEqualTo(true)
 
         @Suppress("UNCHECKED_CAST")
@@ -161,7 +220,7 @@ class TemplateWireFormatTest {
         assertThat(cells.first()["rowRef"]).isEqualTo("r010")
         assertThat(cells.first()["label"]).isEqualTo("OWN FUNDS")
         assertThat(cells.first()["isDataGap"]).isEqualTo(true)
-        assertThat(cells.first()["gapReason"].toString()).contains("No capital-structure GL accounts")
+        assertThat(cells.first()["gapReason"].toString()).contains("no recognised regulatory-capital source")
     }
 
     @Test

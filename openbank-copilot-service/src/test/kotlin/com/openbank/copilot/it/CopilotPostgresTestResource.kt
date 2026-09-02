@@ -4,6 +4,7 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.copilot.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.containers.PostgreSQLContainer
 
@@ -20,6 +21,7 @@ class CopilotPostgresTestResource : QuarkusTestResourceLifecycleManager {
             .withUsername("openbank")
             .withPassword("openbank")
         postgres.start()
+        TestInfrastructureEvidence.record("postgres", PGVECTOR_IMAGE.asCanonicalNameString(), "started")
         return mapOf(
             "quarkus.datasource.reactive.url" to
                 "postgresql://${postgres.host}:${postgres.firstMappedPort}/${postgres.databaseName}",
@@ -33,7 +35,10 @@ class CopilotPostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        if (::postgres.isInitialized) postgres.stop()
+        if (::postgres.isInitialized) {
+            postgres.stop()
+            TestInfrastructureEvidence.record("postgres", PGVECTOR_IMAGE.asCanonicalNameString(), "stopped")
+        }
     }
 }
 

@@ -35,7 +35,7 @@
 #   pentest:       { date: 2026-05-01, ttl_days: 365, by: ext,  ref: schemathesis-fleet }
 
 ledger:
-  restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }
+  restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: docs/bcp/dr-test-log.md }
   pentest:       { date: 2026-08-18, ttl_days: 21, by: ci-zap-baseline, ref: https://github.com/JiRaska/open-bank-oss/actions/runs/32173390301 }
 
 consent:

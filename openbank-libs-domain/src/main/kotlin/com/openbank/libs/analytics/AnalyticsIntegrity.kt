@@ -53,6 +53,7 @@ object AnalyticsIntegrity {
         append(envelope.occurredAt.toEpochMilli()).append('|')
         append(envelope.sourceService).append('|')
         append(envelope.schemaVersion).append('|')
+        append(envelope.synthetic).append('|')
         append(canonicalPayload(envelope.payload))
     }
 

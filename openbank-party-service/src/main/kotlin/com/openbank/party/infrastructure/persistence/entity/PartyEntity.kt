@@ -18,6 +18,9 @@ class PartyEntity : PanacheEntity() {
     @Column(name = "party_type", nullable = false)
     lateinit var partyType: String
 
+    @Column(name = "classification", nullable = false)
+    lateinit var classification: String
+
     @Column(name = "status", nullable = false)
     lateinit var status: String
 

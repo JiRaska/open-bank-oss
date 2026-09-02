@@ -232,6 +232,33 @@ A pull request is **ready to merge** only when ALL apply:
   - CVE check (no Critical / High open vulnerabilities).
   - Reasonable source review (no obfuscated or suspicious patterns).
 
+### Real names in tracked files
+
+A real person's name can appear in a tracked file two different ways, and they look identical to a
+reader — only one of them is a problem. Ask two questions before naming a real person anywhere in
+this repository:
+
+1. Is this row **sourced reference data** (drawn from a public register, with an external source
+   identifier attached), or an **invented fixture**?
+2. Does the classification carry an **implication about the person** beyond what the source itself
+   asserts?
+
+**Sourced reference data is fine, and expected.** A sanctions/PEP screening list seeded from a
+public register (OFAC, EU, UN, or a national register) legitimately names real, public figures —
+that is the correct content for that kind of seed data. Each such row must carry its source
+identifier (e.g. a Wikidata id) so the classification is traceable to the source rather than
+invented, and so the identifier's presence gives a reviewer (or a future check) a usable signal to
+tell it apart from a fixture.
+
+**An invented fixture must not use a real person's name**, especially not in a context — like an
+adverse-media / negative-news test — where the classification implies something about that person
+the source data does not assert. Use an obviously fictional name instead (`Adverse Subject Zero`,
+`Jan Novák`), never a real living or recently deceased person, even a public figure.
+
+A blanket "no real names" rule would be wrong — it would forbid legitimate sourced reference data.
+The source identifier is the discriminator: sourced rows carry one, invented fixtures never should
+need one because they never claim to be real.
+
 ## What NOT to do
 
 - Don't bypass CI (`[skip ci]` is forbidden on `main`).

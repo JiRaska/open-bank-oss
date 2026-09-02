@@ -22,21 +22,17 @@ import java.time.format.DateTimeFormatter
  * through the CDI proxy so the MicroProfile Fault Tolerance interceptors actually fire.
  */
 @ApplicationScoped
-class CnbRateProviderAdapter(
-    @RestClient private val client: CnbFeedClient
-) : CnbRateProvider {
+class CnbRateProviderAdapter(@RestClient private val client: CnbFeedClient) : CnbRateProvider {
 
     @Inject
     lateinit var self: CnbRateProviderAdapter
 
-    override suspend fun fetchFixing(date: LocalDate?): String =
-        self.fetchWithResilience(date?.format(FEED_DATE))
+    override suspend fun fetchFixing(date: LocalDate?): String = self.fetchWithResilience(date?.format(FEED_DATE))
 
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
     @Retry(maxRetries = 3, delay = 500, jitter = 200, retryOn = [Exception::class])
     @Timeout(8_000)
-    open suspend fun fetchWithResilience(date: String?): String =
-        client.daily(date).awaitSuspending()
+    open suspend fun fetchWithResilience(date: String?): String = client.daily(date).awaitSuspending()
 
     companion object {
         private val FEED_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")

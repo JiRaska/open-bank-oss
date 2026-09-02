@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Every ```mermaid block in the tree must PARSE with the mermaid the admin-ui renders with.
+# Every mermaid diagram in the tree must PARSE with the mermaid the admin-ui renders with:
+# both ```mermaid blocks inside .md files AND standalone .mmd files.
 #
 # WHY THIS EXISTS
 #   The Service Docs viewer renders the per-service docs client-side with mermaid. A block
@@ -91,7 +92,7 @@ const files = [];
 (function walk(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) { if (!SKIP.has(e.name)) walk(path.join(dir, e.name)); }
-    else if (e.isFile() && e.name.endsWith('.md')) files.push(path.join(dir, e.name));
+    else if (e.isFile() && (e.name.endsWith('.md') || e.name.endsWith('.mmd'))) files.push(path.join(dir, e.name));
   }
 })(scanRoot);
 
@@ -99,12 +100,16 @@ let blocks = 0;
 const failures = [];
 for (const f of files.sort()) {
   const src = fs.readFileSync(f, 'utf8');
-  // Fenced mermaid blocks only. An indented or ~~~-fenced block is not what the viewer
-  // renders, so widening this would flag text the page never parses.
-  for (const [i, m] of [...src.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)].entries()) {
+  // A .mmd file IS one diagram — the whole file, no fence to strip. A .md file contributes
+  // its fenced ```mermaid blocks only: an indented or ~~~-fenced block is not what the viewer
+  // renders, so widening THAT would flag text the page never parses.
+  const found = f.endsWith('.mmd')
+    ? [src]
+    : [...src.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)].map((m) => m[1]);
+  for (const [i, body] of found.entries()) {
     blocks++;
     try {
-      await mermaid.parse(m[1]);
+      await mermaid.parse(body);
     } catch (e) {
       const [first, second = ''] = String(e?.message ?? e).split('\n');
       failures.push({ file: path.relative(scanRoot, f), block: i, msg: `${first} ${second}`.trim() });
@@ -115,21 +120,27 @@ for (const f of files.sort()) {
 // A gate whose subject set is empty must not read as a pass: no mermaid blocks means the
 // walk is broken or pointed at the wrong tree, not that every diagram is fine (#2165).
 if (blocks === 0) {
-  console.error(`::error::[mermaid-parses] found NO mermaid blocks under ${scanRoot} — the scan, not the tree, is what this proves.`);
+  console.error(`::error::[mermaid-parses] found NO mermaid diagrams under ${scanRoot} — the scan, not the tree, is what this proves.`);
   process.exit(1);
 }
 
 for (const f of failures) {
   console.error(`::error file=${f.file}::[mermaid-parses] block #${f.block} does not parse: ${f.msg}`);
 }
-console.log(`[mermaid-parses] mermaid ${mermaidPkg.version}: ${failures.length} failing / ${blocks} blocks in ${files.length} markdown files`);
+const mmdCount = files.filter((f) => f.endsWith('.mmd')).length;
+console.log(`[mermaid-parses] mermaid ${mermaidPkg.version}: ${failures.length} failing / ${blocks} diagram(s) in ${files.length} file(s) (${mmdCount} standalone .mmd)`);
 // The subject count run-gates.py checks against min_subjects: a gate that examined nothing
 // passes everything (#4339).
 console.log(`SUBJECTS=${blocks}`);
 if (failures.length > 0) {
   console.error('[mermaid-parses] These render as a red "Mermaid render failed" box in admin-ui Service Docs.');
   console.error('[mermaid-parses] Common causes: a bare `@` in an unquoted node label (quote the label);');
-  console.error('[mermaid-parses] a literal `;` in a sequenceDiagram message or Note (write `#59;`).');
+  console.error('[mermaid-parses] a literal `;` in a sequenceDiagram message or Note (write `#59;`);');
+  console.error('[mermaid-parses] an HTML entity such as &lt; in a message (write `#lt;`); a participant');
+  console.error('[mermaid-parses] alias that is a keyword (PAR lexes as `par`); a bare `%%` comment line');
+  console.error('[mermaid-parses] with no content; a key marker like PK_FK (write `PK,FK`) — see #6496.');
+  console.error('[mermaid-parses] The caret in a parse error points at the END of the construct, not the');
+  console.error('[mermaid-parses] offending token: bisect by mutating the file, not by reading the column.');
   process.exit(1);
 }
 NODE
@@ -150,6 +161,10 @@ if [ "${1:-}" = "--self-test" ]; then
 
   write_doc() {  # $1 filename, $2 body of the mermaid block
     { echo '```mermaid'; printf '%s\n' "$2"; echo '```'; } > "$tmp/$1"
+  }
+
+  write_mmd() {  # $1 filename, $2 whole-file diagram — no fence, that IS the difference
+    printf '%s\n' "$2" > "$tmp/$1"
   }
 
   probe() {  # $1 label, $2 expected rc, $3 must-appear substring ("" = none)
@@ -188,13 +203,38 @@ if [ "${1:-}" = "--self-test" ]; then
   A->>B: status=ACTIVE; outbox written'
   probe "a literal ; in a sequence message is flagged, by file" 1 "good.md"
 
+  # --- standalone .mmd coverage (#6495) ---------------------------------------------------
+  # 114 .mmd files were outside this gate's walk until #6495, and 7 of them did not parse
+  # (#6496). The extension list is the whole subject set here, so it needs a fixture in BOTH
+  # directions — a gate that only ever sees .md fixtures cannot notice that .mmd was dropped
+  # from the walk again.
   rm -f "$tmp"/*.md
-  probe "an empty tree FAILS rather than reporting a vacuous pass" 1 "found NO mermaid blocks"
+  write_mmd good.mmd 'graph TB
+  a[Sink]
+  b[Source]
+  b --> a'
+  probe "a standalone .mmd is scanned and parses" 0 ""
+
+  write_mmd good.mmd 'sequenceDiagram
+  participant PAR as party-service
+  PAR->>K: party.events'
+  probe "a broken .mmd is flagged, by file" 1 "good.mmd"
+
+  # The whole file is the diagram: a .mmd wrapped in a fence is NOT valid, and treating it
+  # like a .md would silently skip it (no fence match => zero blocks => vacuous pass).
+  write_mmd fenced.mmd '```mermaid
+  graph TB
+  a --> b
+  ```'
+  probe "a .mmd is read whole, not searched for fences" 1 "fenced.mmd"
+
+  rm -f "$tmp"/*.md "$tmp"/*.mmd
+  probe "an empty tree FAILS rather than reporting a vacuous pass" 1 "found NO mermaid diagrams"
 
   if [ "$fails" -ne 0 ]; then
     echo "[mermaid-parses] SELF-TEST FAILED ($fails)"; exit 1
   fi
-  echo "[mermaid-parses] self-test passed: both defect shapes are detected and the empty case fails closed."
+  echo "[mermaid-parses] self-test passed: both defect shapes are detected, .mmd files are in scope, and the empty case fails closed."
   exit 0
 fi
 

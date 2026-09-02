@@ -13,6 +13,7 @@ import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.lending.DelinquencyBucket
 import com.openbank.libs.lending.EclHorizon
 import com.openbank.libs.lending.Ifrs9Stage
+import com.openbank.libs.lending.origination.CreditProductKind
 import com.openbank.libs.lending.origination.OriginationState
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -128,6 +129,12 @@ data class LoanApplication(
     val decidedAt: OffsetDateTime? = null,
     val jurisdiction: String? = null,
     val productType: String? = null,
+    /**
+     * ADR-0269 rule 3: which of the three credit shapes this application is, and therefore which
+     * steps the customer walks. Defaults to UNSECURED — the only intake route that exists today —
+     * so an existing caller keeps the behaviour it already had.
+     */
+    val productKind: CreditProductKind = CreditProductKind.UNSECURED,
     val packVersion: Int? = null,
     val verifiedIncomeMonthly: Money? = null,
     val existingDebtServiceMonthly: Money? = null,

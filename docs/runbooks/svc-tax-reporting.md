@@ -43,7 +43,7 @@ triaging an incident that starts on `tax-reporting`.
 
 ## Health & probes
 
-- Readiness: `GET :8152/q/health/ready` · Liveness: `GET :8152/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `tax-reporting`); dashboards in Grafana.
 - Logs: `kubectl logs -n tax-reporting deploy/tax-reporting-service -f`, or Loki
   `{namespace="tax-reporting"}`.
@@ -51,7 +51,7 @@ triaging an incident that starts on `tax-reporting`.
 ## Routine operations
 
 - **Restart:** `kubectl rollout restart deploy/tax-reporting-service -n tax-reporting` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/tax-reporting-service -n tax-reporting --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale deploy/tax-reporting-service -n tax-reporting --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

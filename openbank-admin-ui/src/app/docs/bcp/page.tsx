@@ -323,9 +323,12 @@ export default function BcpPage() {
           )}
           <PrintDocumentButton />
           <button
+            type="button"
             className="btn"
             onClick={fetchHealth}
             disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit stav BCP', 'Refresh BCP status')}
             style={{
               display: 'flex', alignItems: 'center', gap: '6px',
               padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)',
@@ -333,7 +336,7 @@ export default function BcpPage() {
               color: 'var(--text-primary)',
             }}
           >
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}

@@ -20,7 +20,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, CreditCard, RefreshCw, Search, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
@@ -36,6 +36,7 @@ import {
 } from '@/lib/cards/issue'
 import { formatMajor, formatMinor, minorToMajorString, parseMajorToMinor } from '@/lib/cards/money'
 import { useCardOperations } from '@/lib/cards/useCardOperations'
+import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 import { CardOperationFeedback } from './CardOperationFeedback'
 
 const SEARCH_LIMIT = 10
@@ -106,6 +107,7 @@ function Row({ label, value, mono }: { label: string; value: React.ReactNode; mo
 export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; onIssued: (card: Card) => void }) {
   const { t, language } = useLanguage()
   const ops = useCardOperations()
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   const [step, setStep] = useState<IssueStep>('party')
   const [draft, setDraft] = useState<IssueDraft>(initialDraft)
@@ -129,10 +131,11 @@ export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; on
   const [entitlementsUnknown, setEntitlementsUnknown] = useState(false)
   const [resolveNonce, setResolveNonce] = useState(0)
 
-  // Step 4 — the idempotency key for THIS attempt, generated once and reused on
-  // every retry so a dropped response replays the same card rather than minting
-  // a second one.
-  const [idempotencyKey, setIdempotencyKey] = useState('')
+  // Step 4 — refs update synchronously, before React can render the button disabled.
+  // Keep one key for this attempt so a dropped response replays the same card rather
+  // than minting a second one, and reject a second click in the same event turn.
+  const idempotencyKey = useRef<string | null>(null)
+  const issuingInFlight = useRef(false)
 
   const [dailyText, setDailyText] = useState('')
   const [monthlyText, setMonthlyText] = useState('')
@@ -294,10 +297,15 @@ export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; on
   const submit = async () => {
     const body = issueRequestBody(draft)
     if (!body) return
-    const key = idempotencyKey || crypto.randomUUID()
-    if (!idempotencyKey) setIdempotencyKey(key)
-    const issued = await ops.issueCard(body, key)
-    if (issued?.id) onIssued(issued)
+    if (issuingInFlight.current) return
+    issuingInFlight.current = true
+    try {
+      const key = idempotencyKey.current ??= crypto.randomUUID()
+      const issued = await ops.issueCard(body, key)
+      if (issued?.id) onIssued(issued)
+    } finally {
+      issuingInFlight.current = false
+    }
   }
 
   const stepTitle: Record<IssueStep, string> = {
@@ -312,10 +320,15 @@ export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; on
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={t('Vydat kartu', 'Issue a card')}
-      onKeyDown={e => { if (e.key === 'Escape' && !busy) onClose() }}
+      aria-busy={busy}
+      onKeyDown={e => {
+        if (e.key === 'Escape' && !busy) onClose()
+        trapDialogFocus(e, dialogRef.current)
+      }}
       style={{
         position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(15,23,42,0.45)',
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 24px', overflowY: 'auto',
@@ -326,12 +339,12 @@ export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; on
         <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
-              <CreditCard size={16} style={{ color: 'var(--accent)' }} />
+              <CreditCard size={16} aria-hidden="true" style={{ color: 'var(--accent)' }} />
               <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Vydat kartu', 'Issue a card')}</span>
             </div>
-            <button onClick={onClose} disabled={busy} aria-label={t('Zavřít', 'Close')}
+            <button type="button" onClick={onClose} disabled={busy} aria-label={t('Zavřít', 'Close')}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 0, lineHeight: 1 }}>
-              <X size={16} />
+              <X size={16} aria-hidden="true" />
             </button>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
@@ -497,8 +510,8 @@ export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; on
                     )}</span>
                   </div>
                   <div>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setResolveNonce(n => n + 1)}>
-                      <RefreshCw size={12} /> {t('Zkusit znovu', 'Try again')}
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setResolveNonce(n => n + 1)}>
+                      <RefreshCw size={12} aria-hidden="true" /> {t('Zkusit znovu', 'Try again')}
                     </button>
                   </div>
                 </div>
@@ -635,19 +648,19 @@ export function IssueCardDialog({ onClose, onIssued }: { onClose: () => void; on
 
         {/* footer */}
         <div style={{ padding: '14px 22px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-          <button className="btn btn-ghost btn-sm" disabled={busy || step === 'party'} onClick={() => go(prevStep(step))}>
-            <ArrowLeft size={12} /> {t('Zpět', 'Back')}
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busy || step === 'party'} onClick={() => go(prevStep(step))}>
+            <ArrowLeft size={12} aria-hidden="true" /> {t('Zpět', 'Back')}
           </button>
           {step === 'review' ? (
-            <button className="btn btn-primary btn-sm" disabled={busy || !canContinue} onClick={() => void submit()}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !canContinue} aria-busy={busy} onClick={() => void submit()}>
               {busy
-                ? <RefreshCw size={12} style={{ animation: 'spin 0.8s linear infinite' }} />
-                : <CreditCard size={12} />}
+                ? <RefreshCw size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} />
+                : <CreditCard size={12} aria-hidden="true" />}
               {t('Vydat kartu', 'Issue the card')}
             </button>
           ) : (
-            <button className="btn btn-primary btn-sm" disabled={busy || !canContinue} onClick={() => go(nextStep(step))}>
-              {t('Pokračovat', 'Continue')} <ArrowRight size={12} />
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !canContinue} onClick={() => go(nextStep(step))}>
+              {t('Pokračovat', 'Continue')} <ArrowRight size={12} aria-hidden="true" />
             </button>
           )}
         </div>

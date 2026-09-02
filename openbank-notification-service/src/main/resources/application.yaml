@@ -149,6 +149,17 @@ mp:
         # but left broken the same way if not moved out too.
         topic: openbank.notification.requests
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # #5745 (sweep of #5698): NotificationConsumer.consume now RETHROWS a processing failure
+        # instead of acking it. SmallRye's DEFAULT failure-strategy is `fail`, which STOPS the
+        # channel — without this line the rethrow trades silent data loss for a wedged consumer
+        # that stops every notification, not only the failed one. `dead-letter-queue` is what
+        # makes the fix's KDoc true by effect rather than by assertion (mirrors party-events-in
+        # below).
+        #
+        # The DLQ TOPIC NAME is set in the gitops msg-override ConfigMap, not here: the key is
+        # `dead-letter-queue.topic`, a dotted leaf key, and SmallRye's YAML source would register
+        # it quoted and never read it (issue #686).
+        failure-strategy: dead-letter-queue
       party-events-in:
         connector: smallrye-kafka
         # client.id / group.id / auto.offset.reset: same dotted-key YAML bug as above —
@@ -279,6 +290,10 @@ openbank:
   # from Vault via ExternalSecret (never in git). Only anonymized, allow-listed
   # oversight signals egress — see com.openbank.notification.application.OversightWebhook.
   notification:
+    push-fallback:
+      # #4363: a reviewed policy exists, but e-mail fallback is off until a separate GitOps
+      # activation proves a real transport and address-quality gate. Never treat this as live.
+      enabled: ${PUSH_FALLBACK_ENABLED:false}
     webhook:
       slack:
         enabled: ${SLACK_WEBHOOK_ENABLED:false}

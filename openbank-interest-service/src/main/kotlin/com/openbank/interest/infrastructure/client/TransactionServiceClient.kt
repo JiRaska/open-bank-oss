@@ -4,6 +4,7 @@
 
 package com.openbank.interest.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.POST
@@ -22,6 +23,7 @@ import java.util.UUID
  * as sdd-service's `TransactionServiceClient`.
  */
 @RegisterRestClient(configKey = "transaction-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/transactions")
 interface TransactionServiceClient {

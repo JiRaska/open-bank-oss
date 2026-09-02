@@ -18,7 +18,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { CaseRuntimeTimeline, CaseRuntimeTopology } from '@/components/agent/CaseRuntimeViews'
 import type { RuntimeEvidenceView } from '@/components/agent/CaseRuntimeViews'
 
-type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED' | 'SHADOW_RECORDED'
+type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED' | 'SHADOW_RECORDED' | 'POLICY_DECISION' | 'SIGNAL_INVOKED' | 'SIGNAL_CONSUMED' | 'CONTRIBUTION_PERSISTED'
 
 interface ThreadEntry {
   type: EntryType
@@ -33,6 +33,9 @@ interface ThreadEntry {
   proposalType?: string
   shadow?: boolean
   tokensUsed?: number
+  signalId?: string
+  capability?: string
+  rolloutId?: string
   runtimeEvidence: RuntimeEvidenceView
 }
 
@@ -293,6 +296,24 @@ export default function IaopsCaseThreadPage() {
                     {!shadow && <Link href="/approvals" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'none' }}>
                       {t('Procházet HITL frontu', 'Browse the HITL queue')}
                     </Link>}
+                  </div>
+                )
+              }
+              if (entry.type === 'POLICY_DECISION' || entry.type === 'SIGNAL_INVOKED' || entry.type === 'SIGNAL_CONSUMED' || entry.type === 'CONTRIBUTION_PERSISTED') {
+                const denied = entry.runtimeEvidence.stage === 'DENIED'
+                return (
+                  <div key={index} style={{ padding: '12px 16px', borderRadius: '12px', background: denied ? 'var(--danger-bg)' : 'var(--info-bg)', border: `1px solid ${denied ? 'var(--danger)' : 'var(--border)'}` }}>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {denied ? <TriangleAlert size={13} style={{ color: 'var(--danger)' }} /> : <CircleDot size={13} style={{ color: 'var(--blue)' }} />}
+                      <strong style={{ fontSize: '11px', color: denied ? 'var(--danger)' : 'var(--text-primary)' }}>{entry.type}</strong>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-secondary)' }}>{entry.actor ?? '—'}</span>
+                      {entry.capability && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--accent-text)' }}>{entry.capability}</span>}
+                      <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-tertiary)' }}>{fmt(entry.atEpochMs)}</span>
+                    </div>
+                    <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-tertiary)' }}>
+                      {entry.signalId && <>signal {entry.signalId}</>}{entry.signalId && entry.rolloutId && ' · '}{entry.rolloutId && <>rollout {entry.rolloutId}</>}
+                    </div>
+                    {entry.summary && <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-secondary)' }}>{entry.summary}</p>}
                   </div>
                 )
               }

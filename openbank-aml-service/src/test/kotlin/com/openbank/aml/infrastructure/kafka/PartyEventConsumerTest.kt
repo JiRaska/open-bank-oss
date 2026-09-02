@@ -14,6 +14,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.util.UUID
 
 /**
@@ -22,6 +23,8 @@ import java.util.UUID
  * The consumer is tested in pure unit style (no Quarkus container) following the same pattern
  * as [com.openbank.aml.application.usecase.AmlCaseServiceTest].
  */
+private class TransientDbFailure : RuntimeException("DB unavailable")
+
 class PartyEventConsumerTest {
 
     private lateinit var amlUseCase: AmlCaseUseCase
@@ -68,14 +71,17 @@ class PartyEventConsumerTest {
     }
 
     @Test
-    fun `PARTY_ERASED repository failure is caught and message is acked`(): Unit = runBlocking {
+    fun `PARTY_ERASED repository failure is RETHROWN so the connector dead-letters`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { amlCaseRepository.anonymizeByPartyId(partyId) } throws RuntimeException("DB unavailable")
+        coEvery { amlCaseRepository.anonymizeByPartyId(partyId) } throws TransientDbFailure()
 
-        // Must not throw — poison-pill protection requires the method to return normally
-        consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
+        // Replaces a test that asserted the opposite ("message is acked"). Acking a failed erasure
+        // leaves the PII in place while the log records the erasure as done (#5698).
+        assertThrows<TransientDbFailure> {
+            runBlocking { consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""") }
+        }
 
-        coVerify(exactly = 1) { amlCaseRepository.anonymizeByPartyId(partyId) }
+        coVerify(exactly = 3) { amlCaseRepository.anonymizeByPartyId(partyId) }
     }
 
     @Test

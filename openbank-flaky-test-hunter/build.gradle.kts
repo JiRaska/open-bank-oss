@@ -44,6 +44,7 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.rest.assured.kotlin)
     // Git-pact for the Admin UI's bounded operator trigger (ADR-0063): the

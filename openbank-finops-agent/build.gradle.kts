@@ -39,10 +39,12 @@ dependencies {
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(project(":openbank-libs-testing"))
 }
 
 // Package the ADR-0148 prompt registry onto the classpath so LlmDiagnosisAdapter loads its

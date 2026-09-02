@@ -12,7 +12,7 @@ sequenceDiagram
     participant LS as ledger-service
 
     CH->>DP: POST /api/v1/domestic-payments<br/>(Idempotency-Key, Bearer token)
-    note over CH,DP: SCA already done upstream;<br/>sca_reference in request body
+    note over CH,DP: SCA already done upstream#59;<br/>sca_reference in request body
 
     DP->>DB: INSERT domestic_payment (status=RECEIVED)<br/>+ outbox event
     DP->>SAP: POST /api/v1/sanctions/screen<br/>(debtor name + creditor name)

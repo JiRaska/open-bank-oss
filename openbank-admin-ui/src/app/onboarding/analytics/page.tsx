@@ -156,8 +156,8 @@ export default function OnboardingAnalyticsPage() {
             feature={t('Konverze onboardingu', 'Onboarding conversion')} lang={language} />
         </div>
       ) : loading && !data ? (
-        <div className="card" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>
-          <RefreshCw size={20} style={{ animation: 'spin 1s linear infinite' }} />
+        <div role="status" aria-live="polite" className="card" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>
+          <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 1s linear infinite' }} />
         </div>
       ) : !data || data.available === false ? (
         <div className="card" style={{ padding: 0 }}>

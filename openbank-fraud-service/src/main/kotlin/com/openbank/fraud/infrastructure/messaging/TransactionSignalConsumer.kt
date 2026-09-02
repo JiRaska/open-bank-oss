@@ -10,6 +10,7 @@ import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.application.usecase.FeatureOnlineUpdater
+import com.openbank.libs.messaging.EventRetry
 import io.smallrye.common.annotation.Blocking
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.runBlocking
@@ -88,18 +89,24 @@ class TransactionSignalConsumer(
             )
             Instant.now(clock)
         }
-        @Suppress("TooGenericExceptionCaught") // DB / reactive layer exceptions have no common base
         runBlocking {
-            try {
+            // The velocity aggregate IS this consumer's product: every velocity rule reads it, so a
+            // dropped update silently weakens fraud detection for that account with no error anywhere
+            // (an acked Kafka message is indistinguishable from a processed one). Retried, then
+            // RETHROWN so the connector dead-letters — #5698. recordTransaction is an idempotent
+            // upsert on (account, window).
+            EventRetry.withRetry(log, "velocity aggregate", accountId) {
                 velocityRepo.recordTransaction(accountId, amount, currency, signal.aggregateId, eventTime)
                 log.debugf("Velocity aggregate updated for account %s amount=%s %s", accountId, amount, currency)
-            } catch (ex: Exception) {
-                log.warnf(ex, "Failed to record velocity aggregate for account %s", accountId)
             }
             recordPayeeHistory(accountId, signal, eventTime)
-            // ADR-0140 online feature store (shadow plane). Best-effort: a feature-store failure must
-            // never break the velocity path. Skip silently when the event carries no business time.
+            // ADR-0140 online feature store (SHADOW plane).
+            // best-effort: nothing decides on it — it feeds a model running in shadow, so a gap costs
+            // observability, not a fraud verdict. That is the test for whether a catch may swallow
+            // (#5698): can the event be called complete without this side effect? Here, yes.
+            // Skipped silently when the event carries no business time.
             val occurredAt = signal.occurredAt ?: return@runBlocking
+            @Suppress("TooGenericExceptionCaught") // shadow-plane side effect; see the marker above
             try {
                 featureUpdater.onTransactionInitiated(accountId.toString(), occurredAt)
             } catch (ex: Exception) {
@@ -116,14 +123,14 @@ class TransactionSignalConsumer(
      * carries none, so a history row is still recorded (unlike the feature store, which requires a
      * business timestamp to stay meaningful) — the substitution is counted by the caller (#6044).
      */
-    @Suppress("TooGenericExceptionCaught") // DB / reactive layer exceptions have no common base
     private suspend fun recordPayeeHistory(accountId: UUID, signal: TransactionInitiatedSignal, occurredAt: Instant) {
         val payeeIdentifier = signal.targetAccountId?.toString() ?: return
-        try {
+        // A MISSING signal (no targetAccountId) degrades gracefully — that is the documented contract
+        // above and it stays. A FAILED write does not: "first payment to this payee" is a fraud
+        // discriminator, and a hole in the history reads as a first-time payee forever after.
+        EventRetry.withRetry(log, "payee history", accountId) {
             payeeHistoryRepo.recordPayment(accountId, payeeIdentifier, signal.aggregateId, occurredAt)
             log.debugf("Payee history updated for account %s payee %s", accountId, payeeIdentifier)
-        } catch (ex: Exception) {
-            log.warnf(ex, "Failed to record payee history for account %s payee %s", accountId, payeeIdentifier)
         }
     }
 }

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.ResourceOwnershipClient
 import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.logging.Log
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
@@ -43,6 +44,7 @@ data class CardOwnerResponse(val id: UUID, val partyId: UUID)
  */
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "account-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 interface AccountServiceRestClient {
     @GET
     @Path("/{id}")
@@ -62,6 +64,7 @@ interface AccountServiceRestClient {
  */
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "card-issuance-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 interface CardIssuanceRestClient {
     @GET
     @Path("/{id}")

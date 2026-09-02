@@ -252,19 +252,22 @@ class PartyEventConsumer(
         log.infof("GDPR Art. 17: anonymised legalName for erased party %s (%d account(s))", partyId, count)
     }
 
-    // Fire the one-time welcome bonus as the account goes live. Best-effort: a failure here must not
-    // wedge the consumer or block activation (the account is already ACTIVE). Idempotent downstream
-    // (keyed on the account id), so a retry on the next event re-delivery is safe rather than doubling.
-    // On a successful grant, also notify the party (in-app feed + push) — itself best-effort.
+    // Fire the one-time welcome bonus as the account goes live. Idempotent downstream (keyed on the
+    // account id), so a retry or a redelivery cannot double-credit.
     private suspend fun grantWelcomeBonus(accountId: UUID, partyId: UUID) {
         if (!welcomeBonusEnabled) return
-        try {
-            welcomeBonusPort.grantWelcomeBonus(accountId, welcomeBonusAmount, welcomeBonusCurrency)
-            log.infof("Granted welcome bonus %s %s to account %s", welcomeBonusAmount, welcomeBonusCurrency, accountId)
-        } catch (e: Exception) {
-            log.errorf(e, "Welcome bonus grant failed for account %s (will retry on next ACTIVE event)", accountId)
-            return
-        }
+        // The old code caught this and logged "will retry on next ACTIVE event". There IS no next
+        // ACTIVE event — a party activates once — so the customer simply never got the money, and
+        // the only trace was an ERROR line (#5698). It now propagates.
+        //
+        // Deliberately NOT wrapped in EventRetry here: consume() already runs this whole path
+        // through withBoundedRetry, and nesting the two multiplies the attempts (4 x 3 = 12 calls
+        // to the payment path for one event, which the test caught). One retry loop per message.
+        welcomeBonusPort.grantWelcomeBonus(accountId, welcomeBonusAmount, welcomeBonusCurrency)
+        log.infof("Granted welcome bonus %s %s to account %s", welcomeBonusAmount, welcomeBonusCurrency, accountId)
+        // best-effort: the money is already booked and the event is complete without this. A failed
+        // notification costs the customer a push, not their balance — the one shape of failure a
+        // handler may swallow, and it is stated here rather than left to a bare catch.
         try {
             notificationRequestPort.notifyIncomingCredit(partyId, welcomeBonusAmount, welcomeBonusCurrency)
         } catch (e: Exception) {

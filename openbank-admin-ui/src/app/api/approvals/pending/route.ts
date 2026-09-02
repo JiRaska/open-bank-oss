@@ -17,22 +17,9 @@ export const dynamic = 'force-dynamic'
 
 type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 
-// These domains already persist maker-checker decisions, but do not yet expose the
-// pending-list read required by ADR-0227 D2. Keep them in the response explicitly so
-// the inbox can distinguish "not wired" from an empty queue. Omitting them would make
-// the most dangerous state look healthy to an operator.
-const NOT_CONFIGURED_SOURCES = {
-  account: 'not-configured',
-  balance: 'not-configured',
-  billing: 'not-configured',
-  consent: 'not-configured',
-  notification: 'not-configured',
-  party: 'not-configured',
-} as const satisfies Record<string, SourceState>
-
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -92,6 +79,27 @@ type SwiftApproval = LendingApproval
 // decision parked at 202 was discoverable only by whoever had been handed its id out of band.
 type SepaPaymentApproval = LendingApproval
 
+// notification-service serves the same libs `PendingApproval` shape (issue #5679). Before this,
+// an `opsmessage.compose` four-eyes decision parked at 202 was discoverable only by whoever had
+// been handed its id out of band.
+type NotificationApproval = LendingApproval
+
+// party-service serves the same shared PendingApproval shape. This source turns the approval id
+// returned from a parked `party.merge` into a visible checker hand-off before its 24-hour TTL.
+type PartyApproval = LendingApproval
+
+// account-service serves the shared PendingApproval shape for gated account lifecycle actions.
+// Surfacing it here makes a parked freeze or other protected action discoverable before TTL expiry.
+type AccountApproval = LendingApproval
+
+type ConsentApproval = LendingApproval
+
+// balance-service serves the shared PendingApproval shape for gated credit/debit actions.
+type BalanceApproval = LendingApproval
+
+// billing-service serves the shared PendingApproval shape for gated fee-posting actions.
+// Listing is read-only; posting and reversal controls remain entirely service-owned.
+type BillingApproval = LendingApproval
 type AgentProposal = {
   id: string
   suggestedAction: string
@@ -272,6 +280,96 @@ async function sepaInstantPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function notificationPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('notification-service', 'notifications', 8112, '/api/v1/notifications/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as NotificationApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'notification' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
+async function partyPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('party-service', 'party', 8111, '/api/v1/parties/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as PartyApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'party' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
+async function accountPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('account-service', 'accounts', 8100, '/api/v1/accounts/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as AccountApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'account' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
+async function consentPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('consent-service', 'consent', 8106, '/api/v1/consents/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as ConsentApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'consent' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
+async function balancePending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('balance-service', 'balances', 8103, '/api/v1/balances/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as BalanceApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'balance' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
+async function billingPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('billing-service', 'billing', 8132, '/api/v1/fees/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as BillingApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'billing' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -299,7 +397,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -310,14 +408,19 @@ export async function GET() {
     swiftPending(headers).catch(() => unavailable),
     sepaPaymentPending(headers).catch(() => unavailable),
     sepaInstantPending(headers).catch(() => unavailable),
+    notificationPending(headers).catch(() => unavailable),
+    partyPending(headers).catch(() => unavailable),
+    accountPending(headers).catch(() => unavailable),
+    consentPending(headers).catch(() => unavailable),
+    balancePending(headers).catch(() => unavailable),
+    billingPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
     sources: {
-      ...NOT_CONFIGURED_SOURCES,
       lending: lending.state,
       sanctions: sanctions.state,
       transaction: transaction.state,
@@ -328,6 +431,12 @@ export async function GET() {
       swift: swift.state,
       'sepa-payment': sepaPayment.state,
       'sepa-instant': sepaInstant.state,
+      notification: notification.state,
+      party: party.state,
+      account: account.state,
+      consent: consent.state,
+      balance: balance.state,
+      billing: billing.state,
       agent: agent.state,
     },
   })

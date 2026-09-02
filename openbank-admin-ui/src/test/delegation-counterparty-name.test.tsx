@@ -16,7 +16,7 @@ import React from 'react'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import { SessionProvider } from 'next-auth/react'
 import { EntityChip } from '@/components/entities/EntityChip'
-import { counterpartyLabel } from '@/components/delegations/GrantView'
+import { counterpartyLabel, grantCounterparty, type Grant } from '@/components/delegations/GrantView'
 import { ROLES } from '@/lib/auth/roles'
 
 const PARTY_ID = '33333333-3333-4333-8333-333333333333'
@@ -42,6 +42,23 @@ describe('counterpartyLabel', () => {
     expect(counterpartyLabel(undefined)).toBeUndefined()
     expect(counterpartyLabel('')).toBeUndefined()
     expect(counterpartyLabel('   ')).toBeUndefined()
+  })
+})
+
+describe('grantCounterparty', () => {
+  const grant = {
+    grantorPartyId: 'grantor-id',
+    grantorName: 'Owner',
+    granteePartyId: 'grantee-id',
+    granteeName: 'Delegate',
+  } as Grant
+
+  it('shows the recipient for access shared by the selected party', () => {
+    expect(grantCounterparty(grant, 'granted')).toEqual({ id: 'grantee-id', name: 'Delegate' })
+  })
+
+  it('shows the owner for access shared with the selected party', () => {
+    expect(grantCounterparty(grant, 'received')).toEqual({ id: 'grantor-id', name: 'Owner' })
   })
 })
 

@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.HeaderParam
@@ -12,6 +13,7 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 
 /**
@@ -25,6 +27,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * scheme submission then arrives unauthenticated and the simulator answers 401 (ADR-0104 BUG #3).
  */
 @RegisterRestClient(configKey = "clearing-simulator")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/clearing")
 interface ClearingSimulatorClient {
     @POST

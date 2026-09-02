@@ -73,7 +73,7 @@ export const PERMISSIONS = {
   "cards:block":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Generic Product Studio. Scope-derived roles make the same UI usable with a provider-neutral
   // standalone OIDC issuer; OpenBank OPERATOR/ADMIN remain compatible personas.
-  "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH],
+  "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH],
   "catalog:author":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_AUTHOR],
   "catalog:publish":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_PUBLISH],
   // Parties / KYC / Onboarding — party-service's list/search/detail GETs accept
@@ -85,6 +85,9 @@ export const PERMISSIONS = {
   // must never be offered a customer-creation workflow.
   "parties:create":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   "parties:edit":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // PID-service's party list/detail/create and BankID sync endpoints accept only
+  // OPERATOR/ADMIN. Keep this PII workspace narrower than the generic payments area.
+  "pid:view":             [ROLES.ADMIN, ROLES.OPERATOR],
   "kyc:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   "kyc:approve":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.KYC_REVIEWER],
   // ROLES.DEMO here (and nowhere else in this file) because onboarding-service's own
@@ -225,6 +228,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['kyc:view', ['/kyc']],
   ['onboarding:view', ['/onboarding']],
   ['identity-cases:view', ['/identity-cases']],
+  ['pid:view', ['/pid']],
   ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
   ['transactions:view', ['/transactions']],
@@ -233,7 +237,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['cards:view', ['/cards']],
   ['payments:view', [
     '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant', '/clearing',
-    '/fx', '/swift', '/interest', '/pid', '/fees', '/lending',
+    '/fx', '/swift', '/interest', '/fees', '/lending',
   ]],
   ['sanctions:view', ['/sanctions']],
   ['compliance:view', [

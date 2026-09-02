@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
-
 @import "tailwindcss";
 @config "../../tailwind.config.ts";
 
@@ -10,7 +8,9 @@
   --sidebar-active-bg:    rgba(99,102,241,0.12);
   --sidebar-active-text:  #c7d2fe;
   --sidebar-text:         #8b9cb6;
-  --sidebar-text-muted:   #475569;
+  /* Muted navigation is still operational text. #94a3b8 reaches 7.54:1 against the
+     sidebar, whereas the previous #475569 was 2.55:1 and unreadable at its shipped size. */
+  --sidebar-text-muted:   #94a3b8;
   --sidebar-border:       rgba(255,255,255,0.04);
   --sidebar-accent:       #6366f1;
 
@@ -32,8 +32,10 @@
   /* ── Text ── */
   --text-primary:         #0f172a;
   --text-secondary:       #475569;
-  --text-tertiary:        #94a3b8;
-  --text-muted:           #94a3b8;
+  /* Used for labels, metadata and empty-state guidance across the operator console. #64748b
+     keeps a clear hierarchy while meeting AA on both white (4.76:1) and surface-2 (4.55:1). */
+  --text-tertiary:        #64748b;
+  --text-muted:           var(--text-tertiary);
 
   /* ── Shorthand semantic aliases ── */
   --green:  #10b981;
@@ -42,9 +44,41 @@
   --blue:   #3b82f6;
 
   /* ── Typography ── */
-  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  /* Platform stack: no build-time network fetch or runtime third-party font origin. */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --text-inverse:         #ffffff;
+
+  /* ── Foundation scales ──
+   * These are the source of truth for new primitives. Existing literal spacing
+   * is migrated tranche-by-tranche; do not introduce a competing scale. */
+  --space-1: .25rem;
+  --space-2: .5rem;
+  --space-3: .75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --text-xs: .75rem;
+  --text-sm: .875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --font-extrabold: 800;
+  --motion-fast: 120ms;
+  --motion-normal: 200ms;
+  --motion-slow: 400ms;
+  --ease-standard: cubic-bezier(.2, .8, .2, 1);
+  --z-dropdown: 20;
+  --z-sticky: 30;
+  --z-modal: 50;
+  --z-toast: 60;
 
   /* ── Brand / Accent ── */
   --ob-accent:            #6366f1;
@@ -123,6 +157,62 @@
    * colour, not a Tailwind HSL triplet. The triplet silently makes those
    * declarations invalid and leaves cards, fields and tables borderless. */
   --border: #e2e8f0;
+}
+
+/* Dark theme is token-only by design. Pages that still carry literal colours
+ * remain in the migration ratchet and must not opt into a one-off dark palette.
+ * Toggling `.dark` on the document root therefore changes every shared
+ * primitive and every token-based surface coherently. */
+.dark {
+  color-scheme: dark;
+  --bg: #0b1220;
+  --surface: #111827;
+  --surface-1: #111827;
+  --surface-2: #172033;
+  --surface-3: #243047;
+  --surface-4: #334155;
+  --border: #334155;
+  --border-strong: #475569;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --text-muted: var(--text-tertiary);
+  --text-inverse: #0f172a;
+  --accent: #a5b4fc;
+  --accent-hover: #c7d2fe;
+  --accent-light: #1e1b4b;
+  --accent-bg: #1e1b4b;
+  --accent-border: #4338ca;
+  --accent-text: #c7d2fe;
+  --ob-accent: var(--accent);
+  --ob-accent-hover: var(--accent-hover);
+  --ob-accent-light: var(--accent-light);
+  --ob-accent-border: var(--accent-border);
+  --ob-accent-text: var(--accent-text);
+  --success: #34d399;
+  --success-bg: #064e3b;
+  --success-border: #047857;
+  --success-text: #6ee7b7;
+  --warning: #fbbf24;
+  --warning-bg: #451a03;
+  --warning-border: #b45309;
+  --warning-text: #fcd34d;
+  --danger: #f87171;
+  --danger-bg: #450a0a;
+  --danger-border: #b91c1c;
+  --danger-text: #fecaca;
+  --info: #60a5fa;
+  --info-bg: #172554;
+  --info-border: #1d4ed8;
+  --info-text: #bfdbfe;
+  --sidebar-bg: #090e17;
+  --sidebar-hover-bg: rgba(255,255,255,0.08);
+  --sidebar-active-bg: rgba(165,180,252,0.18);
+  --sidebar-active-text: #e0e7ff;
+  --sidebar-text: #cbd5e1;
+  --sidebar-text-muted: #94a3b8;
+  --sidebar-border: rgba(255,255,255,0.09);
+  --sidebar-accent: var(--accent);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -251,6 +341,17 @@ main {
 .badge-info    { background: var(--info-bg);    color: var(--info-text);    border: 1px solid var(--info-border); }
 .badge-neutral { background: var(--surface-3);  color: var(--text-secondary); border: 1px solid var(--border-strong); }
 .badge-accent  { background: var(--ob-accent-light); color: var(--ob-accent-text); border: 1px solid var(--ob-accent-border); }
+.badge-sm {
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+.badge-detail {
+  font-weight: 600;
+  opacity: .8;
+  text-transform: none;
+}
 
 
 /* ── Button ── */
@@ -823,12 +924,22 @@ main {
 
 /* Tone text colours (ADR-0208 D2), for cases where a full badge is too heavy — a tinted metric
    label, an inline verdict. Same tokens the .badge-* rules use, so a theme change moves both. */
-.tone-text-success { color: var(--success); }
-.tone-text-warning { color: var(--warning); }
-.tone-text-danger  { color: var(--danger); }
-.tone-text-info    { color: var(--info); }
+.tone-text-success { color: var(--success-text); }
+.tone-text-warning { color: var(--warning-text); }
+.tone-text-danger  { color: var(--danger-text); }
+.tone-text-info    { color: var(--info-text); }
 .tone-text-neutral { color: var(--text-secondary); }
-.tone-text-accent  { color: var(--ob-accent); }
+.tone-text-accent  { color: var(--ob-accent-text); }
+
+/* Semantic card emphasis for the cases where the verdict belongs to the whole surface, not just
+   a badge. The tone is selected in TypeScript; the actual colour remains token-owned here. */
+.tone-border-left { border-left-style: solid; border-left-width: 4px; }
+.tone-border-left-success { border-left-color: var(--success); }
+.tone-border-left-warning { border-left-color: var(--warning); }
+.tone-border-left-danger  { border-left-color: var(--danger); }
+.tone-border-left-info    { border-left-color: var(--info); }
+.tone-border-left-neutral { border-left-color: var(--border-strong); }
+.tone-border-left-accent  { border-left-color: var(--ob-accent); }
 
 /* ── Page header ── */
 .page-header {
@@ -872,7 +983,7 @@ main {
 }
 
 /* ── Mono ── */
-.mono { font-family: 'JetBrains Mono', monospace; letter-spacing: -0.01em; }
+.mono { font-family: var(--font-mono); letter-spacing: -0.01em; }
 
 /* ── Status dot ── */
 .status-dot {

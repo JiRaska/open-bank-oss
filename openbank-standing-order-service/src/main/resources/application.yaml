@@ -115,6 +115,15 @@ quarkus:
       enabled: false
     management:
       enabled: false
+  openbank:
+    outbox:
+      # #7539: the real StandingOrderOutboxDispatcher scheduled tick (poll-interval 5s,
+      # initial-delay 5s) is otherwise live during every @QuarkusTest in this module and can
+      # race a test's own manual outbox manipulation (e.g. StandingOrderOutboxClaimIT stomping
+      # claimed_at to force a stale row) -- the scheduler can claim/dispatch/markSent the row
+      # out from under the test before its own assertion runs, an intermittent false failure of
+      # the reclaim assertion, not a defect in claimProcessable itself.
+      dispatch-enabled: false
 openbank:
   rate-limit:
     enabled: true

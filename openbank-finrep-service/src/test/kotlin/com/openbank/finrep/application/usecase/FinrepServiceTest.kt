@@ -40,8 +40,8 @@ class FinrepServiceTest {
                 net = BigDecimal("-300000"),
                 currency = "CZK",
             ),
-            TrialBalanceLineDto(code = "4000", accountType = "INCOME", net = BigDecimal("-260000"), currency = "CZK"),
-            TrialBalanceLineDto(code = "5000", accountType = "EXPENSE", net = BigDecimal("60000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "4100", accountType = "INCOME", net = BigDecimal("-260000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "5100", accountType = "EXPENSE", net = BigDecimal("60000"), currency = "CZK"),
         )
         coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(lines, ledgerSays = true)
         val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
@@ -50,7 +50,7 @@ class FinrepServiceTest {
 
         assertThat(template.templateId).isEqualTo("F01.01")
         assertThat(template.period).isEqualTo(asOf)
-        assertThat(template.cells).anyMatch { it.rowRef == "r490" && it.value == BigDecimal("200000") }
+        assertThat(template.cells.single { it.rowRef == "r0380" }.value).isEqualByComparingTo("500000")
         coVerify(exactly = 1) { ledgerPort.getTrialBalance(asOf) }
     }
 
@@ -58,8 +58,8 @@ class FinrepServiceTest {
     fun `getTemplate dispatches F02_00 to the P&L mapper`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
         val lines = listOf(
-            TrialBalanceLineDto(code = "4000", accountType = "INCOME", net = BigDecimal("-120000"), currency = "CZK"),
-            TrialBalanceLineDto(code = "5000", accountType = "EXPENSE", net = BigDecimal("80000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "4100", accountType = "INCOME", net = BigDecimal("-120000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "5100", accountType = "EXPENSE", net = BigDecimal("80000"), currency = "CZK"),
         )
         coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(lines, ledgerSays = true)
         val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
@@ -67,7 +67,31 @@ class FinrepServiceTest {
         val template = service.getTemplate(GetFinrepTemplateQuery(templateId = "F02.00", asOf = asOf))
 
         assertThat(template.templateId).isEqualTo("F02.00")
-        assertThat(template.cells).anyMatch { it.rowRef == "r450" && it.value == BigDecimal("40000") }
+        assertThat(template.cells).anyMatch { it.rowRef == "r0670" && it.value == BigDecimal("40000") }
+    }
+
+    @Test
+    fun `getTemplate dispatches F01_02 and F01_03 with official coordinates and signs`(): Unit = runBlocking {
+        val asOf = LocalDate.of(2026, 6, 30)
+        val lines = listOf(
+            TrialBalanceLineDto("1000", "ASSET", BigDecimal("500000"), "CZK"),
+            TrialBalanceLineDto("2000", "LIABILITY", BigDecimal("-300000"), "CZK"),
+            TrialBalanceLineDto("4100", "INCOME", BigDecimal("-260000"), "CZK"),
+            TrialBalanceLineDto("5100", "EXPENSE", BigDecimal("60000"), "CZK"),
+        )
+        coEvery { ledgerPort.getTrialBalance(asOf) } returns snapshot(lines, ledgerSays = true)
+        val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
+
+        val liabilities = service.getTemplate(GetFinrepTemplateQuery("F01.02", asOf))
+        val equity = service.getTemplate(GetFinrepTemplateQuery("F01.03", asOf))
+
+        assertThat(liabilities.cells.single { it.rowRef == "r0300" }.value).isEqualByComparingTo("300000")
+        assertThat(equity.cells.single { it.rowRef == "r0300" }.value).isEqualByComparingTo("200000")
+        assertThat(equity.cells.single { it.rowRef == "r0310" }.value).isEqualByComparingTo("500000")
+        assertThat(registry.get("openbank.finrep.templates.rendered").tag("template", "F01.02").counter().count())
+            .isEqualTo(1.0)
+        assertThat(registry.get("openbank.finrep.templates.rendered").tag("template", "F01.03").counter().count())
+            .isEqualTo(1.0)
     }
 
     @Test

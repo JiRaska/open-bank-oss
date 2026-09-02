@@ -43,6 +43,14 @@ data class OutboxMessage(
      * A caller that needs a fixed clock (tests, replay) still passes it explicitly.
      */
     val createdAt: Instant = Instant.now(),
+    /**
+     * Durable origin marker for activity produced by a bank-owned synthetic customer.
+     *
+     * An outbox dispatcher runs after the business transaction, often on another worker, so it
+     * must not infer this from request MDC or OpenTelemetry baggage. The persisted row is the
+     * hand-off boundary; [OutboxKafkaHeaders] reconstructs the transport header from this value.
+     */
+    val synthetic: Boolean = false,
 )
 
 data class OutboxEntry(
@@ -56,4 +64,5 @@ data class OutboxEntry(
     val updatedAt: Instant,
     val sentAt: Instant?,
     val lastError: String?,
+    val synthetic: Boolean = false,
 )

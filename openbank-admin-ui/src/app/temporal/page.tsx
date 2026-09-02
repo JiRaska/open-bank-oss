@@ -50,10 +50,10 @@ const PHASES = [
     id: 'P0',
     labelCs: 'Sdílená knihovna',
     labelEn: 'Shared Library',
-    status: 'done' as const,
+    status: 'partial' as const,
     services: ['openbank-libs'],
-    descCs: 'Worker bootstrap, Saga DSL, OPA interceptor aktivity, deterministický RNG',
-    descEn: 'Worker bootstrap, Saga DSL, OPA activity interceptor, deterministic RNG',
+    descCs: 'Dodáno: klient a konfigurace (TemporalClientProducer, TemporalConfig). Saga DSL, OPA interceptor a deterministický RNG zatím ne.',
+    descEn: 'Shipped: client and config (TemporalClientProducer, TemporalConfig). Saga DSL, OPA interceptor and deterministic RNG are not.',
   },
   {
     id: 'P1',
@@ -106,7 +106,7 @@ const PHASES = [
 const COMPLIANCE_LINKS = [
   { code: 'DORA Art. 11', descCs: 'Business continuity — durable execution přežije restart', descEn: 'Business continuity — durable execution survives restart' },
   { code: 'DORA Art. 17', descCs: 'Advanced testing — deterministická simulace (ADR-0100)', descEn: 'Advanced testing — deterministic simulation (ADR-0100)' },
-  { code: 'PSD2 Art. 5(3)', descCs: 'SCA integrita — OPA policy gate na každou aktivitu', descEn: 'SCA integrity — OPA policy gate on each activity' },
+  { code: 'PSD2 Art. 5(3)', descCs: 'SCA integrita — plánováno (ADR-0034); activity-level policy gate zatím není nasazen', descEn: 'SCA integrity — planned (ADR-0034); no activity-level policy gate is deployed yet' },
   { code: 'PCI-DSS Req. 10', descCs: 'Auditní záznamy — Temporal history je immutable log', descEn: 'Audit records — Temporal history is an immutable log' },
   { code: 'GDPR', descCs: '90denní retence, EU region (eu-north-1), datová minimalizace', descEn: '90-day retention, EU region (eu-north-1), data minimization' },
 ]
@@ -133,8 +133,8 @@ const COMPARISON = [
   {
     dimensionCs: 'Kompenzace (Saga)',
     dimensionEn: 'Compensation (Saga)',
-    beforeCs: 'Vlastní OpenBankSaga DSL, compensations v paměti, náchylné k bug-u',
-    beforeEn: 'Custom OpenBankSaga DSL, in-memory compensations, prone to bugs',
+    beforeCs: 'Kompenzace řešené ad hoc v jednotlivých službách; sdílené saga primitivum neexistuje',
+    beforeEn: 'Compensation handled ad hoc per service; no shared saga primitive exists',
     afterCs: 'Saga kompenzace jako nativní Temporal pattern, plně perzistentní',
     afterEn: 'Saga compensation as native Temporal pattern, fully persistent',
   },
@@ -159,8 +159,8 @@ const COMPARISON = [
     dimensionEn: 'Policy enforcement',
     beforeCs: 'HTTP middleware, není vynuceno na úrovni aktivity',
     beforeEn: 'HTTP middleware, not enforced at activity level',
-    afterCs: 'OpaActivityInterceptor — každá aktivita prochází OPA policy gate (ADR-0034)',
-    afterEn: 'OpaActivityInterceptor — each activity goes through OPA policy gate (ADR-0034)',
+    afterCs: 'Plánováno: OpaActivityInterceptor (ADR-0034). Dnes nezměněno — autorizace zůstává na HTTP vrstvě.',
+    afterEn: 'Planned: OpaActivityInterceptor (ADR-0034). Unchanged today — authorization stays at the HTTP layer.',
   },
 ]
 
@@ -183,7 +183,7 @@ function MetricCard({ label, value, unit, status }: {
   }
   const color = status ? colors[status] : 'var(--text)'
   return (
-    <div style={{
+    <div aria-label={`${label}: ${value === null ? 'unavailable' : value}${unit && value !== null ? ` ${unit}` : ''}`} style={{
       background: 'var(--card-bg)',
       border: '1px solid var(--border)',
       borderRadius: '12px',
@@ -379,8 +379,8 @@ export default function TemporalPage() {
               </div>
               <p style={{ color: 'var(--text)', fontSize: '14px', lineHeight: '1.7', margin: '0 0 12px' }}>
                 {t(
-                  'OpenBank dosud orchestruje money-path workflowy pomocí vlastního primitiva OpenBankSaga (kompenzační chain v paměti) a stavové tabulky outbox_saga_state v PostgreSQL. Tento přístup funguje pro jednoduché scénáře, ale skrývá třídu defektů: kompenzace jsou dosažitelné jen pokud proces nespadl, tabulka je jediný zdroj pravdy bez auditní stopy a deterministické testování je těžké bez reálné DB.',
-                  'OpenBank currently orchestrates money-path workflows using its own OpenBankSaga primitive (in-memory compensation chain) and the outbox_saga_state state table in PostgreSQL. This works for simple scenarios but hides a class of defects: compensations are only reachable if the process hasn\'t crashed, the table is the single source of truth without an audit trail, and deterministic testing is hard without a real DB.',
+    'OpenBank dnes nemá sdílené orchestrační primitivum pro money-path workflowy: kompenzace řeší každá služba po svém, přes transakční outbox a vlastní stavové přechody. Ani třída OpenBankSaga, ani tabulka outbox_saga_state v repozitáři neexistují — tato stránka je návrh cílového stavu podle ADR-0101, ne popis nasazeného systému.',
+    'OpenBank has no shared orchestration primitive for money-path workflows today: each service handles compensation its own way, through the transactional outbox and its own state transitions. Neither an OpenBankSaga class nor an outbox_saga_state table exists in the repository — this page describes the ADR-0101 target state, not a deployed system.',
                 )}
               </p>
               <p style={{ color: 'var(--text)', fontSize: '14px', lineHeight: '1.7', margin: 0 }}>
@@ -424,7 +424,7 @@ export default function TemporalPage() {
                         ))}
                       </div>
                       <div style={{ fontSize: '10.5px', color: 'var(--text-tertiary)', fontFamily: 'monospace', background: 'var(--surface-2)', padding: '3px 8px', borderRadius: 4 }}>
-                        {t(wf.flagCs, wf.flagEn)}
+                        {wf.svc}
                       </div>
                     </div>
                   )
@@ -549,8 +549,8 @@ export default function TemporalPage() {
               <CheckCircle size={16} color="#22c55e" style={{ flexShrink: 0, marginTop: '1px' }} />
               <span>
                 {t(
-                  'P0–P4 nasazeno; feature flagy ON v GitOps. P3 (settlement, money-path) prošlo se 2 review approvaly a aktualizovaným threat modelem (docs/threat-models/settlement.md) podle ADR-0030. Zbývá P5 — dekomisace legacy saga tabulek.',
-                  'P0–P4 deployed; feature flags ON in GitOps. P3 (settlement, money-path) shipped with 2 review approvals and an updated threat model (docs/threat-models/settlement.md) per ADR-0030. P5 remaining — decommission legacy saga tables.',
+                  'Toto je referenční migrační plán z ADR-0100, ne živý stav běhů. Aktuální aktivitu a typy workflow potvrzují pouze metriky níže.',
+                  'This is the ADR-0100 reference migration plan, not live execution state. Only the metrics below confirm current activity and workflow types.',
                 )}
               </span>
             </div>
@@ -584,12 +584,12 @@ export default function TemporalPage() {
                 <Clock size={16} color="#818cf8" style={{ flexShrink: 0, marginTop: 2 }} />
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-                    {t('Temporal server běží — Prometheus metriky se ještě neobjeví', 'Temporal server is running — Prometheus metrics not yet visible')}
+                    {t('Temporal nelze potvrdit z Promethea', 'Temporal cannot be confirmed from Prometheus')}
                   </div>
                   <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                     {t(
-                      'Temporal server je nasazen (Helm chart + PodMonitor enablePodMonitor=true v GitOpsu). Temporal vystavuje metriky na portu 9090 pod prefixem temporal_. Pokud Prometheus nevrací temporal_server_start_count, nejčastější příčiny jsou: (1) PodMonitor v namespace temporal ještě čeká na první scrape cyklus (~30 s po startu), (2) kube-prometheus-stack má podMonitorNamespaceSelector omezený jen na vlastní namespace — zkontroluj Helm values. Workflowy domácích plateb, SEPA, FX a uzávěrek jsou aktivní (feature flagy ON), metriky se zobrazí po vyřešení scrape konfigurace.',
-                      'Temporal server is deployed (Helm chart + PodMonitor enablePodMonitor=true in GitOps). Temporal exposes metrics on port 9090 with the temporal_ prefix. If Prometheus does not return temporal_server_start_count, the most common causes are: (1) PodMonitor in the temporal namespace is still waiting for the first scrape cycle (~30 s after start), (2) kube-prometheus-stack podMonitorNamespaceSelector is scoped only to its own namespace — check Helm values. Domestic payment, SEPA, FX and closing workflows are active (feature flags ON); metrics will appear once the scrape config is resolved.',
+                      'Prometheus odpověděl, ale nevrátil žádnou temporal_restarts řadu. To může znamenat nenasazený Temporal nebo chybějící scrape; tato stránka z toho neodvozuje, že server či workflow běží. Ověř PodMonitor, target health a Temporal frontend.',
+                      'Prometheus responded but returned no temporal_restarts series. Temporal may be absent or its scrape may be missing; this page does not infer that the server or workflows are running. Check the PodMonitor, target health, and Temporal frontend.',
                     )}
                   </div>
                 </div>
@@ -739,16 +739,16 @@ export default function TemporalPage() {
                     titleCs: 'Worker SDK (openbank-libs)',
                     titleEn: 'Worker SDK (openbank-libs)',
                     icon: <GitBranch size={18} color="#4ade80" />,
-                    itemsCs: ['TemporalWorkerConfig (CDI)', 'OpenBankSaga DSL', 'OpaActivityInterceptor', 'DeterministicRandom (ADR-0100)', 'Feature flag: openbank.temporal.enabled'],
-                    itemsEn: ['TemporalWorkerConfig (CDI)', 'OpenBankSaga DSL', 'OpaActivityInterceptor', 'DeterministicRandom (ADR-0100)', 'Feature flag: openbank.temporal.enabled'],
+                    itemsCs: ['TemporalClientProducer (CDI) — dodáno', 'TemporalConfig — dodáno', 'OpenBankSaga DSL — plánováno', 'OpaActivityInterceptor — plánováno', 'DeterministicRandom (ADR-0100) — plánováno', 'Feature flag: openbank.temporal.enabled'],
+                    itemsEn: ['TemporalClientProducer (CDI) — shipped', 'TemporalConfig — shipped', 'OpenBankSaga DSL — planned', 'OpaActivityInterceptor — planned', 'DeterministicRandom (ADR-0100) — planned', 'Feature flag: openbank.temporal.enabled'],
                     ns: 'service namespace',
                   },
                   {
                     titleCs: 'OPA Policy Gate (ADR-0034)',
                     titleEn: 'OPA Policy Gate (ADR-0034)',
                     icon: <Shield size={18} color="#f59e0b" />,
-                    itemsCs: ['Sidecar OPA v každém workeru', 'Policy: openbank/temporal/allow', 'Blokuje neoprávněné aktivity', 'Audit log každého rozhodnutí'],
-                    itemsEn: ['OPA sidecar in each worker', 'Policy: openbank/temporal/allow', 'Blocks unauthorized activities', 'Audit log of each decision'],
+                    itemsCs: ['PLÁNOVÁNO — nic z tohoto není nasazeno', 'Sidecar OPA v každém workeru', 'Policy: openbank/temporal/allow', 'Blokovalo by neoprávněné aktivity', 'Audit log každého rozhodnutí'],
+                    itemsEn: ['PLANNED — none of this is deployed', 'OPA sidecar in each worker', 'Policy: openbank/temporal/allow', 'Would block unauthorized activities', 'Audit log of each decision'],
                     ns: 'service namespace',
                   },
                 ].map(comp => (
@@ -792,11 +792,11 @@ export default function TemporalPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {[
                   { stepCs: 'REST API volání', stepEn: 'REST API call', detailCs: 'Klient volá /api/v1/payments (sepa-payment-service)', detailEn: 'Client calls /api/v1/payments (sepa-payment-service)' },
-                  { stepCs: 'OPA authz check', stepEn: 'OPA authz check', detailCs: 'Sidecar OPA potvrdí oprávnění volající party', detailEn: 'OPA sidecar confirms the calling party\'s authorization' },
+                  { stepCs: 'OPA authz check (plánováno)', stepEn: 'OPA authz check (planned)', detailCs: 'Sidecar OPA by potvrdil oprávnění volající party — není nasazeno', detailEn: 'An OPA sidecar would confirm the calling party\'s authorization — not deployed' },
                   { stepCs: 'Workflow start', stepEn: 'Workflow start', detailCs: 'TemporalClient.start(SepaPaymentWorkflow, input)', detailEn: 'TemporalClient.start(SepaPaymentWorkflow, input)' },
                   { stepCs: 'Temporal server → History service', stepEn: 'Temporal server → History service', detailCs: 'Workflow execution event persistován do CNPG (temporal DB)', detailEn: 'Workflow execution event persisted to CNPG (temporal DB)' },
                   { stepCs: 'Worker task queue', stepEn: 'Worker task queue', detailCs: 'History service zařadí workflow task do sepa-payment-queue', detailEn: 'History service enqueues workflow task into sepa-payment-queue' },
-                  { stepCs: 'Activity dispatch', stepEn: 'Activity dispatch', detailCs: 'OpaActivityInterceptor → policy check → ValidateSEPA activity', detailEn: 'OpaActivityInterceptor → policy check → ValidateSEPA activity' },
+                  { stepCs: 'Activity dispatch', stepEn: 'Activity dispatch', detailCs: 'ValidateSEPA activity (bez policy checku — OpaActivityInterceptor neexistuje)', detailEn: 'ValidateSEPA activity (no policy check — OpaActivityInterceptor does not exist)' },
                   { stepCs: 'Kompenzace při chybě', stepEn: 'Compensation on failure', detailCs: 'Saga.addCompensation { revertBalanceDebit() } → automaticky spuštěno', detailEn: 'Saga.addCompensation { revertBalanceDebit() } → automatically executed' },
                   { stepCs: 'Audit trail', stepEn: 'Audit trail', detailCs: 'Každý krok v Temporal history = immutable záznam pro DORA/PCI-DSS', detailEn: 'Each step in Temporal history = immutable record for DORA/PCI-DSS' },
                 ].map((step, idx) => (
@@ -832,7 +832,7 @@ export default function TemporalPage() {
                 {[
                   { adr: 'ADR-0101', titleCs: 'Temporal Durable Execution', titleEn: 'Temporal Durable Execution', descCs: 'Primární rozhodnutí o adopci', descEn: 'Primary adoption decision', href: '/docs/adr' },
                   { adr: 'ADR-0100', titleCs: 'Deterministické simulační testování', titleEn: 'Deterministic Simulation Testing', descCs: 'Testovací harness pro workflow scénáře', descEn: 'Testing harness for workflow scenarios', href: '/docs/adr' },
-                  { adr: 'ADR-0034', titleCs: 'OPA unifikovaná autorizace', titleEn: 'OPA unified authorisation', descCs: 'Policy gate pro každou Temporal aktivitu', descEn: 'Policy gate for each Temporal activity', href: '/docs/adr' },
+                  { adr: 'ADR-0034', titleCs: 'OPA unifikovaná autorizace', titleEn: 'OPA unified authorisation', descCs: 'Policy gate pro každou Temporal aktivitu — plánováno, nenasazeno', descEn: 'Policy gate for each Temporal activity — planned, not deployed', href: '/docs/adr' },
                   { adr: 'ADR-0004', titleCs: 'Saga pattern', titleEn: 'Saga pattern', descCs: 'Zakladatel kompenzačního modelu', descEn: 'Foundation of the compensation model', href: '/docs/adr' },
                 ].map(item => (
                   <a key={item.adr} href={item.href} style={{ textDecoration: 'none' }}>

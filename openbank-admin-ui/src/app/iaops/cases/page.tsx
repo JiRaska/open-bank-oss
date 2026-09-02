@@ -149,8 +149,8 @@ export default function IaopsCasesPage() {
       </div>
 
       {loading ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
-          <RefreshCw size={16} style={{ animation: 'spin 0.8s linear infinite' }} />
+        <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
+          <RefreshCw size={16} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} />
           <span style={{ fontSize: '13px' }}>{t('Načítám case…', 'Loading cases…')}</span>
         </div>
       ) : cases.length === 0 ? (
@@ -219,6 +219,7 @@ export default function IaopsCasesPage() {
           </div>
           {cases.length >= limit && limit < MAX_LIMIT && (
             <button
+              type="button"
               onClick={() => setLimit(Math.min(limit + PAGE_SIZE, MAX_LIMIT))}
               style={{
                 marginTop: '14px', fontSize: '12px', fontWeight: 700, padding: '8px 18px', borderRadius: '10px',

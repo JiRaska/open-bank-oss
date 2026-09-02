@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.0...lending-service-v0.32.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **lending:** distinguish an unconfigured court register from a clear one ([#7595](https://github.com/JiRaska/open-bank-oss/issues/7595)) ([3144e07](https://github.com/JiRaska/open-bank-oss/commit/3144e073e9dc5391190861402c8944257a9a9ae7))
+
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.31.0...lending-service-v0.32.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.30.0...lending-service-v0.31.0) (2026-08-26)
+
+
+### Features
+
+* **admin-ui:** enrich operator cockpit ([#5905](https://github.com/JiRaska/open-bank-oss/issues/5905)) ([9a2207a](https://github.com/JiRaska/open-bank-oss/commit/9a2207aa5e66797f7f33789df2846da049113a9d))
+
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.29.0...lending-service-v0.30.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.28.0...lending-service-v0.29.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.27.0...lending-service-v0.28.0) (2026-08-22)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 1 — one credit journey, three product shapes, customer-readable projection ([#6230](https://github.com/JiRaska/open-bank-oss/issues/6230)) ([a969810](https://github.com/JiRaska/open-bank-oss/commit/a969810df5541832f63580dfa828efaec81a3ba4))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.26.1...lending-service-v0.27.0) (2026-08-21)
 
 

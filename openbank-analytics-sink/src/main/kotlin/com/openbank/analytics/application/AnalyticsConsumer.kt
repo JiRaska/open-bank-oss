@@ -11,7 +11,9 @@ import com.openbank.analytics.application.port.out.DeadLetterRecord
 import com.openbank.analytics.application.port.out.DeadLetterSink
 import com.openbank.libs.analytics.AnalyticsEnvelope
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.libs.synthetic.SyntheticTaint
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
@@ -35,10 +37,31 @@ import java.util.UUID
  * bronze layer is retained ≥10 years and must never hold raw identifiers.
  *
  * Delivery is at-least-once; the envelope's [AnalyticsEnvelope.eventId] is the dedupe key and the
- * sink (and ClickHouse `ReplacingMergeTree`) collapse duplicates. A malformed event is **quarantined**
- * to the [DeadLetterSink] (not silently swallowed) so it is visible, counted and replayable once the
- * producer is fixed — a dropped event would be an invisible gap in the log of record.
+ * sink (and ClickHouse `ReplacingMergeTree`) collapse duplicates.
+ *
+ * **Two failures, two different answers (#5698/#5745).**
+ *
+ * A **malformed or un-projectable event** cannot be fixed by replaying it, so it is handed to the
+ * [DeadLetterSink] and ACKED. Read [DeadLetterSink] for what that actually buys today: the only
+ * binding is `LoggingDeadLetterSink`, a WARN line. The message is recoverable from the log pipeline
+ * for as long as logs are retained (Loki, 1 week here) — that is a far weaker guarantee than the
+ * "visible, counted and replayable" this KDoc used to claim. The ClickHouse `dead_letter_events`
+ * table exists but nothing writes to it — see [DeadLetterSink].
+ *
+ * A **failed sink write** is the opposite: the event is fine, ClickHouse is not. This used to take
+ * the same branch — the bronze row was dropped, a WARN was logged, and the message was acked. Bronze
+ * is the ≥10-year log of record and the sole extraction path, so a dropped row is a permanent,
+ * unreconstructable hole in it, and nothing downstream reports one: consumer lag is zero (the message
+ * was acked) and the row simply is not there. Sink writes now go through [EventRetry.withRetry] and,
+ * on persistent failure, the message is **NACKed** — see [consume] for why nack rather than a rethrow,
+ * and for why neither KDoc names the channel's current `failure-strategy`.
  */
+// TooManyFunctions: 11, i.e. exactly AT detekt's threshold, which it reports. The class was at 10
+// and the #5745 fix adds exactly one — [settle] — because manual acknowledgement now has two
+// possible outcomes instead of the single `finally { ack() }` it replaces. Splitting the envelope
+// mapping out to buy headroom would move a dozen attribution fallbacks away from the KDocs that
+// explain why their ORDER is load-bearing, which is a worse trade than one suppression.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class AnalyticsConsumer {
 
@@ -69,36 +92,14 @@ class AnalyticsConsumer {
      * UNKNOWN/UNKNOWN/unknown with nothing erroring.
      */
     @Incoming("analytics-events-in")
+    @Suppress("TooGenericExceptionCaught") // the two catches below mean opposite things; see the KDoc
     suspend fun consume(message: Message<String>) {
         val payload = message.payload
         val address = addressOf(message)
-        try {
-            val node: JsonNode = objectMapper.readTree(payload)
-            val envelope = toEnvelope(node, address)
-            // F7: schema governance — an unknown/newer-than-known schema is quarantined (when strict),
-            // never silently written into the 10-year log of record.
-            if (::schemaGovernance.isInitialized &&
-                !schemaGovernance.accept(
-                    envelope.eventType,
-                    envelope.schemaVersion,
-                )
-            ) {
-                deadLetters.quarantine(
-                    DeadLetterRecord(
-                        contentHash = sha256(payload),
-                        rawPayload = payload,
-                        error = "unknown schema ${envelope.eventType}:${envelope.schemaVersion}",
-                        failedAt = Instant.now(clock),
-                    ),
-                )
-                return
-            }
-            sink.write(envelope)
-            // #2598 ask 2: a row that lands without attribution must be counted and logged, or
-            // the broken state stays indistinguishable from the healthy one.
-            if (::attribution.isInitialized) attribution.record(envelope, address.topic)
-            // F8: record ingest lag (now - occurredAt) so freshness/RPO can be alerted on.
-            if (::freshness.isInitialized) freshness.recordIngest(envelope.occurredAt)
+
+        // ---- Un-projectable payload: the poison pill. Quarantine and ACK; a replay fails the same.
+        val envelope = try {
+            toEnvelope(objectMapper.readTree(payload), address)
         } catch (e: Exception) {
             log.errorf(e, "Quarantining un-projectable analytics message: %s", payload.take(200))
             deadLetters.quarantine(
@@ -110,12 +111,70 @@ class AnalyticsConsumer {
                 ),
             )
             if (::freshness.isInitialized) freshness.recordDeadLetter()
-        } finally {
-            // Switching the signature from `String` to `Message<String>` also switches SmallRye
-            // from auto-ack to manual, so the ack has to be explicit — and in a `finally`, or a
-            // quarantined message would stall the partition forever.
-            Uni.createFrom().completionStage(message.ack()).awaitSuspending()
+            settle(message)
+            return
         }
+
+        // F7: schema governance — an unknown/newer-than-known schema is quarantined (when strict),
+        // never silently written into the 10-year log of record. Also a producer-side problem a
+        // replay cannot fix, so it acks too.
+        if (::schemaGovernance.isInitialized && !schemaGovernance.accept(envelope.eventType, envelope.schemaVersion)) {
+            deadLetters.quarantine(
+                DeadLetterRecord(
+                    contentHash = sha256(payload),
+                    rawPayload = payload,
+                    error = "unknown schema ${envelope.eventType}:${envelope.schemaVersion}",
+                    failedAt = Instant.now(clock),
+                ),
+            )
+            settle(message)
+            return
+        }
+
+        // ---- Sink write: a dependency failure, NOT a bad event. Retry, then nack.
+        try {
+            EventRetry.withRetry(log, "analytics bronze write", envelope.eventId) {
+                sink.write(envelope)
+            }
+        } catch (e: Exception) {
+            // NACK rather than rethrow, because this handler took manual ack the moment its
+            // signature became `Message<String>`: acknowledgement is this method's job, and nack is
+            // how it says "I did not do this work". A bare rethrow past a manual-ack handler leaves
+            // the outcome to the framework rather than stating it here.
+            //
+            // What the nack buys is the connector's `failure-strategy` for `analytics-events-in`,
+            // which is CONFIGURATION and not a property of this code: `dead-letter-queue` parks the
+            // record in the configured topic, SmallRye's default `fail` stops the channel. This
+            // comment deliberately does not state today's value — #5745 section B found the whole
+            // #5698 family asserting a dead-letter that only four channels fleet-wide actually had,
+            // and #5751 is wiring this one to `openbank.dlq.analytics-sink.analytics-events-in`.
+            // Either outcome beats the old behaviour, which was to ack: a halted channel or a parked
+            // record is recoverable, a silent hole in a ≥10-year log of record is not.
+            log.errorf(e, "Bronze write failed after retries, nacking: %s", payload.take(200))
+            settle(message, e)
+            return
+        }
+
+        // #2598 ask 2: a row that lands without attribution must be counted and logged, or
+        // the broken state stays indistinguishable from the healthy one.
+        if (::attribution.isInitialized) attribution.record(envelope, address.topic)
+        // F8: record ingest lag (now - occurredAt) so freshness/RPO can be alerted on.
+        if (::freshness.isInitialized) freshness.recordIngest(envelope.occurredAt)
+        settle(message)
+    }
+
+    /**
+     * Settle the message: ACK when [cause] is null, NACK otherwise.
+     *
+     * Switching the signature from `String` to `Message<String>` switched SmallRye from auto-ack to
+     * manual, so every terminal path in [consume] must state its own outcome — exactly once, and
+     * never both. That is why this is no longer a `finally`: a `finally` acked the failed write too,
+     * which is the whole defect. One function rather than an `ack`/`nack` pair so the class stays
+     * under detekt's TooManyFunctions threshold without splitting the mapping apart.
+     */
+    private suspend fun settle(message: Message<String>, cause: Throwable? = null) {
+        val stage = if (cause == null) message.ack() else message.nack(cause)
+        Uni.createFrom().completionStage(stage).awaitSuspending()
     }
 
     /** Lifts the broker metadata this consumer used to discard. Absent metadata is not an error. */
@@ -130,10 +189,17 @@ class AnalyticsConsumer {
             ?.value()
             ?.toString(Charsets.UTF_8)
             ?.takeIf { it.isNotBlank() }
+        val synthetic = record.headers
+            ?.lastHeader(SyntheticTaint.KAFKA_HEADER)
+            ?.value()
+            ?.toString(Charsets.UTF_8)
+            ?.let(SyntheticTaint::isTainted)
+            ?: false
         return EventAddress(
             topic = record.topic?.takeIf { it.isNotBlank() },
             key = record.key?.toString()?.takeIf { it.isNotBlank() },
             ceType = ceType,
+            synthetic = synthetic,
         )
     }
 
@@ -180,6 +246,7 @@ class AnalyticsConsumer {
             traceId = node["traceId"]?.asText() ?: node["correlationId"]?.asText(),
             ingestedAt = Instant.now(clock),
             payload = PayloadMasker.maskToMap(node["payload"] ?: node),
+            synthetic = address.synthetic,
         )
     }
 

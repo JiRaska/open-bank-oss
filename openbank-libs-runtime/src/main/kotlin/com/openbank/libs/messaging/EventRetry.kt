@@ -54,19 +54,42 @@ object EventRetry {
     const val DEFAULT_BACKOFF_MS = 500L
 
     /**
+     * Retry everything EXCEPT the two exception types this codebase uses for a deterministic domain
+     * failure — "no published template for this product's documentTemplateCode", a malformed
+     * command, an impossible state transition. Those fail identically on every delivery, so
+     * retrying them only delays the ack and burns attempts.
+     *
+     * Note what this is NOT: permission to swallow. A non-retryable failure is still rethrown, and
+     * a caller that wants it acked has to catch it explicitly and say why — which is exactly what
+     * document-service's consumers do, one line below their call.
+     */
+    val RETRY_UNLESS_DETERMINISTIC: (Exception) -> Boolean =
+        { it !is IllegalStateException && it !is IllegalArgumentException }
+
+    /**
      * Run [block], retrying transient failures, then rethrow.
      *
      * @param log the caller's logger, so the message names the real handler rather than this class.
      * @param what short description of the work — appears in both the retry and dead-letter lines.
      * @param key the entity the event is about (party id, account id, …), for grepping later.
+     * @param isRetryable which failures are worth another attempt. Defaults to all of them, because
+     *   the common case is a dependency being down. Override it where the caller can tell a
+     *   DETERMINISTIC domain failure apart — "no published template for this product" fails the same
+     *   way on every delivery, so retrying it burns attempts and delays the ack for nothing.
+     *   A non-retryable failure is rethrown immediately and unchanged: this helper never decides to
+     *   swallow, it only decides whether to try again.
      */
-    @Suppress("TooGenericExceptionCaught") // The point of this helper: ANY failure is transient until proven otherwise.
+    // TooGenericExceptionCaught: type-agnostic ON PURPOSE. What makes a failure retryable here is
+    // whether the dependency might recover, not which class it is — and the caller says so through
+    // `isRetryable`. Nothing is swallowed: every path out of this catch either retries or rethrows.
+    @Suppress("TooGenericExceptionCaught")
     suspend fun <T> withRetry(
         log: Logger,
         what: String,
         key: Any?,
         maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
         backoffMs: Long = DEFAULT_BACKOFF_MS,
+        isRetryable: (Exception) -> Boolean = { true },
         block: suspend () -> T,
     ): T {
         require(maxAttempts >= 1) { "maxAttempts must be >= 1, was $maxAttempts" }
@@ -75,6 +98,15 @@ object EventRetry {
             try {
                 return block()
             } catch (e: Exception) {
+                if (!isRetryable(e)) {
+                    log.debugf(
+                        "%s for %s failed with a non-retryable %s — rethrowing without further attempts",
+                        what,
+                        key,
+                        e.javaClass.simpleName,
+                    )
+                    throw e
+                }
                 if (attempt >= maxAttempts) {
                     log.errorf(
                         e,

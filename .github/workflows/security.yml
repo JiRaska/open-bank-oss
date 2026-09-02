@@ -178,7 +178,7 @@ jobs:
       contents: read
       security-events: write # upload-sarif
     timeout-minutes: 40
-    # The java-kotlin leg's build step shells out to its own `./gradlew testClasses`
+    # The java-kotlin leg's build step shells out to its own `./gradlew classes`
     # (whole-fleet dependency resolution, ~30 modules + quarkus-bom) without picking up
     # any GRADLE_OPTS we'd set in a step — it needs the env var at the job level. Without
     # this, Gradle's auto-detected 3 GiB default heap OOMs on that resolution (first seen
@@ -199,7 +199,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # The build step below shells out to `./gradlew testClasses` for the java-kotlin
+      # The build step below shells out to `./gradlew classes` for the java-kotlin
       # leg — validate the wrapper jar before it runs, same as every other job
       # that invokes gradlew.
       - name: Validate Gradle wrapper
@@ -217,7 +217,7 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -225,7 +225,7 @@ jobs:
 
       # java-kotlin uses an explicit build step (build-mode: manual), not autobuild.
       # This repo has `org.gradle.caching=true` + a remote HTTP build cache
-      # (settings.gradle.kts) fleet-wide; autobuild's `./gradlew testClasses` was
+      # (settings.gradle.kts) fleet-wide; autobuild's Gradle compilation was
       # intermittently satisfied entirely from the build cache, so javac/kotlinc
       # Cache the Gradle build between runs (same setup-gradle as the service CI). The
       # cold --no-build-cache leg took ~25-30 min of wall time and was the single most
@@ -237,14 +237,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         if: matrix.language == 'java-kotlin'
 
-      # Two-phase: try the cached build; if NO compile task actually executed (all
+      # Two-phase: try the cached production build; if NO compile task actually executed (all
       # FROM-CACHE/UP-TO-DATE — grep anchors on the line end so FROM-CACHE rows don't
       # count), fall back to the cold compile so the CodeQL trace stays non-empty.
-      - name: Build (java-kotlin) for CodeQL tracing
+      - name: Build production classes (java-kotlin) for CodeQL tracing
         if: matrix.language == 'java-kotlin'
         run: |
           set -euo pipefail
-          .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew testClasses --no-daemon 2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build.log"
+          # CodeQL evaluates deployable Kotlin/Java. `testClasses` also compiles every
+          # fleet test source, but that is not shipped code and repeatedly received SIGTERM
+          # before analysis could start. `classes` retains generated and
+          # production compilation for every module while keeping the trace bounded.
+          .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- ./gradlew classes --no-daemon 2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build.log"
           executed=$( { grep -c '> Task :.*:compileKotlin$' "${RUNNER_TEMP:-/tmp}/codeql-build.log" || true; } )
           if [ "$executed" -eq 0 ]; then
             echo "::warning::every compile resolved from cache — cold re-run so the CodeQL trace is non-empty"
@@ -254,7 +258,7 @@ jobs:
             # `60 UP-TO-DATE, 60 FROM-CACHE, 0 executed` and CodeQL then failed with
             # "could not process any code written in Java/Kotlin".
             .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- \
-              ./gradlew testClasses --no-build-cache --rerun-tasks --no-daemon \
+              ./gradlew classes --no-build-cache --rerun-tasks --no-daemon \
               2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build-cold.log"
             cold=$( { grep -c '> Task :.*:compileKotlin$' "${RUNNER_TEMP:-/tmp}/codeql-build-cold.log" || true; } )
             if [ "$cold" -eq 0 ]; then
@@ -266,7 +270,7 @@ jobs:
             echo "compile tasks executed: $executed"
           fi
 
-      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -393,14 +397,14 @@ jobs:
       # this repo went public failed here). Distinct categories per file fixes it.
       - name: Upload Trivy fs SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
 
       - name: Upload Trivy config SARIF
         if: always() && steps.verify-trivy.outcome == 'success' && github.event.repository.private == false
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
@@ -421,7 +425,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Generate SBOM with Syft
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: .
           format: cyclonedx-json

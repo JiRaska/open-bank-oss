@@ -58,11 +58,62 @@ enum class CreditOfferSuppressionCode {
     /** 360-derived buffer is below the configured floor — thin cover, not yet distress. */
     BUFFER_BELOW_FLOOR,
 
+    /**
+     * The 360 profile has too few observed months to be evidence.
+     *
+     * Distinct from [SIGNALS_UNAVAILABLE] on purpose: that one is a fault worth alerting on, this
+     * one is a customer the bank has simply not seen for long enough. Collapsing them would bury a
+     * genuine outage inside the normal traffic of new customers.
+     */
+    HISTORY_TOO_THIN,
+
     /** A credit-marketing contact already went out inside the frequency window. */
     FREQUENCY_CAP,
 
     /** Nothing about the inputs changed since the last contact, so there is nothing to say. */
     NO_MATERIAL_CHANGE,
+}
+
+/**
+ * Whether a court-register distress marker is present, absent, or **has no source at all**.
+ *
+ * This is deliberately not a `Boolean`. A boolean has exactly two values and this signal has
+ * three, so the third — "no register feed is configured in this deployment" — could only be
+ * expressed by picking one of the other two, and whichever is picked becomes a lie the rest of the
+ * system cannot detect. Encoded as `false` it says *we looked and the customer is clear*; encoded
+ * as `true` it suppresses every offer forever, which is indistinguishable from the feature being
+ * switched off and hides the day a real feed arrives.
+ *
+ * That collapse is a defect this repository has paid for before: a disabled push adapter returned
+ * `success = true` for a delivery that never left the process, and every downstream count agreed
+ * with it. The rule learned there — a skipped/unconfigured outcome gets its **own** value, never a
+ * flag shared with a real result — is what this enum is.
+ *
+ * [NOT_CONFIGURED] does not by itself change the offer decision (see [CreditOfferEligibility]); it
+ * exists so that the decision's *blind spot* is a fact the gate states rather than one a reader has
+ * to infer from the absence of findings.
+ */
+enum class CourtRegisterSignalState {
+    /**
+     * No upstream publishes this register in this deployment, so nothing was looked up.
+     *
+     * Not "clear". An empty result from a register that was queried and an empty result from a
+     * register that was never queried are the same number of findings and opposite facts.
+     */
+    NOT_CONFIGURED,
+
+    /** A register was consulted and holds no marker for this party. */
+    CLEAR,
+
+    /** A register was consulted and holds a marker for this party. */
+    MARKER_PRESENT,
+    ;
+
+    /**
+     * True only for [MARKER_PRESENT]. [NOT_CONFIGURED] is not a suppression reason: the gate cannot
+     * cite a register it never read, and an unattributable refusal is not auditable.
+     */
+    val suppresses: Boolean get() = this == MARKER_PRESENT
 }
 
 /**
@@ -77,15 +128,35 @@ enum class CreditOfferSuppressionCode {
 data class BorrowerDistressSignals(
     val hasArrears: Boolean,
     val hasNegativeBalance: Boolean,
-    val hasEnforcementOrder: Boolean,
-    val hasInsolvencyProceeding: Boolean,
+    /**
+     * Enforcement (execution) register state. Three-valued on purpose — see
+     * [CourtRegisterSignalState].
+     */
+    val enforcementSignal: CourtRegisterSignalState,
+    /** Insolvency register state. Three-valued on purpose — see [CourtRegisterSignalState]. */
+    val insolvencySignal: CourtRegisterSignalState,
     val inHardshipArrangement: Boolean,
     val lastAffordabilityFailureAt: Instant?,
     val bufferDays: Int?,
+    /**
+     * Whole months of cash-flow history behind the 360 figures. A three-week-old customer and a
+     * five-year customer can produce the same median, so the count travels with the numbers rather
+     * than being discarded at the source.
+     */
+    val monthsObserved: Int?,
     val lastCreditContactAt: Instant?,
     val inputsChangedSinceLastContact: Boolean,
     val complete: Boolean,
 )
+
+/**
+ * Who started the conversation — the axis ADR-0269's pull-only rule turns on.
+ *
+ * PUSH is the bank speaking unprompted and needs consent; PULL is the customer asking and does not.
+ * Modelled as a type rather than a boolean parameter so a call site cannot get it backwards
+ * silently: `evaluate(partyId, PUSH)` reads as what it is, `evaluate(partyId, true)` does not.
+ */
+enum class OfferSurface { PUSH, PULL }
 
 /** Thresholds, versioned as one object so a change is a single reviewable diff (ADR-0213 shape). */
 data class CreditOfferPolicy(
@@ -93,12 +164,14 @@ data class CreditOfferPolicy(
     val minimumBufferDays: Int,
     val affordabilityCoolingDays: Long,
     val contactFrequencyDays: Long,
+    val minimumMonthsObserved: Int,
 ) {
     init {
         require(version > 0) { "policy version must be positive" }
         require(minimumBufferDays >= 0) { "minimumBufferDays must not be negative" }
         require(affordabilityCoolingDays >= 0) { "affordabilityCoolingDays must not be negative" }
         require(contactFrequencyDays >= 0) { "contactFrequencyDays must not be negative" }
+        require(minimumMonthsObserved >= 0) { "minimumMonthsObserved must not be negative" }
     }
 
     companion object {
@@ -112,6 +185,9 @@ data class CreditOfferPolicy(
             minimumBufferDays = 30,
             affordabilityCoolingDays = 14,
             contactFrequencyDays = 30,
+            // Three whole months: enough for one unusual month not to be the whole picture, and
+            // the point at which a median stops being an anecdote.
+            minimumMonthsObserved = 3,
         )
     }
 }
@@ -141,6 +217,7 @@ object CreditOfferEligibility {
         signals: BorrowerDistressSignals,
         now: Instant,
         policy: CreditOfferPolicy = CreditOfferPolicy.V1,
+        surface: OfferSurface = OfferSurface.PUSH,
     ): CreditOfferDecision {
         if (!hasOffersConsent) {
             return CreditOfferDecision.Suppressed(policy.version, CreditOfferSuppressionCode.CONSENT_ABSENT)
@@ -148,7 +225,7 @@ object CreditOfferEligibility {
         if (!signals.complete) {
             return CreditOfferDecision.Suppressed(policy.version, CreditOfferSuppressionCode.SIGNALS_UNAVAILABLE)
         }
-        val distress = distressCode(signals, now, policy)
+        val distress = distressCode(signals, now, policy, surface)
             ?: return CreditOfferDecision.Allowed(policy.version)
         return CreditOfferDecision.Suppressed(policy.version, distress)
     }
@@ -165,12 +242,29 @@ object CreditOfferEligibility {
         signals: BorrowerDistressSignals,
         now: Instant,
         policy: CreditOfferPolicy,
+        surface: OfferSurface,
     ): CreditOfferSuppressionCode? {
+        // Hard facts and a binding affordability refusal stop BOTH surfaces. These are the cases
+        // where the answer itself is the harm, no matter who started the conversation.
         hardFactCode(signals)?.let { return it }
-
         if (withinDays(signals.lastAffordabilityFailureAt, now, policy.affordabilityCoolingDays)) {
             return CreditOfferSuppressionCode.AFFORDABILITY_COOLING
         }
+        // Everything below is about the bank speaking UNPROMPTED, and none of it is a reason to
+        // refuse an answer the customer just asked for:
+        //
+        //  - a thin buffer means "do not go looking for this customer with an offer"; it does not
+        //    mean "refuse to tell them what a loan would cost", which would leave someone who is
+        //    managing carefully unable to plan at all;
+        //  - a frequency cap limits how often the BANK initiates, and cannot silence a reply;
+        //  - materiality asks whether there is anything new to SAY, which is meaningless when the
+        //    customer just asked the question.
+        if (surface == OfferSurface.PULL) return null
+
+        // A push needs evidence, and a median over one or two months is not evidence. A pull is
+        // unaffected: answering "what would this cost" does not rest on knowing the customer.
+        val months = signals.monthsObserved ?: return CreditOfferSuppressionCode.HISTORY_TOO_THIN
+        if (months < policy.minimumMonthsObserved) return CreditOfferSuppressionCode.HISTORY_TOO_THIN
 
         // A missing buffer is not a healthy buffer. Unknown reads as below the floor.
         val buffer = signals.bufferDays ?: return CreditOfferSuppressionCode.BUFFER_BELOW_FLOOR
@@ -181,8 +275,8 @@ object CreditOfferEligibility {
 
     /** Facts on file, independent of any threshold. */
     private fun hardFactCode(signals: BorrowerDistressSignals): CreditOfferSuppressionCode? = when {
-        signals.hasInsolvencyProceeding -> CreditOfferSuppressionCode.INSOLVENCY
-        signals.hasEnforcementOrder -> CreditOfferSuppressionCode.ENFORCEMENT
+        signals.insolvencySignal.suppresses -> CreditOfferSuppressionCode.INSOLVENCY
+        signals.enforcementSignal.suppresses -> CreditOfferSuppressionCode.ENFORCEMENT
         signals.hasArrears -> CreditOfferSuppressionCode.ARREARS
         signals.inHardshipArrangement -> CreditOfferSuppressionCode.HARDSHIP
         signals.hasNegativeBalance -> CreditOfferSuppressionCode.NEGATIVE_BALANCE
