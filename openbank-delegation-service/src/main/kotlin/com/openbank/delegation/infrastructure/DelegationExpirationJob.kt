@@ -87,9 +87,11 @@ class DelegationExpirationJob {
                 .onItem().transformToUniAndConcatenate { grant ->
                     delegationRepo.markExpired(
                         grant.id,
+                        grant.lifecycleRevision,
                         threshold,
                         DelegationExpired(
                             aggregateId = grant.id,
+                            lifecycleRevision = Math.addExact(grant.lifecycleRevision, 1),
                             grantorPartyId = grant.grantorPartyId,
                             granteePartyId = grant.granteePartyId,
                             resourceType = grant.resourceType,

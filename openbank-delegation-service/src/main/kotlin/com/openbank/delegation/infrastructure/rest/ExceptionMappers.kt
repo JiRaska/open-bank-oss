@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.infrastructure.rest
 
+import com.openbank.delegation.application.port.out.DelegationConcurrentTransitionException
 import com.openbank.delegation.application.usecase.DelegationCallerMismatchException
 import com.openbank.delegation.application.usecase.DelegationEligibilityException
 import com.openbank.delegation.application.usecase.DelegationNotFoundException
@@ -30,6 +31,15 @@ private fun errorBody(status: Int, message: String?): Map<String, Any?> = mapOf(
 class DelegationNotFoundExceptionMapper : ExceptionMapper<DelegationNotFoundException> {
     override fun toResponse(exception: DelegationNotFoundException): Response =
         Response.status(Response.Status.NOT_FOUND).entity(errorBody(404, exception.message)).build()
+}
+
+/** A stale lifecycle command is safe to retry from a fresh representation, never to overwrite. */
+@Provider
+class DelegationConcurrentTransitionExceptionMapper : ExceptionMapper<DelegationConcurrentTransitionException> {
+    override fun toResponse(exception: DelegationConcurrentTransitionException): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message))
+            .build()
 }
 
 @Provider
