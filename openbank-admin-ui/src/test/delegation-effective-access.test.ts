@@ -16,6 +16,27 @@ describe('effective access role matching', () => {
     expect(matchedRoleName({ ...grant, capabilities: ['ACCOUNT_READ_BALANCES'] }, presets, 'cs')).toBe('Vlastní kombinace práv')
   })
 
+  it('does not present a historical unsupported grant as an owner role', () => {
+    expect(matchedRoleName({ ...grant, capabilities: ['DELEGATION_MANAGE'] }, [{
+      id: 'legacy-owner',
+      name: 'Majitel účtu',
+      description: '',
+      resourceType: 'ACCOUNT',
+      capabilities: ['DELEGATION_MANAGE'],
+    }], 'en')).toBe('Historical delegated rights')
+  })
+
+  it('does not present a full card delegation as card ownership', () => {
+    const capabilities = ['CARD_VIEW', 'CARD_VIEW_TRANSACTIONS', 'CARD_MANAGE_LIMITS', 'CARD_MANAGE_STATUS', 'CARD_MANAGE_CHANNELS']
+    expect(matchedRoleName({ ...grant, resourceType: 'CARD', capabilities }, [{
+      id: 'legacy-card-owner',
+      name: 'Majitel karty',
+      description: '',
+      resourceType: 'CARD',
+      capabilities,
+    }], 'en')).toBe('Plný disponent karty')
+  })
+
   it('requires a server evaluation timestamp instead of trusting the browser clock', () => {
     expect(isEffectiveAccessPayload({ ...grant, id: 'g1' })).toBe(false)
     expect(isEffectiveAccessPayload({ evaluatedAt: '2026-09-01T12:00:00Z', nextChangeAt: null, refreshAfterMs: null, accounts: [], cards: [], grants: [], presets: [], resourceDetails: [], sources: { accounts: 'ok' } })).toBe(true)
@@ -67,6 +88,22 @@ describe('effective access role matching', () => {
     })
 
     expect(grantResourcePresentation({ ...grant, resourceId: 'account-1' }, details, 'en').label).toBe('Current label')
+  })
+
+  it('does not use a delegated card as an owned-resource fallback', () => {
+    const details = effectiveResourceDetails({
+      evaluatedAt: '2026-09-01T12:00:00Z',
+      nextChangeAt: null,
+      refreshAfterMs: null,
+      accounts: [],
+      cards: [{ id: 'card-delegated', maskedPan: '•••• 2222', delegated: true }],
+      grants: [],
+      presets: [],
+      resourceDetails: [],
+      sources: { accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' },
+    })
+
+    expect(details).toEqual([])
   })
 
   it('explains financial and approval guardrails for an active operation role', () => {

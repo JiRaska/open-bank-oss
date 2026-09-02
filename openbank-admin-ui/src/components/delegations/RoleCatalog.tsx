@@ -2,11 +2,12 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Check, LayoutGrid, Pencil, Plus, Shield, Table2, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Check, Crown, LayoutGrid, Pencil, Plus, Shield, Table2, Trash2, X } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useAuth } from '@/lib/auth/useAuth'
 import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
-import { CAPABILITIES_BY_RESOURCE, capabilityIntent, capabilityLabel, type CapabilityIntent, type DelegationResource, type RolePreset } from '@/lib/delegations/rolePresets'
+import { CAPABILITIES_BY_RESOURCE, assignablePresetCapabilities, capabilityIntent, capabilityLabel, isAssignablePresetCapability, isReservedOwnershipPresetName, truthfulPresetName, type CapabilityIntent, type DelegationResource, type RolePreset } from '@/lib/delegations/rolePresets'
+import { LegacyCapabilityEvidence } from '@/components/delegations/LegacyCapabilityEvidence'
 
 const emptyRole = (): RolePreset => ({ id: '', name: '', description: '', resourceType: 'ACCOUNT', capabilities: [] })
 
@@ -40,7 +41,7 @@ export function RoleCatalog() {
     queueMicrotask(() => { void load() })
   }, [load])
 
-  const rights = CAPABILITIES_BY_RESOURCE[resource]
+  const rights = assignablePresetCapabilities(resource)
   const visibleRoles = roles.filter(role => role.resourceType === resource)
   const openEditor = (role: RolePreset) => {
     setSaveError(false)
@@ -52,7 +53,7 @@ export function RoleCatalog() {
     setSaveError(false)
   }
   const save = async (role: RolePreset) => {
-    const payload = { name: role.name.trim(), description: role.description.trim(), resourceType: role.resourceType, capabilities: role.capabilities }
+    const payload = { name: truthfulPresetName(role).trim(), description: role.description.trim(), resourceType: role.resourceType, capabilities: role.capabilities.filter(isAssignablePresetCapability) }
     setSaving(true)
     setSaveError(false)
     try {
@@ -107,6 +108,7 @@ export function RoleCatalog() {
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>{t('Centrální presety pro nové delegace. Změna presetu nemění již udělená práva.', 'Central presets for new delegations. Changing one never alters existing grants.')}</p></div>
       {canManage && <button type="button" className="btn btn-primary" onClick={() => openEditor(emptyRole())}><Plus size={14} aria-hidden="true" />{t('Přidat roli', 'Add role')}</button>}
     </div>
+    <OwnershipRoleNotice />
     {state === 'loading' && <div style={{ padding: 20, color: 'var(--text-tertiary)' }}>{t('Načítám katalog…', 'Loading catalog…')}</div>}
     {state === 'error' && <div style={{ padding: 20, color: 'var(--text-tertiary)' }}>{t('Katalog rolí není dostupný.', 'Role catalog is unavailable.')}</div>}
     {state === 'ready' && <>
@@ -130,9 +132,9 @@ export function RoleCatalog() {
       {view === 'overview' && <RoleOverview roles={visibleRoles} canManage={canManage} edit={openEditor} remove={requestRemoval} />}
       {view === 'matrix' && <div style={{ overflowX: 'auto' }}><table className="table" style={{ width: '100%', minWidth: 760 }}><thead><tr><th style={stickyRoleStyle}>{t('Role', 'Role')}</th>
       {rights.map(right => <th key={right} title={rightLabel(right, t)} style={{ textAlign: 'center', fontSize: 10, minWidth: 92 }}>{rightLabel(right, t)}</th>)}{canManage && <th aria-label={t('Akce', 'Actions')} />}</tr></thead>
-      <tbody>{visibleRoles.map(role => <tr key={role.id}><td style={stickyRoleStyle}><strong>{role.name}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)', maxWidth: 280 }}>{role.description}</div></td>
+      <tbody>{visibleRoles.map(role => <tr key={role.id}><td style={stickyRoleStyle}><strong>{truthfulPresetName(role)}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)', maxWidth: 280 }}>{role.description}</div><LegacyOwnershipNameEvidence rolePreset={role} /><LegacyCapabilityEvidence capabilities={role.capabilities} /></td>
         {rights.map(right => <td key={right} style={{ textAlign: 'center' }}>{role.capabilities.includes(right) ? <Check size={15} color="var(--success)" aria-label={t('Povoleno', 'Allowed')} /> : '—'}</td>)}
-        {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={() => openEditor({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${role.name}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => requestRemoval(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${role.name}`}><Trash2 size={13} aria-hidden="true" /></button></div></td>}</tr>)}</tbody></table></div>
+        {canManage && <td><div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={() => openEditor({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${truthfulPresetName(role)}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => requestRemoval(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${truthfulPresetName(role)}`}><Trash2 size={13} aria-hidden="true" /></button></div></td>}</tr>)}</tbody></table></div>
       }
     </>}
     {editing && <RoleEditor value={editing} busy={saving} failed={saveError} cancel={closeEditor} save={save} />}
@@ -140,29 +142,44 @@ export function RoleCatalog() {
   </section>
 }
 
-function RoleOverview({ roles, canManage, edit, remove }: { roles: RolePreset[]; canManage: boolean; edit: (role: RolePreset) => void; remove: (role: RolePreset, trigger: HTMLButtonElement) => void }) {
+export function OwnershipRoleNotice() {
+  const { t } = useLanguage()
+  return <aside role="note" aria-label={t('Vlastnické role', 'Ownership roles')} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 14, padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+    <Crown size={17} aria-hidden="true" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
+    <div><strong style={{ display: 'block', fontSize: 12 }}>{t('Vlastnictví se nepřiřazuje', 'Ownership is not assignable')}</strong>
+      <span style={{ display: 'block', marginTop: 2, color: 'var(--text-secondary)', fontSize: 11.5, lineHeight: 1.45 }}>{t('Role „Majitel účtu“ a „Majitel karty“ se odvozují z evidence produktu. Tento katalog obsahuje pouze delegovatelné presety; vlastnictví zde nelze vytvořit ani změnit.', '“Account owner” and “Card owner” come from the product record. This catalog contains delegation presets only; ownership cannot be created or changed here.')}</span></div>
+  </aside>
+}
+
+export function RoleOverview({ roles, canManage, edit, remove }: { roles: RolePreset[]; canManage: boolean; edit: (role: RolePreset) => void; remove: (role: RolePreset, trigger: HTMLButtonElement) => void }) {
   const { t } = useLanguage()
   return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 330px), 1fr))', gap: 12 }}>
-    {roles.map(role => <article key={role.id} style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 16, background: 'linear-gradient(145deg, var(--surface-1), var(--surface-2))' }}>
+    {roles.map(role => {
+      const unsupported = role.capabilities.filter(capability => !isAssignablePresetCapability(capability))
+      const displayName = truthfulPresetName(role)
+      return <article key={role.id} style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 16, background: 'linear-gradient(145deg, var(--surface-1), var(--surface-2))' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
-        <div><h3 style={{ fontSize: 15, fontWeight: 750 }}>{role.name}</h3><p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4, lineHeight: 1.5 }}>{role.description}</p></div>
-        {canManage && <div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={() => edit({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${role.name}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => remove(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${role.name}`}><Trash2 size={13} aria-hidden="true" /></button></div>}
+        <div><h3 style={{ fontSize: 15, fontWeight: 750 }}>{displayName}</h3><p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4, lineHeight: 1.5 }}>{role.description}</p></div>
+        {canManage && <div style={{ display: 'flex', gap: 4 }}><button type="button" className="btn btn-secondary" onClick={() => edit({ ...role, capabilities: [...role.capabilities] })} aria-label={`${t('Upravit', 'Edit')} ${displayName}`}><Pencil size={13} aria-hidden="true" /></button><button type="button" className="btn btn-secondary" onClick={event => remove(role, event.currentTarget)} aria-label={`${t('Smazat', 'Delete')} ${displayName}`}><Trash2 size={13} aria-hidden="true" /></button></div>}
       </div>
+      <LegacyOwnershipNameEvidence rolePreset={role} />
+      {unsupported.length > 0 && <><p style={{ marginTop: 10, color: 'var(--warning-text)', fontSize: 11 }}>{t('Tento starší preset před dalším použitím upravte.', 'Edit this legacy preset before reuse.')}</p><LegacyCapabilityEvidence capabilities={unsupported} /></>}
       <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
         {(['view', 'act', 'manage'] as CapabilityIntent[]).map(intent => {
-          const capabilities = role.capabilities.filter(capability => capabilityIntent(capability) === intent)
+          const capabilities = role.capabilities.filter(capability => isAssignablePresetCapability(capability) && capabilityIntent(capability) === intent)
           if (!capabilities.length) return null
           return <div key={intent}><div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: intentColor(intent) }}>{intentLabel(intent, t)}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>{capabilities.map(capability => <span key={capability} title={capability} style={{ borderRadius: 999, padding: '5px 9px', fontSize: 11, background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{rightLabel(capability, t)}</span>)}</div>
           </div>
         })}
       </div>
-    </article>)}
+    </article>})}
   </div>
 }
 
 export function DeleteRoleDialog({ role, busy, failed, onCancel, onConfirm }: { role: RolePreset; busy: boolean; failed: boolean; onCancel: () => void; onConfirm: () => void }) {
   const { t } = useLanguage()
+  const displayName = truthfulPresetName(role)
   const dialogRef = useRef<HTMLDivElement>(null)
   const titleId = `delete-role-${role.id}-title`
   const impactId = `delete-role-${role.id}-impact`
@@ -181,7 +198,7 @@ export function DeleteRoleDialog({ role, busy, failed, onCancel, onConfirm }: { 
   ><div className="card" style={{ width: 'min(440px, 100%)', padding: 22 }}>
     <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
       <AlertTriangle size={19} aria-hidden="true" style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
-      <div><h2 id={titleId} style={{ margin: 0, fontSize: 16, fontWeight: 750 }}>{t(`Smazat roli „${role.name}“?`, `Delete “${role.name}”?`)}</h2>
+      <div><h2 id={titleId} style={{ margin: 0, fontSize: 16, fontWeight: 750 }}>{t(`Smazat roli „${displayName}“?`, `Delete “${displayName}”?`)}</h2>
         <p id={impactId} style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 12.5, lineHeight: 1.5 }}>{t('Preset přestane být dostupný pro nové delegace. Již udělená práva se nezmění ani neodvolají.', 'The preset will no longer be available for new delegations. Existing grants will not change or be revoked.')}</p></div>
     </div>
     {failed && <p role="alert" style={{ margin: '14px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>{t('Roli se nepodařilo smazat. Nic se nezměnilo; zkuste to znovu.', 'The role could not be deleted. Nothing changed; try again.')}</p>}
@@ -193,19 +210,38 @@ export function DeleteRoleDialog({ role, busy, failed, onCancel, onConfirm }: { 
 }
 
 export function RoleEditor({ value, busy, failed, cancel, save }: { value: RolePreset; busy: boolean; failed: boolean; cancel: () => void; save: (role: RolePreset) => Promise<void> }) {
-  const { t } = useLanguage(); const [role, setRole] = useState(value); const allowed = CAPABILITIES_BY_RESOURCE[role.resourceType]
+  const { t } = useLanguage()
+  const unsupported = value.capabilities.filter(capability => !isAssignablePresetCapability(capability))
+  const [role, setRole] = useState({ ...value, name: truthfulPresetName(value), capabilities: value.capabilities.filter(isAssignablePresetCapability) })
+  const reservedName = isReservedOwnershipPresetName(role.name)
+  const allowed = assignablePresetCapabilities(role.resourceType)
   const dialogRef = useRef<HTMLDivElement>(null)
   const changeResource = (resourceType: DelegationResource) => setRole({ ...role, resourceType, capabilities: [] })
   const toggle = (right: string) => setRole({ ...role, capabilities: role.capabilities.includes(right) ? role.capabilities.filter(item => item !== right) : [...role.capabilities, right] })
   return <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="role-editor-title" aria-busy={busy} onKeyDown={event => { if (event.key === 'Escape' && !busy) cancel(); trapDialogFocus(event, dialogRef.current) }} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.55)', display: 'grid', placeItems: 'center', padding: 16 }}><div className="card" style={{ padding: 20, width: 'min(620px, 100%)', maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}><h2 id="role-editor-title" style={{ fontWeight: 700 }}>{t('Nastavení dispoziční role', 'Delegation role settings')}</h2><button type="button" className="btn btn-secondary" disabled={busy} onClick={cancel} aria-label={t('Zavřít', 'Close')}><X size={14} aria-hidden="true" /></button></div>
     {failed && <p role="alert" style={{ margin: '0 0 14px', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>{t('Roli se nepodařilo uložit. Nic se nezměnilo; zkontrolujte údaje a zkuste to znovu.', 'The role could not be saved. Nothing changed; check the details and try again.')}</p>}
+    <LegacyOwnershipNameEvidence rolePreset={value} />
+    {unsupported.length > 0 && <p role="note" aria-label={t('Nepodporované právo', 'Unsupported capability')} style={{ margin: '0 0 14px', padding: '10px 12px', borderRadius: 8, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: 12 }}>{t('Správa dalších delegací se nevymáhá a do uloženého presetu se nevrátí. Vyberte alespoň jedno podporované právo, nebo preset smažte. Již udělená práva se nezmění.', 'Management of further delegations is not enforced and will not return to a saved preset. Select at least one supported right, or delete the preset. Existing grants will not change.')}</p>}
+    {reservedName && <p role="alert" style={{ margin: '0 0 14px', color: 'var(--warning-text)', fontSize: 12 }}>{t('Názvy vlastnických rolí jsou vyhrazené pro evidenci produktu. Použijte pravdivý název dispoziční role.', 'Ownership role names are reserved for product records. Use a truthful delegation role name.')}</p>}
     <label style={labelStyle}>{t('Název', 'Name')}<input autoFocus className="input" maxLength={100} value={role.name} onChange={event => setRole({ ...role, name: event.target.value })} /></label>
     <label style={labelStyle}>{t('Popis', 'Description')}<textarea className="input" maxLength={500} value={role.description} onChange={event => setRole({ ...role, description: event.target.value })} /></label>
     <label style={labelStyle}>{t('Zdroj', 'Resource')}<select className="input" value={role.resourceType} onChange={event => changeResource(event.target.value as DelegationResource)}>{Object.keys(CAPABILITIES_BY_RESOURCE).map(resource => <option key={resource}>{resource}</option>)}</select></label>
     <fieldset style={{ border: 0, padding: 0, margin: '14px 0' }}><legend style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{t('Práva', 'Rights')}</legend>{allowed.map(right => <label key={right} title={right} style={{ display: 'flex', gap: 8, padding: 8 }}><input type="checkbox" checked={role.capabilities.includes(right)} onChange={() => toggle(right)} /><span>{rightLabel(right, t)}</span></label>)}</fieldset>
-    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button type="button" className="btn btn-secondary" disabled={busy} onClick={cancel}>{t('Zrušit', 'Cancel')}</button><button type="button" className="btn btn-primary" disabled={busy || !role.name.trim() || !role.capabilities.length} aria-busy={busy} onClick={() => void save(role)}>{busy ? t('Ukládám…', 'Saving…') : t('Uložit', 'Save')}</button></div>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button type="button" className="btn btn-secondary" disabled={busy} onClick={cancel}>{t('Zrušit', 'Cancel')}</button><button type="button" className="btn btn-primary" disabled={busy || reservedName || !role.name.trim() || !role.capabilities.length} aria-busy={busy} onClick={() => void save(role)}>{busy ? t('Ukládám…', 'Saving…') : t('Uložit', 'Save')}</button></div>
   </div></div>
+}
+
+function LegacyOwnershipNameEvidence({ rolePreset }: { rolePreset: RolePreset }) {
+  const { t } = useLanguage()
+  if (!isReservedOwnershipPresetName(rolePreset.name)) return null
+  const displayName = truthfulPresetName(rolePreset)
+  return <aside role="note" aria-label={t('Historický vlastnický název', 'Legacy ownership label')} style={{ marginTop: 8, padding: '7px 9px', borderRadius: 7, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', fontSize: 10 }}>
+    {t(
+      `Uložený historický název „${rolePreset.name}“ popisoval vlastnictví. Zobrazuje se jako „${displayName}“; uložením se převezme pravdivý název. Existující granty se nezmění.`,
+      `The stored legacy label “${rolePreset.name}” described ownership. It is shown as “${displayName}”; saving adopts the truthful name. Existing grants do not change.`,
+    )}
+  </aside>
 }
 const labelStyle = { display: 'grid', gap: 6, fontSize: 13, fontWeight: 600, marginBottom: 12 } as const
 const stickyRoleStyle = { position: 'sticky', left: 0, zIndex: 1, minWidth: 240, background: 'var(--surface-1)' } as const

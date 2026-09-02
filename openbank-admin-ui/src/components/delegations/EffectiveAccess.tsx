@@ -3,10 +3,11 @@
 
 import Link from 'next/link'
 import type { ReactNode } from 'react'
-import { AlertTriangle, Crown, KeyRound, Layers3 } from 'lucide-react'
+import { AlertTriangle, CreditCard, Crown, KeyRound, Layers3 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { CAPABILITIES_BY_RESOURCE, capabilityIntent, capabilityLabel, type RolePreset } from '@/lib/delegations/rolePresets'
+import { CAPABILITIES_BY_RESOURCE, capabilityIntent, capabilityLabel, isAssignablePresetCapability, truthfulPresetName, type RolePreset } from '@/lib/delegations/rolePresets'
 import { DelegationStatusBadge, formatCeiling, type Grant } from '@/components/delegations/GrantView'
+import { LegacyCapabilityEvidence } from '@/components/delegations/LegacyCapabilityEvidence'
 
 type SourceState = 'ok' | 'forbidden' | 'unavailable'
 type Account = { id?: string; accountNumber?: string; nickname?: string | null; accountType?: string; currencyCode?: string; status?: string }
@@ -41,8 +42,11 @@ const sameCapabilities = (left: string[] = [], right: string[] = []) =>
   left.length === right.length && [...left].sort().every((item, index) => item === [...right].sort()[index])
 
 export function matchedRoleName(grant: Grant, presets: RolePreset[], language: 'cs' | 'en'): string {
+  if (grant.capabilities.includes('DELEGATION_MANAGE')) {
+    return language === 'cs' ? 'Historická delegovaná práva' : 'Historical delegated rights'
+  }
   const preset = presets.find(item => item.resourceType === grant.resourceType && sameCapabilities(item.capabilities, grant.capabilities))
-  if (preset) return preset.name
+  if (preset) return truthfulPresetName(preset)
   return language === 'cs' ? 'Vlastní kombinace práv' : 'Custom rights set'
 }
 
@@ -68,7 +72,7 @@ export function grantResourcePresentation(grant: Grant, details: ResourceDetail[
 export function effectiveResourceDetails(data: EffectiveAccessPayload): ResourceDetail[] {
   const owned = [
     ...data.accounts.filter(account => account.id).map(account => ({ key: `ACCOUNT:${account.id}`, resourceType: 'ACCOUNT', resourceId: account.id!, state: 'ok' as const, detail: account })),
-    ...data.cards.filter(card => card.id).map(card => ({ key: `CARD:${card.id}`, resourceType: 'CARD', resourceId: card.id!, state: 'ok' as const, detail: card })),
+    ...data.cards.filter(card => !card.delegated && card.id).map(card => ({ key: `CARD:${card.id}`, resourceType: 'CARD', resourceId: card.id!, state: 'ok' as const, detail: card })),
   ]
   return [...new Map([...owned, ...data.resourceDetails].map(detail => [detail.key, detail])).values()]
 }
@@ -170,6 +174,8 @@ export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
   const partial = Object.entries(data.sources).filter(([, state]) => state !== 'ok')
   const now = new Date(data.evaluatedAt)
   const effectiveGrants = data.grants.filter(grant => isGrantEffectiveAt(grant, now))
+  const ownedCards = data.cards.filter(card => !card.delegated)
+  const delegatedCards = data.cards.filter(card => card.delegated)
   const attention = data.grants
     .map(grant => ({ grant, reasons: delegationAttentionReasons(grant, now, language) }))
     .filter(item => item.reasons.length > 0)
@@ -204,16 +210,20 @@ export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
       </div>
     </aside>}
 
-    <AccessSection title={t('Vlastní zdroje', 'Owned resources')} empty={data.accounts.length === 0 && data.cards.length === 0}>
-      {data.accounts.map(account => <AccessCard key={`account-${account.id}`} icon={<Crown size={15} />} role={t('Majitel účtu', 'Account owner')} resource={account.nickname || maskedAccount(account.accountNumber, t('Účet', 'Account')) || t('Účet', 'Account')} meta={[account.accountType, account.currencyCode, account.status].filter(Boolean).join(' · ')} href={account.id ? `/accounts/${account.id}` : undefined} capabilities={[...CAPABILITIES_BY_RESOURCE.ACCOUNT]} />)}
-      {data.cards.map(card => <AccessCard key={`card-${card.id}`} icon={<Crown size={15} />} role={card.delegated ? t('Držitel dodatkové karty', 'Additional cardholder') : t('Majitel karty', 'Card owner')} resource={card.maskedPan || t('Karta', 'Card')} meta={[card.network, card.cardType, card.status].filter(Boolean).join(' · ')} href={card.id ? `/cards/${card.id}` : undefined} capabilities={card.delegated ? delegatedCardCapabilities(card, data) : [...CAPABILITIES_BY_RESOURCE.CARD]} />)}
+    <AccessSection title={t('Vlastní zdroje', 'Owned resources')} empty={data.accounts.length === 0 && ownedCards.length === 0}>
+      {data.accounts.map(account => <AccessCard key={`account-${account.id}`} icon={<Crown size={15} />} authority="derived" role={t('Majitel účtu', 'Account owner')} resource={account.nickname || maskedAccount(account.accountNumber, t('Účet', 'Account')) || t('Účet', 'Account')} meta={[account.accountType, account.currencyCode, account.status].filter(Boolean).join(' · ')} href={account.id ? `/accounts/${account.id}` : undefined} capabilities={[...CAPABILITIES_BY_RESOURCE.ACCOUNT]} />)}
+      {ownedCards.map(card => <AccessCard key={`card-${card.id}`} icon={<Crown size={15} />} authority="derived" role={t('Majitel karty', 'Card owner')} resource={card.maskedPan || t('Karta', 'Card')} meta={[card.network, card.cardType, card.status].filter(Boolean).join(' · ')} href={card.id ? `/cards/${card.id}` : undefined} capabilities={[...CAPABILITIES_BY_RESOURCE.CARD]} />)}
+    </AccessSection>
+
+    <AccessSection title={t('Delegované karty', 'Delegated cards')} empty={delegatedCards.length === 0}>
+      {delegatedCards.map(card => <AccessCard key={`delegated-card-${card.id}`} icon={<CreditCard size={15} />} authority="card-holder" role={t('Držitel dodatkové karty', 'Additional cardholder')} resource={card.maskedPan || t('Karta', 'Card')} meta={[card.network, card.cardType, card.status].filter(Boolean).join(' · ')} href={card.id ? `/cards/${card.id}` : undefined} capabilities={[]} evidence={<DelegatedCardAuthorityEvidence card={card} />} />)}
     </AccessSection>
 
     <AccessSection title={t('Právě účinná delegovaná oprávnění', 'Delegated rights effective now')} empty={effectiveGrants.length === 0}>
       {effectiveGrants.map(grant => {
         const resource = grantResourcePresentation(grant, data.resourceDetails, language)
         const grantor = grant.grantorName?.trim() || shortId(grant.grantorPartyId)
-        return <AccessCard key={`grant-${grant.id}`} icon={<KeyRound size={15} />} role={matchedRoleName(grant, data.presets, language)} resource={resource.label} meta={<div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}><DelegationStatusBadge status={grant.status} /><span>{t('Udělil', 'Granted by')}: {grantor}</span>{resource.meta && <span>· {resource.meta}</span>}</div>} href={`/delegations/${grant.id}`} capabilities={grant.capabilities} conditions={grantConditions(grant, language)} />
+        return <AccessCard key={`grant-${grant.id}`} icon={<KeyRound size={15} />} authority="delegated" role={matchedRoleName(grant, data.presets, language)} resource={resource.label} meta={<div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}><DelegationStatusBadge status={grant.status} /><span>{t('Udělil', 'Granted by')}: {grantor}</span>{resource.meta && <span>· {resource.meta}</span>}</div>} href={`/delegations/${grant.id}`} capabilities={grant.capabilities} conditions={grantConditions(grant, language)} />
       })}
     </AccessSection>
   </section>
@@ -221,25 +231,45 @@ export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
 
 function AccessSection({ title, empty, children }: { title: string; empty: boolean; children: ReactNode }) {
   const { t } = useLanguage()
-  return <div style={{ marginTop: 16 }}><h3 style={{ fontSize: 12, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>{title}</h3>
+  return <section aria-label={title} style={{ marginTop: 16 }}><h3 style={{ fontSize: 12, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>{title}</h3>
     {empty ? <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 8 }}>{t('Žádné položky z dostupných zdrojů.', 'No items from the available sources.')}</p>
       : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 12, marginTop: 8 }}>{children}</div>}
+  </section>
+}
+
+function AccessCard({ icon, authority, role, resource, meta, href, capabilities, evidence, conditions = [] }: { icon: ReactNode; authority: 'derived' | 'delegated' | 'card-holder'; role: string; resource: string; meta: ReactNode; href?: string; capabilities: string[]; evidence?: ReactNode; conditions?: { label: string; value: string }[] }) {
+  const { t, language } = useLanguage()
+  const authorityLabel = authority === 'derived'
+    ? t('Odvozeno z evidence produktu', 'Derived from product record')
+    : authority === 'card-holder'
+      ? t('Odvozeno ze záznamu držitele karty', 'Derived from cardholder record')
+      : t('Přiděleno delegací', 'Granted by delegation')
+  const effectiveCapabilities = authority === 'derived'
+    ? capabilities
+    : authority === 'card-holder' ? [] : capabilities.filter(isAssignablePresetCapability)
+  const hasLegacyEvidence = authority === 'delegated' && effectiveCapabilities.length !== capabilities.length
+  const content = <><div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', color: 'var(--accent)' }}>{icon}<strong style={{ color: 'var(--text-primary)' }}>{role}</strong><span style={{ borderRadius: 999, padding: '3px 7px', fontSize: 9.5, fontWeight: 700, color: 'var(--text-secondary)', background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{authorityLabel}</span></div>
+    <div style={{ fontSize: 13, fontWeight: 650, marginTop: 9 }}>{resource}</div><div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 3 }}>{meta}</div>
+    {effectiveCapabilities.length > 0 && <div aria-label={t('Účinná práva', 'Effective rights')} style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 12 }}>{effectiveCapabilities.map(capability => <span key={capability} title={capability} style={{ borderRadius: 999, padding: '4px 8px', fontSize: 10, background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{capabilityLabel(capability, language)}</span>)}</div>}
+    {evidence}
+    {authority === 'delegated' && <LegacyCapabilityEvidence capabilities={capabilities} />}
+    {conditions.length > 0 && <div aria-label={t('Podmínky oprávnění', 'Access conditions')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 6, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>{conditions.map(condition => <div key={condition.label} style={{ fontSize: 10 }}><span style={{ color: 'var(--text-tertiary)' }}>{condition.label}</span><strong style={{ display: 'block', marginTop: 2, color: 'var(--text-primary)' }}>{condition.value}</strong></div>)}</div>}</>
+  const style = { display: 'block', padding: 14, border: '1px solid var(--border)', borderRadius: 11, background: 'var(--surface-1)', color: 'inherit', textDecoration: 'none' }
+  const label = `${role}: ${resource} — ${authorityLabel}${hasLegacyEvidence ? ` — ${t('historický záznam, nikoli účinné právo', 'historical evidence, not effective authority')}` : ''}`
+  return href ? <Link href={href} aria-label={label} style={style}>{content}</Link> : <div role="group" aria-label={label} style={style}>{content}</div>
+}
+
+function DelegatedCardAuthorityEvidence({ card }: { card: Card }) {
+  const { t } = useLanguage()
+  const grantTrace = card.delegationGrantId
+    ? `${t('Propojená delegace', 'Linked delegation')}: ${shortId(card.delegationGrantId)}.`
+    : t('Identifikátor propojené delegace není dostupný.', 'Linked delegation identifier is unavailable.')
+  return <div role="note" aria-label={t('Důkaz oprávnění držitele karty', 'Cardholder authority evidence')} style={{ marginTop: 12, padding: '7px 9px', borderRadius: 7, color: 'var(--text-secondary)', background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 10 }}>
+    <strong style={{ display: 'block', color: 'var(--text-primary)' }}>{t('Oprávnění vychází ze záznamu držitele karty', 'Authority derives from the cardholder record')}</strong>
+    <span style={{ display: 'block', marginTop: 3 }}>{grantTrace} {t('Z této účetní delegace se zde neodvozují žádná práva ke kartě. Samostatné delegace ke kartě jsou uvedeny níže.', 'No card capabilities are inferred here from that account delegation. Separate card-scoped grants are listed below.')}</span>
   </div>
 }
 
-function AccessCard({ icon, role, resource, meta, href, capabilities, conditions = [] }: { icon: ReactNode; role: string; resource: string; meta: ReactNode; href?: string; capabilities: string[]; conditions?: { label: string; value: string }[] }) {
-  const { t, language } = useLanguage()
-  const content = <><div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--accent)' }}>{icon}<strong style={{ color: 'var(--text-primary)' }}>{role}</strong></div>
-    <div style={{ fontSize: 13, fontWeight: 650, marginTop: 9 }}>{resource}</div><div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 3 }}>{meta}</div>
-    <div aria-label={t('Práva', 'Rights')} style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 12 }}>{capabilities.map(capability => <span key={capability} title={capability} style={{ borderRadius: 999, padding: '4px 8px', fontSize: 10, background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{capabilityLabel(capability, language)}</span>)}</div>
-    {conditions.length > 0 && <div aria-label={t('Podmínky oprávnění', 'Access conditions')} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 6, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>{conditions.map(condition => <div key={condition.label} style={{ fontSize: 10 }}><span style={{ color: 'var(--text-tertiary)' }}>{condition.label}</span><strong style={{ display: 'block', marginTop: 2, color: 'var(--text-primary)' }}>{condition.value}</strong></div>)}</div>}</>
-  const style = { display: 'block', padding: 14, border: '1px solid var(--border)', borderRadius: 11, background: 'var(--surface-1)', color: 'inherit', textDecoration: 'none' }
-  return href ? <Link href={href} style={style}>{content}</Link> : <div style={style}>{content}</div>
-}
-
-const presetCapabilities = (presets: RolePreset[], name: string) => presets.find(preset => preset.name === name)?.capabilities ?? []
-const delegatedCardCapabilities = (card: Card, data: EffectiveAccessPayload) =>
-  data.grants.find(grant => grant.id === card.delegationGrantId)?.capabilities ?? presetCapabilities(data.presets, 'Držitel dodatkové karty')
 const maskedAccount = (number: string | undefined, label: string) => number ? `${label} •••• ${number.replace(/\s/g, '').slice(-4)}` : undefined
 const shortId = (id?: string) => id ? `${id.slice(0, 8)}…` : '—'
 const resourceLabel = (resource: string, language: 'cs' | 'en') => ({ ACCOUNT: language === 'cs' ? 'Účet' : 'Account', CARD: language === 'cs' ? 'Karta' : 'Card', SAVINGS_GOAL: language === 'cs' ? 'Spoření' : 'Savings' }[resource] ?? resource)

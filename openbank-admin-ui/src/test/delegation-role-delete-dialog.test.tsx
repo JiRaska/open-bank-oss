@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { DeleteRoleDialog, RoleEditor } from '@/components/delegations/RoleCatalog'
+import { DeleteRoleDialog, OwnershipRoleNotice, RoleEditor, RoleOverview } from '@/components/delegations/RoleCatalog'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import type { RolePreset } from '@/lib/delegations/rolePresets'
 
@@ -14,6 +14,28 @@ const ROLE = {
   description: 'Can prepare treasury payments',
   resourceType: 'PAYMENT',
   capabilities: ['OBJECT_READ'],
+} satisfies RolePreset
+
+const LEGACY_OWNER_ROLE = {
+  id: 'legacy-account-owner',
+  name: 'Majitel účtu',
+  description: 'Legacy full-access preset',
+  resourceType: 'ACCOUNT',
+  capabilities: ['ACCOUNT_READ_BALANCES', 'DELEGATION_MANAGE'],
+} satisfies RolePreset
+
+const LEGACY_CARD_OWNER_ROLE = {
+  id: 'legacy-card-owner',
+  name: 'Majitel karty',
+  description: 'Legacy full-card preset',
+  resourceType: 'CARD',
+  capabilities: ['CARD_VIEW', 'CARD_VIEW_TRANSACTIONS', 'CARD_MANAGE_LIMITS', 'CARD_MANAGE_STATUS', 'CARD_MANAGE_CHANNELS'],
+} satisfies RolePreset
+
+const LEGACY_ONLY_ROLE = {
+  ...LEGACY_OWNER_ROLE,
+  id: 'legacy-only',
+  capabilities: ['DELEGATION_MANAGE'],
 } satisfies RolePreset
 
 afterEach(cleanup)
@@ -105,5 +127,72 @@ describe('delegation role editor recovery', () => {
     fireEvent.keyDown(dialog, { key: 'Escape' })
     expect(cancel).not.toHaveBeenCalled()
     expect(save).not.toHaveBeenCalled()
+  })
+
+  it('does not offer recursive delegation and removes it only on an explicit save', () => {
+    const save = vi.fn(async () => undefined)
+    render(
+      <LanguageProvider>
+        <RoleEditor value={LEGACY_OWNER_ROLE} busy={false} failed={false} cancel={vi.fn()} save={save} />
+      </LanguageProvider>,
+    )
+
+    expect(screen.getByRole('note', { name: 'Unsupported capability' })).toHaveTextContent('Existing grants will not change.')
+    expect(screen.queryByRole('checkbox', { name: 'Delegates' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ name: 'Plný disponent účtu', capabilities: ['ACCOUNT_READ_BALANCES'] }))
+  })
+
+  it('explains how to retire a legacy-only capability instead of promising an impossible save', () => {
+    render(
+      <LanguageProvider>
+        <RoleEditor value={LEGACY_ONLY_ROLE} busy={false} failed={false} cancel={vi.fn()} save={vi.fn()} />
+      </LanguageProvider>,
+    )
+
+    expect(screen.getByRole('note', { name: 'Unsupported capability' })).toHaveTextContent('Select at least one supported right, or delete the preset.')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+})
+
+describe('ownership role semantics', () => {
+  it('explains that owner roles come from product records rather than presets', () => {
+    render(
+      <LanguageProvider>
+        <OwnershipRoleNotice />
+      </LanguageProvider>,
+    )
+
+    const note = screen.getByRole('note', { name: 'Ownership roles' })
+    expect(note).toHaveTextContent('Ownership is not assignable')
+    expect(note).toHaveTextContent('ownership cannot be created or changed here')
+  })
+
+  it('keeps an unsupported historical capability visible without presenting it as a right', () => {
+    render(
+      <LanguageProvider>
+        <RoleOverview roles={[LEGACY_OWNER_ROLE]} canManage={false} edit={vi.fn()} remove={vi.fn()} />
+      </LanguageProvider>,
+    )
+
+    const evidence = screen.getByRole('note', { name: 'Legacy unsupported capabilities' })
+    expect(evidence).toHaveTextContent('Historical evidence only — not effective authority')
+    expect(evidence).toContainElement(screen.getByTitle('DELEGATION_MANAGE'))
+    expect(screen.getByTitle('DELEGATION_MANAGE')).toHaveTextContent('Delegates · not enforced')
+    expect(screen.getAllByTitle('DELEGATION_MANAGE')).toHaveLength(1)
+  })
+
+  it('presents the seeded card preset as a delegate role while preserving its stored label as evidence', () => {
+    render(
+      <LanguageProvider>
+        <RoleOverview roles={[LEGACY_CARD_OWNER_ROLE]} canManage={false} edit={vi.fn()} remove={vi.fn()} />
+      </LanguageProvider>,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Plný disponent karty' })).toBeVisible()
+    const evidence = screen.getByRole('note', { name: 'Legacy ownership label' })
+    expect(evidence).toHaveTextContent('stored legacy label “Majitel karty” described ownership')
+    expect(evidence).toHaveTextContent('Existing grants do not change')
   })
 })
