@@ -11,6 +11,12 @@ import {
   ToggleLeft, ToggleRight, ExternalLink, Download, Loader2
 } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import {
+  SanctionsListChangeDialog,
+  retainEnabledSelectedListTypes,
+  type SanctionsList,
+  type SanctionsListChangeError,
+} from '@/components/sanctions/SanctionsListChangeDialog'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
@@ -18,6 +24,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { statusTone } from '@/components/ui/tone'
 import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
+import { readApprovalId } from '@/lib/approvals/triage'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -28,10 +35,13 @@ interface SanctionMatch {
   listType: string; matchType: string; matchScore: number
   matchedName: string; programs: string[]
 }
-interface SanctionsList {
-  id: string; listType: string; displayName: string; sourceUrl: string
-  enabled: boolean; lastUpdatedAt?: string; lastEntryCount?: number
-  cronHour: number; cronMinute: number; cronDays: string
+interface SanctionsListChangeIntent {
+  list: SanctionsList
+  enabled: boolean
+}
+
+interface ListChangeFocusRequest {
+  listId: string
 }
 
 interface ApiError {
@@ -68,6 +78,7 @@ interface ApprovalDecisionIntent {
 const DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN']
 const DAY_LABELS_CS: Record<string,string> = { MON:'Po', TUE:'Út', WED:'St', THU:'Čt', FRI:'Pá', SAT:'So', SUN:'Ne' }
 const DAY_LABELS_EN: Record<string,string> = { MON:'Mon', TUE:'Tue', WED:'Wed', THU:'Thu', FRI:'Fri', SAT:'Sat', SUN:'Sun' }
+const listToggleControlId = (listId: string) => `sanctions-list-${listId}-toggle`
 
 function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string, patch: Partial<SanctionsList>) => void }) {
   const { t } = useLanguage()
@@ -129,7 +140,7 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
 
 function ListCard({ list, onToggle, onRefresh, onSave }: {
   list: SanctionsList
-  onToggle: (id: string, enabled: boolean) => void
+  onToggle: (list: SanctionsList, enabled: boolean, trigger: HTMLButtonElement) => void
   onRefresh: (listType: string) => void
   onSave: (id: string, patch: Partial<SanctionsList>) => void
 }) {
@@ -149,7 +160,17 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
     <div style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden', opacity: list.enabled ? 1 : 0.6, transition: 'opacity 0.2s' }}>
       <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--surface)' }}>
         <Can permission="sanctions:manage">
-          <button type="button" onClick={() => onToggle(list.id, !list.enabled)} aria-label={list.enabled ? t('Deaktivovat sankční seznam', 'Disable sanctions list') : t('Aktivovat sankční seznam', 'Enable sanctions list')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: list.enabled ? 'var(--success)' : 'var(--text-tertiary)', padding: 0, display: 'flex' }}>
+          <button
+            id={listToggleControlId(list.id)}
+            type="button"
+            aria-pressed={list.enabled}
+            aria-haspopup="dialog"
+            onClick={event => onToggle(list, !list.enabled, event.currentTarget)}
+            aria-label={list.enabled
+              ? t(`Zkontrolovat pozastavení automatických aktualizací seznamu ${list.displayName}`, `Review pausing automatic updates for ${list.displayName}`)
+              : t(`Zkontrolovat obnovení automatických aktualizací seznamu ${list.displayName}`, `Review resuming automatic updates for ${list.displayName}`)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: list.enabled ? 'var(--success)' : 'var(--text-tertiary)', padding: 0, display: 'flex' }}
+          >
             {list.enabled ? <ToggleRight size={20} aria-hidden="true" /> : <ToggleLeft size={20} aria-hidden="true" />}
           </button>
         </Can>
@@ -218,6 +239,12 @@ export default function SanctionsPage() {
   // Selected list types for manual screening — initialised to all enabled lists once loaded
   const [selectedListTypes, setSelectedListTypes] = useState<string[]>([])
   const [listScopeInitialised, setListScopeInitialised] = useState(false)
+  const [pendingListChange, setPendingListChange] = useState<SanctionsListChangeIntent | null>(null)
+  const [listChangeBusy, setListChangeBusy] = useState(false)
+  const [listChangeError, setListChangeError] = useState<SanctionsListChangeError>(null)
+  const [listChangeFocusRequest, setListChangeFocusRequest] = useState<ListChangeFocusRequest | null>(null)
+  const handledListChangeFocusRef = useRef<ListChangeFocusRequest | null>(null)
+  const listChangeTriggerRef = useRef<HTMLButtonElement | null>(null)
 
   // Manual disposition of a hit (issue #3334). POST /api/v1/sanctions/review existed, was
   // publicly routed and had no caller anywhere in the product — so this queue could only grow.
@@ -239,6 +266,13 @@ export default function SanctionsPage() {
   const [decideMsg, setDecideMsg] = useState('')
   const [decisionIntent, setDecisionIntent] = useState<ApprovalDecisionIntent | null>(null)
   const decisionTriggerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const linkedApprovalId = readApprovalId(window.location.search)
+    if (!linkedApprovalId) return
+    const frame = requestAnimationFrame(() => setDecideId(linkedApprovalId))
+    return () => cancelAnimationFrame(frame)
+  }, [])
 
   const loadChecks = useCallback(async () => {
     setLoading(true)
@@ -272,7 +306,11 @@ export default function SanctionsPage() {
         setListsError(errorPayload.error ?? t(`Načtení listů selhalo (HTTP ${res.status})`, `Failed to load lists (HTTP ${res.status})`))
         return
       }
-      setLists(Array.isArray(data) ? data : [])
+      const nextLists = Array.isArray(data) ? data as SanctionsList[] : []
+      setLists(nextLists)
+      // Reconciliation may reveal that an ambiguous PUT actually disabled a list. Remove only
+      // types that are no longer enabled; never add back a list the operator deliberately omitted.
+      setSelectedListTypes(current => retainEnabledSelectedListTypes(current, nextLists))
     } catch (error) {
       setListsError(error instanceof Error ? error.message : 'Spojení se službou selhalo')
     }
@@ -308,6 +346,23 @@ export default function SanctionsPage() {
     }
   }, [lists, listScopeInitialised])
 
+  // Restore focus only after React commits both dialog removal and the reconciled list controls.
+  // A one-shot animation frame can run while the loading branch still owns the panel, leaving only
+  // the detached initiating button to focus. A fresh request object also supports the same list
+  // being changed repeatedly without refocusing it on unrelated later renders.
+  useEffect(() => {
+    const request = listChangeFocusRequest
+    if (!request || handledListChangeFocusRef.current === request || pendingListChange || listsLoading) return
+
+    const stableControl = document.getElementById(listToggleControlId(request.listId))
+    const originalTrigger = listChangeTriggerRef.current
+    const target = stableControl instanceof HTMLButtonElement
+      ? stableControl
+      : originalTrigger?.isConnected ? originalTrigger : null
+    target?.focus()
+    handledListChangeFocusRef.current = request
+  }, [listChangeFocusRequest, listsLoading, pendingListChange])
+
   const handleScreen = async () => {
     if (!searchName.trim()) return
     setScreening(true); setScreenResult(null); setScreenError('')
@@ -338,15 +393,24 @@ export default function SanctionsPage() {
     setScreening(false)
   }
 
-  const handleToggleList = async (id: string, enabled: boolean) => {
-    setListsError('')
-    const res = await fetch(`/api/sanctions/lists/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) })
-    if (!res.ok) {
-      const errorPayload = await res.json().catch(() => ({ error: 'Update failed' })) as ApiError
-      setListsError(errorPayload.error ?? `Aktualizace listu selhala (HTTP ${res.status})`)
-      return
-    }
-    loadLists()
+  const requestListChange = (list: SanctionsList, enabled: boolean, trigger: HTMLButtonElement) => {
+    listChangeTriggerRef.current = trigger
+    setListChangeError(null)
+    setPendingListChange({ list, enabled })
+  }
+
+  const restoreListChangeFocus = (listId: string) => {
+    setListChangeFocusRequest({ listId })
+  }
+
+  const closeListChange = async () => {
+    if (listChangeBusy) return
+    const intent = pendingListChange
+    const mustReconcile = listChangeError !== null
+    setPendingListChange(null)
+    setListChangeError(null)
+    if (mustReconcile) await loadLists()
+    if (intent) restoreListChangeFocus(intent.list.id)
   }
 
   const handleRefreshList = async (listType: string) => {
@@ -396,12 +460,56 @@ export default function SanctionsPage() {
     setPendingApproval(null)
   }
 
-  // SEPARATE locks for the maker and checker halves (#7098): a maker disposition and a
-  // checker decision are different operations and must not block each other. Neither
-  // lock addresses the cross-operator four-eyes race — that is arbitrated upstream
-  // (403 on self-approval, below) and no client-side lock could ever see it.
+  // These are separate operations and must not block each other. The list-change lock prevents
+  // same-tick duplicate PUTs; the upstream endpoint is idempotent because it sets an explicit
+  // boolean target state. It does NOT create a maker-checker approval — sanctions.update is an
+  // immediate operation, unlike sanctions.clear below.
+  const listChangeFlight = useSingleFlight()
   const reviewFlight = useSingleFlight()
   const decideFlight = useSingleFlight()
+
+  const confirmListChange = async () => {
+    const intent = pendingListChange
+    if (!intent) return
+
+    const outcome = await listChangeFlight.run(`sanctions:list:${intent.list.id}`, async () => {
+      setListChangeBusy(true)
+      setListChangeError(null)
+      setListsError('')
+      try {
+        const res = await fetch(`/api/sanctions/lists/${intent.list.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: intent.enabled }),
+        })
+        if (!res.ok) {
+          setListChangeError(res.status === 401 || res.status === 403 ? 'unauthorized' : 'unconfirmed')
+          return
+        }
+
+        // A confirmed target-state PUT is safe to reflect immediately. Keep stale-list recovery:
+        // loadLists() reconciles with the service, but a failed follow-up GET must not undo the
+        // state the successful PUT already confirmed.
+        setLists(current => current.map(list => list.id === intent.list.id ? { ...list, enabled: intent.enabled } : list))
+        if (!intent.enabled) {
+          // The list scope is initialised only once, so a list disabled later would otherwise stay
+          // selected and the next manual check would still send it explicitly.
+          setSelectedListTypes(current => current.filter(listType => listType !== intent.list.listType))
+        }
+        setPendingListChange(null)
+        setListChangeError(null)
+        await loadLists()
+        restoreListChangeFocus(intent.list.id)
+      } catch {
+        // A dropped response is ambiguous: the server may have applied the idempotent target state.
+        // Keep the dialog open and never claim that nothing changed.
+        setListChangeError('unconfirmed')
+      } finally {
+        setListChangeBusy(false)
+      }
+    })
+    if (wasSkipped(outcome)) return
+  }
 
   /** Submit a disposition. `approvalId` is set only on the post-approval retry. */
   const submitReview = async (checkId: string, approvalId?: string) => {
@@ -578,7 +686,7 @@ export default function SanctionsPage() {
             {TABS.map(t => (
               <button key={t.id} type="button" aria-pressed={tab === t.id} aria-label={t.label} onClick={() => setTab(t.id)}
                 style={{ padding: '12px 16px', fontSize: '13px', fontWeight: tab === t.id ? 700 : 500,
-                  color: tab === t.id ? 'var(--accent)' : 'var(--text-secondary)',
+                  color: tab === t.id ? 'var(--accent-text)' : 'var(--text-secondary)',
                   background: 'none', border: 'none', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
                   cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '-1px' }}>
                 {t.icon}{t.label}
@@ -860,7 +968,7 @@ export default function SanctionsPage() {
                       {t('Rozsah prověření', 'Search scope')}
                     </label>
                     <div role="group" aria-label={t('Výběr všech sankčních listů', 'Select sanctions lists')} style={{ display: 'flex', gap: '8px' }}>
-                      <button type="button" onClick={() => setSelectedListTypes(lists.map(lst => lst.listType))}
+                      <button type="button" onClick={() => setSelectedListTypes(lists.filter(lst => lst.enabled).map(lst => lst.listType))}
                         style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                         {t('Vše', 'All')}
                       </button>
@@ -881,17 +989,18 @@ export default function SanctionsPage() {
                         const checked = selectedListTypes.includes(lst.listType)
                         const isPep = lst.displayName.toLowerCase().includes('pep') || lst.listType.toLowerCase().includes('pep')
                         return (
-                          <label key={lst.listType} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', padding: '6px 8px', borderRadius: '5px',
+                          <label key={lst.listType} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: lst.enabled ? 'pointer' : 'not-allowed', padding: '6px 8px', borderRadius: '5px',
                             background: checked ? (isPep ? 'rgba(168,85,247,0.07)' : 'rgba(99,102,241,0.07)') : 'transparent',
                             border: `1px solid ${checked ? (isPep ? 'rgba(168,85,247,0.25)' : 'rgba(99,102,241,0.25)') : 'transparent'}`,
                             transition: 'all 0.15s', opacity: lst.enabled ? 1 : 0.5 }}>
                             <input
                               type="checkbox"
                               checked={checked}
+                              disabled={!lst.enabled}
                               onChange={e => setSelectedListTypes(prev =>
                                 e.target.checked ? [...prev, lst.listType] : prev.filter(x => x !== lst.listType)
                               )}
-                              style={{ width: '13px', height: '13px', marginTop: '1px', accentColor: isPep ? 'rgb(168,85,247)' : 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}
+                              style={{ width: '13px', height: '13px', marginTop: '1px', accentColor: isPep ? 'rgb(168,85,247)' : 'var(--accent)', cursor: lst.enabled ? 'pointer' : 'not-allowed', flexShrink: 0 }}
                             />
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontSize: '12px', fontWeight: 600, color: checked ? 'var(--text-primary)' : 'var(--text-secondary)',
@@ -995,7 +1104,7 @@ export default function SanctionsPage() {
             <div style={{ padding: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                 <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                  {lists.filter(l => l.enabled).length} {t('z', 'of')} {lists.length} {t('listů aktivních', 'lists active')}
+                  {lists.filter(l => l.enabled).length} {t('z', 'of')} {lists.length} {t('listů s automatickou aktualizací', 'lists with automatic updates')}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button type="button" aria-busy={listsLoading} aria-label={t('Obnovit stav sankčních listů', 'Refresh sanctions-list status')} onClick={() => void loadLists()} disabled={listsLoading}
@@ -1046,7 +1155,7 @@ export default function SanctionsPage() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {lists.map(list => (
                       <ListCard key={list.id} list={list}
-                        onToggle={handleToggleList}
+                        onToggle={requestListChange}
                         onRefresh={handleRefreshList}
                         onSave={handleSaveCron} />
                     ))}
@@ -1057,6 +1166,14 @@ export default function SanctionsPage() {
           )}
         </div>
       </div>
+      {pendingListChange && <SanctionsListChangeDialog
+        list={pendingListChange.list}
+        enabled={pendingListChange.enabled}
+        busy={listChangeBusy}
+        error={listChangeError}
+        onCancel={() => void closeListChange()}
+        onConfirm={() => void confirmListChange()}
+      />}
       {decisionIntent && <SanctionsApprovalDecisionDialog
         intent={decisionIntent}
         busy={decideBusy}

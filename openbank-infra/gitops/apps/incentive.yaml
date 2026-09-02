@@ -8,6 +8,10 @@ kind: Application
 metadata:
   name: incentive
   namespace: argocd
+  annotations:
+    # Machine-readable counterpart to the rollout boundary above. Admin UI discovery must not
+    # create cross-namespace RBAC until this Application is activated and observed healthy.
+    openbank.io/discovery-state: staged
   finalizers: [resources-finalizer.argocd.argoproj.io]
 spec:
   project: default

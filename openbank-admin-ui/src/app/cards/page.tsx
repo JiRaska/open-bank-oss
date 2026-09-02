@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
@@ -52,6 +52,8 @@ export default function CardsPage() {
   const [visible, setVisible] = useState(PAGE_SIZE)
   const [pending, setPending] = useState<{ card: Card; transition: CardTransition } | null>(null)
   const [issuing, setIssuing] = useState(false)
+  const cardsResultsRef = useRef<HTMLElement>(null)
+  const closeFocusOverrideRef = useRef<HTMLElement | null>(null)
 
   // Single graceful data path (admin-ui rule #1): the hook classifies a non-OK
   // BFF response and auto-wakes a scaled-to-zero pod (KEDA, ADR-0057) instead of
@@ -97,7 +99,10 @@ export default function CardsPage() {
   const onSelectTransition = (card: Card, tr: CardTransition) => {
     setHighlighted(card.id)
     ops.setFeedback(null)
-    if (tr.irreversible) setPending({ card, transition: tr })
+    if (tr.irreversible) {
+      closeFocusOverrideRef.current = null
+      setPending({ card, transition: tr })
+    }
     else void ops.runTransition(card, tr)
   }
 
@@ -153,7 +158,7 @@ export default function CardsPage() {
 
         <CardLifecycleMap current={highlightedCard?.status} />
 
-        <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />
+        {!pending && <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />}
 
         {/* Table */}
         <div className="card">
@@ -204,7 +209,12 @@ export default function CardsPage() {
             </p>
           </div>
 
-          <div id="cards-results">
+          <section
+            ref={cardsResultsRef}
+            id="cards-results"
+            tabIndex={-1}
+            aria-label={t('Výsledky karet', 'Card results')}
+          >
           {unavailable && <DataUnavailable kind={unavailable.kind} service={t('Card-issuance-service', 'Card-issuance-service')} feature={t('Karty', 'Cards')} lang={language} dense={cards.length > 0} />}
           {loading && cards.length === 0 ? (
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
@@ -284,7 +294,7 @@ export default function CardsPage() {
               </div>
             </>
           )}
-          </div>
+          </section>
         </div>
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginTop: '14px', fontSize: '11.5px', color: 'var(--text-tertiary)' }}>
@@ -301,8 +311,16 @@ export default function CardsPage() {
           card={pending.card}
           transition={pending.transition}
           busy={ops.busy !== null}
+          feedback={ops.feedback}
+          closeFocusOverrideRef={closeFocusOverrideRef}
           onCancel={() => setPending(null)}
-          onConfirm={reason => void ops.runTransition(pending.card, pending.transition, reason).then(ok => { if (ok) setPending(null) })}
+          onDismissFeedback={() => ops.setFeedback(null)}
+          onConfirm={reason => void ops.runTransition(pending.card, pending.transition, reason).then(ok => {
+            if (ok) {
+              closeFocusOverrideRef.current = cardsResultsRef.current
+              setPending(null)
+            }
+          })}
         />
       )}
 

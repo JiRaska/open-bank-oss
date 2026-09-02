@@ -4,6 +4,10 @@ quarkus:
 
   http:
     port: 8126
+    # Full-suite Quarkus profiles restart the application in one test worker. A fixed default
+    # test port can still be held by the preceding profile during that hand-off, so let Quarkus
+    # allocate an available port and propagate it to RestAssured.
+    test-port: 0
     cors:
       ~: true
       origins: "http://localhost:3000"
@@ -146,6 +150,15 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Full immutable reservation snapshots on a dedicated compacted bootstrap stream.
+      spend-reservation-state-out:
+        connector: smallrye-kafka
+        client.id: delegation-service-spend-state-${quarkus.uuid}
+        topic: openbank.delegation.spend-reservation-state
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%dev":
   quarkus:
@@ -174,6 +187,9 @@ mp:
 openbank:
   delegation:
     idempotency-ttl-seconds: 86400
+    # New domestic reservations fail closed until the downstream binding consumer is deployed.
+    # Existing neutral reservations and exact replays retain their established behavior.
+    spend-reservation-state-events-enabled: false
     # Config expression, not a literal in the annotation: DelegationExpirationSweepIT shrinks it
     # so a test can observe a REAL scheduler dispatch. A test that calls the method directly
     # cannot see the defect this sweep had — the direct call supplies the Vert.x context the

@@ -26,9 +26,13 @@ WHY THIS GATE EXISTS
     happens or somebody finds out".
 
 WHAT IT FLAGS
-    In a file containing @Incoming or @Scheduled: a `catch (e: Exception|Throwable)` whose body
-    never throws, wrapping a try that performs a STATE CHANGE through a repository / use case /
-    port / store / publisher.
+    In a file containing @Incoming or @Scheduled, four spellings of one defect:
+      1. `catch (e: Exception|Throwable)` whose body never throws, around a STATE CHANGE;
+      2. `runCatching { <state change> }` whose Result is recovered rather than rethrown;
+      3. a Mutiny chain over a state change ending in `.onFailure()....recoverWith*` — the
+         reactive spelling, with no `catch` and no `runCatching` anywhere in it;
+      4. any of the above where the state change lives in a helper declared in the same file OR
+         in a SIBLING file of the same package.
 
 WHAT IT DOES NOT FLAG, AND WHY
     - A catch that rethrows (directly, or via EventRetry.withRetry, which ends in a throw).
@@ -86,7 +90,12 @@ STATE_CALL = re.compile(
     # Read-model / sink verbs. `taxFilingService.observe(...)` matched the RECEIVER
     # (…Service) and was still invisible, because the verb list was written from the
     # money path and a projection does not "save", it "observes" or "ingests".
-    r"observe|ingest|index|flush|commit|advance|project)\w*\s*\(",
+    r"observe|ingest|index|flush|commit|advance|project|"
+    # Accounting verbs the money path spells its own way. `accrueInterestUseCase.accrueAll(date)`
+    # and `capitalizeInterestUseCase.capitalizeAll(toDate)` both matched the RECEIVER (…UseCase)
+    # and neither matched a verb, so interest-service's two nightly money schedulers were invisible
+    # in both spellings. `synchronize` is the same gap one receiver over.
+    r"accrue|capitali[sz]e|synchroni[sz]e|sync)\w*\s*\(",
     re.IGNORECASE,
 )
 # Two ways to be legitimately silent, and both must be STATED where a reviewer reads them.
@@ -107,6 +116,68 @@ RUN_CATCHING = re.compile(r"runCatching\s*\{")
 RECOVERED = re.compile(r"^\s*\.\s*(getOrNull|getOrElse|getOrDefault|onFailure|fold)\b")
 # .getOrThrow() / .getOrElse { throw … } are the SAFE terminators: the failure still surfaces.
 RETHROWN_TERMINATOR = re.compile(r"getOrThrow|throw")
+
+# The REACTIVE spelling of the same swallow, and the one with no `catch` and no `runCatching`
+# anywhere in it (#5745 section C). A Mutiny pipeline recovers by operator:
+#   repo.eraseParty(id).onFailure().recoverWithNull()          — failure becomes a null item
+#   uni.onFailure().invoke { log.error(it) }.recoverWithItem(0) — failure becomes a log line
+# The handler's Uni then completes successfully, so the connector ACKS, exactly as a
+# catch-and-log would. This is not a rare idiom here: every non-suspend `@Incoming` returning
+# `Uni<Void>` is written this way, and the gate's two existing shapes (`try/catch`,
+# `runCatching`) are both textual — neither can see an operator chain.
+#
+# `.onFailure().retry()`, `.transform { … }` and `.recoverWithUni { … throw … }` are NOT matched:
+# the first re-attempts, the second re-raises a mapped exception, and the third rethrows. Only the
+# recoverWith* family that SUBSTITUTES a value is a swallow.
+MUTINY_RECOVER = re.compile(r"\.\s*recoverWith(Item|Null|Uni|Completion)\s*[({]")
+
+
+def _chained_statement(text: str, idx: int) -> tuple[str, int]:
+    """The whole method-chain statement containing the character at `idx`.
+
+    A Mutiny chain has no braces or semicolons of its own, so the usual statement delimiters are
+    useless. Walk UP from the operator line until a line is BOTH a statement head (not starting
+    with `.`, `)` or `}`) AND leaves the accumulated text brace/paren-balanced.
+
+    The balance condition is not decoration — it is the whole difference between reaching the
+    statement head and stopping one operator short. A "continuation starts with a dot" rule alone
+    stops at the `}` closing a multi-line `.onItem().invoke { … }`, which is the shape every real
+    scheduler in this repo is written in: `InterestAccrualScheduler`'s chain would have been read
+    as its last three lines, the `accrueInterestUseCase.accrueAll(date)` head never seen, and the
+    gate would have reported clean for a reason that has nothing to do with the code being safe.
+    Walking DOWN is not needed — the state change is always upstream of the recovery.
+    """
+    lines = text[:idx].split("\n")
+    i = len(lines) - 1
+    while i > 0:
+        acc = "\n".join(lines[i:])
+        head = lines[i].lstrip()
+        balanced = acc.count("{") == acc.count("}") and acc.count("(") == acc.count(")")
+        if balanced and not head.startswith((".", ")", "}")):
+            break
+        i -= 1
+    start = len("\n".join(lines[:i])) + (1 if i else 0)
+    return "\n".join(lines[i:]) + text[idx : idx + 200].split("\n")[0], start
+
+
+def _mutiny_findings(text: str, path: str, funs=None) -> list[tuple[str, int, str]]:
+    """A Mutiny chain whose failure is recovered away, over a statement that changes state."""
+    out = []
+    for m in MUTINY_RECOVER.finditer(text):
+        stmt, stmt_start = _chained_statement(text, m.start())
+        if "throw" in stmt:
+            continue
+        state = _state_change_in(stmt, funs)
+        if not state:
+            continue
+        line_no = text[: m.start()].count("\n") + 1
+        # Same excusal rule as the try/catch shape: the marker must sit in the chain itself or in
+        # the contiguous comment block directly above the statement it justifies.
+        if EXCUSED.search(stmt) or EXCUSED.search(_preceding_comment_block(text, stmt_start)):
+            continue
+        out.append((path, line_no, state.group(0).strip()))
+    return out
+
 
 # A MANUAL NEGATIVE ACKNOWLEDGEMENT is the other correct ending, and it must be recognised
 # here or widening STATE_CALL above turns correct code red. `message.nack(e)`
@@ -220,11 +291,23 @@ def _run_catching_findings(text: str, path: str, funs=None) -> list[tuple[str, i
     return out
 
 
-def findings_for(text: str, path: str) -> list[tuple[str, int, str]]:
+def findings_for(text: str, path: str, package_funs: dict | None = None) -> list[tuple[str, int, str]]:
+    """Findings in one file. `package_funs` are `fun` bodies declared in its SIBLING files.
+
+    The same-file helper hop already existed; the swallow that hides one file over did not
+    (#5745 section C). `PartyErasureConsumer` catching around `applyErasure(event)` — declared in
+    `ErasureSupport.kt`, same package, where `projection.eraseParty(...)` actually lives — was
+    invisible for exactly the reason a same-file helper used to be: the scan is textual and it only
+    ever read one file. Splitting a helper out is normal Kotlin, so the gate's coverage silently
+    depended on a file-layout choice. Same-file declarations WIN on a name clash: a package-wide
+    index makes generic helper names (`process`, `apply`) ambiguous, and the local one is the
+    call's real target.
+    """
     if not HANDLER.search(text):
         return []
-    funs = _local_fun_bodies(text)
+    funs = {**(package_funs or {}), **_local_fun_bodies(text)}
     out = _run_catching_findings(text, path, funs)
+    out += _mutiny_findings(text, path, funs)
     for m in re.finditer(r"\btry\s*\{", text):
         try_body, after = _block(text, m.end() - 1)
         tail = text[after : after + 400]
@@ -252,12 +335,20 @@ def scan(root: Path) -> tuple[list[tuple[str, int, str]], int]:
     files = [p for p in root.rglob("*.kt") if "/build/" not in str(p) and "/src/main/" in str(p)]
     findings: list[tuple[str, int, str]] = []
     handlers = 0
+    # `fun` bodies by directory — the practical stand-in for "same package", which is what a
+    # helper an @Incoming handler can call unqualified actually is. Built once; a handler file is
+    # then resolved against its own declarations plus its siblings'.
+    package_funs: dict = {}
+    for p in files:
+        package_funs.setdefault(p.parent, {}).update(
+            _local_fun_bodies(p.read_text(encoding="utf-8", errors="replace"))
+        )
     for p in files:
         text = p.read_text(encoding="utf-8", errors="replace")
         if not HANDLER.search(text):
             continue
         handlers += 1
-        findings += findings_for(text, str(p.relative_to(root)))
+        findings += findings_for(text, str(p.relative_to(root)), package_funs.get(p.parent))
     return findings, handlers
 
 
@@ -590,6 +681,138 @@ SELF_TEST_CASES = [
         """,
         0,
     ),
+    # ---- #5745 section C, the two shapes that remained blind after the first widening --------
+    # Both of these return 0 findings on the pre-widening gate — measured, not assumed. A gate
+    # that cannot see a shape reports CLEAN about it, which is why each has a matching
+    # must-stay-green control below rather than a widening taken on trust.
+    (
+        "a Mutiny chain recovering a state change is the reactive spelling of the swallow",
+        """
+        @Incoming("party-erased")
+        fun consume(p: String): Uni<Void> {
+            return projectionRepository.eraseParty(partyId)
+                .onFailure().invoke { e -> log.error("erase failed", e) }
+                .onFailure().recoverWithNull()
+                .replaceWithVoid()
+        }
+        """,
+        1,
+    ),
+    (
+        # The walk back to the statement head has to survive a multi-line lambda mid-chain, or
+        # the head is never read and the gate reports clean for a reason unrelated to safety.
+        # Every real scheduler in this repo is written with one.
+        "the chain head is found past a multi-line lambda operator",
+        """
+        @Scheduled(cron = "0 0 2 * * ?")
+        fun runDaily(): Uni<Void> {
+            return accrueUseCase.accrueAll(date)
+                .onItem().invoke { count ->
+                    log.infof("wrote %d", count)
+                    liveness?.recordSuccess()
+                }
+                .onFailure().recoverWithItem(0)
+                .replaceWithVoid()
+        }
+        """,
+        1,
+    ),
+    (
+        "a Mutiny chain that RETRIES is not a swallow",
+        """
+        @Incoming("x")
+        fun consume(p: String): Uni<Void> {
+            return repo.save(entity).onFailure().retry().atMost(3).replaceWithVoid()
+        }
+        """,
+        0,
+    ),
+    (
+        "a Mutiny chain recovering something that changes no state is not a finding",
+        """
+        @Incoming("x")
+        fun consume(p: String): Uni<String> =
+            parser.parseUni(p).onFailure().recoverWithItem("")
+        """,
+        0,
+    ),
+    (
+        "an excused Mutiny chain is honoured, same rule as the try/catch shape",
+        """
+        @Incoming("x")
+        fun consume(p: String): Uni<Void> {
+            // best-effort: the money is already booked, this is only a push
+            return pushPort.notify(partyId)
+                .onFailure().recoverWithNull()
+                .replaceWithVoid()
+        }
+        """,
+        0,
+    ),
+]
+
+
+# Cross-file cases: (name, handler source, SIBLING file source, expected findings). The helper is
+# declared in another file of the same package, which is the layout the single-file scan could not
+# see. The innocent variant is the control — a package-wide index of `fun` bodies must not start
+# inventing findings out of same-named helpers.
+SELF_TEST_CROSS_FILE_CASES = [
+    (
+        "a state change in a SIBLING-file helper is reached",
+        """
+        @Incoming("party-erased")
+        suspend fun consume(p: String) {
+            try {
+                applyErasure(event)
+            } catch (e: Exception) {
+                log.error("erase failed", e)
+            }
+        }
+        """,
+        """
+        internal suspend fun applyErasure(event: Event) {
+            partyProjection.eraseParty(event.partyId)
+        }
+        """,
+        1,
+    ),
+    (
+        "a sibling helper that changes nothing invents no finding",
+        """
+        @Incoming("party-erased")
+        suspend fun consume(p: String) {
+            try {
+                applyErasure(event)
+            } catch (e: Exception) {
+                log.error("fine", e)
+            }
+        }
+        """,
+        """
+        internal fun applyErasure(event: Event): String = event.toString()
+        """,
+        0,
+    ),
+    (
+        "a rethrowing catch stays clean even when the sibling helper does change state",
+        """
+        @Incoming("party-erased")
+        suspend fun consume(p: String) {
+            try {
+                applyErasure(event)
+            } catch (e: Exception) {
+                log.error("erase failed", e)
+                throw e
+            }
+        }
+        """,
+        """
+        internal suspend fun applyErasure(event: Event) {
+            partyProjection.eraseParty(event.partyId)
+        }
+        """,
+        0,
+    ),
 ]
 
 
@@ -597,6 +820,13 @@ def self_test() -> int:
     bad = 0
     for name, src, want in SELF_TEST_CASES:
         got = len(findings_for(src, "fixture.kt"))
+        if got != want:
+            print(f"  BAD  {name}: want {want} finding(s), got {got}")
+            bad += 1
+        else:
+            print(f"  ok   {name}")
+    for name, handler_src, sibling_src, want in SELF_TEST_CROSS_FILE_CASES:
+        got = len(findings_for(handler_src, "fixture.kt", _local_fun_bodies(sibling_src)))
         if got != want:
             print(f"  BAD  {name}: want {want} finding(s), got {got}")
             bad += 1

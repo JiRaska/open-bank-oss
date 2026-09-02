@@ -8,6 +8,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { parse as parseYaml, parseDocument } from 'yaml'
 import { parseStringPromise } from 'xml2js'
+import { executionEvidenceTotals } from '../src/lib/test-intelligence-execution-evidence.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
@@ -75,6 +76,69 @@ const freshnessAwareState = (state, at) => {
   if (observed - collectedAt.getTime() > maxFutureSkewMs) return 'unknown'
   if (collectedAt.getTime() - observed > staleAfterMs) return 'stale'
   return state
+}
+
+const thresholdObservation = summary => {
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)
+      || !summary.metrics || typeof summary.metrics !== 'object' || Array.isArray(summary.metrics)) {
+    return { valid: false, count: 0, failed: 0 }
+  }
+  const results = []
+  let malformed = false
+  for (const metric of Object.values(summary.metrics)) {
+    if (!metric || typeof metric !== 'object' || Array.isArray(metric)
+        || !Object.hasOwn(metric, 'thresholds')) continue
+    if (!metric.thresholds || typeof metric.thresholds !== 'object' || Array.isArray(metric.thresholds)) {
+      malformed = true
+      continue
+    }
+    const metricResults = Object.values(metric.thresholds)
+    if (metricResults.length === 0) malformed = true
+    results.push(...metricResults)
+  }
+  const valid = !malformed && results.length > 0 && results.every(result =>
+    typeof result === 'boolean'
+      || (result && typeof result === 'object' && !Array.isArray(result) && typeof result.ok === 'boolean'))
+  // Never let one malformed sibling erase a concrete breached threshold.
+  const failed = results.filter(result =>
+    result === true || (result && typeof result === 'object' && !Array.isArray(result) && result.ok === false)).length
+  return { valid, count: results.length, failed }
+}
+
+const retainedThresholdObservation = value => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || !Number.isSafeInteger(value.evaluated) || value.evaluated <= 0
+      || !Number.isSafeInteger(value.breached) || value.breached < 0
+      || value.breached > value.evaluated) return undefined
+  return { valid: true, count: value.evaluated, failed: value.breached }
+}
+
+const thresholdBackedState = (claimedState, rawObservation, retainedObservation) => {
+  // Recorded failures remain actionable even if the optional summary artifact was lost.
+  // A pass is different: prose cannot prove that the producer saw typed outcomes (the legacy
+  // producer rendered malformed objects as "0 breached"), so it needs the raw summary until
+  // the versioned envelope carries a structured denominator.
+  const retained = retainedThresholdObservation(retainedObservation)
+  if (rawObservation?.failed > 0 || retained?.failed > 0) return 'failed'
+  if (claimedState === 'failed') return 'failed'
+  if (!['passed', 'stale'].includes(claimedState)) return claimedState
+  const observation = rawObservation ?? retained
+  if (!observation?.valid) return 'unknown'
+  return claimedState
+}
+
+const retainActionableFailure = (previous, next, validRecovery) =>
+  previous?.state === 'failed' && next.state !== 'failed' && !validRecovery ? previous : next
+
+const normalizeThresholdEvidence = evidence => {
+  if (evidence.kind !== 'performance' && (evidence.kind !== 'synthetic' || evidence.variant)) return evidence
+  const retained = retainedThresholdObservation(evidence.thresholdResults)
+  const { thresholdResults: _untrustedThresholdResults, ...rest } = evidence
+  return {
+    ...rest,
+    state: thresholdBackedState(evidence.state, undefined, evidence.thresholdResults),
+    ...(retained ? { thresholdResults: { evaluated: retained.count, breached: retained.failed } } : {}),
+  }
 }
 
 function releasedComponents() {
@@ -182,10 +246,17 @@ function runEnvelope(component) {
         kind: item.kind, name: item.name, url: item.url, retentionDays: item.retentionDays,
         access: item.access, mayContainSensitiveData: item.mayContainSensitiveData,
       })),
-    })), ...(run.specializedEvidence ?? []).map(item => ({
-      kind: item.kind, state: freshnessAwareState(item.state, run.run?.observedAt ?? observedAt(file)), observedAt: run.run?.observedAt ?? observedAt(file),
-      source: item.source, environment: 'ci', detail: item.detail, run: provenance,
-    }))],
+    })), ...(run.specializedEvidence ?? []).map(item => {
+      const normalized = normalizeThresholdEvidence(item)
+      return {
+        kind: normalized.kind,
+        state: freshnessAwareState(normalized.state, run.run?.observedAt ?? observedAt(file)),
+        observedAt: run.run?.observedAt ?? observedAt(file),
+        source: item.source, environment: 'ci', detail: item.detail, run: provenance,
+        ...(normalized.variant ? { variant: normalized.variant } : {}),
+        ...(normalized.thresholdResults ? { thresholdResults: normalized.thresholdResults } : {}),
+      }
+    })],
     coverage: run.coverage ? {
       state: stateFrom(0, 1, run.run?.observedAt ?? observedAt(file)),
       observedAt: run.run?.observedAt ?? observedAt(file), lines: run.coverage.lines,
@@ -549,12 +620,7 @@ function performance() {
       ? readJson(summaryFile.replace(/-summary\.json$/, '-run.json')) ?? readJson(`${summaryFile}.run.json`)
       : readJson(runSidecar)
     const specialized = performanceRun?.specializedEvidence?.find(item => item.kind === 'performance')
-    const thresholdResults = summary
-      ? Object.values(summary.metrics ?? {}).flatMap(metric => Object.values(metric?.thresholds ?? {}))
-      : []
-    // k6 summary-export uses bare booleans with inverted-looking polarity: true means
-    // crossed/breached, false means passed. The object form is kept for compatible fixtures.
-    const failed = thresholdResults.filter(result => result === true || result?.ok === false).length
+    const summaryThresholds = summaryFile ? thresholdObservation(summary) : undefined
     const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null
     const ratePercent = value => {
       const rate = number(value)
@@ -568,13 +634,44 @@ function performance() {
     } : undefined
     const at = summaryFile ? observedAt(summaryFile) : null
     const provenance = safeRun(performanceRun?.run ?? summaryMeta?.run, `performance:${id}`)
+    const specializedState = specialized
+      ? thresholdBackedState(
+          freshnessAwareState(specialized.state, performanceRun?.run?.observedAt ?? at),
+          summaryThresholds,
+          specialized.thresholdResults,
+        )
+      : null
+    if (specialized?.state === 'passed' && specializedState === 'unknown') {
+      warnings.push(`thresholdless performance pass downgraded: ${id}`)
+    } else if (!specialized && summaryThresholds && !summaryThresholds.valid) {
+      warnings.push(`performance summary has no valid threshold denominator: ${id}`)
+    }
+    const summaryDetail = summaryThresholds
+      ? (summaryThresholds.failed > 0
+          ? `${summaryThresholds.count} threshold result(s), ${summaryThresholds.failed} breached${summaryThresholds.valid ? '' : '; additional invalid threshold outcome(s)'}`
+          : summaryThresholds.count === 0 || summaryThresholds.valid
+          ? `${summaryThresholds.count} threshold result(s), 0 breached`
+          : 'k6 summary contains invalid threshold outcomes')
+      : 'Scenario is declared; the latest k6 run artifact is not bundled into this image.'
+    const retainedThresholds = retainedThresholdObservation(specialized?.thresholdResults)
+    const authoritativeThresholds = summaryThresholds?.valid
+      ? summaryThresholds
+      : summaryFile ? undefined : retainedThresholds
     return {
       id, component,
       state: specialized
-        ? freshnessAwareState(specialized.state, performanceRun?.run?.observedAt ?? at)
-        : (summary ? stateFrom(failed, 1, at) : 'not-run'),
+        ? specializedState
+        : (summaryThresholds?.failed > 0
+            ? stateFrom(summaryThresholds.failed, Math.max(summaryThresholds.count, 1), at)
+            : summaryThresholds?.valid
+            ? stateFrom(summaryThresholds.failed, summaryThresholds.count, at)
+            : summaryFile ? 'unknown' : 'not-run'),
       observedAt: performanceRun?.run?.observedAt ?? at,
       source: path.relative(repo, file), thresholds,
+      ...(authoritativeThresholds ? { thresholdResults: {
+        evaluated: authoritativeThresholds.count,
+        breached: authoritativeThresholds.failed,
+      } } : {}),
       ...(plan ? { plan: {
         executionMode: plan.execution_mode,
         safetyBoundary: plan.safety_boundary,
@@ -583,9 +680,9 @@ function performance() {
         blocker: plan.blocker ?? null,
       } } : {}),
       ...(metrics ? { metrics } : {}),
-      detail: specialized?.detail ?? (summary
-        ? `${thresholdResults.length} threshold result(s), ${failed} breached`
-        : 'Scenario is declared; the latest k6 run artifact is not bundled into this image.'),
+      detail: summaryThresholds?.failed > 0 || (summaryThresholds && !summaryThresholds.valid)
+        ? summaryDetail
+        : specialized?.detail ?? summaryDetail,
       ...(provenance ? { run: provenance } : {}),
     }
   })
@@ -613,17 +710,29 @@ function syntheticJourneys() {
           warnings.push(`synthetic evidence workflow mismatch omitted: ${journeyId}`)
           continue
         }
+        const freshnessState = freshnessAwareState(evidence.state, envelope.run.observedAt)
+        const evidenceState = evidence.variant
+          ? freshnessState
+          : thresholdBackedState(freshnessState, undefined, evidence.thresholdResults)
+        const validRecovery = ['passed', 'stale'].includes(evidenceState)
+          && (Boolean(evidence.variant) || Boolean(retainedThresholdObservation(evidence.thresholdResults)))
+        if (!evidence.variant && evidence.state === 'passed' && evidenceState === 'unknown') {
+          warnings.push(`thresholdless synthetic pass downgraded: ${journeyId}`)
+        }
         const observation = {
-          state: freshnessAwareState(evidence.state, envelope.run.observedAt), observedAt: envelope.run.observedAt,
+          state: evidenceState, observedAt: envelope.run.observedAt,
           detail: evidence.detail ?? 'Synthetic run retained without detail.',
+          ...(retainedThresholdObservation(evidence.thresholdResults) ? {
+            thresholdResults: evidence.thresholdResults,
+          } : {}),
           ...(provenance ? { run: provenance } : {}),
         }
         if (evidence.variant) {
           const variants = latestVariants.get(journeyId) ?? new Map()
-          variants.set(evidence.variant, observation)
+          variants.set(evidence.variant, retainActionableFailure(variants.get(evidence.variant), observation, validRecovery))
           latestVariants.set(journeyId, variants)
         } else {
-          latestCi.set(journeyId, observation)
+          latestCi.set(journeyId, retainActionableFailure(latestCi.get(journeyId), observation, validRecovery))
         }
       }
     }
@@ -835,6 +944,7 @@ async function main() {
       kind: 'performance', state: item.state, observedAt: item.observedAt,
       source: `k6:${item.source}`, environment: item.id === 'money-path-smoke' ? 'sandbox' : 'ci',
       detail: item.detail,
+      ...(item.thresholdResults ? { thresholdResults: item.thresholdResults } : {}),
     })
   }
   const synthetic = syntheticJourneys()
@@ -849,14 +959,29 @@ async function main() {
   const unknownEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'unknown').length
   const unresolvedEvidence = components.flatMap(item => item.evidence)
     .filter(item => ['unknown', 'not-run', 'blocked'].includes(item.state)).length
-  const missingEvidence = components.filter(item => item.evidence.length === 0).length
+  // A Pact declaration can add an unresolved row without a provider replay. Conversely, an
+  // observed suite that skipped every test is still a real zero-execution result.
+  const { componentsWithExecutionEvidence, missingEvidence } = executionEvidenceTotals(components)
   const historyDir = path.join(repo, 'openbank-admin-ui', 'test-intelligence-history')
   const historicalSnapshots = allFiles(historyDir, file => file.endsWith('.json'))
     .map(readJson).filter(item => item?.collectedAt && item?.totals)
-  const historicalReports = historicalSnapshots
-    .map(item => ({ collectedAt: item.collectedAt, ...item.totals }))
+  const historicalEvidenceStates = new Set(['passed', 'failed', 'skipped', 'not-run', 'stale', 'blocked', 'unknown'])
+  const historicalReports = historicalSnapshots.map(item => {
+    const historicalComponents = Array.isArray(item.components)
+      && item.components.every(component => Array.isArray(component?.evidence)
+        && component.evidence.every(evidence => evidence && typeof evidence === 'object'
+          && !Array.isArray(evidence) && historicalEvidenceStates.has(evidence.state)
+          && (evidence.observedAt === undefined || evidence.observedAt === null
+            || typeof evidence.observedAt === 'string')))
+      ? item.components
+      : null
+    const correctedExecutionTotals = historicalComponents
+      ? { components: historicalComponents.length, ...executionEvidenceTotals(historicalComponents) }
+      : {}
+    return { collectedAt: item.collectedAt, ...item.totals, ...correctedExecutionTotals }
+  })
   const currentPoint = { collectedAt: collectedAt.toISOString(), components: components.length,
-    componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
+    componentsWithExecutionEvidence,
     failingEvidence, missingEvidence, staleEvidence, unknownEvidence, unresolvedEvidence }
   const history = [...historicalReports, currentPoint]
     .sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
@@ -925,7 +1050,7 @@ async function main() {
     clientExperiences: clientExperience, requiredControls: controls, platformCapabilities: capabilities,
     totals: {
       components: components.length,
-      componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
+      componentsWithExecutionEvidence,
       moneyPathComponents: components.filter(item => item.moneyPath).length,
       failingEvidence, missingEvidence, staleEvidence, unknownEvidence, unresolvedEvidence,
       requiredControls: controls.length,

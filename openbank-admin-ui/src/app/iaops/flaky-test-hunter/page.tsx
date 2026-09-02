@@ -6,10 +6,9 @@
 
 // Flaky Test Hunter findings (ADR-0168, issue #5499) — active findings from the four checks
 // (RunBlocking-unit drop, Pact local-verification blind spot, Pact provider collision, test-count
-// drift), plus an operator "Run check now" trigger for the weekly sweep (FlakyTestResource,
-// POST /check/trigger). Data flows through the dedicated BFF (/api/flaky-test-hunter/**), the
-// same pattern devops-agent and finops-agent use, since the agent's namespace is not enumerated
-// by ADR-0051 discovery (see the route comment).
+// drift), plus an operator "Run check now" trigger for the weekly sweep. Trigger admission is
+// asynchronous: the bounded IAOps BFF returns a durable workflow id, never a completed report.
+// Findings continue to flow through their dedicated read-only BFF.
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -22,13 +21,36 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import type { FlakyTestFinding } from '@/app/api/flaky-test-hunter/findings/route'
-import type { FlakyTestReport } from '@/app/api/flaky-test-hunter/trigger/route'
 
 const CHECK_TYPE_LABEL: Record<FlakyTestFinding['checkType'], { cs: string; en: string }> = {
   RUNBLOCKING_UNIT_MISSING:          { cs: 'runBlocking bez Unit',        en: 'runBlocking missing Unit' },
   PACT_LOCAL_VERIFICATION_BLIND_SPOT:{ cs: 'Pact — slepé místo lokálně',  en: 'Pact local blind spot' },
   PACT_PROVIDER_CLASS_COLLISION:     { cs: 'Pact — kolize providerů',     en: 'Pact provider collision' },
   TEST_COUNT_DRIFT:                  { cs: 'Odchylka počtu testů',       en: 'Test count drift' },
+}
+
+const TRIGGER_RECOVERY_DAY_KEY = 'openbank.flaky-test-hunter.trigger.requested-on'
+
+function currentUtcDay(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function triggerRecoveryDay(): string {
+  try {
+    return window.localStorage.getItem(TRIGGER_RECOVERY_DAY_KEY) || currentUtcDay()
+  } catch {
+    return currentUtcDay()
+  }
+}
+
+function persistTriggerRecoveryDay(requestedOn: string | null) {
+  try {
+    if (requestedOn) window.localStorage.setItem(TRIGGER_RECOVERY_DAY_KEY, requestedOn)
+    else window.localStorage.removeItem(TRIGGER_RECOVERY_DAY_KEY)
+  } catch {
+    // The in-memory request still reuses the same day for this mounted page. A browser that blocks
+    // storage loses cross-reload recovery, but the server's one-workflow-per-UTC-day key remains.
+  }
 }
 
 function FlakyTestHunterContent() {
@@ -42,8 +64,9 @@ function FlakyTestHunterContent() {
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [triggering, setTriggering] = useState(false)
-  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
-  const [lastReport, setLastReport] = useState<FlakyTestReport | null>(null)
+  const [notice, setNotice] = useState<{ tone: 'accepted' | 'nonfinal' | 'error'; text: string } | null>(null)
+  const [lastWorkflowId, setLastWorkflowId] = useState<string | null>(null)
+  const [recoveryDay, setRecoveryDay] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -66,33 +89,108 @@ function FlakyTestHunterContent() {
   const runCheck = useCallback(async () => {
     setTriggering(true)
     setNotice(null)
+    const requestedOn = recoveryDay ?? triggerRecoveryDay()
+    setRecoveryDay(requestedOn)
+    persistTriggerRecoveryDay(requestedOn)
     try {
-      const res = await fetch('/api/flaky-test-hunter/trigger', { method: 'POST', signal: AbortSignal.timeout(65_000) })
-      if (!res.ok) {
+      const res = await fetch('/api/iaops/flaky-test-hunter/trigger', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ requestedOn }),
+        signal: AbortSignal.timeout(15_000),
+      })
+      const payload = await res.json().catch(() => null) as {
+        error?: unknown
+        workflowId?: unknown
+        upstreamStatus?: unknown
+      } | null
+      if (res.status === 401 || res.status === 403) {
         setNotice({
-          ok: false,
-          text: res.status === 403
-            ? t('Nemáte oprávnění spustit kontrolu.', 'You are not authorized to run the check.')
-            : t('Spuštění kontroly se nezdařilo.', 'Could not run the check.'),
+          tone: 'error',
+          text: t(
+            `Nemáte oprávnění spustit kontrolu. Po obnovení přístupu se znovu použije UTC klíč ${requestedOn}.`,
+            `You are not authorized to run the check. After access is restored, retry reuses UTC key ${requestedOn}.`,
+          ),
         })
         return
       }
-      const report = await res.json() as FlakyTestReport
-      setLastReport(report)
+      if (payload?.error === 'idempotent_admission_not_supported') {
+        setNotice({
+          tone: 'nonfinal',
+          text: t(
+            `Tato backendová replika ještě nepodporuje idempotentní přijetí. Tento pokus workflow nespustil; další pokus znovu použije UTC klíč ${requestedOn}.`,
+            `This backend replica does not support idempotent admission yet. This attempt did not start a workflow; the next retry reuses UTC key ${requestedOn}.`,
+          ),
+        })
+        return
+      }
+      if (res.status === 400 || payload?.error === 'admission_rejected') {
+        persistTriggerRecoveryDay(null)
+        setRecoveryDay(null)
+        const rejectedStatus = typeof payload?.upstreamStatus === 'number' ? payload.upstreamStatus : res.status
+        setNotice({
+          tone: 'error',
+          text: t(
+            `Požadavek byl odmítnut před přijetím (HTTP ${rejectedStatus}). Je bezpečné jej po opravě zopakovat.`,
+            `The request was rejected before admission (HTTP ${rejectedStatus}). It is safe to retry after correcting it.`,
+          ),
+        })
+        return
+      }
+      if (payload?.error === 'admission_accepted_handle_unknown') {
+        setNotice({
+          tone: 'nonfinal',
+          text: t(
+            `Workflow byl přijat, ale jeho identifikátor chybí. Opakování je bezpečné: znovu použije UTC klíč ${requestedOn}.`,
+            `The workflow was admitted, but its identifier is missing. Retrying is safe: it reuses UTC key ${requestedOn}.`,
+          ),
+        })
+        return
+      }
+      if (res.status !== 202 || payload?.error === 'admission_outcome_unknown') {
+        setNotice({
+          tone: 'nonfinal',
+          text: t(
+            `Přijetí nelze potvrdit ani vyvrátit. Opakování je bezpečné: znovu použije UTC klíč ${requestedOn}.`,
+            `Admission cannot be confirmed or ruled out. Retrying is safe: it reuses UTC key ${requestedOn}.`,
+          ),
+        })
+        return
+      }
+      if (!payload || typeof payload.workflowId !== 'string' || !payload.workflowId.trim()) {
+        setNotice({
+          tone: 'nonfinal',
+          text: t(
+            `Workflow byl přijat, ale jeho identifikátor chybí. Opakování je bezpečné: znovu použije UTC klíč ${requestedOn}.`,
+            `The workflow was admitted, but its identifier is missing. Retrying is safe: it reuses UTC key ${requestedOn}.`,
+          ),
+        })
+        return
+      }
+      setLastWorkflowId(payload.workflowId)
+      persistTriggerRecoveryDay(null)
+      setRecoveryDay(null)
       setNotice({
-        ok: true,
+        tone: 'accepted',
         text: t(
-          `Kontrola dokončena — ${report.findingsDetected.length} nálezů, ${report.testFilesScanned} souborů`,
-          `Check completed — ${report.findingsDetected.length} findings across ${report.testFilesScanned} files`,
+          `Požadavek byl přijat jako workflow ${payload.workflowId}. To nedokládá, zda workflow právě běží, nebo už skončilo.`,
+          `The request was admitted as workflow ${payload.workflowId}. This does not prove whether the workflow is running or already complete.`,
         ),
       })
-      void load()
     } catch {
-      setNotice({ ok: false, text: t('Spuštění kontroly se nezdařilo.', 'Could not run the check.') })
+      // A browser-side timeout or connection loss after POST dispatch cannot prove that Temporal
+      // rejected the workflow. Treat it like the BFF's 504 and prevent an unsafe blind retry.
+      setNotice({
+        tone: 'nonfinal',
+        text: t(
+          `Přijetí nelze potvrdit ani vyvrátit. Opakování je bezpečné: znovu použije UTC klíč ${requestedOn}.`,
+          `Admission cannot be confirmed or ruled out. Retrying is safe: it reuses UTC key ${requestedOn}.`,
+        ),
+      })
     } finally {
       setTriggering(false)
     }
-  }, [t, load])
+  }, [recoveryDay, t])
 
   const critical = findings.filter(f => f.severity === 'CRITICAL').length
   const open = findings.filter(f => f.status === 'OPEN').length
@@ -122,7 +220,9 @@ function FlakyTestHunterContent() {
                 className="btn btn-primary"
                 onClick={() => void runCheck()}
                 disabled={triggering}
-                title={t('Spustit kontrolu nyní', 'Run the check now')}
+                title={notice?.tone === 'nonfinal'
+                  ? t('Bezpečně zopakovat se stejným UTC klíčem', 'Retry safely with the same UTC key')
+                  : t('Spustit nebo obnovit dnešní kontrolu', 'Run or recover today\'s check')}
               >
                 <Play size={13} className={triggering ? 'animate-spin' : undefined} />
                 {triggering ? t('Spouštím…', 'Running…') : t('Spustit kontrolu', 'Run check now')}
@@ -144,11 +244,11 @@ function FlakyTestHunterContent() {
       )}
 
       {notice && (
-        <div style={{
+        <div role={notice.tone === 'error' ? 'alert' : 'status'} style={{
           marginBottom: '20px', padding: '10px 14px', borderRadius: 'var(--r-md)', fontSize: '13px',
-          background: notice.ok ? 'var(--success-bg)' : 'var(--warning-bg)',
-          border: `1px solid ${notice.ok ? 'var(--success-border)' : 'var(--warning-border)'}`,
-          color: notice.ok ? 'var(--success)' : 'var(--warning)',
+          background: notice.tone === 'error' ? 'var(--danger-bg)' : 'var(--warning-bg)',
+          border: `1px solid ${notice.tone === 'error' ? 'var(--danger-border)' : 'var(--warning-border)'}`,
+          color: notice.tone === 'error' ? 'var(--danger-text)' : 'var(--warning)',
         }}>
           {notice.text}
         </div>
@@ -159,10 +259,10 @@ function FlakyTestHunterContent() {
         <StatCard label={t('Kritické', 'Critical')} value={critical} icon={<AlertTriangle size={16} />} tone={critical > 0 ? 'danger' : undefined} />
         <StatCard label={t('Otevřené', 'Open')} value={open} icon={<Bug size={16} />} tone={open > 0 ? 'warning' : undefined} />
         <StatCard
-          label={t('Poslední běh', 'Last run')}
-          value={lastReport ? new Date(lastReport.completedAt).toLocaleTimeString(language === 'cs' ? 'cs-CZ' : 'en-US') : '—'}
+          label={t('Poslední přijaté workflow', 'Latest admitted workflow')}
+          value={lastWorkflowId ? t('Přijato', 'Accepted') : '—'}
           icon={<Clock size={16} />}
-          hint={lastReport ? `${lastReport.testFilesScanned} ${t('souborů', 'files')}` : undefined}
+          hint={lastWorkflowId ?? undefined}
         />
       </div>
 

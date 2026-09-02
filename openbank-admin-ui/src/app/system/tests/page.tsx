@@ -14,7 +14,9 @@ import { filterTestCases, type TestTriageFilter } from '@/lib/test-intelligence-
 import type {
   ComponentTestPosture, EvidenceKind, EvidenceState, TestIntelligenceReport,
 } from '@/lib/types/test-intelligence'
-import { TestIntelligenceFlow } from '@/components/testing/TestIntelligenceFlow'
+import {
+  TestIntelligenceFlow, testIntelligenceCollectionUnavailable,
+} from '@/components/testing/TestIntelligenceFlow'
 import { TestAgentPanel } from '@/components/testing/TestAgentPanel'
 import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
 
@@ -53,10 +55,11 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
  */
 function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
   const { t } = useLanguage()
+  const collectionUnavailable = testIntelligenceCollectionUnavailable(report)
   const syntheticActive = report.syntheticJourneys.filter(item => item.status === 'active')
   const syntheticState = aggregateEvidenceState(syntheticActive.map(item => item.state))
   const runtimeRows = report.components.filter(component => component.testInfrastructure.declared.length > 0)
-  const runtimeState: EvidenceState = runtimeRows.some(component => {
+  const runtimeState: EvidenceState = collectionUnavailable ? 'unknown' : runtimeRows.length === 0 ? 'not-run' : runtimeRows.some(component => {
     const observed = component.testInfrastructure.observed
     return observed.filter(item => item.lifecycle === 'stopped').length < observed.filter(item => item.lifecycle === 'started').length
   }) ? 'unknown' : runtimeRows.some(component => component.testInfrastructure.observed.length === 0) ? 'unknown' : 'passed'
@@ -65,7 +68,8 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
     clientEvidence.flatMap(client => [...client.evidence.map(item => item.state), client.rum.state]),
     'not-run',
   )
-  const ciState: EvidenceState = report.totals.failingEvidence > 0 ? 'failed'
+  const ciState: EvidenceState = collectionUnavailable ? 'unknown'
+    : report.totals.failingEvidence > 0 ? 'failed'
     : (report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) > 0 ? 'unknown'
       : report.totals.missingEvidence > 0 || report.totals.staleEvidence > 0 ? 'stale' : 'passed'
   const cards: { tab: Tab; title: string; eyebrow: string; state: EvidenceState; detail: string }[] = [
@@ -145,9 +149,8 @@ function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceRepor
 }
 
 function EvidenceCell({ component, kind }: { component: ComponentTestPosture; kind: EvidenceKind }) {
-  const evidence = component.evidence.find(item => item.kind === kind)
-  if (!evidence) return <StateBadge state="not-run" />
-  return <StateBadge state={evidence.state} />
+  const states = component.evidence.filter(item => item.kind === kind).map(item => item.state)
+  return <StateBadge state={aggregateEvidenceState(states, 'not-run')} />
 }
 
 const tableStyle = { width: '100%', borderCollapse: 'collapse' as const, fontSize: 12 }
@@ -176,13 +179,13 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
       <section aria-label={t('Matice důkazů komponent', 'Component evidence matrix')} style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, marginBottom: 4 }}>{t('Matice důkazů komponent', 'Component evidence matrix')}</h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 8px' }}>{t('Jeden řádek na komponentu: skenuj napříč druhy testů; peněžní toky jsou nahoře.', 'One row per component: scan across test kinds; money-path components are first.')}</p>
-        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+        <div tabIndex={0} style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
           <table style={tableStyle}>
             <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
             <tbody>{sorted.map(component => (
               <tr key={component.component}>
                 <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: '#dc2626', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
-                {KINDS.map(kind => <td key={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
+                {KINDS.map(kind => <td key={kind} data-component={component.component} data-evidence-kind={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
                 <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
               </tr>
             ))}</tbody>
@@ -449,7 +452,7 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Selhání v okně', 'Failures in window')}</span><br /><strong>{row.live.failuresWithinWindow ?? 'unavailable'} / {Math.round(row.live.failureWindowSeconds / 60)} min</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Právě běží', 'Running now')}</span><br /><strong>{row.live.activeJobs ?? 'unavailable'}</strong></div>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Čerstvost evidence', 'Evidence freshness')}</span><br /><strong>{row.live.freshnessSeconds === null ? 'unknown' : `${Math.round(row.live.freshnessSeconds / 60)} min`}</strong></div>
-      <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední Kubernetes běhy', 'Recent Kubernetes runs')}</span><br /><strong>{row.live.recentRuns.length || 'none retained'}</strong></div>
+      <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední Kubernetes běhy', 'Recent Kubernetes runs')}</span><br /><strong>{row.live.recentRunsError ? 'unavailable' : row.live.recentRuns.length || 'none retained'}</strong></div>
     </div>}
     {row.live?.performance && <div aria-label={t(`Výkonnostní důkazy ${row.title}`, `Performance evidence for ${row.title}`)} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8, marginTop: 9, padding: 12, borderRadius: 8, border: '1px solid color-mix(in srgb, var(--accent) 28%, var(--border))', background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, var(--surface-2)), var(--surface-2))', fontSize: 11 }}>
       <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Nejhorší k6 p95', 'Worst k6 p95')}</span><br /><strong>{row.live.performance.worstP95Ms === null ? t('nepozorováno', 'not observed') : `${Math.round(row.live.performance.worstP95Ms)} ms`}</strong></div>

@@ -20,7 +20,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
@@ -87,6 +87,8 @@ export default function CardDetailPage() {
 
   const ops = useCardOperations(reload)
   const [pending, setPending] = useState<CardTransition | null>(null)
+  const backToCardsRef = useRef<HTMLAnchorElement>(null)
+  const closeFocusOverrideRef = useRef<HTMLElement | null>(null)
 
   // Context the card only carries as UUIDs. Each is best-effort: the card view must
   // still render when party-service or account-service is asleep, so a failed lookup
@@ -158,7 +160,10 @@ export default function CardDetailPage() {
 
   const onSelectTransition = (tr: CardTransition) => {
     ops.setFeedback(null)
-    if (tr.irreversible) setPending(tr)
+    if (tr.irreversible) {
+      closeFocusOverrideRef.current = null
+      setPending(tr)
+    }
     else if (card) void ops.runTransition(card, tr)
   }
 
@@ -166,7 +171,7 @@ export default function CardDetailPage() {
     <AuthGuard permission="cards:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <div style={{ marginBottom: '18px' }}>
-          <Link href="/cards" className="btn btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
+          <Link ref={backToCardsRef} href="/cards" className="btn btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
             <ArrowLeft size={12} /> {t('Zpět na karty', 'Back to cards')}
           </Link>
         </div>
@@ -220,7 +225,7 @@ export default function CardDetailPage() {
               </div>}
             />
 
-            <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />
+            {!pending && <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />}
 
             {/* ── PCI boundary, stated once, visibly ─────────────────────── */}
             <div style={{
@@ -376,8 +381,16 @@ export default function CardDetailPage() {
           card={card}
           transition={pending}
           busy={ops.busy !== null}
+          feedback={ops.feedback}
+          closeFocusOverrideRef={closeFocusOverrideRef}
           onCancel={() => setPending(null)}
-          onConfirm={reason => void ops.runTransition(card, pending, reason).then(ok => { if (ok) setPending(null) })}
+          onDismissFeedback={() => ops.setFeedback(null)}
+          onConfirm={reason => void ops.runTransition(card, pending, reason).then(ok => {
+            if (ok) {
+              closeFocusOverrideRef.current = backToCardsRef.current
+              setPending(null)
+            }
+          })}
         />
       )}
     </AuthGuard>

@@ -181,6 +181,7 @@ class SavingsProposalIT {
         """
         {
           "eventType": "$type",
+          "lifecycleRevision": 1,
           "aggregateId": "$grantId",
           "grantorPartyId": "$ownerParty",
           "granteePartyId": "$delegateParty",

@@ -4,19 +4,22 @@
 
 // ADR-0076 Layer 2 — the delegation console end-to-end (ADR-0230 / ADR-0232).
 //
-// Three properties are worth an e2e rather than a route test:
+// Four properties are worth an e2e rather than a route test:
 //   1. the grant list renders from a REAL BFF response (the page, its own route handler and the
 //      upstream shape agreeing — a route test proves only the middle one),
 //   2. party lookup goes through the ADR-0228 entity-resolution facade, never a UUID field,
 //   3. there is NO direct mutation path — asserted by watching the wire, not by reading source.
+//   4. a grant detail joins the live grant with its narrow, payload-free audit projection.
 //
 // Only the CLUSTER hop is stubbed (page.route intercepts the browser's call to admin-ui's own
 // BFF); the BFF handlers themselves are the real ones running in `next dev`.
 
+import AxeBuilder from '@axe-core/playwright'
 import { test, expect, type Page } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
 const PARTY = '018f4a3c-1b2d-7e00-9a11-000000000001'
+const PARTY_B = '018f4a3c-1b2d-7e00-9a11-00000000000b'
 const GRANTEE = '018f4a3c-1b2d-7e00-9a11-0000000000ff'
 const GRANT = '018f4a3c-1b2d-7e00-9a11-000000000002'
 const RESOURCE = '018f4a3c-1b2d-7e00-9a11-000000000003'
@@ -42,6 +45,29 @@ const GRANT_ROW = {
   status: 'ACTIVE',
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
+}
+
+const AUDIT_TIMELINE = {
+  grantId: GRANT,
+  latestStatusAfter: 'ACTIVE',
+  mayBeTruncated: false,
+  entries: [{
+    evidenceId: '018f4a3c-1b2d-7e00-9a11-000000000101',
+    eventType: 'DelegationActivated',
+    occurredAt: '2026-01-01T00:00:00Z',
+    recordedAt: '2026-01-01T00:00:01Z',
+    timeSource: 'event',
+    actorId: null,
+    actorType: null,
+    actorProvenance: 'absent',
+    reason: null,
+    reasonState: 'not_recorded',
+    reasonTruncated: false,
+    statusAfter: 'ACTIVE',
+    sourceService: 'delegation-service',
+    sourceAttribution: 'event',
+    correlationId: 'e2e-correlation',
+  }],
 }
 
 /** Stubs admin-ui's own BFF surface. Returns every request path the page actually issued. */
@@ -80,6 +106,9 @@ async function stubBff(page: Page): Promise<string[]> {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
+          evaluatedAt: '2026-09-01T12:00:00Z',
+          nextChangeAt: null,
+          refreshAfterMs: null,
           accounts: [{ id: RESOURCE, nickname: 'Provozní účet', accountNumber: 'CZ1234567890', currencyCode: 'CZK', status: 'ACTIVE' }],
           cards: [],
           grants: [],
@@ -100,6 +129,9 @@ async function stubBff(page: Page): Promise<string[]> {
           sources: { granted: 'ok', received: 'ok' },
         }),
       })
+    }
+    if (path.endsWith(`/${GRANT}/audit`)) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(AUDIT_TIMELINE) })
     }
     // grant detail
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(GRANT_ROW) })
@@ -124,25 +156,75 @@ test('finds a party through entity resolution and renders its grants', async ({ 
   const seen = await stubBff(page)
   await page.goto('/delegations')
 
+  const education = page.getByRole('region', { name: /Kdo může nad čím dělat co|Who may do what/ })
+  await education.locator('summary').first().click()
+  await expect(education).toContainText(/FOP \/ OSVČ|Sole trader/)
+  await expect(education).toContainText('SME')
+  await expect(education).toContainText(/Korporace|Corporate/)
+  await expect(education).toContainText(/Pouze edukace|Education only/)
+  await expect(education).toContainText(/není aktivní|not active/)
+
   // ADR-0231: the operator types a NAME. There is no UUID field on this screen.
   await page.getByRole('textbox', { name: /Hledat stranu|Search party/ }).fill('Novák')
   await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
 
   await page.getByRole('button', { name: /Jan Novák/ }).click()
 
-  const main = page.locator('main')
-  await expect(main.getByText('Účetní').first()).toBeVisible()
-  await expect(main.getByText('Provozní účet').first()).toBeVisible()
-  await expect(main.getByText('Zůstatky').first()).toBeVisible()
-  await expect(main.getByText('Provést platbu').first()).toBeVisible()
-  await expect(main.getByText('5 000 CZK').first()).toBeVisible()
-  await expect(main.getByText('bez limitu').first()).toBeVisible()
-  await expect(main.getByText('ACTIVE').first()).toBeVisible()
+  const effectiveAccess = page.getByRole('region', { name: 'Efektivní přístup klienta' })
+  await expect(effectiveAccess.getByText('Provozní účet').first()).toBeVisible()
+  await expect(effectiveAccess.getByText('Odvozeno z evidence produktu').first()).toBeVisible()
+  await expect(effectiveAccess.getByText('Zůstatky').first()).toBeVisible()
+  await expect(effectiveAccess.getByText('Provést platbu').first()).toBeVisible()
+
+  const granted = page.getByRole('heading', { name: 'Sdíleno touto stranou' }).locator('..')
+  await expect(granted.getByText('Účetní').first()).toBeVisible()
+  await expect(granted.getByText('5 000 CZK').first()).toBeVisible()
+  await expect(granted.getByText('bez limitu').first()).toBeVisible()
+  await expect(granted.getByText('ACTIVE').first()).toBeVisible()
+
+  const roleCatalog = page.getByRole('region', { name: 'Dispoziční role a práva' })
+  await expect(roleCatalog.getByText('Vlastnictví se nepřiřazuje').first()).toBeVisible()
 
   // The grant list came through the console's own BFF route, and party lookup through the
   // shared ADR-0228 facade — not a bespoke search endpoint.
   expect(seen.some(s => s.includes('/api/entities/resolve'))).toBe(true)
   expect(seen.some(s => s === `GET /api/delegations/party/${PARTY}`)).toBe(true)
+})
+
+test('the educational model remains operable at a 320px reflow width', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.route('**/api/delegation-role-presets**', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+  )
+
+  await page.goto('/delegations')
+  const education = page.getByRole('region', { name: /Kdo může nad čím dělat co|Who may do what/ })
+  const guide = page.getByRole('complementary', { name: /Nejdřív porozumět|Understand first/ })
+  await expect(education).toBeVisible()
+  expect(await education.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
+  const guideBounds = await guide.boundingBox()
+  expect(guideBounds).not.toBeNull()
+  expect(guideBounds!.x).toBeGreaterThanOrEqual(0)
+  expect(guideBounds!.x + guideBounds!.width).toBeLessThanOrEqual(321)
+
+  await education.locator('summary').first().press('Enter')
+
+  const corporate = education.getByRole('group', { name: /^(Korporace|Corporate)$/ })
+  await expect(corporate).not.toHaveAttribute('open', '')
+  await corporate.locator('summary').press('Enter')
+  await expect(corporate).toHaveAttribute('open', '')
+  await expect(corporate.getByRole('region', { name: /Corporate:.*not active|Korporace:.*není aktivní/ })).toBeVisible()
+
+  const lightScan = await new AxeBuilder({ page }).include('[aria-labelledby="delegation-education-title"]').analyze()
+  expect(lightScan.violations).toEqual([])
+  const lightGuideScan = await new AxeBuilder({ page }).include('aside[aria-label="Understand first. Decide second."]').analyze()
+  expect(lightGuideScan.violations).toEqual([])
+  await page.locator('html').evaluate(element => element.classList.add('dark'))
+  const darkScan = await new AxeBuilder({ page }).include('[aria-labelledby="delegation-education-title"]').analyze()
+  expect(darkScan.violations).toEqual([])
+  const darkGuideScan = await new AxeBuilder({ page }).include('aside[aria-label="Understand first. Decide second."]').analyze()
+  expect(darkGuideScan.violations).toEqual([])
 })
 
 test('a refused direction never renders as "no delegations"', async ({ page }) => {
@@ -169,6 +251,126 @@ test('a refused direction never renders as "no delegations"', async ({ page }) =
   await expect(main.getByText(/nebyl povolen|was refused for your role/)).toBeVisible()
   // The dangerous wrong answer must NOT be on screen for the refused direction.
   await expect(main.getByText(/Žádné delegace\.|No delegations\./)).toHaveCount(1)
+})
+
+test('a slow previous selection can never overwrite the newest customer', async ({ page }) => {
+  await page.route('**/api/entities/resolve**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      results: [
+        { type: 'party', id: PARTY, label: 'Klient A' },
+        { type: 'party', id: PARTY_B, label: 'Klient B' },
+      ],
+    }),
+  }))
+  await page.route('**/api/delegations/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/projection-health')) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ consumers: [], state: 'ok' }) })
+    }
+    const selectedParty = path.includes(PARTY_B) ? PARTY_B : PARTY
+    if (selectedParty === PARTY) await new Promise(resolve => setTimeout(resolve, 350))
+    if (path.includes('/effective-access/')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          evaluatedAt: '2026-09-01T12:00:00Z',
+          nextChangeAt: null,
+          refreshAfterMs: null,
+          accounts: [{ id: `${selectedParty}-account`, nickname: selectedParty === PARTY_B ? 'Účet klienta B' : 'Účet klienta A' }],
+          cards: [],
+          grants: [],
+          presets: [ROLE_PRESET],
+          resourceDetails: [],
+          sources: { accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' },
+        }),
+      })
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ partyId: selectedParty, granted: [], received: [], sources: { granted: 'ok', received: 'ok' } }),
+    })
+  })
+
+  await page.goto('/delegations')
+  await page.getByRole('textbox', { name: /Hledat stranu|Search party/ }).fill('Klient')
+  await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
+  await page.getByRole('button', { name: /Klient A/ }).click()
+  await page.getByRole('button', { name: /Klient B/ }).click()
+
+  const main = page.locator('main')
+  await expect(main.getByText('Účet klienta B')).toBeVisible()
+  await expect(main.getByText('Účet klienta A')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Klient B/ })).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('a newer search stays available and wins over a slower previous query', async ({ page }) => {
+  let slowSearchFinished = false
+  await page.route('**/api/entities/resolve**', async route => {
+    const query = new URL(route.request().url()).searchParams.get('q')
+    if (query === 'alfa') {
+      await new Promise(resolve => setTimeout(resolve, 800))
+      slowSearchFinished = true
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        results: [{ type: 'party', id: query === 'beta' ? PARTY_B : PARTY, label: query === 'beta' ? 'Výsledek Beta' : 'Výsledek Alfa' }],
+      }),
+    })
+  })
+
+  await page.goto('/delegations')
+  const input = page.getByRole('textbox', { name: /Hledat stranu|Search party/ })
+  const button = page.getByRole('button', { name: /Vyhledat|Search/ })
+  await input.fill('alfa')
+  await button.click()
+  await input.fill('beta')
+  await expect(button).toBeEnabled()
+  await button.click()
+
+  await expect(page.getByRole('button', { name: /Výsledek Beta/ })).toBeVisible()
+  await expect.poll(() => slowSearchFinished).toBe(true)
+  await expect(page.getByRole('button', { name: /Výsledek Alfa/ })).toHaveCount(0)
+})
+
+test('a failed effective summary does not hide successfully loaded grants', async ({ page }) => {
+  await stubBff(page)
+  await page.unroute('**/api/delegations/**')
+  let releaseProjection = () => {}
+  const projectionGate = new Promise<void>(resolve => { releaseProjection = resolve })
+  await page.route('**/api/delegations/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/projection-health')) {
+      await projectionGate
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ consumers: [], state: 'ok' }) })
+    }
+    if (path.includes('/effective-access/')) {
+      return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'upstream_unreachable' }) })
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ partyId: PARTY, granted: [GRANT_ROW], received: [], sources: { granted: 'ok', received: 'ok' } }),
+    })
+  })
+
+  await page.goto('/delegations')
+  await page.getByRole('textbox', { name: /Hledat stranu|Search party/ }).fill('Novák')
+  await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
+  await page.getByRole('button', { name: /Jan Novák/ }).click()
+
+  const main = page.locator('main')
+  await expect(main.getByText(/Souhrn efektivního přístupu je dočasně neúplný|effective-access summary is temporarily incomplete/)).toBeVisible()
+  await expect(main.getByTitle('ACCOUNT_INITIATE_PAYMENT').first()).toBeVisible()
+  await expect(main.getByRole('link', { name: /Detail/ }).first()).toBeVisible()
+  await expect(main.getByText(/Načítám zdraví projekcí|Loading projection health/)).toBeVisible()
+  releaseProjection()
+  await expect(main.getByText(/nemá žádnou konzumentskou skupinu|has no consumer group/)).toBeVisible()
 })
 
 test('role deletion explains impact and recovers from a failed request before removing the preset', async ({ page }) => {
@@ -270,6 +472,10 @@ test('the grant detail offers NO mutation — suspend, reinstate and revoke are 
   const main = page.locator('main')
   await expect(main.getByText(/Zásahy banky|Bank-side actions/)).toBeVisible()
   await expect(main.getByText(/nejdou|not available from this console/)).toBeVisible()
+  await expect(main.getByRole('heading', { name: /Neměnná auditní časová osa|Immutable audit timeline/ })).toBeVisible()
+  await expect(main.getByText(/Delegace přijata a aktivována|Delegation accepted and activated/)).toBeVisible()
+  await expect(main.getByText(/odpovídá poslednímu auditnímu přechodu|matches the latest audited transition/)).toBeVisible()
+  await expect(main.getByText(/Aktér v události neuveden|Actor not recorded in the event/)).toBeVisible()
 
   // No control anywhere on the page offers the bank-side mutations.
   await expect(page.getByRole('button', { name: /Pozastavit|Suspend/ })).toHaveCount(0)
@@ -293,7 +499,7 @@ test('the grant detail offers NO mutation — suspend, reinstate and revoke are 
   ])
 })
 
-test('the coverage probe asks the authority and shows its reason code', async ({ page }) => {
+test('the resource check explains its scope, asks the authority and shows its reason code', async ({ page }) => {
   await stubBff(page)
   await page.unroute('**/api/delegations/**')
 
@@ -313,6 +519,8 @@ test('the coverage probe asks the authority and shows its reason code', async ({
   })
 
   await page.goto(`/delegations/${GRANT}`)
+  await expect(page.getByText(/Nic nerezervuje|reserves nothing/)).toBeVisible()
+  await expect(page.getByText(/konkrétního grantu|specific grant/)).toBeVisible()
   await page.getByRole('textbox', { name: /Částka k ověření|Amount to probe/ }).fill('9000')
   await page.getByRole('button', { name: /^(Ověřit|Probe)$/ }).click()
 

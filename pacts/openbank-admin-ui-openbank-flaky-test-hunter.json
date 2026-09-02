@@ -12,7 +12,8 @@
       ],
       "request": {
         "headers": {
-          "Authorization": "Bearer pact-admin-token"
+          "Authorization": "Bearer pact-admin-token",
+          "Idempotency-Key": "flaky-test-hunter-operator-manual-2026-08-18"
         },
         "matchingRules": {
           "header": {
@@ -24,15 +25,24 @@
                   "regex": "Bearer [A-Za-z0-9._-]+"
                 }
               ]
+            },
+            "Idempotency-Key": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^flaky-test-hunter-operator-manual-\\d{4}-\\d{2}-\\d{2}$"
+                }
+              ]
             }
           }
         },
         "method": "POST",
-        "path": "/api/v1/flaky-test-hunter/check/trigger-async"
+        "path": "/api/v1/flaky-test-hunter/check/trigger-async-idempotent"
       },
       "response": {
         "body": {
-          "workflowId": "flaky-test-check-operator_manual-2026-08-18"
+          "workflowId": "flaky-test-hunter-check-operator_manual-2026-08-18"
         },
         "headers": {
           "Content-Type": "application/json"

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.0...lending-service-v0.32.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **lending:** distinguish an unconfigured court register from a clear one ([#7595](https://github.com/JiRaska/open-bank-oss/issues/7595)) ([3144e07](https://github.com/JiRaska/open-bank-oss/commit/3144e073e9dc5391190861402c8944257a9a9ae7))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.31.0...lending-service-v0.32.0) (2026-08-27)
 
 

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.46.1
+  version: 1.47.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3203,6 +3203,44 @@ paths:
             Body is not a JSON object, upstream validation failed, or the body carries
             dailyLimit/monthlyLimit (response `code: CUMULATIVE_LIMIT_UNSUPPORTED`).
         '403': {description: grantorPartyId is not the authenticated party, or resource not owned}
+
+  /delegations/preview:
+    post:
+      tags: [Delegation]
+      summary: Validate a delegation draft before the app starts SCA
+      description: >-
+        The grantor is derived from the customer token. Runs the same authoritative constraint,
+        ownership and eligibility checks as offer, but creates no grant, emits no event and never
+        consumes SCA. The final offer repeats every check, so a successful preview is not an
+        authorization decision. grantScaSessionId, if supplied by an older client, is stripped.
+      operationId: previewDelegation
+      security:
+        - customerOidc: [delegations:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [granteePartyId, resourceType, resourceId, capabilities]
+              properties:
+                grantorPartyId: {type: string, format: uuid, description: Optional; if present it must match the token party}
+                granteePartyId: {type: string, format: uuid}
+                resourceType: {type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT]}
+                resourceId: {type: string, format: uuid}
+                capabilities: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+                approvalPolicy: {type: string, default: SOLO}
+                requiredApprovals: {type: integer}
+                perTransactionLimit: {type: object}
+                dailyLimit: {type: object, description: Currently rejected by the customer channel}
+                monthlyLimit: {type: object, description: Currently rejected by the customer channel}
+                exposure: {type: object}
+                validTo: {type: string, format: date-time}
+      responses:
+        '200': {description: Draft is currently eligible to proceed to SCA}
+        '400': {description: Invalid draft or a constraint the customer channel cannot enforce}
+        '403': {description: grantorPartyId does not match the authenticated customer}
+        '422': {description: Party eligibility or resource ownership could not be established}
 
   /delegations/shared-by-me:
     get:
