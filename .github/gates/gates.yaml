@@ -4569,6 +4569,7 @@ gates:
     name: "the ArgoCD Synced-but-applying-nothing detector still classifies, and is still wired (#6371, enforced)"
     group: gitops
     mode: enforced
+    budget_seconds: 15  # 1.2s in PR CI; 3.5s standalone locally over all 19 unit cases
     rationale: "ArgoCD reported Synced/Healthy on an app it had applied nothing to for three weeks, and no metric exposes the condition that recorded it; the replacement detector runs in-cluster, so only this gate can notice it being unwired or its comparison being broken."
     review_after: "2027-02-23"
     selftest: python3 .github/scripts/check-argocd-sync-integrity.py --self-test
