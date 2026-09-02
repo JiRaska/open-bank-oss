@@ -32,6 +32,45 @@
 # these are quarantines, and they are invisible to the event-consumer-liveness gate (which reads
 # declared `outgoing:` channels; the connector's DLQ producer is not one).
 ---
+# openbank-account-service :: channel `delegation-events-in`
+# #5752: account-service and card-issuance-service both consume `delegation-events-in`, so both
+# were dead-lettering into the single implicit `dead-letter-topic-delegation-events-in`. This
+# names account-service's half. The old topic and its Write ACL are RETAINED so an existing
+# backlog stays drainable.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.account.delegation-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-account-service :: channel `party-events-in`
+# #5752. `party-events-in` is declared by eight services; account-service was the last one still
+# on the implicit `dead-letter-topic-party-events-in`. The AccountPartyEventDeadLettered alert in
+# prometheus-rules-onboarding.yaml matches BOTH names for the length of the rollout — under an
+# Argo Rollout old and new pods run side by side, and the old topic still holds whatever was
+# parked before the cutover.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.account.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-agent-service :: channel `oversight-events`
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
