@@ -1117,6 +1117,11 @@ class NotificationConsumer @Inject constructor(
                 "A delegated access grant has expired" to
                     "<h2>Grant Expired</h2><p>A delegated access grant for a <b>${vars.v("resourceType")}</b> " +
                     "has reached the end of its validity period and is no longer active.</p>"
+            NotificationTemplate.DELEGATION_FIRST_USED ->
+                "Delegated access to your account was used for the first time" to
+                    "<h2>First Use of Delegated Access</h2><p>Someone you gave delegated access to your " +
+                    "<b>${vars.v("resourceType")}</b> has used it to spend for the first time. Open the OpenBank " +
+                    "app to review the grant, or revoke it if you did not expect this.</p>"
         }
 }
 

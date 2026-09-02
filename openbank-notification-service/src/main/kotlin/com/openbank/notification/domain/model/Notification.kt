@@ -87,6 +87,23 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** A grant's validity window ended on its own; sent to both parties (DelegationExpired). */
     DELEGATION_EXPIRED(setOf("resourceType")),
+
+    /**
+     * ADR-0249 D4 — the grantee spent on the grantor's authority for the FIRST time
+     * (DelegationFirstUsed, issue #5728). Sent to the **grantor**, who is the party that cannot
+     * otherwise see the consequence of what they granted: the eight templates above all announce a
+     * change to the AUTHORITY, and none of them fires when the authority is merely exercised.
+     *
+     * SECURITY category, so it cannot be silenced: "someone started spending on my account" is the
+     * signal a customer needs to catch a grant they did not mean to give, and a preference toggle
+     * over it would make the disclosure optional.
+     *
+     * `resourceType` only, matching its siblings — the event also carries the amount, and it is
+     * deliberately NOT rendered here. A push body reaches a lock screen (ADR-0135 §3), and the
+     * first thing a delegate spends is not something to put there when the deep link already opens
+     * the authenticated app on the grant.
+     */
+    DELEGATION_FIRST_USED(setOf("resourceType")),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -128,6 +145,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             DELEGATION_REINSTATED,
             DELEGATION_RENOUNCED,
             DELEGATION_EXPIRED,
+            DELEGATION_FIRST_USED,
             -> null
         }
 
@@ -143,7 +161,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             CONSENT_GRANTED, CONSENT_REVOKED,
             DELEGATION_OFFERED, DELEGATION_ACCEPTED, DELEGATION_DECLINED,
             DELEGATION_REVOKED, DELEGATION_SUSPENDED, DELEGATION_REINSTATED,
-            DELEGATION_RENOUNCED, DELEGATION_EXPIRED,
+            DELEGATION_RENOUNCED, DELEGATION_EXPIRED, DELEGATION_FIRST_USED,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT

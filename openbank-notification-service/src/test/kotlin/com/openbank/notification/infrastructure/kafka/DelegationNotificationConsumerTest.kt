@@ -78,6 +78,29 @@ class DelegationNotificationConsumerTest {
         assertThat(req.deepLink).isEqualTo("openbank://delegations/$grantId")
     }
 
+    /**
+     * ADR-0249 D4 / #5728 — the ONE event here that is not a lifecycle transition.
+     *
+     * The template is asserted by NAME rather than by the enum constant on purpose: this test was
+     * run against unmodified `main` first, where neither the constant nor the mapping exists, and
+     * it has to go red there by producing no notification — not by failing to compile.
+     */
+    @Test
+    fun `DelegationFirstUsed notifies the grantor and nobody else`() {
+        consumer.consume(eventPayload("DelegationFirstUsed")).subscribe().with({}, {})
+
+        val requests = capturedRequests()
+        assertThat(requests).hasSize(1)
+        val req = requests.single()
+        assertThat(req.partyId).isEqualTo(grantorPartyId)
+        assertThat(req.partyId).isNotEqualTo(granteePartyId)
+        assertThat(req.template.name).isEqualTo("DELEGATION_FIRST_USED")
+        assertThat(req.channel).isEqualTo(NotificationChannel.PUSH)
+        assertThat(req.variables).isEqualTo(mapOf("resourceType" to "ACCOUNT"))
+        assertThat(req.correlationId).isEqualTo(grantId)
+        assertThat(req.deepLink).isEqualTo("openbank://delegations/$grantId")
+    }
+
     @Test
     fun `DelegationActivated notifies the grantor that their offer was accepted`() {
         consumer.consume(eventPayload("DelegationActivated")).subscribe().with({}, {})

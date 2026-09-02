@@ -34,6 +34,11 @@ import java.util.UUID
  *  - `DelegationSuspended` / `DelegationReinstated` -> **both**: authority changed at the bank.
  *  - `DelegationRenounced` -> the **grantor**: the grantee ended their access.
  *  - `DelegationExpired` -> **both**: the grant is gone either way.
+ *  - `DelegationFirstUsed` -> the **grantor** (ADR-0249 D4, issue #5728): the delegate spent on
+ *    their authority for the first time. The one event here that is not a lifecycle transition —
+ *    the grant does not change, its EXERCISE is the news, and the grantor is the only party who
+ *    does not already know. Emitted at most once per grant by delegation-service, inside the same
+ *    transaction as the first reservation, which is what lets this consumer stay non-idempotent.
  *  - Any future/unknown type is deliberately not notified until its recipient semantics are reviewed.
  *
  * **Delivery reuses the real pipeline, in-process.** Rather than re-implement rendering, the
@@ -150,6 +155,7 @@ class DelegationNotificationConsumer @Inject constructor(
             "DelegationReinstated" to NotificationTemplate.DELEGATION_REINSTATED,
             "DelegationRenounced" to NotificationTemplate.DELEGATION_RENOUNCED,
             "DelegationExpired" to NotificationTemplate.DELEGATION_EXPIRED,
+            "DelegationFirstUsed" to NotificationTemplate.DELEGATION_FIRST_USED,
         )
 
         /** Recipient party id(s) per event type, given (grantor, grantee) — see class KDoc. */
@@ -162,6 +168,7 @@ class DelegationNotificationConsumer @Inject constructor(
             "DelegationReinstated" to { grantor, grantee -> listOf(grantor, grantee) },
             "DelegationRenounced" to { grantor, _ -> listOf(grantor) },
             "DelegationExpired" to { grantor, grantee -> listOf(grantor, grantee) },
+            "DelegationFirstUsed" to { grantor, _ -> listOf(grantor) },
         )
     }
 }

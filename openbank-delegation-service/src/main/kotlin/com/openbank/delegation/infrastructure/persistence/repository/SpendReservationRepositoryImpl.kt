@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.out.DelegationOutboxRepository
 import com.openbank.delegation.application.port.out.ReserveOutcome
 import com.openbank.delegation.application.port.out.SpendReservationRepository
+import com.openbank.delegation.domain.event.DelegationFirstUsed
 import com.openbank.delegation.domain.event.DelegationSpendReservationStateChanged
 import com.openbank.delegation.domain.model.CountedSpend
 import com.openbank.delegation.domain.model.DelegationGrant
@@ -169,11 +170,51 @@ class SpendReservationRepositoryImpl(
         when (val decision = decide(lockedGrant, counted)) {
             is SpendDecision.Refused -> Uni.createFrom().item(ReserveOutcome.Refused(decision) as ReserveOutcome)
 
-            SpendDecision.Allowed -> session.persist(SpendReservationEntity.fromDomain(candidate))
+            SpendDecision.Allowed -> appendFirstUseEvent(session, candidate, lockedGrant)
+                .flatMap { session.persist(SpendReservationEntity.fromDomain(candidate)) }
                 .flatMap { appendStateEvent(candidate, lockedGrant) }
                 .replaceWith(ReserveOutcome.Created(candidate) as ReserveOutcome)
         }
     }
+
+    /**
+     * ADR-0249 D4 — announce the grantee's FIRST use of this authority to the grantor (#5728).
+     *
+     * The count runs inside the transaction that already holds `FOR UPDATE` on the grant, so it is
+     * serialised against every other reserve on the same grant: the second of two racing reserves
+     * blocks, then counts the first one's row and emits nothing. It is deliberately counted BEFORE
+     * the candidate is persisted — after the insert the answer would always be at least one.
+     *
+     * Every operation type counts, and the domestic state-stream flag is not consulted: this is a
+     * customer-facing disclosure about the authority, not part of the compacted reservation stream.
+     * A refusal and an idempotent replay both reach this method not at all — the first returns
+     * before `countAndInsert`, the second never leaves the idempotency branch — which is what makes
+     * "exactly one per grant" a property of the transaction rather than of a downstream filter.
+     */
+    private fun appendFirstUseEvent(
+        session: Mutiny.Session,
+        candidate: SpendReservation,
+        grant: DelegationGrant,
+    ): Uni<Void> = session
+        .createQuery(FIRST_USE_COUNT_HQL, Long::class.javaObjectType)
+        .setParameter("grantId", candidate.grantId)
+        .singleResult
+        .flatMap { priorReservations ->
+            if (priorReservations.toLong() > 0L) {
+                Uni.createFrom().voidItem()
+            } else {
+                val event = DelegationFirstUsed.from(candidate, grant)
+                outboxRepository.persistInTransaction(
+                    OutboxMessage(
+                        eventId = event.eventId,
+                        aggregateId = event.aggregateId,
+                        eventType = event.eventType,
+                        payload = objectMapper.writeValueAsString(event),
+                        createdAt = event.occurredAt,
+                    ),
+                )
+            }
+        }
 
     private fun appendStateEvent(reservation: SpendReservation, grant: DelegationGrant): Uni<Void> {
         if (reservation.operationType != SpendReservationOperationType.DOMESTIC_PAYMENT) {
@@ -227,6 +268,10 @@ class SpendReservationRepositoryImpl(
         .map { rows -> rows.firstOrNull() ?: BigDecimal.ZERO }
 
     private companion object {
+        /** Any reservation ever taken on this grant — no window, no currency, no state filter. */
+        const val FIRST_USE_COUNT_HQL =
+            "SELECT count(r) FROM SpendReservationEntity r WHERE r.grantId = :grantId"
+
         const val SUM_SQL = """
             select coalesce(sum(amount), 0)
               from delegation_spend_reservations
