@@ -11,6 +11,7 @@ import java.io.File
 class DomesticPaymentIdempotencyCutoverContractTest {
     private val application = File("src/main/resources/application.yaml").readText()
     private val rollout = File("../openbank-infra/gitops/components/payments/payments-services.yaml").readText()
+
     // The runbook is generated; the service-owned operations source is where durable controls live.
     private val operations = File("src/main/resources/docs/05-operations.en.md").readText()
 
