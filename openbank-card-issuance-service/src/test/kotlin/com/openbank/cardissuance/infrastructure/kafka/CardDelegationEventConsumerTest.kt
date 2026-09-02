@@ -33,32 +33,39 @@ class CardDelegationEventConsumerTest {
     @BeforeEach
     fun setUp() {
         consumer = CardDelegationEventConsumer(repository, cardUseCase, objectMapper)
+        coEvery { repository.applyClosed(any(), any()) } returns true
     }
 
-    private fun event(type: String, resourceType: String = "CARD", resourceId: UUID? = cardId): String =
-        objectMapper.writeValueAsString(
-            mapOf(
-                "eventType" to type,
-                "aggregateId" to grantId,
-                "grantorPartyId" to UUID.randomUUID(),
-                "granteePartyId" to grantee,
-                "resourceType" to resourceType,
-                "resourceId" to resourceId,
-                "capabilities" to listOf("CARD_VIEW", "CARD_MANAGE_LIMITS"),
-                "validFrom" to "2026-07-31T12:00:00Z",
-                "validTo" to "2027-07-31T12:00:00Z",
-                "occurredAt" to "2026-08-01T12:00:00Z",
-            ),
-        )
+    private fun event(
+        type: String,
+        resourceType: String = "CARD",
+        resourceId: UUID? = cardId,
+        revision: Long? = 1,
+    ): String = objectMapper.writeValueAsString(
+        mapOf(
+            "eventType" to type,
+            "aggregateId" to grantId,
+            "grantorPartyId" to UUID.randomUUID(),
+            "granteePartyId" to grantee,
+            "resourceType" to resourceType,
+            "resourceId" to resourceId,
+            "capabilities" to listOf("CARD_VIEW", "CARD_MANAGE_LIMITS"),
+            "validFrom" to "2026-07-31T12:00:00Z",
+            "validTo" to "2027-07-31T12:00:00Z",
+            "occurredAt" to "2026-08-01T12:00:00Z",
+            "lifecycleRevision" to revision,
+        ),
+    )
 
     @Test
     fun `DelegationActivated upserts an active projection row`(): Unit = runBlocking {
         consumer.consume(event("DelegationActivated"))
         coVerify {
-            repository.upsertActive(
+            repository.applyActive(
                 match<DelegatedCardGrant> {
                     it.id == grantId && it.cardId == cardId && it.active && "CARD_VIEW" in it.capabilities
                 },
+                1,
             )
         }
     }
@@ -68,7 +75,7 @@ class CardDelegationEventConsumerTest {
         for (type in listOf("DelegationRevoked", "DelegationSuspended", "DelegationRenounced", "DelegationExpired")) {
             consumer.consume(event(type))
         }
-        coVerify(exactly = 4) { repository.closeById(grantId) }
+        coVerify(exactly = 4) { repository.applyClosed(grantId, 1) }
     }
 
     @Test
@@ -114,7 +121,7 @@ class CardDelegationEventConsumerTest {
         // Suspension is reversible; a block is not, and nothing here could tell a bank-frozen card
         // from a customer-frozen one on reinstatement. The delegate's controls still stop at once,
         // because the projection row closes and the edge asks delegation-service on every request.
-        coVerify(exactly = 1) { repository.closeById(grantId) }
+        coVerify(exactly = 1) { repository.applyClosed(grantId, 1) }
         coVerify(exactly = 0) { cardUseCase.blockCardsForRevokedGrant(any(), any()) }
     }
 
@@ -133,9 +140,18 @@ class CardDelegationEventConsumerTest {
 
     @Test
     fun `transient failure is retried then escapes to the DLQ`(): Unit = runBlocking {
-        coEvery { repository.upsertActive(any()) } throws IllegalStateException("db blip")
+        coEvery { repository.applyActive(any(), any()) } throws IllegalStateException("db blip")
         assertThatThrownBy { runBlocking { consumer.consume(event("DelegationActivated")) } }
             .isInstanceOf(IllegalStateException::class.java)
-        coVerify(exactly = 4) { repository.upsertActive(any()) }
+        coVerify(exactly = 4) { repository.applyActive(any(), 1) }
+    }
+
+    @Test
+    fun `stale close does not trigger irreversible card blocking`(): Unit = runBlocking {
+        coEvery { repository.applyClosed(grantId, 1) } returns false
+
+        consumer.consume(event("DelegationRevoked", resourceType = "ACCOUNT"))
+
+        coVerify(exactly = 0) { cardUseCase.blockCardsForRevokedGrant(any(), any()) }
     }
 }

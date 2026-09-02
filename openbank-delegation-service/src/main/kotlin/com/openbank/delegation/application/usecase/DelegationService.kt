@@ -150,6 +150,7 @@ class DelegationService(
             grant,
             DelegationOffered(
                 aggregateId = grant.id,
+                lifecycleRevision = grant.lifecycleRevision,
                 grantorPartyId = grant.grantorPartyId,
                 granteePartyId = grant.granteePartyId,
                 resourceType = grant.resourceType,
@@ -196,6 +197,7 @@ class DelegationService(
             accepted,
             DelegationActivated(
                 aggregateId = accepted.id,
+                lifecycleRevision = accepted.lifecycleRevision,
                 grantorPartyId = accepted.grantorPartyId,
                 granteePartyId = accepted.granteePartyId,
                 resourceType = accepted.resourceType,
@@ -221,6 +223,7 @@ class DelegationService(
             declined,
             DelegationDeclined(
                 aggregateId = declined.id,
+                lifecycleRevision = declined.lifecycleRevision,
                 grantorPartyId = declined.grantorPartyId,
                 granteePartyId = declined.granteePartyId,
                 occurredAt = clock.instant(),
@@ -240,6 +243,7 @@ class DelegationService(
             renounced,
             DelegationRenounced(
                 aggregateId = renounced.id,
+                lifecycleRevision = renounced.lifecycleRevision,
                 grantorPartyId = renounced.grantorPartyId,
                 granteePartyId = renounced.granteePartyId,
                 resourceType = renounced.resourceType,
@@ -269,6 +273,7 @@ class DelegationService(
             revoked,
             DelegationRevoked(
                 aggregateId = revoked.id,
+                lifecycleRevision = revoked.lifecycleRevision,
                 grantorPartyId = revoked.grantorPartyId,
                 granteePartyId = revoked.granteePartyId,
                 resourceType = revoked.resourceType,
@@ -288,6 +293,7 @@ class DelegationService(
             suspended,
             DelegationSuspended(
                 aggregateId = suspended.id,
+                lifecycleRevision = suspended.lifecycleRevision,
                 grantorPartyId = suspended.grantorPartyId,
                 granteePartyId = suspended.granteePartyId,
                 resourceType = suspended.resourceType,
@@ -307,6 +313,7 @@ class DelegationService(
             reinstated,
             DelegationReinstated(
                 aggregateId = reinstated.id,
+                lifecycleRevision = reinstated.lifecycleRevision,
                 grantorPartyId = reinstated.grantorPartyId,
                 granteePartyId = reinstated.granteePartyId,
                 resourceType = reinstated.resourceType,

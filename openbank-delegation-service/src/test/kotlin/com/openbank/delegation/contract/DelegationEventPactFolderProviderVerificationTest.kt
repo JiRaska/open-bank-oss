@@ -112,6 +112,7 @@ class DelegationEventPactFolderProviderVerificationTest {
     fun produceAccountActivated(): String = objectMapper.writeValueAsString(
         DelegationActivated(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 1,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.ACCOUNT,
@@ -131,6 +132,7 @@ class DelegationEventPactFolderProviderVerificationTest {
     fun produceAccountRevoked(): String = objectMapper.writeValueAsString(
         DelegationRevoked(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 2,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.ACCOUNT,
@@ -148,6 +150,7 @@ class DelegationEventPactFolderProviderVerificationTest {
     fun produceCardActivated(): String = objectMapper.writeValueAsString(
         DelegationActivated(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 1,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.CARD,
@@ -167,6 +170,7 @@ class DelegationEventPactFolderProviderVerificationTest {
     fun produceCardRevoked(): String = objectMapper.writeValueAsString(
         DelegationRevoked(
             aggregateId = GRANT_ID,
+            lifecycleRevision = 2,
             grantorPartyId = GRANTOR,
             granteePartyId = GRANTEE,
             resourceType = DelegationResourceType.CARD,

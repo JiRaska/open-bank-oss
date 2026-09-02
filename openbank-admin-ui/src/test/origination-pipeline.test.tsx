@@ -121,8 +121,14 @@ describe('lending console', () => {
     return vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/api/auth/session')) return new Response('null', { status: 200, headers: { 'content-type': 'application/json' } })
-      if (url.includes('/loans/active')) return json(LOANS)
-      if (url.includes('/applications/recent')) return json(APPS)
+      if (url.includes('/loans/active')) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+        return json(LOANS)
+      }
+      if (url.includes('/applications/recent')) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+        return json(APPS)
+      }
       return json({})
     })
   }
@@ -134,11 +140,9 @@ describe('lending console', () => {
     vi.stubGlobal('fetch', mockFetch())
     render(React.createElement(Providers, null, React.createElement(LendingPage)))
 
-    await waitFor(() => expect(screen.getByText('Applications in flight')).toBeTruthy())
-
     // 3 applications, one DISBURSED — "in flight" is 2, not 3. Counting the finished one would
     // inflate the desk's own workload figure.
-    expect(screen.getByText('Applications in flight').closest('.stat-card')?.textContent).toMatch(/2/)
+    await waitFor(() => expect(screen.getByText('Applications in flight').closest('.stat-card')?.textContent).toMatch(/2/))
     expect(screen.getByText('Loans in trouble').closest('.stat-card')?.textContent).toMatch(/1/)
 
     // A credit officer reads "Four-eyes review"; the enum stays as the title so the screen and the

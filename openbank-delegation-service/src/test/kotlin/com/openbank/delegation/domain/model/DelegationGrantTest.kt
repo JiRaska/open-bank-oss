@@ -118,6 +118,7 @@ class DelegationGrantTest {
         val sca = UUID.randomUUID()
         val accepted = accountGrant().accept(sca, now.plusHours(1))
         assertThat(accepted.status).isEqualTo(DelegationStatus.ACTIVE)
+        assertThat(accepted.lifecycleRevision).isEqualTo(1)
         assertThat(accepted.acceptScaSessionId).isEqualTo(sca)
     }
 
@@ -133,6 +134,7 @@ class DelegationGrantTest {
         val active = accountGrant(status = DelegationStatus.ACTIVE)
         val revoked = active.revoke(grantor, "no longer needed", now.plusDays(1))
         assertThat(revoked.status).isEqualTo(DelegationStatus.REVOKED)
+        assertThat(revoked.lifecycleRevision).isEqualTo(active.lifecycleRevision + 1)
         assertThat(revoked.closedBy).isEqualTo(grantor)
         assertThat(revoked.closedReason).isEqualTo("no longer needed")
         assertThat(revoked.closedAt).isEqualTo(now.plusDays(1))
@@ -151,7 +153,10 @@ class DelegationGrantTest {
         val active = accountGrant(status = DelegationStatus.ACTIVE)
         val suspended = active.suspend("fraud signal", now)
         assertThat(suspended.status).isEqualTo(DelegationStatus.SUSPENDED)
-        assertThat(suspended.reinstate(now).status).isEqualTo(DelegationStatus.ACTIVE)
+        assertThat(suspended.lifecycleRevision).isEqualTo(active.lifecycleRevision + 1)
+        val reinstated = suspended.reinstate(now)
+        assertThat(reinstated.status).isEqualTo(DelegationStatus.ACTIVE)
+        assertThat(reinstated.lifecycleRevision).isEqualTo(suspended.lifecycleRevision + 1)
     }
 
     @Test

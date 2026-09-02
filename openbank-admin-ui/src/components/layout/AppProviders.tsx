@@ -32,10 +32,14 @@ export function AppProviders({
     <LanguageProvider initialLanguage={initialLanguage} refreshServerContent={refreshServerContent}>
       {children}
       {!publicSurface && <AgentDock />}
-      {!publicSurface && <RumScreenTracker />}
       <Toaster richColors position="top-right" />
     </LanguageProvider>
   )
 
-  return publicSurface ? shared : <SessionProvider>{shared}</SessionProvider>
+  return (
+    <>
+      <RumScreenTracker enabled={!publicSurface} />
+      {publicSurface ? shared : <SessionProvider>{shared}</SessionProvider>}
+    </>
+  )
 }

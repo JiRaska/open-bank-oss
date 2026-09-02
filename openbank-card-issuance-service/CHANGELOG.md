@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.2](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.1...card-issuance-service-v0.26.2) (2026-09-02)
+
+
+### Security
+
+* **delegation:** reject stale lifecycle projections ([#8220](https://github.com/JiRaska/open-bank-oss/issues/8220)) ([6537342](https://github.com/JiRaska/open-bank-oss/commit/65373422f3e3c38e266e411f219beaceab407005))
+
 ## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.0...card-issuance-service-v0.26.1) (2026-09-02)
 
 
