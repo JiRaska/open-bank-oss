@@ -79,40 +79,12 @@ jobs:
         env:
           OVERRIDE: ${{ github.event.inputs.services }}
         run: |
-          python3 - <<'PY'
-          import json, os, pathlib, re, yaml
-
-          override = (os.environ.get("OVERRIDE") or "").split()
-          legacy = [
-              "openbank-dispute-service", "openbank-party-service", "openbank-kyc-service",
-              "openbank-notification-service", "openbank-consent-service",
-          ]
-          money = yaml.safe_load(open("openbank-libs/governance/rules.yaml"))["money_path_services"]
-          candidates = override or list(dict.fromkeys(money + legacy))
-
-          keep, skipped = [], []
-          for svc in candidates:
-              app = pathlib.Path(svc) / "src/main/resources/application.yaml"
-              spec = pathlib.Path(svc) / "src/main/resources/openapi.yaml"
-              if not app.is_file() or not spec.is_file():
-                  skipped.append((svc, "no application.yaml or openapi.yaml")); continue
-              raw = app.read_text()
-              port = re.search(r"^  http:\n(?:.*\n)?\s*port:\s*(\d+)", raw, re.M)
-              # Reactive-only services carry no jdbc: URL (their Agroal datasource is
-              # supplied at boot below). The DB name is in the reactive URL all the same.
-              db = re.search(r"(?:jdbc:)?(?:vertx-reactive:)?postgresql://[^/]+/([A-Za-z0-9_]+)", raw)
-              if not port:
-                  skipped.append((svc, "no derivable quarkus.http.port")); continue
-              if not db:
-                  skipped.append((svc, "no postgresql:// URL — the harness cannot provision its DB")); continue
-              keep.append(svc)
-
-          for svc, why in skipped:
-              print(f"::warning::api-fuzz: {svc} EXCLUDED — {why}")
-          print(f"fuzzing {len(keep)} service(s); {len(skipped)} excluded")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-              fh.write("services=" + json.dumps(keep) + "\n")
-          PY
+          # The scope is DERIVED, in one place, and openbank-libs/governance/fuzz-coverage.yaml
+          # is reconciled against the same function by check-readiness-attestations.py. It used
+          # to be computed inline here and restated by hand there -- a gate whose scope is a
+          # hand-kept list of the thing it checks reads as PASSING when the list is short,
+          # never as UNCHECKED (#5849).
+          python3 .github/scripts/derive-fuzz-scope.py --github-output ${OVERRIDE:+--override $OVERRIDE}
 
   fuzz:
     name: "schemathesis (${{ matrix.service }})"
@@ -170,6 +142,88 @@ jobs:
 
       - name: Fuzz services
         run: .github/scripts/fuzz-services.sh
+
+      # ─────────────────────────────────────────────────────────────────────────
+      # WHAT the run exercised, not merely that it ran (#5769).
+      #
+      # A green job is not interchangeable across services: consent reached 3 operations
+      # past the auth layer and found two genuine 5xx, while settlement's whole API is one
+      # operation behind @RolesAllowed — same shade of green, and until this step nothing
+      # recorded the difference. The `pentest` attestation is minted off these runs, so a
+      # bare green was buying a bank-grade cell for a job that proved boot + auth and
+      # nothing else.
+      #
+      # Both numbers are schemathesis's OWN output, parsed rather than recomputed:
+      #   `Operations:  N selected / M total`
+      #   `Authentication failed: K operations returned authentication errors`  (absent = 0)
+      #
+      # An UNPARSEABLE log is an error, never a zero. A zero-filled record would read as
+      # "measured, empty surface" — indistinguishable from the real thing, and exactly the
+      # successful-no-op shape this step exists to end. If schemathesis changes its wording,
+      # this goes red and the floor keeps meaning what it says.
+      - name: Record exercised surface
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import datetime as dt
+          import os, pathlib, re, sys
+
+          ANSI = re.compile(r"\x1b\[[0-9;]*m")
+          OPS = re.compile(r"Operations:\s+(\d+)\s+selected\s*/\s*(\d+)\s+total")
+          AUTH = re.compile(r"Authentication failed:\s+(\d+)\s+operations?\s+returned")
+          FLOOR = 3   # keep in sync with MIN_EXERCISED_OPS in check-readiness-attestations.py
+
+          reports = pathlib.Path("fuzz-reports")
+          logs = sorted(reports.glob("*-fuzz.log"))
+          if not logs:
+              # The service never got as far as being fuzzed (boot failure, no postgres).
+              # That is already an ::error:: above; say so here too so the absence of a
+              # coverage record is explained rather than silent.
+              print("::warning::no *-fuzz.log — nothing was fuzzed, so no coverage is recorded")
+              sys.exit(0)
+
+          status = 0
+          summary = []
+          for log in logs:
+              svc = log.name[: -len("-fuzz.log")]
+              text = ANSI.sub("", log.read_text(encoding="utf-8", errors="replace"))
+              ops = OPS.search(text)
+              if not ops:
+                  print(f"::error::[{svc}] schemathesis printed no `Operations: N selected / M "
+                        f"total` line — coverage cannot be recorded and no pentest attestation "
+                        f"may be minted from this run")
+                  status = 1
+                  continue
+              selected, total = int(ops.group(1)), int(ops.group(2))
+              auth = int(AUTH.search(text).group(1)) if AUTH.search(text) else 0
+              exercised = selected - auth
+              state = "fuzzed" if exercised >= FLOOR else "auth-only-surface"
+              short = re.sub(r"^openbank-", "", re.sub(r"-service$", "", svc))
+              run_url = (f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+                         f"/actions/runs/{os.environ['GITHUB_RUN_ID']}")
+              block = (
+                  f"{short}:\n"
+                  f"  coverage: {{ date: {dt.date.today().isoformat()}, run: {run_url}, "
+                  f"selected: {selected}, total: {total}, auth_errors: {auth}, "
+                  f"state: {state} }}\n"
+              )
+              (reports / f"{svc}-coverage.yaml").write_text(block, encoding="utf-8")
+              print(f"==> [{svc}] {selected}/{total} selected, {auth} auth-only, "
+                    f"{exercised} exercised -> {state}")
+              if state != "fuzzed":
+                  print(f"::warning::[{svc}] {exercised} operation(s) exercised past the auth "
+                        f"layer (floor {FLOOR}) — this green proves boot + uniform auth "
+                        f"enforcement, and is NOT a pentest for attestation purposes")
+              summary.append(block)
+
+          if (path := os.environ.get("GITHUB_STEP_SUMMARY")) and summary:
+              with open(path, "a", encoding="utf-8") as fh:
+                  fh.write("### api-fuzz coverage — paste into "
+                           "`openbank-libs/governance/fuzz-coverage.yaml`\n\n```yaml\n")
+                  fh.writelines(summary)
+                  fh.write("```\n")
+          sys.exit(status)
+          PY
 
       - name: Upload fuzz reports
         if: always()

@@ -4097,6 +4097,17 @@ gates:
       #
       # The attestation count prints on every run: a green reading "0 attestations" would be
       # a gate that never opened the file.
+      #
+      # R8 (#5769) adds the FUZZ FLOOR. A `pentest` attested by the schemathesis lane must
+      # clear `selected - auth_errors >= 3` as recorded in fuzz-coverage.yaml — schemathesis's
+      # own numbers, parsed by api-fuzz.yml, never recomputed here. A green api-fuzz job is not
+      # interchangeable across services: measured on run 32103867665, consent reached 3
+      # operations past the auth layer and found two genuine 5xx, while 25 of the 26 fuzzed
+      # services reached 0 or 1 — the lane bounced off 401 for their whole surface. Attesting
+      # both off the same green is the successful-no-op-sharing-a-flag shape (ADR-0252 phase 0).
+      # Falsified against the real tree in both directions before wiring in: a settlement-shaped
+      # entry (1 selected, 1 auth-only) makes the gate exit 1 and names the numbers; consent's
+      # real 13/13-with-10-auth-only still passes.
       python3 .github/scripts/check-readiness-attestations.py
   - id: label-description-length
     name: "a labels.yml description fits GitHub's 100-character cap (#4192)"

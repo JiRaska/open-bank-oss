@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: Apache-2.0
+# api-fuzz coverage — WHAT the schemathesis lane actually exercised, per service.
+#
+# WHY THIS FILE EXISTS (#5769)
+# ---------------------------
+# The `pentest` attestation in attestations.yaml is minted off a green `api-fuzz.yml`
+# job. A green is NOT interchangeable across services, and until this file nothing
+# recorded the difference:
+#
+#   consent    13 selected / 13 total, 10 auth-only  -> 3 operations actually fuzzed,
+#                                                       and the lane found two genuine 5xx
+#   settlement  1 selected /  1 total,  1 auth-only  -> 0 operations actually fuzzed;
+#                                                       the green says the service boots
+#                                                       and enforces auth, nothing more
+#
+# That is this repo's recurring shape — a successful no-op sharing a flag with a real
+# success (PushResult.skipped() carrying success = true, ADR-0252 phase 0; the CNPG
+# archiver reporting success with no object store, #5755). Worse, it decays the wrong
+# way: the 21-day TTL exists so a DEAD lane expires the attestation, but a lane that
+# runs and bounces off auth renews it forever while testing nothing.
+#
+# THE NUMBERS ARE THE LANE'S OWN, NOT COMPUTED HERE
+#   `Operations: N selected / M total`                        -> selected / total
+#   `Authentication failed: K operations returned auth errors` -> auth_errors
+# Both are printed by schemathesis today; api-fuzz.yml parses them into a paste-ready
+# block per service (job summary + fuzz-reports/<svc>-coverage.yaml artifact). Copy that
+# block here — do not hand-count anything.
+#
+#   exercised = selected - auth_errors
+#            = operations that produced a real, non-auth response to fuzz traffic.
+#
+# THE FLOOR
+#   `pentest` may be attested off this lane only for a service with
+#   exercised >= 3 (gate `readiness-attestation-format`, R8). Everything below it is
+#   recorded here anyway, out loud, as `auth-only-surface` — a NAMED gap rather than a
+#   silent pass, and the standing argument for authenticated fuzzing (the v2 follow-up
+#   tracked in api-fuzz.yml's header). See .github/scripts/check-readiness-attestations.py
+#   for why the floor is 3 and not 1.
+#
+# `state:` is DERIVED from the numbers by the gate, never trusted from this file — a
+# stated state that disagrees with its own selected/auth_errors is an error. It is
+# written out only so a human reading the file sees the verdict next to the evidence.
+#
+# THE SERVICE SET IS NOT MAINTAINED HERE (#5849)
+#   Which services belong in this file is DERIVED by .github/scripts/derive-fuzz-scope.py --
+#   the same function api-fuzz.yml builds its matrix from. `readiness-attestation-format`
+#   reconciles the two in BOTH directions: a service the lane fuzzes with no entry here is an
+#   error, and an entry here for a service the lane no longer fuzzes is an error. Do not add
+#   or remove a heading by hand to make the gate quiet; change the scope (rules.yaml
+#   money_path_services, or the LEGACY list in that script) and this file follows.
+#
+# Service keys are SHORT names (`consent`, not `consent-service`), exactly as in
+# attestations.yaml — the same trap that made consent's attestation dead from birth (#2365).
+#
+# Fleet as measured on run 32103867665 (2026-08-18): 26 services fuzzed, ONE of them
+# (consent) above the floor. That is not a bookkeeping detail — it is the finding.
+
+account:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 20, total: 20, auth_errors: 20, state: auth-only-surface }
+balance:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 11, total: 11, auth_errors: 11, state: auth-only-surface }
+billing:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 5, total: 5, auth_errors: 4, state: auth-only-surface }
+clearing:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 11, total: 11, auth_errors: 11, state: auth-only-surface }
+consent:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 13, total: 13, auth_errors: 10, state: fuzzed }
+delegation:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 14, total: 14, auth_errors: 14, state: auth-only-surface }
+dispute:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 19, total: 19, auth_errors: 19, state: auth-only-surface }
+domestic-payment:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 7, total: 7, auth_errors: 7, state: auth-only-surface }
+fraud:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 2, total: 2, auth_errors: 2, state: auth-only-surface }
+fx:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 8, total: 8, auth_errors: 8, state: auth-only-surface }
+interest:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 15, total: 15, auth_errors: 15, state: auth-only-surface }
+kyc:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 8, total: 8, auth_errors: 8, state: auth-only-surface }
+ledger:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 28, total: 28, auth_errors: 28, state: auth-only-surface }
+lending:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 37, total: 37, auth_errors: 37, state: auth-only-surface }
+notification:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 15, total: 15, auth_errors: 15, state: auth-only-surface }
+party:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 24, total: 24, auth_errors: 24, state: auth-only-surface }
+sanctions:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 13, total: 13, auth_errors: 13, state: auth-only-surface }
+sca:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 6, total: 6, auth_errors: 6, state: auth-only-surface }
+sdd:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 11, total: 11, auth_errors: 11, state: auth-only-surface }
+sepa-instant:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 6, total: 6, auth_errors: 6, state: auth-only-surface }
+sepa-payment:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 7, total: 7, auth_errors: 7, state: auth-only-surface }
+settlement:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 1, total: 1, auth_errors: 1, state: auth-only-surface }
+standing-order:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 9, total: 9, auth_errors: 9, state: auth-only-surface }
+swift:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 7, total: 7, auth_errors: 7, state: auth-only-surface }
+transaction:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 8, total: 8, auth_errors: 8, state: auth-only-surface }
+vop:
+  coverage: { date: 2026-08-18, run: https://github.com/JiRaska/open-bank-oss/actions/runs/32103867665, selected: 1, total: 1, auth_errors: 1, state: auth-only-surface }

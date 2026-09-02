@@ -2579,6 +2579,23 @@ readiness_attestations:
   ref_must_resolve_to: >
     a URL, a #issue, an existing repo path, or runbook-NNNN matching docs/runbooks/NNNN-*.md.
     An entry whose ref resolves to nothing is treated as absent — a sentence is not evidence.
+  fuzz_coverage_file: openbank-libs/governance/fuzz-coverage.yaml
+  fuzz_pentest_floor: 3
+  fuzz_pentest_rule: >
+    A `pentest` attested by the schemathesis lane (by: ci-schemathesis) must clear an
+    EXERCISED-OPERATIONS floor recorded in fuzz-coverage.yaml (gate
+    readiness-attestation-format, R8): exercised = selected - auth_errors >= 3, using
+    schemathesis's own two output lines rather than any number computed here. A green
+    api-fuzz job is not interchangeable across services and nothing recorded the difference
+    until #5769 — measured on run 32103867665, consent reached 3 operations past the auth
+    layer (and found two genuine 5xx) while the other 25 fuzzed services reached 0 or 1, so
+    the same shade of green was buying a bank-grade cell for a job proving only that the
+    service boots and enforces auth uniformly. A ratio cannot see this (settlement is 1 of 1
+    = 100% of its surface); the count of operations that answered something other than an
+    auth error can. A service below the floor is recorded out loud as `auth-only-surface` —
+    a named gap and the standing argument for authenticated fuzzing (api-fuzz.yml v2), not a
+    silent pass. The floor is scoped to the fuzz lane: ledger's ci-zap-baseline pentest is a
+    different tool with a different scope and is judged by the other rules.
   exercise_attestation_keys: [restore_drill, dr_drill]
   exercise_ref_rule: >
     restore_drill and dr_drill assert that an EXERCISE happened on a date, so a runbook-NNNN
