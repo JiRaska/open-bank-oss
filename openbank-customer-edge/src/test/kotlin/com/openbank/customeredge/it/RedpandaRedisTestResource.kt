@@ -4,6 +4,7 @@
 
 package com.openbank.customeredge.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -36,18 +37,20 @@ class RedpandaRedisTestResource : QuarkusTestResourceLifecycleManager {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
         val rp = RedpandaContainer(
-            DockerImageName.parse("redpandadata/redpanda:v24.1.2")
+            DockerImageName.parse(REDPANDA_IMAGE)
                 .asCompatibleSubstituteFor("docker.redpanda.com/redpandadata/redpanda"),
         )
         rp.start()
         redpanda = rp
         lastBootstrapServers = rp.bootstrapServers
+        TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started")
 
-        val rd = GenericContainer(DockerImageName.parse("docker.io/valkey/valkey:7.2-alpine")).withExposedPorts(
+        val rd = GenericContainer(DockerImageName.parse(VALKEY_IMAGE)).withExposedPorts(
             REDIS_PORT,
         )
         rd.start()
         redis = rd
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
 
         return mapOf(
             "kafka.bootstrap.servers" to rp.bootstrapServers,
@@ -71,11 +74,22 @@ class RedpandaRedisTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        redpanda?.stop()
-        redis?.stop()
+        try {
+            redpanda?.let {
+                it.stop()
+                TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped")
+            }
+        } finally {
+            redis?.let {
+                it.stop()
+                TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
+            }
+        }
     }
 
     companion object {
+        private const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
+        private const val VALKEY_IMAGE = "docker.io/valkey/valkey:7.2-alpine"
         private const val REDIS_PORT = 6379
 
         /** Matches [com.openbank.customeredge.integration.PartyEventsConsumerGroupIdBootIT]'s expectation. */
