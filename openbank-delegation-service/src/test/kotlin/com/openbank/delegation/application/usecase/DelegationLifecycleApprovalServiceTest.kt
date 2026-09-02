@@ -65,8 +65,8 @@ class DelegationLifecycleApprovalServiceTest {
     fun `maker cannot reject their own proposal`(): Unit = runBlocking {
         val approval = proposed("maker")
         coEvery { approvals.decideAtomically(approval.id, any()) } coAnswers {
-            arg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>(1)
-                .invoke(approval).approval
+            arg<(DelegationLifecycleApproval, DelegationGrant?) -> LifecycleApprovalDecision>(1)
+                .invoke(approval, grant).approval
         }
 
         assertThatThrownBy {
@@ -77,21 +77,22 @@ class DelegationLifecycleApprovalServiceTest {
     }
 
     @Test
-    fun `approval execution stays fail closed before the revision safe lifecycle seam`(): Unit = runBlocking {
-        val approval = proposed("maker")
+    fun `approval executes a revision matched lifecycle transition with stamped event`(): Unit = runBlocking {
+        val approval = proposed("maker").copy(expectedLifecycleRevision = grant.lifecycleRevision)
+        var plan: LifecycleApprovalDecision? = null
         coEvery { approvals.decideAtomically(approval.id, any()) } coAnswers {
-            arg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>(1)
-                .invoke(approval).approval
+            plan = arg<(DelegationLifecycleApproval, DelegationGrant?) -> LifecycleApprovalDecision>(1)
+                .invoke(approval, grant)
+            plan!!.approval
         }
 
-        assertThatThrownBy {
-            runBlocking {
-                service.decide(
-                    DecideDelegationLifecycleCommand(approval.id, true, "checker", "evidence verified"),
-                )
-            }
-        }.isInstanceOf(DelegationLifecycleApprovalConflict::class.java)
-            .hasMessageContaining("revision-safe")
+        val result = service.decide(
+            DecideDelegationLifecycleCommand(approval.id, true, "checker", "evidence verified"),
+        )
+
+        assertThat(plan).isInstanceOf(LifecycleApprovalDecision.Executed::class.java)
+        assertThat(result.state).isEqualTo(ProposalState.EXECUTED)
+        assertThat(result.executedAt).isEqualTo(now)
     }
 
     @Test
@@ -99,8 +100,8 @@ class DelegationLifecycleApprovalServiceTest {
         val approval = proposed("maker")
         var plan: LifecycleApprovalDecision? = null
         coEvery { approvals.decideAtomically(approval.id, any()) } coAnswers {
-            plan = arg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>(1)
-                .invoke(approval)
+            plan = arg<(DelegationLifecycleApproval, DelegationGrant?) -> LifecycleApprovalDecision>(1)
+                .invoke(approval, grant)
             plan!!.approval
         }
 
@@ -124,8 +125,8 @@ class DelegationLifecycleApprovalServiceTest {
         )
         var plan: LifecycleApprovalDecision? = null
         coEvery { approvals.decideAtomically(terminal.id, any()) } coAnswers {
-            plan = arg<(DelegationLifecycleApproval) -> LifecycleApprovalDecision>(1)
-                .invoke(terminal)
+            plan = arg<(DelegationLifecycleApproval, DelegationGrant?) -> LifecycleApprovalDecision>(1)
+                .invoke(terminal, grant)
             plan!!.approval
         }
 
@@ -188,6 +189,38 @@ class DelegationLifecycleApprovalServiceTest {
                 )
             }
         }.isInstanceOf(DelegationLifecycleApprovalConflict::class.java)
+    }
+
+    @Test
+    fun `approval whose observed revision changed is refused without an execution plan`(): Unit = runBlocking {
+        val approval = proposed("maker").copy(expectedLifecycleRevision = grant.lifecycleRevision)
+        coEvery { approvals.decideAtomically(approval.id, any()) } coAnswers {
+            arg<(DelegationLifecycleApproval, DelegationGrant?) -> LifecycleApprovalDecision>(1)
+                .invoke(approval, grant.copy(lifecycleRevision = grant.lifecycleRevision + 1)).approval
+        }
+
+        assertThatThrownBy {
+            runBlocking {
+                service.decide(DecideDelegationLifecycleCommand(approval.id, true, "checker", "evidence verified"))
+            }
+        }.isInstanceOf(DelegationLifecycleApprovalConflict::class.java)
+            .hasMessageContaining("stale")
+    }
+
+    @Test
+    fun `legacy proposal without an observed revision remains non executable`(): Unit = runBlocking {
+        val legacy = proposed("maker")
+        coEvery { approvals.decideAtomically(legacy.id, any()) } coAnswers {
+            arg<(DelegationLifecycleApproval, DelegationGrant?) -> LifecycleApprovalDecision>(1)
+                .invoke(legacy, grant).approval
+        }
+
+        assertThatThrownBy {
+            runBlocking {
+                service.decide(DecideDelegationLifecycleCommand(legacy.id, true, "checker", "evidence verified"))
+            }
+        }.isInstanceOf(DelegationLifecycleApprovalConflict::class.java)
+            .hasMessageContaining("predates")
     }
 
     private fun proposed(maker: String) = DelegationLifecycleApproval(

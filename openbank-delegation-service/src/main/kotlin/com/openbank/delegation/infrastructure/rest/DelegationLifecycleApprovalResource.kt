@@ -107,7 +107,7 @@ class DelegationLifecycleApprovalResource(
     @POST
     @Path("/{approvalId}/decision")
     @Authorize(action = "delegation.approval.decide", resource = "#approvalId")
-    @Operation(summary = "Reject a lifecycle proposal; approval execution is fail-closed (default-off)")
+    @Operation(summary = "Decide and atomically execute a lifecycle proposal (default-off)")
     suspend fun decide(
         @PathParam("approvalId") approvalId: UUID,
         request: DecideDelegationLifecycleRequest?,

@@ -348,7 +348,7 @@ paths:
   /api/v1/delegations/approvals/{approvalId}/decision:
     post:
       tags: [Delegation lifecycle approvals]
-      summary: Reject a lifecycle proposal; approval execution remains fail-closed
+      summary: Decide and atomically execute a lifecycle proposal (default-off)
       parameters:
         - $ref: '#/components/parameters/ApprovalId'
       requestBody:
@@ -358,13 +358,13 @@ paths:
             schema: { $ref: '#/components/schemas/DecideDelegationLifecycleRequest' }
       responses:
         '200':
-          description: Rejected proposal evidence or idempotent terminal replay
+          description: Executed or rejected proposal evidence, or an idempotent terminal replay
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationLifecycleApprovalResponse' }
         '403': { description: Self-decision, non-human principal, or missing operator role }
         '404': { description: Mutation capability is disabled, or approval not found }
-        '409': { description: Approval execution unavailable, or conflicting terminal decision }
+        '409': { description: Stale proposal, conflicting terminal decision, or an illegal lifecycle transition }
   /api/v1/delegations/check:
     post:
       tags: [Delegations]
@@ -651,9 +651,14 @@ components:
         state:
           type: string
           enum: [PROPOSED, REJECTED, EXECUTED]
-          description: Execution is reserved for the revision-safe lifecycle seam.
+          description: EXECUTED means the revision-matched lifecycle transition and its outbox event committed atomically.
         proposedBy: { type: string }
         proposedAt: { type: string, format: date-time }
+        expectedLifecycleRevision:
+          type: [integer, 'null']
+          format: int64
+          minimum: 0
+          description: Grant lifecycle revision inspected by the maker. Null legacy evidence is readable but cannot execute.
         decidedBy: { type: [string, 'null'] }
         decidedAt: { type: [string, 'null'], format: date-time }
         decisionReason: { type: [string, 'null'] }

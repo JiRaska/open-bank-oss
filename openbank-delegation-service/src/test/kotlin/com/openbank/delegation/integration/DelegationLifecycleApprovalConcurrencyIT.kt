@@ -31,12 +31,11 @@ class LifecycleApprovalEnabledProfile : QuarkusTestProfile {
 }
 
 /**
- * Real-Postgres proof for the current-main evidence boundary.
+ * Real-Postgres proof for the lifecycle approval execution boundary.
  *
  * Request-key replay and terminal rejection are serialised in Postgres across callers. Approval
- * remains fail-closed even when the dark mutation edge is deliberately enabled. The stronger race
- * between approval and a direct lifecycle transition belongs on the V8-V10 stacked tree, where
- * both contenders can use the same authoritative revision/CAS seam.
+ * Approval execution changes the grant, stamps exactly one lifecycle event and records EXECUTED in
+ * one transaction. Legacy proposal rows without an observed revision remain fail-closed.
  */
 @QuarkusTest
 @TestProfile(LifecycleApprovalEnabledProfile::class)
@@ -84,17 +83,17 @@ class DelegationLifecycleApprovalConcurrencyIT {
     }
 
     @Test
-    fun `approval is fail closed even when the dark mutation edge is enabled`() {
+    fun `approval execution atomically changes grant records evidence and writes one outbox event`() {
         val seeded = seedApproval("maker")
 
         assertThat(decide(seeded.approvalId, approve = true, reason = "evidence checked"))
-            .isEqualTo(HTTP_CONFLICT)
+            .isEqualTo(HTTP_OK)
         assertThat(text("select state from delegation_lifecycle_approvals where id = ?", seeded.approvalId))
-            .isEqualTo("PROPOSED")
+            .isEqualTo("EXECUTED")
         assertThat(text("select status from delegation_grants where id = ?", seeded.grantId))
-            .isEqualTo("ACTIVE")
+            .isEqualTo("SUSPENDED")
         assertThat(scalar("select count(*) from delegation_outbox where aggregate_id = ?", seeded.grantId))
-            .isZero()
+            .isEqualTo(1)
     }
 
     @Test
@@ -115,8 +114,8 @@ class DelegationLifecycleApprovalConcurrencyIT {
                 """
                 insert into delegation_lifecycle_approvals
                     (id, delegation_id, operation, requested_reason, request_key,
-                     proposed_by, proposed_at, state)
-                values (?, ?, 'SUSPEND', 'fraud signal reviewed', ?, ?, now(), 'PROPOSED')
+                     proposed_by, proposed_at, expected_lifecycle_revision, state)
+                values (?, ?, 'SUSPEND', 'fraud signal reviewed', ?, ?, now(), 0, 'PROPOSED')
                 """.trimIndent(),
             ).use { statement ->
                 statement.setObject(1, approvalId)

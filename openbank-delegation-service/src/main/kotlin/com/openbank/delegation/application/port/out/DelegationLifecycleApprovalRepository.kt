@@ -4,7 +4,9 @@
 
 package com.openbank.delegation.application.port.out
 
+import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationLifecycleApproval
+import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.governance.ProposalState
 import java.util.UUID
 
@@ -23,14 +25,20 @@ sealed interface LifecycleApprovalDecision {
     data class Replayed(override val approval: DelegationLifecycleApproval) : LifecycleApprovalDecision
 
     data class Rejected(override val approval: DelegationLifecycleApproval) : LifecycleApprovalDecision
+
+    /** A revision-checked lifecycle transition and its event, persisted with the decision. */
+    data class Executed(
+        override val approval: DelegationLifecycleApproval,
+        val grant: DelegationGrant,
+        val event: DomainEvent,
+    ) : LifecycleApprovalDecision
 }
 
 /**
  * Persistence boundary for durable delegation lifecycle approvals.
  *
- * [decideAtomically] locks the proposal and applies its pure [decide] function in one database
- * transaction. This current-main slice only persists rejection evidence. Approval execution stays
- * fail-closed until the repository is stacked on the lifecycle revision/CAS seam.
+ * [decideAtomically] locks the proposal and its referenced grant, applies [decide], then persists
+ * a rejected decision or the grant CAS, outbox event and EXECUTED evidence in one transaction.
  */
 interface DelegationLifecycleApprovalRepository {
     suspend fun create(candidate: DelegationLifecycleApproval): LifecycleApprovalCreateOutcome
@@ -40,6 +48,6 @@ interface DelegationLifecycleApprovalRepository {
 
     suspend fun decideAtomically(
         id: UUID,
-        decide: (DelegationLifecycleApproval) -> LifecycleApprovalDecision,
+        decide: (DelegationLifecycleApproval, DelegationGrant?) -> LifecycleApprovalDecision,
     ): DelegationLifecycleApproval?
 }

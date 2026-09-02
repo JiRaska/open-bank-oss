@@ -40,9 +40,9 @@ data class DelegationLifecycleAction(
  * Durable four-eyes evidence for one bank-side lifecycle action.
  *
  * This wraps the shared [Proposal] state machine rather than defining a second maker-checker rule.
- * Only PROPOSED, REJECTED and EXECUTED are valid persisted evidence states. This current-main slice
- * creates PROPOSED/REJECTED only; EXECUTED is reserved for the revision-safe lifecycle seam and can
- * already be read without inventing a transient APPROVED state.
+ * Only PROPOSED, REJECTED and EXECUTED are valid persisted evidence states. EXECUTED is written
+ * only with a revision-matched lifecycle transition and its transactional outbox event; there is
+ * no transient APPROVED state that could claim a decision without the actual side effect.
  */
 data class DelegationLifecycleApproval(
     val id: UUID,
@@ -50,6 +50,8 @@ data class DelegationLifecycleApproval(
     val requestKey: String,
     val proposedBy: String,
     val proposedAt: Instant,
+    /** Grant revision observed by the maker; legacy NULL evidence is intentionally non-executable. */
+    val expectedLifecycleRevision: Long? = null,
     val state: ProposalState = ProposalState.PROPOSED,
     val decidedBy: String? = null,
     val decidedAt: Instant? = null,
@@ -63,6 +65,9 @@ data class DelegationLifecycleApproval(
         }
         require(proposedBy.isNotBlank()) { "Proposer identity is required" }
         require(proposedBy.length <= MAX_ACTOR_LENGTH) { "Proposer identity is too long" }
+        require(expectedLifecycleRevision == null || expectedLifecycleRevision >= 0) {
+            "Expected lifecycle revision must be non-negative"
+        }
         require(state in PERSISTED_STATES) { "Lifecycle approval state $state is not persisted" }
         require(decisionReason == null || decisionReason.length <= DelegationLifecycleAction.MAX_REASON_LENGTH) {
             "Decision reason must be at most ${DelegationLifecycleAction.MAX_REASON_LENGTH} characters"
