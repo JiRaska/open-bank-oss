@@ -58,6 +58,8 @@ data class ReferralReward(
     val rewardedAt: Instant?,
 )
 
+private const val SOURCE_SERVICE = "openbank-referral-service"
+
 sealed class ReferralEvent {
     /**
      * A consumer must only project the versioned evidence it understands.  The referral topic is
@@ -71,6 +73,17 @@ sealed class ReferralEvent {
     abstract val programId: UUID
     abstract val programVersion: Int
     abstract val inviteId: UUID
+
+    /**
+     * The module that emitted this event, stamped on the body rather than left to be derived.
+     *
+     * audit-service resolves attribution strongest-claim-first, and a `sourceService` on the event
+     * body is the strongest claim available — without it every referral audit row is attributed by
+     * derivation from the topic name, which is a convention rather than a statement by the producer.
+     * Declared once on the sealed base so every subclass carries it and no future event type can be
+     * added without it (issues #5256/#6035).
+     */
+    val sourceService: String = SOURCE_SERVICE
 
     data class Qualified(
         override val schemaVersion: Int = 2,

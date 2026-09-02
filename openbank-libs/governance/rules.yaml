@@ -371,6 +371,8 @@ change_requirements:
     allowlist:
       - topic: "openbank.psd2.events"
         reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
+      - topic: "openbank.referral.events"
+        reason: "Temporary merge-order gap tracked by #7194: #7190 establishes the atomic producer and stable wire contract while the referral workload remains at zero replicas; the next Campaign Studio slice consumes it into the governed MGM funnel projection. Remove this entry with that consumer PR, before workload activation."
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "proposal-events"
