@@ -85,47 +85,46 @@ class DelegatedDomesticPaymentTest {
         scaOk: Boolean = true,
         createStatus: Int = 201,
         reserveOk: Boolean = true,
-    ): UpstreamClient =
-        mockk<UpstreamClient>().also { upstream ->
-            // ADR-0249 D3: the cumulative counter the edge reserves against before it pays. A 409
-            // here is delegation-service refusing the ceiling, which is a different refusal from
-            // account-service's per-transaction one and has to be exercised separately.
-            every { upstream.post(match { it.endsWith("/reservations") }, any(), any()) } returns
-                if (reserveOk) {
-                    Response.status(201)
-                        .entity("""{"reservationId":"$RESERVATION_ID","delegationId":"$grantId"}""")
-                        .build()
-                } else {
-                    Response.status(409).entity("""{"reason":"DAILY"}""").build()
-                }
-            every {
-                upstream.post(match { it.contains("/reservations/") }, any(), any())
-            } returns Response.ok("{}").build()
-            every {
-                upstream.get(
-                    match {
-                        it.contains("/accounts/$account") && !it.contains("payment-authorization")
-                    },
-                    any(),
-                )
-            } answers {
-                // The ownership guard is keyed on the party header, so answer as account-service does.
-                if (secondArg<String>() == grantor.toString()) {
-                    Response.ok("""{"id":"$account","partyId":"$grantor","accountNumber":"$OWNER_IBAN"}""").build()
-                } else {
-                    Response.status(404).entity("""{"error":"Account not found"}""").build()
-                }
+    ): UpstreamClient = mockk<UpstreamClient>().also { upstream ->
+        // ADR-0249 D3: the cumulative counter the edge reserves against before it pays. A 409
+        // here is delegation-service refusing the ceiling, which is a different refusal from
+        // account-service's per-transaction one and has to be exercised separately.
+        every { upstream.post(match { it.endsWith("/reservations") }, any(), any()) } returns
+            if (reserveOk) {
+                Response.status(201)
+                    .entity("""{"reservationId":"$RESERVATION_ID","delegationId":"$grantId"}""")
+                    .build()
+            } else {
+                Response.status(409).entity("""{"reason":"DAILY"}""").build()
             }
-            every { upstream.get(match { it.contains("payment-authorization") }, any()) } returns decision
-            every { upstream.get(match { it.contains("/parties/") }, any()) } answers {
-                val name = if (secondArg<String>() == grantor.toString()) "Grantor Name" else "Delegate Name"
-                Response.ok("""{"legalName":"$name"}""").build()
+        every {
+            upstream.post(match { it.contains("/reservations/") }, any(), any())
+        } returns Response.ok("{}").build()
+        every {
+            upstream.get(
+                match {
+                    it.contains("/accounts/$account") && !it.contains("payment-authorization")
+                },
+                any(),
+            )
+        } answers {
+            // The ownership guard is keyed on the party header, so answer as account-service does.
+            if (secondArg<String>() == grantor.toString()) {
+                Response.ok("""{"id":"$account","partyId":"$grantor","accountNumber":"$OWNER_IBAN"}""").build()
+            } else {
+                Response.status(404).entity("""{"error":"Account not found"}""").build()
             }
-            every { upstream.post(match { it.contains("/sca/challenges/") }, any(), any()) } returns
-                if (scaOk) Response.ok("""{"status":"CONSUMED"}""").build() else Response.status(403).build()
-            every { upstream.post(match { it.contains("/domestic-payments") }, any(), any(), any()) } returns
-                Response.status(createStatus).entity("""{"id":"$PAYMENT_ID","status":"RECEIVED"}""").build()
         }
+        every { upstream.get(match { it.contains("payment-authorization") }, any()) } returns decision
+        every { upstream.get(match { it.contains("/parties/") }, any()) } answers {
+            val name = if (secondArg<String>() == grantor.toString()) "Grantor Name" else "Delegate Name"
+            Response.ok("""{"legalName":"$name"}""").build()
+        }
+        every { upstream.post(match { it.contains("/sca/challenges/") }, any(), any()) } returns
+            if (scaOk) Response.ok("""{"status":"CONSUMED"}""").build() else Response.status(403).build()
+        every { upstream.post(match { it.contains("/domestic-payments") }, any(), any(), any()) } returns
+            Response.status(createStatus).entity("""{"id":"$PAYMENT_ID","status":"RECEIVED"}""").build()
+    }
 
     private fun authorizedDecision() = Response.ok(
         """{"authorized":true,"outcome":"DELEGATED","delegationId":"$grantId","grantorPartyId":"$grantor"}""",
