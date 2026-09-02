@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.237.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.237.0...admin-ui-v0.237.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** make template lifecycle dialogs focus-safe ([#8297](https://github.com/JiRaska/open-bank-oss/issues/8297)) ([b83e7d5](https://github.com/JiRaska/open-bank-oss/commit/b83e7d52d1a860814fa8d49f53bb0acfaacfbc81)), closes [#8294](https://github.com/JiRaska/open-bank-oss/issues/8294)
+
+## [0.237.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.236.1...admin-ui-v0.237.0) (2026-09-02)
+
+
+### Features
+
+* **admin-ui:** add shared App Router route-transition loading state ([#8273](https://github.com/JiRaska/open-bank-oss/issues/8273)) ([4d7f881](https://github.com/JiRaska/open-bank-oss/commit/4d7f8813ecaf44a5747da216089a6ab5f651f49f)), closes [#8225](https://github.com/JiRaska/open-bank-oss/issues/8225)
+
+
+### Bug Fixes
+
+* **admin-ui:** make regulatory preview an accessible dialog ([#8250](https://github.com/JiRaska/open-bank-oss/issues/8250)) ([b870def](https://github.com/JiRaska/open-bank-oss/commit/b870def961a1df85c5914d6192a3ba13bb105ce8))
+* **admin-ui:** single-flight delegation role saves ([#8280](https://github.com/JiRaska/open-bank-oss/issues/8280)) ([589779b](https://github.com/JiRaska/open-bank-oss/commit/589779b4343538456468538056750b54f739e6e4))
+
 ## [0.236.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.236.0...admin-ui-v0.236.1) (2026-09-02)
 
 

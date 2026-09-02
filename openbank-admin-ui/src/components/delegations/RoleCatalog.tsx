@@ -7,6 +7,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useAuth } from '@/lib/auth/useAuth'
 import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 import { CAPABILITIES_BY_RESOURCE, assignablePresetCapabilities, capabilityIntent, capabilityLabel, isAssignablePresetCapability, isReservedOwnershipPresetName, truthfulPresetName, type CapabilityIntent, type DelegationResource, type RolePreset } from '@/lib/delegations/rolePresets'
+import { useSingleFlight } from '@/lib/mutations/singleFlight'
 import { LegacyCapabilityEvidence } from '@/components/delegations/LegacyCapabilityEvidence'
 
 const emptyRole = (): RolePreset => ({ id: '', name: '', description: '', resourceType: 'ACCOUNT', capabilities: [] })
@@ -14,6 +15,7 @@ const emptyRole = (): RolePreset => ({ id: '', name: '', description: '', resour
 export function RoleCatalog() {
   const { t } = useLanguage()
   const { hasRole } = useAuth()
+  const saveFlight = useSingleFlight()
   const canManage = hasRole('ROLE_ADMIN')
   const [roles, setRoles] = useState<RolePreset[]>([])
   const [resource, setResource] = useState<DelegationResource>('ACCOUNT')
@@ -53,24 +55,27 @@ export function RoleCatalog() {
     setSaveError(false)
   }
   const save = async (role: RolePreset) => {
-    const payload = { name: truthfulPresetName(role).trim(), description: role.description.trim(), resourceType: role.resourceType, capabilities: role.capabilities.filter(isAssignablePresetCapability) }
-    setSaving(true)
-    setSaveError(false)
-    try {
-      const response = await fetch(role.id ? `/api/delegation-role-presets/${role.id}` : '/api/delegation-role-presets', {
-        method: role.id ? 'PUT' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
-      })
-      if (!response.ok) {
+    const operationKey = role.id ? `delegation-role:update:${role.id}` : 'delegation-role:create'
+    await saveFlight.run(operationKey, async () => {
+      const payload = { name: truthfulPresetName(role).trim(), description: role.description.trim(), resourceType: role.resourceType, capabilities: role.capabilities.filter(isAssignablePresetCapability) }
+      setSaving(true)
+      setSaveError(false)
+      try {
+        const response = await fetch(role.id ? `/api/delegation-role-presets/${role.id}` : '/api/delegation-role-presets', {
+          method: role.id ? 'PUT' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+        })
+        if (!response.ok) {
+          setSaveError(true)
+          return
+        }
+        setEditing(null)
+        await load()
+      } catch {
         setSaveError(true)
-        return
+      } finally {
+        setSaving(false)
       }
-      setEditing(null)
-      await load()
-    } catch {
-      setSaveError(true)
-    } finally {
-      setSaving(false)
-    }
+    })
   }
   const requestRemoval = (role: RolePreset, trigger: HTMLButtonElement) => {
     removeReturnFocusRef.current = trigger
