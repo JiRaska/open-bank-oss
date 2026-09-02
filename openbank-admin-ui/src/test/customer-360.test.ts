@@ -12,15 +12,16 @@
 // only checked the assembled output against a hand-written row set would pass against a query that
 // leaks, since the fixture would simply not contain the other party's rows.
 
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'fs'
 import path from 'path'
+import { auth } from '@/auth'
 
 const ROUTE = path.join(process.cwd(), 'src/app/api/customer-360/[partyId]/route.ts')
 const PARTY = '11111111-1111-1111-1111-111111111111'
 const OTHER = '22222222-2222-2222-2222-222222222222'
 
-vi.mock('@/auth', () => ({ auth: vi.fn(async () => ({ user: { name: 'op' } })) }))
+vi.mock('@/auth', () => ({ auth: vi.fn() }))
 
 /** Captures the SQL the route sends, so isolation can be asserted on the query itself. */
 function stubClickHouse(rows: Record<string, unknown>[]) {
@@ -34,9 +35,53 @@ function stubClickHouse(rows: Record<string, unknown>[]) {
 
 beforeEach(() => {
   vi.unstubAllGlobals()
+  vi.mocked(auth).mockResolvedValue({ user: { name: 'op', roles: ['ROLE_COMPLIANCE'] } } as never)
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('Customer 360 isolation (ADR-0210 D2)', () => {
+  it('rejects an unauthenticated direct BFF call before querying ClickHouse', async () => {
+    vi.mocked(auth).mockResolvedValue(null as never)
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+
+    const res = await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
+
+    expect(res.status).toBe(401)
+    expect((await res.json()).error).toBe('unauthorized')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a session without compliance:view before querying ClickHouse', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { roles: ['ROLE_OPERATOR'] } } as never)
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+
+    const res = await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
+
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toBe('forbidden')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('bounds the ClickHouse read and degrades a timeout without leaking a 5xx', async () => {
+    const signal = new AbortController().signal
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(signal)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('timed out', 'TimeoutError')))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+
+    const res = await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
+
+    expect(timeout).toHaveBeenCalledWith(8_000)
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({ available: false, partyId: PARTY })
+  })
+
   it('scopes BOTH resolution arms to the requested party', async () => {
     const seen = stubClickHouse([])
     const { GET } = await import('@/app/api/customer-360/[partyId]/route')

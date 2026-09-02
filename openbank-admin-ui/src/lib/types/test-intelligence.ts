@@ -228,6 +228,9 @@ export interface SyntheticJourneyEvidence {
     activeJobs: number | null
     freshnessSeconds: number | null
     recentRuns: Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>
+    /** Non-null when the recent-runs query itself failed — distinguishes that from an
+     *  empty `recentRuns`, which means no Job has completed yet. */
+    recentRunsError: string | null
     /**
      * k6 remote-write measurements from the same journey window.  They are supplementary
      * performance evidence only: the CronJob outcome remains the availability verdict.

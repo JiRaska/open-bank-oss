@@ -359,6 +359,33 @@ describe('GET /api/test-intelligence', () => {
     ])
   })
 
+  it('names a failed recent-runs query instead of rendering it as an empty run history (#7943)', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-recent-runs-failure-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-25T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], history: [], runHistory: [], testCases: [], clientExperiences: [],
+      syntheticJourneys: [{ id: 'public-edge', title: 'Public edge', status: 'active', state: 'unknown', severity: 'page', schedule: '*/5 * * * *', environment: 'sandbox', covers: [], falsifies: 'Break the edge.', blocker: null }],
+      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.PROMETHEUS_URL = 'http://prometheus.test'
+    const now = Date.now() / 1000
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      // Prometheus is reachable and every other query answers; only the recent-runs query fails.
+      if (query.includes('kube_job_status_completion_time')) {
+        return new Response('boom', { status: 500 })
+      }
+      return new Response(JSON.stringify({ status: 'success', data: { result: [{ value: [now, String(now)] }] } }), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+    // An empty list here is ambiguous with "no runs happened yet" — the failure must be named.
+    expect(body.syntheticJourneys[0].live.recentRuns).toEqual([])
+    expect(body.syntheticJourneys[0].live.recentRunsError).toMatch(/prometheus responded 500/)
+  })
+
   it('projects k6 remote-write performance as bounded supplementary evidence', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-performance-'))
     dirs.push(dir)
