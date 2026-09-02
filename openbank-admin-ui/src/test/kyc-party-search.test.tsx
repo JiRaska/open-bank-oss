@@ -19,7 +19,7 @@ describe('KYC party search', () => {
       const url = String(input)
       if (url.includes('/api/v1/parties/search')) return json({ data: [{ id: PARTY, legalName: 'Oldřich Vaněk', status: 'ACTIVE', kycStatus: 'APPROVED' }] })
       if (url.endsWith(`/api/v1/kyc/cases/party/${PARTY}`)) return json([{ id: 'case-1', partyId: PARTY, status: 'APPROVED', checks: [], updatedAt: '2026-08-20T10:00:00Z', createdAt: '2026-08-20T09:00:00Z' }])
-      if (url.endsWith('/api/v1/kyc/cases')) return json([])
+      if (url.includes('/api/v1/kyc/cases?')) return json({ items: [], total: 0, page: 0, size: 20, statusFilter: null })
       return json({}, 404)
     })
     vi.stubGlobal('fetch', f)

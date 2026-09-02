@@ -15,11 +15,21 @@ import { Can } from '@/components/auth/AuthGuard'
 import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 
 const KYC_SERVICE = '/api/svc/kyc-service'
+const PAGE_SIZE = 20
 
 interface KycCase {
   id: string; partyId: string; status: string
   checks: { checkType: string; status: string }[]
   reviewedBy?: string; createdAt: string; updatedAt: string
+}
+
+/** Envelope returned by GET /api/v1/kyc/cases (KycResource.listCases, openapi.yaml KycCasePage). */
+interface KycCasePage {
+  items: KycCase[]
+  total: number
+  page: number
+  size: number
+  statusFilter: string | null
 }
 
 export default function KycPage() {
@@ -36,22 +46,34 @@ export default function KycPage() {
   const [loadedPartyId, setLoadedPartyId] = useState<string | null>(null)
   const loadedPartyIdRef = useRef<string | null>(null)
   const [selectedParty, setSelectedParty] = useState<PartyHit | null>(null)
+  // Server-backed pagination against the declared KycCasePage envelope (issue #8163) —
+  // `page`/`total` are only meaningful in list mode; the party-scoped lookup returns a single case.
+  const [page, setPage] = useState(0)
+  const [total, setTotal] = useState<number | null>(null)
+  // Requests can race (e.g. a slow page-1 response landing after a page-2 click) — only the
+  // most recently ISSUED request may commit state, never whichever happens to resolve first.
+  const requestSeq = useRef(0)
 
-  const load = useCallback(async (requestedPartyId = partyId) => {
+  const load = useCallback(async (requestedPartyId = partyId, requestedPage = page) => {
     const scope = requestedPartyId || null
+    const seq = ++requestSeq.current
     setLoading(true); setUnavailable(null)
     try {
       const url = requestedPartyId
         ? `${KYC_SERVICE}/api/v1/kyc/cases/party/${requestedPartyId}`
-        : `${KYC_SERVICE}/api/v1/kyc/cases`
+        : `${KYC_SERVICE}/api/v1/kyc/cases?page=${requestedPage}&size=${PAGE_SIZE}`
       const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
+      if (seq !== requestSeq.current) return // superseded by a newer request — drop this response
       if (!res.ok) {
         const kind = await classifyBffFailure(res)
-        // A genuine 404/405 on the cases endpoint means "no case for this party",
-        // not a broken app — degrade to the calm empty state rather than an error.
-        const unavailableKind = res.status === 405 || kind === 'not_found' ? 'no_data' : kind
+        // Only a genuine 404 on the PARTY-SCOPED lookup means "no case exists for this party".
+        // A 405 (or a 404 on the unscoped list route) is a route-contract failure — surfacing it
+        // as an empty result would tell an operator the KYC queue is empty when it is actually
+        // unavailable (issue #8163).
+        const isPartyLookupMiss = Boolean(scope) && res.status === 404
+        const unavailableKind = isPartyLookupMiss ? 'no_data' : kind
         if (unavailableKind === 'no_data' || loadedPartyIdRef.current !== scope) {
-          setCases([])
+          setCases([]); setTotal(null)
           loadedPartyIdRef.current = unavailableKind === 'no_data' ? scope : null
           setLoadedPartyId(unavailableKind === 'no_data' ? scope : null)
         }
@@ -59,21 +81,37 @@ export default function KycPage() {
         return
       }
       const data = await res.json()
-      setCases(Array.isArray(data) ? data : data.items ?? [data].filter(Boolean))
+      if (requestedPartyId) {
+        // Single-case response (KycResource.getCaseByParty) — not paginated.
+        setCases(Array.isArray(data) ? data : [data].filter(Boolean))
+        setTotal(null)
+      } else {
+        const envelope = data as Partial<KycCasePage>
+        setCases(Array.isArray(envelope.items) ? envelope.items : [])
+        setTotal(typeof envelope.total === 'number' ? envelope.total : null)
+      }
       loadedPartyIdRef.current = scope
       setLoadedPartyId(scope)
     } catch {
+      if (seq !== requestSeq.current) return
       // Timeout / abort / network — the BFF or kyc-service didn't answer.
       if (loadedPartyIdRef.current !== scope) {
-        setCases([])
+        setCases([]); setTotal(null)
         loadedPartyIdRef.current = null
         setLoadedPartyId(null)
       }
       setUnavailable({ kind: 'unreachable' })
-    } finally { setLoading(false) }
-  }, [partyId])
+    } finally {
+      if (seq === requestSeq.current) setLoading(false)
+    }
+  }, [partyId, page])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(partyId, page) }, [load, partyId, page])
+
+  const canPrev = !partyId && page > 0
+  const canNext = !partyId && total !== null && (page + 1) * PAGE_SIZE < total
+  const rangeStart = total !== null && total > 0 ? page * PAGE_SIZE + 1 : 0
+  const rangeEnd = total !== null ? Math.min((page + 1) * PAGE_SIZE, total) : cases.length
 
   const filtered = cases.filter(c =>
     !search || c.id.includes(search) || c.partyId.includes(search) || c.status.includes(search.toUpperCase())
@@ -88,7 +126,7 @@ export default function KycPage() {
         actions={<button
           type="button"
           className="btn btn-secondary"
-          onClick={() => void load()}
+          onClick={() => void load(partyId, page)}
           disabled={loading}
           aria-busy={loading}
           aria-label={t('Obnovit KYC případy', 'Refresh KYC cases')}
@@ -101,7 +139,7 @@ export default function KycPage() {
       <PartySearch
         selectedId={selectedParty?.id}
         busy={loading}
-        onSelect={party => { setSelectedParty(party); setPartyIdInput(party.id); setPartyId(party.id) }}
+        onSelect={party => { setSelectedParty(party); setPartyIdInput(party.id); setPartyId(party.id); setPage(0) }}
         placeholder={t('Jméno, příjmení, firma nebo Party UUID', 'Name, company, or Party UUID')}
       />
 
@@ -119,14 +157,15 @@ export default function KycPage() {
           className="btn btn-secondary"
           onClick={() => {
             const nextPartyId = partyIdInput.trim()
-            if (nextPartyId === partyId) void load(nextPartyId)
+            if (nextPartyId === partyId) void load(nextPartyId, 0)
             else setPartyId(nextPartyId)
+            setPage(0)
           }}
           disabled={loading || partyIdInput.trim() === ''}
           aria-busy={loading}
           aria-label={t('Vyhledat KYC případy', 'Search KYC cases')}
         >{t('Hledat', 'Search')}</button>
-        {(selectedParty || partyId) && <button type="button" className="btn btn-secondary" onClick={() => { setSelectedParty(null); setPartyIdInput(''); setPartyId('') }}>{t('Všechny případy', 'All cases')}</button>}
+        {(selectedParty || partyId) && <button type="button" className="btn btn-secondary" onClick={() => { setSelectedParty(null); setPartyIdInput(''); setPartyId(''); setPage(0) }}>{t('Všechny případy', 'All cases')}</button>}
       </div>
 
       {unavailable && (
@@ -204,6 +243,32 @@ export default function KycPage() {
           </tbody>
         </table>
       </div>
+
+      {!partyId && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '10px' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            {total !== null
+              ? t(`Zobrazeno ${rangeStart}–${rangeEnd} z ${total}`, `Showing ${rangeStart}-${rangeEnd} of ${total}`)
+              : t('Celkový počet není znám', 'Total unknown')}
+          </span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={loading || !canPrev}
+              aria-label={t('Předchozí strana', 'Previous page')}
+            >{t('Předchozí', 'Previous')}</button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setPage(p => p + 1)}
+              disabled={loading || !canNext}
+              aria-label={t('Další strana', 'Next page')}
+            >{t('Další', 'Next')}</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
