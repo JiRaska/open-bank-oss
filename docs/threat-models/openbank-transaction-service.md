@@ -290,9 +290,17 @@ what the catalogue may hold.
   Touches the **E — elevation of privilege** and **T — tampering** rows (§4b): the action is
   deliberately distinct from `transaction.create` so it can be four-eyes gated without pausing the
   M2M payment rails, and so the resulting journal is distinguishable from a customer payment.
-  Risk class = **integrity** (segregation of duties + auditability of a correction), mitigated by
-  `MergeSweepDescriptionTest` and `TransactionResourceMergeSweepTest`. `authz.four-eyes.enforce`
-  remains `false`; the verb is inert until that flip.
+  Risk class = **integrity** (segregation of duties + auditability of a correction). The
+  **auditability** half is mitigated by `MergeSweepDescriptionTest`, which pins the server-minted
+  description's prefix, its merge reference and both party ids in survivor-last order, and asserts
+  it names no PII — that string is the only thing distinguishing a merge correction from an ordinary
+  transfer in the trial balance. The **segregation-of-duties** half has no endpoint test: a
+  `TransactionResourceMergeSweepTest` was named here but is in no Kotlin source, and no other test
+  references the sweep endpoint. What gates it today is declarative only —
+  `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` plus `@Authorize(action = "transaction.sweep")` on
+  `TransactionResource.mergeSweep`. `authz.four-eyes.enforce` remains `false`
+  (`AUTHZ_FOUR_EYES_ENFORCE:false`); the verb is inert until that flip, so the four-eyes leg of the
+  segregation-of-duties claim is not enforced in any environment today.
 - **2026-08-27** — Transaction-initiation trace contract. `TransactionService` emits the internal
   `transaction.initiate` span only with the terminal transaction status. It deliberately excludes
   amount, account/party identifiers, description, idempotency key and payment metadata. Risk class
