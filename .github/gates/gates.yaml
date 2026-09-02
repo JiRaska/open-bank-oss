@@ -852,8 +852,16 @@ gates:
     # gate unconditionally. `selftest_inputs` below is the same input set (check-loki-rules.py's
     # own RULE_INPUTS) driven by the shared mechanism, which runs off a pull request always.
     selftest: python3 .github/scripts/check-loki-rules.py --self-test
+    # NARROWED, and measured both ways rather than reasoned about. The self-test's load-test
+    # half builds its OWN synthetic rule files (`good`/`bad` inside self_test()); the only repo
+    # file it reads is apps/loki.yaml, via check_ruler_wiring(). So the rule ConfigMaps under
+    # gitops/components are an input to the GATE, not to its falsification, and listing them
+    # charged this 101s self-test to the 62% of pull requests that touch that tree for entirely
+    # unrelated reasons -- every admin-ui and gitops deploy PR. Proven by experiment: corrupting
+    # the LogQL in a real rule ConfigMap leaves the self-test verdict byte-identical, while
+    # mutating apps/loki.yaml (rulerConfig -> ruler, the #5734 defect) turns it red. The gate's
+    # own --since scoping over RULE_INPUTS is untouched and still covers the ConfigMaps.
     selftest_inputs:
-      - "openbank-infra/gitops/components"
       - "openbank-infra/gitops/apps/loki.yaml"
       - ".github/scripts/check-loki-rules.py"
     run: |
