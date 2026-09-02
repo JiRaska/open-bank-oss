@@ -91,7 +91,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/JournalEntryResponse'
         '400':
-          description: Malformed body — an unparseable date, or a null element in `lines`
+          description: >-
+            Malformed body — an unparseable date, a null element in `lines`, or no request body at
+            all. All three are caller errors, and each was previously answered as a 500 (#7860).
           content:
             application/json:
               schema:
