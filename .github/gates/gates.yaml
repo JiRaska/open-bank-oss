@@ -713,6 +713,15 @@ gates:
     env:
       PROMETHEUS_VERSION: "3.14.0"
       PROMETHEUS_SHA256: "f665c6da19eb7ba399c915d30c7d9793c9b417bf8a749b504bc470678631478d"
+    # `install-promtool.sh` pins promtool (PROMETHEUS_VERSION lives in this gate's env: below,
+    # so a version bump is a gates.yaml change and re-falsifies universally) and run.sh IS the
+    # harness under test. The PrometheusRule manifests are NOT inputs to the falsification:
+    # measured 2026-09-02, corrupting the LogQL in prometheus-rules-accounting-day.yaml leaves
+    # the self-test verdict unchanged -- see the reason assertion below for why that used to be
+    # true for the wrong reason, and no longer is.
+    selftest_inputs:
+      - ".github/scripts/install-promtool.sh"
+      - "openbank-infra/tests/promtool/run.sh"
     selftest: |
       bash .github/scripts/install-promtool.sh
       # Prove the harness can FAIL: a test asserting an alert no rule defines must go red.
@@ -721,6 +730,17 @@ gates:
       printf 'rule_files:\n  - prometheus-rules-db.yaml\ntests:\n  - interval: 1m\n    input_series: []\n    alert_rule_test:\n      - eval_time: 1m\n        alertname: NoSuchAlertExists\n        exp_alerts:\n          - exp_labels:\n              severity: critical\n' > "$d/selftest_test.yaml"
       if bash openbank-infra/tests/promtool/run.sh "$d/selftest_test.yaml" >"$d/out" 2>&1; then
         echo "SELF-TEST FAIL: the runner passed a test that must fail"; cat "$d/out"; exit 1
+      fi
+      # A non-zero exit is NOT enough, and asserting only that was a real hole: run.sh also
+      # exits non-zero when `promtool check rules` rejects an unrelated PrometheusRule, when
+      # promtool is missing (127), or when the file cannot be read at all. Measured 2026-09-02
+      # by corrupting the LogQL in prometheus-rules-accounting-day.yaml -- the self-test still
+      # "passed", having proved nothing about its own falsification. Require the failure to be
+      # the one we provoked, named in the output.
+      if ! grep -q "NoSuchAlertExists" "$d/out"; then
+        echo "SELF-TEST FAIL: the runner failed, but not for the reason this test provokes —"
+        echo "so the gate's failure path is NOT shown to be reachable. Output was:"; cat "$d/out"
+        exit 1
       fi
       echo "SELF-TEST PASS"
     run: |
