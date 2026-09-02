@@ -190,6 +190,10 @@ openbank:
     # New domestic reservations fail closed until the downstream binding consumer is deployed.
     # Existing neutral reservations and exact replays retain their established behavior.
     spend-reservation-state-events-enabled: false
+    lifecycle-approvals:
+      # Evidence reads are safe. Proposal/decision routes remain unreachable until the governed
+      # execution path has the revision/CAS integration and two-review rollout approval.
+      mutations-enabled: false
     # Config expression, not a literal in the annotation: DelegationExpirationSweepIT shrinks it
     # so a test can observe a REAL scheduler dispatch. A test that calls the method directly
     # cannot see the defect this sweep had — the direct call supplies the Vert.x context the

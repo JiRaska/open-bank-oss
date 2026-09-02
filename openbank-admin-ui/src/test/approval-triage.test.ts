@@ -14,6 +14,7 @@ const rows: DomainApprovalItem[] = [
   { id: 'sanctions-new', domain: 'sanctions', action: 'sanctions.clear', resourceId: 'check-7', maker: 'maker-b', proposedAt: '2026-08-31T10:00:00Z' },
   { id: 'notification-mid', domain: 'notification', action: 'opsmessage.compose', resourceId: null, maker: 'maker-c', proposedAt: '2026-08-31T09:00:00Z' },
   { id: 'billing-newest', domain: 'billing', action: 'fee.post', resourceId: 'fee-7', maker: 'maker-d', proposedAt: '2026-08-31T11:00:00Z' },
+  { id: 'delegation-opaque/id', domain: 'delegation', action: 'delegation.reinstate', resourceId: 'grant-7', maker: 'maker-e', proposedAt: '2026-08-31T12:00:00Z' },
 ]
 
 describe('approval inbox triage', () => {
@@ -32,6 +33,7 @@ describe('approval inbox triage', () => {
   it('routes only to checker workbenches that preserve domain governance', () => {
     expect(approvalWorkbenchHref(rows[1])).toBe('/sanctions?approvalId=sanctions-new#sanctions-approval-id')
     expect(approvalWorkbenchHref(rows[2])).toBe('/notifications?approvalId=notification-mid#notification-approval-id')
+    expect(approvalWorkbenchHref(rows[4])).toBe('/approvals/delegation/delegation-opaque%2Fid')
     expect(approvalWorkbenchHref(rows[0])).toBeNull()
     expect(approvalWorkbenchHref(rows[3])).toBeNull()
   })

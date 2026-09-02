@@ -11,6 +11,7 @@ servers:
 tags:
   - name: Delegations
   - name: Delegation role presets
+  - name: Delegation lifecycle approvals
 paths:
   /api/v1/delegation-role-presets:
     get:
@@ -287,6 +288,83 @@ paths:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: Bank-initiated only — requires an operator/admin session and no X-Customer-Party-Id }
         '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
+  /api/v1/delegations/approvals:
+    get:
+      tags: [Delegation lifecycle approvals]
+      summary: List durable bank-side lifecycle approval evidence
+      description: Read-only operator view; it never decides or executes a proposal.
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, enum: [PROPOSED, REJECTED, EXECUTED] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Lifecycle approvals
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DelegationLifecycleApprovalResponse' } }
+        '403': { description: A human ROLE_OPERATOR or ROLE_ADMIN session is required }
+    post:
+      tags: [Delegation lifecycle approvals]
+      summary: Propose a bank-side lifecycle action
+      description: >-
+        Dark-launched and unreachable unless the mutation setting is explicitly enabled. The
+        admin portal has no mutation route and approval execution remains fail-closed.
+      parameters:
+        - name: X-Request-ID
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProposeDelegationLifecycleRequest' }
+      responses:
+        '201':
+          description: Proposal created, or the identical X-Request-ID replayed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationLifecycleApprovalResponse' }
+        '404': { description: Mutation capability is disabled, or the delegation does not exist }
+        '409': { description: Request key reused for different content, or transition cannot start }
+  /api/v1/delegations/approvals/{approvalId}:
+    get:
+      tags: [Delegation lifecycle approvals]
+      summary: Get immutable lifecycle approval evidence
+      parameters:
+        - $ref: '#/components/parameters/ApprovalId'
+      responses:
+        '200':
+          description: Immutable proposal, decision and execution evidence
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationLifecycleApprovalResponse' }
+        '403': { description: A human ROLE_OPERATOR or ROLE_ADMIN session is required }
+        '404': { description: Approval not found }
+  /api/v1/delegations/approvals/{approvalId}/decision:
+    post:
+      tags: [Delegation lifecycle approvals]
+      summary: Reject a lifecycle proposal; approval execution remains fail-closed
+      parameters:
+        - $ref: '#/components/parameters/ApprovalId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecideDelegationLifecycleRequest' }
+      responses:
+        '200':
+          description: Rejected proposal evidence or idempotent terminal replay
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationLifecycleApprovalResponse' }
+        '403': { description: Self-decision, non-human principal, or missing operator role }
+        '404': { description: Mutation capability is disabled, or approval not found }
+        '409': { description: Approval execution unavailable, or conflicting terminal decision }
   /api/v1/delegations/check:
     post:
       tags: [Delegations]
@@ -382,6 +460,11 @@ paths:
             delegate has already spent through.
 components:
   parameters:
+    ApprovalId:
+      name: approvalId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     CustomerPartyId:
       name: X-Customer-Party-Id
       in: header
@@ -540,6 +623,41 @@ components:
       required: [reason]
       properties:
         reason: { type: string }
+    ProposeDelegationLifecycleRequest:
+      type: object
+      required: [delegationId, operation, reason]
+      properties:
+        delegationId: { type: string, format: uuid }
+        operation: { type: string, enum: [SUSPEND, REINSTATE, REVOKE] }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    DecideDelegationLifecycleRequest:
+      type: object
+      required: [approve, reason]
+      properties:
+        approve: { type: boolean }
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Mandatory checker rationale retained as immutable decision evidence.
+    DelegationLifecycleApprovalResponse:
+      type: object
+      required: [id, delegationId, operation, requestedReason, state, proposedBy, proposedAt]
+      properties:
+        id: { type: string, format: uuid }
+        delegationId: { type: string, format: uuid }
+        operation: { type: string, enum: [SUSPEND, REINSTATE, REVOKE] }
+        requestedReason: { type: string }
+        state:
+          type: string
+          enum: [PROPOSED, REJECTED, EXECUTED]
+          description: Execution is reserved for the revision-safe lifecycle seam.
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        decisionReason: { type: [string, 'null'] }
+        executedAt: { type: [string, 'null'], format: date-time }
     SuspendDelegationRequest:
       type: object
       required: [reason]
