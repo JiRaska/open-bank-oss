@@ -34,6 +34,10 @@ data class DomesticPaymentCreatedEvent(
      * payments with no consumer-side change.
      */
     val initiatedByPartyId: UUID?,
+    /** Delegation grant that authorized the payment; null for an owner-initiated payment. */
+    val delegationId: UUID? = null,
+    /** Spend reservation bound to the payment; present exactly when [delegationId] is present. */
+    val reservationId: UUID? = null,
     /**
      * Discriminator read by `AuditConsumer` (`node.textOrNull("eventType")`) — issue #3994. Before
      * this field the body had no `eventType` key at all, so the consumer fell all the way through
@@ -62,6 +66,12 @@ data class DomesticPaymentStatusChangedEvent(
     val rejectReason: String?,
     val rejectDetail: String?,
     val occurredAt: Instant,
+    /** Customer who initiated the payment, preserved across asynchronous status transitions. */
+    val initiatedByPartyId: UUID? = null,
+    /** Delegation grant that authorized the payment; null for an owner-initiated payment. */
+    val delegationId: UUID? = null,
+    /** Spend reservation bound to the payment; present exactly when [delegationId] is present. */
+    val reservationId: UUID? = null,
     /** See [DomesticPaymentCreatedEvent.eventType] (#3994). */
     val eventType: String = "DOMESTIC_PAYMENT_STATUS_CHANGED",
     /** See [DomesticPaymentCreatedEvent.sourceService] (#3994). */
@@ -83,6 +93,22 @@ fun DomesticPayment.toCreatedEvent(clock: Clock) = DomesticPaymentCreatedEvent(
     endToEndId = endToEndId,
     occurredAt = Instant.now(clock),
     initiatedByPartyId = initiatedByPartyId,
+    delegationId = delegationId,
+    reservationId = reservationId,
     eventType = "DOMESTIC_PAYMENT_CREATED",
+    sourceService = "domestic-payment",
+)
+
+fun DomesticPayment.toStatusChangedEvent(previous: DomesticPayment, clock: Clock) = DomesticPaymentStatusChangedEvent(
+    paymentId = id,
+    previousStatus = previous.status,
+    newStatus = status,
+    rejectReason = rejectReason?.name,
+    rejectDetail = rejectDetail,
+    occurredAt = Instant.now(clock),
+    initiatedByPartyId = initiatedByPartyId,
+    delegationId = delegationId,
+    reservationId = reservationId,
+    eventType = "DOMESTIC_PAYMENT_STATUS_CHANGED",
     sourceService = "domestic-payment",
 )
