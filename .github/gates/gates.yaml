@@ -112,6 +112,19 @@ gates:
     run: |
       python3 .github/scripts/check-synthetic-outbox-taint.py --enforce
 
+  - id: gate-observability-declarations
+    name: "gate estate declares its own budget + subject floor (ratchet, enforced)"
+    group: lint
+    mode: enforced
+    budget_seconds: 15
+    min_subjects: 50
+    review_after: "2027-03-02"
+    rationale: "run-gates.py can enforce a wall-time ceiling and a subject floor per gate, but only where the manifest declares them; measured on the ci_gate_runs warehouse only 18 of 197 gates declare a budget, so 179 gates can slow down without limit and nothing objects. Ratcheting the undeclared count means a new gate arrives declared, and the tail is paid down deliberately."
+    selftest: python3 .github/scripts/check-gate-observability-declarations.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-gate-observability-declarations.py --enforce
+
   # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an
@@ -165,6 +178,7 @@ gates:
     selftest_exempt: "is-a-test-suite — the run: IS run-gates.py --self-test"
     name: "gate runner self-test (the runner must be falsifiable too)"
     group: lint
+    budget_seconds: 60
     mode: enforced
     run: |
       python3 .github/scripts/run-gates.py --self-test
@@ -397,6 +411,7 @@ gates:
   - id: untrusted-pg-extension
     name: "an untrusted CREATE EXTENSION needs a CNPG Database resource (works local, crashloops deployed)"
     group: data
+    budget_seconds: 27
     mode: enforced
     min_subjects: 1   # 1 untrusted CREATE EXTENSION site today (copilot V3, pgvector)
     rationale: "A migration creating an untrusted extension passes every local path (all of which connect as superuser) and crashloops only in the cluster, where CNPG hands the app a non-superuser role — the diff gives no hint that the difference is the connecting role."
@@ -445,6 +460,7 @@ gates:
   - id: model-residency-claims
     name: "a `sensitivity: self-hosted` model entry points in-cluster (ADR-0175 D3, issue #3599)"
     group: gitops
+    budget_seconds: 58
     mode: enforced
     selftest: python3 .github/scripts/check-model-residency-claims.py --self-test
     selftest_expect: pass
@@ -557,6 +573,7 @@ gates:
   - id: readiness-collectors-agree
     name: "prod-readiness collectors agree (Python vs Node, enforced)"
     group: gitops
+    budget_seconds: 117
     mode: enforced
     rationale: >-
       Two implementations of the readiness scorecard both ship and cannot be merged into one
@@ -740,6 +757,7 @@ gates:
   - id: alert-window-vs-subject-period
     name: "alert window accommodates its subject's period (#5736, enforced)"
     group: gitops
+    budget_seconds: 49
     mode: enforced
     rationale: >-
       An alert whose rate window is no wider than its subject's invocation period cannot ever
@@ -825,6 +843,7 @@ gates:
   - id: service-runbook-drift
     name: "service runbook drift (issue #2255, enforced)"
     group: gitops
+    budget_seconds: 46
     mode: enforced
     selftest: python3 openbank-infra/scripts/generate-service-runbooks.py --self-test
     selftest_expect: pass
@@ -882,7 +901,10 @@ gates:
     mode: enforced
     selftest: |
       python3 .github/scripts/check-msg-channel-image-parity.py --self-test
-    budget_seconds: 40   # 9.2s in CI — network-bound, GitHub contents API
+    budget_seconds: 108   # was 40 with the comment "9.2s in CI"; the warehouse says
+                         # p95 12.21s / max 71.46s over 4338 runs, and the gate went red on
+                         # wall time alone 7 times in 14 days. Network-bound gates need the tail,
+                         # not the median (ADR-0255 warehouse, 2026-09-02).
     run: |
       python3 .github/scripts/check-msg-channel-image-parity.py
 
@@ -988,6 +1010,7 @@ gates:
   - id: cnpg-backup-declared-gate
     name: "CNPG backup-declared gate — every cluster declares a backup or says why not (enforced)"
     group: gitops
+    budget_seconds: 26
     mode: enforced
     rationale: >-
       db-backup-association-gate only inspects clusters that already declare a
@@ -1097,6 +1120,7 @@ gates:
   - id: stale-comment-references
     name: "stale comment references — prose naming a missing file or dead repo (enforced)"
     group: supplychain
+    budget_seconds: 52
     mode: enforced
     selftest: |
       python3 .github/scripts/check-stale-comment-references.py --self-test
@@ -1636,6 +1660,7 @@ gates:
   - id: journey-catalog-integrity
     name: "journey catalog is consistent with the manifests and alerts it claims (ADR-0252)"
     group: registry
+    budget_seconds: 26
     mode: enforced
     selftest: python3 .github/scripts/check-journey-catalog.py --self-test
     selftest_expect: pass
@@ -1911,6 +1936,7 @@ gates:
   - id: gate-script-registration
     name: "every check-* script is actually run (#3240, enforced)"
     group: registry
+    budget_seconds: 41
     mode: enforced
     selftest: |
       python3 .github/scripts/check-gate-script-registration.py --self-test
@@ -2312,6 +2338,7 @@ gates:
   - id: no-service-local-exceptionmapper-collision-with-libs-runtime
     name: "no service-local ExceptionMapper collision with libs-runtime (enforced)"
     group: kotlin
+    budget_seconds: 31
     mode: enforced
     min_subjects: 900   # 1889 service source files today (2026-08-09)
     selftest: bash .github/scripts/check-exception-mapper-collision.sh --self-test
@@ -2426,6 +2453,7 @@ gates:
   - id: clock-injection-gate
     name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
     group: kotlin
+    budget_seconds: 23
     mode: enforced
     min_subjects: 153  # 306 money-path domain/application files today (2026-08-31, #6253).
     # Was 70 = half of the 142 files counted on 2026-08-09. The corpus then more than doubled
@@ -2520,6 +2548,7 @@ gates:
   - id: libs-annotations-implemented
     name: "openbank-libs annotations are implemented, and no doc names a phantom one (#4011, enforced)"
     group: kotlin
+    budget_seconds: 37
     mode: enforced
     selftest: |
       python3 .github/scripts/check-libs-annotations-implemented.py --self-test
@@ -2594,6 +2623,7 @@ gates:
   - id: outbox-has-writer
     name: "a service shipping an outbox dispatcher must construct an OutboxMessage (#4007, enforced)"
     group: kotlin
+    budget_seconds: 26
     mode: enforced
     min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
@@ -3106,6 +3136,7 @@ gates:
   - id: kafka-deployment-wiring
     name: "Kafka-using service has KAFKA_BOOTSTRAP_SERVERS wired in its Deployment (issue #4701, enforced)"
     group: data
+    budget_seconds: 24
     mode: enforced
     rationale: "A service whose outbox producer reads KAFKA_BOOTSTRAP_SERVERS falls through to SmallRye's bare localhost:9092 default when its Deployment omits the env var — the pod stays Ready and only the reactive-messaging channel's own readiness probe (or a hand-read log) shows the outbox dispatcher parking every event DEAD after retry exhaustion (#4701)."
     review_after: "2027-02-19"
@@ -3127,6 +3158,7 @@ gates:
   - id: flyway-version-commit-order
     name: "Flyway migration version must not regress against main's commit order (issue #5628, enforced)"
     group: data
+    budget_seconds: 96
     mode: enforced
     rationale: "A migration whose PR merges after a higher-numbered sibling has already been applied live crashes the service on every boot ('Detected resolved migration not applied to database: N') — each PR's own CI ran green against its own base and could not see the other, per this repo's own 'PR green is about the base, not main' trap (#5628, security-scanner's 4h+ outage)."
     review_after: "2027-02-19"
@@ -3690,6 +3722,7 @@ gates:
   - id: oidc-client-configured
     name: "outbound OIDC filter ⇒ a client it can actually mint from (enforced)"
     group: security
+    budget_seconds: 19
     mode: enforced
     rationale: "An unmintable outbound token fails as a 401 from the CALLEE, which reads as an authorization problem and sends the reader to Keycloak; no test can catch it because a mock port, a @QuarkusTest security context and a pact mock server all supply the very token the real client cannot obtain (#3921: ledger's daily FX revaluation had never once succeeded, and settlement, money-path, had no client block at all)."
     review_after: "2027-02-16"
@@ -3927,6 +3960,7 @@ gates:
   - id: pr-file-overlap
     name: "PR file overlap (other open PRs editing the same files, advisory)"
     group: lint
+    budget_seconds: 115
     mode: advisory
     verified: "2026-08-09 — advisory by design (informational cross-PR heads-up, not a correctness gate)"
     when: pull_request
@@ -4079,6 +4113,7 @@ gates:
   - id: governance-manifest
     name: "Governance manifest gate (ADR-0071, enforced)"
     group: lint
+    budget_seconds: 199
     mode: enforced
     selftest: bash .github/scripts/check-governance-manifest.sh --self-test
     selftest_expect: pass
@@ -4097,6 +4132,7 @@ gates:
   - id: mermaid-parses
     name: "every mermaid diagram parses in the renderer admin-ui uses — .md blocks and .mmd files (enforced)"
     group: lint
+    budget_seconds: 211
     mode: enforced
     rationale: "A mermaid block that does not parse renders as a red error box in the admin-ui Service Docs page and nothing else in CI looks at that page — 40 of 248 blocks across 21 services were broken when this was written, found only because a human opened one."
     review_after: "2027-02-19"
