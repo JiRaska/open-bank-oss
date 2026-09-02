@@ -5,6 +5,7 @@
 #
 # Actions gated (DelegationResource):
 #   delegation.offer      — POST /delegations (mints capabilities over a product; SCA-bound)
+#   delegation.preview    — POST /delegations/preview (same validation, no authority or SCA consume)
 #   delegation.read       — GET /delegations/{id}
 #   delegation.list       — GET /delegations/{grantor,grantee}/{partyId}
 #   delegation.accept     — grantee accepts an OFFERED grant (own SCA)
@@ -58,6 +59,7 @@ allowed_reasons contains "edge-service-delegation" if {
 	input.principal.id == "service-account-openbank-edge"
 	input.action in {
 		"delegation.offer",
+        "delegation.preview",
 		"delegation.read",
 		"delegation.list",
 		"delegation.accept",
