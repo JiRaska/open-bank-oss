@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.2...notification-service-v0.30.0) (2026-09-02)
+
+
+### Features
+
+* **notification:** complete delegation lifecycle alerts ([#8184](https://github.com/JiRaska/open-bank-oss/issues/8184)) ([0656e71](https://github.com/JiRaska/open-bank-oss/commit/0656e7187fd1cdcffa36c0c9d8009b4bd534f14e)), closes [#8183](https://github.com/JiRaska/open-bank-oss/issues/8183) [#8172](https://github.com/JiRaska/open-bank-oss/issues/8172)
+
 ## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.1...notification-service-v0.29.2) (2026-09-01)
 
 

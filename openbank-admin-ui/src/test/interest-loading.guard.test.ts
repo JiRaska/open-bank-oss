@@ -10,4 +10,9 @@ describe('interest loading contract', () => {
     expect(source).toContain('<RefreshCw size={20} aria-hidden="true"')
     expect(source).toContain("t('Načítám…', 'Loading…')")
   })
+
+  it('never hides a visible retry behind a passive-effect single-flight latch', () => {
+    const source = readFileSync(path.resolve(__dirname, '../app/interest/page.tsx'), 'utf8')
+    expect(source).not.toContain('reloadInFlight')
+  })
 })

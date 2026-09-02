@@ -24,6 +24,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { DelegationEducation } from '@/components/delegations/DelegationEducation'
 import { RoleCatalog } from '@/components/delegations/RoleCatalog'
 import {
   EffectiveAccess,
@@ -199,7 +200,7 @@ export default function DelegationsPage() {
       <PageHeader
         icon={<Share2 size={18} aria-hidden="true" />}
         title={t('Delegovaný přístup', 'Delegated Access')}
-        subtitle={t('Kdo komu udělil práva k účtu, kartě nebo spoření (ADR-0232). Konzole je pouze pro čtení.', 'Who granted whom rights over an account, card or savings goal (ADR-0232). This console is read-only.')}
+        subtitle={t('Kdo komu udělil práva k účtu, kartě nebo spoření (ADR-0232). Životní cyklus delegací je zde pouze pro čtení; správci mohou měnit katalog šablon.', 'Who granted whom rights over an account, card or savings goal (ADR-0232). Delegation lifecycles are read-only here; administrators may change the preset catalog.')}
         actions={party && (
           <button type="button" className="btn btn-secondary" onClick={() => loadGrants(party)} disabled={loading} aria-busy={loading} aria-label={t('Obnovit delegovaný přístup', 'Refresh delegated access')}>
             <RefreshCw size={14} aria-hidden="true" />
@@ -208,10 +209,10 @@ export default function DelegationsPage() {
         )}
       />
 
-      <RoleCatalog />
+      <DelegationEducation />
 
       {/* ---- party lookup (ADR-0228 facade, never a raw UUID field) ---- */}
-      <div className="card" style={{ padding: '16px', marginBottom: '20px' }}>
+      <div id="delegation-party-search" className="card" style={{ padding: '16px', marginBottom: '20px', scrollMarginTop: 16 }}>
         <label htmlFor="party-search" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>
           {t('Najít stranu podle jména nebo obchodního klíče', 'Find a party by name or business key')}
         </label>
@@ -320,6 +321,8 @@ export default function DelegationsPage() {
           <ProjectionHealth consumers={consumers} known={projectionKnown} loading={projectionLoading} />
         </>
       )}
+
+      <RoleCatalog />
     </div>
   )
 }
