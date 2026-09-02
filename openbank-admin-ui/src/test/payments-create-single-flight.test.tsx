@@ -100,11 +100,15 @@ describe('payment creation — single-flight (issues #7093, #7172)', () => {
     renderPage()
     const form = await openSepaForm()
 
-    // Both activations before React can re-render `disabled={creating}` — the exact
-    // window a state-only guard cannot cover.
+    fireEvent.submit(form)
+    expect(posted).toHaveLength(0)
+    const confirm = await screen.findByRole('button', { name: 'Confirm and submit' })
+
+    // Both confirmations before React can re-render `disabled={creating}` — the
+    // exact window a state-only guard cannot cover.
     await act(async () => {
-      fireEvent.submit(form)
-      fireEvent.submit(form)
+      fireEvent.click(confirm)
+      fireEvent.click(confirm)
     })
 
     expect(posted.filter(p => p.url.includes('/api/sepa-payments'))).toHaveLength(1)
@@ -120,9 +124,12 @@ describe('payment creation — single-flight (issues #7093, #7172)', () => {
     renderPage()
     const form = await openSepaForm()
 
-    await act(async () => { fireEvent.submit(form) })
+    fireEvent.submit(form)
+    const confirm = await screen.findByRole('button', { name: 'Confirm and submit' })
+    await act(async () => { fireEvent.click(confirm) })
     await waitFor(() => expect(posted).toHaveLength(1))
-    await act(async () => { fireEvent.submit(form) })
+    expect(screen.getByTestId('payment-create-review-error')).toHaveTextContent('upstream unavailable')
+    await act(async () => { fireEvent.click(confirm) })
     await waitFor(() => expect(posted).toHaveLength(2))
 
     expect(posted[0].key).toBeTruthy()
@@ -136,11 +143,14 @@ describe('payment creation — single-flight (issues #7093, #7172)', () => {
     renderPage()
     const form = await openSepaForm('100.00')
 
-    await act(async () => { fireEvent.submit(form) })
+    fireEvent.submit(form)
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Confirm and submit' })) })
     await waitFor(() => expect(posted).toHaveLength(1))
 
+    fireEvent.click(screen.getByRole('button', { name: 'Back to editing' }))
     fireEvent.change(document.getElementById('sepa-amount') as HTMLInputElement, { target: { value: '250.00' } })
-    await act(async () => { fireEvent.submit(form) })
+    fireEvent.submit(form)
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Confirm and submit' })) })
     await waitFor(() => expect(posted).toHaveLength(2))
 
     expect(posted[1].body).not.toBe(posted[0].body)
@@ -150,7 +160,15 @@ describe('payment creation — single-flight (issues #7093, #7172)', () => {
   it('the healthy path still works: one submit, one POST, a well-formed key and payload', async () => {
     renderPage()
     const form = await openSepaForm()
-    await act(async () => { fireEvent.submit(form) })
+    fireEvent.submit(form)
+
+    expect(posted).toHaveLength(0)
+    const dialog = await screen.findByRole('alertdialog', { name: 'Review payment order' })
+    expect(dialog).toHaveTextContent('100.00 EUR')
+    expect(dialog).toHaveTextContent('Jane Doe')
+    expect(dialog).toHaveTextContent('DE89370400440532013000')
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Confirm and submit' })) })
     await waitFor(() => expect(posted).toHaveLength(1))
 
     expect(posted[0].url).toContain('/api/sepa-payments')

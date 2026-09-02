@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -280,6 +280,18 @@ function PaymentsContent() {
   const [createSuccess, setCreateSuccess] = useState<string | null>(null)
   const [domesticForm, setDomesticForm] = useState<DomesticFormData>(emptyDomestic(false))
   const [sepaForm, setSepaForm] = useState<SepaFormData>(emptySepa(false))
+  const [paymentReview, setPaymentReview] = useState<'domestic' | 'sepa' | null>(null)
+  const reviewBackRef = useRef<HTMLButtonElement>(null)
+  const reviewConfirmRef = useRef<HTMLButtonElement>(null)
+  const domesticSubmitRef = useRef<HTMLButtonElement>(null)
+  const sepaSubmitRef = useRef<HTMLButtonElement>(null)
+
+  const returnToPaymentForm = () => {
+    const submit = paymentReview === 'domestic' ? domesticSubmitRef.current : sepaSubmitRef.current
+    setPaymentReview(null)
+    setCreateError(null)
+    window.requestAnimationFrame(() => submit?.focus())
+  }
 
   // SCT Inst monitoring state
   const [sctPayments, setSctPayments] = useState<SctInstPayment[]>([])
@@ -350,8 +362,8 @@ function PaymentsContent() {
     }
   }
 
-  const handleDomesticCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleDomesticCreate = async (e?: React.FormEvent, confirmed = false) => {
+    e?.preventDefault()
     setCreateError(null); setCreateSuccess(null)
     if (!canCreate) {
       setCreateError(t('Nemáte oprávnění vytvářet platby', 'You do not have permission to create payments'))
@@ -361,6 +373,10 @@ function PaymentsContent() {
     if (!f.debtorAccountId || !f.debtorAccountNumber || !f.debtorBankCode || !f.debtorName ||
         !f.creditorAccountNumber || !f.creditorBankCode || !f.creditorName || !f.amount) {
       setCreateError(t('Vyplňte všechna povinná pole', 'Please fill all required fields'))
+      return
+    }
+    if (!confirmed) {
+      setPaymentReview('domestic')
       return
     }
     const outcome = await flight.run('payment:create:domestic', async () => {
@@ -389,6 +405,7 @@ function PaymentsContent() {
       // submission of an identical payload is then a NEW payment, not a replay.
       domesticIdem.clear()
       setCreateSuccess(t(f.instant ? 'Okamžitá platba vytvořena' : 'Platba vytvořena', f.instant ? 'Instant payment created' : 'Payment created'))
+      setPaymentReview(null)
       setShowCreate(null)
       load()
     } catch (err: unknown) {
@@ -398,8 +415,8 @@ function PaymentsContent() {
     if (wasSkipped(outcome)) return
   }
 
-  const handleSepaCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSepaCreate = async (e?: React.FormEvent, confirmed = false) => {
+    e?.preventDefault()
     setCreateError(null); setCreateSuccess(null)
     if (!canCreate) {
       setCreateError(t('Nemáte oprávnění vytvářet platby', 'You do not have permission to create payments'))
@@ -423,6 +440,10 @@ function PaymentsContent() {
       setCreateError(t('Jméno příjemce nesouhlasí (VoP NO_MATCH) — platbu nelze odeslat', 'Payee name does not match (VoP NO_MATCH) — payment cannot be sent'))
       return
     }
+    if (!confirmed) {
+      setPaymentReview('sepa')
+      return
+    }
     const outcome = await flight.run('payment:create:sepa', async () => {
     setCreating(true)
     try {
@@ -442,6 +463,7 @@ function PaymentsContent() {
       if (!res.ok) throw new Error(await res.text() || t('Vytvoření platby selhalo', 'Failed to create payment'))
       sepaIdem.clear()
       setCreateSuccess(t(f.instant ? 'SCT Inst platba vytvořena' : 'SEPA platba vytvořena', f.instant ? 'SCT Inst payment created' : 'SEPA payment created'))
+      setPaymentReview(null)
       setShowCreate(null)
       load()
     } catch (err: unknown) {
@@ -834,7 +856,7 @@ function PaymentsContent() {
                 {createError && <div style={{ color: 'var(--red)', fontSize: '13px', marginTop: '4px' }}>{createError}</div>}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(null)}>{t('Zrušit', 'Cancel')}</button>
-                  <button type="submit" className="btn btn-primary" disabled={creating}>
+                  <button ref={domesticSubmitRef} type="submit" className="btn btn-primary" disabled={creating}>
                     {creating ? t('Odesílám...', 'Sending...') : t(domesticForm.instant ? 'Odeslat okamžitě' : 'Vytvořit', domesticForm.instant ? 'Send instant' : 'Create')}
                   </button>
                 </div>
@@ -916,11 +938,77 @@ function PaymentsContent() {
                 {createError && <div style={{ color: 'var(--red)', fontSize: '13px', marginTop: '4px' }}>{createError}</div>}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(null)}>{t('Zrušit', 'Cancel')}</button>
-                  <button type="submit" className="btn btn-primary" disabled={creating}>
+                  <button ref={sepaSubmitRef} type="submit" className="btn btn-primary" disabled={creating}>
                     {creating ? t('Odesílám...', 'Sending...') : t(sepaForm.instant ? 'Odeslat okamžitě' : 'Vytvořit', sepaForm.instant ? 'Send instant' : 'Create')}
                   </button>
                 </div>
               </form>
+            </div>
+          )}
+
+          {paymentReview && (
+            <div
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="payment-create-review-title"
+              aria-describedby="payment-create-review-impact"
+              onKeyDown={event => {
+                if (event.key === 'Escape' && !creating) {
+                  returnToPaymentForm()
+                }
+                if (event.key === 'Tab') {
+                  const first = reviewBackRef.current
+                  const last = reviewConfirmRef.current
+                  if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault()
+                    last?.focus()
+                  } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault()
+                    first?.focus()
+                  }
+                }
+              }}
+              style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+            >
+              <div className="card" style={{ width: 'min(620px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}>
+                <h2 id="payment-create-review-title" style={{ margin: 0, fontSize: 18 }}>
+                  {t('Zkontrolovat platební příkaz', 'Review payment order')}
+                </h2>
+                <p id="payment-create-review-impact" style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.55 }}>
+                  {t('Potvrzením odešlete přesně tento příkaz platební službě. Přijetí příkazu ještě neznamená vypořádání; další stav a případné schválení řídí platební workflow.', 'Confirmation submits this exact order to the payment service. Acceptance is not settlement; subsequent status and any required approval remain controlled by the payment workflow.')}
+                </p>
+                {paymentReview === 'domestic' ? (
+                  <dl style={{ display: 'grid', gridTemplateColumns: '155px minmax(0, 1fr)', gap: '9px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
+                    <dt>{t('Typ', 'Type')}</dt><dd>{domesticForm.instant ? t('Domácí okamžitá', 'Domestic instant') : t('Domácí standardní', 'Domestic standard')}</dd>
+                    <dt>{t('Částka', 'Amount')}</dt><dd style={{ fontSize: 16, fontWeight: 750 }}>{formatAmount(Number(domesticForm.amount), domesticForm.currency, language)}</dd>
+                    <dt>{t('Plátce', 'Debtor')}</dt><dd>{domesticForm.debtorName}<br/><span className="mono">{domesticForm.debtorAccountNumber}/{domesticForm.debtorBankCode}</span></dd>
+                    <dt>{t('Příjemce', 'Beneficiary')}</dt><dd>{domesticForm.creditorName}<br/><span className="mono">{domesticForm.creditorAccountNumber}/{domesticForm.creditorBankCode}</span></dd>
+                    <dt>{t('Rozsah převodu', 'Transfer scope')}</dt><dd>{domesticForm.transferScope}</dd>
+                    <dt>{t('Priorita', 'Priority')}</dt><dd>{domesticForm.priority}</dd>
+                    <dt>{t('Variabilní symbol', 'Variable symbol')}</dt><dd>{domesticForm.variableSymbol || '—'}</dd>
+                    <dt>{t('End-to-End ID', 'End-to-End ID')}</dt><dd className="mono">{domesticForm.endToEndId || '—'}</dd>
+                    <dt>{t('Zpráva', 'Message')}</dt><dd>{domesticForm.messageForPayee || '—'}</dd>
+                  </dl>
+                ) : (
+                  <dl style={{ display: 'grid', gridTemplateColumns: '155px minmax(0, 1fr)', gap: '9px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
+                    <dt>{t('Typ', 'Type')}</dt><dd>{sepaForm.instant ? 'SEPA Instant (SCT Inst)' : 'SEPA Credit Transfer (SCT)'}</dd>
+                    <dt>{t('Částka', 'Amount')}</dt><dd style={{ fontSize: 16, fontWeight: 750 }}>{formatAmount(Number(sepaForm.amount), 'EUR', language)}</dd>
+                    <dt>{t('IBAN plátce', 'Debtor IBAN')}</dt><dd className="mono" style={{ overflowWrap: 'anywhere' }}>{sepaForm.debtorIban}</dd>
+                    <dt>{t('Příjemce', 'Beneficiary')}</dt><dd>{sepaForm.creditorName}<br/><span className="mono" style={{ overflowWrap: 'anywhere' }}>{sepaForm.creditorIban}</span></dd>
+                    <dt>BIC</dt><dd className="mono">{sepaForm.bic || t('Odvozen z IBAN', 'Derived from IBAN')}</dd>
+                    <dt>{t('VoP výsledek', 'VoP result')}</dt><dd>{sepaForm.vopStatus === 'idle' ? t('Nebylo provedeno', 'Not performed') : sepaForm.vopStatus.toUpperCase()}{sepaForm.vopResult && sepaForm.vopResult !== sepaForm.vopStatus ? ` — ${sepaForm.vopResult}` : ''}</dd>
+                    <dt>{t('End-to-End ID', 'End-to-End ID')}</dt><dd className="mono">{sepaForm.endToEndId || '—'}</dd>
+                    <dt>{t('Zpráva', 'Remittance')}</dt><dd>{sepaForm.remittanceInfo || '—'}</dd>
+                  </dl>
+                )}
+                {createError && <div role="alert" data-testid="payment-create-review-error" style={{ marginTop: 14, padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{createError}</div>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+                  <button ref={reviewBackRef} autoFocus type="button" className="btn btn-secondary" disabled={creating} onClick={returnToPaymentForm}>{t('Zpět k úpravám', 'Back to editing')}</button>
+                  <button ref={reviewConfirmRef} type="button" className="btn btn-primary" aria-busy={creating} disabled={creating} onClick={() => void (paymentReview === 'domestic' ? handleDomesticCreate(undefined, true) : handleSepaCreate(undefined, true))}>
+                    {creating ? t('Odesílám…', 'Submitting…') : t('Potvrdit a odeslat', 'Confirm and submit')}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
