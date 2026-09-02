@@ -61,6 +61,44 @@ describe('collect-quality-report contract classification (#7544)', () => {
     expect(failed).not.toHaveProperty('reasonCode')
   })
 
+  it('pins the provider selector to main so a newer feature pass cannot mask a main failure', async () => {
+    let selector: [string, string][] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const parsed = new URL(url)
+      selector = [...parsed.searchParams.entries()]
+      const selectsMain = parsed.searchParams.getAll('q[][branch]').at(-1) === 'main'
+      return jsonResponse(200, {
+        matrix: selectsMain
+          ? [{
+              providerVersion: { number: 'main-red' },
+              verificationResult: { success: false, verifiedAt: '2026-08-31T00:00:00Z' },
+            }]
+          : [{
+              providerVersion: { number: 'feature-green' },
+              verificationResult: { success: true, verifiedAt: '2026-09-01T00:00:00Z' },
+            }],
+      })
+    }))
+
+    const v = await fetchPairVerification(
+      'http://broker.example',
+      null,
+      'openbank-alpha-service',
+      'sha-consumer',
+      'openbank-real-provider',
+    )
+
+    expect(v).toEqual({ status: 'failed', verifiedAt: '2026-08-31T00:00:00Z', providerVersion: 'main-red' })
+    expect(selector).toEqual([
+      ['q[][pacticipant]', 'openbank-alpha-service'],
+      ['q[][version]', 'sha-consumer'],
+      ['q[][pacticipant]', 'openbank-real-provider'],
+      ['q[][branch]', 'main'],
+      ['q[][latest]', 'true'],
+      ['latestby', 'cvpv'],
+    ])
+  })
+
   it('classifies a network/timeout exception as query-error, and never turns it into a pass', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('The operation was aborted', 'TimeoutError') }))
     const contracts = [{ consumer: 'openbank-alpha-service', provider: 'openbank-real-provider', pactFile: 'x.json', consumerVersion: 'sha-consumer', status: 'pending', verifiedAt: null, interactions: [] }]

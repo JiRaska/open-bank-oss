@@ -57,7 +57,10 @@ describe('Test Intelligence agent BFF', () => {
         { component: 'openbank-ledger-service', state: 'flaky', sameCommitTransitions: 2, wastedDurationMs: 1250, name: 'private test name', fingerprint: 'private-fingerprint' },
         { component: 'openbank-ledger-service', state: 'failing', sameCommitTransitions: 0, wastedDurationMs: 500, name: 'another private test', fingerprint: 'private-fingerprint-2' },
       ],
-      requiredControls: [{ component: 'openbank-ledger-service', kind: 'coverage', state: 'not-run' }],
+      requiredControls: [
+        { component: 'openbank-ledger-service', kind: 'coverage', state: 'not-run' },
+        { component: 'openbank-ledger-service', kind: 'integration', state: 'passed', observedAt: '2020-01-01T00:00:00Z' },
+      ],
     }))
     process.env.OPENBANK_TEST_INTELLIGENCE = file
     const agentFinding = { id: 'diagnosed-1', component: 'openbank-ledger-service', title: 'Investigate stale integration', severity: 'WARNING' }
@@ -69,7 +72,7 @@ describe('Test Intelligence agent BFF', () => {
     const outbound = JSON.parse(fetchMock.mock.calls[0][1].body as string)
     expect(outbound.components[0]).toEqual({ component: 'openbank-ledger-service', moneyPath: true,
       evidence: [{ kind: 'integration', state: 'stale' }], declaredInfrastructure: ['postgres'], observedInfrastructureStarts: 1, observedInfrastructureStops: 0,
-      requiredControls: [{ kind: 'coverage', state: 'not-run' }],
+      requiredControls: [{ kind: 'coverage', state: 'not-run' }, { kind: 'integration', state: 'stale' }],
       flakyTests: 1, failingTests: 1, sameCommitTransitions: 2, wastedDurationMs: 1750 })
     expect(outbound.components[1]).toEqual({ component: 'openbank-app', moneyPath: true,
       evidence: [{ kind: 'visual', state: 'passed' }], declaredInfrastructure: [], observedInfrastructureStarts: 0, observedInfrastructureStops: 0,

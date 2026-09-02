@@ -37,4 +37,21 @@ class FlakyTestResourceRoutingIT {
             .`when`().post("/api/v1/flaky-test-hunter/check/trigger-async")
             .then().statusCode(403)
     }
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `async trigger rejects an invalid idempotency key before workflow admission`() {
+        given()
+            .header("Idempotency-Key", "unbounded-operator-key")
+            .`when`().post("/api/v1/flaky-test-hunter/check/trigger-async-idempotent")
+            .then().statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `idempotent async trigger rejects a missing header before workflow admission`() {
+        given()
+            .`when`().post("/api/v1/flaky-test-hunter/check/trigger-async-idempotent")
+            .then().statusCode(400)
+    }
 }

@@ -75,6 +75,48 @@ enum class CreditOfferSuppressionCode {
 }
 
 /**
+ * Whether a court-register distress marker is present, absent, or **has no source at all**.
+ *
+ * This is deliberately not a `Boolean`. A boolean has exactly two values and this signal has
+ * three, so the third — "no register feed is configured in this deployment" — could only be
+ * expressed by picking one of the other two, and whichever is picked becomes a lie the rest of the
+ * system cannot detect. Encoded as `false` it says *we looked and the customer is clear*; encoded
+ * as `true` it suppresses every offer forever, which is indistinguishable from the feature being
+ * switched off and hides the day a real feed arrives.
+ *
+ * That collapse is a defect this repository has paid for before: a disabled push adapter returned
+ * `success = true` for a delivery that never left the process, and every downstream count agreed
+ * with it. The rule learned there — a skipped/unconfigured outcome gets its **own** value, never a
+ * flag shared with a real result — is what this enum is.
+ *
+ * [NOT_CONFIGURED] does not by itself change the offer decision (see [CreditOfferEligibility]); it
+ * exists so that the decision's *blind spot* is a fact the gate states rather than one a reader has
+ * to infer from the absence of findings.
+ */
+enum class CourtRegisterSignalState {
+    /**
+     * No upstream publishes this register in this deployment, so nothing was looked up.
+     *
+     * Not "clear". An empty result from a register that was queried and an empty result from a
+     * register that was never queried are the same number of findings and opposite facts.
+     */
+    NOT_CONFIGURED,
+
+    /** A register was consulted and holds no marker for this party. */
+    CLEAR,
+
+    /** A register was consulted and holds a marker for this party. */
+    MARKER_PRESENT,
+    ;
+
+    /**
+     * True only for [MARKER_PRESENT]. [NOT_CONFIGURED] is not a suppression reason: the gate cannot
+     * cite a register it never read, and an unattributable refusal is not auditable.
+     */
+    val suppresses: Boolean get() = this == MARKER_PRESENT
+}
+
+/**
  * The distress inputs, read at evaluation time. Every field is deliberately a fact about the
  * borrower rather than a verdict: the verdict is this file's job, and keeping the two apart is what
  * lets the thresholds move without the callers moving.
@@ -86,8 +128,13 @@ enum class CreditOfferSuppressionCode {
 data class BorrowerDistressSignals(
     val hasArrears: Boolean,
     val hasNegativeBalance: Boolean,
-    val hasEnforcementOrder: Boolean,
-    val hasInsolvencyProceeding: Boolean,
+    /**
+     * Enforcement (execution) register state. Three-valued on purpose — see
+     * [CourtRegisterSignalState].
+     */
+    val enforcementSignal: CourtRegisterSignalState,
+    /** Insolvency register state. Three-valued on purpose — see [CourtRegisterSignalState]. */
+    val insolvencySignal: CourtRegisterSignalState,
     val inHardshipArrangement: Boolean,
     val lastAffordabilityFailureAt: Instant?,
     val bufferDays: Int?,
@@ -228,8 +275,8 @@ object CreditOfferEligibility {
 
     /** Facts on file, independent of any threshold. */
     private fun hardFactCode(signals: BorrowerDistressSignals): CreditOfferSuppressionCode? = when {
-        signals.hasInsolvencyProceeding -> CreditOfferSuppressionCode.INSOLVENCY
-        signals.hasEnforcementOrder -> CreditOfferSuppressionCode.ENFORCEMENT
+        signals.insolvencySignal.suppresses -> CreditOfferSuppressionCode.INSOLVENCY
+        signals.enforcementSignal.suppresses -> CreditOfferSuppressionCode.ENFORCEMENT
         signals.hasArrears -> CreditOfferSuppressionCode.ARREARS
         signals.inHardshipArrangement -> CreditOfferSuppressionCode.HARDSHIP
         signals.hasNegativeBalance -> CreditOfferSuppressionCode.NEGATIVE_BALANCE

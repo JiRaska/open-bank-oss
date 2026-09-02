@@ -22,6 +22,7 @@
 // All BFF traffic is intercepted with page.route(); no live services required.
 
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 test.beforeEach(async ({ context, baseURL }) => {
@@ -117,6 +118,13 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     expect(guideBox).not.toBeNull()
     expect(portraitBox).not.toBeNull()
     expect(portraitBox!.y).toBeGreaterThanOrEqual(guideBox!.y)
+
+    const scan = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(scan.violations, scan.violations.map(violation =>
+      `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+    ).join('\n')).toEqual([])
   })
 
   test('tone swatches are square with zero padding, at both sizes', async ({ page }) => {
@@ -147,6 +155,13 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     expect(Math.round(smallBox!.height)).toBe(18)
     // The digit must actually be inside it — zero content width renders an empty box.
     expect((await small.textContent())?.trim()).not.toBe('')
+
+    const scan = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(scan.violations, scan.violations.map(violation =>
+      `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+    ).join('\n')).toEqual([])
   })
 
   test('StatCard tints both its label and its value when a tone is set', async ({ page }) => {
@@ -232,5 +247,12 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
       ['GO', 'NO-GO'].map(label => page.locator('.badge', { hasText: new RegExp(`^${label}$`) }).evaluate(el => getComputedStyle(el).backgroundColor)),
     )
     expect(go).not.toBe(noGo)
+
+    const scan = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(scan.violations, scan.violations.map(violation =>
+      `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+    ).join('\n')).toEqual([])
   })
 })

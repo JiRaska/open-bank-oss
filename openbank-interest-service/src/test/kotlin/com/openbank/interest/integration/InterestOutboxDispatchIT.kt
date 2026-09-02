@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.interest.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.interest.infrastructure.outbox.InterestOutboxDispatcher
 import com.openbank.interest.infrastructure.persistence.entity.InterestOutboxEntity
 import com.openbank.interest.infrastructure.persistence.repository.InterestOutboxRepositoryImpl
@@ -148,7 +149,21 @@ class InterestOutboxDispatchIT {
                 .isEqualTo(id.toString())
             assertThat(headerValue(produced, OutboxKafkaHeaders.HEADER_EVENT_TYPE))
                 .isEqualTo(eventType)
-            assertThat(produced.payload).isEqualTo(payload)
+            // NOT byte equality: KafkaInterestOutboxEventPublisher stamps `sourceService` so
+            // audit-service records this module's own claim (AttributionSource.EVENT) rather than
+            // deriving one from the topic name. The relay must still never lose or rewrite a
+            // producer field, and must add nothing but attribution — two guarantees that byte
+            // equality collapsed into one assertion.
+            val mapper = ObjectMapper()
+            val producedJson = mapper.readTree(produced.payload)
+            val seededJson = mapper.readTree(payload)
+            seededJson.fieldNames().forEach { field ->
+                assertThat(producedJson.get(field)).isEqualTo(seededJson.get(field))
+            }
+            assertThat(producedJson.get("sourceService").asText()).isEqualTo("interest-service")
+            val added = producedJson.fieldNames().asSequence().toSet() -
+                seededJson.fieldNames().asSequence().toSet()
+            assertThat(added).isEqualTo(setOf("sourceService"))
         }
 
         // Persistence side committed: both rows are now SENT with a stamped sentAt and one attempt.

@@ -335,7 +335,7 @@ class PartyResource(
                 gender = request.gender,
                 birthplace = request.birthplace,
                 nationalities = request.nationalities,
-                idDocuments = request.idDocuments.map {
+                idDocuments = request.requireIdDocuments().map {
                     IdDocument(it.type, it.number, it.issuingCountry, it.issuedAt, it.expiresAt)
                 },
                 email = request.email,

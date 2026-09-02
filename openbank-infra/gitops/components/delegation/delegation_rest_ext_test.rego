@@ -61,6 +61,14 @@ test_edge_may_offer if {
 	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.offer"}
 }
 
+test_edge_may_preview if {
+	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.preview"}
+}
+
+test_shared_backend_identity_may_not_preview if {
+	count(allowed_reasons) == 0 with input as {"principal": services_m2m, "action": "delegation.preview"}
+}
+
 test_edge_may_revoke if {
 	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.revoke"}
 }

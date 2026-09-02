@@ -11,10 +11,14 @@ import com.openbank.delegation.application.port.`in`.ReserveSpendUseCase
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.ReserveOutcome
 import com.openbank.delegation.application.port.out.SpendReservationRepository
+import com.openbank.delegation.domain.model.CountedSpend
+import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.SpendCeilings
 import com.openbank.delegation.domain.model.SpendDecision
 import com.openbank.delegation.domain.model.SpendReservation
+import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.delegation.domain.model.SpendWindows
 import jakarta.enterprise.context.ApplicationScoped
@@ -31,6 +35,12 @@ class SpendReservationNotFoundException(id: UUID) : RuntimeException("Spend rese
 
 /** A settle that cannot be replayed into the state the caller asked for. */
 class SpendReservationStateException(message: String) : RuntimeException(message)
+
+class SpendReservationIdempotencyConflictException :
+    RuntimeException("idempotencyKey already belongs to a different immutable reservation tuple")
+
+class SpendReservationStateStreamUnavailableException :
+    RuntimeException("domestic-payment reservation state stream is not active")
 
 /**
  * ADR-0249 D3 — the cumulative-spend counter, in ONE place.
@@ -59,18 +69,40 @@ class SpendReservationService(
             grantId = grant.id,
             amount = command.amount,
             idempotencyKey = command.idempotencyKey,
+            operationType = command.operationType,
             createdAt = now,
         )
         val outcome = reservationRepository.reserve(
             candidate = candidate,
             window = SpendWindows.windowAt(now),
-        ) { counted -> SpendCeilings.evaluate(grant, command.amount, counted, now) }
+        ) { lockedGrant, counted -> evaluateLockedGrant(command, lockedGrant, counted, now) }
 
         return when (outcome) {
             is ReserveOutcome.Created -> ReserveSpendResult(outcome.reservation, replayed = false)
             is ReserveOutcome.Replayed -> ReserveSpendResult(outcome.reservation, replayed = true)
+            ReserveOutcome.IdempotencyConflict -> throw SpendReservationIdempotencyConflictException()
+            ReserveOutcome.StateStreamUnavailable -> throw SpendReservationStateStreamUnavailableException()
             is ReserveOutcome.Refused -> throw SpendReservationRefusedException(outcome.decision)
         }
+    }
+
+    private fun evaluateLockedGrant(
+        command: ReserveSpendCommand,
+        lockedGrant: DelegationGrant,
+        counted: CountedSpend,
+        now: OffsetDateTime,
+    ): SpendDecision {
+        if (command.operationType == SpendReservationOperationType.DOMESTIC_PAYMENT &&
+            (
+                lockedGrant.resourceType != DelegationResourceType.ACCOUNT ||
+                    !lockedGrant.hasCapability(DelegationCapability.ACCOUNT_INITIATE_PAYMENT)
+                )
+        ) {
+            return SpendDecision.Refused(
+                com.openbank.delegation.domain.model.SpendRefusalReason.NO_SPEND_CAPABILITY,
+            )
+        }
+        return SpendCeilings.evaluate(lockedGrant, command.amount, counted, now)
     }
 
     override suspend fun confirm(

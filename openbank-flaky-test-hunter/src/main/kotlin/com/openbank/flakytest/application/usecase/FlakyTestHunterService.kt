@@ -23,6 +23,7 @@ import com.openbank.libs.temporal.TemporalConfig
 import io.opentelemetry.api.trace.SpanKind
 import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.api.trace.Tracer
+import io.temporal.api.enums.v1.WorkflowIdReusePolicy
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
@@ -32,6 +33,7 @@ import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -60,20 +62,23 @@ class FlakyTestHunterService(
         return workflow.runCheck(trigger)
     }
 
-    override suspend fun startDetached(trigger: RunTrigger): String {
-        val workflowId = scheduledWorkflowId(trigger, Instant.now(clock))
-        val options = WorkflowOptions.newBuilder()
-            .setTaskQueue(temporalConfig.taskQueue())
-            .setWorkflowId(workflowId)
-            .build()
+    override suspend fun startDetached(trigger: RunTrigger, idempotencyKey: String?): String {
+        val now = Instant.now(clock)
+        val workflowId = if (trigger == RunTrigger.OPERATOR_MANUAL) {
+            operatorWorkflowId(idempotencyKey, now)
+        } else {
+            require(idempotencyKey == null) { "Idempotency-Key is only supported for operator workflows" }
+            scheduledWorkflowId(trigger, now)
+        }
+        val options = detachedWorkflowOptions(temporalConfig.taskQueue(), workflowId)
         val stub = workflowClient.newWorkflowStub(FlakyTestHunterWorkflow::class.java, options)
         try {
             WorkflowClient.start({ stub.runCheck(trigger) })
             log.infof("Started flaky-test-hunter sweep workflow %s (trigger=%s)", workflowId, trigger)
-        } catch (duplicate: WorkflowExecutionAlreadyStarted) {
-            // Not an error — the dedupe working. Two pods, or one restarted after the cron fired,
-            // compute the same id and Temporal admits only the first.
-            log.infof("Sweep workflow %s already running, not starting a second: %s", workflowId, duplicate.message)
+        } catch (_: WorkflowExecutionAlreadyStarted) {
+            // Not an error — the dedupe working. REJECT_DUPLICATE covers both a running execution
+            // and one that completed before the retry; both return the same durable workflow id.
+            log.infof("Sweep workflow %s already exists; not starting a second (trigger=%s)", workflowId, trigger)
         }
         return workflowId
     }
@@ -103,14 +108,15 @@ class FlakyTestHunterService(
     override suspend fun getById(id: String): FlakyTestFinding? = findingRepository.findById(id)
 
     override suspend fun analyze(request: TestIntelligenceAnalysisRequest): List<FlakyTestFinding> {
-        validateEvidenceRequest(request)
-        return request.components.flatMap { component -> detectEvidenceFindings(request.snapshotId, component) }
+        val components = validateEvidenceRequest(request)
+        return components.flatMap { component -> detectEvidenceFindings(request.snapshotId, component) }
             .map { finding -> diagnoseEvidenceFinding(finding, request.collectedAt) }
     }
 
     private fun detectEvidenceFindings(snapshotId: String, component: TestIntelligenceComponentInput) = buildList {
         val severity = if (component.moneyPath) FindingSeverity.CRITICAL else FindingSeverity.WARNING
-        if (component.evidence.none {
+        val evidence = component.requireEvidence()
+        if (evidence.none {
                 it.kind in EXECUTION_KINDS
             }
         ) {
@@ -125,7 +131,7 @@ class FlakyTestHunterService(
             )
         }
         addAll(detectCurrentAndHistoricalFailures(snapshotId, component, severity))
-        if (component.evidence.any {
+        if (evidence.any {
                 it.state == "stale"
             }
         ) {
@@ -171,7 +177,7 @@ class FlakyTestHunterService(
         component: TestIntelligenceComponentInput,
         severity: FindingSeverity,
     ) = buildList {
-        val requiredGaps = component.requiredControls.count { it.state != "passed" }
+        val requiredGaps = component.requireRequiredControls().count { it.state != "passed" }
         if (requiredGaps > 0) {
             add(
                 evidenceFinding(
@@ -184,7 +190,7 @@ class FlakyTestHunterService(
                 ),
             )
         }
-        if (component.evidence.any { it.state == "failed" }) {
+        if (component.requireEvidence().any { it.state == "failed" }) {
             add(
                 evidenceFinding(
                     snapshotId,
@@ -259,10 +265,13 @@ class FlakyTestHunterService(
         title, component, "test-intelligence:$snapshotId", rawMetricValue, BigDecimal.ZERO,
     )
 
-    private fun validateEvidenceRequest(request: TestIntelligenceAnalysisRequest) {
+    private fun validateEvidenceRequest(
+        request: TestIntelligenceAnalysisRequest,
+    ): List<TestIntelligenceComponentInput> {
         require(request.snapshotId.isNotBlank() && request.snapshotId.length <= MAX_TEXT) { "invalid snapshotId" }
         require(request.components.size <= MAX_COMPONENTS) { "too many components" }
-        request.components.forEach { component ->
+        val components = request.requireComponents()
+        components.forEach { component ->
             require(COMPONENT.matches(component.component)) { "invalid component" }
             require(
                 component.declaredInfrastructure.all { it in INFRASTRUCTURE } &&
@@ -276,17 +285,18 @@ class FlakyTestHunterService(
             ) { "invalid infrastructure or historical metric" }
             require(
                 component.evidence.size <= MAX_EVIDENCE_PER_COMPONENT &&
-                    component.evidence.all {
+                    component.requireEvidence().all {
                         it.kind in EVIDENCE_KINDS && it.state in EVIDENCE_STATES
                     },
             ) { "invalid evidence vocabulary" }
             require(
                 component.requiredControls.size <= MAX_EVIDENCE_PER_COMPONENT &&
-                    component.requiredControls.all {
+                    component.requireRequiredControls().all {
                         it.kind in REQUIRED_CONTROL_KINDS && it.state in EVIDENCE_STATES
                     },
             ) { "invalid required-control vocabulary" }
         }
+        return components
     }
 
     companion object {
@@ -308,15 +318,48 @@ class FlakyTestHunterService(
         private const val MAX_EVIDENCE_PER_COMPONENT = 20
         private const val MAX_TEXT = 200
         private val DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC)
+        private val OPERATOR_IDEMPOTENCY_KEY =
+            Regex("^flaky-test-hunter-operator-manual-([0-9]{4}-[0-9]{2}-[0-9]{2})$")
 
         /**
          * The id that makes a detached start idempotent for the day.
          *
-         * Deliberately NOT `System.currentTimeMillis()`, which the operator path uses: an id that
-         * can never collide can never dedupe either. The trigger is part of the id so an operator
-         * can still force a run on a day the schedule has already used.
+         * Deliberately NOT `System.currentTimeMillis()`: an id that can never collide can never
+         * dedupe either. The trigger is part of the id so an operator run never aliases the
+         * scheduled run for the same day.
          */
         fun scheduledWorkflowId(trigger: RunTrigger, at: Instant): String =
             "flaky-test-hunter-check-${trigger.name.lowercase()}-${DAY.format(at)}"
+
+        internal fun detachedWorkflowOptions(taskQueue: String, workflowId: String): WorkflowOptions =
+            WorkflowOptions.newBuilder()
+                .setTaskQueue(taskQueue)
+                .setWorkflowId(workflowId)
+                .setWorkflowIdReusePolicy(WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE)
+                .build()
+
+        /**
+         * Maps the bounded HTTP idempotency key back into the existing operator workflow-id
+         * namespace. Missing keys select today for mixed-version clients. Explicit keys may pin
+         * only today or yesterday in UTC; yesterday exists solely to make a retry across midnight
+         * target the original execution instead of creating a new daily workflow.
+         */
+        fun operatorWorkflowId(idempotencyKey: String?, at: Instant): String {
+            val today = at.atZone(ZoneOffset.UTC).toLocalDate()
+            val requestedDay = idempotencyKey?.let { key ->
+                val match = requireNotNull(OPERATOR_IDEMPOTENCY_KEY.matchEntire(key)) {
+                    "Invalid Idempotency-Key format"
+                }
+                try {
+                    LocalDate.parse(match.groupValues[1], DateTimeFormatter.ISO_LOCAL_DATE)
+                } catch (_: java.time.DateTimeException) {
+                    throw IllegalArgumentException("Invalid Idempotency-Key date")
+                }
+            } ?: today
+            require(requestedDay == today || requestedDay == today.minusDays(1)) {
+                "Idempotency-Key date must be today or yesterday in UTC"
+            }
+            return "flaky-test-hunter-check-operator_manual-$requestedDay"
+        }
     }
 }

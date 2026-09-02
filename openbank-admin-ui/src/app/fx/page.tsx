@@ -311,10 +311,10 @@ export default function FxPage() {
     fontSize: '12px',
     fontWeight: 600,
     cursor: 'pointer',
-    border: 'none',
+    border: `1px solid ${activeTab === tab ? 'var(--accent-border)' : 'transparent'}`,
     borderRadius: '6px',
-    background: activeTab === tab ? 'var(--accent)' : 'transparent',
-    color: activeTab === tab ? '#fff' : 'var(--text-secondary)',
+    background: activeTab === tab ? 'var(--accent-bg)' : 'transparent',
+    color: activeTab === tab ? 'var(--accent-text)' : 'var(--text-secondary)',
     transition: 'all 0.15s',
   } as React.CSSProperties)
 
@@ -695,10 +695,12 @@ export default function FxPage() {
                       <Play size={11} style={{ animation: isRefreshing(s.source.toLowerCase()) ? 'spin 1s linear infinite' : 'none' }} />
                       {t('Spustit', 'Run')}
                     </button>
-                    <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => { setEditingSchedule(editingSchedule === s.id ? null : s.id); setScheduleDraft({ hour: s.hour, minute: s.minute, days: [...s.days] }) }}
-                      style={{ background: editingSchedule === s.id ? 'var(--accent)' : 'var(--surface-3)', color: editingSchedule === s.id ? '#fff' : 'var(--text-secondary)', border: `1px solid ${editingSchedule === s.id ? 'var(--accent)' : 'var(--border)'}`, padding: '4px 8px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
-                      <Edit3 size={11} />
-                      {editingSchedule === s.id ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                    <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} aria-expanded={editingSchedule === s.id}
+                      aria-label={editingSchedule === s.id ? t(`Zavřít úpravu plánu ${s.source}`, `Close ${s.source} schedule editor`) : t(`Upravit plán ${s.source}`, `Edit ${s.source} schedule`)}
+                      onClick={() => { setEditingSchedule(editingSchedule === s.id ? null : s.id); setScheduleDraft({ hour: s.hour, minute: s.minute, days: [...s.days] }) }}
+                      style={{ background: editingSchedule === s.id ? 'var(--accent-bg)' : 'var(--surface-3)', color: editingSchedule === s.id ? 'var(--accent-text)' : 'var(--text-secondary)', border: `1px solid ${editingSchedule === s.id ? 'var(--accent-border)' : 'var(--border)'}`, padding: '4px 8px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
+                      <Edit3 size={11} aria-hidden="true" />
+                      {editingSchedule === s.id ? <ChevronUp size={11} aria-hidden="true" /> : <ChevronDown size={11} aria-hidden="true" />}
                     </button>
                   </div>
                 </div>

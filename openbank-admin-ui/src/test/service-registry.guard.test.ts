@@ -43,6 +43,7 @@ import { SERVICE_REGISTRY, k8sNameOf } from '@/lib/services/registry'
 const ADMIN_UI = path.resolve(__dirname, '../..')
 const REPO = path.resolve(ADMIN_UI, '..')
 const GITOPS = path.join(REPO, 'openbank-infra', 'gitops')
+const GITOPS_APPS = path.join(GITOPS, 'apps')
 
 const BFF_ROUTE = path.join(ADMIN_UI, 'src/app/api/svc/[service]/[...path]/route.ts')
 const SERVICES_PAGE = path.join(ADMIN_UI, 'src/app/services/page.tsx')
@@ -140,6 +141,50 @@ function gitopsWorkloadNamespaces(): Set<string> {
     }
   }
   return namespaces
+}
+
+interface ApplicationDiscoveryState {
+  file: string
+  namespace: string
+  staged: boolean
+  automated: boolean
+}
+
+/**
+ * Deployment lifecycle comes from the Argo Application, not merely from manifests under its
+ * component path. A staged Application may describe a complete workload while deliberately
+ * withholding sync; binding discovery RBAC into that absent namespace blocks the Admin UI's own
+ * Argo reconciliation before its Deployment can roll out.
+ */
+function applicationDiscoveryStates(): ApplicationDiscoveryState[] {
+  const states: ApplicationDiscoveryState[] = []
+  for (const file of walkYaml(GITOPS_APPS)) {
+    const src = readFileSync(file, 'utf8')
+    for (const doc of src.split(/^---$/m)) {
+      if (!/^kind:\s*Application\s*$/m.test(doc)) continue
+      const lines = doc.split('\n')
+      const destinationLine = lines.findIndex(line => line === '  destination:')
+      let namespace: string | undefined
+      if (destinationLine !== -1) {
+        for (let i = destinationLine + 1; i < lines.length; i++) {
+          if (/^  \S/.test(lines[i])) break
+          const match = /^ {4}namespace:\s*(\S+)\s*$/.exec(lines[i])
+          if (match) {
+            namespace = match[1]
+            break
+          }
+        }
+      }
+      if (!namespace) continue
+      states.push({
+        file: path.relative(REPO, file),
+        namespace,
+        staged: lines.some(line => /^ {4}openbank\.io\/discovery-state:\s*staged\s*$/.test(line)),
+        automated: lines.some(line => /^ {4}automated:\s*$/.test(line)),
+      })
+    }
+  }
+  return states
 }
 
 /**
@@ -298,11 +343,15 @@ describe('service registry drift guard', () => {
 
     // Namespaces that actually run an openbank service, derived from the gitops tree rather than
     // from a second hand-kept list — the whole point is that the set cannot drift.
+    const stagedNamespaces = new Set(
+      applicationDiscoveryStates().filter(app => app.staged).map(app => app.namespace),
+    )
     const serviceNamespaces = new Set<string>()
     for (const ns of gitopsWorkloadNamespaces()) serviceNamespaces.add(ns)
 
     const missing = [...serviceNamespaces]
       .filter(ns => !DISCOVERY_EXEMPT_NAMESPACES.has(ns))
+      .filter(ns => !stagedNamespaces.has(ns))
       .filter(ns => !listed.has(ns) || !bound.has(ns))
       .map(ns => `${ns}${listed.has(ns) ? '' : ' (not in OPENBANK_NAMESPACES)'}${bound.has(ns) ? '' : ' (no RoleBinding)'}`)
 
@@ -310,6 +359,37 @@ describe('service registry drift guard', () => {
       missing,
       'namespaces running an openbank service that admin-ui discovery cannot see. The console '
       + 'will render "not responding" for every service in them, against healthy pods.',
+    ).toEqual([])
+  })
+
+  it('keeps staged Applications outside live discovery until activation', () => {
+    const manifest = readFileSync(
+      path.join(GITOPS, 'components/admin-ui/admin-ui.yaml'), 'utf8',
+    )
+    const listed = new Set(
+      (manifest.match(/name: OPENBANK_NAMESPACES\s*\n\s*value:\s*(.+)/)?.[1] ?? '')
+        .split(',').map(n => n.trim()).filter(Boolean),
+    )
+    const bound = new Set(
+      [...manifest.matchAll(/name: admin-ui-discovery\s*\n\s*namespace:\s*(\S+)/g)].map(m => m[1]),
+    )
+    const staged = applicationDiscoveryStates().filter(app => app.staged)
+    const staleMarkers = staged
+      .filter(app => app.automated)
+      .map(app => `${app.namespace} (${app.file} is automated)`)
+    const activatedTooEarly = staged
+      .filter(app => listed.has(app.namespace) || bound.has(app.namespace))
+      .map(app => `${app.namespace}${listed.has(app.namespace) ? ' (queried)' : ''}${bound.has(app.namespace) ? ' (RBAC bound)' : ''}`)
+
+    expect(
+      staleMarkers,
+      'an automated Application cannot remain marked discovery-state=staged; remove the marker '
+      + 'and complete its OPENBANK_NAMESPACES + RoleBinding activation together.',
+    ).toEqual([])
+    expect(
+      activatedTooEarly,
+      'staged Applications are desired state, not live namespaces. Querying or binding them makes '
+      + `the Admin UI Argo sync fail before its own rollout: ${activatedTooEarly.join(', ')}`,
     ).toEqual([])
   })
 

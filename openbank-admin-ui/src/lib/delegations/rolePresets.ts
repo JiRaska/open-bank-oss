@@ -8,6 +8,30 @@ export const CAPABILITIES_BY_RESOURCE = {
 export type DelegationResource = keyof typeof CAPABILITIES_BY_RESOURCE
 export type RolePreset = { id: string; name: string; description: string; resourceType: DelegationResource; capabilities: string[]; createdAt?: string; updatedAt?: string }
 
+const RESERVED_OWNERSHIP_PRESET_NAMES = new Set(['majitel účtu', 'majitel karty', 'account owner', 'card owner'])
+const FULL_DELEGATE_NAMES: Partial<Record<DelegationResource, string>> = {
+  ACCOUNT: 'Plný disponent účtu',
+  CARD: 'Plný disponent karty',
+}
+
+export const isReservedOwnershipPresetName = (name: string): boolean =>
+  RESERVED_OWNERSHIP_PRESET_NAMES.has(name.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase())
+
+/** Truthful presentation for historical stock presets until their guarded V14 correction lands. */
+export const truthfulPresetName = (preset: Pick<RolePreset, 'name' | 'resourceType'>): string =>
+  isReservedOwnershipPresetName(preset.name)
+    ? (FULL_DELEGATE_NAMES[preset.resourceType] ?? 'Delegovatelná role')
+    : preset.name
+
+// Kept in the full matrix because an account owner can manage sharing by virtue of ownership.
+// It is not offered in delegation presets: no grant-consuming service authorizes a delegate to
+// create another grant, so presenting it as assignable would promise recursive authority that the
+// platform does not enforce. Existing grants may still carry the wire value and remain readable.
+export const isAssignablePresetCapability = (capability: string): boolean => capability !== 'DELEGATION_MANAGE'
+
+export const assignablePresetCapabilities = (resource: DelegationResource): readonly string[] =>
+  CAPABILITIES_BY_RESOURCE[resource].filter(isAssignablePresetCapability)
+
 export type CapabilityIntent = 'view' | 'act' | 'manage'
 
 const CAPABILITY_LABELS: Record<string, [string, string]> = {

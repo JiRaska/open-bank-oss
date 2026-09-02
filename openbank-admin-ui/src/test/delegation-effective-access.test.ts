@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest'
-import { delegationAttentionReasons, grantConditions, grantResourcePresentation, isEffectiveAccessPayload, matchedRoleName } from '@/components/delegations/EffectiveAccess'
+import { delegationAttentionReasons, effectiveResourceDetails, grantConditions, grantResourcePresentation, isEffectiveAccessPayload, isGrantEffectiveAt, matchedRoleName } from '@/components/delegations/EffectiveAccess'
 import type { Grant } from '@/components/delegations/GrantView'
 import type { RolePreset } from '@/lib/delegations/rolePresets'
 
@@ -16,9 +16,31 @@ describe('effective access role matching', () => {
     expect(matchedRoleName({ ...grant, capabilities: ['ACCOUNT_READ_BALANCES'] }, presets, 'cs')).toBe('Vlastní kombinace práv')
   })
 
-  it('rejects a legacy grant payload instead of crashing the customer console', () => {
+  it('does not present a historical unsupported grant as an owner role', () => {
+    expect(matchedRoleName({ ...grant, capabilities: ['DELEGATION_MANAGE'] }, [{
+      id: 'legacy-owner',
+      name: 'Majitel účtu',
+      description: '',
+      resourceType: 'ACCOUNT',
+      capabilities: ['DELEGATION_MANAGE'],
+    }], 'en')).toBe('Historical delegated rights')
+  })
+
+  it('does not present a full card delegation as card ownership', () => {
+    const capabilities = ['CARD_VIEW', 'CARD_VIEW_TRANSACTIONS', 'CARD_MANAGE_LIMITS', 'CARD_MANAGE_STATUS', 'CARD_MANAGE_CHANNELS']
+    expect(matchedRoleName({ ...grant, resourceType: 'CARD', capabilities }, [{
+      id: 'legacy-card-owner',
+      name: 'Majitel karty',
+      description: '',
+      resourceType: 'CARD',
+      capabilities,
+    }], 'en')).toBe('Plný disponent karty')
+  })
+
+  it('requires a server evaluation timestamp instead of trusting the browser clock', () => {
     expect(isEffectiveAccessPayload({ ...grant, id: 'g1' })).toBe(false)
-    expect(isEffectiveAccessPayload({ accounts: [], cards: [], grants: [], presets: [], resourceDetails: [], sources: { accounts: 'ok' } })).toBe(true)
+    expect(isEffectiveAccessPayload({ evaluatedAt: '2026-09-01T12:00:00Z', nextChangeAt: null, refreshAfterMs: null, accounts: [], cards: [], grants: [], presets: [], resourceDetails: [], sources: { accounts: 'ok' } })).toBe(true)
+    expect(isEffectiveAccessPayload({ evaluatedAt: 'not-a-time', nextChangeAt: null, refreshAfterMs: null, accounts: [], cards: [], grants: [], presets: [], resourceDetails: [], sources: {} })).toBe(false)
   })
 
   it('explains the concrete account behind a delegation instead of showing only its UUID', () => {
@@ -27,6 +49,61 @@ describe('effective access role matching', () => {
       label: 'Účet •••• 7890',
       meta: 'CZK · ACTIVE',
     })
+  })
+
+  it('uses owned resources to explain grants made by the selected customer', () => {
+    const details = effectiveResourceDetails({
+      evaluatedAt: '2026-09-01T12:00:00Z',
+      nextChangeAt: null,
+      refreshAfterMs: null,
+      accounts: [{ id: 'account-1', accountNumber: 'CZ1234567890', nickname: 'Provozní účet', currencyCode: 'CZK' }],
+      cards: [{ id: 'card-1', maskedPan: '•••• 4321', network: 'VISA' }],
+      grants: [],
+      presets: [],
+      resourceDetails: [],
+      sources: { accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' },
+    })
+
+    expect(grantResourcePresentation({ ...grant, resourceId: 'account-1' }, details, 'cs')).toEqual({
+      label: 'Provozní účet',
+      meta: 'CZK',
+    })
+    expect(grantResourcePresentation({ ...grant, resourceType: 'CARD', resourceId: 'card-1' }, details, 'en')).toEqual({
+      label: '•••• 4321',
+      meta: 'VISA',
+    })
+  })
+
+  it('prefers an explicitly resolved detail over an ownership-list fallback', () => {
+    const details = effectiveResourceDetails({
+      evaluatedAt: '2026-09-01T12:00:00Z',
+      nextChangeAt: null,
+      refreshAfterMs: null,
+      accounts: [{ id: 'account-1', nickname: 'Old label' }],
+      cards: [],
+      grants: [],
+      presets: [],
+      resourceDetails: [{ key: 'ACCOUNT:account-1', resourceType: 'ACCOUNT', resourceId: 'account-1', state: 'ok', detail: { id: 'account-1', nickname: 'Current label' } }],
+      sources: { accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' },
+    })
+
+    expect(grantResourcePresentation({ ...grant, resourceId: 'account-1' }, details, 'en').label).toBe('Current label')
+  })
+
+  it('does not use a delegated card as an owned-resource fallback', () => {
+    const details = effectiveResourceDetails({
+      evaluatedAt: '2026-09-01T12:00:00Z',
+      nextChangeAt: null,
+      refreshAfterMs: null,
+      accounts: [],
+      cards: [{ id: 'card-delegated', maskedPan: '•••• 2222', delegated: true }],
+      grants: [],
+      presets: [],
+      resourceDetails: [],
+      sources: { accounts: 'ok', cards: 'ok', grants: 'ok', presets: 'ok' },
+    })
+
+    expect(details).toEqual([])
   })
 
   it('explains financial and approval guardrails for an active operation role', () => {
@@ -104,5 +181,27 @@ describe('effective access role matching', () => {
   it('does not flag read-only access without an end date or inactive grants', () => {
     expect(delegationAttentionReasons({ ...grant, status: 'ACTIVE', validTo: null }, new Date('2026-09-01T12:00:00Z'), 'en')).toEqual([])
     expect(delegationAttentionReasons({ ...grant, status: 'REVOKED', validTo: '2026-09-02T12:00:00Z' }, new Date('2026-09-01T12:00:00Z'), 'en')).toEqual([])
+  })
+
+  it('uses the authority half-open validity interval for effective-now access', () => {
+    const timedGrant = {
+      ...grant,
+      status: 'ACTIVE',
+      validFrom: '2026-09-01T10:00:00Z',
+      validTo: '2026-09-01T11:00:00Z',
+    }
+
+    expect(isGrantEffectiveAt(timedGrant, new Date('2026-09-01T09:59:59.999Z'))).toBe(false)
+    expect(isGrantEffectiveAt(timedGrant, new Date('2026-09-01T10:00:00Z'))).toBe(true)
+    expect(isGrantEffectiveAt(timedGrant, new Date('2026-09-01T10:59:59.999Z'))).toBe(true)
+    expect(isGrantEffectiveAt(timedGrant, new Date('2026-09-01T11:00:00Z'))).toBe(false)
+  })
+
+  it('fails closed for malformed validity and non-active status', () => {
+    const now = new Date('2026-09-01T10:00:00Z')
+    expect(isGrantEffectiveAt({ ...grant, status: 'ACTIVE', validFrom: null }, now)).toBe(false)
+    expect(isGrantEffectiveAt({ ...grant, status: 'ACTIVE', validFrom: 'invalid' }, now)).toBe(false)
+    expect(isGrantEffectiveAt({ ...grant, status: 'ACTIVE', validFrom: '2026-01-01T00:00:00Z', validTo: '' }, now)).toBe(false)
+    expect(isGrantEffectiveAt({ ...grant, status: 'REVOKED', validFrom: '2026-01-01T00:00:00Z' }, now)).toBe(false)
   })
 })

@@ -173,6 +173,16 @@ also be deleted (nothing else in balance-service depends on it).
 
 ## 7. Change log
 
+- **2026-08-26** — The operator approval inbox gains a bounded, read-only
+  `GET /api/v1/balances/approvals` edge. It returns pending approval workflow metadata
+  (random id, action, resource id, maker id and creation time) only to `ROLE_OPERATOR` or
+  `ROLE_ADMIN` callers behind the existing OPA boundary. Results are capped at 200 and ordered
+  oldest first; the endpoint cannot decide or execute an approval. Existing maker/checker
+  separation, one-time execution and 24-hour Redis TTL controls remain unchanged. **Risk class:**
+  confidentiality of operator workflow metadata and bounded Redis read load; no new caller,
+  service edge or money mutation. Rollback: remove the GET route and let the admin UI report this
+  source unavailable; balance posting and approval decisions are unaffected.
+
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass: downstream controls still see the journey. It prevents synthetic activity from becoming indistinguishable before a downstream persistence/event boundary; a fleet gate now requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-08-05** — Prohibit the customer-edge M2M principal from balance writes (#3734). The

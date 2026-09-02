@@ -128,7 +128,12 @@ async function queryTempoBackendCorrelation(base: string, traceIds: string[], tr
   }
 }
 
-async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>> {
+type RecentRuns = { rows: Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>; error: string | null }
+
+/** Deliberately not a bare array — an empty list is ambiguous between "no Job has completed
+ *  yet" and "the query failed", and the run-history panel would otherwise render a Prometheus
+ *  outage as a journey with no history at all rather than an unavailable read (#7943). */
+async function queryPrometheusRuns(base: string, cronjob: string): Promise<RecentRuns> {
   // Status gauges retain value 1 and their query sample timestamp advances on every scrape.
   // Use the completion-time gauge as the value, and attach an explicit result label, otherwise
   // a week-old retained Job is rendered as a run that happened "now" and its state depends on
@@ -139,9 +144,10 @@ async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array
     const response = await fetch(`${base}/api/v1/query?query=${encodeURIComponent(query)}`, {
       headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(2500), cache: 'no-store',
     })
-    if (!response.ok) return []
+    if (!response.ok) return { rows: [], error: `prometheus responded ${response.status}` }
     const payload = await response.json() as PrometheusLabelVector
-    return (payload.data?.result ?? []).flatMap(item => {
+    if (payload.status !== 'success') return { rows: [], error: `prometheus query status ${payload.status}` }
+    const rows = (payload.data?.result ?? []).flatMap(item => {
       const id = item.metric?.job_name
       const completedAt = Number(item.value?.[1] ?? 0)
       const state = item.metric?.openbank_evidence_state
@@ -149,7 +155,8 @@ async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array
       const evidenceState: 'passed' | 'failed' = state === 'failed' ? 'failed' : 'passed'
       return [{ id, state: evidenceState, observedAt: new Date(completedAt * 1000).toISOString() }]
     }).sort((left, right) => right.observedAt.localeCompare(left.observedAt)).slice(0, 10)
-  } catch { return [] }
+    return { rows, error: null }
+  } catch (e) { return { rows: [], error: String(e) } }
 }
 
 function freshnessLimitSeconds(schedule: string | null): number {
@@ -195,7 +202,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
     // journey look healthy again while its last successful run was still nominally fresh.
     const failureWindowSeconds = freshnessLimitSeconds(journey.schedule)
     const journeyTag = cronjob.slice('journey-'.length)
-    const [scheduled, successful, failures, activeJobs, recentRuns, worstP95Ms, worstChecksRate] = await Promise.all([
+    const [scheduled, successful, failures, activeJobs, recentRunsResult, worstP95Ms, worstChecksRate] = await Promise.all([
       queryPrometheus(base, `max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="${cronjob}"})`),
       queryPrometheus(base, `max(kube_cronjob_status_last_successful_time{namespace="observability",cronjob="${cronjob}"})`),
       // kube-state-metrics continues exporting terminal Job status until the Job is garbage
@@ -227,7 +234,11 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
         source: 'prometheus' as const, observedAt,
         lastScheduledAt: scheduled === null ? null : new Date(scheduled * 1000).toISOString(),
         lastSuccessfulAt: successful === null ? null : new Date(successful * 1000).toISOString(),
-        failuresWithinWindow: failures, failureWindowSeconds, activeJobs, freshnessSeconds, recentRuns,
+        failuresWithinWindow: failures, failureWindowSeconds, activeJobs, freshnessSeconds,
+        recentRuns: recentRunsResult.rows,
+        // Null when the query answered — an empty `recentRuns` under a null error really means
+        // no Job has completed yet, not that this route failed to ask.
+        recentRunsError: recentRunsResult.error,
         performance: {
           source: 'prometheus' as const,
           windowSeconds: failureWindowSeconds,

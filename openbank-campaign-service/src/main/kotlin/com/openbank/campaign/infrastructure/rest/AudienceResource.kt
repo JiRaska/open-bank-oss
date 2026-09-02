@@ -66,8 +66,24 @@ class AudienceResource(private val service: AudienceService, private val jwt: Js
     }
 }
 
-data class CreateAudienceRequest(val name: String, val rules: List<AudienceRuleRequest>) {
-    fun toRules(): List<SegmentRule> = rules.map { it.toRule() }
+data class CreateAudienceRequest(
+    val name: String,
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS of
+     * a collection, so `{"rules": [null]}` deserialises happily into a `List<AudienceRuleRequest>`
+     * holding a null. Writing the type honestly is what makes the guard in [toRules] reachable
+     * instead of dead code.
+     */
+    val rules: List<AudienceRuleRequest?>,
+) {
+    /**
+     * The only production read of [rules]. `IllegalArgumentException` is answered as 400 by this
+     * resource's own catch, so no service-local `ExceptionMapper` is added (#526).
+     */
+    fun toRules(): List<SegmentRule> = rules.mapIndexed { index, rule ->
+        requireNotNull(rule) { "rules[$index] must not be null" }.toRule()
+    }
 }
 
 /** The wire rule vocabulary is deliberately smaller than the domain's unsupported rule set. */

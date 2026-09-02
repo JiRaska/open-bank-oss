@@ -11,6 +11,7 @@ interface ExplorerGuideProps {
   children: ReactNode
   action?: ReactNode
   compact?: boolean
+  priority?: boolean
   mascot?: 'lion' | 'lioness'
 }
 
@@ -18,7 +19,7 @@ interface ExplorerGuideProps {
  * The corporate Explorer mascot is a navigation and education aid. It deliberately
  * does not represent AI agents, system health, risk severity, or approval authority.
  */
-export function ExplorerGuide({ eyebrow = 'OpenBank Explorer', title, children, action, compact = false, mascot = 'lion' }: ExplorerGuideProps) {
+export function ExplorerGuide({ eyebrow = 'OpenBank Explorer', title, children, action, compact = false, priority = false, mascot = 'lion' }: ExplorerGuideProps) {
   return (
     <aside className={`${styles.guide} ${compact ? styles.compact : ''}`} aria-label={title}>
       <div className={styles.copy}>
@@ -32,6 +33,8 @@ export function ExplorerGuide({ eyebrow = 'OpenBank Explorer', title, children, 
           src={mascot === 'lioness' ? '/brand/explorer-prague-lioness.webp' : '/brand/openbank-explorer.webp'}
           alt=""
           fill
+          loading={priority || !compact ? 'eager' : 'lazy'}
+          fetchPriority={priority ? 'high' : 'auto'}
           sizes={compact ? '160px' : '(max-width: 720px) 180px, 260px'}
           className={`${styles.image} ${mascot === 'lioness' ? styles.lioness : ''}`}
         />

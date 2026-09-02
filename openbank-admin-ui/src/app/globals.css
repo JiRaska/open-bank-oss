@@ -924,12 +924,12 @@ main {
 
 /* Tone text colours (ADR-0208 D2), for cases where a full badge is too heavy — a tinted metric
    label, an inline verdict. Same tokens the .badge-* rules use, so a theme change moves both. */
-.tone-text-success { color: var(--success); }
-.tone-text-warning { color: var(--warning); }
-.tone-text-danger  { color: var(--danger); }
-.tone-text-info    { color: var(--info); }
+.tone-text-success { color: var(--success-text); }
+.tone-text-warning { color: var(--warning-text); }
+.tone-text-danger  { color: var(--danger-text); }
+.tone-text-info    { color: var(--info-text); }
 .tone-text-neutral { color: var(--text-secondary); }
-.tone-text-accent  { color: var(--ob-accent); }
+.tone-text-accent  { color: var(--ob-accent-text); }
 
 /* Semantic card emphasis for the cases where the verdict belongs to the whole surface, not just
    a badge. The tone is selected in TypeScript; the actual colour remains token-owned here. */
@@ -1135,9 +1135,9 @@ main {
 
 .input {
   min-height: 40px;
-  border-color: #cbd5e1;
+  border-color: var(--border-strong);
   border-radius: 9px;
-  background: rgba(255, 255, 255, .94);
+  background: var(--surface);
 }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(99, 102, 241, .13); }
 

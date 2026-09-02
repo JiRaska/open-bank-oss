@@ -75,6 +75,32 @@ jobs:
           python3 .github/scripts/check-journey-catalog.py \
             --root . --extract public-edge --out synthetic-evidence/journey.js
 
+      - name: Prove the exact public-edge monitor fails closed
+        run: |
+          set +e
+          docker run --rm \
+            --network none \
+            --user "$(id -u):$(id -g)" \
+            --volume "$PWD/synthetic-evidence:/evidence" \
+            --env API_BASE=http://127.0.0.1:9 \
+            --env CUSTOMER_BASE=http://127.0.0.1:9 \
+            --env ADMIN_BASE=http://127.0.0.1:9 \
+            docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc \
+            run --quiet \
+            --summary-export /evidence/public-edge-negative-summary.json \
+            /evidence/journey.js
+          negative_exit=$?
+          set -e
+          if [[ "$negative_exit" -ne 99 ]]; then
+            echo "::error::public-edge negative control returned ${negative_exit}; expected k6 threshold exit 99"
+            exit 1
+          fi
+          jq -e '
+            .metrics.checks.fails == 3 and
+            .metrics.checks.passes == 0 and
+            .metrics.checks.thresholds["rate==1.0"] == true
+          ' synthetic-evidence/public-edge-negative-summary.json >/dev/null
+
       - name: Run the exact sandbox journey
         run: |
           docker run --rm \

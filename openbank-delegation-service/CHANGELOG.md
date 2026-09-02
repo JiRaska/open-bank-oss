@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.1...delegation-service-v0.13.2) (2026-09-02)
+
+
+### Security
+
+* **delegation:** publish durable spend reservation state ([#8247](https://github.com/JiRaska/open-bank-oss/issues/8247)) ([a017aab](https://github.com/JiRaska/open-bank-oss/commit/a017aab1111abaf702cc708f9e2a39cec56c9b1c))
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.0...delegation-service-v0.13.1) (2026-09-02)
+
+
+### Security
+
+* **delegation:** make lifecycle transitions monotonic ([#8232](https://github.com/JiRaska/open-bank-oss/issues/8232)) ([da16bee](https://github.com/JiRaska/open-bank-oss/commit/da16beed4acd537dddef4bd6fd070733665bd69d))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.12.0...delegation-service-v0.13.0) (2026-09-02)
+
+
+### Features
+
+* **delegation:** preview client grants before SCA ([#8173](https://github.com/JiRaska/open-bank-oss/issues/8173)) ([cb8065c](https://github.com/JiRaska/open-bank-oss/commit/cb8065c425dde53ba02073b938ca908f2f3e7dfc))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.11.0...delegation-service-v0.12.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.10.0...delegation-service-v0.11.0) (2026-08-31)
 
 

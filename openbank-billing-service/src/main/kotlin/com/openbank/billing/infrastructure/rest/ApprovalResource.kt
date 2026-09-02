@@ -10,11 +10,14 @@ import com.openbank.libs.authz.Authorize
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.PATCH
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -35,6 +38,16 @@ class ApprovalResource(private val approvalStore: ApprovalStore) {
 
     @Inject
     lateinit var identity: SecurityIdentity
+
+    /** Read-only checker queue; deciding remains on PATCH and preserves four-eyes separation. */
+    @GET
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "billing.approval.read", resource = "")
+    @Operation(summary = "List pending billing approvals, oldest first (ADR-0227 D2)")
+    suspend fun listPending(@QueryParam("limit") @DefaultValue("50") limit: Int): Response {
+        val pending = approvalStore.findPending(limit.coerceIn(1, MAX_PENDING_LIMIT))
+        return Response.ok(pending.map { it.toResponse() }).build()
+    }
 
     @PATCH
     @Path("/{id}")
@@ -59,6 +72,11 @@ class ApprovalResource(private val approvalStore: ApprovalStore) {
     // their own request. SecurityIdentity (not @Context SecurityContext) since this is a
     // `suspend fun` — see AccountResource.operatorId() for the same workaround.
     private fun checkerId(): String = identity.principal?.name ?: "anonymous"
+
+    private companion object {
+        /** ApprovalStore scans Redis; keep the caller-controlled result bounded. */
+        const val MAX_PENDING_LIMIT = 200
+    }
 }
 
 data class DecideApprovalRequest(val approve: Boolean)
@@ -68,6 +86,8 @@ data class ApprovalResponse(
     val action: String,
     val resourceId: String?,
     val status: String,
+    val makerId: String?,
+    val createdAt: String?,
     val decidedBy: String?,
 )
 
@@ -76,5 +96,7 @@ fun PendingApproval.toResponse() = ApprovalResponse(
     action = action,
     resourceId = resourceId,
     status = status.name,
+    makerId = makerId,
+    createdAt = createdAt.toString(),
     decidedBy = decidedBy,
 )

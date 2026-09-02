@@ -9,6 +9,7 @@ import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.settlement.application.port.out.CreditPort
 import com.openbank.settlement.application.port.out.DebitPort
+import com.openbank.settlement.application.port.out.LedgerJournalLookupPort
 import com.openbank.settlement.application.port.out.LedgerPort
 import com.openbank.settlement.application.port.out.ReverseCreditPort
 import com.openbank.settlement.application.port.out.ReverseDebitPort
@@ -44,7 +45,12 @@ import java.util.UUID
 // SettlementActivities declares — one method each, not decomposable — plus `compensate`, `audit`,
 // `step` and `runOnVertxContext`. `cycleDuration` is already top-level for the same reason. Same
 // rationale as CampaignJourneyActivitiesImpl, the fleet's other Temporal activities implementation.
-@Suppress("TooManyFunctions")
+// LongParameterList fires AT its threshold of 9, not above it, and #6410's LedgerJournalLookupPort
+// is the ninth. The fleet's usual answer — field injection — does not apply here: this is a Temporal
+// activities impl that the unit tests construct directly, and MetricsTestableActivities subclasses it
+// through this constructor, so moving a port to `@Inject lateinit var` would break both test doubles
+// for a lint threshold. Suppressed rather than restructured; revisit if a tenth port appears.
+@Suppress("TooManyFunctions", "LongParameterList")
 open class SettlementActivitiesImpl(
     private val settlementRepository: SettlementRepository,
     private val debitPort: DebitPort,
@@ -54,6 +60,7 @@ open class SettlementActivitiesImpl(
     private val reverseDebitPort: ReverseDebitPort,
     private val reverseCreditPort: ReverseCreditPort,
     private val metrics: SettlementMetricsPort,
+    private val ledgerJournalLookupPort: LedgerJournalLookupPort,
 ) : SettlementActivities {
 
     private val log = Logger.getLogger(SettlementActivitiesImpl::class.java)
@@ -101,39 +108,89 @@ open class SettlementActivitiesImpl(
     }
 
     /**
-     * NOT IMPLEMENTED — fails loudly rather than reporting a reversal that did not happen.
+     * Compensates the ledger booking by first establishing **what the general ledger actually
+     * holds**, then recording that fact. Three outcomes, three statuses (issue #6410).
      *
-     * ledger-service does expose `POST /api/v1/journals/{journalId}/reverse`, but settlement-service
-     * cannot use it as things stand, for three independent reasons, each needing a decision this
-     * service cannot make on its own (issue #6037):
+     * ### Why it asks the ledger instead of assuming
      *
-     *  1. **Maker-checker.** `ledger.reverse` is an approval-gated action — a call from
-     *     settlement-service's service account lands in ledger's PENDING approval queue rather than
-     *     posting. Granting a machine that action is a `rules.yaml: shared_m2m_matrix_write_grants`
-     *     decision, not a code change, and an *automatic* GL reversal driven by a failed saga is
-     *     precisely the thing maker-checker exists to prevent.
-     *  2. **No journal id is retained.** `bookToLedger` discards the `JournalResponse`, so the id
-     *     would have to be persisted (a migration) or re-resolved via
-     *     `GET /api/v1/journals/transaction/{transactionId}`.
-     *  3. **Period locks.** The endpoint answers 409 when the original entry's fiscal period is
-     *     ATTESTED, so a reversal is not always available and the saga needs a defined behaviour
-     *     for that case — correcting forward in the open period is the accounting convention, which
-     *     is a different posting from a reversal.
+     * `bookToLedger` posts the journal and *then* writes `BOOKED`; either half can fail alone, so
+     * a thrown `bookToLedger` says nothing about whether a journal exists. Both readings are
+     * common and they call for opposite responses. Assuming the worst — what the previous
+     * unconditional `LEDGER_REVERSAL_UNSUPPORTED` did — sends an accountant to correct an entry
+     * that, in the ordinary "ledger refused the posting" case, was never made; and noise on the
+     * one control that exists to make a real GL discrepancy visible is what hides a real GL
+     * discrepancy. So the activity asks: `GET /api/v1/journals/transaction/{settlementId}`, keyed
+     * on the `transactionId` [SettlementJournalFactory] already posts.
      *
-     * Throwing a **non-retryable** failure is deliberate: a retryable one would burn all five
-     * attempts (~75 s of backoff) delaying the two compensations that *do* work, and would still
-     * end in the same place. `SettlementWorkflowImpl` catches `ActivityFailure` per compensation and
-     * continues, so this failure does not block `reverseCredit`/`reverseDebit`.
+     * That lookup also retires one of the three blockers this method's original KDoc listed. "No
+     * journal id is retained" does not hold — the settlement id **is** the handle. The other two
+     * stand and are why nothing here reverses anything:
      *
-     * The status is recorded first, so the row says
-     * [SettlementStatus.LEDGER_REVERSAL_UNSUPPORTED] — an operator sees *which* half of the unwind
-     * did not happen — rather than the old `LEDGER_REVERSED`, which claimed it had.
+     *  1. **Four-eyes.** `reverse` is a `rules.yaml: four_eyes.verbs` verb, so `ledger.reverse`
+     *     carries `four_eyes_required`. That flag is computed from the action name alone, with no
+     *     awareness of the caller, and `rules.yaml`' own guardrail on that list says adding an
+     *     automated caller to a four-eyes verb pauses the automation indistinguishably from the
+     *     human path it was meant to gate. Making a failed saga post a GL reversal by itself is
+     *     precisely what dual control exists to prevent; it is a governance decision, not a code
+     *     change.
+     *  2. **Period locks.** `POST /journals/{id}/reverse` answers 409 when the original entry's
+     *     fiscal year is ATTESTED. Correcting forward in the open period is the accounting
+     *     convention there, and that is a *different posting* from a reversal — a decision this
+     *     service cannot take on a settlement's behalf.
+     *
+     * ### The three outcomes
+     *
+     *  - **A journal exists** — the GL carries this settlement and owes a correcting entry.
+     *    [SettlementStatus.LEDGER_REVERSAL_UNSUPPORTED], and a **non-retryable** failure: no retry
+     *    changes either blocker above, and burning five attempts (~75 s of backoff) would only
+     *    delay the rest of the unwind.
+     *  - **No journal exists** — nothing was posted, so there is nothing to reverse and no
+     *    obligation to report. [SettlementStatus.LEDGER_NOT_POSTED], and the activity **returns
+     *    normally**, so the workflow can go on to reject the settlement cleanly. This is a no-op
+     *    outcome with its own value rather than a success flag shared with a real reversal.
+     *  - **The lookup failed** — the honest answer is that nobody knows.
+     *    [SettlementStatus.LEDGER_STATE_UNKNOWN], and a **retryable** failure: an unreachable
+     *    ledger is the one case here that a retry can genuinely resolve.
+     *
+     * `SettlementWorkflowImpl` catches `ActivityFailure` per compensation and continues, so
+     * neither failure blocks `reverseCredit`/`reverseDebit`.
      */
+    @Suppress("TooGenericExceptionCaught")
     override fun reverseBookToLedger(settlementId: UUID): Unit = step(SettlementStep.REVERSE_LEDGER_BOOK) {
+        val posted = try {
+            ledgerJournalLookupPort.countJournalsForSettlement(settlementId) > 0
+        } catch (ex: Exception) {
+            log.errorf(
+                ex,
+                "Could not establish whether settlement %s reached the general ledger; the ledger " +
+                    "journal lookup failed. The GL state is UNKNOWN — it is not safe to report " +
+                    "either a clean ledger or a standing posting.",
+                settlementId,
+            )
+            val unknown =
+                settlementRepository.updateStatus(settlementId, SettlementStatus.LEDGER_STATE_UNKNOWN)
+            audit("settlement.reverse-ledger-book", unknown, result = AuditResult.FAILURE)
+            throw ApplicationFailure.newFailure(
+                "Ledger state for settlement $settlementId could not be established",
+                "LedgerStateUnknown",
+            )
+        }
+
+        if (!posted) {
+            log.infof(
+                "Ledger holds no journal for settlement %s, so the booking never posted and there " +
+                    "is nothing to reverse; the general ledger is clean.",
+                settlementId,
+            )
+            val clean = settlementRepository.updateStatus(settlementId, SettlementStatus.LEDGER_NOT_POSTED)
+            audit("settlement.reverse-ledger-book", clean)
+            return@step
+        }
         log.errorf(
-            "Ledger booking for settlement %s was NOT reversed: settlement-service cannot reverse a " +
-                "journal (ledger.reverse is maker-checker gated and no journal id is retained). " +
-                "The GL still carries this settlement's posting and needs a manual correcting entry.",
+            "Ledger booking for settlement %s was NOT reversed: a journal exists for it and " +
+                "settlement-service cannot reverse one (ledger.reverse is a four-eyes verb, and a " +
+                "reversal into an ATTESTED period is refused). The GL still carries this " +
+                "settlement's posting and needs a manual correcting entry.",
             settlementId,
         )
         val settlement =

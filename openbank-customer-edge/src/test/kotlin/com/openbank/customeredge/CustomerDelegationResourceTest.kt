@@ -91,6 +91,42 @@ class CustomerDelegationResourceTest {
     }
 
     @Test
+    fun `preview derives grantor strips SCA and calls the literal upstream preview path`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val body = slot<String>()
+        every { upstream.post(capture(url), any(), capture(body), any()) } returns
+            Response.ok("{\"valid\":true}").build()
+
+        val response = resource(upstream).preview(
+            """{"granteePartyId":"$stranger","resourceType":"ACCOUNT","resourceId":"$GRANT_ID",""" +
+                """"capabilities":["ACCOUNT_READ_BALANCES"],"grantScaSessionId":"$GRANT_ID"}""",
+        )
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(url.captured).isEqualTo("$svc/api/v1/delegations/preview")
+        assertThat(body.captured).contains("\"grantorPartyId\":\"$caller\"")
+        assertThat(body.captured).doesNotContain("grantScaSessionId")
+    }
+
+    @Test
+    fun `preview rejects another grantor and unsupported ceilings before upstream`() {
+        val upstream = mockk<UpstreamClient>()
+
+        val wrongGrantor = resource(upstream).preview(
+            """{"grantorPartyId":"$stranger","granteePartyId":"$caller"}""",
+        )
+        val unenforced = resource(upstream).preview(
+            """{"granteePartyId":"$stranger","dailyLimit":{"amount":100,"currency":"CZK"}}""",
+        )
+
+        assertThat(wrongGrantor.status).isEqualTo(403)
+        assertThat(unenforced.status).isEqualTo(400)
+        assertThat(unenforced.entity.toString()).contains("CUMULATIVE_LIMIT_UNSUPPORTED")
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `offer REJECTS a body naming someone else as grantor instead of rewriting it`() {
         val upstream = mockk<UpstreamClient>()
 
