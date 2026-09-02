@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.235.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.234.0...admin-ui-v0.235.0) (2026-09-02)
+
+
+### Features
+
+* **admin-ui:** add final review for DevOps remediation decisions ([#8215](https://github.com/JiRaska/open-bank-oss/issues/8215)) ([f69f1af](https://github.com/JiRaska/open-bank-oss/commit/f69f1af51c2346572d1c185c5f38b70aea9a8345)), closes [#7895](https://github.com/JiRaska/open-bank-oss/issues/7895)
+
+
+### Bug Fixes
+
+* **admin-ui:** enforce core workflow contrast ([#8202](https://github.com/JiRaska/open-bank-oss/issues/8202)) ([ab9d882](https://github.com/JiRaska/open-bank-oss/commit/ab9d882b54a2ce0a5a51879bd86f37f79ece9177))
+* **admin-ui:** enforce dark workflow contrast ([#8214](https://github.com/JiRaska/open-bank-oss/issues/8214)) ([c768ed9](https://github.com/JiRaska/open-bank-oss/commit/c768ed957cbf3a7c3ed1df9f9464a7cf88f9cc2c))
+* **admin-ui:** pin Pact verification to provider main ([#8192](https://github.com/JiRaska/open-bank-oss/issues/8192)) ([1e76e5d](https://github.com/JiRaska/open-bank-oss/commit/1e76e5d5a4828ef7eea04f1b024ed9aecc5a32b7))
+* **admin-ui:** restore sanctions toggle focus after refresh ([#8219](https://github.com/JiRaska/open-bank-oss/issues/8219)) ([9a0da66](https://github.com/JiRaska/open-bank-oss/commit/9a0da66fe8574e873e411eed8f09fcb700fdcb21))
+* **admin-ui:** stabilize mobile drawer focus ([#8198](https://github.com/JiRaska/open-bank-oss/issues/8198)) ([f661831](https://github.com/JiRaska/open-bank-oss/commit/f6618319b6ebd5dfa64013958e88bd24d9ac56f4))
+
 ## [0.234.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.233.0...admin-ui-v0.234.0) (2026-09-02)
 
 
