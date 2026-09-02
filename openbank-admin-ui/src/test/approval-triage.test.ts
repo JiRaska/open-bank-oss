@@ -20,14 +20,16 @@ const rows: DomainApprovalItem[] = [
 describe('approval inbox triage', () => {
   it('filters by domain and makes queue ordering explicit', () => {
     expect(filterAndSortDomainApprovals(rows, 'all', 'oldest').map(row => row.id)).toEqual([
-      'balance-old', 'notification-mid', 'sanctions-new', 'billing-newest',
+      'balance-old', 'notification-mid', 'sanctions-new', 'billing-newest', 'delegation-opaque/id',
     ])
     expect(filterAndSortDomainApprovals(rows, 'all', 'newest').map(row => row.id)).toEqual([
-      'billing-newest', 'sanctions-new', 'notification-mid', 'balance-old',
+      'delegation-opaque/id', 'billing-newest', 'sanctions-new', 'notification-mid', 'balance-old',
     ])
     expect(filterAndSortDomainApprovals(rows, 'sanctions', 'oldest').map(row => row.id)).toEqual(['sanctions-new'])
     expect(filterAndSortDomainApprovals(rows, 'all', 'oldest', 'MAKER-C').map(row => row.id)).toEqual(['notification-mid'])
-    expect(rows.map(row => row.id)).toEqual(['balance-old', 'sanctions-new', 'notification-mid', 'billing-newest'])
+    expect(rows.map(row => row.id)).toEqual([
+      'balance-old', 'sanctions-new', 'notification-mid', 'billing-newest', 'delegation-opaque/id',
+    ])
   })
 
   it('routes only to checker workbenches that preserve domain governance', () => {

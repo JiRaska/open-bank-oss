@@ -56,7 +56,7 @@ class DelegationLifecycleApprovalResource(
         name = "openbank.delegation.lifecycle-approvals.mutations-enabled",
         defaultValue = "false",
     )
-    var mutationsEnabled: Boolean = false
+    lateinit var mutationsEnabled: java.lang.Boolean
 
     @GET
     @Authorize(action = "delegation.approval.read")
@@ -128,7 +128,7 @@ class DelegationLifecycleApprovalResource(
     }
 
     private fun requireMutationsEnabled() {
-        if (!mutationsEnabled) {
+        if (mutationsEnabled != true) {
             // 404 makes the dark endpoint undiscoverable and cannot be mistaken for a retryable
             // operational failure. The read side remains available independently.
             throw NotFoundException("delegation lifecycle approval mutations are not enabled")
