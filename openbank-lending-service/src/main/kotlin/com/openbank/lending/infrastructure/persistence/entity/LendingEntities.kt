@@ -11,6 +11,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.lending.DelinquencyBucket
 import com.openbank.libs.lending.Ifrs9Stage
+import com.openbank.libs.lending.origination.CreditProductKind
 import com.openbank.libs.lending.origination.OriginationState
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.Column
@@ -73,6 +74,16 @@ class LoanApplicationEntity : PanacheEntityBase() {
 
     @Column(name = "product_type", length = 32)
     var productType: String? = null
+
+    /**
+     * ADR-0269 rule 3 — the product SHAPE, which decides which steps the customer walks. Distinct
+     * from [productType], which is the ADR-0212 compliance-pack identifier deciding which rules
+     * judge the application. Non-null with an UNSECURED default: every application written before
+     * the column existed is a cash loan, because that is the only intake route that exists.
+     */
+    @Column(name = "product_kind", length = 16, nullable = false)
+    @Enumerated(EnumType.STRING)
+    var productKind: CreditProductKind = CreditProductKind.UNSECURED
 
     @Column(name = "pack_version")
     var packVersion: Int? = null

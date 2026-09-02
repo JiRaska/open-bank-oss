@@ -325,6 +325,9 @@ COPY --chmod=0644 openbank-admin-ui/test-results.json ./test-results.json
 # (empty scaffold when there are no pacts/pitest reports to collect).
 # --chmod=0644 for the same UID-100 readability reason as test-results.json.
 COPY --chmod=0644 openbank-admin-ui/quality-report.json ./quality-report.json
+# Unified provenance-aware test evidence (ADR-0273). Legacy test/quality
+# projections remain bundled through the compatibility window.
+COPY --chmod=0644 openbank-admin-ui/test-intelligence.json ./test-intelligence.json
 # CI-produced AWS Cost Explorer snapshot (read-only consumer; see
 # src/app/api/finops/costs/route.ts). build-push-admin-ui.sh runs
 # scripts/collect-aws-costs.mjs before the build so this file always exists
@@ -390,6 +393,7 @@ ENV OPENBANK_OPENAPI_BUNDLE=/app/openapi-bundle
 ENV OPENBANK_FLAGS_BUNDLE=/app/flags-bundle
 ENV OPENBANK_CHANGELOG_BUNDLE=/app/changelog-bundle
 ENV OPENBANK_TEST_RESULTS=/app/test-results.json
+ENV OPENBANK_TEST_INTELLIGENCE=/app/test-intelligence.json
 ENV OPENBANK_READINESS=/app/prod-readiness.json
 ENV OPENBANK_COST_REPORT=/app/cost-report.json
 ENV OPENBANK_AGENTS_FILE=/app/agents.yaml

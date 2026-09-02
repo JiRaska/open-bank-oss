@@ -68,12 +68,39 @@ quarkus:
     tls:
       verification: ${OIDC_TLS_VERIFICATION:none}
 
+  # Client-credentials principal for the two calls that do NOT propagate the customer's own
+  # bearer (see the rule-5 comment below): ConsentQueryClient and CreditProfileReadClient both
+  # register OidcClientRequestReactiveFilter, which mints from THIS block, not the resource-server
+  # `oidc:` block above. Same client-id/secret/issuer as the fleet's other internal service callers
+  # (e.g. openbank-agent-service's oidc-client).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: ${OIDC_TLS_VERIFICATION:none}
+
   # READ tools call the customer edge (ADR-0065) AS the customer — the inbound bearer is propagated
   # (ADR-0089 D5); the edge is ROLE_CUSTOMER and enforces ownership, so the assistant only ever reaches
   # the caller's own data. (Calling internal domain services directly would 403 — they want SERVICE roles.)
   rest-client:
     customer-edge:
       url: ${CUSTOMER_EDGE_URL:http://localhost:8128}
+    # ADR-0269 rule 5. These two are NOT called with the propagated customer bearer, unlike the edge
+    # above: "did this customer grant this scope" is not a question their own token may answer about
+    # itself, and analytics-sink's profile route is an internal operator surface. The customer's
+    # protection is the consent check that must pass before the profile is read at all.
+    consent-service:
+      url: ${CONSENT_SERVICE_URL:http://localhost:8107}
+      connect-timeout: 2000
+      read-timeout: 3000
+    analytics-sink:
+      url: ${ANALYTICS_SINK_URL:http://localhost:8110}
+      connect-timeout: 2000
+      read-timeout: 3000
 
 # Customer copilot configuration (ADR-0089).
 copilot:
@@ -181,6 +208,17 @@ mp:
   messaging:
     incoming:
       party-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.copilot.party-events-in
         connector: smallrye-kafka
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer

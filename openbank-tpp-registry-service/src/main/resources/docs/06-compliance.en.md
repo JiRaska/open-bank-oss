@@ -11,7 +11,7 @@
 | **GDPR** | Registry holds legal-entity (TPP) data, not customer PII | `dataClassification: internal`; no party-id/IBAN/natural-person data stored |
 | **DORA** (Reg. (EU) 2022/2554) | Operational resilience of a control-plane service | health probes, fault tolerance, OTel, runbooks, BuildInfo |
 | **NIS2** | Network & info security | mTLS in-cluster, security headers, OPA authz, audit via outbox (pending) |
-| **AMLD** (indirect) | TPP onboarding screening / blacklist as a control | blacklist API; status lifecycle ACTIVE→REVOKED/BLACKLISTED |
+| **AMLD** (indirect) | TPP onboarding screening / blacklist as a control | blacklist API (`ACTIVE→BLACKLISTED`); `checkAuthorization` denies any status other than ACTIVE |
 | **CNB authorisation register** | National competent authority view | `nca` + `tpp_id` keyed to the CNB/EBA identifier |
 
 ## PSD2 — the authorisation gate
@@ -52,7 +52,7 @@ Generally **not applicable** to corporate registry data. The only field that cou
 No data leaves the EU/EEA region.
 
 ### Retention (Art. 5(1)(e))
-`governance.yaml: retentionPolicy: 5 years`. Registration and blacklist records retained 5 years; de-authorisation is a status transition (`REVOKED`/`BLACKLISTED`), not a hard delete, preserving the authorisation audit trail.
+`governance.yaml: retentionPolicy: 5 years`. Registration and blacklist records retained 5 years; de-authorisation is a status transition (`BLACKLISTED`), not a hard delete, preserving the authorisation audit trail. `REVOKED` and `SUSPENDED` exist in the enum but nothing writes them today (#6489), so a withdrawn authorisation is currently recorded as a blacklisting.
 
 ## DORA mapping (Reg. (EU) 2022/2554)
 

@@ -11,8 +11,11 @@ import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
+import org.hibernate.exception.ConstraintViolationException
+import org.hibernate.exception.DataException
 import org.jboss.logging.Logger
 import org.jboss.logging.MDC
+import java.io.CharConversionException
 import java.time.DateTimeException
 import java.time.Instant
 import java.util.UUID
@@ -143,11 +146,15 @@ class PolicyDecisionExceptionMapper : ExceptionMapper<PolicyDecisionException> {
             .build()
 }
 
-// ConstraintViolationExceptionMapper intentionally NOT in libs:
-// jakarta.validation.ConstraintViolationException is only on the runtime classpath of
-// services that pull in quarkus-hibernate-validator. Auto-registering it here would crash
-// every other service at ArC init with a ClassNotFoundException. Services that need
-// bean-validation field-level mapping should register their own mapper.
+// Neither jakarta.validation.ConstraintViolationException NOR the Hibernate persistence
+// mappers below (DataExceptionMapper, ConstraintViolationExceptionMapper) are `@Provider` here:
+// org.hibernate.exception.DataException/ConstraintViolationException are only on the runtime
+// classpath of services that pull in a Hibernate/Panache extension — measured directly
+// (issue #6240): auto-registering them crashed agent-service, analytics-sink and ap2-service
+// at ArC init with `ClassNotFoundException: org.hibernate.exception.ConstraintViolationException`,
+// the exact failure this comment already warned about for the jakarta.validation case. Services
+// with an ORM register these two explicitly (`@Provider` on a thin subclass, or list the class in
+// `quarkus.arc.additional-indexed-classes`); services without one never load them at all.
 
 @Provider
 class WebApplicationExceptionMapper : ExceptionMapper<WebApplicationException> {
@@ -171,11 +178,95 @@ class WebApplicationExceptionMapper : ExceptionMapper<WebApplicationException> {
  * internal exception messages to the client, since they may contain SQL fragments,
  * stack traces or PII.
  */
+/**
+ * Persistence and decoding failures classified by CLASS NAME, walking the cause chain.
+ *
+ * By name, and that is the whole design rather than a shortcut. The typed mappers below
+ * ([DataExceptionMapper], [ConstraintViolationExceptionMapper]) name `org.hibernate.exception`
+ * types in their supertype, so `@Provider` on them makes ArC load those classes in EVERY consumer
+ * of libs-runtime — including services with no ORM. Measured: it crashed agent-service,
+ * analytics-sink and ap2-service at ArC init with
+ * `ClassNotFoundException: org.hibernate.exception.ConstraintViolationException`. They are
+ * therefore not auto-registered, which leaves them inert unless each ORM service opts in by hand —
+ * roughly thirty services, one line each, and a new service silently starts out unprotected.
+ *
+ * [GenericExceptionMapper] already runs everywhere and holds no ORM reference at all. Matching a
+ * String costs nothing on a classpath that lacks the class, so the classification lands once, for
+ * every service, present and future.
+ *
+ * Matched on the FULLY-QUALIFIED name: `jakarta.validation.ConstraintViolationException` is a
+ * DIFFERENT exception from Hibernate's with the same simple name, and conflating them would map a
+ * bean-validation failure to 409 instead of the 400 it deserves.
+ */
+private val PERSISTENCE_STATUS: Map<String, ErrorCode> = mapOf(
+    // The value cannot be represented by the column — too long, out of range, wrong shape. It came
+    // from the request; a service storing its own computed value in a column it defined would be a
+    // schema error, surfacing at migration time rather than per-request.
+    "org.hibernate.exception.DataException" to ErrorCode.VALIDATION_ERROR,
+    // Unique/foreign-key/check violation. A conflict from the caller's perspective either way —
+    // see ConstraintViolationExceptionMapper for why 409 is chosen despite the ambiguity.
+    "org.hibernate.exception.ConstraintViolationException" to ErrorCode.CONFLICT,
+    // Raised while DECODING the entity, before any handler sees it.
+    "java.io.CharConversionException" to ErrorCode.VALIDATION_ERROR,
+)
+
+/**
+ * The first classified failure in the cause chain, or null.
+ *
+ * The chain matters and is not defensive padding: Hibernate Reactive completes failures through
+ * `CompletableFuture`, so the exception arriving at the resource boundary is routinely a wrapper
+ * with the real cause one or more levels down. Measured on run 32504892635 — the same
+ * `DataException` that a typed mapper caught directly in one run reached
+ * [GenericExceptionMapper] wrapped in the next.
+ *
+ * Bounded by [MAX_CAUSE_DEPTH].
+ */
+/** Cause chains are not trusted to be acyclic, and a self-referencing link is also guarded. */
+private const val MAX_CAUSE_DEPTH = 8
+
+private fun classifyByName(exception: Throwable): ErrorCode? {
+    var current: Throwable? = exception
+    var depth = 0
+    while (current != null && depth < MAX_CAUSE_DEPTH) {
+        PERSISTENCE_STATUS[current.javaClass.name]?.let { return it }
+        if (current.cause === current) return null
+        current = current.cause
+        depth++
+    }
+    return null
+}
+
 @Provider
 class GenericExceptionMapper : ExceptionMapper<Exception> {
     private val log = Logger.getLogger(GenericExceptionMapper::class.java)
     override fun toResponse(exception: Exception): Response {
         val id = traceId()
+
+        classifyByName(exception)?.let { code ->
+            // ERROR, not WARN: a 4xx is correct for the caller AND a missing validation in this
+            // service. Fixing the status must not quieten the second half — the only reason the
+            // value reached the database is that nothing checked it earlier.
+            log.errorf(exception, "unvalidated input reached persistence (traceId=%s)", id)
+            return Response.status(code.httpStatus)
+                .entity(
+                    ApiError(
+                        traceId = id,
+                        status = code.httpStatus,
+                        code = code.code,
+                        // Never the exception message: it carries the SQL statement — table names,
+                        // column names, query shape — and this path is reached by exactly the
+                        // caller who would collect it.
+                        message = if (code == ErrorCode.CONFLICT) {
+                            "The request conflicts with existing data"
+                        } else {
+                            "A submitted value is not valid"
+                        },
+                        timestamp = Instant.now(),
+                    ),
+                )
+                .build()
+        }
+
         log.errorf(exception, "Unhandled exception (traceId=%s)", id)
         return Response.status(500)
             .entity(
@@ -189,4 +280,115 @@ class GenericExceptionMapper : ExceptionMapper<Exception> {
             )
             .build()
     }
+}
+
+/**
+ * Persistence and decoding failures that are the CALLER's input, rendered as 4xx instead of 500.
+ *
+ * Same lineage as [DateTimeExceptionMapper], which exists because an earlier authenticated-fuzz
+ * run found five money-path endpoints answering 500 to an unparseable date (#3038). Fuzzing past
+ * authentication found the next layer (#5913): once a 403 stops answering first, malformed input
+ * reaches the handler, the handler passes it to Hibernate unvalidated, and Postgres rejects it —
+ * at which point the caller is told the server broke.
+ *
+ * Measured on run 32498876292, after the NUL-byte guard (#5995) removed 60 of these:
+ *
+ *     sdd       value too long for type character varying(35)   (22001)
+ *     interest  date out of range                              (22008)
+ *     sdd       duplicate key violates uq_sdd_mandate_reference
+ *     dispute   insert on "dispute_evidence" violates foreign key
+ *     sdd       Unsupported UCS-4 endianness (3412) detected
+ *
+ * The bar for mapping globally is the one [DateTimeExceptionMapper] sets: the exception reaching a
+ * *resource boundary* must always be a rejected value, never a server fault. Each type below is
+ * held to it individually, and the one that does not clearly pass says so.
+ */
+
+/**
+ * `DataException` → **400**. The value cannot be represented by the column: too long, out of range,
+ * wrong shape. It came from the request, and no server-side fault produces it — a service storing
+ * its own computed value in a column it defined would be a schema error, which surfaces at
+ * migration time, not per-request.
+ *
+ * The message is NOT echoed to the caller. It carries the SQL statement, so returning it would leak
+ * column names, table names and the query shape to an anonymous caller — a fuzzing client is
+ * precisely who would collect it.
+ */
+class DataExceptionMapper : ExceptionMapper<DataException> {
+    private val log = Logger.getLogger(DataExceptionMapper::class.java)
+
+    override fun toResponse(exception: DataException): Response {
+        // ERROR, not WARN: a 400 here is correct for the caller AND a missing validation in this
+        // service. Mapping the status must not quieten the second half — the whole reason this
+        // reached Postgres is that nothing checked it earlier.
+        log.errorf(exception, "unvalidated value reached the database: %s", exception.sqlException?.sqlState)
+        return Response.status(ErrorCode.VALIDATION_ERROR.httpStatus)
+            .entity(
+                apiError(
+                    ErrorCode.VALIDATION_ERROR.httpStatus,
+                    ErrorCode.VALIDATION_ERROR.code,
+                    "A submitted value is not valid for its field",
+                ),
+            )
+            .build()
+    }
+}
+
+/**
+ * `ConstraintViolationException` → **409**.
+ *
+ * This is the one that does not pass the "never a server fault" bar cleanly, and it is mapped
+ * anyway — with the reason written down rather than glossed. A unique violation on a
+ * caller-supplied reference (`uq_sdd_mandate_reference`) is a conflict the caller can resolve. A
+ * foreign-key violation naming a parent that does not exist (`dispute_evidence`) is the caller
+ * pointing at something absent. But a service inserting a child under an id IT computed wrongly
+ * would produce the identical exception, and that IS a server fault now reported as 409.
+ *
+ * 500 is not the safer answer to that ambiguity: it is wrong for the two measured cases, which are
+ * both ordinary client conflicts, and it tells every caller the server broke when it did not. The
+ * ambiguity is handled where it can actually be resolved — the log line below carries the
+ * constraint name, so the rarer server-side case stays diagnosable instead of being flattened into
+ * a status code.
+ */
+class ConstraintViolationExceptionMapper : ExceptionMapper<ConstraintViolationException> {
+    private val log = Logger.getLogger(ConstraintViolationExceptionMapper::class.java)
+
+    override fun toResponse(exception: ConstraintViolationException): Response {
+        // The constraint name is the only thing that distinguishes "the caller sent a duplicate"
+        // from "this service computed a bad foreign key", so it is logged even though it is
+        // deliberately not returned.
+        log.errorf(exception, "constraint violated at the database: %s", exception.constraintName)
+        return Response.status(ErrorCode.CONFLICT.httpStatus)
+            .entity(
+                apiError(
+                    ErrorCode.CONFLICT.httpStatus,
+                    ErrorCode.CONFLICT.code,
+                    "The request conflicts with existing data",
+                ),
+            )
+            .build()
+    }
+}
+
+/**
+ * `CharConversionException` → **400**. Raised while DECODING the request entity, before any handler
+ * sees it — `Unsupported UCS-4 endianness (3412)` is a body whose byte-order mark claims an
+ * encoding the parser cannot read. Unambiguously the caller's bytes; nothing server-side can
+ * produce it during request handling.
+ *
+ * It extends `IOException`, not `IllegalArgumentException`, which is why it fell through to
+ * [GenericExceptionMapper] and rendered as 500 — the same reason `DateTimeException` did.
+ */
+@Provider
+class CharConversionExceptionMapper : ExceptionMapper<CharConversionException> {
+    override fun toResponse(exception: CharConversionException): Response =
+        Response.status(ErrorCode.VALIDATION_ERROR.httpStatus)
+            .entity(
+                apiError(
+                    ErrorCode.VALIDATION_ERROR.httpStatus,
+                    ErrorCode.VALIDATION_ERROR.code,
+                    "The request body could not be decoded",
+                ),
+            )
+            .build()
 }

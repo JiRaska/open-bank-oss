@@ -25,6 +25,38 @@ and passes, and one that has drifted still overlaps enough to be recognised as t
 An unpaired spec enum is NOT a finding — plenty are free-form vocabularies with no Kotlin type
 (sort orders, filter keywords), and reporting those would bury the real ones.
 
+## What this gate CANNOT see (measured 2026-09-01, #5962)
+
+Two blind spots, both structural. Neither produces a finding, so the gate's silence about them
+is not evidence — they are recorded here so the next reader does not mistake a green run for a
+census.
+
+1. **Pairing is thresholded, so the WORST drift is the most invisible.** The more a spec enum has
+   drifted from its Kotlin enum, the less it overlaps, and below MIN_OVERLAP it is not reported
+   as drift — it is simply not paired, and an unpaired spec enum is not a finding. Measured by
+   re-running this gate with MIN_OVERLAP lowered to 0.10 and changing nothing else: the fleet goes
+   from `17 paired enum(s) drift, all 17 baselined; no new drift` to **six additional pairings**,
+   none of which any run of this gate has ever mentioned — `openbank-account-service` AccountType
+   (spec advertises ESCROW and LOAN, which have never existed, and omits all five GL_*/NOSTRO
+   values), `openbank-dispute-service` DisputeType (three invented names against five real ones —
+   exactly the #5895 shape this gate was built for), `openbank-campaign-service` StepResolution,
+   `openbank-lending-service` CollateralStatus, `openbank-sepa-instant` SctInstStatus and
+   `openbank-swift-service` SwiftStatus. Raising the threshold is NOT the fix: the last two of
+   those six are MIS-pairings against the shared four-eyes vocabulary, see 2.
+
+2. **`kotlin_enums()` walks the SERVICE's own src/main, so a spec enum backed by a shared
+   `openbank-libs-*` enum can never pair, however far it drifts.** 21 spec enums across the fleet
+   are in that state today. The clearest is `[PENDING, APPROVED, REJECTED, EXECUTED]`, which
+   appears in seven service specs as the ADR-0155 four-eyes approval status and is backed by
+   `openbank-libs-domain/.../approval/ApprovalStore.kt: enum class ApprovalStatus`. All seven
+   agree exactly right now — but nothing here is what makes that true. Falsified rather than
+   asserted: feeding `best_match` the swift quartet against the service-only enum map returns
+   `None` both when ApprovalStatus matches and when a value is added to it, while the same call
+   against a service+libs map returns `ApprovalStatus` and reports the added value. Control for
+   that probe: the run asserts the quartet is extracted from the swift spec at all, so a broken
+   extractor cannot masquerade as "no pairing". Consequence: **one value added to a shared libs
+   enum silently drifts seven specs at once, with no signal anywhere.**
+
 ## Ratchet, not a wall
 
 Existing drift is baselined in BASELINE below with the issue that owns it; a NEW drift fails.
@@ -62,8 +94,20 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
+    # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
+    # values are the `channel` of the app-interaction attribution response
+    # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an
+    # attributable app placement. `PanacheSendLogRepository.attributionForAppInteraction` queries
+    #     "id = ?1 and partyId = ?2 and channel in (?3, ?4) and outcome = ?5"
+    # with Channel.PUSH and Channel.BANNER, so EMAIL is unreturnable by construction and
+    # publishing it would advertise a value the endpoint cannot produce. Independent witness, not
+    # the same code re-read: the two DB CHECK constraints disagree ON PURPOSE — V11 constrains the
+    # send log to ('EMAIL','PUSH','BANNER') while V12's engagement projection constrains
+    # `channel` to ('PUSH','BANNER'), the narrower set this enum matches exactly. The gate pairs a
+    # placement-scoped enum with the full Channel enum and cannot see the restriction.
     "openbank-campaign-service:BANNER,PUSH":
-        "#5962 — Channel: undeclared EMAIL",
+        "#5962 — attribution response `channel`: NOT drift. A deliberate subset of Channel; the "
+        "attribution query filters `channel in (PUSH, BANNER)`, so EMAIL is unreturnable.",
     "openbank-campaign-service:DRY_RUN,SENT,SUPPRESSED_CAP,SUPPRESSED_CONSENT,SUPPRESSED_QUIET_HOURS":
         "#5962 — SendOutcome: undeclared CONVERTED/FAILED/SKIPPED_CONDITION/SUPPRESSED_LIST",
     "openbank-card-issuance-service:MASTERCARD,VISA":
@@ -72,12 +116,32 @@ BASELINE: dict[str, str] = {
         "#5962 — ConsentStatus: spec-only PENDING; undeclared PENDING_SCA/SUPERSEDED",
     "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
         "#5962 — ActionKind: undeclared FX_CONVERSION",
+    # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
+    # values are `RecordDecisionRequest.decision`, and a signer decides SIGNED or DECLINED;
+    # PENDING is the state a signer starts in, never one they can submit.
+    # `SignatureCeremony.recordDecision` enforces exactly that:
+    #     require(decision == SignerStatus.SIGNED || decision == SignerStatus.DECLINED)
+    # so publishing PENDING would advertise a value the domain rejects by construction. The
+    # gate pairs a request enum with the full lifecycle enum and cannot see the restriction.
     "openbank-document-service:DECLINED,SIGNED":
-        "#5962 — SignerStatus: undeclared PENDING",
+        "#5962 — RecordDecisionRequest.decision: NOT drift. A deliberate subset of SignerStatus; "
+        "recordDecision `require`s SIGNED or DECLINED, so PENDING is unsubmittable by design.",
+    # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
+    # values are the `{to}` path parameter of POST /accounting-days/{businessDate}/transitions/{to},
+    # and OPEN is not a reachable transition TARGET: a day is created in OPEN by a different
+    # endpoint, and `AccountingDay.canTransitionTo` is
+    #     next.ordinal == ordinal + 1
+    # which OPEN (ordinal 0) can never satisfy — there is deliberately no reopen (ADR-0207 D2/D3;
+    # a day corrected after cutoff is corrected forward). Publishing OPEN here would advertise a
+    # transition that always answers 409, so the reason as first written asked for a regression.
+    # The response schemas that DO carry a whole-lifecycle status already publish all four.
     "openbank-ledger-service:CUTOFF,LOCKED,TIED_OUT":
-        "#5962 — AccountingDayStatus: undeclared OPEN",
+        "#5962 — transitionAccountingDay `{to}`: NOT drift. A deliberate subset of "
+        "AccountingDayStatus; OPEN is unreachable as a transition target (no reopen, ADR-0207).",
     "openbank-lending-service:APPROVED,EXECUTED,PENDING,REJECTED":
         "#5962 — CollateralStatus: spec-only EXECUTED",
+    "openbank-lending-service:APPROVED,EXECUTED,PROPOSED,REJECTED":
+        "Compliance pack ProposalState, not CollateralStatus; value-overlap pairing is ambiguous.",
     # Also deliberate: the enum is right to flag (INDIVIDUAL has never existed; the DB CHECK is
     # ('NATURAL_PERSON','LEGAL_ENTITY','SOLE_TRADER')), but it sits inside `CreatePartyRequest`,
     # whose declared properties — legalName, tradingName, taxId, dateOfBirth, nationality —
@@ -99,8 +163,6 @@ BASELINE: dict[str, str] = {
         "not an enum fix. The `Status` pairing is coincidental.",
     "openbank-sanctions-service:CNB_DOMESTIC,EU_CONSOLIDATED,FATF_HIGH_RISK,HM_TREASURY,OFAC_SDN,UN_CONSOLIDATED":
         "#5962 — SanctionsListType: undeclared PEP_GLOBAL",
-    "openbank-sepa-instant:ACCEPTED,RECALLED,REJECTED,SETTLED,SUBMITTED":
-        "#5962 — SctInstStatus: spec-only ACCEPTED/SUBMITTED; undeclared PENDING/PROCESSING/TIMEOUT",
     "openbank-sepa-payment:COMPLETED,PROCESSING,RECALLED,REJECTED":
         "#5962 — SepaPaymentStatus: spec-only RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
     "openbank-sepa-payment:COMPLETED,PENDING,PROCESSING,RECALLED,REJECTED":
@@ -195,6 +257,11 @@ def best_match(
     best: tuple[str, frozenset[str]] | None = None
     best_n = 0
     for name, vals in domain.items():
+        # An exact vocabulary is authoritative. Without this fast path, declaration order can
+        # make a shorter enum (for example PocketStatus) tie with a longer superset
+        # (AccountStatus) and be reported as drift even though its real domain enum matches.
+        if vals == spec:
+            return name, vals
         n = len(spec & vals)
         if n > best_n:
             best, best_n = (name, vals), n
@@ -240,6 +307,8 @@ def self_test() -> int:
     domain = {
         "CheckType": frozenset({"IDENTITY", "ADDRESS", "PEP_SCREENING", "SANCTIONS_SCREENING", "ADVERSE_MEDIA"}),
         "CaseStatus": frozenset({"OPEN", "UNDER_REVIEW", "APPROVED", "REJECTED"}),
+        "LifecycleStatus": frozenset({"ACTIVE", "DORMANT", "FROZEN", "CLOSED"}),
+        "PocketStatus": frozenset({"ACTIVE", "FROZEN", "CLOSED"}),
     }
     cases: list[tuple[str, frozenset[str], bool]] = [
         # (name, spec values, must be reported as drift)
@@ -257,6 +326,8 @@ def self_test() -> int:
          frozenset({"IDENTITY", "ADDRESS", "AAA", "BBB", "CCC", "DDD", "EEE", "FFF"}), False),
         ("a different domain enum in the same service pairs with ITS OWN match",
          domain["CaseStatus"], False),
+        ("an exact enum wins over an earlier overlapping superset",
+         domain["PocketStatus"], False),
         ("drift in the second enum is still found",
          frozenset({"OPEN", "UNDER_REVIEW", "APPROVED", "DECLINED"}), True),
     ]

@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { isPublicSurface } from '@/lib/auth/publicSurface'
 import { Bot, Send, X, Loader2, Wrench, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react'
 
 interface ToolCall { tool: string; allowed: boolean; resultPreview: string }
@@ -41,6 +42,7 @@ export function modelLabel(id: string): string {
 
 export function AgentDock() {
   const pathname = usePathname()
+  const publicSurface = isPublicSurface(pathname)
   const { t } = useLanguage()
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Msg[]>([])
@@ -51,16 +53,18 @@ export function AgentDock() {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!open || models.length) return
+    if (publicSurface || !open || models.length) return
     fetch('/api/agent/chat')
       .then(r => r.json())
       .then(d => { setModels(d.models ?? []); setModel(d.default ?? '') })
       .catch(() => {})
-  }, [open, models.length])
+  }, [open, models.length, publicSurface])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, busy])
+
+  if (publicSurface) return null
 
   async function send() {
     const text = input.trim()

@@ -84,6 +84,42 @@ enum class NotificationTemplate(val variables: Set<String>) {
     fun unknownVariables(vars: Map<String, String>): Set<String> = vars.keys - variables
 
     /**
+     * Owner-approved no-device fallback policy (#4363). This is intentionally part of the closed
+     * template model rather than a free-form configuration map: adding a template forces an
+     * explicit delivery decision in review. `null` means the existing in-app-feed-only behaviour
+     * remains correct.
+     *
+     * A fallback e-mail never contains the rendered notification body. It is a generic prompt to
+     * open the authenticated app, so a missing device cannot turn lock-screen-safe push content
+     * into unbounded e-mail PII (ADR-0135 §3).
+     */
+    val noDeviceFallbackChannel: NotificationChannel?
+        get() = when (this) {
+            ACCOUNT_FROZEN,
+            KYC_REJECTED,
+            KYC_DOCUMENT_REQUIRED,
+            TRANSACTION_FAILED,
+            -> NotificationChannel.EMAIL
+            ACCOUNT_OPENED,
+            ACCOUNT_CLOSED,
+            TRANSACTION_COMPLETED,
+            KYC_APPROVED,
+            CONSENT_GRANTED,
+            CONSENT_REVOKED,
+            OTP_CODE,
+            PASSWORD_RESET,
+            WELCOME,
+            SCA_APPROVAL,
+            MARKETING_PRODUCT_OFFER,
+            DELEGATION_OFFERED,
+            DELEGATION_ACCEPTED,
+            DELEGATION_DECLINED,
+            DELEGATION_REVOKED,
+            DELEGATION_EXPIRED,
+            -> null
+        }
+
+    /**
      * The customer-facing category a template belongs to (#2). SECURITY is deliberately un-mutable:
      * a customer can never silence OTP / SCA / KYC / account-freeze pushes, so those are always sent
      * regardless of preferences. Everything else maps to a togglable category.

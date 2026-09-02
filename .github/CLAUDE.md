@@ -43,6 +43,24 @@
   plain red while having silently left half the fleet unlinted — 455 actionable findings against a
   true 920 (#2177). Feed every new gate an input it MUST flag, and read what it *prints*, not just
   its exit code.
+- **"I could not READ the corpus" is a third state, and a gate that renders it as a failure
+  turns someone else's rate limit into your red PR.** On 2026-08-21 ~18:25 UTC one installation
+  rate limit hit two gates in the same run and they disagreed:
+  `check-stale-comment-references.py` printed `::notice:: … UNRESOLVED … Not a pass and not a
+  failure` and stayed green, while `ruleset-context-parity` exited 1 and reddened #5896 — a PR
+  touching only admin-ui, `openbank-infra/scripts`, docs and a `CLAUDE.md`. "The ruleset requires
+  X and no job emits X" and "the rulesets API did not answer" are different facts; only the first
+  is a finding. The pattern to copy is the notice + exit 0, with the transient family named
+  explicitly (rate limit, secondary rate limit, timeout, DNS/connection, 5xx) so a NON-transient
+  failure still goes red — on GitHub a rate limit and a permission denial are both HTTP 403 and
+  are told apart only by the message text (`API rate limit exceeded` vs `Resource not accessible
+  by integration` / `Must have admin rights`), so distinguish on that, and where a probe cannot
+  tell them apart, say so rather than degrading both. **The floor undoes this one layer up if you
+  let it**: `min_subjects:` sees 0 subjects and fails a run that examined nothing by definition,
+  so the gate prints `SUBJECTS=UNRESOLVED` (`gatelib.subjects_unresolved`) and run-gates.py skips
+  the floor for that run only, saying so in the output — a silent pass there is indistinguishable
+  from a gate that really looked.
+
 - **An advisory gate's "these findings are all benign" note is an unverified claim, and advisory
   mode is what removes the pressure to check it.** The repo already knows a gate that has only ever
   passed is unfalsified; the sharper form is that a gate can fire CORRECTLY and have its *triage* be

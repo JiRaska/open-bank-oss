@@ -18,7 +18,7 @@
 | `country_code` | CHAR(2) NOT NULL | ISO 3166-1 alpha-2 |
 | `nca` | VARCHAR(20) NOT NULL | National Competent Authority (`CNB`, `BaFin`, …) |
 | `roles` | VARCHAR(100) NOT NULL | comma-joined `TppRole` set (`AISP,PISP`) |
-| `status` | VARCHAR(20) NOT NULL DEFAULT `ACTIVE` | ACTIVE / SUSPENDED / REVOKED / BLACKLISTED |
+| `status` | VARCHAR(20) NOT NULL DEFAULT `ACTIVE` | column domain: ACTIVE / SUSPENDED / REVOKED / BLACKLISTED. Only ACTIVE and BLACKLISTED are ever written (#6489) |
 | `qwac_subject_dn` | TEXT | eIDAS QWAC certificate Subject DN |
 | `qseal_subject_dn` | TEXT | eIDAS QSeal certificate Subject DN |
 | `qwac_expires_at` | DATE | QWAC expiry (checked in authorization) |
@@ -93,7 +93,7 @@ No customer PII (no party-id, IBAN, name of a natural person) is stored here. Th
 
 ## Retention
 
-`governance.yaml: retentionPolicy: 5 years`. TPP registration and blacklist records are retained for **5 years**, aligning with PSD2 / record-keeping obligations for authorisation evidence. Entries are not hard-deleted on de-authorisation — status transitions to `REVOKED`/`BLACKLISTED` preserve the audit history.
+`governance.yaml: retentionPolicy: 5 years`. TPP registration and blacklist records are retained for **5 years**, aligning with PSD2 / record-keeping obligations for authorisation evidence. Entries are not hard-deleted on de-authorisation — the status transition to `BLACKLISTED` preserves the audit history. (`REVOKED` and `SUSPENDED` are declared in the enum but written by nothing today — see #6489.)
 
 ## Data lineage
 

@@ -26,6 +26,7 @@ interface TemporalMetrics {
   workflows: { scheduled1h: number; completed1h: number; failed1h: number; timedOut1h: number }
   latency: { activityScheduleToStartMs: number | null; workflowTaskScheduleToStartMs: number | null; serverRequestP99Ms: number | null }
   namespaces: string[]
+  workflowTypes: { namespace: string; workflowType: string; completed1h: number }[]
 }
 interface StatusData { available: boolean; temporalDeployed: boolean; metrics: TemporalMetrics | null }
 
@@ -77,22 +78,22 @@ export default function TemporalFlowPage() {
           </div>}
         title={t('Tok Temporal workflow', 'Temporal Workflow Flow')}
         icon={<Workflow aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
-        subtitle={t('Money-path ságy jako animované řetězce kroků (krok → krok → kompenzace). Kroky jsou zdokumentované definice ság; metriky jsou živé, ale agregátní za namespace (ne přehrání jednotlivých běhů).',
-               'Money-path sagas as animated step-chains (step → step → compensation). The steps are the documented saga definitions; the metrics are live but namespace-aggregate (not per-run replay).')}
+        subtitle={t('Živé typy workflow a jejich hodinový průtok z Tempa. Referenční diagramy níže popisují kód, nikoli aktuální běhy.',
+               'Live workflow types and hourly throughput from Temporal. Reference diagrams below describe code, not current executions.')}
       />
       {/* Controls */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '14px', gap: '8px' }}>
-        <button onClick={() => setFlow(v => !v)} aria-pressed={flow} title={t('Přepnout tok', 'Toggle flow')}
+        <button type="button" onClick={() => setFlow(v => !v)} aria-pressed={flow} aria-label={t(flow ? 'Pozastavit tok workflow' : 'Spustit tok workflow', flow ? 'Pause workflow flow' : 'Start workflow flow')} title={t('Přepnout tok', 'Toggle flow')}
           style={{
             display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
             borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
             border: `1px solid ${flow ? 'var(--accent)' : 'var(--border)'}`,
             background: flow ? 'var(--accent)' : 'var(--surface)', color: flow ? '#fff' : 'var(--text-secondary)',
           }}>
-          {flow ? <Pause size={13} /> : <Play size={13} />}{t('Tok', 'Flow')}
+          {flow ? <Pause size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}{t('Tok', 'Flow')}
         </button>
-        <button onClick={load} disabled={isChecking} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
-          <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
+        <button type="button" onClick={load} disabled={isChecking} aria-busy={isChecking} aria-label={t('Obnovit stav Temporal', 'Refresh Temporal status')} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+          <RefreshCw size={14} aria-hidden="true" className={isChecking ? 'animate-spin' : ''} />
           {isChecking ? t('Načítám…', 'Loading...') : t('Obnovit', 'Refresh')}
         </button>
       </div>
@@ -112,6 +113,18 @@ export default function TemporalFlowPage() {
           : <><AlertTriangle size={12} style={{ color: 'var(--warning)' }} /> {t('Temporal není nasazený zde — ságy zobrazeny staticky, živé metriky nedostupné.', 'Temporal is not deployed here — sagas shown statically, live metrics unavailable.')}</>}
       </div>
 
+      {deployed && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 18 }}>
+          <div className="section-title" style={{ padding: '14px 16px 8px' }}>{t('Živé workflow typy', 'Live workflow types')}</div>
+          <table className="table"><thead><tr><th>Namespace</th><th>{t('Workflow typ', 'Workflow type')}</th><th>{t('Dokončeno za 1 h', 'Completed in 1h')}</th></tr></thead>
+            <tbody>{(m?.workflowTypes ?? []).map(row => <tr key={`${row.namespace}:${row.workflowType}`}><td className="mono">{row.namespace}</td><td className="mono">{row.workflowType}</td><td>{row.completed1h}</td></tr>)}</tbody>
+          </table>
+          {(m?.workflowTypes ?? []).length === 0 && <div style={{ padding: 16, color: 'var(--text-secondary)', fontSize: 12 }}>{t('Temporal je scrapeován, ale za poslední hodinu nebyl dokončen žádný workflow.', 'Temporal is scraped, but no workflow completed in the last hour.')}</div>}
+        </div>
+      )}
+
+      <div className="section-title" style={{ marginBottom: 10 }}>{t('Referenční definice v kódu', 'Reference definitions in code')}</div>
+
       {/* One animated saga chain per money-path workflow */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
         {MONEY_WORKFLOWS.map((w, wi) => {
@@ -130,7 +143,7 @@ export default function TemporalFlowPage() {
                 </div>
                 <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t(w.serviceCs, w.serviceEn)}</div>
                 <code style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{w.workflowCs}</code>
-                <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>{t(w.flagCs, w.flagEn)}</span>
+                <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>{t('referenční definice', 'reference definition')}</span>
               </div>
               <svg viewBox={`0 0 ${WIDTH} ${SVG_H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
                 <defs>

@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -23,6 +24,7 @@ import java.util.UUID
  * the call returns the raw [Response].
  */
 @RegisterRestClient(configKey = "aml-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/aml/cases")
 @Produces(MediaType.APPLICATION_JSON)

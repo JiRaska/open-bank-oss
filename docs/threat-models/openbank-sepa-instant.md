@@ -64,11 +64,13 @@ here (see ADR-0155, issue #413).
 | **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different recall | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
 | **R**epudiation | No record of who approved a recall clawing back settled funds | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
 | **I**nfo disclosure | Approval id enumeration reveals payment/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/sepa-instant/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_PAYMENTS` + `@Authorize(action = "sctInstPayment.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never payment/account details. Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
 | **D**oS | Flooding `POST /{paymentId}/recall` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
 
-**DFD update:** adds `Operator (checker) → PATCH /api/v1/sepa-instant/approvals/{id} → Redis
-(approval:*)` alongside the existing `POST /{paymentId}/recall` edge; the maker's retry reuses
-the existing DFD edge.
+**DFD update:** adds `Operator (checker) → GET /api/v1/sepa-instant/approvals → Redis (approval:*)`
+and `Operator (checker) → PATCH /api/v1/sepa-instant/approvals/{id} → Redis (approval:*)`
+alongside the existing `POST /{paymentId}/recall` edge; the maker's retry reuses the existing DFD
+edge.
 **Risk class:** integrity (segregation of duties on a fund-clawback action) + confidentiality
 (approval record scope).
 **Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do
@@ -83,6 +85,41 @@ not change any existing request's outcome until explicitly flipped.
   need an additional store; not implemented in this PR.
 
 ## 6. Change log
+
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass: screening and SCA still run. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
+- **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
+  `sctInstPayment.recall` four-eyes decision parked at 202 was discoverable only by whoever had
+  been handed its approval id out of band — the ceremony completed only if the two operators were
+  already talking, and the 24h Redis TTL then expired the request silently otherwise (issue #5679,
+  mirroring sanctions #3472, ledger and domestic-payment). Added
+  `GET /api/v1/sepa-instant/approvals` (§4a new I row); additive-only OpenAPI change (1.4.0 ->
+  1.5.0, ADR-0048).
+  - **Checked the existing decide endpoint's own authz posture while here** (verify-by-effect, not
+    by appearance): `opa eval` against the real `rest.rego` + `rules-opa-data.yaml` bundle showed
+    `sctInstPayment.approval.decide` resolving **`allow=false` for a real ROLE_OPERATOR** — the
+    action was missing from `rules.yaml`'s `role_action_matrix` (present for the sibling
+    `sepaPayment.approval.decide`, absent for this service's own `sctInstPayment.approval.decide`
+    since the four-eyes gate for this rail was wired). The decide endpoint has therefore been
+    403ing every operator in any `AUTHZ_ENFORCE=true` environment since it shipped — same shape as
+    the balance-service gap found by #5686/#5690. **Fixed** by adding the matrix grant (mirroring
+    `sepaPayment.approval.decide`'s entry) to both `role_action_matrix.ROLE_OPERATOR` and
+    `shared_m2m_matrix_write_grants.declared`, then regenerating `rules-opa-data.yaml` and every
+    service's OPA bundle (a `role_action_matrix` edit restamps the fleet). Verified with `opa eval`:
+    `sctInstPayment.approval.decide` now resolves `allow=true`/`reason=matrix-allows` for
+    ROLE_OPERATOR, and a non-operator role (`ROLE_KYC_OPENER`) still resolves `allow=false`.
+  - **Known residual, not fixed here**: `matrix-allows` is role-only, and the deployed realm
+    template gives `service-account-openbank-edge` `ROLE_OPERATOR` in at least one environment (see
+    root `CLAUDE.md`'s realm-drift note) — the same exposure balance-service closed with a
+    per-service `prohibited` rule in `balance_rest_ext.rego`. sepa-instant has no such standalone
+    ext-rego file to extend (its REST extension is a heredoc inside
+    `gen-sepa-instant-opa-bundle.sh` with no `prohibited` block at all today), and there is no
+    verified in-repo M2M caller of `ApprovalResource` (the gen script's own comment already notes
+    this for `sctInstPayment.create`). Building a new prohibition mechanism was out of scope for
+    this PR's mirrored fix; tracked as follow-up under issue #5679's own money-path-first ordering.
+  - **Rollback:** revert both commits independently — the matrix grant only changes an OPA
+    `allow` decision (advisory in this environment, `authz.four-eyes.enforce=false`), and the new
+    `GET` is additive.
 
 - **2026-08-09** — Fraud shadow scoring's fallback is now observable (#4221). **No new trust
   boundary and no new caller**: the outbound edge to fraud-service (OIDC client-credentials + mTLS,

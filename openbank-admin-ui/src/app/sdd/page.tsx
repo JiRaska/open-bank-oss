@@ -68,8 +68,15 @@ export default function SddPage() {
           'Read-only mandate view including the B2B confirmation queue. Lifecycle changes belong to governed flows.',
         )}
         icon={<Repeat size={20} style={{ color: 'var(--accent)' }} />}
-        actions={<button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+        actions={<button
+          onClick={load}
+          disabled={loading}
+          type="button"
+          aria-busy={loading}
+          aria-label={t('Obnovit mandáty inkas', 'Refresh direct debit mandates')}
+          className="btn btn-secondary btn-sm"
+        >
+          <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
 
@@ -85,7 +92,8 @@ export default function SddPage() {
       </div>}
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {unavailable ? <DataUnavailable kind={unavailable.kind} service="sdd-service" feature={t('Mandáty inkas', 'Direct debit mandates')} lang={language} dense /> : (
+        {unavailable && <DataUnavailable kind={unavailable.kind} service="sdd-service" feature={t('Mandáty inkas', 'Direct debit mandates')} lang={language} dense={rows.length > 0} />}
+        {(!unavailable || rows.length > 0) && (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>

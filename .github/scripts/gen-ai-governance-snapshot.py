@@ -39,6 +39,8 @@ CURATED = ROOT / "openbank-libs" / "governance" / "ai-rollout.yaml"
 AGENTS = ROOT / "openbank-libs" / "governance" / "agents.yaml"
 PROMPT_REGISTRY = ROOT / "openbank-libs" / "governance" / "prompts" / "registry.yaml"
 EVALS_BASELINES = ROOT / "openbank-libs" / "governance" / "evals" / "baselines.json"
+EVALS_DIR = EVALS_BASELINES.parent
+EVAL_RECORDINGS = EVALS_DIR / "recordings"
 OUT = ROOT / "openbank-admin-ui" / "ai-governance-snapshot.json"
 
 ALLOWED_D_STATUSES = {"built", "partial", "planned"}
@@ -210,6 +212,7 @@ def collect_prompt_registry_facts(registry_doc: dict, agent_ids: list[str]) -> d
     allowed_statuses = {"registered", "pending", "external", "not-applicable"}
     by_status: dict[str, list[str]] = {key: [] for key in sorted(allowed_statuses)}
     seen_ids: list[str] = []
+    prompts_by_charter: dict[str, list[str]] = {}
     for entry in entries:
         if not isinstance(entry, dict):
             fail("prompts/registry.yaml charters[] entries must be mappings")
@@ -221,6 +224,10 @@ def collect_prompt_registry_facts(registry_doc: dict, agent_ids: list[str]) -> d
             fail(f"prompts/registry.yaml charter {charter_id} has invalid status {status!r}")
         seen_ids.append(charter_id)
         by_status[status].append(charter_id)
+        prompts = entry.get("prompts", [])
+        if not isinstance(prompts, list) or any(not isinstance(item, str) for item in prompts):
+            fail(f"prompts/registry.yaml charter {charter_id} has invalid prompts")
+        prompts_by_charter[charter_id] = prompts
 
     if sorted(seen_ids) != sorted(agent_ids):
         missing = sorted(set(agent_ids) - set(seen_ids))
@@ -235,16 +242,19 @@ def collect_prompt_registry_facts(registry_doc: dict, agent_ids: list[str]) -> d
         "sha256": sha256_short(PROMPT_REGISTRY),
         "counts": {status: len(ids) for status, ids in by_status.items()},
         "idsByStatus": {status: ids for status, ids in by_status.items()},
+        "promptsByCharter": prompts_by_charter,
     }
 
 
-def collect_evals_facts() -> dict:
+def collect_evals_facts(registered_charters: list[str]) -> dict:
     baselines = load_json(EVALS_BASELINES)
     if "default_min_pass_rate" not in baselines:
         fail("evals/baselines.json missing default_min_pass_rate")
     overrides = baselines.get("overrides", {})
     if not isinstance(overrides, dict):
         fail("evals/baselines.json overrides must be an object")
+    suite_charters = sorted(path.stem for path in EVALS_DIR.glob("*.yaml"))
+    recorded_charters = sorted(path.stem for path in EVAL_RECORDINGS.glob("*.json"))
     return {
         "source": "openbank-libs/governance/evals/baselines.json",
         "sha256": sha256_short(EVALS_BASELINES),
@@ -252,6 +262,10 @@ def collect_evals_facts() -> dict:
         "defaultMinPassRate": baselines["default_min_pass_rate"],
         "overrideCount": len(overrides),
         "overrideCharters": sorted(overrides.keys()),
+        "suiteCharters": suite_charters,
+        "recordedCharters": recorded_charters,
+        "missingSuiteCharters": sorted(set(registered_charters) - set(suite_charters)),
+        "missingRecordingCharters": sorted(set(suite_charters) - set(recorded_charters)),
     }
 
 
@@ -332,8 +346,9 @@ def build_snapshot() -> dict:
     agent_facts, agent_ids, enforced, policy_default = collect_agent_facts(agents_doc)
     validate_curated(curated)
     prompt_facts = collect_prompt_registry_facts(registry_doc, agent_ids)
-    evals_facts = collect_evals_facts()
-    loader_facts = collect_registry_loader_facts(prompt_facts["idsByStatus"]["registered"])
+    registered_charters = prompt_facts["idsByStatus"]["registered"]
+    evals_facts = collect_evals_facts(registered_charters)
+    loader_facts = collect_registry_loader_facts(registered_charters)
 
     decisions = curated["decisions"]
     decision_summary = {

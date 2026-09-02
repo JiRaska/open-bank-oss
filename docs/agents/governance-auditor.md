@@ -58,6 +58,13 @@ liveness, applied here to the governance axis instead.
   `review.money_path_approvals` / `money_path_services` as config defaults rather than parsing the
   mounted `rules.yaml` live — a future edit to those values will not be picked up until the
   live-parsing follow-up lands.
-- The LLM diagnosis and fix-diff generation are stubs pending the shared LiteLLM gateway wiring; a
-  finding today produces a tracking ticket with a placeholder summary rather than an LLM-drafted
-  root-cause note.
+- The LLM diagnosis and fix-diff generation are stubs pending the shared LiteLLM gateway wiring, so
+  `proposeFixDiff` never yet returns a real diff.
+- **`GitHubProposalPort` is unwired and REFUSES — no finding of this agent reaches GitHub today**
+  (#5897). Both methods return `null`, and `DiagnoseAndProposeActivityImpl` then leaves the finding
+  `DIAGNOSED` with a null `proposalUrl`: it is never counted in a run's `findingsProposed` and never
+  presented as awaiting a human. It previously returned a fabricated
+  `https://github.com/openbank/openbank/issues/pending-governance-<id>` URL and moved the finding to
+  `PROPOSED` — a no-op sharing its shape with a real result, on a host that is not even this
+  repository. This follows `openbank-mcp-service`'s `UnwiredProposalPort` (#3900).
+  `flaky-test-hunter`'s adapter is the template if and when this gets wired.

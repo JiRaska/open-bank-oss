@@ -125,7 +125,16 @@ mp:
         # DLQ ensures processing failures on this money-path consumer are retried out-of-band
         # rather than silently dropped (ignore) or stalling the partition (fail).
         failure-strategy: dead-letter-queue
-        dead-letter-queue.topic: payment.scheme-accepted.dlq
+        # #5745: NESTED, not `dead-letter-queue.topic:`. The dotted spelling this replaces
+        # registered as ..."dead-letter-queue.topic" (quotes included) and the connector never
+        # read it — so on a workstation and in every test this money-path channel silently fell
+        # back to SmallRye's implicit `dead-letter-topic-payment-scheme-accepted`. Only the
+        # deployed pod got the right name, from the transaction-service-msg-override ConfigMap
+        # (which stays, unchanged: same value, and it is what production actually reads). Same
+        # value here, now resolving everywhere. Proven both directions by
+        # openbank-aml-service's DeadLetterQueueConfigResolutionTest.
+        dead-letter-queue:
+          topic: payment.scheme-accepted.dlq
     outgoing:
       transaction-events-out:
         connector: smallrye-kafka

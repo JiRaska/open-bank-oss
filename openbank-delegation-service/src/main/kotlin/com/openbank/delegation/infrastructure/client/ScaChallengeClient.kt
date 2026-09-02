@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.client
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.delegation.application.port.out.ScaChallengeClient
 import com.openbank.delegation.application.port.out.ScaChallengeSnapshot
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -45,6 +46,7 @@ data class ConsumeScaChallengeRequest(val partyId: UUID)
  */
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "sca-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 interface ScaServiceRestClient {
     @GET
     @Path("/{id}")

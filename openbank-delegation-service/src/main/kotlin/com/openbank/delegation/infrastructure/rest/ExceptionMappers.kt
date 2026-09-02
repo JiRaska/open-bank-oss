@@ -10,6 +10,7 @@ import com.openbank.delegation.application.usecase.DelegationNotFoundException
 import com.openbank.delegation.application.usecase.DelegationNotGranteeException
 import com.openbank.delegation.application.usecase.DelegationNotGrantorException
 import com.openbank.delegation.application.usecase.DelegationResourceOwnershipException
+import com.openbank.delegation.application.usecase.DelegationRolePresetNotFound
 import com.openbank.delegation.application.usecase.DelegationScaException
 import com.openbank.delegation.application.usecase.DelegationUnsupportedConstraintException
 import com.openbank.delegation.application.usecase.SpendReservationNotFoundException
@@ -29,6 +30,14 @@ private fun errorBody(status: Int, message: String?): Map<String, Any?> = mapOf(
 class DelegationNotFoundExceptionMapper : ExceptionMapper<DelegationNotFoundException> {
     override fun toResponse(exception: DelegationNotFoundException): Response =
         Response.status(Response.Status.NOT_FOUND).entity(errorBody(404, exception.message)).build()
+}
+
+@Provider
+class DelegationRolePresetNotFoundMapper : ExceptionMapper<DelegationRolePresetNotFound> {
+    override fun toResponse(exception: DelegationRolePresetNotFound): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message))
+            .build()
 }
 
 @Provider

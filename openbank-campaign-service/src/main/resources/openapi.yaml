@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.39.0
+  version: 1.43.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -54,8 +54,9 @@ paths:
       summary: Resolve server-owned attribution for an opaque app interaction reference
       description: >-
         Additive internal customer-edge capability. Only after ownership, app channel and handoff
-        are established does the trusted response return campaign/step/channel context for the edge
-        to attach to the downstream event. The app never receives or supplies these fields.
+        are established does the trusted response return campaign/step/channel context and the
+        campaign's immutable incentive reference for the edge to attach to a downstream claim.
+        The app never receives or supplies campaign or offer identity.
       parameters:
         - name: interactionRef
           in: path
@@ -77,6 +78,10 @@ paths:
                   campaignId: { type: string, format: uuid }
                   stepOrder: { type: integer, minimum: 0 }
                   channel: { type: string, enum: [PUSH, BANNER] }
+                  incentiveOfferRef:
+                    oneOf:
+                      - $ref: '#/components/schemas/IncentiveOfferRef'
+                      - type: 'null'
         "400":
           description: Missing or malformed caller party header
         "404":
@@ -530,6 +535,29 @@ paths:
                 items:
                   $ref: '#/components/schemas/CampaignEngagementMetric'
 
+  /api/v1/campaigns/{id}/incentives:
+    get:
+      tags: [Campaigns]
+      summary: Authoritative incentive lifecycle funnel
+      description: >-
+        Aggregate attributed reservation outcomes. Reserved means inventory is held, not redeemed;
+        only committed is a completed reward. Released and expired remain visible so delivery or
+        clicks can never be mistaken for economic success. No party, code or digest is retained.
+      operationId: campaignIncentiveFunnel
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Counts by authoritative incentive lifecycle state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignIncentiveFunnel'
+        '503':
+          description: >-
+            Incentive outcome projection has not completed its reviewed initial catch-up. Clients
+            must show the funnel as unavailable rather than treating it as zero.
+
   /api/v1/campaigns/{id}/sends/summary:
     get:
       tags: [Campaigns]
@@ -850,6 +878,8 @@ components:
             Percentage of the audience assigned deterministically to the durable no-contact
             control cohort. A non-zero value requires conversionRule; zero retains the campaign's
             historical all-treatment behaviour.
+        incentiveOfferRef:
+          $ref: '#/components/schemas/IncentiveOfferRef'
         state:
           type: string
           enum: [DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED]
@@ -861,6 +891,17 @@ components:
       type: object
       properties:
         name: { type: string }
+        version: { type: integer, minimum: 1 }
+    IncentiveOfferRef:
+      type: object
+      required: [id, name, version]
+      description: >-
+        Exact published incentive revision selected during authoring. Campaign-service stores this
+        immutable reference only; incentive-service exclusively owns reservation, redemption and
+        reward value mutation.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1 }
         version: { type: integer, minimum: 1 }
     CampaignStep:
       type: object
@@ -1038,6 +1079,8 @@ components:
           description: >-
             Percentage assigned to a no-contact control cohort. Requires conversionRule so an
             author cannot withhold a message from people without a measurable outcome.
+        incentiveOfferRef:
+          $ref: '#/components/schemas/IncentiveOfferRef'
     CampaignSchedule:
       type: object
       required: [cadence]
@@ -1231,6 +1274,18 @@ components:
           enum: [IMPRESSION, CLICK, DISMISS]
         count: { type: integer, format: int64, minimum: 0 }
 
+    CampaignIncentiveFunnel:
+      type: object
+      required: [reserved, committed, released, expired]
+      description: >-
+        Reservation lifecycle counts deduplicated by event id and reservation/status. Only
+        committed is an authoritative redemption; reserved is never reported as redeemed.
+      properties:
+        reserved: { type: integer, format: int64, minimum: 0 }
+        committed: { type: integer, format: int64, minimum: 0 }
+        released: { type: integer, format: int64, minimum: 0 }
+        expired: { type: integer, format: int64, minimum: 0 }
+
     SuppressionCount:
       type: object
       properties:
@@ -1328,6 +1383,10 @@ components:
             # Not a suppression: no policy denied anything.
             - SKIPPED_CONDITION
             - FAILED
+            # ConversionConsumer writes this outcome into the same send-log row this schema
+            # describes (Persistence.kt), so a live response can already carry it; the spec had
+            # never declared it (1.43.0, #5962).
+            - CONVERTED
         occurredAt: { type: string, format: date-time }
         deliveryStatus:
           description: >-

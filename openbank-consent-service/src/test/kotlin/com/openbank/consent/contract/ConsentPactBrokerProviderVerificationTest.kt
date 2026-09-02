@@ -133,6 +133,66 @@ class ConsentPactBrokerProviderVerificationTest {
         ps.executeUpdate()
     }
 
+    /**
+     * States for the two other consumers currently published to the Pact Broker. The broker loader
+     * selects every pact naming this provider, not only mcp-service's pact. Keeping these fixtures
+     * here is therefore essential: an unhandled state makes the published provider verdict red
+     * even when the always-on git-pact replay has the corresponding fixture.
+     */
+    @State("an ALL-scope suppression is active for the pact suppressed party")
+    fun activeSuppressionExists() {
+        dataSource.connection.use { c ->
+            c.autoCommit = false
+            if (!rowExists(c, "SELECT 1 FROM suppressions WHERE id = ?::uuid", PACT_SUPPRESSION_ID)) {
+                c.prepareStatement(INSERT_SUPPRESSION_SQL).use { ps ->
+                    ps.setString(1, PACT_SUPPRESSION_ID)
+                    ps.setString(2, PACT_SUPPRESSED_PARTY_ID)
+                    ps.executeUpdate()
+                }
+                c.commit()
+            }
+        }
+    }
+
+    @State("an ACTIVE MARKETING_COMMS_EMAIL consent covers the pact consented party")
+    fun activeMarketingConsentExists() = insertMarketingConsent(
+        consentId = PACT_MARKETING_CONSENT_ID,
+        partyId = PACT_CONSENTED_PARTY_ID,
+        scope = "MARKETING_COMMS_EMAIL",
+    )
+
+    @State("an ACTIVE MARKETING_COMMS_INAPP consent covers the pact engagement party")
+    fun activeInAppConsentExists() = insertMarketingConsent(
+        consentId = PACT_INAPP_CONSENT_ID,
+        partyId = PACT_ENGAGEMENT_PARTY_ID,
+        scope = "MARKETING_COMMS_INAPP",
+    )
+
+    private fun insertMarketingConsent(consentId: String, partyId: String, scope: String) {
+        dataSource.connection.use { c ->
+            c.autoCommit = false
+            if (!rowExists(c, "SELECT 1 FROM consents WHERE id = ?::uuid", consentId)) {
+                c.prepareStatement(INSERT_MARKETING_CONSENT_SQL).use { ps ->
+                    ps.setString(1, consentId)
+                    ps.setString(2, partyId)
+                    ps.setString(3, PACT_MARKETING_GRANTEE_ID)
+                    ps.executeUpdate()
+                }
+                c.prepareStatement("INSERT INTO consent_scopes (consent_id, scope) VALUES (?::uuid, ?)").use { ps ->
+                    ps.setString(1, consentId)
+                    ps.setString(2, scope)
+                    ps.executeUpdate()
+                }
+                c.commit()
+            }
+        }
+    }
+
+    private fun rowExists(c: Connection, sql: String, id: String): Boolean = c.prepareStatement(sql).use { ps ->
+        ps.setString(1, id)
+        ps.executeQuery().use { rs -> rs.next() }
+    }
+
     @State("no consent exists with the pact unknown-consent id")
     fun unknownConsentDoesNotExist() {
         // No setup: a fresh Testcontainer DB satisfies this by construction, and nothing in this
@@ -151,10 +211,36 @@ class ConsentPactBrokerProviderVerificationTest {
             )
         """.trimIndent()
 
+        private val INSERT_SUPPRESSION_SQL = """
+            INSERT INTO suppressions (
+                id, party_id, scope, value, reason_code, source, created_by, created_at
+            ) VALUES (
+                ?::uuid, ?::uuid, 'ALL', NULL, 'CUSTOMER_OPTOUT', 'preference-centre',
+                'pact-operator', NOW()
+            )
+        """.trimIndent()
+
+        private val INSERT_MARKETING_CONSENT_SQL = """
+            INSERT INTO consents (
+                id, party_id, grantee_id, grantee_type, grantee_name, status,
+                valid_from, valid_to, frequency_per_day, created_at, updated_at
+            ) VALUES (
+                ?::uuid, ?::uuid, ?, 'CUSTOMER_AGENT', 'Pact Verify Marketing', 'ACTIVE',
+                NOW() - INTERVAL '1 day', NOW() + INTERVAL '30 days', 4, NOW(), NOW()
+            )
+        """.trimIndent()
+
         /** Must equal `ConsentValidatePactConsumerTest.PACT_CONSENT_ID` (openbank-mcp-service). */
         const val PACT_CONSENT_ID = "c1c1c1c1-d2d2-4e4e-8f8f-a9a9a9a9a9a9"
         const val PACT_PARTY_ID = "c2c2c2c2-d3d3-4e4e-8f8f-a8a8a8a8a8a8"
         const val PACT_GRANTEE_ID = "agent:pact-verify-mcp"
         const val PACT_ACCOUNT_IBAN = "CZ6508000000192000145399"
+        const val PACT_SUPPRESSION_ID = "c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3"
+        const val PACT_SUPPRESSED_PARTY_ID = "c1c1c1c1-c1c1-c1c1-c1c1-c1c1c1c1c1c1"
+        const val PACT_CONSENTED_PARTY_ID = "c2c2c2c2-c2c2-c2c2-c2c2-c2c2c2c2c2c2"
+        const val PACT_MARKETING_CONSENT_ID = "c4c4c4c4-c4c4-4c4c-8c4c-c4c4c4c4c4c4"
+        const val PACT_MARKETING_GRANTEE_ID = "party-service:marketing-comms"
+        const val PACT_INAPP_CONSENT_ID = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2"
+        const val PACT_ENGAGEMENT_PARTY_ID = "e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1"
     }
 }

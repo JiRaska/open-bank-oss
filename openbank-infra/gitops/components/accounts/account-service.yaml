@@ -37,7 +37,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-account-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "f2d60035c03b1395"
+        openbank.tech/policy-checksum: "21cb426620a70a58"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -48,7 +48,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: account-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-account-service:sandbox-b8b8d7a2
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-account-service:sandbox-00b9ae4a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -56,7 +56,7 @@ spec:
             - name: management
               containerPort: 8085
           env:
-            # AML/sanctions screening gate for account opening (ADR-0073). The
+            # AML/sanctions screening gate for account opening (ADR-0032 §C). The
             # service lives in the `sanctions` namespace on :8123; without this the
             # app falls back to a non-resolving default and account opening fails
             # closed (AccountScreeningUnavailableException) — blocking onboarding.

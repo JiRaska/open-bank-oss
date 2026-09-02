@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.1...audit-service-v0.18.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **audit:** read aggregateId from the producer envelope ([#6478](https://github.com/JiRaska/open-bank-oss/issues/6478)) ([564cbd3](https://github.com/JiRaska/open-bank-oss/commit/564cbd3aa00094479253fc20b1551fe079de8f23)), closes [#6318](https://github.com/JiRaska/open-bank-oss/issues/6318)
+* **docs:** repair the 7 .mmd diagrams that do not parse ([#6496](https://github.com/JiRaska/open-bank-oss/issues/6496)) ([c1e6ad7](https://github.com/JiRaska/open-bank-oss/commit/c1e6ad7b14887db70ec3365747f2ed06d9ec02db))
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.0...audit-service-v0.18.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.17.1...audit-service-v0.18.0) (2026-08-21)
+
+
+### Features
+
+* **agent:** durable AI audit provenance ([#6209](https://github.com/JiRaska/open-bank-oss/issues/6209)) ([8a862f3](https://github.com/JiRaska/open-bank-oss/commit/8a862f387594f934f91bf5befcbc966ccf40abad))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.17.0...audit-service-v0.17.1) (2026-08-20)
 
 

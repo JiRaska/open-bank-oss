@@ -158,8 +158,9 @@ export default function ObservabilityPage() {
             <GitBranch size={13} />
             {t('Trace Explorer', 'Trace Explorer')}
           </Link>
-          <button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+          <button onClick={load} disabled={loading} type="button" aria-busy={loading}
+            aria-label={t('Obnovit observabilitu', 'Refresh observability')} className="btn btn-secondary btn-sm">
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>

@@ -4,15 +4,15 @@
 
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { classifyBffFailure } from '@/lib/services/bff'
+import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { readStashedRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
 
 // Mirrors the list-row shape on the payments page. The record can carry more
 // fields than the table showed — the detail view surfaces all of them.
@@ -33,16 +33,22 @@ interface Payment {
   [k: string]: unknown
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  SETTLED: 'var(--success)', RECEIVED: 'var(--info-text)', SENT_TO_CLEARING: 'var(--warning)',
-  PENDING: 'var(--warning)', PROCESSING: 'var(--warning)', REJECTED: 'var(--danger)', FAILED: 'var(--danger)',
+// These two statuses are specific to payment processing. Keep their explicit
+// meaning here rather than broadening the cross-domain status vocabulary:
+// RECEIVED means accepted by the payment service, not settled; SENT_TO_CLEARING
+// remains an in-flight operator state that needs attention.
+function paymentStatusTone(status: string | undefined): Tone {
+  if (status === 'RECEIVED') return 'info'
+  if (status === 'SENT_TO_CLEARING') return 'warning'
+  return statusTone(status)
 }
 
-// The list route is the source of truth (no by-id backend endpoint exists);
-// refresh re-fetches the list and picks this id out of it.
-const LIST_ROUTE: Record<string, string> = {
-  SEPA: '/api/sepa-payments',
-  DOMESTIC: '/api/domestic-payments',
+// Both payment rails expose an authorized by-id resource. Use the generic BFF so
+// the browser keeps the session→bearer relay and the backend enforces read RBAC
+// for this exact payment instead of broadening the request to the whole list.
+const DETAIL_ROUTE: Record<string, { service: string; path: string }> = {
+  SEPA: { service: 'sepa-payment', path: '/api/v1/sepa-payments' },
+  DOMESTIC: { service: 'domestic-payment', path: '/api/v1/domestic-payments' },
 }
 
 export default function PaymentDetailPage() {
@@ -59,47 +65,80 @@ function PaymentDetailContent() {
   const type = (params.get('type') ?? '').toUpperCase()
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const routeKey = `${type}:${id}`
 
-  const [payment, setPayment] = useState<Payment | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+  const [paymentSnapshot, setPaymentSnapshot] = useState<{ key: string; payment: Payment } | null>(null)
+  const [loadingState, setLoadingState] = useState<{ key: string; active: boolean }>({ key: routeKey, active: true })
+  const [unavailableSnapshot, setUnavailableSnapshot] = useState<{ key: string; kind: UnavailableKind } | null>(null)
   const [showRaw, setShowRaw] = useState(false)
+  const requestGeneration = useRef(0)
 
-  async function load() {
-    setLoading(true)
-    // Show the handed-off row immediately (no round-trip); refresh in the background.
-    const stashed = readStashedRow<Payment>('payments', id)
-    if (stashed) { setPayment(stashed); setUnavailable(null) }
+  // Key every rendered state to the current route. A param/rail change must not
+  // flash the previous payment or its failure before the new effect starts.
+  const payment = paymentSnapshot?.key === routeKey ? paymentSnapshot.payment : null
+  const unavailable = unavailableSnapshot?.key === routeKey
+    ? { kind: unavailableSnapshot.kind }
+    : null
+  const loading = loadingState.key !== routeKey || loadingState.active
 
-    const route = LIST_ROUTE[type]
-    if (!route) {
-      // Direct URL with no/unknown type and no stash — we can't know which service to ask.
-      if (!stashed) setUnavailable({ kind: 'not_found' })
-      setLoading(false)
+  async function load(resetForRoute = false) {
+    const generation = ++requestGeneration.current
+    const stillCurrent = () => requestGeneration.current === generation
+    setLoadingState({ key: routeKey, active: true })
+
+    // Show the handed-off row immediately on navigation (no round-trip); a
+    // manual refresh retains the freshest currently displayed snapshot.
+    const handedOff = resetForRoute ? readStashedRow<Payment>('payments', id) : null
+    const stashed = handedOff?.id === id && handedOff.type === type ? handedOff : null
+    if (resetForRoute) {
+      setPaymentSnapshot(stashed ? { key: routeKey, payment: stashed } : null)
+    }
+
+    const target = DETAIL_ROUTE[type]
+    if (!target) {
+      // A missing/unknown rail cannot be refreshed truthfully. Keep a handed-off
+      // preview if present, but mark it unavailable rather than presenting it as live.
+      if (stillCurrent()) {
+        setUnavailableSnapshot({ key: routeKey, kind: 'not_found' })
+        setLoadingState({ key: routeKey, active: false })
+      }
       return
     }
     try {
+      const route = svcUrl(target.service, `${target.path}/${encodeURIComponent(id)}`)
       const res = await fetch(route, { signal: AbortSignal.timeout(10_000), cache: 'no-store' })
       if (!res.ok) {
-        if (!stashed) setUnavailable({ kind: await classifyBffFailure(res) })
-        setLoading(false)
+        const kind = await classifyBffFailure(res)
+        if (stillCurrent()) setUnavailableSnapshot({ key: routeKey, kind })
         return
       }
-      const body = (await res.json()) as unknown
-      const items = (Array.isArray(body) ? body : ((body as { items?: unknown[] }).items ?? [])) as Payment[]
-      const found = items.find(p => p.id === id)
-      if (found) { setPayment({ ...found, type: type as Payment['type'] }); setUnavailable(null) }
-      else if (!stashed) setUnavailable({ kind: 'not_found' })
+      const fresh = (await res.json()) as Payment
+      if (!stillCurrent()) return
+      setPaymentSnapshot({ key: routeKey, payment: { ...fresh, type: type as Payment['type'] } })
+      setUnavailableSnapshot(null)
     } catch {
-      if (!stashed) setUnavailable({ kind: 'unreachable' })
+      if (stillCurrent()) setUnavailableSnapshot({ key: routeKey, kind: 'unreachable' })
     } finally {
-      setLoading(false)
+      if (stillCurrent()) setLoadingState({ key: routeKey, active: false })
     }
   }
 
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id, type])
+  useEffect(() => {
+    void load(true)
+    return () => { requestGeneration.current += 1 }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, type])
 
   const svcLabel = type === 'SEPA' ? t('SEPA-payment', 'SEPA-payment') : t('Domestic-payment', 'Domestic-payment')
+  const stalePreviewCopy = unavailable?.kind === 'unauthorized'
+    ? {
+        title: t('Relace vypršela — zobrazuji uložený náhled', 'Session expired — showing saved preview'),
+        detail: t('Uložený náhled může být zastaralý. Pro načtení živých dat se znovu přihlaste.', 'This saved preview may be stale. Sign in again to load live data.'),
+      }
+    : {
+        title: t('Živá platba není dostupná — zobrazuji uložený náhled', 'Live payment unavailable — showing saved preview'),
+        detail: t('Obnovení živých dat selhalo. Uložený náhled může být zastaralý; zkuste platbu obnovit znovu.', 'The live refresh failed. This saved preview may be stale; try refreshing the payment again.'),
+      }
 
   return (
     <div>
@@ -108,10 +147,10 @@ function PaymentDetailContent() {
         subtitle={t('Detail platebního příkazu', 'Payment order detail')}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/payments" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('Platby', 'Payments')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{id.slice(0, 12)}…</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {payment?.status && <span className="pill" style={{ background: `${STATUS_COLOR[payment.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[payment.status] ?? 'var(--text-muted)' }}>{payment.status}</span>}
+          {payment?.status && <StatusBadge status={payment.status} tone={paymentStatusTone(payment.status)} />}
           {payment?.type && <span className="tag">{payment.type}</span>}
           <Link href="/payments" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>
-          <button className="btn btn-secondary" onClick={load} disabled={loading}>
+          <button type="button" className="btn btn-secondary" onClick={() => { void load() }} disabled={loading} aria-busy={loading} aria-label={t('Obnovit platbu', 'Refresh payment')}>
             <RefreshCw size={13} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
           </button>
         </div>}
@@ -124,7 +163,21 @@ function PaymentDetailContent() {
       ) : !payment && unavailable ? (
         <div className="card"><DataUnavailable kind={unavailable.kind} service={svcLabel} feature={t('Platba', 'Payment')} lang={language} /></div>
       ) : payment ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+        <>
+          {unavailable && (
+            <div className="card" style={{ marginBottom: '14px' }}>
+              <DataUnavailable
+                kind={unavailable.kind}
+                service={svcLabel}
+                feature={t('Platba', 'Payment')}
+                lang={language}
+                dense
+                title={stalePreviewCopy.title}
+                detail={stalePreviewCopy.detail}
+              />
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
           <div className="card">
             <div className="card-header"><span className="card-header-title">{t('Platba', 'Payment')}</span></div>
             <DetailRows rows={[
@@ -160,7 +213,8 @@ function PaymentDetailContent() {
               </div>
             )}
           </div>
-        </div>
+          </div>
+        </>
       ) : null}
     </div>
   )

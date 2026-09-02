@@ -56,6 +56,12 @@ class AuditAnchorService(
     )
     suspend fun captureScheduled() {
         if (!enabled) return
+        // observed-by: this job's own ADR-0237 liveness gauge. `recordSuccess()` is on the SUCCESS
+        // path only, so a permanently failing capture leaves the last-success age climbing until
+        // WorkflowLivenessStale fires — the failure is visible, just not through a DLQ. Swallowing
+        // is also the right call for the tick itself: this is an hourly @Scheduled sweep over the
+        // chain head, not a consumed message, so nothing is lost by one failed tick — the next hour
+        // re-reads the same head. Throwing would only kill the scheduler thread.
         runCatching { captureAnchor() }
             .onSuccess { liveness?.recordSuccess() }
             .onFailure { log.error("audit anchor capture failed", it) }

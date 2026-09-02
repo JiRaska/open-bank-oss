@@ -60,6 +60,7 @@ import concurrent.futures
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -77,6 +78,7 @@ MANIFEST = ".github/gates/gates.yaml"
 # the manifest even where a checker's dependencies are missing, and the string is the contract.
 PARSE_CACHE_ENV = "GATE_PARSE_CACHE"
 SUBJECTS_PREFIX = "SUBJECTS="  # must match gatelib.SUBJECTS_PREFIX
+SUBJECTS_UNRESOLVED = "UNRESOLVED"  # must match gatelib.SUBJECTS_UNRESOLVED
 VALID_MODES = {"enforced", "advisory"}
 VALID_WHEN = {"always", "pull_request"}
 VALID_EXPECT = {"pass", "fail"}
@@ -85,6 +87,48 @@ VALID_EXPECT = {"pass", "fail"}
 # ---------------------------------------------------------------------------
 # Manifest
 # ---------------------------------------------------------------------------
+def unbuffer():
+    """Line-buffer stdout/stderr, unconditionally.
+
+    THE ISSUE THIS EXISTS FOR (#6068). Python block-buffers stdout when it is not a TTY,
+    and this runner printed nothing until the very end. Measured 2026-08-21 on `--all`:
+    the redirect file held **0 bytes for the whole 81-second run** and every byte appeared
+    at exit. A `--group` shard finishes in seconds, so its window is invisible — which is
+    exactly why all four reported observations were `--all` and none were per-shard.
+
+    That silence is the failure. Anything that samples the output early, or kills the run
+    (a harness timeout, a cancelled job, a closed session) and reports the WRAPPER's exit
+    code, reads "exit 0, no output" — indistinguishable from "all gates passed". With line
+    buffering a killed run leaves its partial verdicts behind, which is the difference
+    between an unexplained silence and a truncated log naming the gate it died on.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(line_buffering=True)
+        except (AttributeError, OSError):
+            pass  # not a reconfigurable stream (a StringIO under the self-test); harmless
+
+
+TEXT_GATE_ID = re.compile(r"^  - id:\s*\S", re.M)
+
+
+def gate_count_by_text(root: pathlib.Path, path: str = MANIFEST) -> int:
+    """Count gate entries by TEXT SCAN — deliberately not the YAML parser.
+
+    The cross-count (#6068 suggestion 2, the convention `check_ruler_wiring()` and
+    `check-audit-money-path-subscription.py` adopted): a reach figure derived twice by the
+    same method is one figure. If PyYAML ever silently drops entries — a duplicate mapping
+    key keeps only the LAST, the trap CLAUDE.md documents for application.yaml — the parse
+    shrinks and nothing disagrees with it. A regex over the raw bytes cannot make that
+    mistake, and a mismatch between the two is a hard failure rather than a smaller run.
+    """
+    f = root / path
+    try:
+        return len(TEXT_GATE_ID.findall(f.read_text()))
+    except OSError:
+        return -1
+
+
 def strip_comments(body: str) -> str:
     """Drop whole-line shell comments. See the ${{ }} check in load() for why."""
     return "\n".join(l for l in body.split("\n") if not l.lstrip().startswith("#"))
@@ -337,9 +381,11 @@ def last_subject_count(out: str):
     for line in out.splitlines():
         line = line.strip()
         if line.startswith(SUBJECTS_PREFIX):
-            digits = line[len(SUBJECTS_PREFIX):].split("#")[0].strip()
-            if digits.isdigit():
-                found = int(digits)
+            value = line[len(SUBJECTS_PREFIX):].split("#")[0].strip()
+            if value.isdigit():
+                found = int(value)
+            elif value == SUBJECTS_UNRESOLVED:
+                found = SUBJECTS_UNRESOLVED
     return found
 
 
@@ -397,7 +443,16 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
     floor = gate.get("min_subjects")
     if floor is not None and rc == 0:
         found = last_subject_count(out)
-        if found is None:
+        if found == SUBJECTS_UNRESOLVED:
+            # THIRD STATE. The gate says it could not read its corpus at all (a rate-limited
+            # or unreachable API), so the floor has nothing to hold: 0 subjects here means
+            # "not measured", not "corpus collapsed". Enforcing it would turn every transient
+            # outage into a red PR — exactly what gatelib.subjects_unresolved exists to stop.
+            buf.append(
+                "\n[run-gates] this gate reported its corpus UNRESOLVED; min_subjects "
+                f"({floor}) not applied to this run. Not a pass and not a failure.\n"
+            )
+        elif found is None:
             rc = 1
             buf.append(
                 f"\n[run-gates] this gate declares min_subjects: {floor} but printed no "
@@ -457,6 +512,20 @@ ICON = {
 
 
 def report(results, jobs):
+    # ZERO GATES IS NOT A PASS (#6068). Without this, report([]) printed "0 gates" and
+    # returned 0 — the one line in this file that could answer "everything is fine" about
+    # a run that evaluated nothing. Every other vacuity guard here (empty manifest, empty
+    # run:, unknown group, missing subject floor) exists to prevent exactly that shape;
+    # the function that computes the exit code did not have one.
+    if not results:
+        sys.stderr.write(
+            "::error::run-gates: ZERO gates ran, so there is nothing to report success "
+            "about. A run that evaluated nothing is not a pass — exiting 2. If a shard is "
+            "genuinely meant to be empty, delete it from the matrix rather than letting it "
+            "report green.\n"
+        )
+        return 2
+
     # Print each gate's output inside its own collapsible group, in manifest order — the
     # concurrent completion order is not reproducible and makes logs hard to diff.
     failed, warned = [], []
@@ -480,6 +549,16 @@ def report(results, jobs):
         + "  ".join(f"{ICON[k]}={counts[k]}" for k in ICON if counts[k])
         + f"   cpu={total:.1f}s  slowest={wall:.1f}s  jobs={jobs}"
     )
+    # The per-gate roster, printed UNCONDITIONALLY — on the pass path as much as the fail
+    # path (#6068). The ::group:: blocks above are collapsed by default in the CI UI and
+    # absent entirely from a truncated log, so on a green run the only surviving evidence
+    # used to be a single count line. A caller has to be able to see WHICH gates ran, not
+    # just how many, without expanding anything.
+    print(f"--- verdicts ({len(results)} gates) ---")
+    for r in results:
+        print(f"  {ICON[r.status]:12s} {r.gate['id']:{max(len(x.gate['id']) for x in results)}s}"
+              f"  {r.seconds:6.1f}s  [{r.gate.get('group')}]")
+
     for r in warned:
         print(f"::warning title={r.gate['id']}::advisory gate failed: {r.gate['name']}")
     for r in failed:
@@ -565,12 +644,26 @@ def main(argv=None):
                      "code or the text output")
     ap.add_argument("--self-test", action="store_true", help="falsify the runner itself")
     args = ap.parse_args(argv)
+    unbuffer()
 
     if args.self_test:
         return self_test()
 
     root = pathlib.Path(args.root).resolve()
     gates = load(root, args.manifest)
+
+    # Cross-count the manifest's reach by a SECOND method before running anything (#6068).
+    # A YAML parse that silently lost entries yields a smaller, entirely green run, and no
+    # figure derived from that same parse can disagree with it.
+    by_text = gate_count_by_text(root, args.manifest)
+    if by_text != len(gates):
+        sys.stderr.write(
+            f"::error::run-gates: gate count disagrees by method — YAML parse says "
+            f"{len(gates)}, a text scan of {args.manifest} says {by_text}. One of them is "
+            f"losing gates (a duplicate mapping key keeps only the last), so the run would "
+            f"cover less than the manifest declares. Refusing to run.\n"
+        )
+        return 2
 
     if args.list:
         w = max(len(g["id"]) for g in gates)
@@ -606,10 +699,29 @@ def main(argv=None):
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
             futs = {ex.submit(execute, g, root, is_pr, args.timeout, index): g["id"] for g in sel}
-            done = {futs[f]: f.result() for f in concurrent.futures.as_completed(futs)}
+            done = {}
+            # Emit a line PER GATE as it finishes, rather than nothing until the end
+            # (#6068). Combined with unbuffer() this is what makes a run that is killed
+            # part-way leave evidence of how far it got, instead of an empty file.
+            for f in concurrent.futures.as_completed(futs):
+                r = f.result()
+                done[futs[f]] = r
+                print(f"[run-gates] {len(done):3d}/{len(sel)} {ICON[r.status]:12s} "
+                      f"{r.gate['id']} ({r.seconds:.1f}s)")
     finally:
         os.environ.pop(PARSE_CACHE_ENV, None)
         shutil.rmtree(cache, ignore_errors=True)
+
+    # Everything that was submitted must come back. A missing id here would silently
+    # shrink `results` (and with it every count printed below) rather than fail.
+    missing = [g["id"] for g in sel if g["id"] not in done]
+    if missing or len(done) != len(sel):
+        sys.stderr.write(
+            f"::error::run-gates: {len(sel)} gates were submitted but {len(done)} came "
+            f"back{' (missing: ' + ', '.join(missing) + ')' if missing else ''}. The run "
+            f"is incomplete, so its verdict is not evidence. Refusing to report it.\n"
+        )
+        return 2
     results = [done[g["id"]] for g in sel]
     if args.json:
         # Written BEFORE report()'s exit code is returned, so a shard that goes on to fail
@@ -680,6 +792,11 @@ gates:
     group: t
     min_subjects: 3
     run: "echo checked nothing; echo SUBJECTS=0"
+  - id: floor-unresolved
+    name: "a gate whose corpus could not be READ is not held to its floor"
+    group: t
+    min_subjects: 3
+    run: "echo 'SUBJECTS=UNRESOLVED  # rate limited'"
   - id: floor-unreported
     name: "a gate that declares a floor and never prints a count"
     group: t
@@ -713,6 +830,7 @@ EXPECTED = {
     "passing": "ok",
     "floor-met": "ok",
     "floor-missed": "failed",
+    "floor-unresolved": "ok",
     "floor-unreported": "failed",
     "floor-last-wins": "ok",
     "over-budget": "failed",
@@ -751,6 +869,11 @@ def self_test():
                 bad.append("over-budget: failed, but not for the budget reason")
             if r.id == "floor-missed" and "below its declared floor" not in r.output:
                 bad.append("floor-missed: failed, but not for the floor reason")
+            # The third state, both halves: an UNRESOLVED corpus must pass DESPITE the floor,
+            # and must say out loud that the floor was not applied — a silent pass here is
+            # indistinguishable from a gate that really checked 3 subjects.
+            if r.id == "floor-unresolved" and "min_subjects (3) not applied" not in r.output:
+                bad.append("floor-unresolved: passed without saying the floor was skipped")
             # ADR-0255's json_records() must round-trip through json.dumps (a Result carrying
             # something non-serialisable would crash the whole run at the very end, after
             # every gate had already finished) and preserve the SUBJECTS= count this record
@@ -1026,6 +1149,102 @@ def self_test():
             bad.append("--json to an unwritable path did not warn")
         if rc2 == 0:
             bad.append("--json to an unwritable path unexpectedly reported success overall")
+
+        # ------------------------------------------------------------------
+        # #6068: the runner must not be able to report success having run nothing,
+        # and must not be able to report ANYTHING silently.
+        # ------------------------------------------------------------------
+
+        # 1. Zero gates ran -> non-zero, and it must SAY that nothing ran. Status-only
+        #    assertions would pass against a report() that returned 2 for a different
+        #    reason, which is how a guard ends up green for the wrong cause.
+        sink0 = io.StringIO()
+        with contextlib.redirect_stderr(sink0):
+            rc_empty = report([], 1)
+        if rc_empty == 0:
+            bad.append("report([]) returned 0 — a run that evaluated nothing read as a pass")
+        if "ZERO gates ran" not in sink0.getvalue():
+            bad.append("report([]) failed without naming the fact that nothing ran")
+
+        # 2. The cross-count. Both directions: a manifest whose two counting methods
+        #    disagree must abort, and the REAL manifest must agree — a check that always
+        #    reported a mismatch would satisfy the negative case on its own.
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(SELF_TEST_MANIFEST)
+        if gate_count_by_text(tmp) != len(load(tmp)):
+            bad.append("gate_count_by_text disagrees with the YAML parse on a VALID manifest")
+        repo_root = pathlib.Path(__file__).resolve().parent.parent.parent
+        if (repo_root / MANIFEST).is_file():
+            n_text, n_yaml = gate_count_by_text(repo_root), len(load(repo_root))
+            if n_text != n_yaml:
+                bad.append(f"the repo's own {MANIFEST}: text scan {n_text} != YAML {n_yaml}")
+        # duplicate `id:` keys inside one entry: PyYAML keeps the last, the text scan sees
+        # the entries — the shape the cross-count exists to catch.
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(
+            'gates:\n  - id: a\n    name: a\n    group: t\n    run: "true"\n'
+        )
+        if gate_count_by_text(tmp) != 1:
+            bad.append(f"text scan miscounted a 1-gate manifest: {gate_count_by_text(tmp)}")
+
+        # 3. NO TTY -> still non-empty output, same verdict as an ordinary run. Driven as a
+        #    real SUBPROCESS with pipes for stdout/stderr: an in-process call cannot observe
+        #    buffering at all, which is the whole defect (#6068). stdin is closed too, so
+        #    nothing about the invocation looks interactive.
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(SELF_TEST_MANIFEST)
+        for label, argv_tty in (
+            ("failing shard", ["--group", "t", "--timeout", "3"]),
+            ("passing shard", ["--only", "passing"]),
+        ):
+            proc = subprocess.run(
+                [sys.executable, str(pathlib.Path(__file__).resolve()),
+                 "--root", str(tmp)] + argv_tty,
+                capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
+                env={**os.environ, "GITHUB_EVENT_NAME": "push"},
+            )
+            if not proc.stdout.strip():
+                bad.append(f"no-TTY {label}: EMPTY stdout — the #6068 shape, exit "
+                           f"{proc.returncode}")
+            if "--- verdicts" not in proc.stdout:
+                bad.append(f"no-TTY {label}: no per-gate verdict roster in the output")
+            want_rc = (label == "passing shard")
+            if (proc.returncode == 0) != want_rc:
+                bad.append(f"no-TTY {label}: exit {proc.returncode}, want "
+                           f"{'0' if want_rc else 'non-zero'}")
+
+        # 4. STREAMING, not just eventual. The three checks above all wait for the process
+        #    to exit, and exit flushes — so every one of them passes against the block-
+        #    buffered build that produced #6068. This is the assertion that can actually
+        #    fail: with stdout redirected to a FILE (never a TTY), output must be readable
+        #    while the run is still in flight. Measured on origin/main before the fix:
+        #    0 bytes for the whole 81s of `--all`, everything appearing at exit.
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(
+            'gates:\n  - id: slow-a\n    name: slow-a\n    group: t\n    run: "true"\n'
+            '  - id: slow-b\n    name: slow-b\n    group: t\n    run: "sleep 6"\n'
+        )
+        stream_out = tmp / "streamed.log"
+        with open(stream_out, "wb") as fh:
+            proc = subprocess.Popen(
+                [sys.executable, str(pathlib.Path(__file__).resolve()),
+                 "--root", str(tmp), "--group", "t", "--timeout", "30"],
+                stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                env={**os.environ, "GITHUB_EVENT_NAME": "push"},
+            )
+            seen = 0
+            deadline = time.monotonic() + 4.0
+            while time.monotonic() < deadline and proc.poll() is None:
+                seen = stream_out.stat().st_size
+                if seen:
+                    break
+                time.sleep(0.1)
+            alive_when_seen = proc.poll() is None
+            proc.wait(timeout=60)
+        if not seen:
+            bad.append(
+                "stdout to a non-TTY file stayed EMPTY while the run was in flight — this "
+                "is #6068 exactly: a killed or sampled run is indistinguishable from a "
+                "silent pass. unbuffer() is not taking effect."
+            )
+        elif not alive_when_seen:
+            bad.append("output only appeared after the process had already exited")
 
         if bad:
             print("\n::error::run-gates self-test FAILED:")

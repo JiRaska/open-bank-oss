@@ -10,7 +10,7 @@ import { Users, Plus, Search, RefreshCw, ChevronRight, ChevronDown } from 'lucid
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 
 const PAGE_SIZE = 25
@@ -31,19 +31,6 @@ interface Pagination {
   limit: number
   hasNextPage: boolean
   nextCursor?: string
-}
-
-const KYC_COLORS: Record<string, string> = {
-  APPROVED:    'var(--green)',
-  PENDING:     'var(--yellow)',
-  REJECTED:    'var(--red)',
-  NOT_STARTED: 'var(--text-muted)',
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  ACTIVE:   'var(--green)',
-  INACTIVE: 'var(--text-muted)',
-  BLOCKED:  'var(--red)',
 }
 
 export default function PartiesPage() {
@@ -153,7 +140,8 @@ export default function PartiesPage() {
         subtitle={t('Zákazníci a společnosti registrované v platformě', 'Customers and companies registered in the platform')}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Subjekty', 'Parties')}</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-secondary" onClick={load} disabled={loading || inSearchMode}>
+          <button className="btn btn-secondary" type="button" onClick={load} disabled={loading || inSearchMode}
+            aria-busy={loading} aria-label={t('Obnovit subjekty', 'Refresh parties')}>
             <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
@@ -249,16 +237,8 @@ export default function PartiesPage() {
                   </td>
                   <td><span className="tag">{p.partyType}</span></td>
                   <td style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{p.email}</td>
-                  <td>
-                    <span className="pill" style={{ background: `${STATUS_COLORS[p.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLORS[p.status] ?? 'var(--text-muted)' }}>
-                      {p.status}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="pill" style={{ background: `${KYC_COLORS[p.kycStatus] ?? 'var(--text-muted)'}22`, color: KYC_COLORS[p.kycStatus] ?? 'var(--text-muted)' }}>
-                      {p.kycStatus?.replace('_', ' ')}
-                    </span>
-                  </td>
+                  <td><StatusBadge status={p.status} /></td>
+                  <td><StatusBadge status={p.kycStatus} label={p.kycStatus?.replace('_', ' ')} /></td>
                   <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString(dateLocale)}</td>
                   <td>
                     <Link href={`/parties/${p.id}`} style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', textDecoration: 'none' }}>
@@ -274,10 +254,12 @@ export default function PartiesPage() {
           {inSearchMode && searchPagi?.hasNextPage && !loadingMore && (
             <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
               <button
+                type="button"
                 className="btn btn-secondary"
                 onClick={() => runSearch(debouncedQ, searchPagi.nextCursor)}
+                aria-label={t('Načíst další subjekty', 'Load more parties')}
               >
-                <ChevronDown size={13} />
+                <ChevronDown size={13} aria-hidden="true" />
                 {t('Načíst další', 'Load more')}
               </button>
             </div>

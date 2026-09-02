@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.9.0...tpp-registry-service-v0.9.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **tpp-registry:** reject a null array element with 400 instead of 500 ([#8007](https://github.com/JiRaska/open-bank-oss/issues/8007)) ([b8dd50c](https://github.com/JiRaska/open-bank-oss/commit/b8dd50c8fe334b014c3e2818665f3628245bebd5))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.8.0...tpp-registry-service-v0.9.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.7.1...tpp-registry-service-v0.8.0) (2026-08-18)
 
 

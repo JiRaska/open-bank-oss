@@ -68,6 +68,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
 }
 
 // Coverage is ratchet-only (never lower). Without this block koverVerify has no rule to check,

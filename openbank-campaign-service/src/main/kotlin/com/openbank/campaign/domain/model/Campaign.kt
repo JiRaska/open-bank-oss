@@ -30,7 +30,16 @@ data class CampaignDefinition(
      * journey exactly; a non-empty list opts the draft into the bounded graph model below.
      */
     val decisions: List<CampaignDecision> = emptyList(),
+    /** Immutable published incentive catalogue reference; redemption remains incentive-service-owned. */
+    val incentiveOfferRef: IncentiveOfferRef? = null,
 )
+
+data class IncentiveOfferRef(val id: UUID, val name: String, val version: Int) {
+    init {
+        require(name.isNotBlank()) { "incentive offer name must not be blank" }
+        require(version > 0) { "incentive offer version must be positive" }
+    }
+}
 
 /**
  * Campaign aggregate (ADR-0200). A definition — steps, delays, stop conditions — that is executed
@@ -76,6 +85,7 @@ data class Campaign(
     val updatedAt: Instant,
     /** Explicit graph nodes; persisted separately from legacy step JSON for reversible rollout. */
     val decisions: List<CampaignDecision> = emptyList(),
+    val incentiveOfferRef: IncentiveOfferRef? = null,
 ) {
     init {
         require(name.isNotBlank()) { "campaign name must not be blank" }
@@ -136,6 +146,7 @@ data class Campaign(
             schedule = definition.schedule,
             trigger = definition.trigger,
             decisions = definition.decisions,
+            incentiveOfferRef = definition.incentiveOfferRef,
             updatedAt = Instant.now(),
         )
     }

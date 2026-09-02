@@ -85,6 +85,21 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      # D5 provenance is isolated from the legacy mixed stream: its handler only acknowledges a
+      # Kafka record after append-only persistence succeeds.
+      agent-audit-events-in:
+        connector: smallrye-kafka
+        enabled: ${AUDIT_AGENT_AUDIT_KAFKA_ENABLED:false}
+        client.id: audit-service-agent-provenance-${quarkus.uuid}
+        topic: openbank.agent.audit.events
+        # #5745, same reasoning as `audit-events-in` below. This channel needs it MORE, not less:
+        # it is the strict path — AgentAuditConsumer acknowledges only after append-only
+        # persistence succeeds, so it rethrows by design, and SmallRye's default `fail` would stop
+        # the D5 provenance stream on the first bad record. Explicit and NESTED (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.audit.agent-audit-events-in
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
       # openbank-infra/gitops/components/audit/audit-service-msg-override.yaml (a properties-file
       # override loaded via QUARKUS_CONFIG_LOCATIONS) for where they're set instead. Summary:
@@ -114,6 +129,17 @@ mp:
       # mechanism is the CORRECT choice for a hyphenated channel like `audit-events-in`, not
       # merely a stylistic alternative.
       audit-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.audit.audit-events-in
         connector: smallrye-kafka
         client.id: audit-service-${quarkus.uuid}
         # clearing.batch.event / security.ict.incident / security.scan.event added (ADR-0160 #996
@@ -148,7 +174,31 @@ mp:
         # alone (#1034's lesson). audit-service was the only one of the topic's two documented
         # consumers (the other being onboarding-service's projection, #4353) that had never
         # subscribed.
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events
+        #
+        # Issue #6035 (money-path audit gap, found by
+        # .github/scripts/check-audit-money-path-subscription.py): four more money-path producers
+        # were missing from all three places at once -- this list, TopicAttribution, and the
+        # audit-service KafkaUser's Read ACLs -- which is the signature of a set that was never
+        # enumerated rather than four independent oversights. Each producer was verified at its
+        # own `mp.messaging.outgoing.<channel>.topic` declaration, never by grepping a topic
+        # literal (a serialised data-class payload has no literal anywhere, #3883):
+        #   openbank.ledger.journal.posted  --
+        #     openbank-ledger-service/src/main/resources/application.yaml (the posting record
+        #     itself, so the largest of the five named in #6035)
+        #   openbank.sdd.event              -- openbank-sdd-service/src/main/resources/application.yaml
+        #   openbank.interest.accrual.event -- openbank-interest-service/src/main/resources/application.yaml
+        #   openbank.fraud.hold.changed     -- openbank-fraud-service/src/main/resources/application.yaml
+        # All four publish through the standard outbox relay, so each record carries the `ce-type`
+        # header AuditConsumer reads for event_type; none sets a "sourceService" body field, so
+        # they resolve AttributionSource.TOPIC through TopicAttribution.
+        #
+        # NOT changed here, deliberately: `auto.offset.reset`. It is already `earliest` for the
+        # deployed channel (audit-service-msg-override ConfigMap, config_ordinal=500). The
+        # existing 22 topics have committed offsets on group `audit-service` and are unaffected;
+        # the four new ones have none, so they are read from their retention start on first
+        # subscribe. That is the intended audit behaviour, not a mass replay of the existing
+        # surface -- but it is a first-subscribe load spike worth knowing about.
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:

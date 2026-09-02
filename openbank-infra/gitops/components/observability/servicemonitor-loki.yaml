@@ -1,0 +1,49 @@
+# Scrape Loki's own Prometheus metrics (issue #6236).
+#
+# WHY THIS EXISTS: Loki exported NOTHING to Prometheus — measured 2026-08-21, zero series matching
+# `loki_*` in the cluster Prometheus — because the chart's `monitoring.selfMonitoring` is disabled
+# and nothing else scraped it. So the log pipeline was the one part of the observability stack that
+# could not be observed by the observability stack, and "Alloy stopped tailing" or "Loki stopped
+# ingesting" had no signal at all. Every log-based rule in loki-rules-*.yaml would then evaluate
+# over an empty window and report healthy — the exact shape of #5733 (dead alert rules) and #6032
+# (a ruler that had never loaded a rule).
+#
+# This is a ServiceMonitor rather than `monitoring.selfMonitoring.enabled: true` deliberately: that
+# chart flag installs the Grafana Agent operator and a second collection path alongside the Alloy
+# DaemonSet this estate already runs. The metrics are already served on the existing `loki` Service
+# (port `http-metrics`:3100, verified live) — nothing needed to be turned on, only scraped.
+#
+# Selector precision matters here, because the chart ships three Services under identical
+# name/instance labels and a sloppy selector produces duplicate series:
+#   loki             http-metrics, grpc   <- the one target
+#   loki-headless    http-metrics         <- carries prometheus.io/service-monitor: "false"
+#   loki-memberlist  tcp                  <- no http-metrics port, so no endpoint matches
+# The NotIn expression honours the chart's own opt-out label rather than hard-coding a name.
+# Verified: this selector resolves to `loki` and `loki-memberlist`, and only `loki` has the port.
+#
+# The cluster Prometheus has empty ServiceMonitor selectors, so this is picked up automatically.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: loki
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - observability
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+      app.kubernetes.io/instance: loki
+    matchExpressions:
+      - key: prometheus.io/service-monitor
+        operator: NotIn
+        values: ["false"]
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      path: /metrics
+      honorLabels: true

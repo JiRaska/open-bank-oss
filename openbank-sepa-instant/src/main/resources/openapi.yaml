@@ -3,7 +3,10 @@
 openapi: 3.1.0
 info:
   title: SEPA Instant (SCT Inst) Service API
-  version: 1.4.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
+  # only — GET /sepa-instant/approvals (the checker's queue, issue #5679) plus two additive
+  # fields on ApprovalResponse (makerId, createdAt). No breaking change.
+  version: 1.6.0
   description: >-
     SEPA Instant Credit Transfer — sub-10s settlement, recall support. On submit, debtor and creditor
     names are synchronously screened against the sanctions lists (ADR-0032): a clean payment proceeds
@@ -95,16 +98,16 @@ paths:
           schema:
             type: string
             format: uuid
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 20
-        - name: offset
+        - name: page
           in: query
           schema:
             type: integer
             default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
           description: List of payments
@@ -127,6 +130,39 @@ paths:
       responses:
         '200':
           description: Recall initiated
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/sepa-instant/approvals:
+    get:
+      tags: [SCT Inst]
+      summary: >-
+        List pending four-eyes approvals, oldest first — the checker's queue (ADR-0227 D2).
+        Without it a decision parked at 202 is discoverable only by whoever was handed its id.
+      description: >-
+        PENDING maker-checker approvals on `sctInstPayment.recall`, oldest first. The read side of
+        the unified approval inbox — deciding stays on
+        PATCH /api/v1/sepa-instant/approvals/{id}. Requires ROLE_OPERATOR, ROLE_ADMIN or
+        ROLE_PAYMENTS.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -162,22 +198,11 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [id, action, status]
-                properties:
-                  id:
-                    type: string
-                  action:
-                    type: string
-                    description: The gated action this approval was raised for.
-                  resourceId:
-                    type: string
-                    nullable: true
-                  status:
-                    type: string
-                  decidedBy:
-                    type: string
-                    nullable: true
+                $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          description: >-
+            The caller is the maker of this approval. Segregation of duties is enforced in
+            RedisApprovalStore.decide, not per-service.
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -213,26 +238,38 @@ components:
 
   schemas:
     SubmitSctInstRequest:
+      # Field-for-field with SubmitSctInstRequest in SctInstDtos.kt. `idempotencyKey`,
+      # `debtorIban` and `debtorName` are non-nullable there, so a body omitting any of them
+      # fails to deserialise; the `Idempotency-Key` header, when present, overrides the body
+      # field but does not make it optional (SctInstResource.submit reads `body.idempotencyKey`).
       type: object
-      required: [debtorAccountId, creditorIban, creditorName, amount, endToEndId]
+      required: [idempotencyKey, debtorAccountId, debtorIban, debtorName, creditorIban, creditorName, amount, endToEndId]
       properties:
+        idempotencyKey:
+          type: string
         debtorAccountId:
           type: string
           format: uuid
+        debtorIban:
+          type: string
+        debtorName:
+          type: string
         creditorIban:
           type: string
         creditorName:
           type: string
         creditorBic:
           type: string
+          nullable: true
         amount:
           type: number
-        currencyCode:
+        currency:
           type: string
           default: EUR
-        endToEndId:
-          type: string
         remittanceInfo:
+          type: string
+          nullable: true
+        endToEndId:
           type: string
 
     RecallRequest:
@@ -244,34 +281,38 @@ components:
           enum: [FRAUD, DUPLICATE, WRONG_AMOUNT, WRONG_BENEFICIARY]
 
     SctInstPaymentResponse:
+      # Field-for-field with SctInstPaymentResponse in SctInstDtos.kt, which SctInstResource
+      # .toResponse() populates directly from the SctInstPayment aggregate.
       type: object
+      required: [paymentId, status, debtorIban, creditorIban, amount, currency, endToEndId, createdAt]
       properties:
-        id:
+        paymentId:
           type: string
           format: uuid
-        endToEndId:
+        status:
           type: string
-        debtorAccountId:
+          enum: [PENDING, PROCESSING, SETTLED, REJECTED, TIMEOUT, RECALLED]
+        debtorIban:
           type: string
-          format: uuid
         creditorIban:
-          type: string
-        creditorName:
           type: string
         amount:
           type: number
-        currencyCode:
+        currency:
           type: string
-        status:
+        endToEndId:
           type: string
-          enum: [SUBMITTED, ACCEPTED, SETTLED, REJECTED, RECALLED]
-        submittedAt:
+        executionTimeoutAt:
           type: string
           format: date-time
+          nullable: true
         settledAt:
           type: string
           format: date-time
           nullable: true
+        createdAt:
+          type: string
+          format: date-time
 
     ApiError:
       type: object
@@ -280,3 +321,36 @@ components:
           type: string
         message:
           type: string
+
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes approval record (ADR-0155). `makerId` is the principal that requested the
+        gated action; a DIFFERENT principal must decide it — enforced in
+        RedisApprovalStore.decide, so the queue is readable by anyone who may decide, including
+        the maker (seeing a request is not authority over it).
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+          description: The value the maker replays as the X-Approval-Id header once approved.
+        action:
+          type: string
+          example: sctInstPayment.recall
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, EXECUTED]
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          description: >-
+            Request time. The store expires a PENDING approval after 24h, so age is the only
+            visible sign of one about to lapse.
+        decidedBy:
+          type: string
+          nullable: true

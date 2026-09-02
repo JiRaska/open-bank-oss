@@ -38,7 +38,7 @@ spec:
       annotations:
         # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
         # Must match case-coordinator-opa-bundle's openbank.tech/policy-checksum (CI verifies).
-        openbank.tech/policy-checksum: "e05f4db0c00ea4b8"
+        openbank.tech/policy-checksum: "a4ec411c4f743e8a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: case-coordinator-agent
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-a4e80bd0
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-e96c8e41
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -226,6 +226,14 @@ spec:
             - name: opa-bundle
               mountPath: /bundle/agents/data.yaml
               subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/case-collaboration.rego
+              subPath: case-collaboration.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/case_collaboration/data.yaml
+              subPath: case-collaboration-data.yaml
               readOnly: true
             - name: opa-bundle
               mountPath: /bundle/.manifest

@@ -124,6 +124,10 @@ class SettlementStrandedGaugeTest {
             "REVERSED",
             "CREDITED_REVERSED",
             "LEDGER_REVERSED",
+            // #6037's two new outcomes. REVERSAL_FAILED is the one that matters: the money moved
+            // and did NOT come back, and it was the only money-path state with no age series.
+            "REVERSAL_FAILED",
+            "LEDGER_REVERSAL_UNSUPPORTED",
         )
         assertThat(published).doesNotContain("BOOKED", "REJECTED")
         // The published set must be exactly "every status minus the two terminal ones", derived

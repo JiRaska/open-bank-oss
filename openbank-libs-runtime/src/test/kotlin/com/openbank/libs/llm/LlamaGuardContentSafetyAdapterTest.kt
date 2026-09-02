@@ -157,6 +157,26 @@ class LlamaGuardContentSafetyAdapterTest {
     }
 
     @Test
+    fun `a message carrying provider extras still parses`(): Unit = runBlocking {
+        // The live failure on 2026-08-21: DeepInfra returns `tool_calls`, `function_call` and
+        // `reasoning_content` INSIDE the message object, and the wire type did not ignore unknown
+        // fields — so Jackson threw and EVERY classification came back `unavailable`. The verdict
+        // was visible; the cause was one annotation.
+        val url = startStub(
+            200,
+            """{"choices":[{"message":{"role":"assistant","content":"unsafe\nS2",
+               |"tool_calls":null,"function_call":null,"reasoning_content":"the user asks..."}}],
+               |"usage":{"prompt_tokens":9,"completion_tokens":3}}
+            """.trimMargin(),
+        )
+
+        val verdict = adapter(url).classify(ContentSafetyPort.SafetyRole.USER, "…")
+
+        assertThat(verdict.decision).isEqualTo(ContentSafetyPort.Decision.UNSAFE)
+        assertThat(verdict.categories).containsExactly("S2")
+    }
+
+    @Test
     fun `disabled port classifies nothing and says so`(): Unit = runBlocking {
         val verdict = ContentSafetyPort.DISABLED.classify(ContentSafetyPort.SafetyRole.USER, "anything")
 

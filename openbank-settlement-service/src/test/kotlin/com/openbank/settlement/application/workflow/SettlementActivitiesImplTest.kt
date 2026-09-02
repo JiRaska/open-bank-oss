@@ -12,6 +12,7 @@ import com.openbank.settlement.application.port.out.DebitPort
 import com.openbank.settlement.application.port.out.LedgerPort
 import com.openbank.settlement.application.port.out.ReverseCreditPort
 import com.openbank.settlement.application.port.out.ReverseDebitPort
+import com.openbank.settlement.application.port.out.SettlementMetricsPort
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
@@ -42,6 +43,7 @@ class SettlementActivitiesImplTest {
     private val auditPublisher: AuditEventPublisher = mockk(relaxed = true)
     private val reverseDebitPort: ReverseDebitPort = mockk(relaxed = true)
     private val reverseCreditPort: ReverseCreditPort = mockk(relaxed = true)
+    private val metrics: SettlementMetricsPort = mockk(relaxed = true)
 
     private lateinit var activities: SettlementActivitiesImpl
 
@@ -68,6 +70,7 @@ class SettlementActivitiesImplTest {
             auditPublisher,
             reverseDebitPort,
             reverseCreditPort,
+            metrics,
         )
         coEvery { settlementRepository.updateStatus(any(), any()) } answers {
             settlement(firstArg(), secondArg())
@@ -237,6 +240,7 @@ private class TestableActivities(
     auditPublisher: AuditEventPublisher,
     reverseDebitPort: ReverseDebitPort,
     reverseCreditPort: ReverseCreditPort,
+    metrics: SettlementMetricsPort,
 ) : SettlementActivitiesImpl(
     settlementRepository,
     debitPort,
@@ -245,6 +249,7 @@ private class TestableActivities(
     auditPublisher,
     reverseDebitPort,
     reverseCreditPort,
+    metrics,
 ) {
     override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
 }

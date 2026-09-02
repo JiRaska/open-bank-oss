@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.11.0...statement-service-v0.12.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.10.2...statement-service-v0.11.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.10.1...statement-service-v0.10.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.10.0...statement-service-v0.10.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **statement-service:** add sourceService and occurredAt to the restated event ([#5898](https://github.com/JiRaska/open-bank-oss/issues/5898)) ([7143162](https://github.com/JiRaska/open-bank-oss/commit/7143162b16121899e0b25fd671fb7287691e2339)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.9.0...statement-service-v0.10.0) (2026-08-20)
 
 

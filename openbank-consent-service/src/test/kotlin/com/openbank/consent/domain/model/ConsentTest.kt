@@ -225,13 +225,38 @@ class ConsentTest {
     }
 
     @Test
-    fun `GDPR_ONLY_SCOPES contains exactly the four GDPR Art7 scopes, not the PSD2 or agent ones`() {
+    fun `GDPR_ONLY_SCOPES contains exactly the GDPR Art7 scopes, not the PSD2 or agent ones`() {
         assertThat(Consent.GDPR_ONLY_SCOPES).containsExactlyInAnyOrder(
             ConsentScope.TELEMETRY_RUM,
             ConsentScope.MARKETING_COMMS_EMAIL,
             ConsentScope.MARKETING_COMMS_PUSH,
             ConsentScope.MARKETING_COMMS_INAPP,
+            ConsentScope.CREDIT_OFFERS,
+            ConsentScope.CREDIT_PROFILE_USE,
+            ConsentScope.CREDIT_AI_AGENT,
         )
+    }
+
+    // ADR-0269 rule 1: the credit scopes are Art. 7 data-processing consents like the marketing
+    // ones, and must NOT inherit the PSD2 90-day AISP cap or an SCA ceremony.
+    @Test
+    fun `CREDIT scopes are GDPR-only, uncapped by the 90-day AISP rule and carry no read frequency`() {
+        val offers = consent(
+            scopes = setOf(ConsentScope.CREDIT_OFFERS),
+            accountIbans = null,
+            validTo = baseValidFrom.plusDays(180),
+        )
+        assertThat(offers.frequencyPerDay()).isNull()
+        assertThat(offers.hasScope(ConsentScope.CREDIT_OFFERS)).isTrue()
+        assertThat(offers.hasScope(ConsentScope.CREDIT_PROFILE_USE)).isFalse()
+    }
+
+    // Being shown an offer and having the 360 profile mined to choose it are separate permissions;
+    // a single credit consent would make the narrower of the two unexpressable.
+    @Test
+    fun `CREDIT_OFFERS does not imply CREDIT_PROFILE_USE`() {
+        val offersOnly = consent(scopes = setOf(ConsentScope.CREDIT_OFFERS), accountIbans = null)
+        assertThat(offersOnly.hasScope(ConsentScope.CREDIT_PROFILE_USE)).isFalse()
     }
 
     private fun consent(

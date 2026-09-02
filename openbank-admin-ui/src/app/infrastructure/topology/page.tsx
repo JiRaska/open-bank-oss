@@ -5,7 +5,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import {
-  Network, RefreshCw, Play, Pause, CheckCircle2, XCircle, HelpCircle,
+  Network, RefreshCw, Play, Pause,
   Cloud, GitBranch, Database, Eye, Server, X,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -14,7 +14,7 @@ import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBands } from '@/components/topology/layout'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge, statusTone } from '@/components/ui'
 
 // ---------------------------------------------------------------------------
 // Infrastructure topology (ADR-0027/0029). A companion to the code-derived
@@ -230,7 +230,15 @@ export default function InfraTopologyPage() {
   const selectedEdges = selected ? EDGES.filter(e => e.from === selected || e.to === selected) : []
 
   const groupLabel = (g: GroupKey) => t(GROUPS[g].cs, GROUPS[g].en)
-  const statusColor = (s: Status) => (s === 'UP' ? '#10b981' : s === 'DOWN' ? '#ef4444' : '#94a3b8')
+  // SVG cannot consume the HTML StatusBadge primitive, but it still derives
+  // colour from the same central vocabulary. The CSS tokens preserve dark-mode
+  // contrast without inventing a second UP/DOWN/UNKNOWN colour taxonomy here.
+  const liveStatusFill = (status: Status) => {
+    const tone = statusTone(status)
+    if (tone === 'success') return 'var(--success)'
+    if (tone === 'danger') return 'var(--danger)'
+    return 'var(--text-muted)'
+  }
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px' }}>
@@ -353,7 +361,7 @@ export default function InfraTopologyPage() {
                   <text x={x + 26} y={p.cy + 4} fontSize="11" fontWeight="600" fill={isSel ? '#fff' : 'var(--text-primary)'}>{n.label}</text>
                   {st && (
                     <g transform={`translate(${x + p.w - 12}, ${y + 2})`}>
-                      <circle cx="0" cy="0" r="6.5" fill={statusColor(st)} stroke="var(--surface)" strokeWidth="1.5" />
+                      <circle cx="0" cy="0" r="6.5" fill={liveStatusFill(st)} stroke="var(--surface)" strokeWidth="1.5" />
                       {st === 'UP' && <path d="M-2.5,0 L-0.8,1.8 L2.6,-2.2" fill="none" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />}
                       {st === 'DOWN' && <path d="M-2,-2 L2,2 M-2,2 L2,-2" fill="none" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" />}
                       {st === 'UNKNOWN' && <text x="0" y="2.5" fontSize="8" fill="#fff" textAnchor="middle" fontWeight="bold">?</text>}
@@ -375,7 +383,7 @@ export default function InfraTopologyPage() {
               </div>
             ))}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#10b981' }} />{t('Živý stav (UP/DOWN)', 'Live status (UP/DOWN)')}
+              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--success)' }} />{t('Živý stav (UP/DOWN)', 'Live status (UP/DOWN)')}
             </div>
           </div>
         </div>
@@ -392,15 +400,11 @@ export default function InfraTopologyPage() {
                 <X aria-hidden="true" size={16} />
               </button>
               {statusOf(selectedNode.id) && (
-                <div style={{
-                  marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
-                  borderRadius: '12px', fontSize: '11px', fontWeight: 600,
-                  background: `${statusColor(statusOf(selectedNode.id)!)}22`, color: statusColor(statusOf(selectedNode.id)!),
-                }}>
-                  {statusOf(selectedNode.id) === 'UP' && <CheckCircle2 aria-hidden="true" size={12} />}
-                  {statusOf(selectedNode.id) === 'DOWN' && <XCircle aria-hidden="true" size={12} />}
-                  {statusOf(selectedNode.id) === 'UNKNOWN' && <HelpCircle aria-hidden="true" size={12} />}
-                  {statusOf(selectedNode.id)}
+                <div style={{ marginLeft: 'auto' }}>
+                  <StatusBadge
+                    status={statusOf(selectedNode.id)}
+                    withDot
+                  />
                 </div>
               )}
             </div>

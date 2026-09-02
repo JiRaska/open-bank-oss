@@ -173,18 +173,81 @@ FEEDS = [
 NOT_PROBED = [
     ("https://api.github.com", "authenticated API, not a data feed; failure is loud at call time"),
     ("https://api.deepinfra.com/v1/openai", "authenticated LLM gateway; needs a key"),
+    ("https://integrate.api.nvidia.com/v1", "authenticated LLM gateway; needs a key"),
     ("https://s3.eu-north-1.amazonaws.com", "AWS endpoint, reached with SigV4 credentials"),
     ("https://kc.open-bank.tech/realms/openbank-customers", "our own Keycloak realm, covered by its own probes"),
     ("https://pid.open-bank.tech", "our own PID issuer, covered by its own probes"),
-    (
-        "https://campaign-service.campaign.svc:8443",
-        "private in-cluster ownership validator; protected by mTLS and the campaign network policy",
-    ),
+    # --- gitops corpus (#6242). Everything below became visible when CORPUS_GLOBS gained
+    # `openbank-infra/gitops/**/*.yaml`. Each entry is stale-checked in BOTH directions by
+    # check_drift: an entry whose URL leaves the tree fails just as loudly as an undeclared URL.
+    #
+    # (1) IDENTIFIERS, not fetch targets. A URL-shaped string nothing dereferences.
+    ("https://www.apache.org/licenses/LICENSE-2.0", "SPDX licence identifier in an embedded SQL header; never fetched"),
+    ("https://cyclonedx.org/bom", "CycloneDX schema URI in a Kyverno SBOM policy; an identifier the policy matches on"),
+    ("https://git.k8s.io", "upstream source link in a vendored CRD's description text; never fetched"),
+    ("https://github.com/thanos-io/thanos/blob", "upstream doc link in a vendored CRD's description text; never fetched"),
+    ("https://github.com/kubernetes-sigs/controller-tools/issues", "upstream issue link in a vendored CRD comment; never fetched"),
+    ("https://github.com/JiRaska/open-bank-oss/blob", "runbook deep-link in an alert annotation; read by a human, not by a workload"),
+    ("https://open-bank.tech/", "OAuth redirect/claimed-HTTPS identifier in a Keycloak client; not a feed"),
+    ("https://flagd.dev", "flagd JSON-schema URI in a feature-flag ConfigMap; an identifier"),
+    ("https://go.temporal.io", "Go module path in a Temporal chart value; not an HTTP fetch"),
+    #
+    # (2) DEPLOY-TIME sources. Resolved by Argo CD / the registry cache, not by a running
+    # service. A failure blocks the sync or the pull loudly — it cannot go silent the way a
+    # 404 on a data feed did (#2204), which is exactly why they are declared and not probed.
+    ("https://github.com/JiRaska/open-bank-oss.git", "this repo, cloned by the realm-drift and tier-classifier CronJobs; a clone failure is loud"),
+    ("https://gitlab.com", "upstream source repo pinned by the GlitchTip chart; deploy-time"),
+    ("https://grafana.github.io", "Helm chart repository; deploy-time, a failure blocks the Argo CD sync"),
+    ("https://open-telemetry.github.io", "Helm chart repository; deploy-time"),
+    ("https://prometheus-community.github.io", "Helm chart repository; deploy-time"),
+    ("https://argoproj.github.io", "Helm chart repository; deploy-time"),
+    ("https://charts.external-secrets.io", "Helm chart repository; deploy-time"),
+    ("https://charts.fairwinds.com", "Helm chart repository; deploy-time"),
+    ("https://falcosecurity.github.io", "Helm chart repository; deploy-time"),
+    ("https://kubernetes.github.io", "Helm chart repository; deploy-time"),
+    ("https://kubernetes-sigs.github.io", "Helm chart repository; deploy-time"),
+    ("https://kyverno.github.io", "Helm chart repository; deploy-time"),
+    ("https://openbao.github.io", "Helm chart repository; deploy-time"),
+    ("https://strimzi.io", "Helm chart repository; deploy-time"),
+    ("https://robusta-charts.storage.googleapis.com", "Helm chart repository; deploy-time"),
+    #
+    # (3) REGISTRY / BUILD-ARTEFACT upstreams behind our own caches. Real third-party egress,
+    # but each has an in-cluster cache whose own liveness is the signal, and none serves a
+    # data feed a money-path job reads.
+    ("https://registry-1.docker.io", "upstream mirrored by the in-cluster registry cache"),
+    ("https://quay.io", "upstream mirrored by the in-cluster registry cache"),
+    ("https://ghcr.io", "upstream mirrored by the in-cluster registry cache"),
+    ("https://repo1.maven.org", "Maven Central, mirrored by Reposilite"),
+    ("https://plugins.gradle.org", "Gradle plugin portal, mirrored by Reposilite"),
+    ("https://dl.google.com", "Google Maven, mirrored by Reposilite"),
+    #
+    # (3b) AUTHENTICATED LLM EGRESS. Real third-party egress from a running workload, but it
+    # cannot be probed: the endpoint answers 401 without a key, so a probe would assert the
+    # liveness of an error page (the #2204 shape it exists to prevent). HolmesGPT dials this for
+    # its meta/llama-3.1-70b-instruct route; a failure surfaces as a failed investigation, not as
+    # a silently-empty table, and the LLM-failure alerts (#6041) cover the gateway path.
+    # Same category and same reason as api.deepinfra.com above.
+    ("https://integrate.api.nvidia.com/v1", "authenticated LLM endpoint for HolmesGPT; needs a key, so a probe would only measure a 401"),
+    #
+    # (4) ACME. Real egress; a failure surfaces as an un-renewed Certificate, which cert-manager
+    # reports and the certificate-expiry alert covers.
+    ("https://acme-v02.api.letsencrypt.org", "ACME directory; failure surfaces as a cert-manager Certificate condition"),
+    ("https://acme-staging-v02.api.letsencrypt.org", "ACME staging directory; non-production issuer"),
+    #
+    # (5) OUR OWN public hostnames, each covered by its own probe or journey CronJob.
+    ("https://admin.open-bank.tech", "our own admin-ui ingress; covered by the public-edge journey probe"),
+    ("https://api.open-bank.tech", "our own API ingress; covered by the public-edge journey probe"),
+    ("https://customer.open-bank.tech", "our own customer ingress; covered by the public-edge journey probe"),
+    ("https://kc.open-bank.tech", "our own Keycloak ingress; covered by its own probes"),
+    ("https://glitchtip.open-bank.tech", "our own GlitchTip ingress"),
+    ("https://langfuse.open-bank.tech", "our own Langfuse ingress"),
+    ("https://pact.open-bank.tech", "our own Pact Broker ingress"),
 ]
 
 URL_IN_TEXT = re.compile(r"https?://[^\s\"'}\)>,]+")
 _LOOPBACK = re.compile(r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(/|$)")
 _PLAINTEXT = re.compile(r"^http://(?P<host>[^/:]+)(?P<port>:\d+)?")
+_ANY_SCHEME = re.compile(r"^https?://(?P<host>[^/:]+)")
 
 
 def is_internal(url):
@@ -199,15 +262,41 @@ def is_internal(url):
     """
     if _LOOPBACK.match(url):
         return True
+    m = _ANY_SCHEME.match(url)
+    host = m.group("host") if m else ""
+    # A Kubernetes DNS suffix is in-cluster under ANY scheme. This used to be tested only on
+    # the `http://` branch, so `https://campaign-service.campaign.svc:8443` fell through to
+    # "external by definition" and needed a NOT_PROBED entry to excuse an in-cluster mTLS call.
+    # Widening the corpus to gitops (#6242) makes that shape the norm, not the exception.
+    if host.endswith((".svc", ".cluster.local")) or ".svc." in host:
+        return True
     m = _PLAINTEXT.match(url)
     if not m:
         return False  # https:// — external by definition
     host, port = m.group("host"), m.group("port")
-    return "." not in host or bool(port) or host.endswith((".svc", ".cluster.local"))
+    return "." not in host or bool(port)
+
+
+# The corpus. DERIVED from the artifacts, not hand-kept: every service config plus every
+# deployed manifest. It used to be the first glob alone, which is why a live LLM egress
+# declared only in `openbank-infra/gitops/apps/holmesgpt.yaml` was outside this gate's reach
+# and declared nowhere — the gate reported "every external URL accounted for" and exited 0
+# while a workload that receives cluster diagnostics called a third party (#6242). A gate
+# whose SCOPE is narrower than the subject it claims to govern reads as PASSING, never as
+# UNCHECKED; adding a source here is the only way to change that, so it is one list, in code,
+# next to the check that consumes it.
+CORPUS_GLOBS = (
+    "openbank-*/src/main/resources/application.yaml",
+    "openbank-infra/gitops/**/*.yaml",
+)
 
 
 def scanned_yamls(root):
-    return sorted(pathlib.Path(root).glob("openbank-*/src/main/resources/application.yaml"))
+    base = pathlib.Path(root)
+    out = set()
+    for pattern in CORPUS_GLOBS:
+        out.update(base.glob(pattern))
+    return sorted(out)
 
 
 def external_urls_in(path):
@@ -274,7 +363,13 @@ def check_drift(root, resolved):
         for lineno, url in external_urls_in(path):
             if url in probed:
                 continue
-            match = next((e for e in excused if url.startswith(e)), None)
+            # LONGEST matching prefix, not any. `excused` is a set, so `next(...)` picked an
+            # arbitrary one; with overlapping entries (a host and a path under it) that made
+            # which entry got marked seen — and therefore which one was reported stale —
+            # depend on hash order. Longest-prefix is deterministic and keeps a specific
+            # entry meaningful next to a broader one covering the same host.
+            candidates = [e for e in excused if url.startswith(e)]
+            match = max(candidates, key=len) if candidates else None
             if match:
                 seen_excused.add(match)
                 continue

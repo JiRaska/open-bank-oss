@@ -51,9 +51,22 @@ data:
     mp.messaging.incoming.notification-events-in.client.id=notification-service-${quarkus.uuid}
     mp.messaging.incoming.notification-events-in.group.id=notification-service
     mp.messaging.incoming.notification-events-in.auto.offset.reset=earliest
+    # #5745 (sweep of #5698): explicit DLQ topic for the notification-events-in channel
+    # (failure-strategy: dead-letter-queue, set in application.yaml). Explicit rather than the
+    # SmallRye default `dead-letter-topic-notification-events-in` for the same reason as
+    # party-events-in below — a dotted leaf key, so it MUST live here (issue #686).
+    mp.messaging.incoming.notification-events-in.dead-letter-queue.topic=openbank.notification.requests.dlq
     mp.messaging.incoming.party-events-in.client.id=notification-service-party-${quarkus.uuid}
     mp.messaging.incoming.party-events-in.group.id=notification-service-party
     mp.messaging.incoming.party-events-in.auto.offset.reset=earliest
+    # #5698: explicit DLQ topic for the party-events-in channel (failure-strategy:
+    # dead-letter-queue, set in application.yaml). Explicit rather than implicit because
+    # SmallRye's default name is dead-letter-topic-<channel>, and account-service already owns
+    # `dead-letter-topic-party-events-in` for ITS party-events-in channel — sharing it would put
+    # two services' dead letters in one topic and misattribute them in the existing
+    # AccountPartyEventDeadLettered alert. Dotted leaf key, so it MUST live here and not in
+    # application.yaml (issue #686, same reason as group.id above).
+    mp.messaging.incoming.party-events-in.dead-letter-queue.topic=openbank.party.events.notification.dlq
     mp.messaging.incoming.delegation-events-in.client.id=notification-service-delegation-${quarkus.uuid}
     mp.messaging.incoming.delegation-events-in.group.id=notification-service-delegation
     mp.messaging.incoming.delegation-events-in.auto.offset.reset=earliest

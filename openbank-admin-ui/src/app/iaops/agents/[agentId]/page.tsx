@@ -225,8 +225,8 @@ function AgentDetailContent() {
       />
 
       {loading && !data ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
-          <RefreshCw size={16} style={{ animation: 'spin 0.8s linear infinite' }} />
+        <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
+          <RefreshCw size={16} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} />
           <span style={{ fontSize: '13px' }}>{t('Načítám agenta…', 'Loading agent…')}</span>
         </div>
       ) : data ? (

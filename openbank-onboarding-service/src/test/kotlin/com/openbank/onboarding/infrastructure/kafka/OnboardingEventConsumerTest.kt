@@ -10,6 +10,7 @@ import com.openbank.onboarding.application.usecase.OnboardingProjectionService
 import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingEvent
 import com.openbank.onboarding.domain.model.PartyStage
+import com.openbank.onboarding.domain.model.ProjectionResult
 import com.openbank.onboarding.infrastructure.observability.ProjectionOutcomeMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -64,7 +65,7 @@ class OnboardingEventConsumerTest {
             """"partyId":"$partyId",""" +
             """"credentialId":"e2e-1c0a4767-aed7-4e9a-9f91-ea8ba3e0493e",""" +
             """"algorithm":"ES256","occurredAt":"2026-08-08T03:20:23.835301445Z"}"""
-        coEvery { projection.applyEvent(any()) } just runs
+        coEvery { projection.applyEvent(any()) } returns ProjectionResult.APPLIED
 
         consumer.consumeScaEvent(payload)
 
@@ -74,6 +75,50 @@ class OnboardingEventConsumerTest {
             )
         }
         verify(exactly = 1) { metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.PROJECTED) }
+    }
+
+    /**
+     * The defect this outcome exists for (#6248). A DEVICE_ENROLLED whose party has no row yet is
+     * consumed successfully and dropped; before the fourth outcome existed it was recorded as
+     * PROJECTED, so the alert built for exactly this class of loss compared against a series the
+     * drops were inflating.
+     *
+     * The `exactly = 0` on PROJECTED is the assertion that matters. Without it this test passes
+     * unchanged against the old code, which recorded PROJECTED and nothing else — it would be
+     * measuring that a counter was touched, not which bucket it landed in.
+     */
+    @Test
+    fun `a seeded projection is recorded as SEEDED_UNKNOWN_PARTY and never as PROJECTED`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { projection.applyEvent(any()) } returns ProjectionResult.APPLIED_TO_SEEDED_RECORD
+
+        consumer.consumeScaEvent(
+            """{"eventType":"DEVICE_ENROLLED","partyId":"$partyId","credentialId":"c1"}""",
+        )
+
+        verify(exactly = 1) {
+            metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.SEEDED_UNKNOWN_PARTY)
+        }
+        verify(exactly = 0) { metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.PROJECTED) }
+        verify(exactly = 0) { metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.FAILED) }
+    }
+
+    /**
+     * A seed must stay acked. Nacking it would wedge the consumer group on an ordering race
+     * that resolves itself, which is the failure mode the original `?: return` was right to
+     * avoid — what was wrong was discarding the event, and then reporting that as a success.
+     */
+    @Test
+    fun `a seeded projection does not throw`() {
+        coEvery { projection.applyEvent(any()) } returns ProjectionResult.APPLIED_TO_SEEDED_RECORD
+
+        assertThatCode {
+            runBlocking {
+                consumer.consumeScaEvent(
+                    """{"eventType":"DEVICE_ENROLLED","partyId":"${UUID.randomUUID()}","credentialId":"c1"}""",
+                )
+            }
+        }.doesNotThrowAnyException()
     }
 
     /**
@@ -132,7 +177,7 @@ class OnboardingEventConsumerTest {
         val partyId = UUID.randomUUID()
         val payload = """{"eventType":"PARTY_CREATED","partyId":"$partyId",""" +
             """"legalName":"Alice","email":"a@b.com","occurredAt":"2026-06-01T10:00:00Z"}"""
-        coEvery { projection.applyEvent(any()) } just runs
+        coEvery { projection.applyEvent(any()) } returns ProjectionResult.APPLIED
 
         consumer.consumePartyEvent(payload)
 
@@ -148,7 +193,7 @@ class OnboardingEventConsumerTest {
         val partyId = UUID.randomUUID()
         val payload = """{"eventType":"KYC_STATUS_CHANGED","partyId":"$partyId",""" +
             """"status":"ACTIVE","occurredAt":"2026-06-01T10:00:00Z"}"""
-        coEvery { projection.applyEvent(any()) } just runs
+        coEvery { projection.applyEvent(any()) } returns ProjectionResult.APPLIED
 
         consumer.consumePartyEvent(payload)
 
@@ -174,7 +219,7 @@ class OnboardingEventConsumerTest {
             val caseId = UUID.randomUUID()
             val payload = """{"eventType":"KYC_CASE_STATUS_CHANGED","partyId":"$partyId","kycCaseId":"$caseId",""" +
                 """"status":"UNDER_REVIEW","occurredAt":"2026-06-01T10:00:00Z"}"""
-            coEvery { projection.applyEvent(any()) } just runs
+            coEvery { projection.applyEvent(any()) } returns ProjectionResult.APPLIED
 
             consumer.consumeKycEvent(payload)
 
@@ -258,6 +303,7 @@ class OnboardingEventConsumerTest {
         coEvery { projection.applyEvent(any()) } answers {
             attempts++
             if (attempts < EventRetry.DEFAULT_MAX_ATTEMPTS) throw DownstreamDown("connection reset")
+            ProjectionResult.APPLIED
         }
 
         consumer.consumeScaEvent("""{"eventType":"DEVICE_ENROLLED","partyId":"$partyId","credentialId":"c1"}""")

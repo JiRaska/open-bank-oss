@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.14.1...fx-service-v0.15.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** unify the three-month FX rate trend ([#7736](https://github.com/JiRaska/open-bank-oss/issues/7736)) ([5e85aa6](https://github.com/JiRaska/open-bank-oss/commit/5e85aa60dab75048024186ff7072c0918cddaeea))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.14.0...fx-service-v0.14.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **ci:** event-handler-swallow gate was blind to every read-model receiver ([#7600](https://github.com/JiRaska/open-bank-oss/issues/7600)) ([336c2f1](https://github.com/JiRaska/open-bank-oss/commit/336c2f1857060696f4b0945cc9ae0556cf3edbda)), closes [#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.13.0...fx-service-v0.14.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.12.1...fx-service-v0.13.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.12.0...fx-service-v0.12.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.11.1...fx-service-v0.12.0) (2026-08-19)
 
 

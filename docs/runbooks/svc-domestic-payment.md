@@ -30,7 +30,7 @@ triaging an incident that starts on `domestic-payment`.
 
 ## Health & probes
 
-- Readiness: `GET :8116/q/health/ready` · Liveness: `GET :8116/q/health/live`
+- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `payments`); dashboards in Grafana.
 - Logs: `kubectl logs -n payments -l app.kubernetes.io/name=domestic-payment-service -f`, or Loki
   `{namespace="payments"}`.
@@ -38,7 +38,7 @@ triaging an incident that starts on `domestic-payment`.
 ## Routine operations
 
 - **Restart:** `kubectl argo rollouts restart domestic-payment-service -n payments` (Argo Rollout — plain `kubectl rollout restart` does NOT work on the CRD). Without the plugin: `kubectl patch rollout domestic-payment-service -n payments --type merge -p '{"spec":{"restartAt":"<RFC3339-now>"}}'`.
-- **Scale:** `kubectl scale rollout/domestic-payment-service -n payments --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
+- **Scale:** `kubectl scale rollout/domestic-payment-service -n payments --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes

@@ -35,11 +35,26 @@ takes a state-changing money-path action. The surfaces that accept external inpu
 operator ──bearer──▶ admin-ui BFF ──bearer + X-Agent-Id──▶ /mcp ──▶ AgentPolicyGate ──▶ OPA sidecar
                                                               │                         (agents.rego)
                                                               ├──▶ McpToolRegistry ──▶ downstream svc REST
-                                                              └──▶ AuditEventPublisher ──▶ Kafka audit-events-out
+                                                              └──▶ AuditEventPublisher
+                                                                     (DurableAgentAuditPublisher)
+                                                                        │
+                                                                        ▼
+                                                              agent_audit_outbox (local Postgres,
+                                                              same tx as the audited operation)
+                                                                        │  AgentAuditOutboxDispatcher
+                                                                        ▼  (@Scheduled, gated off)
+                                                              Kafka openbank.agent.audit.events
+                                                                        │  AgentAuditConsumer
+                                                                        ▼
+                                                              audit-service → audit_entries
+                                                              (append-only, hash-chained)
 ```
 
 Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service (Keycloak bearer),
-(c) agent-service→downstream services (service bearer), (d) agent-service→OPA (localhost sidecar).
+(c) agent-service→downstream services (service bearer), (d) agent-service→OPA (localhost sidecar),
+(e) agent-service→Kafka (mTLS, KafkaUser `agent-service`, `Write, Describe` on
+`openbank.agent.audit.events` and deliberately no `Read` — a component may append to the trail
+about itself and may not read it back; `openbank-infra/gitops/components/agent/kafka-agent-mtls.yaml`).
 
 ## 2. STRIDE
 
@@ -82,9 +97,33 @@ Trust boundaries: (a) browser→BFF (NextAuth session), (b) BFF→agent-service 
 
 ### Repudiation
 
-- **T-R1.** Every decision (ALLOW/DENY), tool execution, model completion and now identity rejection
+- **T-R1.** Every decision (ALLOW/DENY), tool execution, model completion and identity rejection
   is audited with an attributable actor (AI_AGENT for agent actions, the OIDC subject for operator
   actions). Kill-switch flips record the OIDC subject, never a body field.
+- **T-R2 (issue #6191, ADR-0031 D5).** Those events reach a durable record and not only a log line.
+  Until #6209 the fleet's only `AuditEventPublisher` implementation was the log-only fallback, so
+  the DFD arrow above credited a Kafka delivery that no code performed — the evidence for every AI
+  action was a log line written by the same process whose behaviour a dispute would put in question.
+  `DurableAgentAuditPublisher` (an `@Alternative`) now enqueues into `agent_audit_outbox` inside the
+  audited operation's own transaction, so an audit call returns only after the source database has
+  acknowledged the row; `AgentAuditOutboxDispatcher` drains it and marks a row published only on
+  Kafka ack, leaving a failed send claimed for retry with `last_error` recorded.
+  `AgentAuditConsumer` acks the Kafka offset only after `audit_entries` has committed, and the
+  producer's `eventId` is the row's `entry_id`, so an at-least-once redelivery de-duplicates rather
+  than double-chaining (`AgentAuditRedeliveryIT`).
+  **Residual, stated rather than implied:**
+  - **The transport is off by default.** `AGENT_AUDIT_KAFKA_ENABLED` defaults to `false` (#6209's
+    deliberate rollout choice), and the gitops `group.id`/`auto.offset.reset` override that
+    audit-service needs is deliberately not added yet. Until both land, AI provenance is durable in
+    agent-service's *local* outbox and has not reached the tamper-evident trail — the outbox grows
+    unbounded and no `audit_entries` row exists. This is a rollout state, not a design gap, but it
+    is the state today and no green test contradicts it.
+  - **`aggregate_id` degrades to the `unknown` sentinel.** The envelope spells the acted-on
+    resource `aggregateId`; `AuditConsumer.inferAggregateId` derives that column from a fixed chain
+    of business id field names and cannot see it. The row is therefore attributable to the actor
+    but not joinable to the resource, and `audit_entries` is append-only so it can never be
+    corrected. Measured by `AgentAuditEventPersistenceIT`, which asserts the sentinel rather than
+    agreeing with it silently.
 
 ### Information disclosure
 

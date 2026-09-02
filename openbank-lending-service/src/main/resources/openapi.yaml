@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.13.0
+  version: 1.16.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -85,6 +85,108 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           description: Refused by the origination guard (e.g. no active compliance pack)
+    get:
+      tags: [Lending]
+      operationId: listCustomerCreditJourneys
+      summary: The caller's own credit applications as customer-readable journeys (customer-edge only)
+      description: >-
+        ADR-0269 rule 3. Scoped to the party in X-Customer-Party-Id; carries no rate, instalment or
+        APRC — that is ADR-0269 rule 4, served by /quotes below. Only the configured customer-edge principal may
+        call it.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The party's credit applications (possibly empty)
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/lending/intake/applications/{id}:
+    get:
+      tags: [Lending]
+      operationId: getCustomerCreditJourney
+      summary: One of the caller's own credit applications as a customer-readable journey
+      description: >-
+        A journey belonging to another party answers 404, not 403 — a not-found and a not-yours must
+        be indistinguishable, or the id space leaks.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: The credit application journey }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: No such application for this caller }
+
+  /api/v1/lending/intake/financial-health:
+    get:
+      tags: [Lending]
+      operationId: getCustomerFinancialHealth
+      summary: The caller's four-pillar financial health (customer-edge only, no score)
+      description: >-
+        ADR-0269 rule 5. Assembled here because the pillars need the credit profile, the loan book
+        and (later) balances, all of which this service already reaches. The judgement itself is a
+        pure function in libs; this route only fetches. Any pillar may answer UNKNOWN, and one
+        unavailable upstream greys out one pillar rather than the whole view.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The four pillars
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/lending/intake/quotes:
+    post:
+      tags: [Lending]
+      operationId: quoteCustomerCredit
+      summary: Indicative, non-binding price for a requested amount and term (customer-edge only)
+      description: >-
+        ADR-0269 rule 4 — the only place an instalment or an APRC may come from. Nothing is
+        persisted: an indicative price with an id would be one lookup away from being treated as a
+        binding offer. Price, currency and bounds are lending-side configuration; the body carries
+        only the amount and term. Refused 409 with a reason code when the ADR-0269 rule-2 distress
+        floor suppresses pricing — never a 200 with empty numbers, which a client renders as zero.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerQuoteRequest'
+      responses:
+        '200':
+          description: The indicative quote (binding is always false)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerQuote'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Pricing suppressed by the distress floor; body carries the reason code
+
   /api/v1/lending/applications/{id}:
     get:
       tags: [Lending]
@@ -606,6 +708,9 @@ paths:
       responses:
         '201':
           description: Proposal registered, awaiting a checker
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PackActivationView' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -633,6 +738,9 @@ paths:
       responses:
         '200':
           description: Decision recorded; an approved pack is active in-memory immediately
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PackActivationView' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -647,6 +755,11 @@ paths:
       responses:
         '200':
           description: Pending proposals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PackActivationView' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/compliance-packs/active:
@@ -657,6 +770,11 @@ paths:
       responses:
         '200':
           description: Active packs with content hashes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PackActivationView' }
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -692,6 +810,44 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
   schemas:
+    PackActivationView:
+      type: object
+      required:
+        - id
+        - jurisdiction
+        - productType
+        - packVersion
+        - effectiveFrom
+        - contentHash
+        - state
+        - proposedBy
+        - pack
+      properties:
+        id: { type: string, format: uuid }
+        jurisdiction: { type: string }
+        productType: { type: string, enum: [CONSUMER_CREDIT, MORTGAGE, OVERDRAFT, SME_CREDIT] }
+        packVersion: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        contentHash: { type: string, description: SHA-256 fingerprint of the exact reviewed pack }
+        state: { type: string, enum: [PROPOSED, APPROVED, REJECTED, EXECUTED] }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time, nullable: true }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true }
+        pack:
+          $ref: '#/components/schemas/CompliancePack'
+    CompliancePack:
+      type: object
+      description: Exact reviewed pack content, returned so operators can inspect what the hash identifies.
+      additionalProperties: true
+      required: [jurisdiction, productType, version, effectiveFrom]
+      properties:
+        jurisdiction: { type: string }
+        productType: { type: string, enum: [CONSUMER_CREDIT, MORTGAGE, OVERDRAFT, SME_CREDIT] }
+        version: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date, nullable: true }
     ApiError:
       type: object
       properties:
@@ -750,6 +906,43 @@ components:
         principal:
           type: array
           items: { $ref: '#/components/schemas/MoneyTotal' }
+    CustomerQuoteRequest:
+      type: object
+      required: [amount, termMonths]
+      description: >-
+        The same two fields the intake accepts, and for the same reason: a customer may choose how
+        much and how long, never at what price.
+      properties:
+        amount: { type: string, description: Decimal in the product's configured currency }
+        termMonths: { type: integer, minimum: 1 }
+
+    CustomerQuote:
+      type: object
+      required: [amount, currency, termMonths, nominalAnnualRatePercent, monthlyPayment,
+                 totalPayable, totalCostOfCredit, validUntil, binding]
+      description: >-
+        An indicative price. Structurally distinct from a binding offer: no id, no accept path.
+      properties:
+        amount: { type: string }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        termMonths: { type: integer }
+        nominalAnnualRatePercent: { type: string }
+        monthlyPayment: { type: string }
+        totalPayable: { type: string }
+        totalCostOfCredit: { type: string }
+        aprcPercent:
+          type: string
+          nullable: true
+          description: >-
+            RPSN/APRC. NULL means "could not be computed" and must be rendered as an absent figure —
+            never as 0%, which reads to a customer as free credit.
+        validUntil: { type: string, format: date-time }
+        binding:
+          type: boolean
+          description: >-
+            Always false. Present so a client never has to infer it; an unwritten assumption is the
+            kind that gets forgotten.
+
     CustomerIntakeRequest:
       type: object
       required: [amount, termMonths]

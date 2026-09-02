@@ -89,6 +89,16 @@ jobs:
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2g"
 
+      - name: Build mutation Test Intelligence envelope
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service "${{ matrix.service }}" \
+            --mutation-report "${{ matrix.service }}/build/reports/pitest/mutations.xml" \
+            --mutation-threshold 70 \
+            --out "${{ matrix.service }}/build/reports/pitest/test-intelligence-run.json"
+
       - name: Upload pitest XML report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

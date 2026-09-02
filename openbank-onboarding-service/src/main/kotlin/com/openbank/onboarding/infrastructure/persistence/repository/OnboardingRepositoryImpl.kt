@@ -9,12 +9,14 @@ import com.openbank.onboarding.domain.model.FunnelStage
 import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingRecord
 import com.openbank.onboarding.domain.model.PartyStage
+import com.openbank.onboarding.infrastructure.persistence.entity.DeviceEnrolmentEntity
 import com.openbank.onboarding.infrastructure.persistence.entity.OnboardingEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
@@ -47,6 +49,34 @@ class OnboardingRepositoryImpl :
             }
         }.awaitSuspending()
     }
+
+    /**
+     * Check-then-insert inside one transaction, so a duplicate is absorbed without ever letting a
+     * constraint violation reach the reactive session (a failed statement poisons it for the rest
+     * of the transaction, and this method must be safe to call on every replayed event). The
+     * UNIQUE index remains the real guarantee under concurrency; this is the common path.
+     */
+    override suspend fun recordDeviceEnrolment(partyId: UUID, credentialId: String, enrolledAt: Instant): Int =
+        Panache.withTransaction {
+            DeviceEnrolmentEntity
+                .find("partyId = ?1 and credentialId = ?2", partyId, credentialId)
+                .firstResult()
+                .flatMap { existing ->
+                    if (existing != null) {
+                        Uni.createFrom().item(Unit)
+                    } else {
+                        val e = DeviceEnrolmentEntity()
+                        e.partyId = partyId
+                        e.credentialId = credentialId
+                        e.enrolledAt = enrolledAt
+                        // replaceWith(Unit), not the bare persist(): Kotlin infers the branch
+                        // type from the `if`, and `Uni<DeviceEnrolmentEntity>` vs `Uni<Void>`
+                        // unifies to a cast that only blows up at runtime.
+                        e.persist<DeviceEnrolmentEntity>().replaceWith(Unit)
+                    }
+                }
+                .flatMap { DeviceEnrolmentEntity.count("partyId", partyId) }
+        }.awaitSuspending().toInt()
 
     override suspend fun findByPartyId(partyId: UUID): OnboardingRecord? =
         Panache.withSession { find("partyId", partyId).firstResult() }.awaitSuspending()?.toDomain()
@@ -83,34 +113,37 @@ class OnboardingRepositoryImpl :
             }
         }.awaitSuspending()
     }
-
-    private fun OnboardingRecord.toEntity() = OnboardingEntity().also {
-        it.partyId = partyId
-        it.legalName = legalName
-        it.email = email
-        it.partyStatus = partyStatus.name
-        it.kycCaseId = kycCaseId
-        it.kycStatus = kycStatus?.name
-        it.scaEnrolled = scaEnrolled
-        it.deviceCount = deviceCount
-        it.funnelStage = funnelStage.name
-        it.blockedReason = blockedReason
-        it.createdAt = createdAt
-        it.updatedAt = updatedAt
-    }
-
-    private fun OnboardingEntity.toDomain() = OnboardingRecord(
-        partyId = partyId,
-        legalName = legalName,
-        email = email,
-        partyStatus = PartyStage.valueOf(partyStatus),
-        kycCaseId = kycCaseId,
-        kycStatus = kycStatus?.let { runCatching { KycStage.valueOf(it) }.getOrNull() },
-        scaEnrolled = scaEnrolled,
-        deviceCount = deviceCount,
-        funnelStage = FunnelStage.valueOf(funnelStage),
-        blockedReason = blockedReason,
-        createdAt = createdAt,
-        updatedAt = updatedAt,
-    )
 }
+
+// Entity <-> domain mapping as file-private top-level extensions rather than methods: they
+// need nothing from the class, and keeping them off it holds it under detekt's
+// TooManyFunctions threshold, which fires AT 11 and not above it.
+private fun OnboardingRecord.toEntity() = OnboardingEntity().also {
+    it.partyId = partyId
+    it.legalName = legalName
+    it.email = email
+    it.partyStatus = partyStatus.name
+    it.kycCaseId = kycCaseId
+    it.kycStatus = kycStatus?.name
+    it.scaEnrolled = scaEnrolled
+    it.deviceCount = deviceCount
+    it.funnelStage = funnelStage.name
+    it.blockedReason = blockedReason
+    it.createdAt = createdAt
+    it.updatedAt = updatedAt
+}
+
+private fun OnboardingEntity.toDomain() = OnboardingRecord(
+    partyId = partyId,
+    legalName = legalName,
+    email = email,
+    partyStatus = PartyStage.valueOf(partyStatus),
+    kycCaseId = kycCaseId,
+    kycStatus = kycStatus?.let { runCatching { KycStage.valueOf(it) }.getOrNull() },
+    scaEnrolled = scaEnrolled,
+    deviceCount = deviceCount,
+    funnelStage = FunnelStage.valueOf(funnelStage),
+    blockedReason = blockedReason,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)

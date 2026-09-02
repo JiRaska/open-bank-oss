@@ -7,6 +7,7 @@ package com.openbank.liveness
 
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
@@ -22,6 +23,14 @@ import org.junit.jupiter.api.Test
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 class LivenessBootSmokeIT {
+
+    @Test
+    @TestSecurity(user = "viewer", roles = ["ROLE_VIEWER"])
+    fun `viewer findings query reaches reactive persistence`() {
+        given()
+            .`when`().get("/api/v1/liveness-sentinel/findings")
+            .then().statusCode(200)
+    }
 
     @Test
     fun `application boots and reports ready against a live database`() {

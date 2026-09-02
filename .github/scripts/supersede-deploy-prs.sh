@@ -92,20 +92,79 @@ classify() {
   esac
 }
 
+# ── coverage (issue #7621) ─────────────────────────────────────────────────────────────────────
+# Ancestry alone is NOT sufficient: an auto-deploy PR bumps only the services *its own run*
+# detected as changed, so a descendant commit's PR can touch a completely disjoint set of gitops
+# components. Measured live: #7313 (bumps balance-service.yaml) was closed "superseded by #7314"
+# (bumps kyc-service.yaml), which was in turn closed "superseded by #7319" (bumps
+# account-service.yaml) — #7319's diff never touched either of the other two files, so both
+# services silently stopped deploying while every job read green. Ancestry is still required (it
+# is what generation 1 / issue #6231 fixed, and removing it reopens the createdAt rewind) — this
+# is an ADDITIONAL gate, never a replacement.
+#
+# List the file paths a PR's diff touches. Overridable via SUPERSEDE_FILES_HOOK for the self-test,
+# the same seam pattern as compare_status.
+changed_files() {
+  local pr="$1"
+  if [ -n "${SUPERSEDE_FILES_HOOK:-}" ]; then
+    "$SUPERSEDE_FILES_HOOK" "$pr"
+    return
+  fi
+  gh pr diff "$pr" --repo "$REPO" --name-only 2>/dev/null
+}
+
+# rc 0 iff every non-empty line of $2 (the PR being considered for closure) appears in $1 (the
+# survivor). An EMPTY subset is deliberately never treated as "covered" here — that decision
+# belongs to the caller, which must refuse to close on empty/unreadable file lists (unknown must
+# never mean "close it", same rule as classify() above).
+covers() {
+  local superset="$1" subset="$2" line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    grep -qxF -- "$line" <<<"$superset" || return 1
+  done <<<"$subset"
+  return 0
+}
+
+# CLOSE | SKIP, from (keep's changed files, other's changed files). Pure, same reason as classify().
+# Fails safe in every direction: no keep files, no other files, or other not a subset -> SKIP.
+classify_coverage() {
+  local keep_files="$1" other_files="$2"
+  if [ -z "$keep_files" ] || [ -z "$other_files" ]; then printf 'SKIP'; return; fi
+  if covers "$keep_files" "$other_files"; then printf 'CLOSE'; else printf 'SKIP'; fi
+}
+
 # ── main ────────────────────────────────────────────────────────────────────────────────────────
 run() {
   local PREFIX="$1" KEEP="$2" KEEP_SHA="$3" PAIRS="$4"
   local n ref other_sha verdict failed=0 stale_keep=0 closed=0 skipped=0
+  local KEEP_FILES other_files cov_verdict
 
   if [ -z "$PAIRS" ]; then
     echo "supersede: no other open '$PREFIX*' PRs besides #$KEEP — nothing to close."
     return 0
   fi
 
+  # Fetched once, reused for every candidate. An unreadable diff yields "" and classify_coverage()
+  # then refuses to close anything against it — never treated as "covers everything".
+  KEEP_FILES="$(changed_files "$KEEP")"
+
   while IFS=$'\t' read -r n ref; do
     [ -n "$n" ] || continue
     other_sha="$(sha_of_branch "$ref" "$PREFIX")"
     verdict="$(classify "$KEEP_SHA" "$other_sha")"
+    if [ "$verdict" = "CLOSE" ]; then
+      other_files="$(changed_files "$n")"
+      cov_verdict="$(classify_coverage "$KEEP_FILES" "$other_files")"
+      if [ "$cov_verdict" != "CLOSE" ]; then
+        skipped=$((skipped + 1))
+        echo "::warning::supersede: #$KEEP is a descendant of #$n's commit, but #$KEEP's changed" \
+             "files do not cover #$n's (coverage check, issue #7621) — leaving #$n OPEN." \
+             "keep_files=[$(printf '%s' "$KEEP_FILES" | tr '\n' ' ')]" \
+             "other_files=[$(printf '%s' "$other_files" | tr '\n' ' ')]"
+        continue
+      fi
+    fi
     case "$verdict" in
       STALE_KEEP)
         stale_keep=1
@@ -188,6 +247,28 @@ HOOK
   chmod +x "$tmp/compare"
   export SUPERSEDE_COMPARE_HOOK="$tmp/compare"
   export DRY_RUN=true
+
+  # Fake file lists, keyed by PR number. Cases 1-4 predate the coverage gate (issue #7621) and are
+  # about ancestry only, so every PR in them shares one file — coverage is trivially satisfied and
+  # cannot mask an ancestry regression. Cases 5-7 give distinct PRs distinct files to exercise the
+  # coverage gate itself.
+  cat > "$tmp/files" <<'HOOK'
+#!/usr/bin/env bash
+pr="$1"
+case "$pr" in
+  6222|6225|1|2) echo "openbank-infra/gitops/components/shared/shared-service.yaml" ;;
+  7313) printf '%s\n' "openbank-infra/gitops/components/balances/balance-service.yaml" ;;
+  7319) printf '%s\n' "openbank-infra/gitops/components/accounts/account-service.yaml" ;;
+  7314) printf '%s\n' "openbank-infra/gitops/components/kyc/kyc-service.yaml" ;;
+  7327) printf '%s\n%s\n' \
+          "openbank-infra/gitops/components/aml/aml-service.yaml" \
+          "openbank-infra/gitops/components/kyc/kyc-service.yaml" ;;
+  7320) printf '%s\n' "openbank-infra/gitops/components/aml/aml-service.yaml" ;;
+  *) echo "" ;;
+esac
+HOOK
+  chmod +x "$tmp/files"
+  export SUPERSEDE_FILES_HOOK="$tmp/files"
   local OLD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   local NEW=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   local P=chore/gitops-auto-deploy-
@@ -230,11 +311,36 @@ HOOK
     echo "self-test case 4 OK (unparsable sha -> warning, left open)"
   fi
 
+  # case 5 — coverage gate (issue #7621), the exact production shape: #7314 (kyc) is a genuine
+  # ancestry-supersede of #7313 (balance), but #7314's diff never touches balance-service.yaml.
+  # Ancestry alone would CLOSE this; the coverage gate must refuse.
+  out="$(run "$P" 7314 "$NEW" "$(printf '7313\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "SELF-TEST FAIL case 5: coverage-insufficient run exited $rc (must be 0, tidiness only); got: $out"; ok=1
+  elif printf '%s' "$out" | grep -q 'would close #7313'; then
+    echo "SELF-TEST FAIL case 5: #7313 was closed despite #7314 never touching balance-service.yaml; got: $out"; ok=1
+  elif ! printf '%s' "$out" | grep -q 'coverage check, issue #7621.*leaving #7313 OPEN'; then
+    echo "SELF-TEST FAIL case 5: no coverage warning naming #7313; got: $out"; ok=1
+  else
+    echo "self-test case 5 OK (ancestor but disjoint files -> #7313 left OPEN, #7313/#7314/#7319 shape)"
+  fi
+
+  # case 6 — coverage gate, the ordinary (should-close) case: #7327 bumps BOTH aml and kyc
+  # manifests, a genuine superset of #7320's aml-only diff. Must still close.
+  out="$(run "$P" 7327 "$NEW" "$(printf '7320\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "SELF-TEST FAIL case 6: ordinary coverage-covered run exited $rc; got: $out"; ok=1
+  elif ! printf '%s' "$out" | grep -q 'would close #7320'; then
+    echo "SELF-TEST FAIL case 6: #7320 was not closed despite #7327's superset diff; got: $out"; ok=1
+  else
+    echo "self-test case 6 OK (ancestor and superset files -> #7320 closed)"
+  fi
+
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
     return 1
   fi
-  echo "self-test: all 4 cases OK"
+  echo "self-test: all 6 cases OK"
   return 0
 }
 

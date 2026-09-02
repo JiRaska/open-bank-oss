@@ -61,10 +61,16 @@ import java.util.concurrent.atomic.AtomicLong
  * ### Which states are published
  *
  * Terminal states ([SettlementStatus.BOOKED], [SettlementStatus.REJECTED]) are not published:
- * their age only grows and would alert forever. Everything else is published, including the three
- * compensation states — `SettlementWorkflowImpl` always calls `rejectSettlement` after
- * compensating, so a row parked in `REVERSED` / `CREDITED_REVERSED` / `LEDGER_REVERSED` means the
- * unwinding ran and the record never reached its terminal state.
+ * their age only grows and would alert forever. Everything else is published, including all five
+ * compensation outcomes — `SettlementWorkflowImpl` always calls `rejectSettlement` after
+ * compensating, so a row parked in `REVERSED` / `CREDITED_REVERSED` / `LEDGER_REVERSED` /
+ * `REVERSAL_FAILED` / `LEDGER_REVERSAL_UNSUPPORTED` means the unwinding ran (or refused) and the
+ * record never reached its terminal state.
+ *
+ * The set is DERIVED from [SettlementStatus] rather than listed, because it was listed once and
+ * went stale: #6037 split the compensation outcomes into their own values and `REVERSAL_FAILED` /
+ * `LEDGER_REVERSAL_UNSUPPORTED` were left unpublished, so the two states that mean *the money did
+ * not come back* were the only two the stranded-settlement rules could never see.
  *
  * ### t=0 on a cold pod
  *
@@ -167,18 +173,18 @@ class SettlementStrandedGauge(
         private const val WORKFLOW_NAME = "settlement-stranded-gauge"
         private const val REFRESH_INTERVAL_SECONDS = 30L
 
+        /** The only two states a settlement is allowed to rest in. */
+        val TERMINAL: Set<SettlementStatus> = setOf(SettlementStatus.BOOKED, SettlementStatus.REJECTED)
+
         /**
-         * States a settlement must move out of. Everything except the two terminal states
-         * ([SettlementStatus.BOOKED], [SettlementStatus.REJECTED]) — a settlement in any of these
-         * has been accepted and is still owed an outcome, so its age is meaningful.
+         * States a settlement must move out of: everything except [TERMINAL] — a settlement in any
+         * of these has been accepted and is still owed an outcome, so its age is meaningful.
+         *
+         * Derived from the enum on purpose. A hand-kept list is silently wrong the day a status is
+         * added, and the failure mode is a state nobody watches rather than a compile error.
+         * [SettlementStatus.LEDGER_REVERSED] is deprecated and no longer written, but rows written
+         * before #6037 still carry it, so it stays published until they are migrated out.
          */
-        val NON_TERMINAL: List<SettlementStatus> = listOf(
-            SettlementStatus.PENDING,
-            SettlementStatus.DEBITED,
-            SettlementStatus.CREDITED,
-            SettlementStatus.REVERSED,
-            SettlementStatus.CREDITED_REVERSED,
-            SettlementStatus.LEDGER_REVERSED,
-        )
+        val NON_TERMINAL: List<SettlementStatus> = SettlementStatus.entries.filterNot { it in TERMINAL }
     }
 }

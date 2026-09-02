@@ -35,7 +35,7 @@ data class OpenAmlCaseCommand(
     val riskLevel: AmlCaseRiskLevel,
     val alertCode: String,
     val alertDetail: String?,
-    val matchedEntity: String?
+    val matchedEntity: String?,
 )
 
 /**

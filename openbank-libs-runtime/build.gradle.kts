@@ -58,6 +58,11 @@ dependencies {
     compileOnly("jakarta.persistence:jakarta.persistence-api:3.2.0")
     compileOnly("org.eclipse.microprofile.rest.client:microprofile-rest-client-api:4.0")
     compileOnly("io.quarkus:quarkus-hibernate-reactive-panache-kotlin:3.33.2")
+    // Test-only, and deliberately not `implementation`: the persistence exception mappers reference
+    // Hibernate types, but a service without an ORM must not inherit one from libs-runtime just to
+    // get the shared error handling. compileOnly keeps it off every consumer's runtime classpath;
+    // this line only lets libs-runtime's OWN tests construct a DataException to assert against.
+    testImplementation("io.quarkus:quarkus-hibernate-reactive-panache-kotlin:3.33.2")
     compileOnly("io.quarkus:quarkus-scheduler:3.33.2")
     compileOnly("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
     // 1.14.5 -> 1.17.0: GHSA-g3pr-3p32-fp23 / CVE-2026-40984 (HIGH, DoS in Micrometer's HTTP
@@ -73,6 +78,10 @@ dependencies {
     compileOnly("io.micrometer:micrometer-core:1.17.0")
     compileOnly("io.quarkus:quarkus-security:3.33.2")
     compileOnly("io.quarkus:quarkus-arc:3.33.2")
+    // SyntheticTaintRequestFilter binds the trusted synthetic classification into OTel baggage
+    // for the lifetime of an inbound request. Keep this compileOnly: Quarkus services already
+    // supply the API at runtime, and libs-runtime must not bring an observability SDK with it.
+    compileOnly("io.opentelemetry:opentelemetry-api:1.62.0")
 
     // NulByteGuards: the fleet-wide U+0000 rejection (#5913). jackson-databind supplies
     // StringDeserializer/SimpleModule; quarkus-jackson supplies ObjectMapperCustomizer, the
@@ -122,6 +131,7 @@ dependencies {
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
     testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.22.1")
     testImplementation("io.quarkus:quarkus-jackson:3.33.2")
+    testImplementation("io.opentelemetry:opentelemetry-api:1.62.0")
     testImplementation("io.smallrye.reactive:mutiny-kotlin:3.1.1")
     // ResilientCallMetrics classifies CircuitBreakerOpenException; the API is compileOnly above.
     testImplementation("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
@@ -136,6 +146,30 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     jvmArgs("-Dnet.bytebuddy.experimental=true")
+
+    // OutboxDeadLetterAlertNamingTest asserts that the committed PrometheusRule selector matches
+    // what a real Micrometer registration exports — a producer/consumer seam whose two halves live
+    // in different trees. Without declaring the rule file as an input, Gradle sees no reason to
+    // re-run: editing the alert to `openbank_TOTALLY_WRONG` reports `test UP-TO-DATE` and BUILD
+    // SUCCESSFUL, and only `--rerun-tasks` goes red. Combined with path-scoped CI — a gitops-only
+    // PR never builds this module — the guard could not see the change it exists to catch.
+    inputs.file(rootProject.file("openbank-infra/gitops/components/payments/prometheus-rules.yaml"))
+        .withPropertyName("alertRulesUnderTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.file("openbank-infra/gitops/components/billing/prometheus-rules-billing.yaml"))
+        .withPropertyName("billingAlertRulesUnderTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    // `every dead-letter gauge binding is covered here` derives its scope by walking the service
+    // modules for `*OutboxDeadLetterGauge.kt`. Without these as declared inputs the task is
+    // UP-TO-DATE when a NEW binding appears — measured: adding an uncovered gauge left the suite
+    // green, so the scope guard was blind to the one event it exists to catch.
+    inputs.files(
+        rootProject.fileTree(rootProject.projectDir) {
+            include("openbank-*/src/main/kotlin/**/*OutboxDeadLetterGauge.kt")
+        },
+    ).withPropertyName("deadLetterGaugeBindings")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 kover {

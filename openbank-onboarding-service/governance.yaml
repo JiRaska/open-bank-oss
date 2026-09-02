@@ -26,7 +26,7 @@ lineage:
   # No account-service downstream edge: onboarding-service is a passive funnel-tracking read model
   # (OnboardingEventConsumer projects party/kyc/sca events), not an orchestrator — it has
   # no AccountServiceClient and opens no account. Account opening is driven directly by
-  # account-service's PartyEventConsumer on PARTY_CREATED (ADR-0073); the real edge is
+  # account-service's PartyEventConsumer on PARTY_CREATED (ADR-0267 §1); the real edge is
   # party-service --topic--> account-service, declared on party-service's own downstream.
   # The former `account-service (api, "opens account")` edge here was fabricated boilerplate
   # with no backing @RegisterRestClient (issue #1501, found by check-governance-lineage.py).

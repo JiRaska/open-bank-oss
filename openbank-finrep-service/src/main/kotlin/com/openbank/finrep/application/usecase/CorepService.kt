@@ -6,6 +6,7 @@ package com.openbank.finrep.application.usecase
 
 import com.openbank.finrep.application.port.inbound.CorepUseCase
 import com.openbank.finrep.application.port.inbound.GetCorepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.application.port.out.FinrepMetricsPort
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.RegulatoryFramework
@@ -24,16 +25,16 @@ import java.time.LocalDate
  * provisions, etc.) is out of scope for this increment.
  *
  * The rendered return deliberately carries **flagged data gaps** rather than silent omissions
- * (ADR-0097): capital-structure rows have no GL accounts behind them yet, so they are reported as
- * explicit zeros marked `isDataGap`. That flag is the honest thing to do and also invisible — the
- * `data_gap_cells` histogram on [FinrepMetricsPort] is how far the report is from submittable.
+ * (ADR-0097): a render with no recognised 6000-6060 capital source is reported as explicit zeros
+ * marked `isDataGap`. Once those ledger accounts carry balances, the mapper derives the own-funds
+ * subtotals and `data_gap_cells` proves that the source gap cleared.
  */
 @ApplicationScoped
 class CorepService(private val ledgerPort: LedgerPort, private val metrics: FinrepMetricsPort) : CorepUseCase {
 
     override suspend fun getTemplate(query: GetCorepTemplateQuery): CorepTemplate {
         val startedAt = System.nanoTime()
-        val snapshot = trialBalance(query.asOf)
+        val snapshot = trialBalance(query.asOf, query.evidence)
         val template = when (query.templateId) {
             "C_01.00" -> C0100Mapper.map(snapshot.lines, query.asOf)
             else -> {
@@ -64,8 +65,11 @@ class CorepService(private val ledgerPort: LedgerPort, private val metrics: Finr
      * REST-client failure mode (connect, timeout, 5xx, deserialisation) means the same thing here.
      */
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun trialBalance(asOf: LocalDate): TrialBalanceSnapshot = try {
-        ledgerPort.getTrialBalance(asOf)
+    private suspend fun trialBalance(asOf: LocalDate, evidence: TrialBalanceEvidence): TrialBalanceSnapshot = try {
+        when (evidence) {
+            TrialBalanceEvidence.FROZEN -> ledgerPort.getTrialBalance(asOf)
+            TrialBalanceEvidence.LIVE_PREVIEW -> ledgerPort.getLiveTrialBalance(asOf)
+        }
     } catch (e: Exception) {
         metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.LEDGER_UNAVAILABLE)
         throw e

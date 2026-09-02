@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Notification Service API
-  version: 1.8.0
+  version: 1.9.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -261,6 +261,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+
+  /api/v1/notifications/approvals:
+    get:
+      tags: [Notification Approvals]
+      summary: List pending four-eyes approvals, oldest first (ADR-0227 D2)
+      description: |
+        The checker's queue for `opsmessage.approval.decide` (issue #5679). Without it a parked
+        `opsmessage.compose` decision is discoverable only by whoever was handed its approval id
+        out of band, and the 24h Redis TTL then expires the request silently. ROLE_OPERATOR /
+        ROLE_ADMIN only.
+      operationId: listPendingNotificationApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
 
   /api/v1/notifications/approvals/{id}:
     patch:
@@ -716,6 +745,13 @@ components:
           nullable: true
         status:
           type: string
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
         decidedBy:
           type: string
           nullable: true

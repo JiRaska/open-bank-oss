@@ -94,14 +94,7 @@ DRILL_LOGS = ("docs/bcp/dr-test-log.md", "docs/bcp/chaos-test-log.md")
 # Exercise attestations that predate this rule and still cite a runbook. Shrink-only and
 # checked BOTH WAYS: a new one fails, and an entry that healed is reported so the list
 # cannot rot into a permanent exemption. Key: "<service>.<attestation key>".
-EXERCISE_REF_DEBT = {
-    "ledger.restore_drill": (
-        "#5673 — cites runbook-0003 (a PG major-upgrade procedure) for a 2026-07-26 "
-        "restore drill that has no entry in docs/bcp/dr-test-log.md. Left in place rather "
-        "than deleted because the drill may genuinely have happened; the attestant must "
-        "either log it with measured RTO/RPO or drop the claim."
-    ),
-}
+EXERCISE_REF_DEBT: dict[str, str] = {}
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ISSUE_RE = re.compile(r"^#\d+$")
@@ -391,15 +384,6 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
             True,
         ),
         (
-            # This line used to be the gate's own proof that a runbook is acceptable
-            # evidence for a drill. It is not (R7) — it is the fleet's one baselined debt,
-            # and the case now tests the EXEMPTION, not the rule.
-            "BASELINED DEBT: ledger.restore_drill's runbook ref is exempt, not endorsed",
-            "ledger:\n  restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }\n",
-            "clean",
-            True,
-        ),
-        (
             "R7: an exercise attestation citing a runbook fails for anyone not baselined",
             "consent:\n  dr_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }\n",
             "error",
@@ -561,6 +545,68 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
             else:
                 print(f"  ok  [{got:5}] {name}")
 
+        # Scope guard: the EXEMPTION MECHANISM, now that EXERCISE_REF_DEBT is empty.
+        #
+        # #5673 emptied the list: the drill it covered really happened (#2495) and its record
+        # now lives in docs/bcp/dr-test-log.md, so nothing is exempt any more. That removed the
+        # gate's only live exercise of the exemption path -- and an unexercised escape hatch is
+        # exactly the kind of code that is discovered to be broken by the next person who needs
+        # it. So the case no longer reads the real list; it injects a debt entry, asserts the
+        # SAME body flips from error to clean, and asserts the stale-declaration direction. Both
+        # halves must move, or the exemption is not what makes the difference.
+        debt_body = "ledger:\n  restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }\n"
+        (tmp / rel).write_text(debt_body, encoding="utf-8")
+
+        errors, _, _ = check(tmp, rel, _TODAY)
+        if not errors:
+            print("::error::self-test: a runbook ref was clean with EXERCISE_REF_DEBT empty")
+            failures += 1
+        else:
+            print("  ok  [error] with the debt list EMPTY, a runbook ref for a drill fails")
+
+        _saved = dict(EXERCISE_REF_DEBT)
+        try:
+            EXERCISE_REF_DEBT["ledger.restore_drill"] = "self-test injected exemption"
+            errors, _, _ = check(tmp, rel, _TODAY)
+            if errors:
+                print(
+                    "::error::self-test: EXERCISE_REF_DEBT no longer exempts a baselined entry "
+                    f"-- errors={errors}"
+                )
+                failures += 1
+            else:
+                print("  ok  [clean] an INJECTED debt entry exempts that same runbook ref")
+
+            # ...and the other direction: exempt something that no longer cites a runbook and
+            # the stale-declaration error must fire, so the list cannot rot into a permanent
+            # exemption once the data is fixed.
+            # This one must be written at FILE_REL: the stale-declaration check is scoped
+            # `if file_rel == FILE_REL`, so against the self-test's own "att.yaml" it silently
+            # does nothing -- which is why this direction had never actually been exercised.
+            real = tmp / FILE_REL
+            real.parent.mkdir(parents=True, exist_ok=True)
+            real.write_text(
+                "ledger:\n  restore_drill: { date: 2026-06-30, ttl_days: 180, by: jiri, "
+                "ref: docs/bcp/dr-test-log.md }\n",
+                encoding="utf-8",
+            )
+            (tmp / "docs" / "bcp").mkdir(parents=True, exist_ok=True)
+            (tmp / "docs" / "bcp" / "dr-test-log.md").write_text(
+                "## 2026-06-30 — entry\n", encoding="utf-8"
+            )
+            errors, _, _ = check(tmp, FILE_REL, _TODAY)
+            if not any("no longer cites a runbook" in e for e in errors):
+                print(
+                    "::error::self-test: a STALE EXERCISE_REF_DEBT declaration was not reported "
+                    f"-- errors={errors}"
+                )
+                failures += 1
+            else:
+                print("  ok  [error] a debt entry whose attestation healed is reported as stale")
+        finally:
+            EXERCISE_REF_DEBT.clear()
+            EXERCISE_REF_DEBT.update(_saved)
+
         # Scope guard: an empty file must report zero, and zero must be visible.
         (tmp / rel).write_text("# nothing attested\n", encoding="utf-8")
         errors, warnings, n = check(tmp, rel, _TODAY)
@@ -581,7 +627,7 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
     if failures:
         print(f"::error::self-test: {failures} case(s) failed")
         return 1
-    print(f"self-test: all {len(cases) + 2} cases passed (both directions)")
+    print(f"self-test: all {len(cases) + 5} cases passed (both directions)")
     return 0
 
 

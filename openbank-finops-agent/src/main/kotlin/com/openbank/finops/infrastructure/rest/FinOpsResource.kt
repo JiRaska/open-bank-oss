@@ -36,14 +36,11 @@ class FinOpsResource(
     @GET
     @Path("/anomalies")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getActiveAnomalies(): List<CostAnomaly> = runBlocking {
-        getAnomalies.getActive()
-    }
+    suspend fun getActiveAnomalies(): List<CostAnomaly> = getAnomalies.getActive()
 
     @GET
     @Path("/anomalies/{id}")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getAnomaly(@PathParam("id") id: String): CostAnomaly = runBlocking {
+    suspend fun getAnomaly(@PathParam("id") id: String): CostAnomaly =
         getAnomalies.getById(id) ?: throw NotFoundException("Anomaly $id not found")
-    }
 }

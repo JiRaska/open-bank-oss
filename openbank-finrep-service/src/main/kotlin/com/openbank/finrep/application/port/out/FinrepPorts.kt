@@ -40,6 +40,14 @@ data class TrialBalanceLineDto(val code: String, val accountType: String, val ne
  */
 data class TrialBalanceSnapshot(val lines: List<TrialBalanceLineDto>, val ledgerReportsBalanced: Boolean?)
 
+/** Minimal closed-period metadata needed to decide whether a regulatory render is reproducible. */
+data class ClosedPeriodDto(val periodType: String, val to: LocalDate, val status: String, val evidenceState: String)
+
 interface LedgerPort {
     suspend fun getTrialBalance(asOf: LocalDate): TrialBalanceSnapshot
+
+    /** Mutable period aggregate for an explicitly labelled internal working preview only. */
+    suspend fun getLiveTrialBalance(asOf: LocalDate): TrialBalanceSnapshot
+
+    suspend fun listClosedPeriods(): List<ClosedPeriodDto>
 }
