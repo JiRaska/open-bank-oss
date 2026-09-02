@@ -1633,21 +1633,39 @@ paths:
 
         Debit authority (ADR-0232 D3/D5): the debtorAccountId must belong to the JWT party, OR the
         JWT party must hold an ACTIVE, in-window, owner-issued delegation grant carrying
-        `ACCOUNT_INITIATE_PAYMENT` whose per-transaction ceiling covers this amount. account-service
-        makes that decision — the edge asks it, supplying the party from the validated token and
-        never from the body. A delegated payment carries the ACCOUNT HOLDER's legal name as
-        debtorName (not the initiator's) and is recorded in the tamper-evident audit chain with
-        `onBehalfOf` = the grantor and `delegationId` = the grant.
+        `ACCOUNT_INITIATE_PAYMENT`. account-service first returns attributed DELEGATED authority;
+        after enrichment and SCA the edge reserves this amount against the grant's per-transaction,
+        daily and monthly ceilings before calling domestic-payment. The reservation id and grant id
+        reach domestic-payment only as edge-stamped trusted headers. A delegated payment carries the
+        ACCOUNT HOLDER's legal name as debtorName (not the initiator's) and is recorded in the
+        tamper-evident audit chain with `onBehalfOf` = the grantor and `delegationId` = the grant.
 
 
         The delegate still authenticates as themselves: SCA is unchanged and a grant is not a
-        substitute for it. Every refusal — not yours, no grant, expired, over the ceiling — returns
-        the identical 403, so this route is not an oracle for other parties' accounts or grants.
+        substitute for it. Every authority refusal — not yours, no grant, expired, malformed grant
+        evidence — returns the identical 403, so this route is not an oracle for other parties'
+        accounts or grants. A cumulative-ceiling refusal returns 409 with the spend-limit detail.
+
+
+        Idempotency-Key is required, non-blank and at most 128 characters. The same key binds the
+        reservation and domestic instruction. A 201 means the instruction was durably accepted,
+        not settled, so the edge neither confirms nor releases the reservation. Ambiguous failures
+        also retain it, including 400 because an earlier attempt may already have persisted the same
+        key. Without explicit machine-readable NOT_PERSISTED evidence, only authoritative outcome
+        reconciliation may settle the reservation; a timeout alone is never proof that no payment
+        exists. The reservation chain has an off-by-default rollout binding gate that must remain
+        disabled until durable receiver-side reconciliation is deployed: owners remain available, while
+        delegated initiation returns 503 until receiver and consumer health is proven and the sender
+        is enabled in a separate configuration rollout.
       operationId: createDomesticPayment
       security:
         - customerOidc: [payments:initiate]
       parameters:
-        - {name: Idempotency-Key, in: header, required: true, schema: {type: string}}
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Stable, non-blank key of at most 128 characters; binds reservation and payment retries.
+          schema: {type: string, minLength: 1, maxLength: 128}
       requestBody:
         required: true
         content:
@@ -1658,7 +1676,13 @@ paths:
               properties:
                 debtorAccountId: {type: string, format: uuid}
                 amount: {type: string, example: '250.00'}
-                currency: {type: string, default: CZK}
+                currency:
+                  type: string
+                  default: CZK
+                  minLength: 3
+                  maxLength: 3
+                  pattern: '^[A-Za-z]{3}$'
+                  description: ISO-style three-letter code; normalized to uppercase before authorization and SCA.
                 creditorAccountNumber: {type: string, description: 'Czech "number/bankcode"', example: '2000145399/0800'}
                 creditorName: {type: string}
                 variableSymbol: {type: string, nullable: true}
@@ -1669,12 +1693,25 @@ paths:
         '201':
           description: Payment instruction created
         '400':
-          description: Malformed currency, debtor IBAN, creditor account, or incomplete body
+          description: Missing/blank/overlong Idempotency-Key, malformed currency, debtor IBAN, creditor account, or incomplete body
         '403':
           description: >-
             Caller may not debit this account — not the owner and no authorising delegation grant
             (indistinguishable from an expired grant, an over-ceiling amount, or an unknown
             account, by design), or SCA missing/rejected.
+        '409':
+          description: >-
+            Cumulative delegated-spend ceiling refused, the key is bound to different spend/payment
+            request, or the reservation was released. Only the contracted IDEMPOTENCY_KEY_REUSED
+            problem from domestic-payment is passed through.
+        '502':
+          description: >-
+            Reservation evidence or payment acceptance could not be verified. Internal downstream
+            authentication, routing and uncontracted client errors are collapsed to this response.
+        '503':
+          description: >-
+            Delegated reservation sender is not yet enabled, or a retryable downstream outage occurred;
+            owner payments are unaffected by the rollout gate.
 
   /domestic-payments/{paymentId}:
     get:

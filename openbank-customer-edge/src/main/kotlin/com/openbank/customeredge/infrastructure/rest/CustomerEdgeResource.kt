@@ -38,12 +38,15 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
+import java.math.BigDecimal
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -185,6 +188,17 @@ class CustomerEdgeResource(
         defaultValue = "http://delegation-service.delegation.svc:8126",
     )
     lateinit var delegationServiceUrl: String
+
+    /**
+     * Rollout binding gate for the new reserve -> domestic evidence chain.
+     *
+     * Off by default so receiver, consumer and sender can deploy independently without activating
+     * the sender before downstream health is observed. Owners keep the existing path; delegated
+     * initiation fails closed until the whole chain is enabled. The strict DELEGATED authority
+     * tuple is independent and applies in both modes.
+     */
+    @ConfigProperty(name = "openbank.delegation.spend-reservations-enabled", defaultValue = "false")
+    var delegatedSpendReservationsEnabled: Boolean = false
 
     @ConfigProperty(name = "openbank.edge.pid-service-url")
     lateinit var pidServiceUrl: String
@@ -2296,7 +2310,13 @@ class CustomerEdgeResource(
         }
         val decision = fetchDelegatedPaymentDecision(debtorAccountId, customer.partyId, amount, currency)
         val grantor = decision?.grantorPartyId
-        if (decision?.authorized != true || grantor == null) {
+        val delegationId = decision?.delegationId
+        if (
+            decision?.authorized != true ||
+            decision.outcome != "DELEGATED" ||
+            delegationId == null ||
+            grantor == null
+        ) {
             // One refusal for "not yours", "no grant", "grant expired" and "over the ceiling" — the
             // classified outcome goes to the audit trail, never to the caller, so this route cannot
             // be used to enumerate other people's accounts or grants.
@@ -2328,7 +2348,7 @@ class CustomerEdgeResource(
                 accountJson = ownerJson,
                 accountOwnerPartyId = grantor,
                 onBehalfOf = grantor,
-                delegationId = decision.delegationId,
+                delegationId = delegationId,
             ),
         )
     }
@@ -2365,9 +2385,182 @@ class CustomerEdgeResource(
         return DelegatedPaymentDecision(
             authorized = node.path("authorized").asBoolean(false),
             outcome = text("outcome"),
-            delegationId = text("delegationId"),
+            delegationId = text("delegationId")?.let { runCatching { UUID.fromString(it) }.getOrNull() },
             grantorPartyId = text("grantorPartyId")?.let { runCatching { UUID.fromString(it) }.getOrNull() },
         )
+    }
+
+    /**
+     * Reserve cumulative headroom before a delegated instruction reaches a payment rail.
+     *
+     * The reservation response is authority evidence, not a best-effort acknowledgement. Every
+     * identifier and money field is therefore checked against the stable request. This also closes
+     * delegation-service's deliberate idempotent replay shape: a reused key returns the original
+     * row, so the edge must reject a caller attempting to reuse that key for different money.
+     */
+    private fun reserveDelegatedSpend(
+        delegationId: UUID,
+        customer: CustomerIdentity,
+        amount: String,
+        currency: String,
+        idempotencyKey: String,
+    ): SpendReservationResult {
+        val expectedAmount = runCatching { BigDecimal(amount) }.getOrNull()
+            ?: return SpendReservationResult.Refused(badRequest("Malformed amount"))
+        val request = objectMapper.createObjectNode().apply {
+            put("amount", expectedAmount)
+            put("currency", currency)
+            put("idempotencyKey", idempotencyKey)
+            put("operationType", DOMESTIC_PAYMENT_OPERATION_TYPE)
+        }
+        val response = upstream.post(
+            "$delegationServiceUrl/api/v1/delegations/$delegationId/reservations",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(request),
+            idempotencyKey,
+        )
+        if (response.status == Response.Status.CONFLICT.statusCode) return SpendReservationResult.Refused(response)
+        if (response.status == Response.Status.NOT_FOUND.statusCode) {
+            return SpendReservationResult.Refused(forbidden("Debtor account does not belong to caller"))
+        }
+        if (response.status != Response.Status.CREATED.statusCode) {
+            return SpendReservationResult.Refused(
+                delegatedSpendUnavailable("Delegated spend reservation is unavailable"),
+            )
+        }
+
+        val evidence = parseSpendReservationEvidence(response)
+            ?: return SpendReservationResult.Refused(
+                delegatedSpendUnavailable("Delegated spend reservation evidence is invalid"),
+            )
+        if (evidence.delegationId != delegationId) {
+            return SpendReservationResult.Refused(
+                delegatedSpendUnavailable("Delegated spend reservation evidence is invalid"),
+            )
+        }
+        if (
+            evidence.amount.compareTo(expectedAmount) != 0 ||
+            evidence.currency != currency ||
+            evidence.operationType != DOMESTIC_PAYMENT_OPERATION_TYPE
+        ) {
+            val refusal = if (evidence.replayed) {
+                delegatedSpendConflict("Idempotency-Key is already bound to different delegated spend")
+            } else {
+                delegatedSpendUnavailable("Delegated spend reservation evidence is invalid")
+            }
+            return SpendReservationResult.Refused(refusal)
+        }
+        return when (evidence.state) {
+            "RESERVED" -> if (evidence.settledAt == null) {
+                SpendReservationResult.Accepted(evidence)
+            } else {
+                SpendReservationResult.Refused(
+                    delegatedSpendUnavailable("Delegated spend reservation evidence is invalid"),
+                )
+            }
+            "CONFIRMED" -> if (evidence.replayed && evidence.settledAt != null) {
+                // A prior attempt got far enough to confirm. Replaying the SAME domestic key is
+                // safe: domestic-payment must return the same durable instruction, never create a
+                // second one. A fresh CONFIRMED response is impossible and therefore invalid.
+                SpendReservationResult.Accepted(evidence)
+            } else {
+                SpendReservationResult.Refused(
+                    delegatedSpendUnavailable("Delegated spend reservation evidence is invalid"),
+                )
+            }
+
+            "RELEASED" -> if (evidence.settledAt != null) {
+                SpendReservationResult.Refused(
+                    delegatedSpendConflict("Delegated spend reservation was already released"),
+                )
+            } else {
+                SpendReservationResult.Refused(
+                    delegatedSpendUnavailable("Delegated spend reservation evidence is invalid"),
+                )
+            }
+
+            else -> SpendReservationResult.Refused(
+                delegatedSpendUnavailable("Delegated spend reservation evidence is invalid"),
+            )
+        }
+    }
+
+    private fun parseSpendReservationEvidence(response: Response): SpendReservationEvidence? = runCatching {
+        val root = objectMapper.readTree((response.entity as? String).orEmpty())
+        fun uuid(field: String): UUID? = root.path(field).takeIf { it.isTextual }?.asText()
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        fun instant(field: String): OffsetDateTime? = root.path(field).takeIf { it.isTextual }?.asText()
+            ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+        val money = root.path("amount").takeIf { it.isObject } ?: return null
+        val amountNode = money.path("amount")
+        val reservedAmount = when {
+            amountNode.isNumber -> amountNode.decimalValue()
+            amountNode.isTextual -> runCatching { BigDecimal(amountNode.asText()) }.getOrNull()
+            else -> null
+        } ?: return null
+        val reservedCurrency = money.path("currency").takeIf { it.isTextual }?.asText()
+            ?.takeIf { it.isNotBlank() } ?: return null
+        val state = root.path("state").takeIf { it.isTextual }?.asText() ?: return null
+        val operationType = root.path("operationType").takeIf { it.isTextual }?.asText()
+            ?.takeIf { it.isNotBlank() } ?: return null
+        instant("createdAt") ?: return null
+        val settledAtNode = root.path("settledAt")
+        val settledAt = when {
+            settledAtNode.isNull -> null
+            settledAtNode.isTextual -> instant("settledAt") ?: return null
+            else -> return null
+        }
+        SpendReservationEvidence(
+            reservationId = uuid("reservationId") ?: return null,
+            delegationId = uuid("delegationId") ?: return null,
+            amount = reservedAmount,
+            currency = reservedCurrency,
+            operationType = operationType,
+            state = state,
+            settledAt = settledAt,
+            replayed = response.getHeaderString(UpstreamClient.IDEMPOTENCY_REPLAY_HEADER)
+                ?.equals("true", ignoreCase = true) == true,
+        )
+    }.getOrNull()
+
+    private fun delegatedSpendConflict(message: String): Response = Response.status(Response.Status.CONFLICT)
+        .entity("""{"error":"$message"}""")
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+
+    private fun delegatedSpendUnavailable(message: String): Response = Response.status(Response.Status.BAD_GATEWAY)
+        .entity("""{"error":"$message"}""")
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+
+    private fun delegatedSpendTemporarilyUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+        .entity("""{"error":"Delegated payment service is temporarily unavailable"}""")
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+
+    /**
+     * A customer has already authenticated at this edge; an upstream 401/403/404 or implementation
+     * error is not their authorization result and must not expose an internal service boundary.
+     * Preserve only the one contracted, safe client-visible conflict. Every other response remains
+     * ambiguous for reservation settlement, but is translated to a stable retryable gateway error.
+     */
+    private fun normalizeDelegatedDomesticResponse(response: Response): Response {
+        if (response.status == Response.Status.CREATED.statusCode) return response
+        if (isIdempotencyKeyConflict(response)) return response
+        return if (response.status in RETRYABLE_UPSTREAM_STATUSES) {
+            delegatedSpendTemporarilyUnavailable()
+        } else {
+            delegatedSpendUnavailable("Domestic payment outcome could not be verified")
+        }
+    }
+
+    private fun isIdempotencyKeyConflict(response: Response): Boolean {
+        if (response.status != Response.Status.CONFLICT.statusCode) return false
+        if (!response.getHeaderString("Content-Type").orEmpty().startsWith(PROBLEM_JSON_MEDIA_TYPE)) return false
+        val body = response.entity as? String ?: return false
+        return runCatching {
+            objectMapper.readTree(body).path("code").asText() == IDEMPOTENCY_KEY_REUSED_CODE
+        }.getOrDefault(false)
     }
 
     // Resolve the caller's legal name from party-service (for the debtorName a domestic payment needs).
@@ -2438,14 +2631,19 @@ class CustomerEdgeResource(
     // --- Domestic payments (initiate; settlement is a separate, SCA-gated step) ---
 
     /**
-     * Initiate a domestic payment from one of the caller's OWN accounts. The app sends a lightweight
+     * Initiate a domestic payment from the caller's own account or an account carrying an active,
+     * attributable payment delegation. The app sends a lightweight
      * body (debtorAccountId, amount, currency, creditorAccountNumber "number/bankcode", creditorName,
      * symbols, reference); domestic-payment-service needs the full instruction, so the edge ENRICHES it:
      * it resolves the debtor's own account number + bank code (from the account's Czech IBAN) and the
-     * debtor's legal name (party-service), and splits the creditor "number/bankcode". Ownership is
-     * enforced HERE — the debtorAccountId must belong to the JWT party (IDOR guard). This step creates
-     * and screens the instruction; it does NOT move money (settlement is a later, SCA-gated step). The
-     * caller's Idempotency-Key is forwarded so an app retry replays rather than duplicates.
+     * debtor's legal name (party-service), and splits the creditor "number/bankcode". Debit authority
+     * is enforced here: the account must belong to the JWT party or account-service must return the
+     * complete DELEGATED evidence tuple. This step creates and screens the instruction; it does NOT
+     * move money (settlement is later). On the delegated path the same required Idempotency-Key
+     * reserves cumulative grant headroom after SCA and is forwarded with trusted grant/reservation
+     * evidence, so an app retry replays rather than duplicates. The rollout gate fails delegated
+     * initiation closed until that whole evidence chain is enabled; it never falls back to an
+     * unreserved debit.
      */
     @POST
     @Path("/domestic-payments")
@@ -2457,6 +2655,14 @@ class CustomerEdgeResource(
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
     ): Response {
+        // This key binds three durable facts: the reservation, the domestic instruction and any
+        // retry of both. Generating one downstream (UpstreamClient's generic fallback) would give
+        // the two services different identities, so reject before identity resolution, account
+        // reads or SCA consumption. domestic-payment's persisted key is capped at 128 characters.
+        if (idempotencyKey.isNullOrBlank()) return badRequest("Idempotency-Key header is required")
+        if (idempotencyKey.length > DOMESTIC_PAYMENT_IDEMPOTENCY_KEY_MAX_LENGTH) {
+            return badRequest("Idempotency-Key must be at most $DOMESTIC_PAYMENT_IDEMPOTENCY_KEY_MAX_LENGTH characters")
+        }
         val customer = customer()
         // Read the debtor with Jackson (same last-wins semantics as the upstream) so the value we
         // ownership-check is exactly the one we forward — closing the double-`debtorAccountId` IDOR bypass.
@@ -2466,13 +2672,28 @@ class CustomerEdgeResource(
         // ceiling is per-transaction, so an authorization asked without the amount is a different
         // (and weaker) question than the one this route has to ask.
         val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
-        val currency = extractTextField(objectMapper, body, "currency") ?: "CZK"
+        // One canonical value must drive authorization, SCA, reservation evidence and the
+        // domestic instruction. Delegation-service normalises CurrencyCode to uppercase; using
+        // the caller's raw `czk` here previously rejected a reservation that already consumed
+        // headroom and then never created a payment.
+        val currency = (extractTextField(objectMapper, body, "currency") ?: "CZK")
+            .trim()
+            .uppercase(Locale.ROOT)
+        if (currency.length != CURRENCY_CODE_LENGTH || currency.any { it !in 'A'..'Z' }) {
+            return badRequest("Malformed currency")
+        }
         // Owner OR delegate (ADR-0232 D3/D5). `resolveDebitAuthority` returns the account JSON, the
         // party whose money is moving, and — when this is a delegated debit — the grant that
         // permitted it, or an audited refusal.
         val debit = when (val authority = resolveDebitAuthority(customer, debtor, amount, currency)) {
             is DebitAuthorityResult.Refused -> return authority.response
             is DebitAuthorityResult.Allowed -> authority.authority
+        }
+        if (debit.delegationId != null && !delegatedSpendReservationsEnabled) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                .entity("""{"error":"Delegated payments are temporarily unavailable"}""")
+                .type(MediaType.APPLICATION_JSON)
+                .build()
         }
         val accountJson = debit.accountJson
         val debtorIban = extractTextField(objectMapper, accountJson, "accountNumber")
@@ -2531,6 +2752,7 @@ class CustomerEdgeResource(
             debtorName,
             creditorAcctNo,
             creditorBank,
+            currency,
         ) ?: return badRequest("Malformed or incomplete payment body")
         // Settlement gate (ADR-0021): no money path without a device-signed, amount+payee-bound,
         // single-use SCA approval. The compare-and-consume happens in sca-service, atomically.
@@ -2538,12 +2760,54 @@ class CustomerEdgeResource(
         // holder — a delegate authenticates as themselves; the grant is what makes it their debit
         // to make. So `customer` here stays the delegate on the delegated path, deliberately.
         scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")?.let { return it }
-        val resp = upstream.post(
-            "$domesticPaymentServiceUrl/api/v1/domestic-payments",
-            customer.partyId.toString(),
-            enriched,
-            idempotencyKey,
-        )
+        val reservation = debit.delegationId?.let { delegationId ->
+            when (
+                val result = reserveDelegatedSpend(
+                    delegationId = delegationId,
+                    customer = customer,
+                    amount = amount,
+                    currency = currency,
+                    idempotencyKey = idempotencyKey,
+                )
+            ) {
+                is SpendReservationResult.Accepted -> result.evidence
+                is SpendReservationResult.Refused -> return result.response
+            }
+        }
+        val domesticUrl = "$domesticPaymentServiceUrl/api/v1/domestic-payments"
+        val domesticResponse = if (reservation == null) {
+            // The owner path is intentionally unchanged and carries no delegation evidence.
+            upstream.post(domesticUrl, customer.partyId.toString(), enriched, idempotencyKey)
+        } else {
+            upstream.post(
+                domesticUrl,
+                customer.partyId.toString(),
+                enriched,
+                idempotencyKey,
+                mapOf(
+                    DELEGATION_ID_HEADER to reservation.delegationId.toString(),
+                    DELEGATION_RESERVATION_ID_HEADER to reservation.reservationId.toString(),
+                ),
+            )
+        }
+
+        // A 201 means only that domestic-payment durably accepted the instruction; settlement is
+        // asynchronous, so confirming here would make a merely RECEIVED payment consume headroom
+        // as settled. Every remote error is ambiguous, including 400: it can be an idempotency-key
+        // mismatch discovered after an earlier attempt persisted that same key. Without explicit,
+        // machine-readable NOT_PERSISTED evidence, the edge never releases synchronously; the
+        // outcome event or an atomic receiver-side absent-payment tombstone owns settlement of the
+        // reservation. Time alone can never prove that an in-flight payment did not persist.
+        val resp = when {
+            reservation != null -> normalizeDelegatedDomesticResponse(domesticResponse)
+            domesticResponse.statusInfo.family == Response.Status.Family.SUCCESSFUL &&
+                domesticResponse.status != Response.Status.CREATED.statusCode -> {
+                // An undocumented 2xx cannot be classified as durable acceptance or pre-persist
+                // rejection. Expose no optimistic success.
+                delegatedSpendUnavailable("Domestic payment outcome could not be verified")
+            }
+            else -> domesticResponse
+        }
         // Receiver-side honesty (ADR-0108): a 2xx here means the instruction was ACCEPTED, not that
         // the money settled. Bind the created payment id to the session so the receiver's status poll
         // can reconcile true settlement, and only flip to PAID now if the create already reached the
@@ -4703,7 +4967,7 @@ class CustomerEdgeResource(
             "scaChallengeId" to scaChallengeId,
             // EdgeAuditPublisher drops null-valued details, so a direct payment emits neither key.
             "onBehalfOf" to debit?.onBehalfOf?.toString(),
-            "delegationId" to debit?.delegationId,
+            "delegationId" to debit?.delegationId?.toString(),
         ),
     )
 
@@ -4933,6 +5197,19 @@ class CustomerEdgeResource(
         private const val MIN_PROMO_CODE_LENGTH = 8
         private const val MAX_PROMO_CODE_LENGTH = 128
         private const val MAX_IDEMPOTENCY_KEY_LENGTH = 255
+
+        /** domestic-payment persists the caller's key in a 128-character field. */
+        private const val DOMESTIC_PAYMENT_IDEMPOTENCY_KEY_MAX_LENGTH = 128
+        private const val CURRENCY_CODE_LENGTH = 3
+        private const val PROBLEM_JSON_MEDIA_TYPE = "application/problem+json"
+        private const val IDEMPOTENCY_KEY_REUSED_CODE = "IDEMPOTENCY_KEY_REUSED"
+        private const val DOMESTIC_PAYMENT_OPERATION_TYPE = "DOMESTIC_PAYMENT"
+
+        private val RETRYABLE_UPSTREAM_STATUSES = setOf(408, 429, 502, 503, 504)
+
+        /** Trusted M2M evidence; neither value is ever accepted from the public request. */
+        private const val DELEGATION_ID_HEADER = "X-Delegation-Id"
+        private const val DELEGATION_RESERVATION_ID_HEADER = "X-Delegation-Reservation-Id"
 
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
@@ -5166,13 +5443,13 @@ class CustomerEdgeResource(
             debtorName: String,
             creditorAccountNumber: String,
             creditorBankCode: String,
+            canonicalCurrency: String,
         ): String? = runCatching {
             val app = mapper.readTree(appBody) as? ObjectNode ?: return null
             fun txt(f: String) = app.get(f)?.takeIf { it.isTextual && it.asText().isNotBlank() }?.asText()
             val amountRaw = app.get("amount")?.let { if (it.isTextual) it.asText() else it.toString() } ?: return null
             val amount = java.math.BigDecimal(amountRaw)
             val creditorName = txt("creditorName") ?: return null
-            val currency = txt("currency") ?: "CZK"
             val out = mapper.createObjectNode()
             out.put("debtorAccountId", debtorAccountId)
             out.put("debtorAccountNumber", debtorAccountNumber)
@@ -5182,7 +5459,7 @@ class CustomerEdgeResource(
             out.put("creditorBankCode", creditorBankCode)
             out.put("creditorName", creditorName)
             out.put("amount", amount)
-            out.put("currency", currency)
+            out.put("currency", canonicalCurrency)
             txt("variableSymbol")?.let { out.put("variableSymbol", it) }
             txt("specificSymbol")?.let { out.put("specificSymbol", it) }
             txt("constantSymbol")?.let { out.put("constantSymbol", it) }
@@ -5684,7 +5961,7 @@ internal data class DebitAuthority(
     val accountJson: String,
     val accountOwnerPartyId: UUID,
     val onBehalfOf: UUID? = null,
-    val delegationId: String? = null,
+    val delegationId: UUID? = null,
 )
 
 /** Allowed-with-authority, or an already-audited refusal to hand straight back to the caller. */
@@ -5703,6 +5980,22 @@ internal sealed interface DebitAuthorityResult {
 internal data class DelegatedPaymentDecision(
     val authorized: Boolean,
     val outcome: String?,
-    val delegationId: String?,
+    val delegationId: UUID?,
     val grantorPartyId: UUID?,
 )
+
+private data class SpendReservationEvidence(
+    val reservationId: UUID,
+    val delegationId: UUID,
+    val amount: BigDecimal,
+    val currency: String,
+    val operationType: String,
+    val state: String,
+    val settledAt: OffsetDateTime?,
+    val replayed: Boolean,
+)
+
+private sealed interface SpendReservationResult {
+    data class Accepted(val evidence: SpendReservationEvidence) : SpendReservationResult
+    data class Refused(val response: Response) : SpendReservationResult
+}

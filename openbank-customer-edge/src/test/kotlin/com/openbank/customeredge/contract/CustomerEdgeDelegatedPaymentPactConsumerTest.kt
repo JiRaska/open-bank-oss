@@ -171,7 +171,7 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
             .isNotNull()
         assertThat(decision!!.authorized).isTrue()
         assertThat(decision.outcome).isEqualTo("DELEGATED")
-        assertThat(decision.delegationId).isEqualTo(GRANT_ID)
+        assertThat(decision.delegationId).isEqualTo(UUID.fromString(GRANT_ID))
         assertThat(decision.grantorPartyId).isEqualTo(UUID.fromString(GRANTOR_PARTY_ID))
     }
 }
