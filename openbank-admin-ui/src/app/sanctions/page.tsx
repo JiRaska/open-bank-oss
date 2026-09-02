@@ -667,7 +667,7 @@ export default function SanctionsPage() {
             {TABS.map(t => (
               <button key={t.id} type="button" aria-pressed={tab === t.id} aria-label={t.label} onClick={() => setTab(t.id)}
                 style={{ padding: '12px 16px', fontSize: '13px', fontWeight: tab === t.id ? 700 : 500,
-                  color: tab === t.id ? 'var(--accent)' : 'var(--text-secondary)',
+                  color: tab === t.id ? 'var(--accent-text)' : 'var(--text-secondary)',
                   background: 'none', border: 'none', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
                   cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '-1px' }}>
                 {t.icon}{t.label}
