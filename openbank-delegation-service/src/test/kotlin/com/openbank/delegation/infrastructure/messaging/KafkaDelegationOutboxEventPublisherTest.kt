@@ -6,11 +6,13 @@ package com.openbank.delegation.infrastructure.messaging
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.openbank.delegation.domain.event.DelegationRevoked
+import com.openbank.delegation.domain.event.DelegationSpendReservationStateChanged
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import io.smallrye.reactive.messaging.MutinyEmitter
 import kotlinx.coroutines.runBlocking
@@ -49,6 +51,7 @@ class KafkaDelegationOutboxEventPublisherTest {
     private fun realEventPayload(): String = mapper.writeValueAsString(
         DelegationRevoked(
             aggregateId = UUID.randomUUID(),
+            lifecycleRevision = 2,
             grantorPartyId = UUID.randomUUID(),
             granteePartyId = UUID.randomUUID(),
             resourceType = com.openbank.delegation.domain.model.DelegationResourceType.ACCOUNT,
@@ -59,10 +62,14 @@ class KafkaDelegationOutboxEventPublisherTest {
         ),
     )
 
-    private fun entry(payload: String) = OutboxEntry(
+    private fun entry(
+        payload: String,
+        eventType: String = "DelegationRevoked",
+        aggregateId: UUID = UUID.randomUUID(),
+    ) = OutboxEntry(
         eventId = UUID.randomUUID(),
-        aggregateId = UUID.randomUUID(),
-        eventType = "DelegationRevoked",
+        aggregateId = aggregateId,
+        eventType = eventType,
         payload = payload,
         status = OutboxStatus.PENDING,
         attemptCount = 0,
@@ -71,6 +78,9 @@ class KafkaDelegationOutboxEventPublisherTest {
         sentAt = null,
         lastError = null,
     )
+
+    private fun statePayload(reservationId: UUID, revision: Long): String =
+        """{"reservationId":"$reservationId","reservationVersion":$revision}"""
 
     @Test
     fun `a real serialised domain event carries no sourceService of its own`() {
@@ -87,7 +97,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
 
         runBlocking {
-            KafkaDelegationOutboxEventPublisher(emitter, mapper).publish(entry(realEventPayload()))
+            KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper).publish(entry(realEventPayload()))
         }
 
         assertThat(mapper.readTree(captured.captured.payload).get("sourceService").asText())
@@ -101,7 +111,7 @@ class KafkaDelegationOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
         val payload = realEventPayload()
 
-        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, mapper).publish(entry(payload)) }
+        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper).publish(entry(payload)) }
 
         val before = mapper.readTree(payload)
         val after = mapper.readTree(captured.captured.payload)
@@ -121,10 +131,53 @@ class KafkaDelegationOutboxEventPublisherTest {
         val captured = slot<Message<String>>()
         every { emitter.sendMessage(capture(captured)) } returns Uni.createFrom().voidItem()
 
-        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, mapper).publish(entry("not json at all")) }
+        runBlocking { KafkaDelegationOutboxEventPublisher(emitter, emitter, mapper).publish(entry("not json at all")) }
 
         // This is the money path: an unattributed row is a strictly better outcome than a publish
         // that throws and wedges the outbox dispatcher.
         assertThat(captured.captured.payload).isEqualTo("not json at all")
+    }
+
+    @Test
+    fun `reservation snapshots route only to the compacted state channel`() {
+        val lifecycleEmitter = mockk<MutinyEmitter<String>>()
+        val stateEmitter = mockk<MutinyEmitter<String>>()
+        every { stateEmitter.sendMessage(any()) } returns Uni.createFrom().voidItem()
+        val reservationId = UUID.randomUUID()
+
+        runBlocking {
+            KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, mapper).publish(
+                entry(
+                    statePayload(reservationId, 1L),
+                    DelegationSpendReservationStateChanged.EVENT_TYPE,
+                    reservationId,
+                ),
+            )
+        }
+
+        verify(exactly = 1) { stateEmitter.sendMessage(any()) }
+        verify(exactly = 0) { lifecycleEmitter.sendMessage(any()) }
+    }
+
+    @Test
+    fun `invalid reservation revision fails closed before either channel`() {
+        val lifecycleEmitter = mockk<MutinyEmitter<String>>()
+        val stateEmitter = mockk<MutinyEmitter<String>>()
+        val reservationId = UUID.randomUUID()
+        val publisher = KafkaDelegationOutboxEventPublisher(lifecycleEmitter, stateEmitter, mapper)
+
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            runBlocking {
+                publisher.publish(
+                    entry(
+                        statePayload(reservationId, 3L),
+                        DelegationSpendReservationStateChanged.EVENT_TYPE,
+                        reservationId,
+                    ),
+                )
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        verify(exactly = 0) { stateEmitter.sendMessage(any()) }
+        verify(exactly = 0) { lifecycleEmitter.sendMessage(any()) }
     }
 }

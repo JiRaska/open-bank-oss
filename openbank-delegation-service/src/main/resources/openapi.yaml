@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.7.0
+  version: 1.9.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -160,6 +160,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: Not the grantor, and not a bank-initiated revoke }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/grantor/{partyId}:
     get:
       tags: [Delegations]
@@ -214,6 +215,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: The authenticated party is not the grantee }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/decline:
     post:
       tags: [Delegations]
@@ -232,6 +234,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: The authenticated party is not the grantee }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/renounce:
     post:
       tags: [Delegations]
@@ -250,6 +253,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: The authenticated party is not the grantee }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/suspend:
     post:
       tags: [Delegations]
@@ -268,6 +272,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: Bank-initiated only — requires an operator/admin session and no X-Customer-Party-Id }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/reinstate:
     post:
       tags: [Delegations]
@@ -281,6 +286,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: Bank-initiated only — requires an operator/admin session and no X-Customer-Party-Id }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/check:
     post:
       tags: [Delegations]
@@ -306,9 +312,10 @@ paths:
         reservation already consumes headroom; that is the point, and it is why two concurrent
         payments cannot both pass a check that neither passes alone.
 
-        `idempotencyKey` is the caller's key for the spend: a retry under the same key returns the
-        SAME reservation and takes the headroom once. The response carries
-        `X-Idempotency-Replayed: true` when it did.
+        A retry under the same `idempotencyKey` and immutable amount/currency/operation tuple
+        returns the same reservation. A different tuple is refused. `operationType` defaults to
+        `UNSPECIFIED`; `DOMESTIC_PAYMENT` opts into the durable state stream and remains disabled
+        until its downstream binding consumer is ready.
       parameters:
         - $ref: '#/components/parameters/DelegationId'
         - $ref: '#/components/parameters/CustomerPartyId'
@@ -324,13 +331,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SpendReservationResponse' }
         '404': { description: No such delegation, or the caller is not its grantee }
+        '400': { description: Malformed request, including an idempotency key above its rail limit }
         '409':
           description: >-
-            Refused. The body names WHICH ceiling was hit and how much remains under it, because a
-            client that only learns "no" can only guess.
+            Refused by a ceiling, or the idempotency key names a different immutable tuple.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SpendRefusalResponse' }
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/SpendIdempotencyConflictResponse' }
+        '503':
+          description: Domestic reservation admission is disabled; no reservation was created.
   /api/v1/delegations/{id}/reservations/{rid}/confirm:
     post:
       tags: [Delegations]
@@ -615,13 +626,21 @@ components:
           description: >-
             The caller's key for this spend, unique per delegation. Enforced by a database
             constraint, so a replay cannot double-count even across replicas.
+        operationType:
+          type: string
+          enum: [UNSPECIFIED, DOMESTIC_PAYMENT]
+          default: UNSPECIFIED
+          description: Reconciliation rail; it is not workload authentication.
     SpendReservationResponse:
       type: object
-      required: [reservationId, delegationId, amount, state, createdAt]
+      required: [reservationId, delegationId, amount, operationType, state, createdAt]
       properties:
         reservationId: { type: string, format: uuid }
         delegationId: { type: string, format: uuid }
         amount: { $ref: '#/components/schemas/MoneyDto' }
+        operationType:
+          type: string
+          enum: [UNSPECIFIED, DOMESTIC_PAYMENT]
         state:
           type: string
           enum: [RESERVED, CONFIRMED, RELEASED]
@@ -644,4 +663,14 @@ components:
         remaining:
           $ref: '#/components/schemas/MoneyDto'
           description: What is still spendable under the breached ceiling, clamped at zero.
+        error: { type: string }
+    SpendIdempotencyConflictResponse:
+      type: object
+      required: [type, title, status, detail, code, error]
+      properties:
+        type: { type: string, enum: ['urn:openbank:error:idempotency-key-reused'] }
+        title: { type: string, enum: [Idempotency key reused] }
+        status: { type: integer, enum: [409] }
+        detail: { type: string }
+        code: { type: string, enum: [IDEMPOTENCY_KEY_REUSED] }
         error: { type: string }

@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { DeleteRoleDialog, OwnershipRoleNotice, RoleEditor, RoleOverview } from '@/components/delegations/RoleCatalog'
+import { DeleteRoleDialog, OwnershipRoleNotice, RoleCatalog, RoleEditor, RoleOverview } from '@/components/delegations/RoleCatalog'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import type { RolePreset } from '@/lib/delegations/rolePresets'
+
+vi.mock('@/lib/auth/useAuth', () => ({
+  useAuth: () => ({ hasRole: (role: string) => role === 'ROLE_ADMIN' }),
+}))
 
 const ROLE = {
   id: 'treasury-operator',
@@ -38,7 +42,10 @@ const LEGACY_ONLY_ROLE = {
   capabilities: ['DELEGATION_MANAGE'],
 } satisfies RolePreset
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 describe('delegation role deletion', () => {
   it('never falls back to a native browser confirmation', () => {
@@ -111,22 +118,61 @@ describe('delegation role editor recovery', () => {
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ name: 'Treasury reviewer' }))
   })
 
-  it('locks dismissal and duplicate submission while saving', () => {
-    const cancel = vi.fn()
-    const save = vi.fn(async () => undefined)
+  it('locks dismissal and duplicate submission while saving, then releases the lock for retry', async () => {
+    let releaseFirstResponse!: (response: Response) => void
+    const firstResponse = new Promise<Response>(resolve => { releaseFirstResponse = resolve })
+    let postRequests = 0
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const method = init?.method ?? 'GET'
+      if (method === 'GET') {
+        return Promise.resolve(new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }))
+      }
+      if (method === 'POST' && String(input) === '/api/delegation-role-presets') {
+        postRequests += 1
+        if (postRequests === 1) return firstResponse
+        return Promise.resolve(new Response('{}', { status: 201, headers: { 'content-type': 'application/json' } }))
+      }
+      return Promise.reject(new Error(`unexpected ${method} ${String(input)}`))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
     render(
       <LanguageProvider>
-        <RoleEditor value={ROLE} busy failed={false} cancel={cancel} save={save} />
+        <RoleCatalog />
       </LanguageProvider>,
     )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/delegation-role-presets',
+      expect.objectContaining({ cache: 'no-store' }),
+    ))
+    fireEvent.click(screen.getByRole('button', { name: 'Add role' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Payments reviewer' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Account details' }))
+
+    const save = screen.getByRole('button', { name: 'Save' })
+    expect(save).toBeEnabled()
+    act(() => {
+      save.click()
+      save.click()
+    })
 
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveAttribute('aria-busy', 'true')
     expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
     fireEvent.keyDown(dialog, { key: 'Escape' })
-    expect(cancel).not.toHaveBeenCalled()
-    expect(save).not.toHaveBeenCalled()
+    expect(dialog).toBeInTheDocument()
+    expect(postRequests).toBe(1)
+
+    releaseFirstResponse(new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Nothing changed; check the details and try again.')
+    const retry = screen.getByRole('button', { name: 'Save' })
+    expect(retry).toBeEnabled()
+    fireEvent.click(retry)
+
+    await waitFor(() => expect(postRequests).toBe(2))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
   it('does not offer recursive delegation and removes it only on an explicit save', () => {

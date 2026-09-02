@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.237.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.236.1...admin-ui-v0.237.0) (2026-09-02)
+
+
+### Features
+
+* **admin-ui:** add shared App Router route-transition loading state ([#8273](https://github.com/JiRaska/open-bank-oss/issues/8273)) ([4d7f881](https://github.com/JiRaska/open-bank-oss/commit/4d7f8813ecaf44a5747da216089a6ab5f651f49f)), closes [#8225](https://github.com/JiRaska/open-bank-oss/issues/8225)
+
+
+### Bug Fixes
+
+* **admin-ui:** make regulatory preview an accessible dialog ([#8250](https://github.com/JiRaska/open-bank-oss/issues/8250)) ([b870def](https://github.com/JiRaska/open-bank-oss/commit/b870def961a1df85c5914d6192a3ba13bb105ce8))
+* **admin-ui:** single-flight delegation role saves ([#8280](https://github.com/JiRaska/open-bank-oss/issues/8280)) ([589779b](https://github.com/JiRaska/open-bank-oss/commit/589779b4343538456468538056750b54f739e6e4))
+
+## [0.236.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.236.0...admin-ui-v0.236.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** render unknown observability metrics neutrally ([#8243](https://github.com/JiRaska/open-bank-oss/issues/8243)) ([2f39ac0](https://github.com/JiRaska/open-bank-oss/commit/2f39ac039aa3308f53c7cbc018d8700162ab6bf2)), closes [#8242](https://github.com/JiRaska/open-bank-oss/issues/8242)
+
+## [0.236.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.235.0...admin-ui-v0.236.0) (2026-09-02)
+
+
+### Features
+
+* **admin-ui:** capture Core Web Vitals ([#8223](https://github.com/JiRaska/open-bank-oss/issues/8223)) ([6adc1c3](https://github.com/JiRaska/open-bank-oss/commit/6adc1c3c37bf4ed1cbbcfaa528c161b0a1ad5309))
+
+
+### Bug Fixes
+
+* **admin-ui:** retain onboarding analytics context ([#8231](https://github.com/JiRaska/open-bank-oss/issues/8231)) ([dc801c6](https://github.com/JiRaska/open-bank-oss/commit/dc801c6bd656e982c07288683c8fc9c37cbadffb))
+
+## [0.235.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.234.0...admin-ui-v0.235.0) (2026-09-02)
+
+
+### Features
+
+* **admin-ui:** add final review for DevOps remediation decisions ([#8215](https://github.com/JiRaska/open-bank-oss/issues/8215)) ([f69f1af](https://github.com/JiRaska/open-bank-oss/commit/f69f1af51c2346572d1c185c5f38b70aea9a8345)), closes [#7895](https://github.com/JiRaska/open-bank-oss/issues/7895)
+
+
+### Bug Fixes
+
+* **admin-ui:** enforce core workflow contrast ([#8202](https://github.com/JiRaska/open-bank-oss/issues/8202)) ([ab9d882](https://github.com/JiRaska/open-bank-oss/commit/ab9d882b54a2ce0a5a51879bd86f37f79ece9177))
+* **admin-ui:** enforce dark workflow contrast ([#8214](https://github.com/JiRaska/open-bank-oss/issues/8214)) ([c768ed9](https://github.com/JiRaska/open-bank-oss/commit/c768ed957cbf3a7c3ed1df9f9464a7cf88f9cc2c))
+* **admin-ui:** pin Pact verification to provider main ([#8192](https://github.com/JiRaska/open-bank-oss/issues/8192)) ([1e76e5d](https://github.com/JiRaska/open-bank-oss/commit/1e76e5d5a4828ef7eea04f1b024ed9aecc5a32b7))
+* **admin-ui:** restore sanctions toggle focus after refresh ([#8219](https://github.com/JiRaska/open-bank-oss/issues/8219)) ([9a0da66](https://github.com/JiRaska/open-bank-oss/commit/9a0da66fe8574e873e411eed8f09fcb700fdcb21))
+* **admin-ui:** stabilize mobile drawer focus ([#8198](https://github.com/JiRaska/open-bank-oss/issues/8198)) ([f661831](https://github.com/JiRaska/open-bank-oss/commit/f6618319b6ebd5dfa64013958e88bd24d9ac56f4))
+
 ## [0.234.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.233.0...admin-ui-v0.234.0) (2026-09-02)
 
 
