@@ -96,6 +96,7 @@ object TopicAttribution {
         // carry their own "sourceService", so they resolve AttributionSource.EVENT; the eight
         // older lifecycle events do not yet, and resolve TOPIC through this row.
         "openbank.delegation.events" to "delegation-service",
+        "openbank.delegation.spend-reservation-state" to "delegation-service",
         // Issue #6035: four more money-path producers were absent from all three places at once
         // (this table, application.yaml's topics list, and the audit KafkaUser's Read ACLs) --
         // found by .github/scripts/check-audit-money-path-subscription.py, which derives the set

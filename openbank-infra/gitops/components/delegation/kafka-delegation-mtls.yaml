@@ -38,3 +38,8 @@ spec:
           name: openbank.delegation.events
           patternType: literal
         operations: [Write, Describe]
+      - resource:
+          type: topic
+          name: openbank.delegation.spend-reservation-state
+          patternType: literal
+        operations: [Write, Describe]

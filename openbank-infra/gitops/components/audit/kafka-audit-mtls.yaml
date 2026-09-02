@@ -195,6 +195,12 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      - resource:
+          type: topic
+          name: openbank.delegation.spend-reservation-state
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       # Issue #6035: four money-path produced topics had no Read grant here, so even after
       # being added to the subscription list they would have been ACL-denied at runtime with
       # no error surfaced anywhere (the #5338 shape) -- the poll fails silently and the audit
