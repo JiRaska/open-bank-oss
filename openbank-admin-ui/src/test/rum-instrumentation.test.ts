@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createRumProvider,
   looksLikeIdentifier,
+  recordWebVital,
   recordScreenView,
   resetRumForTests,
   RUM_INGEST_PATH,
@@ -22,6 +23,27 @@ function exportScreen(pathname: string) {
     new SimpleSpanProcessor(exporter),
   )
   recordScreenView(pathname, provider.getTracer(RUM_SERVICE_NAME))
+  return exporter.getFinishedSpans() as ReadableSpan[]
+}
+
+function exportWebVital(
+  name: 'CLS' | 'INP' | 'LCP',
+  value: number,
+  pathname = '/parties/9f3c1e2a-77b1-4d0e-9a55-000000000001?customer=secret',
+) {
+  const exporter = new InMemorySpanExporter()
+  const provider = createRumProvider(
+    { userAgent: IPHONE_UA, appVersion: '1.2.3' },
+    new SimpleSpanProcessor(exporter),
+  )
+  recordWebVital({
+    name,
+    value,
+    delta: value,
+    rating: 'good',
+    id: 'v4-sensitive-session-shaped-id',
+    entries: [{ name: 'https://bank.example/payments/sepa?customer=secret' }],
+  }, pathname, provider.getTracer(RUM_SERVICE_NAME))
   return exporter.getFinishedSpans() as ReadableSpan[]
 }
 
@@ -54,6 +76,33 @@ describe('authenticated Admin UI browser RUM', () => {
 
   it('uses the authenticated same-origin relay, never an external browser collector', () => {
     expect(RUM_INGEST_PATH).toBe('/api/telemetry/traces')
+  })
+
+  it.each([
+    ['CLS', 0.04, '1'],
+    ['INP', 130, 'ms'],
+    ['LCP', 1_800, 'ms'],
+  ] as const)('exports low-cardinality %s without metric IDs, URLs or attribution', (name, value, unit) => {
+    const [span] = exportWebVital(name, value)
+    expect(span.name).toBe(`web-vital.${name.toLowerCase()}`)
+    expect(span.attributes).toMatchObject({
+      'web_vital.name': name,
+      'web_vital.value': value,
+      'web_vital.delta': value,
+      'web_vital.rating': 'good',
+      'web_vital.unit': unit,
+      'screen.name': '/parties/:id',
+      'http.route': '/parties/:id',
+    })
+    expect(JSON.stringify(span.attributes)).not.toContain('sensitive-session')
+    expect(JSON.stringify(span.attributes)).not.toContain('customer=secret')
+    expect(JSON.stringify(span.attributes)).not.toContain('9f3c1e2a')
+  })
+
+  it('drops malformed or non-Core Web Vital measurements', () => {
+    expect(exportWebVital('LCP', Number.POSITIVE_INFINITY)).toHaveLength(0)
+    expect(exportWebVital('INP', -1)).toHaveLength(0)
+    expect(exportWebVital('FCP' as 'LCP', 100)).toHaveLength(0)
   })
 
   it('relays to the runtime-only collector endpoint and exposes disabled state distinctly', async () => {
