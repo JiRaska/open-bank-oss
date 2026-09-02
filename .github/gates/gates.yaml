@@ -432,7 +432,7 @@ gates:
     mode: enforced
     when: pull_request
     needs_base: required
-    min_subjects: 50
+    min_subjects: 1
     rationale: "LiteLLM parses its config once at startup, so a route added without a pod roll answers 'model not found' while ArgoCD reports Synced and Healthy; the manifest asked for the bump in prose since #1919 and three routes in one week relied on someone remembering."
     review_after: "2027-02-19"
     selftest: python3 .github/scripts/check-litellm-config-revision.py --self-test
