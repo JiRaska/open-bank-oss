@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { Header } from '@/components/layout/Header'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { SkipLink } from '@/components/layout/SkipLink'
@@ -21,17 +22,17 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const { status: sessionStatus } = useSession()
   const { t } = useLanguage()
   const pathname = usePathname()
   useEffect(() => { setMobileNavOpen(false) }, [pathname])
   useEffect(() => {
     if (!mobileNavOpen) return
+    const sidebar = document.querySelector<HTMLElement>('#admin-sidebar')
     const focusableInSidebar = () => Array.from(
       document.querySelectorAll<HTMLElement>('#admin-sidebar a, #admin-sidebar button:not([disabled])'),
     )
-    const frame = requestAnimationFrame(() => {
-      focusableInSidebar()[0]?.focus()
-    })
+    sidebar?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -45,7 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       const last = focusable.at(-1)
       if (!first || !last) return
 
-      if (!document.querySelector('#admin-sidebar')?.contains(document.activeElement)) {
+      if (document.activeElement === sidebar || !sidebar?.contains(document.activeElement)) {
         event.preventDefault()
         const nextFocus = event.shiftKey ? last : first
         nextFocus.focus()
@@ -58,8 +59,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => { cancelAnimationFrame(frame); window.removeEventListener('keydown', onKeyDown) }
+    return () => { window.removeEventListener('keydown', onKeyDown) }
   }, [mobileNavOpen])
+  useEffect(() => {
+    if (!mobileNavOpen || sessionStatus === 'loading') return
+    const frame = requestAnimationFrame(() => {
+      const sidebar = document.querySelector<HTMLElement>('#admin-sidebar')
+      const opener = document.querySelector<HTMLElement>('button[aria-controls="admin-sidebar"]')
+      if (document.activeElement !== sidebar && document.activeElement !== opener) return
+      sidebar?.querySelector<HTMLElement>('a, button:not([disabled])')?.focus()
+    })
+    return () => { cancelAnimationFrame(frame) }
+  }, [mobileNavOpen, sessionStatus])
   return (
     <div className="ob-app-shell">
       <SkipLink />

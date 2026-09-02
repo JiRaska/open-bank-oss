@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "c325d92f2559242e"
+    openbank.tech/policy-checksum: "97b8daa0e97c48a3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -536,6 +536,7 @@ data:
     #
     # Actions gated (DelegationResource):
     #   delegation.offer      — POST /delegations (mints capabilities over a product; SCA-bound)
+    #   delegation.preview    — POST /delegations/preview (same validation, no authority or SCA consume)
     #   delegation.read       — GET /delegations/{id}
     #   delegation.list       — GET /delegations/{grantor,grantee}/{partyId}
     #   delegation.accept     — grantee accepts an OFFERED grant (own SCA)
@@ -589,6 +590,7 @@ data:
     	input.principal.id == "service-account-openbank-edge"
     	input.action in {
     		"delegation.offer",
+            "delegation.preview",
     		"delegation.read",
     		"delegation.list",
     		"delegation.accept",

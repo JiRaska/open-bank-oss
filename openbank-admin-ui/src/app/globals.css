@@ -1135,9 +1135,9 @@ main {
 
 .input {
   min-height: 40px;
-  border-color: #cbd5e1;
+  border-color: var(--border-strong);
   border-radius: 9px;
-  background: rgba(255, 255, 255, .94);
+  background: var(--surface);
 }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(99, 102, 241, .13); }
 
