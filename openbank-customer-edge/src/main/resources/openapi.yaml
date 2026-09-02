@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.46.0
+  version: 1.46.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1127,11 +1127,11 @@ paths:
   /fx/rates/{base}/{quote}/history:
     get:
       tags: [FX]
-      summary: Historical bank commercial rates for a currency pair (newest-first)
+      summary: Three-month ČNB reference trend for a currency pair
       description: >-
-        Returns the bank's own published rates (source=INTERNAL) for the pair over time, ordered
-        newest-first. Use `from`/`to` (ISO-8601 Instant) to bound the window; `limit` is capped
-        at 365 (one year of daily rates). Designed for the app's rate-history chart.
+        Returns ČNB reference mid-rates for the pair over time, ordered newest-first. When bounds
+        are omitted, the interval is exactly three calendar months in UTC. The values are
+        indicative historical fixings, not reproducible or binding commercial customer quotes.
       operationId: getFxRateHistory
       security:
         - customerOidc: [accounts:read]

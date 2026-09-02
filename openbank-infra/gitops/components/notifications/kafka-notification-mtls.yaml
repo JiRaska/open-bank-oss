@@ -31,6 +31,15 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # #5745 (sweep of #5698): SmallRye dead-letter topic for the notification-events-in channel.
+      # Without Write here the DLQ send itself fails and the consumer wedges on the very failure it
+      # was meant to park — the same lockout class the party-events-in DLQ grant below exists for.
+      - resource:
+          type: topic
+          name: openbank.notification.requests.dlq
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       - resource:
           type: topic
           name: openbank.party.events

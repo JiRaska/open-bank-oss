@@ -18,21 +18,20 @@
 
 'use client'
 
-import { useCallback, useState } from 'react'
-import Link from 'next/link'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Search, Share2, RefreshCw, Activity } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { classifyBffFailure, type BffFailure } from '@/lib/services/bff'
+import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { EntityChip } from '@/components/entities/EntityChip'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { RoleCatalog } from '@/components/delegations/RoleCatalog'
 import {
-  DelegationStatusBadge,
-  capabilityLabels,
-  counterpartyLabel,
-  formatCeiling,
-  type Grant,
-} from '@/components/delegations/GrantView'
+  EffectiveAccess,
+  isEffectiveAccessPayload,
+  type EffectiveAccessPayload,
+} from '@/components/delegations/EffectiveAccess'
+import { GrantTable } from '@/components/delegations/GrantTable'
+import type { Grant } from '@/components/delegations/GrantView'
 
 type EntityRef = { type: string; id: string; label: string; sublabel?: string }
 
@@ -55,69 +54,145 @@ export default function DelegationsPage() {
   const [results, setResults] = useState<EntityRef[]>([])
   const [searched, setSearched] = useState(false)
   const [searchFailed, setSearchFailed] = useState(false)
+  const [searching, setSearching] = useState(false)
 
   const [party, setParty] = useState<EntityRef | null>(null)
   const [grants, setGrants] = useState<GrantsPayload | null>(null)
+  const [effectiveAccess, setEffectiveAccess] = useState<EffectiveAccessPayload | null>(null)
   const [grantsUnavail, setGrantsUnavail] = useState<UnavailableKind | null>(null)
+  const [effectiveUnavail, setEffectiveUnavail] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
 
   const [consumers, setConsumers] = useState<ProjectionConsumer[] | null>(null)
   const [projectionKnown, setProjectionKnown] = useState(true)
+  const [projectionLoading, setProjectionLoading] = useState(false)
+  const searchGeneration = useRef(0)
+  const searchRequest = useRef<AbortController | null>(null)
+  const accessGeneration = useRef(0)
+  const accessRequest = useRef<AbortController | null>(null)
+
+  useEffect(() => () => {
+    searchGeneration.current += 1
+    accessGeneration.current += 1
+    searchRequest.current?.abort()
+    accessRequest.current?.abort()
+  }, [])
 
   const search = useCallback(async () => {
     const q = term.trim()
     if (q.length < SEARCH_MIN) return
+    const generation = ++searchGeneration.current
+    searchRequest.current?.abort()
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 6000)
+    searchRequest.current = controller
     setSearchFailed(false)
     setSearched(true)
+    setSearching(true)
+    setResults([])
     try {
       const res = await fetch(`/api/entities/resolve?q=${encodeURIComponent(q)}`, {
         cache: 'no-store',
-        signal: AbortSignal.timeout(6000),
+        signal: controller.signal,
       })
+      if (generation !== searchGeneration.current) return
       if (!res.ok) { setSearchFailed(true); setResults([]); return }
       const body = (await res.json()) as { results?: EntityRef[] }
+      if (generation !== searchGeneration.current) return
       setResults((body.results ?? []).filter(r => r.type === 'party'))
     } catch {
-      setSearchFailed(true)
-      setResults([])
+      if (generation === searchGeneration.current) {
+        setSearchFailed(true)
+        setResults([])
+      }
+    } finally {
+      window.clearTimeout(timeout)
+      if (searchRequest.current === controller) searchRequest.current = null
+      if (generation === searchGeneration.current) setSearching(false)
     }
   }, [term])
 
   const loadGrants = useCallback(async (target: EntityRef) => {
+    const generation = ++accessGeneration.current
+    accessRequest.current?.abort()
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 8000)
+    accessRequest.current = controller
     setParty(target)
     setLoading(true)
     setGrantsUnavail(null)
+    setEffectiveUnavail(null)
     setGrants(null)
-    try {
-      const res = await fetch(`/api/delegations/party/${target.id}`, {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(8000),
-      })
-      if (!res.ok) {
-        setGrantsUnavail((await classifyBffFailure(res)) as BffFailure)
-        return
-      }
-      setGrants((await res.json()) as GrantsPayload)
-    } catch {
-      setGrantsUnavail('unreachable')
-    } finally {
-      setLoading(false)
-    }
+    setEffectiveAccess(null)
+    setConsumers(null)
+    setProjectionKnown(false)
+    setProjectionLoading(true)
+
+    const grantsRequest = fetch(`/api/delegations/party/${target.id}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    }).then(async res => {
+      if (!res.ok) return { data: null, unavailable: await classifyBffFailure(res) }
+      return { data: (await res.json()) as GrantsPayload, unavailable: null }
+    })
+    const effectiveRequest = fetch(`/api/delegations/effective-access/${target.id}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    }).then(async res => {
+      if (!res.ok) return { data: null, unavailable: await classifyBffFailure(res) }
+      const payload: unknown = await res.json()
+      return isEffectiveAccessPayload(payload)
+        ? { data: payload, unavailable: null }
+        : { data: null, unavailable: 'error' as const }
+    })
+    const projectionRequest = fetch('/api/delegations/projection-health', {
+      cache: 'no-store',
+      signal: controller.signal,
+    }).then(async res => {
+      if (!res.ok) return null
+      return (await res.json()) as { consumers?: ProjectionConsumer[]; state?: string }
+    }).catch(() => null)
 
     try {
-      const res = await fetch('/api/delegations/projection-health', {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(6000),
-      })
-      if (!res.ok) { setProjectionKnown(false); setConsumers(null); return }
-      const body = (await res.json()) as { consumers?: ProjectionConsumer[]; state?: string }
-      setProjectionKnown(body.state === 'ok')
-      setConsumers(body.consumers ?? [])
-    } catch {
-      setProjectionKnown(false)
-      setConsumers(null)
+      const [grantResult, effectiveResult] = await Promise.allSettled([grantsRequest, effectiveRequest])
+      if (generation === accessGeneration.current) {
+        if (grantResult.status === 'fulfilled') {
+          setGrants(grantResult.value.data)
+          setGrantsUnavail(grantResult.value.unavailable)
+        } else {
+          setGrantsUnavail('unreachable')
+        }
+        if (effectiveResult.status === 'fulfilled') {
+          setEffectiveAccess(effectiveResult.value.data)
+          setEffectiveUnavail(effectiveResult.value.unavailable)
+        } else {
+          setEffectiveUnavail('unreachable')
+        }
+      }
+    } finally {
+      if (generation === accessGeneration.current) setLoading(false)
+    }
+
+    const projection = await projectionRequest
+    if (generation === accessGeneration.current) {
+      setProjectionKnown(projection?.state === 'ok')
+      setConsumers(projection?.consumers ?? null)
+      setProjectionLoading(false)
+    }
+    window.clearTimeout(timeout)
+    if (accessRequest.current === controller) {
+      accessRequest.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (!party || !effectiveAccess?.nextChangeAt || effectiveAccess.refreshAfterMs === null) return
+    // The BFF computes this remaining duration immediately before returning the snapshot. This
+    // avoids both the workstation clock and extending validity by time spent resolving details.
+    const delay = Math.min(Math.max(effectiveAccess.refreshAfterMs, 0), 2_147_000_000)
+    const timer = window.setTimeout(() => { void loadGrants(party) }, delay)
+    return () => window.clearTimeout(timer)
+  }, [effectiveAccess?.nextChangeAt, effectiveAccess?.refreshAfterMs, loadGrants, party])
 
   return (
     <div>
@@ -132,6 +207,8 @@ export default function DelegationsPage() {
           </button>
         )}
       />
+
+      <RoleCatalog />
 
       {/* ---- party lookup (ADR-0228 facade, never a raw UUID field) ---- */}
       <div className="card" style={{ padding: '16px', marginBottom: '20px' }}>
@@ -149,7 +226,7 @@ export default function DelegationsPage() {
             placeholder={t('Jméno strany…', 'Party name…')}
             aria-label={t('Hledat stranu', 'Search party')}
           />
-          <button type="button" className="btn btn-primary" onClick={search} disabled={term.trim().length < SEARCH_MIN} aria-busy={loading} aria-label={t('Vyhledat delegující stranu', 'Search delegating party')}>
+          <button type="button" className="btn btn-primary" onClick={search} disabled={term.trim().length < SEARCH_MIN} aria-busy={searching} aria-label={t('Vyhledat delegující stranu', 'Search delegating party')}>
             <Search size={14} aria-hidden="true" />
             {t('Vyhledat', 'Search')}
           </button>
@@ -164,7 +241,7 @@ export default function DelegationsPage() {
           </p>
         )}
 
-        {searched && !searchFailed && results.length === 0 && (
+        {searched && !searching && !searchFailed && results.length === 0 && (
           <p style={{ marginTop: '10px', fontSize: '13px', color: 'var(--text-tertiary)' }}>
             {t('Žádná strana neodpovídá dotazu.', 'No party matches that query.')}
           </p>
@@ -207,6 +284,21 @@ export default function DelegationsPage() {
         />
       )}
 
+      {party && loading && (
+        <div role="status" aria-live="polite" className="card" style={{ padding: '20px', marginBottom: '20px', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+          {t(`Načítám přístup klienta ${party.label}…`, `Loading access for ${party.label}…`)}
+        </div>
+      )}
+
+      {party && effectiveAccess && <EffectiveAccess data={effectiveAccess} />}
+
+      {party && !loading && effectiveUnavail && grants && (
+        <div role="status" aria-live="polite" style={{ padding: '12px', marginBottom: '20px', borderRadius: '10px', border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', fontSize: '12px' }}>
+          <strong>{t('Souhrn efektivního přístupu je dočasně neúplný.', 'The effective-access summary is temporarily incomplete.')}</strong>{' '}
+          {t('Níže zůstávají zobrazené úspěšně načtené delegace; vlastnictví, názvy rolí nebo detaily zdrojů mohou chybět.', 'Successfully loaded grants remain visible below; ownership, role names, or resource details may be missing.')}
+        </div>
+      )}
+
       {party && !grantsUnavail && grants && (
         <>
           <GrantTable
@@ -214,86 +306,25 @@ export default function DelegationsPage() {
             subtitle={t('Práva, která tato strana udělila jiným.', 'Rights this party has granted to others.')}
             grants={grants.granted}
             state={grants.sources.granted}
+            direction="granted"
+            effectiveAccess={effectiveAccess}
           />
           <GrantTable
             title={t('Sdíleno s touto stranou', 'Shared with this party')}
             subtitle={t('Práva, která tato strana drží nad cizími zdroji.', 'Rights this party holds over other people’s resources.')}
             grants={grants.received}
             state={grants.sources.received}
+            direction="received"
+            effectiveAccess={effectiveAccess}
           />
-          <ProjectionHealth consumers={consumers} known={projectionKnown} />
+          <ProjectionHealth consumers={consumers} known={projectionKnown} loading={projectionLoading} />
         </>
       )}
     </div>
   )
 }
 
-function GrantTable({
-  title, subtitle, grants, state,
-}: { title: string; subtitle: string; grants: Grant[]; state: DirectionState }) {
-  const { t, language } = useLanguage()
-  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-
-  return (
-    <div className="card" style={{ padding: '16px', marginBottom: '20px' }}>
-      <h2 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '2px' }}>{title}</h2>
-      <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>{subtitle}</p>
-
-      {state !== 'ok' ? (
-        <div style={{ padding: '16px', borderRadius: '8px', background: 'var(--surface-3)', fontSize: '13px' }}>
-          {state === 'forbidden'
-            ? t(
-                'Tento pohled vám nebyl povolen — nezaměňujte za „žádné delegace“.',
-                'This view was refused for your role — do not read it as “no delegations”.',
-              )
-            : t(
-                'Tento pohled se teď nepodařilo načíst — nezaměňujte za „žádné delegace“.',
-                'This view could not be loaded right now — do not read it as “no delegations”.',
-              )}
-        </div>
-      ) : grants.length === 0 ? (
-        <div style={{ padding: '16px', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-          {t('Žádné delegace.', 'No delegations.')}
-        </div>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table className="table" style={{ width: '100%' }}>
-            <thead>
-              <tr>
-                <th>{t('Stav', 'Status')}</th>
-                <th>{t('Protistrana', 'Counterparty')}</th>
-                <th>{t('Zdroj', 'Resource')}</th>
-                <th>{t('Oprávnění', 'Capabilities')}</th>
-                <th>{t('Strop na transakci', 'Per-transaction cap')}</th>
-                <th>{t('Platnost do', 'Valid until')}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {grants.map(g => (
-                <tr key={g.id}>
-                  <td><DelegationStatusBadge status={g.status} /></td>
-                  <td><EntityChip type="party" id={g.granteePartyId} label={counterpartyLabel(g.granteeName)} /></td>
-                  <td style={{ fontSize: '12px' }}>{g.resourceType}</td>
-                  <td style={{ fontSize: '12px' }}>{capabilityLabels(g.capabilities)}</td>
-                  <td style={{ fontSize: '12px' }}>{formatCeiling(g.perTransactionLimit, numberLocale)}</td>
-                  <td style={{ fontSize: '12px' }}>{g.validTo ? g.validTo.slice(0, 10) : '—'}</td>
-                  <td>
-                    <Link href={`/delegations/${g.id}`} className="btn btn-secondary" style={{ fontSize: '12px' }}>
-                      {t('Detail', 'Detail')}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ProjectionHealth({ consumers, known }: { consumers: ProjectionConsumer[] | null; known: boolean }) {
+function ProjectionHealth({ consumers, known, loading }: { consumers: ProjectionConsumer[] | null; known: boolean; loading: boolean }) {
   const { t } = useLanguage()
 
   return (
@@ -309,7 +340,11 @@ function ProjectionHealth({ consumers, known }: { consumers: ProjectionConsumer[
         )}
       </p>
 
-      {!known || consumers === null ? (
+      {loading ? (
+        <div role="status" style={{ padding: '12px', fontSize: '13px', color: 'var(--text-tertiary)' }}>
+          {t('Načítám zdraví projekcí…', 'Loading projection health…')}
+        </div>
+      ) : !known || consumers === null ? (
         <div style={{ padding: '12px', fontSize: '13px', color: 'var(--text-tertiary)' }}>
           {t(
             'Zpoždění konzumentů teď není známé — nepovažujte to za nulové zpoždění.',

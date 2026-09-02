@@ -31,6 +31,12 @@ export interface TestCounts {
   errors: number
 }
 
+/** Typed k6 threshold outcomes. A prose detail is not evidence of this denominator. */
+export interface ThresholdResults {
+  evaluated: number
+  breached: number
+}
+
 export interface CoverageObservation {
   state: EvidenceState
   observedAt: string | null
@@ -50,6 +56,10 @@ export interface EvidenceObservation {
   detail?: string
   run?: TestRunProvenance
   diagnostics?: TestDiagnosticArtifact[]
+  /** Present only when typed k6 threshold outcomes were retained. */
+  thresholdResults?: ThresholdResults
+  /** Browser synthetics prove execution without a k6 threshold denominator. */
+  variant?: 'chromium' | 'firefox' | 'webkit'
 }
 
 export interface TestDiagnosticArtifact {
@@ -70,11 +80,21 @@ export interface TestRunProvenance {
   url: string
 }
 
+/**
+ * One LOGICAL resource lifecycle, not one physical container start (issue #7640). Quarkus
+ * reprovisions a test resource onto a fresh manager instance several times before the single
+ * terminal `stop()`, so the recorder collapses the repeats and publishes how many there were
+ * as `reprovisions`, present only on a `stopped` record and only when at least one repeat
+ * occurred. Absent `reprovisions` therefore means "provisioned once", never "unknown".
+ */
 export interface TestInfrastructureObservation {
   resource: 'postgres' | 'redpanda' | 'valkey'
   image: string
   lifecycle: 'started' | 'stopped'
   observedAt: string
+  /** Opaque job-local resource-manager scope; never a Docker or network identity. */
+  resourceScopeId?: string
+  reprovisions?: number
 }
 
 export interface ComponentTestPosture {
@@ -89,15 +109,31 @@ export interface ComponentTestPosture {
   }
 }
 
+/**
+ * Why `state` is `'unknown'` for a contract pair — never set alongside a resolved verdict.
+ * - `query-error`: the Pact Broker itself answered the verification query with an error.
+ * - `no-provider-main-version`: the provider has no published main-branch version, so
+ *   provider verification cannot be dispatched (re-running it will not help).
+ * - `pending-verification`: both pacticipants exist but no verification result yet —
+ *   genuinely awaiting a broker-backed run.
+ */
+export type ContractUnavailableReason = 'query-error' | 'no-provider-main-version' | 'pending-verification'
+
 export interface ContractEvidence {
   consumer: string
   provider: string
   pactFile: string
+  /** Consumer commit that authored the committed Pact used in the broker query. */
+  consumerVersion?: string | null
+  /** Provider build whose replay produced the broker verdict. */
+  providerVersion?: string | null
   state: EvidenceState
   observedAt: string | null
   interactions: number
   /** Why a broker verdict is unavailable, or the authority behind one that is. */
   verificationDetail?: string
+  /** Classification of `verificationDetail` when `state` is `'unknown'`; null otherwise. */
+  unavailableReason?: ContractUnavailableReason | null
 }
 
 export interface MutationEvidence {
@@ -119,6 +155,8 @@ export interface PerformanceEvidence {
   observedAt: string | null
   source: string
   thresholds: number
+  /** Present only when typed k6 threshold outcomes were observed. */
+  thresholdResults?: ThresholdResults
   metrics?: {
     p95Ms: number | null
     errorRatePercent: number | null
@@ -146,6 +184,7 @@ export interface PerformanceHistoryPoint {
   state: EvidenceState
   observedAt: string | null
   metrics: NonNullable<PerformanceEvidence['metrics']>
+  thresholdResults?: ThresholdResults
   run?: TestRunProvenance
 }
 
@@ -169,6 +208,7 @@ export interface SyntheticJourneyEvidence {
     observedAt: string
     detail: string
     run: TestRunProvenance
+    thresholdResults?: ThresholdResults
     /** Browser engines declared by the journey. Missing evidence remains explicitly not-run. */
     variants?: Array<{
       browser: 'chromium' | 'firefox' | 'webkit'
@@ -188,6 +228,9 @@ export interface SyntheticJourneyEvidence {
     activeJobs: number | null
     freshnessSeconds: number | null
     recentRuns: Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>
+    /** Non-null when the recent-runs query itself failed — distinguishes that from an
+     *  empty `recentRuns`, which means no Job has completed yet. */
+    recentRunsError: string | null
     /**
      * k6 remote-write measurements from the same journey window.  They are supplementary
      * performance evidence only: the CronJob outcome remains the availability verdict.
@@ -273,6 +316,8 @@ export interface TestIntelligenceReport {
   syntheticJourneys: SyntheticJourneyEvidence[]
   journeyCoverage?: JourneyCoverageSummary
   clientExperiences: ClientExperienceEvidence[]
+  requiredControls?: RequiredTestControl[]
+  platformCapabilities?: TestPlatformCapability[]
   /**
    * Build-time derived ADR-0148 record/replay posture. This is deliberately neither a CI
    * test result nor a runtime agent-health signal: it says which registered charters have a
@@ -292,8 +337,29 @@ export interface TestIntelligenceReport {
     staleEvidence: number
     unknownEvidence?: number
     unresolvedEvidence?: number
+    requiredControls?: number
+    requiredControlGaps?: number
   }
   warnings: string[]
+}
+
+export interface RequiredTestControl {
+  id: string
+  component: string | null
+  kind: EvidenceKind | 'coverage' | 'runtime'
+  state: EvidenceState
+  reason: string
+  source: string | null
+  observedAt: string | null
+  blocker?: string
+}
+
+export interface TestPlatformCapability {
+  id: string
+  title: string
+  state: 'implemented' | 'external-blocked' | 'ownership-blocked' | 'safety-blocked' | 'intentionally-deferred'
+  blocker: string | null
+  evidence: string
 }
 
 export interface AiEvalAssurance {

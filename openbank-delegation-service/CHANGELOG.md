@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.11.0...delegation-service-v0.12.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.10.0...delegation-service-v0.11.0) (2026-08-31)
+
+
+### Features
+
+* **delegation:** expand role capability catalog ([#7732](https://github.com/JiRaska/open-bank-oss/issues/7732)) ([4fdd0d3](https://github.com/JiRaska/open-bank-oss/commit/4fdd0d3e3c3a3d4b85c37c759300af60600a6cfb))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.9.0...delegation-service-v0.10.0) (2026-08-31)
+
+
+### Features
+
+* **delegation:** manage reusable role presets ([#7697](https://github.com/JiRaska/open-bank-oss/issues/7697)) ([c3f21ee](https://github.com/JiRaska/open-bank-oss/commit/c3f21ee63cc482a7ab27e6002967b23654812abe))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.8.0...delegation-service-v0.9.0) (2026-08-24)
 
 

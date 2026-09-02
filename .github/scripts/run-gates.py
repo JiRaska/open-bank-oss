@@ -186,6 +186,44 @@ def load(root: pathlib.Path, path: str = MANIFEST):
                     f"number\n"
                 )
                 sys.exit(2)
+        # selftest_inputs. The one way this optimisation can HARM: a declared path that
+        # matches nothing — a typo, or a file since renamed — makes the gate's self-test skip
+        # on every pull request forever, and the skip is silent because "no declared input
+        # changed" is the normal, expected message. So every declared path must exist in the
+        # tree right now, and the check is here rather than at execution time because a
+        # manifest that cannot be trusted must stop the run, not degrade it.
+        inputs = g.get("selftest_inputs")
+        if inputs is not None:
+            if not g.get("selftest"):
+                sys.stderr.write(
+                    f"::error::gate {g['id']}: declares `selftest_inputs` but has no "
+                    f"`selftest` to scope. Remove it, or add the falsification.\n"
+                )
+                sys.exit(2)
+            if not isinstance(inputs, list) or not inputs or not all(
+                isinstance(x, str) and x.strip() for x in inputs
+            ):
+                sys.stderr.write(
+                    f"::error::gate {g['id']}: `selftest_inputs` must be a non-empty list of "
+                    f"repo-relative paths.\n"
+                )
+                sys.exit(2)
+            for decl in inputs:
+                if decl in UNIVERSAL_SELFTEST_INPUTS:
+                    sys.stderr.write(
+                        f"::error::gate {g['id']}: `selftest_inputs` names `{decl}`, which is "
+                        f"already universal — every gate's self-test re-runs when it changes. "
+                        f"Listing it hides that fact from the next reader.\n"
+                    )
+                    sys.exit(2)
+                if not (root / decl).exists():
+                    sys.stderr.write(
+                        f"::error::gate {g['id']}: `selftest_inputs` names `{decl}`, which does "
+                        f"not exist. A path that matches nothing skips this gate's self-test on "
+                        f"every pull request, silently and forever.\n"
+                    )
+                    sys.exit(2)
+
         floor = g.get("min_subjects")
         if floor is not None:
             if not isinstance(floor, int) or isinstance(floor, bool) or floor < 1:
@@ -293,6 +331,10 @@ class Result:
         # text log — measured live at 894s of gate CPU in one CI run with no way to say how
         # much of that was falsification overhead vs the check doing its actual job.
         self.selftest_seconds = 0.0
+        # True when the self-test was deliberately not run for this pull request because
+        # none of the gate's declared inputs changed. Distinct from `selftest_declared`
+        # being false: the falsification EXISTS and simply did not need re-proving here.
+        self.selftest_skipped = False
 
     @property
     def id(self):
@@ -389,7 +431,75 @@ def last_subject_count(out: str):
     return found
 
 
-def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> Result:
+# Files whose content can change a self-test's verdict for EVERY gate, so a change to any of
+# them re-falsifies the whole estate regardless of what a gate declares. gates.yaml carries the
+# selftest command and its expected verdict; run-gates.py decides what a verdict MEANS; gatelib
+# is imported by most checkers. Anything else is per-gate and must be declared.
+UNIVERSAL_SELFTEST_INPUTS = (
+    ".github/gates/gates.yaml",
+    ".github/scripts/run-gates.py",
+    ".github/scripts/gatelib.py",
+)
+
+
+def changed_paths(root: pathlib.Path, base: str):
+    """Repo-relative paths this PR changed against the already-resolved merge-base.
+
+    Returns None when the set cannot be established — no base, not a repo, git failed. None is
+    NOT an empty set: an empty set means "this PR changed nothing here" and would let every
+    self-test be skipped, so the caller must treat None as "run everything". That distinction is
+    the whole safety property of this function (CLAUDE.md: a probe's silence is not evidence).
+    """
+    if not base:
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--name-only", base],
+            cwd=root, capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return {line.strip() for line in out.stdout.splitlines() if line.strip()}
+
+
+def selftest_is_needed(gate, changed):
+    """(needed, reason). Whether this gate's self-test must run on THIS pull request.
+
+    A self-test proves the gate's red path is reachable. That is a property of the gate's own
+    code -- its checker, its fixture, its manifest entry -- and re-running it on a pull request
+    that touched none of them re-proves an identical static fact. Measured 2026-09-02 over the
+    ci_gate_runs warehouse: 266.1 of 889.1 gate-hours in 23 days were self-test, 193.4 h of it
+    on the pull_request lane alone.
+
+    What is NOT weakened, and why this is not a cache:
+      * nothing is stored, trusted or replayed -- there is no recorded verdict anywhere, so
+        there is nothing to poison or to go stale;
+      * every push to main runs every self-test unconditionally (`changed` is None off a pull
+        request), so a self-test broken by anything at all is caught on the merge commit that
+        introduced it, not a day later;
+      * any pull request touching a gate's declared inputs, the manifest, or the runner itself
+        falsifies that gate before it is allowed to gate the change;
+      * a gate that declares no `selftest_inputs` keeps today's behaviour exactly.
+    """
+    if not gate.get("selftest"):
+        return False, ""
+    inputs = gate.get("selftest_inputs")
+    if not inputs:
+        return True, ""
+    if changed is None:
+        return True, "the changed-file set could not be established"
+    for path in changed:
+        if path in UNIVERSAL_SELFTEST_INPUTS:
+            return True, f"`{path}` changed (universal self-test input)"
+        for decl in inputs:
+            if path == decl or path.startswith(decl.rstrip("/") + "/"):
+                return True, f"`{path}` changed (declared input `{decl}`)"
+    return False, "no declared input changed on this pull request"
+
+
+def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, changed=None) -> Result:
     r = Result(gate)
     if gate["when"] == "pull_request" and not is_pr:
         r.status = "skipped"
@@ -407,6 +517,19 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
     buf = []
 
     selftest = gate.get("selftest")
+    needed, why = selftest_is_needed(gate, changed)
+    if selftest and not needed:
+        # Skipped, and SAID SO in the gate's own output — a falsification that silently did not
+        # happen would be indistinguishable from one that passed, which is the failure mode this
+        # whole runner exists to prevent.
+        r.selftest_skipped = True
+        buf.append(
+            f"--- self-test SKIPPED on this pull request: {why} ---\n"
+            "[run-gates] the gate below still runs. Its self-test runs unconditionally on every\n"
+            "push to main, and on any pull request touching its declared `selftest_inputs`,\n"
+            "gates.yaml, run-gates.py or gatelib.py.\n"
+        )
+        selftest = None
     if selftest:
         want_pass = gate.get("selftest_expect", "pass") == "pass"
         st0 = time.monotonic()
@@ -599,8 +722,13 @@ def json_records(results) -> list[dict]:
             # own run: at all (see execute()) — status alone already encodes this, repeated
             # here as an explicit boolean so a consumer never has to know that convention.
             "selftest_passed": (
-                None if not g.get("selftest") else r.status != "unfalsified"
+                None if not g.get("selftest") or r.selftest_skipped
+                else r.status != "unfalsified"
             ),
+            # None means "not re-proved on this pull request because no declared input
+            # changed", NOT "passed" and NOT "absent". A consumer counting falsifications must
+            # keep the three apart or the estate's coverage reads higher than it is.
+            "selftest_skipped": r.selftest_skipped,
             "budget_seconds": g.get("budget_seconds"),
             "min_subjects": g.get("min_subjects"),
         })
@@ -687,6 +815,14 @@ def main(argv=None):
     print(f"[run-gates] {len(sel)} gates, {jobs} concurrent, event="
           f"{os.environ.get('GITHUB_EVENT_NAME', '(local)')}")
 
+    # Resolved ONCE for the whole invocation: 40-odd gates in a shard would otherwise each
+    # shell out to git for the identical answer. `None` off a pull request (and whenever the
+    # set cannot be established) means every self-test runs — see selftest_is_needed().
+    changed = changed_paths(root, os.environ.get("PR_DIFF_BASE", "")) if is_pr else None
+    if changed is not None:
+        print(f"[run-gates] pull request changed {len(changed)} paths; self-tests whose declared "
+              f"inputs are untouched will be skipped")
+
     index = git_index_path(root)
     # One YAML parse cache for the whole invocation. The gates are separate processes over one
     # corpus — the 20 single-script python gates in the `gitops` shard cost 231s apart and 8.7s
@@ -698,7 +834,7 @@ def main(argv=None):
     os.environ[PARSE_CACHE_ENV] = cache
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
-            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index): g["id"] for g in sel}
+            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index, changed): g["id"] for g in sel}
             done = {}
             # Emit a line PER GATE as it finishes, rather than nothing until the end
             # (#6068). Combined with unbuffer() this is what makes a run that is killed
@@ -1245,6 +1381,102 @@ def self_test():
             )
         elif not alive_when_seen:
             bad.append("output only appeared after the process had already exited")
+
+        # 9. SELFTEST INPUT SCOPING. Skipping a falsification is the one optimisation in
+        #    this runner that can hollow it out, so every branch is driven here — including
+        #    the two that must NOT skip, because a feature that skips everything would satisfy
+        #    a test that only checked the skip.
+        SKIP_CASES = [
+            # (gate dict fragment, changed set, want_needed, label)
+            ({"selftest": "true"}, {"any/file"}, True,
+             "no selftest_inputs declared -> unchanged behaviour, always runs"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]}, {"a/b.py"}, True,
+             "a declared input changed -> runs"),
+            ({"selftest": "true", "selftest_inputs": ["a"]}, {"a/deep/c.py"}, True,
+             "a declared DIRECTORY prefix contains the change -> runs"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]}, {"z/other.py"}, False,
+             "nothing declared changed -> skipped"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]},
+             {".github/gates/gates.yaml"}, True,
+             "the manifest changed -> every self-test runs"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]},
+             {".github/scripts/run-gates.py"}, True,
+             "the runner changed -> every self-test runs"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]},
+             {".github/scripts/gatelib.py"}, True,
+             "gatelib changed -> every self-test runs"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]}, None, True,
+             "changed set UNKNOWN -> runs (None is not an empty set)"),
+            ({"selftest": "true", "selftest_inputs": ["a/b.py"]}, set(), False,
+             "a pull request that changed nothing -> skipped"),
+            ({"selftest": "true", "selftest_inputs": ["ab"]}, {"abc/d.py"}, False,
+             "prefix must be a PATH boundary: `ab` must not match `abc/`"),
+            ({"run": "true"}, {"a/b.py"}, False,
+             "no selftest at all -> nothing to run"),
+        ]
+        for frag, changed_set, want, label in SKIP_CASES:
+            got, _why = selftest_is_needed(dict(frag), changed_set)
+            if got != want:
+                bad.append(f"selftest scoping [{label}]: want needed={want}, got {got}")
+
+        # And end to end through execute(), because the predicate agreeing is not the same as
+        # the runner acting on it: a skipped self-test must still RUN THE GATE, must say in its
+        # own output that the falsification did not happen, and must not report `selftest_passed`.
+        scoped = {
+            "id": "scoped", "name": "scoped", "group": "t", "when": "always",
+            "mode": "enforced", "selftest": "exit 1", "selftest_expect": "pass",
+            "selftest_inputs": ["a/b.py"], "run": "echo ran-anyway",
+        }
+        r = execute(dict(scoped), tmp, True, 60, None, {"z/unrelated.py"})
+        if r.status != "ok":
+            bad.append(f"scoped skip: a broken self-test with untouched inputs should not "
+                       f"block the gate on a PR, got {r.status}")
+        if "ran-anyway" not in r.output:
+            bad.append("scoped skip: the GATE itself did not run")
+        if "self-test SKIPPED" not in r.output:
+            bad.append("scoped skip: output does not say the falsification was skipped")
+        if not r.selftest_skipped:
+            bad.append("scoped skip: selftest_skipped flag not set")
+        if json_records([r])[0]["selftest_passed"] is not None:
+            bad.append("scoped skip: selftest_passed must be null, never true, when skipped")
+        if r.selftest_seconds != 0.0:
+            bad.append("scoped skip: charged self-test time for a self-test that did not run")
+
+        # The SAME gate, same broken self-test, with the changed set unknown — i.e. every push
+        # to main. It must go UNFALSIFIED. This is the case that makes the whole design safe,
+        # so it is asserted rather than assumed.
+        r = execute(dict(scoped), tmp, False, 60, None, None)
+        if r.status != "unfalsified":
+            bad.append(f"off a pull request a broken self-test must be UNFALSIFIED, got {r.status}")
+
+        # A declared input that does not exist would skip forever, silently. load() must refuse.
+        (tmp / "real-input.py").write_text("# a path that really exists\n")
+        man = tmp / ".github" / "gates" / "gates.yaml"
+        for body, want_refused in (
+            ('selftest_inputs: ["does/not/exist.py"]', True),
+            ('selftest_inputs: [".github/gates/gates.yaml"]', True),   # already universal
+            ('selftest_inputs: []', True),
+            ('selftest_inputs: "a-string"', True),
+            ('selftest_inputs: ["real-input.py"]', False),             # the valid shape
+            # ...and the valid shape must still be refused without a selftest to scope.
+            ('selftest_inputs: ["real-input.py"]\n    NO_SELFTEST: 1', True),
+        ):
+            decl = body.replace("\n    NO_SELFTEST: 1", "")
+            has_selftest = "NO_SELFTEST" not in body
+            man.write_text(
+                "gates:\n  - id: x\n    name: x\n    group: t\n"
+                + ('    selftest: "true"\n    selftest_expect: pass\n' if has_selftest else "")
+                + f"    {decl}\n" + '    run: "true"\n'
+            )
+            rc = subprocess.run(
+                [sys.executable, str(pathlib.Path(__file__).resolve()), "--list"],
+                capture_output=True, text=True, cwd=str(tmp),
+            ).returncode
+            if want_refused and rc == 0:
+                bad.append(f"load() accepted an unusable selftest_inputs ({body!r})")
+            if not want_refused and rc != 0:
+                bad.append(f"load() rejected a valid selftest_inputs ({body!r})")
+        man.write_text(SELF_TEST_MANIFEST)   # restore for anything after this block
 
         if bad:
             print("\n::error::run-gates self-test FAILED:")

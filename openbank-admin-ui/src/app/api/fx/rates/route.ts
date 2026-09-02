@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
+import { auth } from '@/auth'
 import { CURRENCY_META } from '@/lib/currency-meta'
 import { inCluster, discoverServices, resolveInClusterBaseUrl } from '@/lib/discovery'
 
@@ -91,38 +92,62 @@ async function fetchEcbRates() {
   return result
 }
 
-async function fetchFxServiceRates(baseUrl: string) {
+/** Outcome of one fx-service read.
+ *
+ *  Deliberately NOT a bare array. `GET /api/v1/fx/rates` is
+ *  `@RolesAllowed(ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN, ROLE_PAYMENTS)`, and this route used to
+ *  call it with no `Authorization` header at all — so 401 was the expected response, and
+ *  `if (!res.ok) return []` rendered it as "no rates". A missing credential, a 403, a timeout and a
+ *  genuinely empty rate table were four states reduced to one value, with nothing downstream able
+ *  to tell them apart. `cnb` and `ecb` in this same response already carry an `error` field;
+ *  fxService did not. */
+type FxFetch = { rows: unknown[]; error: string | null }
+
+const EMPTY: FxFetch = { rows: [], error: null }
+
+async function fetchFxServiceRates(baseUrl: string, accessToken: string | undefined): Promise<FxFetch> {
+  if (!accessToken) return { rows: [], error: 'unauthenticated: no operator bearer to relay' }
   try {
-    const res = await fetch(`${baseUrl}/api/v1/fx/rates`, { signal: AbortSignal.timeout(5000) })
-    if (!res.ok) return []
+    const res = await fetch(`${baseUrl}/api/v1/fx/rates`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return { rows: [], error: `fx-service responded ${res.status}` }
     const data = await res.json()
-    return Array.isArray(data) ? data : (data?.rates ?? [])
-  } catch {
-    return []
+    return { rows: Array.isArray(data) ? data : (data?.rates ?? []), error: null }
+  } catch (e) {
+    return { rows: [], error: String(e) }
   }
 }
 
-async function fetchFxConversions(baseUrl: string) {
+async function fetchFxConversions(baseUrl: string, accessToken: string | undefined): Promise<FxFetch> {
+  if (!accessToken) return { rows: [], error: 'unauthenticated: no operator bearer to relay' }
   try {
-    const res = await fetch(`${baseUrl}/api/v1/fx/conversions`, { signal: AbortSignal.timeout(5000) })
-    if (!res.ok) return []
+    const res = await fetch(`${baseUrl}/api/v1/fx/conversions`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return { rows: [], error: `fx-service responded ${res.status}` }
     const data = await res.json()
-    return Array.isArray(data) ? data : (data?.conversions ?? [])
-  } catch {
-    return []
+    return { rows: Array.isArray(data) ? data : (data?.conversions ?? []), error: null }
+  } catch (e) {
+    return { rows: [], error: String(e) }
   }
 }
 
 export async function GET() {
   const fx = await resolveFxService()
+  // Relay the operator's own bearer, so fx-service's policy stays authoritative — the same
+  // pattern the agent BFF routes use. Without it every call here was a 401 rendered as "no rates".
+  const accessToken = (await auth())?.user?.accessToken
   // Only reach out to fx-service when it's actually serving; a scaled-to-zero or
   // undeployed service has no reachable pod, so skip the fetch (and its timeout).
   const canFetch = fx.status === 'up' && fx.baseUrl !== null
   const [cnbRates, ecbRates, fxRates, conversions] = await Promise.allSettled([
     fetchCnbRates(),
     fetchEcbRates(),
-    canFetch ? fetchFxServiceRates(fx.baseUrl!) : Promise.resolve([]),
-    canFetch ? fetchFxConversions(fx.baseUrl!) : Promise.resolve([]),
+    canFetch ? fetchFxServiceRates(fx.baseUrl!, accessToken) : Promise.resolve(EMPTY),
+    canFetch ? fetchFxConversions(fx.baseUrl!, accessToken) : Promise.resolve(EMPTY),
   ])
 
   return NextResponse.json({
@@ -140,8 +165,16 @@ export async function GET() {
       status: fx.status,
       // `up` kept for backward-compat with any older client; `status` is authoritative.
       up: fx.status === 'up',
-      rates: fxRates.status === 'fulfilled' ? fxRates.value : [],
-      conversions: conversions.status === 'fulfilled' ? conversions.value : [],
+      rates: fxRates.status === 'fulfilled' ? fxRates.value.rows : [],
+      conversions: conversions.status === 'fulfilled' ? conversions.value.rows : [],
+      // Present so an unauthenticated or failing read is distinguishable from an empty one,
+      // matching the `error` field cnb and ecb already carry above.
+      error: fxRates.status === 'fulfilled'
+        ? fxRates.value.error
+        : String((fxRates as PromiseRejectedResult).reason),
+      conversionsError: conversions.status === 'fulfilled'
+        ? conversions.value.error
+        : String((conversions as PromiseRejectedResult).reason),
     },
     currencyMeta: CURRENCY_META,
     fetchedAt: new Date().toISOString(),

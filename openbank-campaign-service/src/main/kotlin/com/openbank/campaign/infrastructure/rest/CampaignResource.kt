@@ -35,7 +35,14 @@ data class CreateCampaignRequest(
     val goal: String,
     val segmentName: String,
     val segmentVersion: Int,
-    val steps: List<StepRequest>,
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS of
+     * a collection, so `{"steps": [null]}` deserialises happily into a `List<StepRequest>` holding a
+     * null. Writing the type honestly is what makes the guard in [toSteps] reachable instead of
+     * dead code.
+     */
+    val steps: List<StepRequest?>,
     /** Published referral programme UUID; metadata is resolved and pinned server-side. */
     val referralProgramId: UUID? = null,
     val stopCondition: StopConditionRequest? = null,
@@ -51,7 +58,7 @@ data class CreateCampaignRequest(
      */
     val trigger: String? = null,
     /** Bounded, explicit yes/no delivery branches. Absent preserves a linear campaign. */
-    val decisions: List<DecisionRequest> = emptyList(),
+    val decisions: List<DecisionRequest?> = emptyList(),
     /** Exact published incentive revision; redemption remains owned by incentive-service. */
     val incentiveOfferRef: IncentiveOfferRefRequest? = null,
 )
@@ -145,32 +152,39 @@ data class ApprovalRequest(val approver: String? = null)
  */
 private fun JsonWebToken.principalName(): String = name ?: subject ?: "unknown"
 
-private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.map {
+/**
+ * The only production read of [CreateCampaignRequest.steps]. `IllegalArgumentException` is mapped
+ * to 400 by libs-runtime's `CommonExceptionMappers`; no service-local mapper is added (#526).
+ */
+private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.mapIndexed { index, raw ->
+    val step = requireNotNull(raw) { "steps[$index] must not be null" }
     CampaignStep(
-        it.order,
-        it.template,
-        it.channel,
-        it.variables,
-        it.delaySeconds,
-        it.condition,
-        it.conditionSourceOrder,
-        it.variantBVariables,
-        it.fallbackToPush,
-        it.mobileDestination,
-        it.inAppSurface,
-        it.variantBTemplate,
-        it.variantBChannel,
-        it.variantBDelaySeconds,
-        it.nextStepOrder,
+        step.order,
+        step.template,
+        step.channel,
+        step.variables,
+        step.delaySeconds,
+        step.condition,
+        step.conditionSourceOrder,
+        step.variantBVariables,
+        step.fallbackToPush,
+        step.mobileDestination,
+        step.inAppSurface,
+        step.variantBTemplate,
+        step.variantBChannel,
+        step.variantBDelaySeconds,
+        step.nextStepOrder,
     )
 }
 
-private fun CreateCampaignRequest.toDecisions(): List<CampaignDecision> = decisions.map {
+/** The only production read of [CreateCampaignRequest.decisions]; same 400 mapping as [toSteps]. */
+private fun CreateCampaignRequest.toDecisions(): List<CampaignDecision> = decisions.mapIndexed { index, raw ->
+    val decision = requireNotNull(raw) { "decisions[$index] must not be null" }
     CampaignDecision(
-        sourceStepOrder = it.sourceStepOrder,
-        evaluationDelaySeconds = it.evaluationDelaySeconds,
-        confirmedStepOrder = it.confirmedStepOrder,
-        notConfirmedStepOrder = it.notConfirmedStepOrder,
+        sourceStepOrder = decision.sourceStepOrder,
+        evaluationDelaySeconds = decision.evaluationDelaySeconds,
+        confirmedStepOrder = decision.confirmedStepOrder,
+        notConfirmedStepOrder = decision.notConfirmedStepOrder,
     )
 }
 

@@ -8,14 +8,160 @@ import json
 import re
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
+import yaml
 
 REQUIRED_SCHEMA = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
 TESTCONTAINERS_EVIDENCE_BASELINE = "openbank-libs/governance/testcontainers-evidence-baseline.txt"
+CAPABILITY_REGISTER = "openbank-libs/governance/test-intelligence-capabilities.yaml"
+CAPABILITY_STATES = {
+    "implemented",
+    "external-blocked",
+    "ownership-blocked",
+    "safety-blocked",
+    "intentionally-deferred",
+}
+CAPABILITY_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+
+
+class DuplicateYamlKeyError(yaml.YAMLError):
+    """A YAML mapping whose apparent source and effective value would diverge."""
+
+
+class CapabilityLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate keys instead of silently keeping the last."""
+
+
+def construct_unique_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            duplicate = key in mapping
+        except TypeError as exc:
+            raise yaml.YAMLError(f"unhashable mapping key {key!r}") from exc
+        if duplicate:
+            raise DuplicateYamlKeyError(f"duplicate YAML key {key!r}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+CapabilityLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    construct_unique_mapping,
+)
 
 
 def text(path: Path) -> str:
     return path.read_text(errors="ignore") if path.exists() else ""
+
+
+def normalized_heading(value: str) -> str:
+    """Return a comparison form for GitHub-style Markdown heading fragments.
+
+    GitHub's precise slug algorithm deliberately preserves some punctuation.  Evidence
+    pointers need a stronger property than reproducing that implementation: the
+    declared fragment must still name an actual heading after punctuation and spacing
+    differences are ignored.  This catches a renamed or invented ADR section without
+    coupling the governance gate to a renderer implementation.
+    """
+    return "-".join(re.findall(r"[a-z0-9]+", value.lower()))
+
+
+def valid_capability_evidence(root: Path, evidence: str) -> bool:
+    """Accept an HTTPS primary source or an existing local document/heading pointer."""
+    if evidence.startswith("https://"):
+        parsed = urlsplit(evidence)
+        return (
+            parsed.scheme == "https"
+            and bool(parsed.netloc)
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+        )
+    if evidence.startswith(("http://", "/")):
+        return False
+
+    relative, separator, fragment = evidence.partition("#")
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        return False
+    if not relative or not candidate.is_file():
+        return False
+    if not separator:
+        return True
+
+    if candidate.suffix.lower() not in {".md", ".markdown"}:
+        return re.search(rf"(?<![a-zA-Z0-9_-]){re.escape(fragment)}(?![a-zA-Z0-9_-])", text(candidate)) is not None
+
+    target = normalized_heading(fragment)
+    return bool(target) and any(
+        normalized_heading(heading) == target
+        for heading in re.findall(r"(?m)^#{1,6}\s+(.+?)\s*#*\s*$", text(candidate))
+    )
+
+
+def capability_register_errors(root: Path) -> list[str]:
+    """Validate the exact operator contract read by the Admin capability matrix.
+
+    This must parse YAML rather than recognise its indentation.  The collector parses the
+    same file, and ordinary YAML loaders silently retain a duplicate key's final value;
+    accepting the earlier textual value here would let CI certify a different UI state.
+    """
+    register_path = root / CAPABILITY_REGISTER
+    try:
+        register = yaml.load(register_path.read_text(encoding="utf-8"), Loader=CapabilityLoader)
+    except (OSError, yaml.YAMLError) as exc:
+        return [f"test-intelligence capability register unavailable: {exc}"]
+    if not isinstance(register, dict):
+        return ["test-intelligence capability register must be a YAML mapping"]
+
+    errors: list[str] = []
+    if set(register) != {"version", "capabilities"}:
+        errors.append("test-intelligence capability register has unsupported or missing top-level fields")
+    if type(register.get("version")) is not int or register.get("version") != 1:
+        errors.append("test-intelligence capability register must declare integer version 1")
+    capabilities = register.get("capabilities")
+    if not isinstance(capabilities, list) or not capabilities:
+        return errors + ["test-intelligence capability register must declare a non-empty capability list"]
+
+    seen_ids: set[str] = set()
+    for index, capability in enumerate(capabilities, start=1):
+        prefix = f"test-intelligence capability #{index}"
+        if not isinstance(capability, dict):
+            errors.append(f"{prefix} must be a mapping")
+            continue
+        identifier = capability.get("id")
+        title = capability.get("title")
+        state = capability.get("state")
+        evidence = capability.get("evidence")
+        blocker = capability.get("blocker")
+        required = {"id", "title", "state", "evidence"}
+        permitted = required | {"blocker"}
+        if not required.issubset(capability) or not set(capability).issubset(permitted):
+            errors.append(f"{prefix} has unsupported or missing fields")
+        if not isinstance(identifier, str) or not CAPABILITY_ID.fullmatch(identifier):
+            errors.append(f"{prefix} has an invalid id")
+        elif identifier in seen_ids:
+            errors.append(f"test-intelligence capability id is duplicated: {identifier}")
+        else:
+            seen_ids.add(identifier)
+        if not isinstance(title, str) or not title.strip():
+            errors.append(f"{prefix} has an empty or non-string title")
+        if not isinstance(state, str) or state not in CAPABILITY_STATES:
+            errors.append(f"{prefix} has an unsupported state")
+        if not isinstance(evidence, str) or not valid_capability_evidence(root, evidence.strip()):
+            errors.append(f"{prefix} has unresolvable evidence")
+        if state == "implemented":
+            if "blocker" in capability:
+                errors.append(f"implemented test-intelligence capability has a blocker: {identifier}")
+        elif not isinstance(blocker, str) or not blocker.strip():
+            errors.append(f"blocked test-intelligence capability has no non-empty blocker: {identifier}")
+    return errors
 
 
 RECORD_CALL = re.compile(
@@ -62,6 +208,15 @@ def check(root: Path) -> list[str]:
                                 .get("properties", {}).get("kind", {}).get("enum", []))
         if "trace" not in specialized_kinds:
             errors.append("run schema cannot represent executed trace-contract evidence")
+        runtime_observation = schema.get("$defs", {}).get("infrastructureObservation", {})
+        runtime_properties = runtime_observation.get("properties", {})
+        scope_pattern = runtime_properties.get("resourceScopeId", {}).get("pattern", "")
+        if ("resourceScopeId" in runtime_observation.get("required", [])
+                or not scope_pattern.startswith("^[0-9a-f]{8}-")):
+            errors.append("run schema cannot safely represent optional opaque Testcontainers resource scopes")
+        reprovisions = runtime_properties.get("reprovisions", {})
+        if reprovisions.get("type") != "integer" or reprovisions.get("minimum") != 1:
+            errors.append("run schema cannot safely represent positive logical-resource reprovision counts")
         diagnostic = schema.get("properties", {}).get("diagnostics", {})
         if diagnostic.get("items", {}).get("$ref") != "#/$defs/diagnosticArtifact":
             errors.append("run schema has no typed diagnostic artifact collection")
@@ -80,15 +235,30 @@ def check(root: Path) -> list[str]:
         errors.append(f"run schema unavailable: {exc}")
 
     workflow = text(root / ".github/workflows/_service-ci.yml")
-    for needle in ("collect-test-run-evidence.py", "build/test-intelligence/run.json", "if: always()", "docker events", "--filter event=start", "--filter event=die"):
+    for needle in (
+        "collect-test-run-evidence.py",
+        "build/test-intelligence/run.json",
+        "if: always()",
+        "docker events",
+        "--filter type=container",
+        "--filter event=start",
+        "--filter event=die",
+    ):
         if needle not in workflow:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
     if "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport" not in workflow:
         errors.append("Kover evidence is not bounded with the money-path-safe timeout")
+    immutable_envelope_artifact = workflow.partition("Retain immutable Test Intelligence run envelope")[2].partition(
+        "Upload coverage to Codecov"
+    )[0]
+    if "build/test-intelligence/run.json" not in immutable_envelope_artifact or "runtime/" in immutable_envelope_artifact:
+        errors.append("immutable Test Intelligence artifact must retain only the redacted run envelope, never raw runtime evidence")
 
     convention = text(root / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts")
     if "OPENBANK_TEST_EVIDENCE_DIR" not in convention:
         errors.append("service test JVMs do not receive the runtime-evidence directory")
+    if "project.delete(testIntelligenceRuntimeDir)" not in convention:
+        errors.append("runtime evidence is not reset before each Test task and can mix local reruns")
     # Kover's agent otherwise transforms Testcontainers' shaded classes during Quarkus
     # integration tests.  That can leave the advisory report task green but no XML to
     # project, which is indistinguishable from absent coverage in the operator view.
@@ -98,10 +268,14 @@ def check(root: Path) -> list[str]:
     recorder = root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/evidence/TestInfrastructureEvidence.kt"
     if not recorder.exists():
         errors.append("openbank-libs-testing has no shared runtime evidence recorder")
+    elif "resourceScopeId" not in text(recorder) or "reprovisions" not in text(recorder):
+        errors.append("shared runtime evidence recorder cannot preserve opaque scopes and logical reprovisions")
     for name in ("PostgresBase.kt", "PostgresRedpandaTestResource.kt", "PostgresRedisTestResource.kt"):
         source = text(root / "openbank-libs-testing/src/main/kotlin/com/openbank/libs/testing/containers" / name)
         if "TestInfrastructureEvidence.record" not in source:
             errors.append(f"shared Testcontainers resource emits no lifecycle proof: {name}")
+        if "resourceScopeId" not in source:
+            errors.append(f"shared Testcontainers resource lacks opaque lifecycle correlation: {name}")
 
     baseline_path = root / TESTCONTAINERS_EVIDENCE_BASELINE
     baseline = {
@@ -125,7 +299,8 @@ def check(root: Path) -> list[str]:
     for needle in ('"trace"', "def trace_contract_evidence", "OPENBANK_TRACE_CONTRACT_V1:",
                    "specialized.extend(trace_contract_evidence(service))", "def parse_timestamp(",
                    "run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW",
-                   "observed_at - run_observed_at > MAX_FUTURE_SKEW"):
+                   "observed_at - run_observed_at > MAX_FUTURE_SKEW", "def public_runtime_image",
+                   'item["image"] = public_runtime_image'):
         if needle not in run_collector:
             errors.append(f"run-envelope collector loses executed trace evidence: {needle}")
     tracing_pilot = text(root / "openbank-agent-service/src/test/kotlin/com/openbank/agent/application/AgentChatServiceTracingTest.kt")
@@ -141,8 +316,7 @@ def check(root: Path) -> list[str]:
         ("workflow_run.conclusion == 'success'", "admin deployment accepts unsuccessful Services CI evidence"),
         ("workflow_run.head_branch == 'main'", "admin deployment accepts non-main Services CI evidence"),
         ("github.event.workflow_run.head_sha", "admin deployment cannot inspect the exact workflow-run source commit"),
-        ('subject="$(git log -1 --format=%s)"', "admin deployment does not inspect the workflow-run commit subject"),
-        ('proceed=false', "admin deployment cannot reject its own GitOps commit"),
+        ("authorize-admin-ui-deploy-source.sh", "admin deployment bypasses its source-ancestry guard"),
         ("needs.deploy-source.outputs.proceed == 'true'", "privileged admin image build bypasses the deploy-source guard"),
         ("latest_main_artifact", "admin deployment cannot select main-only service evidence"),
         ("per_page=100&page=${page}",
@@ -153,13 +327,31 @@ def check(root: Path) -> list[str]:
         ("github.event_name }}\" = \"workflow_run\"", "event-driven snapshot refresh does not use a unique immutable image tag"),
         ("github.event.workflow_run.head_sha || 'eligible'", "workflow-run events can evict the current push/dispatch Admin UI deploy queue"),
         ("git ls-remote origin refs/heads/main", "admin deployment does not reject a source commit that is stale before privileged build"),
-        ("Skipping stale source", "admin deployment does not make stale-source rejection observable"),
+        ('git fetch --no-tags --depth=64 origin "$main_sha"',
+         "admin deployment cannot inspect current main after checking out a waiting source"),
         ('"openbank-libs/governance/journeys.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the journey catalog changes"),
         ('"perf/scenarios.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when the performance catalog changes"),
         ('"perf/k6/**"', "admin deployment does not rebuild the Test Intelligence snapshot when a performance definition changes"),
         ('"openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when a synthetic runtime manifest changes"),
     ):
         if needle not in deploy:
+            errors.append(message)
+    deploy_source_guard = text(root / ".github/scripts/authorize-admin-ui-deploy-source.sh")
+    for needle, message in (
+        ('source_subject="$(git log -1 --format=%s "$SOURCE_SHA")"',
+         "admin deployment does not inspect the source commit subject"),
+        ('git merge-base --is-ancestor "$SOURCE_SHA" "$MAIN_SHA"',
+         "admin deployment accepts a stale source outside main ancestry"),
+        ('git rev-list --reverse "${SOURCE_SHA}..${MAIN_SHA}"',
+         "admin deployment cannot inspect every commit that overtook a waiting source"),
+        ('git diff-tree --first-parent --no-commit-id --name-only -r "$commit_sha"',
+         "admin deployment trusts a deploy-looking commit without verifying its changed paths"),
+        ('openbank-infra/gitops/components/admin-ui/admin-ui.yaml',
+         "admin deployment does not restrict the harmless-advance exception to its image manifest"),
+        ("Skipping stale source", "admin deployment does not make stale-source rejection observable"),
+        ("echo false", "admin deployment cannot reject its own GitOps commit"),
+    ):
+        if needle not in deploy_source_guard:
             errors.append(message)
     history_stage = deploy.partition("Stage immutable per-attempt Test Intelligence history")[2].partition(
         "Stage pitest mutation results"
@@ -194,10 +386,20 @@ def check(root: Path) -> list[str]:
     ui_page = text(root / "openbank-admin-ui/src/app/system/tests/page.tsx")
     if "| 'trace'" not in ui_types or "'trace', 'mutation'" not in ui_page:
         errors.append("Admin UI does not expose trace-contract evidence in fleet posture")
+    if "RequiredTestControl" not in ui_types or "Deterministic required controls" not in ui_page:
+        errors.append("Admin UI does not expose required controls as a typed operator surface")
     for needle in ("function journeyCoverage(journeys)", "journeys.filter(item => item.status === 'active')",
                    "journeyCoverage: syntheticCoverage"):
         if needle not in collector:
             errors.append(f"admin projection loses the governed synthetic coverage denominator: {needle}")
+    for needle in ("function requiredControls(", "mutationComponents()", "requiredControls: controls",
+                   "requiredControlGaps: controls.filter"):
+        if needle not in collector:
+            errors.append(f"admin projection loses an independent required-control denominator: {needle}")
+    errors.extend(capability_register_errors(root))
+    for needle in ("function platformCapabilities()", "platformCapabilities: capabilities"):
+        if needle not in collector:
+            errors.append(f"admin projection loses operator-visible platform blockers: {needle}")
     agent_analysis = text(root / "openbank-flaky-test-hunter/src/main/kotlin/com/openbank/flakytest/application/usecase/FlakyTestHunterService.kt")
     if "private val EVIDENCE_KINDS" not in agent_analysis or '"trace",' not in agent_analysis:
         errors.append("flaky-test-hunter cannot consume the trace evidence emitted by the Admin BFF")
@@ -207,12 +409,16 @@ def check(root: Path) -> list[str]:
     for workflow_name, required in {
         "perf-gate.yml": ("--performance-summary", "Build performance Test Intelligence envelope"),
         "perf-baseline.yml": ("--performance-summary", "test-intelligence-run-openbank-money-path"),
-        "pitest.yml": ("--mutation-report", "Build mutation Test Intelligence envelope"),
+        "pitest.yml": ("--mutation-report", "--mutation-threshold 70", "Build mutation Test Intelligence envelope"),
     }.items():
         workflow = text(root / ".github/workflows" / workflow_name)
         for needle in required:
             if needle not in workflow:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
+    if "pitest.yml/runs?branch=main&status=completed&per_page=1" not in deploy:
+        errors.append("mutation projection does not select the latest completed attempt regardless of verdict")
+    if "pitest.yml/runs?branch=main&status=success" in deploy:
+        errors.append("mutation projection hides failed attempts behind an older successful workflow")
     perf_gate = text(root / ".github/workflows/perf-gate.yml")
     perf_baseline = text(root / ".github/workflows/perf-baseline.yml")
     pinned_k6 = "ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79"
@@ -385,6 +591,60 @@ def self_test() -> int:
         if any(new_resource in failure for failure in check(root)):
             print("self-test failed: a genuine start/stop lifecycle pair was rejected")
             return 1
+        evidence_doc = root / "docs/adr/test-intelligence.md"
+        evidence_doc.parent.mkdir(parents=True, exist_ok=True)
+        evidence_doc.write_text("## D8 — Capability boundary\n")
+        evidence_yaml = root / ".github/gates/gates.yaml"
+        evidence_yaml.parent.mkdir(parents=True, exist_ok=True)
+        evidence_yaml.write_text("test-intelligence-ecosystem:\n")
+        if not valid_capability_evidence(root, "docs/adr/test-intelligence.md#d8--capability-boundary"):
+            print("self-test failed: a real Markdown evidence anchor was rejected")
+            return 1
+        for invalid in (
+            "docs/adr/test-intelligence.md#invented-boundary",
+            ".github/gates/gates.yaml#invented-control",
+            "../outside.md",
+            "http://untrusted.example/evidence",
+            "https://",
+            "https://user:password@trusted.example/evidence",
+        ):
+            if valid_capability_evidence(root, invalid):
+                print(f"self-test failed: invalid capability evidence was accepted: {invalid}")
+                return 1
+        register = root / CAPABILITY_REGISTER
+        register.write_text(
+            "version: 1\ncapabilities:\n"
+            "  - id: verified-capability\n"
+            "    title: Verified capability\n"
+            "    state: implemented\n"
+            "    evidence: docs/adr/test-intelligence.md#d8--capability-boundary\n"
+        )
+        if capability_register_errors(root):
+            print("self-test failed: a valid capability register was rejected")
+            return 1
+        cases = {
+            "duplicate YAML key": register.read_text().replace(
+                "    state: implemented\n", "    state: implemented\n    state: external-blocked\n"
+            ),
+            "duplicate capability id": register.read_text() + (
+                "  - id: verified-capability\n"
+                "    title: Duplicate capability\n"
+                "    state: implemented\n"
+                "    evidence: docs/adr/test-intelligence.md#d8--capability-boundary\n"
+            ),
+            "mapping instead of list": "version: 1\ncapabilities: {}\n",
+            "missing blocked capability reason": register.read_text().replace(
+                "state: implemented", "state: safety-blocked"
+            ),
+            "non-string evidence": register.read_text().replace(
+                "evidence: docs/adr/test-intelligence.md#d8--capability-boundary", "evidence: 42"
+            ),
+        }
+        for label, candidate in cases.items():
+            register.write_text(candidate)
+            if not capability_register_errors(root):
+                print(f"self-test failed: {label} was accepted")
+                return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0
 

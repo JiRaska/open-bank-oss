@@ -33,7 +33,7 @@ export default function StandingOrdersPage() {
   // "idle, waking…" state (KEDA/scaledown) instead of a misleading error — and
   // auto-retries while the pod wakes. (Was a raw /q/health/ready probe that read
   // a scaled-down service as "down" and always claimed "running on port 8121".)
-  const { data, loading, unavailable, waking } = useServiceResource<StandingOrder[]>(
+  const { data, loading, unavailable, waking, reload } = useServiceResource<StandingOrder[]>(
     svcUrl('standing-order-service', '/api/v1/standing-orders'),
     { select: (raw) => (Array.isArray(raw) ? (raw as StandingOrder[]) : ((raw as { standingOrders?: StandingOrder[] }).standingOrders ?? [])) },
   )
@@ -61,6 +61,17 @@ export default function StandingOrdersPage() {
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
               }}
             />
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={reload}
+              disabled={loading || waking}
+              aria-busy={loading || waking}
+              aria-label={t('Obnovit trvalé příkazy', 'Refresh standing orders')}
+            >
+              <RefreshCw size={13} aria-hidden="true" className={loading || waking ? 'animate-spin' : ''} />
+              {t('Obnovit', 'Refresh')}
+            </button>
             <span role="status" style={{ padding: '5px 9px', borderRadius: '6px', border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontSize: '11px', fontWeight: 600 }}>
               {t('Založení příkazu není připojeno', 'Order creation is not connected')}
             </span>
@@ -76,7 +87,7 @@ export default function StandingOrdersPage() {
             <div key={k.label} className="stat-card">
               <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
-              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{loading ? '—' : k.value}</div>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{loading && orders.length === 0 ? '—' : k.value}</div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
             </div>
           ))}
@@ -92,13 +103,12 @@ export default function StandingOrdersPage() {
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
           </div>
-          {loading ? (
+          {unavailable && <DataUnavailable kind={unavailable.kind} service={t('Standing-order-service', 'Standing-order-service')} feature={t('Trvalé příkazy', 'Standing orders')} lang={language} dense={orders.length > 0} />}
+          {loading && orders.length === 0 ? (
             <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
-          ) : unavailable ? (
-            <DataUnavailable kind={unavailable.kind} service={t('Standing-order-service', 'Standing-order-service')} feature={t('Trvalé příkazy', 'Standing orders')} lang={language} />
-          ) : filtered.length === 0 ? (
+          ) : unavailable && orders.length === 0 ? null : filtered.length === 0 ? (
             <DataUnavailable kind="no_data" feature={t('Trvalé příkazy', 'Standing orders')} lang={language}
               detail={orders.length === 0
                 ? t('Služba běží, zatím žádné trvalé příkazy.', 'The service is running; no standing orders yet.')

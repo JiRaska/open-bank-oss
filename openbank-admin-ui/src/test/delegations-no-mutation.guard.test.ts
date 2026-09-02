@@ -28,6 +28,9 @@ const UPSTREAM = 'delegation-service'
 /** The single non-GET upstream call this console is allowed to make. */
 const READ_ONLY_PROBE = '/api/v1/delegations/check'
 
+/** CRUD of reusable presets changes no grant and is deliberately outside ADR-0230's guard. */
+const ROLE_PRESET_PATH = '/api/v1/delegation-role-presets'
+
 /** Bank-side mutations on delegation-service that must never be reachable from admin-ui. */
 const FORBIDDEN_PATH_FRAGMENTS = ['/suspend', '/reinstate']
 
@@ -59,7 +62,7 @@ export function findDelegationMutations(files: { file: string; source: string }[
     const code = stripComments(source)
     if (!code.includes(UPSTREAM)) continue
 
-    const upstreamPaths = [...code.matchAll(/\/api\/v1\/delegations[^'"`\s)]*/g)].map(m => m[0])
+    const upstreamPaths = [...code.matchAll(/\/api\/v1\/(?:delegations|delegation-role-presets)[^'"`\s)]*/g)].map(m => m[0])
     const methods = [...code.matchAll(/method:\s*['"]([A-Z]+)['"]/g)].map(m => m[1])
 
     for (const path of upstreamPaths) {
@@ -73,6 +76,7 @@ export function findDelegationMutations(files: { file: string; source: string }[
     for (const method of methods) {
       if (method === 'GET') continue
       if (method === 'POST' && upstreamPaths.some(p => p.startsWith(READ_ONLY_PROBE))) continue
+      if (upstreamPaths.some(p => p.startsWith(ROLE_PRESET_PATH))) continue
       findings.push({ file, problem: `issues ${method} against ${UPSTREAM}` })
     }
   }

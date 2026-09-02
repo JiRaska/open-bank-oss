@@ -6,8 +6,9 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { parse as parseYaml } from 'yaml'
+import { parse as parseYaml, parseDocument } from 'yaml'
 import { parseStringPromise } from 'xml2js'
+import { executionEvidenceTotals } from '../src/lib/test-intelligence-execution-evidence.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
@@ -75,6 +76,69 @@ const freshnessAwareState = (state, at) => {
   if (observed - collectedAt.getTime() > maxFutureSkewMs) return 'unknown'
   if (collectedAt.getTime() - observed > staleAfterMs) return 'stale'
   return state
+}
+
+const thresholdObservation = summary => {
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)
+      || !summary.metrics || typeof summary.metrics !== 'object' || Array.isArray(summary.metrics)) {
+    return { valid: false, count: 0, failed: 0 }
+  }
+  const results = []
+  let malformed = false
+  for (const metric of Object.values(summary.metrics)) {
+    if (!metric || typeof metric !== 'object' || Array.isArray(metric)
+        || !Object.hasOwn(metric, 'thresholds')) continue
+    if (!metric.thresholds || typeof metric.thresholds !== 'object' || Array.isArray(metric.thresholds)) {
+      malformed = true
+      continue
+    }
+    const metricResults = Object.values(metric.thresholds)
+    if (metricResults.length === 0) malformed = true
+    results.push(...metricResults)
+  }
+  const valid = !malformed && results.length > 0 && results.every(result =>
+    typeof result === 'boolean'
+      || (result && typeof result === 'object' && !Array.isArray(result) && typeof result.ok === 'boolean'))
+  // Never let one malformed sibling erase a concrete breached threshold.
+  const failed = results.filter(result =>
+    result === true || (result && typeof result === 'object' && !Array.isArray(result) && result.ok === false)).length
+  return { valid, count: results.length, failed }
+}
+
+const retainedThresholdObservation = value => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || !Number.isSafeInteger(value.evaluated) || value.evaluated <= 0
+      || !Number.isSafeInteger(value.breached) || value.breached < 0
+      || value.breached > value.evaluated) return undefined
+  return { valid: true, count: value.evaluated, failed: value.breached }
+}
+
+const thresholdBackedState = (claimedState, rawObservation, retainedObservation) => {
+  // Recorded failures remain actionable even if the optional summary artifact was lost.
+  // A pass is different: prose cannot prove that the producer saw typed outcomes (the legacy
+  // producer rendered malformed objects as "0 breached"), so it needs the raw summary until
+  // the versioned envelope carries a structured denominator.
+  const retained = retainedThresholdObservation(retainedObservation)
+  if (rawObservation?.failed > 0 || retained?.failed > 0) return 'failed'
+  if (claimedState === 'failed') return 'failed'
+  if (!['passed', 'stale'].includes(claimedState)) return claimedState
+  const observation = rawObservation ?? retained
+  if (!observation?.valid) return 'unknown'
+  return claimedState
+}
+
+const retainActionableFailure = (previous, next, validRecovery) =>
+  previous?.state === 'failed' && next.state !== 'failed' && !validRecovery ? previous : next
+
+const normalizeThresholdEvidence = evidence => {
+  if (evidence.kind !== 'performance' && (evidence.kind !== 'synthetic' || evidence.variant)) return evidence
+  const retained = retainedThresholdObservation(evidence.thresholdResults)
+  const { thresholdResults: _untrustedThresholdResults, ...rest } = evidence
+  return {
+    ...rest,
+    state: thresholdBackedState(evidence.state, undefined, evidence.thresholdResults),
+    ...(retained ? { thresholdResults: { evaluated: retained.count, breached: retained.failed } } : {}),
+  }
 }
 
 function releasedComponents() {
@@ -182,10 +246,17 @@ function runEnvelope(component) {
         kind: item.kind, name: item.name, url: item.url, retentionDays: item.retentionDays,
         access: item.access, mayContainSensitiveData: item.mayContainSensitiveData,
       })),
-    })), ...(run.specializedEvidence ?? []).map(item => ({
-      kind: item.kind, state: freshnessAwareState(item.state, run.run?.observedAt ?? observedAt(file)), observedAt: run.run?.observedAt ?? observedAt(file),
-      source: item.source, environment: 'ci', detail: item.detail, run: provenance,
-    }))],
+    })), ...(run.specializedEvidence ?? []).map(item => {
+      const normalized = normalizeThresholdEvidence(item)
+      return {
+        kind: normalized.kind,
+        state: freshnessAwareState(normalized.state, run.run?.observedAt ?? observedAt(file)),
+        observedAt: run.run?.observedAt ?? observedAt(file),
+        source: item.source, environment: 'ci', detail: item.detail, run: provenance,
+        ...(normalized.variant ? { variant: normalized.variant } : {}),
+        ...(normalized.thresholdResults ? { thresholdResults: normalized.thresholdResults } : {}),
+      }
+    })],
     coverage: run.coverage ? {
       state: stateFrom(0, 1, run.run?.observedAt ?? observedAt(file)),
       observedAt: run.run?.observedAt ?? observedAt(file), lines: run.coverage.lines,
@@ -323,15 +394,40 @@ function moneyPathComponents() {
   }
 }
 
+// A 'pending' pact-broker verdict is unresolved for one of several distinct reasons
+// (collect-quality-report.mjs's `reasonCode`); fall back to a generic sentence for a
+// legacy/unclassified snapshot rather than pretending the reason is known (#7544).
+const PENDING_DETAIL_BY_REASON = {
+  'query-error': item => item.detail
+    ?? 'The Pact Broker returned an error when this pair’s verification was queried. This is not a passing result.',
+  'no-provider-main-version': item => item.detail
+    ?? `${item.provider} has no published main-branch version in the Pact Broker, so provider verification cannot be dispatched yet. This is not a passing result.`,
+  'pending-verification': item => item.detail
+    ?? 'Provider verification has not completed for the latest versions in the Pact Broker yet. This is not a passing result.',
+}
+
+function pendingContractDetail(item) {
+  const byReason = item.reasonCode && PENDING_DETAIL_BY_REASON[item.reasonCode]
+  if (byReason) return byReason(item)
+  if (!item.consumerVersion) {
+    return 'The committed Pact has no immutable consumer-version provenance in this snapshot, so the Broker was not queried. This is not a passing result.'
+  }
+  return 'Pact Broker provider-verification verdict was unavailable when this immutable deployment snapshot was built. This is not a passing result.'
+}
+
 function contracts() {
   const quality = readJson(path.join(repo, 'openbank-admin-ui', 'quality-report.json'))
   if (quality?.contracts) return quality.contracts.map(item => ({
     consumer: item.consumer, provider: item.provider, pactFile: item.pactFile,
+    consumerVersion: item.consumerVersion ?? null, providerVersion: item.providerVersion ?? null,
+    // A pact file existing, or even carrying interactions, is never itself evidence of a pass —
+    // only a broker status of 'passed' can produce state 'passed' below.
     state: item.status === 'pending' ? 'unknown' : freshnessAwareState(item.status, item.verifiedAt),
     observedAt: item.verifiedAt ?? null, interactions: item.interactions?.length ?? 0,
+    unavailableReason: item.status === 'pending' ? (item.reasonCode ?? null) : null,
     verificationDetail: item.status === 'pending'
-      ? 'Pact Broker provider-verification verdict was unavailable when this immutable deployment snapshot was built. This is not a passing result.'
-      : 'Verified by the Pact Broker provider-verification verdict retained in this deployment snapshot.',
+      ? pendingContractDetail(item)
+      : `Verified by the Pact Broker provider replay for consumer ${item.consumerVersion?.slice(0, 12) ?? 'unknown'} and provider ${item.providerVersion?.slice(0, 12) ?? 'unknown'} retained in this deployment snapshot.`,
   }))
   const dir = path.join(repo, 'pacts')
   if (!exists(dir)) return []
@@ -340,6 +436,7 @@ function contracts() {
     return pact ? [{
       consumer: pact.consumer?.name ?? 'unknown', provider: pact.provider?.name ?? 'unknown',
       pactFile: name, state: 'unknown', observedAt: null, interactions: pact.interactions?.length ?? 0,
+      unavailableReason: null,
       verificationDetail: 'No Pact Broker verification snapshot was bundled. This is not a passing result.',
     }] : []
   })
@@ -370,6 +467,107 @@ async function mutations(components) {
     })
   }
   return result
+}
+
+function mutationComponents() {
+  const workflow = readText(path.join(repo, '.github', 'workflows', 'pitest.yml'))
+  const serviceMatrix = workflow.match(/\n {8}service:\s*\n([\s\S]*?)\n {4}steps:/)?.[1] ?? ''
+  return new Set([...serviceMatrix.matchAll(/- (openbank-[a-z0-9-]+)/g)].map(match => match[1]))
+}
+
+function platformCapabilities() {
+  const file = path.join(repo, 'openbank-libs', 'governance', 'test-intelligence-capabilities.yaml')
+  try {
+    const document = parseDocument(fs.readFileSync(file, 'utf8'), { uniqueKeys: true })
+    if (document.errors.length) throw new Error(document.errors.map(error => error.message).join('; '))
+    const capabilities = document.toJS()?.capabilities
+    if (!Array.isArray(capabilities) || capabilities.length === 0) throw new Error('expected a non-empty capability list')
+    const states = new Set(['implemented', 'external-blocked', 'ownership-blocked', 'safety-blocked', 'intentionally-deferred'])
+    const ids = new Set()
+    return capabilities.map((item, index) => {
+      const prefix = `capability #${index + 1}`
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`${prefix} is not a mapping`)
+      if (typeof item.id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.id)) throw new Error(`${prefix} has an invalid id`)
+      if (ids.has(item.id)) throw new Error(`${prefix} duplicates id ${item.id}`)
+      ids.add(item.id)
+      if (typeof item.title !== 'string' || !item.title.trim()) throw new Error(`${prefix} has an empty title`)
+      if (typeof item.state !== 'string' || !states.has(item.state)) throw new Error(`${prefix} has an unsupported state`)
+      if (typeof item.evidence !== 'string' || !item.evidence.trim()) throw new Error(`${prefix} has no evidence pointer`)
+      if (item.state !== 'implemented' && (typeof item.blocker !== 'string' || !item.blocker.trim())) throw new Error(`${prefix} has no blocker`)
+      if (item.state === 'implemented' && item.blocker !== undefined) throw new Error(`${prefix} has an unexpected blocker`)
+      return { id: item.id, title: item.title, state: item.state, blocker: item.blocker ?? null, evidence: item.evidence }
+    })
+  } catch (error) {
+    warnings.push(`test-intelligence capability register unavailable: ${error.message}`)
+    return []
+  }
+}
+
+function requiredControls(components, contracts, mutations, performance, synthetics) {
+  const pactParticipants = new Set(contracts.flatMap(item => [item.consumer, item.provider]))
+  const mutationParticipants = mutationComponents()
+  const mutationByComponent = new Map(mutations.map(item => [item.component, item]))
+  const performanceComponents = new Set(performance.map(item => item.component).filter(Boolean))
+  const controls = []
+  const observation = (component, kind) => {
+    const rows = component.evidence.filter(item => item.kind === kind)
+    const precedence = ['failed', 'blocked', 'unknown', 'not-run', 'stale', 'skipped', 'passed']
+    return rows.sort((left, right) => precedence.indexOf(left.state) - precedence.indexOf(right.state))[0]
+  }
+  const addEvidence = (component, kind, reason) => {
+    const row = observation(component, kind)
+    controls.push({
+      id: `${component.component}:${kind}`, component: component.component, kind,
+      state: row?.state ?? 'not-run', reason, source: row?.source ?? null,
+      observedAt: row?.observedAt ?? null,
+    })
+  }
+  for (const component of components.filter(item => item.released)) {
+    addEvidence(component, 'unit', 'Every released component must publish executable test evidence.')
+    if (exists(path.join(repo, component.component, 'build.gradle.kts'))) {
+      controls.push({
+        id: `${component.component}:coverage`, component: component.component, kind: 'coverage',
+        state: component.coverage.state, reason: 'Every released Gradle component is subject to the Kover coverage ratchet.',
+        source: component.coverage.source, observedAt: component.coverage.observedAt,
+      })
+    }
+    if (component.component === 'openbank-admin-ui') addEvidence(component, 'e2e', 'The operator UI requires its Playwright journey evidence.')
+    if (component.moneyPath || component.testInfrastructure.declared.length > 0) {
+      addEvidence(component, 'integration', component.moneyPath
+        ? 'Money-path components require integration evidence.'
+        : 'A declared container topology requires an integration run.')
+    }
+    if (pactParticipants.has(component.component)) addEvidence(component, 'contract', 'The component participates in a governed Pact contract.')
+    if (performanceComponents.has(component.component)) addEvidence(component, 'performance', 'A governed k6 scenario exists for this component.')
+    if (mutationParticipants.has(component.component)) {
+      const row = mutationByComponent.get(component.component)
+      controls.push({
+        id: `${component.component}:mutation`, component: component.component, kind: 'mutation',
+        state: row?.state ?? 'not-run', reason: 'The service is in the governed Pitest matrix and must publish its 70% advisory result.',
+        source: row ? 'Pitest:mutations.xml' : null, observedAt: row?.observedAt ?? null,
+      })
+    }
+    for (const resource of component.testInfrastructure.declared) {
+      const rows = component.testInfrastructure.observed.filter(item => item.resource === resource)
+      const starts = rows.filter(item => item.lifecycle === 'started').length
+      const stops = rows.filter(item => item.lifecycle === 'stopped').length
+      controls.push({
+        id: `${component.component}:runtime:${resource}`, component: component.component, kind: 'runtime',
+        state: starts > 0 && starts === stops ? 'passed' : starts > 0 || stops > 0 ? 'failed' : 'not-run',
+        reason: `Declared ${resource} topology requires balanced start and stop proof from the same run.`,
+        source: rows.length ? 'test-intelligence-run:v1' : null,
+        observedAt: rows.map(item => item.observedAt).sort().at(-1) ?? null,
+      })
+    }
+  }
+  for (const journey of synthetics) controls.push({
+    id: `synthetic:${journey.id}`, component: null, kind: 'synthetic', state: journey.state,
+    reason: journey.falsifies || `Governed synthetic journey ${journey.id}.`,
+    source: journey.live?.source ?? journey.ci?.run?.url ?? 'openbank-libs/governance/journeys.yaml',
+    observedAt: journey.live?.observedAt ?? journey.ci?.observedAt ?? null,
+    ...(journey.blocker ? { blocker: journey.blocker } : {}),
+  })
+  return controls.sort((left, right) => left.id.localeCompare(right.id))
 }
 
 function performance() {
@@ -422,12 +620,7 @@ function performance() {
       ? readJson(summaryFile.replace(/-summary\.json$/, '-run.json')) ?? readJson(`${summaryFile}.run.json`)
       : readJson(runSidecar)
     const specialized = performanceRun?.specializedEvidence?.find(item => item.kind === 'performance')
-    const thresholdResults = summary
-      ? Object.values(summary.metrics ?? {}).flatMap(metric => Object.values(metric?.thresholds ?? {}))
-      : []
-    // k6 summary-export uses bare booleans with inverted-looking polarity: true means
-    // crossed/breached, false means passed. The object form is kept for compatible fixtures.
-    const failed = thresholdResults.filter(result => result === true || result?.ok === false).length
+    const summaryThresholds = summaryFile ? thresholdObservation(summary) : undefined
     const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null
     const ratePercent = value => {
       const rate = number(value)
@@ -441,13 +634,44 @@ function performance() {
     } : undefined
     const at = summaryFile ? observedAt(summaryFile) : null
     const provenance = safeRun(performanceRun?.run ?? summaryMeta?.run, `performance:${id}`)
+    const specializedState = specialized
+      ? thresholdBackedState(
+          freshnessAwareState(specialized.state, performanceRun?.run?.observedAt ?? at),
+          summaryThresholds,
+          specialized.thresholdResults,
+        )
+      : null
+    if (specialized?.state === 'passed' && specializedState === 'unknown') {
+      warnings.push(`thresholdless performance pass downgraded: ${id}`)
+    } else if (!specialized && summaryThresholds && !summaryThresholds.valid) {
+      warnings.push(`performance summary has no valid threshold denominator: ${id}`)
+    }
+    const summaryDetail = summaryThresholds
+      ? (summaryThresholds.failed > 0
+          ? `${summaryThresholds.count} threshold result(s), ${summaryThresholds.failed} breached${summaryThresholds.valid ? '' : '; additional invalid threshold outcome(s)'}`
+          : summaryThresholds.count === 0 || summaryThresholds.valid
+          ? `${summaryThresholds.count} threshold result(s), 0 breached`
+          : 'k6 summary contains invalid threshold outcomes')
+      : 'Scenario is declared; the latest k6 run artifact is not bundled into this image.'
+    const retainedThresholds = retainedThresholdObservation(specialized?.thresholdResults)
+    const authoritativeThresholds = summaryThresholds?.valid
+      ? summaryThresholds
+      : summaryFile ? undefined : retainedThresholds
     return {
       id, component,
       state: specialized
-        ? freshnessAwareState(specialized.state, performanceRun?.run?.observedAt ?? at)
-        : (summary ? stateFrom(failed, 1, at) : 'not-run'),
+        ? specializedState
+        : (summaryThresholds?.failed > 0
+            ? stateFrom(summaryThresholds.failed, Math.max(summaryThresholds.count, 1), at)
+            : summaryThresholds?.valid
+            ? stateFrom(summaryThresholds.failed, summaryThresholds.count, at)
+            : summaryFile ? 'unknown' : 'not-run'),
       observedAt: performanceRun?.run?.observedAt ?? at,
       source: path.relative(repo, file), thresholds,
+      ...(authoritativeThresholds ? { thresholdResults: {
+        evaluated: authoritativeThresholds.count,
+        breached: authoritativeThresholds.failed,
+      } } : {}),
       ...(plan ? { plan: {
         executionMode: plan.execution_mode,
         safetyBoundary: plan.safety_boundary,
@@ -456,9 +680,9 @@ function performance() {
         blocker: plan.blocker ?? null,
       } } : {}),
       ...(metrics ? { metrics } : {}),
-      detail: specialized?.detail ?? (summary
-        ? `${thresholdResults.length} threshold result(s), ${failed} breached`
-        : 'Scenario is declared; the latest k6 run artifact is not bundled into this image.'),
+      detail: summaryThresholds?.failed > 0 || (summaryThresholds && !summaryThresholds.valid)
+        ? summaryDetail
+        : specialized?.detail ?? summaryDetail,
       ...(provenance ? { run: provenance } : {}),
     }
   })
@@ -486,17 +710,29 @@ function syntheticJourneys() {
           warnings.push(`synthetic evidence workflow mismatch omitted: ${journeyId}`)
           continue
         }
+        const freshnessState = freshnessAwareState(evidence.state, envelope.run.observedAt)
+        const evidenceState = evidence.variant
+          ? freshnessState
+          : thresholdBackedState(freshnessState, undefined, evidence.thresholdResults)
+        const validRecovery = ['passed', 'stale'].includes(evidenceState)
+          && (Boolean(evidence.variant) || Boolean(retainedThresholdObservation(evidence.thresholdResults)))
+        if (!evidence.variant && evidence.state === 'passed' && evidenceState === 'unknown') {
+          warnings.push(`thresholdless synthetic pass downgraded: ${journeyId}`)
+        }
         const observation = {
-          state: freshnessAwareState(evidence.state, envelope.run.observedAt), observedAt: envelope.run.observedAt,
+          state: evidenceState, observedAt: envelope.run.observedAt,
           detail: evidence.detail ?? 'Synthetic run retained without detail.',
+          ...(retainedThresholdObservation(evidence.thresholdResults) ? {
+            thresholdResults: evidence.thresholdResults,
+          } : {}),
           ...(provenance ? { run: provenance } : {}),
         }
         if (evidence.variant) {
           const variants = latestVariants.get(journeyId) ?? new Map()
-          variants.set(evidence.variant, observation)
+          variants.set(evidence.variant, retainActionableFailure(variants.get(evidence.variant), observation, validRecovery))
           latestVariants.set(journeyId, variants)
         } else {
-          latestCi.set(journeyId, observation)
+          latestCi.set(journeyId, retainActionableFailure(latestCi.get(journeyId), observation, validRecovery))
         }
       }
     }
@@ -708,9 +944,12 @@ async function main() {
       kind: 'performance', state: item.state, observedAt: item.observedAt,
       source: `k6:${item.source}`, environment: item.id === 'money-path-smoke' ? 'sandbox' : 'ci',
       detail: item.detail,
+      ...(item.thresholdResults ? { thresholdResults: item.thresholdResults } : {}),
     })
   }
   const synthetic = syntheticJourneys()
+  const controls = requiredControls(components, contractEvidence, mutationEvidence, performanceEvidence, synthetic)
+  const capabilities = platformCapabilities()
   const syntheticCoverage = journeyCoverage(synthetic)
   const clientExperience = await clientExperiences()
   const testCases = testCaseHistory(currentEnvelopes)
@@ -720,14 +959,29 @@ async function main() {
   const unknownEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'unknown').length
   const unresolvedEvidence = components.flatMap(item => item.evidence)
     .filter(item => ['unknown', 'not-run', 'blocked'].includes(item.state)).length
-  const missingEvidence = components.filter(item => item.evidence.length === 0).length
+  // A Pact declaration can add an unresolved row without a provider replay. Conversely, an
+  // observed suite that skipped every test is still a real zero-execution result.
+  const { componentsWithExecutionEvidence, missingEvidence } = executionEvidenceTotals(components)
   const historyDir = path.join(repo, 'openbank-admin-ui', 'test-intelligence-history')
   const historicalSnapshots = allFiles(historyDir, file => file.endsWith('.json'))
     .map(readJson).filter(item => item?.collectedAt && item?.totals)
-  const historicalReports = historicalSnapshots
-    .map(item => ({ collectedAt: item.collectedAt, ...item.totals }))
+  const historicalEvidenceStates = new Set(['passed', 'failed', 'skipped', 'not-run', 'stale', 'blocked', 'unknown'])
+  const historicalReports = historicalSnapshots.map(item => {
+    const historicalComponents = Array.isArray(item.components)
+      && item.components.every(component => Array.isArray(component?.evidence)
+        && component.evidence.every(evidence => evidence && typeof evidence === 'object'
+          && !Array.isArray(evidence) && historicalEvidenceStates.has(evidence.state)
+          && (evidence.observedAt === undefined || evidence.observedAt === null
+            || typeof evidence.observedAt === 'string')))
+      ? item.components
+      : null
+    const correctedExecutionTotals = historicalComponents
+      ? { components: historicalComponents.length, ...executionEvidenceTotals(historicalComponents) }
+      : {}
+    return { collectedAt: item.collectedAt, ...item.totals, ...correctedExecutionTotals }
+  })
   const currentPoint = { collectedAt: collectedAt.toISOString(), components: components.length,
-    componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
+    componentsWithExecutionEvidence,
     failingEvidence, missingEvidence, staleEvidence, unknownEvidence, unresolvedEvidence }
   const history = [...historicalReports, currentPoint]
     .sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
@@ -793,12 +1047,14 @@ async function main() {
     schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
     contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence, performanceHistory,
     syntheticJourneys: synthetic, journeyCoverage: syntheticCoverage, history, runHistory, testCases, testImpact: impact,
-    clientExperiences: clientExperience,
+    clientExperiences: clientExperience, requiredControls: controls, platformCapabilities: capabilities,
     totals: {
       components: components.length,
-      componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
+      componentsWithExecutionEvidence,
       moneyPathComponents: components.filter(item => item.moneyPath).length,
       failingEvidence, missingEvidence, staleEvidence, unknownEvidence, unresolvedEvidence,
+      requiredControls: controls.length,
+      requiredControlGaps: controls.filter(item => item.state !== 'passed').length,
     },
     warnings,
   }

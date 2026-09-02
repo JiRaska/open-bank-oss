@@ -16,15 +16,7 @@ import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui/PageHeader'
-
-const STATUS_COLOR: Record<string, { bg: string; text: string; border: string }> = {
-  ACTIVE:     { bg: 'var(--success-bg)',  text: 'var(--success-text)',  border: 'var(--success-border)' },
-  INACTIVE:   { bg: 'var(--surface-3)',   text: 'var(--text-tertiary)', border: 'var(--border)' },
-  DRAFT:      { bg: 'var(--warning-bg)',  text: 'var(--warning-text)',  border: 'var(--warning-border)' },
-  DEPRECATED: { bg: 'var(--danger-bg)',   text: 'var(--danger-text)',   border: 'var(--danger-border)' },
-  ARCHIVED:   { bg: 'var(--surface-3)',   text: 'var(--text-tertiary)', border: 'var(--border)' },
-}
+import { BADGE_CLASS, PageHeader, StatusBadge, statusTone } from '@/components/ui'
 
 const TYPE_ICON: Record<string, React.ReactNode> = {
   SAVINGS:      <Banknote size={13} />,
@@ -91,16 +83,6 @@ async function apiFetch(path: string, opts?: RequestInit) {
   return res.json()
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const c = STATUS_COLOR[status] ?? STATUS_COLOR.INACTIVE
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, background: c.bg, color: c.text, border: `1px solid ${c.border}`, letterSpacing: '0.03em' }}>
-      {status === 'ACTIVE' && <CheckCircle2 size={9} />}
-      {status}
-    </span>
-  )
-}
-
 function TypeBadge({ type }: { type: string }) {
   const color = TYPE_COLOR[type] ?? 'var(--accent)'
   return (
@@ -147,8 +129,6 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
     { id: 'history' as TabId, label: t('Verze', 'Versions'), icon: <History size={12} />, show: (product.versionHistory?.length ?? 0) > 0 },
   ].filter(tab => tab.show)
 
-  const sc = STATUS_COLOR[product.status] ?? STATUS_COLOR.INACTIVE
-
   return (
     <div style={{ position: 'fixed', top: 0, right: 0, width: '520px', height: '100vh', background: 'var(--surface-1)', borderLeft: '1px solid var(--border)', zIndex: 900, display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 32px rgba(0,0,0,0.18)', animation: 'slideInRight 0.2s ease-out' }}>
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
@@ -179,7 +159,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
           >
             <Edit size={12} /> {t('Upravit', 'Edit')}
           </button>
-          <button type="button" aria-pressed={product.status === 'ACTIVE'} onClick={onToggleStatus} aria-label={product.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')} style={{ background: sc.bg, border: `1px solid ${sc.border}`, borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: sc.text }}>
+          <button type="button" aria-pressed={product.status === 'ACTIVE'} className={BADGE_CLASS[statusTone(product.status)]} onClick={onToggleStatus} aria-label={product.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')} style={{ borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', gap: '4px', fontSize: '11px' }}>
             {product.status === 'ACTIVE' ? <><Square size={11} aria-hidden="true" /> {t('Deaktivovat', 'Deactivate')}</> : <><Play size={11} aria-hidden="true" /> {t('Aktivovat', 'Activate')}</>}
           </button>
           </Can>
@@ -484,7 +464,6 @@ export default function ProductCatalogPage() {
         if (refreshed) setSelectedProduct(refreshed)
       }
     } catch (e) {
-      setProducts([])
       setUnavailable({ kind: e instanceof ApiError ? e.kind : 'unreachable' })
     } finally {
       setLoading(false)
@@ -619,6 +598,11 @@ export default function ProductCatalogPage() {
                 lang={language}
                 dense
               />
+              {products.length > 0 && (
+                <div role="status" aria-live="polite" style={{ padding: '0 16px 14px', color: 'var(--warning-text)', fontSize: '12px', fontWeight: 600 }}>
+                  {t('Zobrazené produkty a souhrny jsou poslední dostupná data; obnovení katalogu se nezdařilo.', 'Displayed products and summaries are the last available data; catalog refresh failed.')}
+                </div>
+              )}
             </div>
           )}
 

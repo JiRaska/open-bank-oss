@@ -105,8 +105,11 @@ concurrency:
   # pending deploy for a newer push, and only then discover that it must skip. That exact race
   # cancelled the pending Test Intelligence deploy for 29dc20e2 in favour of a stale evidence
   # refresh (#7211). Keep workflow-run events in a SHA-scoped queue; deploy-source independently
-  # rejects a source SHA that is no longer main before the privileged build. Push, dispatch and
-  # schedule retain one queue, so the newest operator/source-triggered deploy still wins normally.
+  # rejects a source SHA that has been superseded by build-relevant work before the privileged
+  # build. Push, dispatch and schedule retain one queue, so the newest operator/source-triggered
+  # deploy still wins normally. A waiting source remains eligible when main advanced solely through
+  # this workflow's own image-pin commit; otherwise that harmless commit can starve the source that
+  # produced it and leave newer UI code undeployed.
   group: >-
     admin-ui-deploy-${{
       github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'eligible'
@@ -146,19 +149,13 @@ jobs:
             echo "::error::could not resolve origin/main; refusing a privileged build from an unverified source"
             exit 1
           fi
-          if [ "$source_sha" != "$main_sha" ]; then
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping stale source $source_sha; main is now $main_sha. A newer push/workflow run owns deployment."
-            exit 0
+          if ! git cat-file -e "${main_sha}^{commit}" 2>/dev/null; then
+            # A waiting run checked out its own (now older) SHA. Fetch a bounded current-main
+            # ancestry window for the image-pin-only proof; a longer gap safely remains stale.
+            git fetch --no-tags --depth=64 origin "$main_sha"
           fi
-
-          subject="$(git log -1 --format=%s)"
-          if [[ "$subject" == "chore(admin-ui): deploy "* ]]; then
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping self-generated GitOps commit; its image is already built, signed and attested."
-          else
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-          fi
+          proceed="$(bash .github/scripts/authorize-admin-ui-deploy-source.sh "$source_sha" "$main_sha")"
+          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
 
   build-push:
     name: Build + push admin-ui
@@ -275,7 +272,7 @@ jobs:
           python3 -c "import json,pathlib; p=pathlib.Path.home()/'.docker'/'config.json'; d=json.loads(p.read_text()) if p.exists() else {}; d.pop('credsStore',None); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(json.dumps(d))"
 
       - name: ECR login
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       - name: Rebuild ob-deploy-builder with native arm64 image
         # ob-deploy-builder's BuildKit container was created from an amd64 moby/buildkit
@@ -526,11 +523,12 @@ jobs:
               done
           echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes."
 
-      - name: Stage pitest mutation results from latest weekly run
+      - name: Stage pitest mutation results from latest completed weekly run
         # pitest.yml uploads one artifact per service: pitest-{service} (30-day retention).
         # collect-quality-report.mjs reads openbank-*/build/reports/pitest/mutations.xml.
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
-        # Best-effort: absent → mutations tab stays empty (acceptable, never blocks build).
+        # Do not filter to success: a failed/latest attempt must not disappear behind an
+        # older green run. Best-effort absence stays visible as missing evidence.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -538,11 +536,11 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=success&per_page=1" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=1" \
             | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
             2>/dev/null || true)
           if [ -z "${RUN_ID}" ]; then
-            echo "No successful pitest run found — skipping pitest staging."
+            echo "No completed pitest run found — skipping pitest staging."
             exit 0
           fi
           echo "Staging pitest results from run ${RUN_ID}..."

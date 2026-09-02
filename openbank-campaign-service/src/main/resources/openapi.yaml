@@ -1403,6 +1403,10 @@ components:
             # Not a suppression: no policy denied anything.
             - SKIPPED_CONDITION
             - FAILED
+            # ConversionConsumer writes this outcome into the same send-log row this schema
+            # describes (Persistence.kt), so a live response can already carry it; the spec had
+            # never declared it (1.43.0, #5962).
+            - CONVERTED
         occurredAt: { type: string, format: date-time }
         deliveryStatus:
           description: >-

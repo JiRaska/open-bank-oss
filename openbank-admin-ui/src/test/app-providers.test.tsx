@@ -9,7 +9,10 @@ import { usePathname } from 'next/navigation'
 import { AppProviders } from '@/components/layout/AppProviders'
 import { isPublicSurface } from '@/lib/auth/publicSurface'
 
-vi.mock('next/navigation', () => ({ usePathname: vi.fn() }))
+vi.mock('next/navigation', () => ({
+  usePathname: vi.fn(),
+  useRouter: vi.fn(() => ({ refresh: vi.fn() })),
+}))
 vi.mock('@/components/auth/SessionProvider', () => ({
   SessionProvider: ({ children }: { children: React.ReactNode }) => <div data-testid="session-provider">{children}</div>,
 }))

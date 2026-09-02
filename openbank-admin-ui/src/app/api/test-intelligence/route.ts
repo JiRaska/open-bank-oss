@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server'
 import type { EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
 import { enforceRuntimeFreshness } from '@/lib/test-intelligence-freshness'
 import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
+import { RUM_SERVICE_NAME as ADMIN_RUM_SERVICE_NAME } from '@/lib/telemetry/rum-service-name'
 
 export const dynamic = 'force-dynamic'
 
@@ -127,7 +128,12 @@ async function queryTempoBackendCorrelation(base: string, traceIds: string[], tr
   }
 }
 
-async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>> {
+type RecentRuns = { rows: Array<{ id: string; state: 'passed' | 'failed'; observedAt: string }>; error: string | null }
+
+/** Deliberately not a bare array — an empty list is ambiguous between "no Job has completed
+ *  yet" and "the query failed", and the run-history panel would otherwise render a Prometheus
+ *  outage as a journey with no history at all rather than an unavailable read (#7943). */
+async function queryPrometheusRuns(base: string, cronjob: string): Promise<RecentRuns> {
   // Status gauges retain value 1 and their query sample timestamp advances on every scrape.
   // Use the completion-time gauge as the value, and attach an explicit result label, otherwise
   // a week-old retained Job is rendered as a run that happened "now" and its state depends on
@@ -138,9 +144,10 @@ async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array
     const response = await fetch(`${base}/api/v1/query?query=${encodeURIComponent(query)}`, {
       headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(2500), cache: 'no-store',
     })
-    if (!response.ok) return []
+    if (!response.ok) return { rows: [], error: `prometheus responded ${response.status}` }
     const payload = await response.json() as PrometheusLabelVector
-    return (payload.data?.result ?? []).flatMap(item => {
+    if (payload.status !== 'success') return { rows: [], error: `prometheus query status ${payload.status}` }
+    const rows = (payload.data?.result ?? []).flatMap(item => {
       const id = item.metric?.job_name
       const completedAt = Number(item.value?.[1] ?? 0)
       const state = item.metric?.openbank_evidence_state
@@ -148,7 +155,8 @@ async function queryPrometheusRuns(base: string, cronjob: string): Promise<Array
       const evidenceState: 'passed' | 'failed' = state === 'failed' ? 'failed' : 'passed'
       return [{ id, state: evidenceState, observedAt: new Date(completedAt * 1000).toISOString() }]
     }).sort((left, right) => right.observedAt.localeCompare(left.observedAt)).slice(0, 10)
-  } catch { return [] }
+    return { rows, error: null }
+  } catch (e) { return { rows: [], error: String(e) } }
 }
 
 function freshnessLimitSeconds(schedule: string | null): number {
@@ -194,7 +202,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
     // journey look healthy again while its last successful run was still nominally fresh.
     const failureWindowSeconds = freshnessLimitSeconds(journey.schedule)
     const journeyTag = cronjob.slice('journey-'.length)
-    const [scheduled, successful, failures, activeJobs, recentRuns, worstP95Ms, worstChecksRate] = await Promise.all([
+    const [scheduled, successful, failures, activeJobs, recentRunsResult, worstP95Ms, worstChecksRate] = await Promise.all([
       queryPrometheus(base, `max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="${cronjob}"})`),
       queryPrometheus(base, `max(kube_cronjob_status_last_successful_time{namespace="observability",cronjob="${cronjob}"})`),
       // kube-state-metrics continues exporting terminal Job status until the Job is garbage
@@ -226,7 +234,11 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
         source: 'prometheus' as const, observedAt,
         lastScheduledAt: scheduled === null ? null : new Date(scheduled * 1000).toISOString(),
         lastSuccessfulAt: successful === null ? null : new Date(successful * 1000).toISOString(),
-        failuresWithinWindow: failures, failureWindowSeconds, activeJobs, freshnessSeconds, recentRuns,
+        failuresWithinWindow: failures, failureWindowSeconds, activeJobs, freshnessSeconds,
+        recentRuns: recentRunsResult.rows,
+        // Null when the query answered — an empty `recentRuns` under a null error really means
+        // no Job has completed yet, not that this route failed to ask.
+        recentRunsError: recentRunsResult.error,
         performance: {
           source: 'prometheus' as const,
           windowSeconds: failureWindowSeconds,
@@ -275,12 +287,15 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
   // from an unavailable query. Zero is normal and must not become a failed CI verdict.
   const [tempoTraces, adminTempoTraces, mobilePlatforms, spanCounterIncrements, errorSpans, adminSpanCounterIncrements, adminErrorSpans, auditScheduled, auditScheduledSuccessful, auditManualSuccessful] = await Promise.all([
     tracesBase ? queryTempoMobileTraces(tracesBase) : Promise.resolve(null),
-    tracesBase ? queryTempoServiceTraces(tracesBase, 'openbank-admin-ui') : Promise.resolve(null),
+    tracesBase ? queryTempoServiceTraces(tracesBase, ADMIN_RUM_SERVICE_NAME) : Promise.resolve(null),
     tracesBase ? queryTempoMobilePlatforms(tracesBase) : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*"}[7d])) or vector(0)') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)') : Promise.resolve(null),
-    metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-admin-ui.*"}[7d])) or vector(0)') : Promise.resolve(null),
-    metricsBase ? queryPrometheus(metricsBase, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-admin-ui.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)') : Promise.resolve(null),
+    // Exact match, never a prefix regex: `openbank-admin-ui.*` also matches the BFF's own bare
+    // "openbank-admin-ui" service.name, which reintroduces the conflation this constant exists
+    // to prevent (issue #7536).
+    metricsBase ? queryPrometheus(metricsBase, `sum(increase(traces_spanmetrics_calls_total{service="${ADMIN_RUM_SERVICE_NAME}"}[7d])) or vector(0)`) : Promise.resolve(null),
+    metricsBase ? queryPrometheus(metricsBase, `sum(increase(traces_spanmetrics_calls_total{service="${ADMIN_RUM_SERVICE_NAME}",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)`) : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="rum-attribute-audit"})') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'max(kube_job_status_completion_time{namespace="observability",job_name=~"rum-attribute-audit-[0-9]+"})') : Promise.resolve(null),
     metricsBase ? queryPrometheus(metricsBase, 'max(kube_job_status_completion_time{namespace="observability",job_name=~"rum-attribute-audit-manual-.*"})') : Promise.resolve(null),
@@ -290,7 +305,7 @@ async function attachLiveClientExperience(report: TestIntelligenceReport): Promi
   const backendCorrelations = tempoTraces === null ? null
     : await queryTempoBackendCorrelation(tracesBase!, tempoTraces.traceIds, tempoTraces.truncated, 'openbank-app')
   const adminBackendCorrelations = adminTempoTraces === null ? null
-    : await queryTempoBackendCorrelation(tracesBase!, adminTempoTraces.traceIds, adminTempoTraces.truncated, 'openbank-admin-ui')
+    : await queryTempoBackendCorrelation(tracesBase!, adminTempoTraces.traceIds, adminTempoTraces.truncated, ADMIN_RUM_SERVICE_NAME)
 
   const observedAt = new Date().toISOString()
   const sampled = tempoTraces?.count ?? Math.max(0, Math.round(spanCounterIncrements ?? 0))

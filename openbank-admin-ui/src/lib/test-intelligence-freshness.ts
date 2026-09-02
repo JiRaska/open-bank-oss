@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
+import { executionEvidenceTotals } from '@/lib/test-intelligence-execution-evidence.mjs'
 
 const evidenceFreshnessMs = () => {
   const days = Number(process.env.OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS ?? 14)
@@ -30,9 +31,14 @@ export function enforceRuntimeFreshness(report: TestIntelligenceReport): TestInt
     },
   }))
   const evidence = components.flatMap(component => component.evidence)
+  const requiredControls = report.requiredControls?.map(control => ({
+    ...control, state: runtimeFreshnessState(control.state, control.observedAt),
+  }))
+  const { componentsWithExecutionEvidence, missingEvidence } = executionEvidenceTotals(components)
   return {
     ...report,
     components,
+    ...(requiredControls ? { requiredControls } : {}),
     contracts: (report.contracts ?? []).map(item => ({
       ...item, state: runtimeFreshnessState(item.state, item.observedAt),
     })),
@@ -61,13 +67,17 @@ export function enforceRuntimeFreshness(report: TestIntelligenceReport): TestInt
     totals: {
       ...report.totals,
       components: components.length,
-      componentsWithExecutionEvidence: components.filter(component => component.evidence.length > 0).length,
+      componentsWithExecutionEvidence,
       moneyPathComponents: components.filter(component => component.moneyPath).length,
       failingEvidence: evidence.filter(item => item.state === 'failed').length,
-      missingEvidence: components.filter(component => component.evidence.length === 0).length,
+      missingEvidence,
       staleEvidence: evidence.filter(item => item.state === 'stale').length,
       unknownEvidence: evidence.filter(item => item.state === 'unknown').length,
       unresolvedEvidence: evidence.filter(item => ['unknown', 'not-run', 'blocked'].includes(item.state)).length,
+      ...(requiredControls ? {
+        requiredControls: requiredControls.length,
+        requiredControlGaps: requiredControls.filter(control => control.state !== 'passed').length,
+      } : {}),
     },
   }
 }

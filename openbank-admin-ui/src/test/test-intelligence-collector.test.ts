@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { execFileSync } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { createServer } from 'http'
 import { tmpdir } from 'os'
 import path from 'path'
+import { promisify } from 'util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TestIntelligenceReport } from '@/lib/types/test-intelligence'
 
 const SCRIPT = path.resolve(__dirname, '../../scripts/collect-test-intelligence.mjs')
+const QUALITY_SCRIPT = path.resolve(__dirname, '../../scripts/collect-quality-report.mjs')
+const execFileAsync = promisify(execFile)
 const dirs: string[] = []
 const write = (root: string, relative: string, body: string) => {
   const file = path.join(root, relative)
@@ -58,6 +62,7 @@ journeys:
     money_moving: false
     workflow: .github/workflows/admin-ui-browser-synthetic.yml
     workflow_name: Admin UI browser synthetic
+    browser_variants: [chromium]
     schedule: "13 */2 * * *"
     capability: proves the public SSO hand-off
     falsification: remove the SSO boundary
@@ -113,13 +118,15 @@ scenarios:
       schemaVersion: 1,
       run: { id: 'browser-10', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Admin UI browser synthetic', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/browser-10', observedAt: '2026-08-25T08:10:00Z' },
       component: 'openbank-admin-ui', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
-      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: '1/1 browser E2E checks executed' }],
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-sso-boundary', detail: '1/1 browser E2E checks executed', variant: 'chromium' }],
     }))
     write(repo, 'openbank-admin-ui/test-intelligence-history/previous-snapshot.json', JSON.stringify({
       schemaVersion: 1, collectedAt: '2026-08-24T06:00:00Z', totals: { components: 2 },
-      performance: [{ id: 'openbank-alpha-service-alpha-smoke', state: 'passed', observedAt: '2026-08-24T05:59:00Z', metrics: {
-        p95Ms: 280, errorRatePercent: 0, checkPassRatePercent: 100, requests: 75,
-      }, run: { id: 'perf-previous', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Performance gate', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/perf-previous' } }],
+      performance: [{
+        id: 'openbank-alpha-service-alpha-smoke', state: 'passed', observedAt: '2026-08-24T05:59:00Z',
+        metrics: { p95Ms: 280, errorRatePercent: 0, checkPassRatePercent: 100, requests: 75 },
+        run: { id: 'perf-previous', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Performance gate', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/perf-previous' },
+      }],
     }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
@@ -138,11 +145,15 @@ scenarios:
       verificationDetail: expect.stringMatching(/not a passing result/i),
     })])
     expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *', runtimeNote: 'requires a dedicated synthetic identity', ci: {
-      state: 'passed', detail: '2 threshold result(s), 0 breached', run: { id: 'synthetic-9', workflow: 'Synthetic journeys' },
+      state: 'unknown', detail: '2 threshold result(s), 0 breached',
+      run: { id: 'synthetic-9', workflow: 'Synthetic journeys' },
     } })
     expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
     expect(report.syntheticJourneys.find(item => item.id === 'admin-ui-sso-boundary')).toMatchObject({
-      status: 'active', executor: 'github-actions', ci: { state: 'passed', detail: '1/1 browser E2E checks executed' },
+      status: 'active', executor: 'github-actions', ci: {
+        state: 'passed', detail: '1/1 declared browser variants passed.',
+        variants: [expect.objectContaining({ browser: 'chromium', state: 'passed' })],
+      },
     })
     expect(report.journeyCoverage).toMatchObject({ moneyPathTotal: 2, activelyCovered: 1, explicitlyUnwatched: 1 })
     expect(report.journeyCoverage?.services).toEqual([
@@ -151,7 +162,7 @@ scenarios:
     ])
     expect(report.performance.find(item => item.id === 'openbank-alpha-service-alpha-smoke')).toMatchObject({ state: 'passed', metrics: {
       p95Ms: 321.4, errorRatePercent: 1.25, checkPassRatePercent: 98.75, requests: 80,
-    }, run: { id: 'perf-42', workflow: 'Performance gate' } })
+    }, thresholdResults: { evaluated: 3, breached: 0 }, run: { id: 'perf-42', workflow: 'Performance gate' } })
     expect(report.performanceHistory.filter(item => item.id === 'openbank-alpha-service-alpha-smoke')).toEqual(expect.arrayContaining([
       expect.objectContaining({ collectedAt: '2026-08-24T06:00:00Z', metrics: expect.objectContaining({ p95Ms: 280 }), run: { id: 'perf-previous', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Performance gate', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/perf-previous' } }),
       expect.objectContaining({ metrics: expect.objectContaining({ p95Ms: 321.4 }), run: expect.objectContaining({ id: 'perf-42' }) }),
@@ -164,6 +175,247 @@ scenarios:
     expect(report.clientExperiences).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'admin-ui', rum: expect.objectContaining({ policy: 'authenticated', state: 'unknown' }) }),
       expect.objectContaining({ id: 'openbank-app', evidence: [], blocker: expect.stringMatching(/artifact/i) }),
+    ]))
+  })
+
+  it('refuses thresholdless performance and synthetic passes in current and retained evidence', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-thresholdless-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', `version: 1
+journeys:
+  - id: edge
+    title: Edge
+    status: active
+    severity: page
+    capability: proves the public edge
+    covers: [openbank-alpha-service]
+    schedule: "*/5 * * * *"
+    falsification: break it
+`)
+    write(repo, 'perf/k6/empty.js', 'export const options = { thresholds: { checks: ["rate==1.0"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/empty-summary.json', JSON.stringify({ metrics: {} }))
+    write(repo, 'openbank-admin-ui/perf-artifacts/empty-run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'perf-empty', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Performance gate', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/perf-empty', observedAt: '2026-09-01T10:00:00Z' },
+      component: 'openbank-alpha-service', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'performance', state: 'passed', source: 'summary.json', detail: '0 threshold result(s), 0 breached' }],
+    }))
+    write(repo, 'perf/k6/malformed.js', 'export const options = { thresholds: { checks: ["rate==1.0"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/malformed-summary.json', JSON.stringify({
+      metrics: { checks: { thresholds: { 'rate==1.0': {} } } },
+    }))
+    write(repo, 'perf/k6/object-valid.js', 'export const options = { thresholds: { checks: ["rate==1.0"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/object-valid-summary.json', JSON.stringify({
+      metrics: { checks: { thresholds: { 'rate==1.0': { ok: true } } } },
+    }))
+    write(repo, 'perf/k6/mixed.js', 'export const options = { thresholds: { checks: ["rate==1.0"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/mixed-summary.json', JSON.stringify({
+      metrics: { checks: { thresholds: { breached: true, malformed: {} } } },
+    }))
+    write(repo, 'openbank-admin-ui/perf-artifacts/mixed-run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'perf-mixed', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Performance gate', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/perf-mixed', observedAt: '2026-09-01T10:00:30Z' },
+      component: 'openbank-alpha-service', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'performance', state: 'not-run', source: 'summary.json', detail: 'producer did not classify the summary' }],
+    }))
+    write(repo, 'perf/k6/retained.js', 'export const options = { thresholds: { checks: ["rate==1.0"] } }')
+    write(repo, 'openbank-admin-ui/perf-artifacts/retained-summary.json.run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'perf-retained', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Performance gate', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/perf-retained', observedAt: '2026-09-01T10:01:00Z' },
+      component: 'openbank-alpha-service', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'performance', state: 'passed', source: 'summary.json', detail: '1 threshold result(s), 0 breached' }],
+    }))
+    write(repo, 'openbank-admin-ui/test-run-history/synthetic-failed.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'synthetic-failed', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Synthetic journeys', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/synthetic-failed', observedAt: '2026-09-01T10:01:30Z' },
+      component: 'openbank-platform', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'synthetic', state: 'failed', source: 'journey:edge', detail: '1 threshold result(s), 1 breached' }],
+    }))
+    write(repo, 'openbank-admin-ui/test-run-history/synthetic-empty.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'synthetic-empty', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Synthetic journeys', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/synthetic-empty', observedAt: '2026-09-01T10:02:00Z' },
+      component: 'openbank-platform', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:edge', detail: '0 threshold result(s), 0 breached' }],
+    }))
+    write(repo, 'openbank-admin-ui/test-run-history/performance-empty.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'performance-empty', attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Performance gate', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/performance-empty', observedAt: '2026-09-01T10:03:00Z' },
+      component: 'openbank-alpha-service', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'performance', state: 'passed', source: 'summary.json', detail: '0 threshold result(s), 0 breached' }],
+    }))
+    write(repo, 'openbank-admin-ui/test-intelligence-history/thresholdless-snapshot.json', JSON.stringify({
+      schemaVersion: 1,
+      collectedAt: '2026-08-31T10:00:00Z',
+      totals: {
+        components: 1, componentsWithExecutionEvidence: 1, missingEvidence: 0,
+        failingEvidence: 0, staleEvidence: 0, unknownEvidence: 0, unresolvedEvidence: 0,
+      },
+      components: [{
+        component: 'openbank-alpha-service',
+        evidence: [{
+          kind: 'performance', state: 'passed', observedAt: '2026-08-31T09:59:00Z',
+          source: 'k6:legacy.js', environment: 'ci', detail: '1 threshold result(s), 0 breached',
+        }],
+      }],
+      performance: [{
+        id: 'legacy', state: 'passed', observedAt: '2026-08-31T09:59:00Z',
+        detail: '1 threshold result(s), 0 breached',
+        metrics: { p95Ms: 50, errorRatePercent: 0, checkPassRatePercent: 100, requests: 1 },
+      }],
+    }))
+
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.performance.find(item => item.id === 'empty')).toMatchObject({
+      state: 'unknown', detail: '0 threshold result(s), 0 breached',
+    })
+    expect(report.performance.find(item => item.id === 'retained')).toMatchObject({
+      state: 'unknown', detail: '1 threshold result(s), 0 breached',
+    })
+    expect(report.performance.find(item => item.id === 'malformed')).toMatchObject({
+      state: 'unknown', detail: 'k6 summary contains invalid threshold outcomes',
+    })
+    expect(report.performance.find(item => item.id === 'object-valid')).toMatchObject({
+      state: 'passed', thresholdResults: { evaluated: 1, breached: 0 },
+    })
+    expect(report.performance.find(item => item.id === 'mixed')).toMatchObject({
+      state: 'failed', detail: '2 threshold result(s), 1 breached; additional invalid threshold outcome(s)',
+    })
+    expect(report.syntheticJourneys.find(item => item.id === 'edge')?.ci).toMatchObject({
+      state: 'failed', detail: '1 threshold result(s), 1 breached', run: { id: 'synthetic-failed' },
+    })
+    // ADR-0273 keeps immutable history as originally recorded; only the current projection is corrected.
+    expect(report.runHistory.find(item => item.run.id === 'synthetic-empty')?.states.synthetic).toBe('passed')
+    expect(report.runHistory.find(item => item.run.id === 'performance-empty')?.states.performance).toBe('passed')
+    expect(report.performanceHistory.find(item => item.id === 'legacy')).toMatchObject({ state: 'passed' })
+    expect(report.history.find(item => item.collectedAt === '2026-08-31T10:00:00Z')).toMatchObject({
+      failingEvidence: 0, unknownEvidence: 0, unresolvedEvidence: 0,
+    })
+  })
+
+  it('does not count an unobserved contract declaration as execution evidence', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-execution-evidence-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-beta-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'pacts/alpha-external.json', JSON.stringify({
+      consumer: { name: 'openbank-alpha-service' },
+      provider: { name: 'external-provider' },
+      interactions: [{ description: 'declared but not verified' }],
+    }))
+    write(
+      repo,
+      'openbank-beta-service/build/test-results/test/TEST-com.openbank.beta.AllSkippedTest.xml',
+      '<testsuite name="com.openbank.beta.AllSkippedTest" tests="1" failures="0" errors="0" skipped="1" time="0"><testcase classname="com.openbank.beta.AllSkippedTest"><skipped/></testcase></testsuite>',
+    )
+    write(repo, 'openbank-admin-ui/test-intelligence-history/previous.json', JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-01T00:00:00.000Z',
+      components: [
+        { component: 'openbank-alpha-service', evidence: [{ state: 'unknown', observedAt: null }] },
+        { component: 'openbank-beta-service', evidence: [{ state: 'skipped', observedAt: '2026-08-01T00:00:00.000Z' }] },
+      ],
+      totals: { components: 2, componentsWithExecutionEvidence: 2, missingEvidence: 0 },
+    }))
+    write(repo, 'openbank-admin-ui/test-intelligence-history/malformed-null.json', JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-07-30T00:00:00.000Z',
+      components: [{ component: 'openbank-legacy-service', evidence: [null] }],
+      totals: { components: 7, componentsWithExecutionEvidence: 6, missingEvidence: 1 },
+    }))
+    write(repo, 'openbank-admin-ui/test-intelligence-history/malformed-shape.json', JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-07-31T00:00:00.000Z',
+      components: [
+        { component: 'openbank-invalid-state', evidence: [{ state: 'invented', observedAt: '2026-07-31T00:00:00.000Z' }] },
+        { component: 'openbank-invalid-time', evidence: [{ state: 'passed', observedAt: 123 }] },
+      ],
+      totals: { components: 9, componentsWithExecutionEvidence: 8, missingEvidence: 1 },
+    }))
+
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.components.find(item => item.component === 'openbank-alpha-service')?.evidence).toEqual([
+      expect.objectContaining({ kind: 'contract', state: 'unknown', observedAt: null }),
+    ])
+    expect(report.components.find(item => item.component === 'openbank-beta-service')?.evidence).toEqual([
+      expect.objectContaining({
+        kind: 'unit', state: 'skipped', observedAt: expect.any(String),
+        counts: expect.objectContaining({ discovered: 1, executed: 0, skipped: 1 }),
+      }),
+    ])
+    expect(report.totals).toMatchObject({
+      components: 2, componentsWithExecutionEvidence: 1, missingEvidence: 1,
+    })
+    expect(report.history[0]).toMatchObject({
+      collectedAt: '2026-07-30T00:00:00.000Z',
+      components: 7, componentsWithExecutionEvidence: 6, missingEvidence: 1,
+    })
+    expect(report.history[1]).toMatchObject({
+      collectedAt: '2026-07-31T00:00:00.000Z',
+      components: 9, componentsWithExecutionEvidence: 8, missingEvidence: 1,
+    })
+    expect(report.history[2]).toMatchObject({
+      collectedAt: '2026-08-01T00:00:00.000Z',
+      components: 2, componentsWithExecutionEvidence: 1, missingEvidence: 1,
+    })
+    expect(report.history.at(-1)).toMatchObject({
+      components: 2, componentsWithExecutionEvidence: 1, missingEvidence: 1,
+    })
+  })
+
+  it('derives required mutation controls from the full commented Pitest matrix', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-required-mutation-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-beta-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-libs/governance/test-intelligence-capabilities.yaml', 'version: 1\ncapabilities:\n  - id: probes\n    title: Independent probes\n    state: external-blocked\n    blocker: no external fleet\n    evidence: issue-1\n')
+    write(repo, '.github/workflows/pitest.yml', 'jobs:\n  pitest:\n    strategy:\n      matrix:\n        service:\n          - openbank-alpha-service\n          # comments must not truncate the denominator\n          - openbank-beta-service\n    steps:\n      - run: true\n')
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.requiredControls?.filter(control => control.kind === 'mutation')).toEqual([
+      expect.objectContaining({ id: 'openbank-alpha-service:mutation', state: 'not-run' }),
+      expect.objectContaining({ id: 'openbank-beta-service:mutation', state: 'not-run' }),
+    ])
+    expect(report.totals).toMatchObject({ requiredControls: 4, requiredControlGaps: 4 })
+    expect(report.platformCapabilities).toContainEqual(expect.objectContaining({ id: 'probes', state: 'external-blocked' }))
+  })
+
+  it('does not project a malformed capability register as a partial platform matrix', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-capability-register-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-libs/governance/test-intelligence-capabilities.yaml', `version: 1
+capabilities:
+  - id: probes
+    title: Independent probes
+    state: implemented
+    state: external-blocked
+    evidence: issue-1
+`)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.platformCapabilities).toEqual([])
+    expect(report.warnings).toEqual(expect.arrayContaining([
+      expect.stringMatching(/capability register unavailable:.*unique/i),
     ]))
   })
 
@@ -459,7 +711,7 @@ journeys:
     write(repo, 'openbank-admin-ui/test-run-history/synthetic-old.json', JSON.stringify({
       schemaVersion: 1, run: oldRun, component: 'openbank-platform', suites: [], coverage: null,
       testInfrastructure: { declared: [], observed: [] },
-      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:old-journey' }],
+      specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:old-journey', detail: '1 threshold result(s), 0 breached' }],
     }))
     write(repo, 'openbank-admin-ui/quality-report.json', JSON.stringify({ contracts: [{
       consumer: 'openbank-alpha-service', provider: 'openbank-provider', pactFile: 'alpha-provider.json',
@@ -479,8 +731,135 @@ journeys:
     expect(report.mutations[0]).toMatchObject({ state: 'stale' })
     expect(report.performance.find(item => item.id === 'openbank-alpha-service-alpha-smoke')).toMatchObject({ state: 'stale' })
     expect(report.performance.find(item => item.id === 'future')).toMatchObject({ state: 'unknown' })
-    expect(report.syntheticJourneys[0].ci).toMatchObject({ state: 'stale' })
+    expect(report.syntheticJourneys[0].ci).toMatchObject({ state: 'unknown' })
     expect(report.contracts[0]).toMatchObject({ state: 'stale' })
     expect(report.totals).toMatchObject({ failingEvidence: 1, staleEvidence: 5 })
+  })
+
+  it('classifies why a Pact Broker verdict is unresolved and never turns an unresolved pact into a pass (#7544)', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-contract-reason-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-admin-ui/quality-report.json', JSON.stringify({ contracts: [
+      {
+        consumer: 'openbank-admin-ui', provider: 'openbank-case-coordinator-agent', pactFile: 'error.json',
+        status: 'pending', verifiedAt: null, reasonCode: 'query-error',
+        detail: 'Pact Broker matrix query returned HTTP 400 for openbank-admin-ui → openbank-case-coordinator-agent.',
+        interactions: [{ description: 'a', status: 'pending' }],
+      },
+      {
+        consumer: 'openbank-alpha-service', provider: 'openbank-document-service', pactFile: 'no-main.json',
+        status: 'pending', verifiedAt: null, reasonCode: 'no-provider-main-version',
+        detail: 'openbank-document-service has no published main-branch version in the Pact Broker, so provider verification cannot be dispatched yet.',
+        interactions: [{ description: 'b', status: 'pending' }],
+      },
+      {
+        consumer: 'openbank-alpha-service', provider: 'openbank-incentive-service', pactFile: 'pending.json',
+        status: 'pending', verifiedAt: null, reasonCode: 'pending-verification',
+        detail: 'openbank-incentive-service has a main-branch version, but no verification result for the latest openbank-alpha-service pact yet.',
+        interactions: [{ description: 'c', status: 'pending' }],
+      },
+      // A legacy/unclassified snapshot (no reasonCode) must still read as unresolved, not passed.
+      {
+        consumer: 'openbank-alpha-service', provider: 'openbank-legacy-provider', pactFile: 'legacy.json',
+        status: 'pending', verifiedAt: null, interactions: [{ description: 'd', status: 'pending' }],
+      },
+      {
+        consumer: 'openbank-alpha-service', provider: 'openbank-real-provider', pactFile: 'passed.json',
+        status: 'passed', verifiedAt: '2026-08-28T00:00:00Z', interactions: [{ description: 'e', status: 'passed' }],
+      },
+    ] }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const byFile = (file: string) => report.contracts.find(c => c.pactFile === file)
+
+    expect(byFile('error.json')).toMatchObject({
+      state: 'unknown', unavailableReason: 'query-error', verificationDetail: expect.stringMatching(/HTTP 400/),
+    })
+    expect(byFile('no-main.json')).toMatchObject({
+      state: 'unknown', unavailableReason: 'no-provider-main-version',
+      verificationDetail: expect.stringMatching(/no published main-branch version/),
+    })
+    expect(byFile('pending.json')).toMatchObject({
+      state: 'unknown', unavailableReason: 'pending-verification',
+      verificationDetail: expect.stringMatching(/no verification result/),
+    })
+    // Every unresolved pact stays 'unknown' — having a pact file, interactions, and even a
+    // consumer/provider pair is never itself sufficient for 'passed'.
+    for (const file of ['error.json', 'no-main.json', 'pending.json', 'legacy.json']) {
+      expect(byFile(file)?.state).not.toBe('passed')
+      expect(byFile(file)?.state).toBe('unknown')
+    }
+    expect(byFile('legacy.json')).toMatchObject({ state: 'unknown', unavailableReason: null })
+    // Only a real broker 'passed' verdict produces state 'passed', and it carries no reason.
+    expect(byFile('passed.json')).toMatchObject({ state: 'passed', unavailableReason: null })
+  })
+
+  it('pins a Pact verdict to the committed consumer version instead of the broker latest pair', async () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'quality-contract-provenance-'))
+    const output = mkdtempSync(path.join(tmpdir(), 'quality-contract-output-'))
+    dirs.push(repo, output)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'pacts/openbank-consumer-openbank-provider.json', JSON.stringify({
+      consumer: { name: 'openbank-consumer' }, provider: { name: 'openbank-provider' }, interactions: [],
+    }))
+    execFileSync('git', ['init'], { cwd: repo })
+    execFileSync('git', ['config', 'user.email', 'test@example.test'], { cwd: repo })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repo })
+    execFileSync('git', ['config', 'commit.gpgSign', 'false'], { cwd: repo })
+    execFileSync('git', ['add', '.'], { cwd: repo })
+    execFileSync('git', ['commit', '-m', 'test pact provenance'], { cwd: repo })
+    const consumerVersion = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim()
+
+    let requestUrl = ''
+    const server = createServer((request, response) => {
+      requestUrl = request.url ?? ''
+      response.setHeader('content-type', 'application/json')
+      response.end(JSON.stringify({ matrix: [{
+        providerVersion: { number: 'provider-replay-sha' },
+        verificationResult: { success: true, verifiedAt: '2026-08-26T12:00:00Z' },
+      }] }))
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('test broker did not bind a TCP port')
+    try {
+      await execFileAsync('node', [QUALITY_SCRIPT, '--repo-root', repo], {
+        cwd: output,
+        env: { ...process.env, PACT_BROKER_URL: `http://127.0.0.1:${address.port}` },
+      })
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
+    const report = JSON.parse(readFileSync(path.join(output, 'quality-report.json'), 'utf8'))
+    expect(report.contracts).toEqual([expect.objectContaining({
+      consumerVersion, providerVersion: 'provider-replay-sha', status: 'passed',
+    })])
+    const query = new URL(`http://broker${requestUrl}`).searchParams
+    expect(query.getAll('q[][pacticipant]')).toEqual(['openbank-consumer', 'openbank-provider'])
+    expect(query.getAll('q[][version]')).toEqual([consumerVersion])
+    expect(query.getAll('q[][latest]')).toEqual(['true'])
+  })
+
+  it('does not query a broker latest pair when the committed Pact has no Git provenance', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'quality-contract-no-provenance-'))
+    const output = mkdtempSync(path.join(tmpdir(), 'quality-contract-no-provenance-output-'))
+    dirs.push(repo, output)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'pacts/openbank-consumer-openbank-provider.json', JSON.stringify({
+      consumer: { name: 'openbank-consumer' }, provider: { name: 'openbank-provider' }, interactions: [],
+    }))
+    execFileSync('node', [QUALITY_SCRIPT, '--repo-root', repo], {
+      cwd: output,
+      // A deliberately unavailable endpoint proves the collector returns before
+      // network I/O when it cannot pin the Pact to a committed consumer version.
+      env: { ...process.env, PACT_BROKER_URL: 'http://127.0.0.1:1' },
+    })
+    const report = JSON.parse(readFileSync(path.join(output, 'quality-report.json'), 'utf8'))
+    expect(report.contracts).toEqual([expect.objectContaining({
+      consumerVersion: null, providerVersion: null, status: 'pending', verifiedAt: null,
+    })])
   })
 })

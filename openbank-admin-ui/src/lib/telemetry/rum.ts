@@ -7,10 +7,11 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { resourceFromAttributes } from '@opentelemetry/resources'
 import { BatchSpanProcessor, WebTracerProvider, type SpanProcessor } from '@opentelemetry/sdk-trace-web'
 import { ATTR_HTTP_ROUTE, ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions'
+import { RUM_SERVICE_NAME } from './rum-service-name'
 
 /** Browser posts to this same-origin, authenticated relay — never directly to an internal collector. */
 export const RUM_INGEST_PATH = '/api/telemetry/traces'
-export const RUM_SERVICE_NAME = 'openbank-admin-ui'
+export { RUM_SERVICE_NAME }
 export const ATTR_SCREEN_NAME = 'screen.name'
 export const ATTR_APP_VERSION = 'app.version'
 export const ATTR_DEVICE_MODEL = 'device.model'

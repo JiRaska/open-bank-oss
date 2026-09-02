@@ -157,7 +157,7 @@ class PartyResource {
     @RolesAllowed("ROLE_API")
     @Operation(summary = "Match phone-number hashes against parties who opted into being discoverable")
     suspend fun lookupDirectory(req: DirectoryLookupRequest): Response =
-        Response.ok(mapOf("matches" to partyUseCase.lookupByPhoneHashes(req.phoneHashes))).build()
+        Response.ok(mapOf("matches" to partyUseCase.lookupByPhoneHashes(req.requireHashes()))).build()
 
     /** Turn this party's pay-to-phone findability on or off. Revocable at any time. */
     @PUT
@@ -774,7 +774,30 @@ private const val GDPR_EXPORT_SCOPE =
         "subject-access response is a tracked follow-up (ADR-0118 §6)."
 
 /** Address-book hashes to match. See PhoneDirectory for what the hashing does and does not buy. */
-data class DirectoryLookupRequest(val phoneHashes: List<String> = emptyList())
+data class DirectoryLookupRequest(
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     *
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS of
+     * a collection. So `{"phoneHashes": [null]}` deserialises happily into a `List<String>` holding
+     * a null, and `PartyService.lookupByPhoneHashes` NPEs on `it.trim()`. Kotlin's non-null element
+     * type was a compile-time promise nothing kept; writing the type honestly is what makes
+     * [requireHashes] reachable instead of dead code.
+     */
+    val phoneHashes: List<String?> = emptyList(),
+) {
+    /**
+     * The hashes, with every element proven present.
+     *
+     * A null ENTRY is a malformed JSON document, which is a different thing from the malformed
+     * hash CONTENT the use case already tolerates by design (it silently drops anything that is not
+     * 64 hex characters). `IllegalArgumentException` is mapped to 400 by libs-runtime's
+     * `CommonExceptionMappers`; no service-local mapper is added (#526).
+     */
+    fun requireHashes(): List<String> = phoneHashes.mapIndexed { index, hash ->
+        requireNotNull(hash) { "phoneHashes[$index] must not be null" }
+    }
+}
 
 data class DiscoverableRequest(val discoverable: Boolean = false)
 
