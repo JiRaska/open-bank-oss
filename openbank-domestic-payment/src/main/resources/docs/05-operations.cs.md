@@ -97,11 +97,15 @@ a projekce po terminální revizi následované opožděnou rezervovanou revizí
 kompaktovaného proudu se aplikuje nejvyšší `reservationVersion` z payloadu, nikdy poslední pozorovaný
 záznam.
 
-Při přechodu na request fingerprint nejprve zastavte vytváření plateb, nechte doběhnout maximální
-timeout requestu, přepněte všechny writery na zdravý nový image a teprve pak tvorbu znovu otevřete.
-Starý nullable fingerprint záměrně vrací `409 IDEMPOTENCY_KEY_REUSED`; není autoritou pro replay.
-U nejednoznačného requestu nevyzývejte klienta k novému klíči — nejprve ověřte stav platby a proveďte
-reconciliation.
+Při přechodu na request fingerprint nejprve zastavte vytváření plateb, nechte doběhnout nakonfigurovaný
+timeout requestu (`openbank.domestic.resilience.timeout.value-ms`, aktuálně 15 vteřin), přepněte
+všechny writery na zdravý nový image a teprve pak tvorbu znovu otevřete. Použijte blue/green přepnutí,
+ne rolling interval se smíšenými verzemi: request přijatý starou instancí a zopakovaný proti nové
+během rolling deploye je přesně ten nejednoznačný fingerprint case, kterému má tento cutover
+předcházet, ne ho dodatečně řešit. Starý nullable fingerprint záměrně vrací `409
+IDEMPOTENCY_KEY_REUSED`; není autoritou pro replay. Nikdy nevyzývejte klienta k novému klíči u
+nejednoznačného requestu — vytvořili byste tím druhou platbu za jeden záměr. Ověřte stav platby a
+vyžadujte reconciliation operátorem, než rozhodnete, jestli už prošla.
 
 Finalizer zapínejte jako poslední. Smí uvolnit jen binding, který domestic-payment atomicky označil
 za neexistující; timeouty a neznámé výsledky zůstávají rezervované. Při zapnutí musí existovat jeho

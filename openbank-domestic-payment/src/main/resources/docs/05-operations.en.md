@@ -97,10 +97,15 @@ and a terminal revision followed by a delayed reserved revision remains terminal
 The compacted stream is revision-folded: apply the greatest payload `reservationVersion`, never the
 last record observed.
 
-For the request-fingerprint cutover, quiesce payment creation, drain the configured request timeout,
-switch every writer to the healthy new image, and only then reopen creation. An old nullable
-fingerprint is deliberately a `409 IDEMPOTENCY_KEY_REUSED`, not a replayable authority. Do not ask a
-caller to reuse a new key for an ambiguous request; inspect payment status and reconcile first.
+For the request-fingerprint cutover, quiesce payment creation, drain the configured request timeout
+(`openbank.domestic.resilience.timeout.value-ms`, currently 15 seconds), then switch every writer to
+the healthy new image, and only then reopen creation. Use a blue/green switch, not a mixed-version
+rolling interval: a request already accepted by an old instance and retried against a new one during
+a rolling deploy is exactly the ambiguous-fingerprint case this cutover exists to close, not one it
+can resolve after the fact. An old nullable fingerprint is deliberately a `409
+IDEMPOTENCY_KEY_REUSED`, not a replayable authority. Never tell the caller to retry with a new key
+for an ambiguous request — that mints a second payment for one intent. Inspect payment status and
+require operator reconciliation before deciding whether it already went through.
 
 Enable the finalizer last. It may release only a binding that domestic-payment atomically finalized
 as absent; timeouts and unknown outcomes remain reserved. Its workflow-liveness signal must be
