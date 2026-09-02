@@ -3648,10 +3648,9 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Historical bank commercial rates for a currency pair (newest-first). The edge fixes
-     * source=INTERNAL so customers only see the bank's own published rates, not ECB/CNB reference
-     * rows. from/to are ISO-8601 Instant strings; limit is capped at 365 (one year of daily rates).
-     * The app uses this list to render a rate-history chart.
+     * Historical ČNB reference mid-rates for a currency pair (newest-first). When the caller omits
+     * bounds, the edge supplies an exact three-calendar-month UTC window. This is deliberately a
+     * reference trend, not a promise that a historical commercial quote can be recreated.
      */
     @GET
     @Path("/fx/rates/{base}/{quote}/history")
@@ -3671,19 +3670,19 @@ class CustomerEdgeResource(
         if (to != null && !isValidInstant(to)) return badRequest("Invalid 'to' instant: $to")
         val safeLimit = (limit ?: 90).coerceIn(1, 365)
         val safeOffset = (offset ?: 0).coerceAtLeast(0)
+        val windowEnd = to ?: java.time.Instant.now().toString()
+        val windowStart = from ?: threeMonthWindowStart(java.time.Instant.parse(windowEnd)).toString()
         val url = buildString {
-            // No source filter: CNB reference rows are excluded by mapFxRateList (cnbRef partition);
-            // INTERNAL + ECB bank rows all appear in the chart — correct union of published rates.
-            append("$fxServiceUrl/api/v1/fx/rates/$base/$quote/history?limit=$safeLimit&offset=$safeOffset")
-            if (from != null) append("&from=${java.net.URLEncoder.encode(from, "UTF-8")}")
-            if (to != null) append("&to=${java.net.URLEncoder.encode(to, "UTF-8")}")
+            append("$fxServiceUrl/api/v1/fx/rates/$base/$quote/history?source=CNB&limit=$safeLimit&offset=$safeOffset")
+            append("&from=${java.net.URLEncoder.encode(windowStart, "UTF-8")}")
+            append("&to=${java.net.URLEncoder.encode(windowEnd, "UTF-8")}")
         }
         val resp = upstream.get(url, customer.partyId.toString())
         val upstreamBody = (resp.entity as? String).orEmpty()
         if (resp.status != 200) {
             return Response.status(resp.status).entity(upstreamBody).type(MediaType.APPLICATION_JSON).build()
         }
-        val mapped = mapFxRateList(objectMapper, upstreamBody)
+        val mapped = mapFxHistoryList(objectMapper, upstreamBody)
             ?: return Response.status(Response.Status.BAD_GATEWAY)
                 .entity("""{"error":"malformed fx history"}""")
                 .type(MediaType.APPLICATION_JSON).build()
@@ -5342,6 +5341,20 @@ class CustomerEdgeResource(
             bankNodes.forEach { obj -> mapFxRateRow(mapper, obj, cnbRef)?.let(out::add) }
             mapper.writeValueAsString(out)
         }.getOrNull()
+
+        /** History keeps ČNB rows (unlike the commercial rate-sheet projection) and removes
+         * duplicate snapshots for the same business timestamp before returning newest-first. */
+        internal fun mapFxHistoryList(mapper: ObjectMapper, upstreamJson: String): String? = runCatching {
+            val arr = mapper.readTree(upstreamJson) as? com.fasterxml.jackson.databind.node.ArrayNode ?: return null
+            val rows = arr.mapNotNull { it as? ObjectNode }
+                .mapNotNull { mapFxRateRow(mapper, it) }
+                .distinctBy { it.get("timestamp")?.asText() ?: return@distinctBy it.toString() }
+                .sortedByDescending { it.get("timestamp")?.asText().orEmpty() }
+            mapper.writeValueAsString(mapper.createArrayNode().addAll(rows))
+        }.getOrNull()
+
+        internal fun threeMonthWindowStart(now: java.time.Instant): java.time.Instant =
+            java.time.ZonedDateTime.ofInstant(now, java.time.ZoneOffset.UTC).minusMonths(3).toInstant()
 
         /**
          * Project one upstream rate record to the app row {base, quote, rate, bid?, ask?,

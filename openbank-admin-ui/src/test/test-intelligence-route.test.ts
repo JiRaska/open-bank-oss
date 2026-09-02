@@ -46,6 +46,52 @@ describe('GET /api/test-intelligence', () => {
     expect(body.warnings[0]).toMatch(/not bundled/i)
   })
 
+  it('does not promote an unobserved contract declaration into runtime execution evidence', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-runtime-evidence-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: new Date().toISOString(),
+      components: [
+        {
+          component: 'openbank-alpha-service', released: true, moneyPath: false,
+          evidence: [{ kind: 'contract', state: 'unknown', observedAt: null, source: 'pacts/alpha.json', environment: 'ci' }],
+          coverage: { state: 'not-run' },
+        },
+        {
+          component: 'openbank-beta-service', released: true, moneyPath: false,
+          evidence: [{
+            kind: 'unit', state: 'skipped', observedAt: new Date().toISOString(), source: 'junit', environment: 'ci',
+            counts: { discovered: 1, executed: 0, passed: 0, failed: 0, skipped: 1, errors: 0 },
+          }],
+          coverage: { state: 'not-run' },
+        },
+        {
+          component: 'openbank-gamma-service', released: true, moneyPath: false,
+          evidence: [{ kind: 'integration', state: 'not-run', observedAt: new Date().toISOString(), source: 'junit', environment: 'ci' }],
+          coverage: { state: 'not-run' },
+        },
+        {
+          component: 'openbank-delta-service', released: true, moneyPath: false,
+          evidence: [{ kind: 'integration', state: 'blocked', observedAt: new Date().toISOString(), source: 'junit', environment: 'ci' }],
+          coverage: { state: 'not-run' },
+        },
+      ],
+      contracts: [], mutations: [], performance: [], syntheticJourneys: [], history: [],
+      totals: { components: 4, componentsWithExecutionEvidence: 1, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 3, staleEvidence: 0 },
+      warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+
+    expect(body.components.map((component: { evidence: Array<{ state: string }> }) => component.evidence[0].state))
+      .toEqual(['unknown', 'skipped', 'not-run', 'blocked'])
+    expect(body.totals).toMatchObject({
+      components: 4, componentsWithExecutionEvidence: 1, missingEvidence: 3,
+    })
+  })
+
   it('ages a deployed successful snapshot at request time while preserving failures and recomputing totals', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-runtime-freshness-'))
     dirs.push(dir)
@@ -311,6 +357,33 @@ describe('GET /api/test-intelligence', () => {
     expect(body.syntheticJourneys[0].live.recentRuns).toEqual([
       { id: 'journey-public-edge-123', state: 'passed', observedAt: new Date(completed * 1000).toISOString() },
     ])
+  })
+
+  it('names a failed recent-runs query instead of rendering it as an empty run history (#7943)', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-synthetic-recent-runs-failure-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    writeFileSync(file, JSON.stringify({
+      schemaVersion: 1, collectedAt: '2026-08-25T00:00:00.000Z', components: [], contracts: [], mutations: [], performance: [], history: [], runHistory: [], testCases: [], clientExperiences: [],
+      syntheticJourneys: [{ id: 'public-edge', title: 'Public edge', status: 'active', state: 'unknown', severity: 'page', schedule: '*/5 * * * *', environment: 'sandbox', covers: [], falsifies: 'Break the edge.', blocker: null }],
+      totals: { components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0, failingEvidence: 0, missingEvidence: 0, staleEvidence: 0 }, warnings: [],
+    }))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    process.env.PROMETHEUS_URL = 'http://prometheus.test'
+    const now = Date.now() / 1000
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      // Prometheus is reachable and every other query answers; only the recent-runs query fails.
+      if (query.includes('kube_job_status_completion_time')) {
+        return new Response('boom', { status: 500 })
+      }
+      return new Response(JSON.stringify({ status: 'success', data: { result: [{ value: [now, String(now)] }] } }), { status: 200 })
+    }))
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const body = await (await GET()).json()
+    // An empty list here is ambiguous with "no runs happened yet" — the failure must be named.
+    expect(body.syntheticJourneys[0].live.recentRuns).toEqual([])
+    expect(body.syntheticJourneys[0].live.recentRunsError).toMatch(/prometheus responded 500/)
   })
 
   it('projects k6 remote-write performance as bounded supplementary evidence', async () => {

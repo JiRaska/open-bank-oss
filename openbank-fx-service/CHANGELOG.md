@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.14.1...fx-service-v0.15.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** unify the three-month FX rate trend ([#7736](https://github.com/JiRaska/open-bank-oss/issues/7736)) ([5e85aa6](https://github.com/JiRaska/open-bank-oss/commit/5e85aa60dab75048024186ff7072c0918cddaeea))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.14.0...fx-service-v0.14.1) (2026-08-31)
 
 

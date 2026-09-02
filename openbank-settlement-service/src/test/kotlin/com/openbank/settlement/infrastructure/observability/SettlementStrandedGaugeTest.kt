@@ -128,6 +128,12 @@ class SettlementStrandedGaugeTest {
             // and did NOT come back, and it was the only money-path state with no age series.
             "REVERSAL_FAILED",
             "LEDGER_REVERSAL_UNSUPPORTED",
+            // #6410's two. The ledger compensation only became reachable with that issue, and it
+            // now reports which of three situations the general ledger is in rather than assuming
+            // the worst; both new outcomes are transient by construction, so a row resting in
+            // either means the workflow died and the age series is what makes that visible.
+            "LEDGER_NOT_POSTED",
+            "LEDGER_STATE_UNKNOWN",
         )
         assertThat(published).doesNotContain("BOOKED", "REJECTED")
         // The published set must be exactly "every status minus the two terminal ones", derived

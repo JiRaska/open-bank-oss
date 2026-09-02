@@ -12,6 +12,6 @@ describe('Notifications refresh contract', () => {
     expect(source).toContain('aria-busy={loading}')
     expect(source).toContain("aria-label={t('Obnovit oznámení', 'Refresh notifications')}")
     expect(source).toContain('<RefreshCw aria-hidden="true"')
-    expect(source).toContain('onClick={load}')
+    expect(source).toContain('onClick={refresh}')
   })
 })

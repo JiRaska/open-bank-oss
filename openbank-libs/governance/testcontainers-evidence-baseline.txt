@@ -11,15 +11,11 @@
 # clearing, swift, fx, lending, sdd, interest, sca, consent) are tracked separately: they
 # need the two-approval + threat-model process before their topology is touched.
 openbank-account-service/src/test/kotlin/com/openbank/account/it/PostgresRedpandaRedisTestResource.kt
-openbank-aml-service/src/test/kotlin/com/openbank/aml/it/PostgresRedisTestResource.kt
-openbank-anacredit-service/src/test/kotlin/com/openbank/anacredit/it/PostgresRedpandaTestResource.kt
 openbank-balance-service/src/test/kotlin/com/openbank/balance/it/PostgresRedpandaTestResource.kt
 openbank-billing-service/src/test/kotlin/com/openbank/billing/it/PostgresRedisTestResource.kt
-openbank-card-issuance-service/src/test/kotlin/com/openbank/cardissuance/it/PostgresRedisTestResource.kt
 openbank-clearing-service/src/test/kotlin/com/openbank/clearing/it/PostgresRedpandaRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/ConsentPostgresRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/PostgresTestResource.kt
-openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/it/RedpandaRedisTestResource.kt
 openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/it/PostgresRedisTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisRedpandaTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisTestResource.kt
@@ -35,5 +31,4 @@ openbank-settlement-service/src/test/kotlin/com/openbank/settlement/it/PostgresT
 openbank-standing-order-service/src/test/kotlin/com/openbank/standingorder/it/PostgresRedisTestResource.kt
 openbank-statement-service/src/test/kotlin/com/openbank/statement/it/PostgresTestResource.kt
 openbank-swift-service/src/test/kotlin/com/openbank/swift/it/PostgresRedisTestResource.kt
-openbank-tpp-registry-service/src/test/kotlin/com/openbank/tppregistry/it/PostgresRedisTestResource.kt
 openbank-vop-service/src/test/kotlin/com/openbank/vop/PostgresTestResource.kt

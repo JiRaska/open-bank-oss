@@ -82,17 +82,23 @@ class SettlementWorkflowImplTest {
         // Debit and credit both ran before the ledger booking failed.
         assertThat(calls.debitPayer.get()).isEqualTo(1)
         assertThat(calls.creditPayee.get()).isEqualTo(1)
-        // Both prior steps get compensated (most-recent-first), booking itself is not reversed.
+        // Both prior steps get compensated (most-recent-first), and the ledger compensation runs
+        // too — #6410: it is registered BEFORE bookToLedger, because a bookToLedger that throws
+        // may still have posted the journal. Here the stub's compensation finds no journal, so it
+        // returns normally and the settlement is rejected cleanly.
         assertThat(calls.reverseCredit.get()).isEqualTo(1)
         assertThat(calls.reverseDebit.get()).isEqualTo(1)
-        assertThat(calls.reverseBookToLedger.get()).isZero()
+        assertThat(calls.reverseBookToLedger.get()).isEqualTo(1)
         assertThat(calls.rejectSettlement.get()).isEqualTo(1)
+        // The two balance reversals go first: they return customer funds, which outranks a GL
+        // correcting entry. The three compensations are independent, so this is urgency order.
         assertThat(calls.order).containsExactly(
             "debitPayer",
             "creditPayee",
             "bookToLedger",
             "reverseCredit",
             "reverseDebit",
+            "reverseBookToLedger",
             "rejectSettlement",
         )
     }
@@ -139,9 +145,10 @@ class SettlementWorkflowImplTest {
 
         val result = newWorkflow().settle(UUID.randomUUID())
 
-        // reverseCredit throws, but the workflow still runs reverseDebit.
+        // reverseCredit throws, but the workflow still runs reverseDebit (and the ledger one).
         assertThat(calls.reverseCredit.get()).isEqualTo(1)
         assertThat(calls.reverseDebit.get()).isEqualTo(1)
+        assertThat(calls.reverseBookToLedger.get()).isEqualTo(1)
         // It must NOT reject: see the REVERSAL_FAILED test below for why.
         assertThat(result).isEqualTo(SettlementStatus.REVERSAL_FAILED)
         assertThat(calls.rejectSettlement.get()).isZero()
@@ -177,29 +184,98 @@ class SettlementWorkflowImplTest {
     }
 
     /**
-     * `reverseBookToLedger` is currently UNREACHABLE, and this test exists to say so out loud.
+     * The money-path assertion of issue #6410, and the direct inverse of the test it replaces.
      *
-     * Its compensation is registered only after `bookToLedger` returns, and `bookToLedger` is the
-     * last forward step — so nothing can fail afterwards to trigger the unwind. The activity, its
-     * LEDGER_REVERSAL_UNSUPPORTED status, and the `SettlementStuckAfterCompensation` coverage of
-     * that status are all dead until the saga gains a step after the ledger booking.
+     * `reverseBookToLedger` used to be structurally unreachable: its compensation was registered
+     * only after `bookToLedger` RETURNED, and `bookToLedger` is the last forward step, so nothing
+     * could fail afterwards to trigger an unwind that included it. The previous version of this
+     * test asserted that zero and passed — correctly, about dead code.
      *
-     * The workflow still pairs that compensation with its status (see `Compensation`), so the day
-     * a step IS added the reporting is already correct rather than silently reporting the wrong
-     * half. If this test ever fails, the saga grew a step and the pairing became live — which is
-     * the moment to add the reachable-path assertions.
+     * What made it dead also made it wrong. `bookToLedger` posts the journal and *then* writes
+     * BOOKED, so a throw from it does not mean the general ledger is clean: the posting can have
+     * landed and the status write failed. Under the registered-after shape that settlement
+     * unwound both balance movements, wrote REJECTED, and left a GL entry standing that nothing
+     * in the row, the alerts or the audit trail ever mentioned.
+     *
+     * Registering the compensation first is what closes that, and it is safe only because
+     * `reverseBookToLedger` establishes what the ledger actually holds instead of assuming.
      */
     @Test
-    fun `the ledger compensation is unreachable in the current saga shape`() {
-        val calls = RecordingActivities(failBookToLedger = true, failReverseBookToLedger = true)
+    fun `the ledger compensation runs when bookToLedger fails, because the posting may have landed`() {
+        val calls = RecordingActivities(failBookToLedger = true)
         worker.registerActivitiesImplementations(calls)
         env.start()
 
         newWorkflow().settle(UUID.randomUUID())
 
         assertThat(calls.reverseBookToLedger.get())
-            .describedAs("bookToLedger is the last forward step, so its compensation can never run")
-            .isZero()
+            .describedAs("a bookToLedger that threw may still have posted the journal")
+            .isEqualTo(1)
+    }
+
+    /**
+     * A ledger compensation that CONFIRMED a standing GL posting leaves the settlement
+     * non-terminal in LEDGER_REVERSAL_UNSUPPORTED — the GL owes a correcting entry, and writing
+     * REJECTED over it would erase the only durable record of that (the #6286 rule, applied to
+     * the ledger half).
+     */
+    @Test
+    fun `a confirmed standing GL posting is reported as LEDGER_REVERSAL_UNSUPPORTED and never rejects`() {
+        val calls = RecordingActivities(failBookToLedger = true, failReverseBookToLedger = true)
+        worker.registerActivitiesImplementations(calls)
+        env.start()
+
+        val result = newWorkflow().settle(UUID.randomUUID())
+
+        assertThat(result).isEqualTo(SettlementStatus.LEDGER_REVERSAL_UNSUPPORTED)
+        assertThat(calls.rejectSettlement.get()).isZero()
+    }
+
+    /**
+     * The reason `Compensation.onFailure` is a function of the failure and not a constant.
+     *
+     * `reverseBookToLedger` has two distinct failures. It writes LEDGER_REVERSAL_UNSUPPORTED when
+     * a journal is confirmed to exist, and LEDGER_STATE_UNKNOWN when the lookup itself failed and
+     * nobody knows. With a constant pairing the workflow would return the first for both, so a
+     * settlement whose row said "nobody has checked the ledger" would be reported as "the ledger
+     * definitely carries a posting" — sending an accountant to correct an entry that may not
+     * exist, and losing the fact that the question is still open.
+     */
+    @Test
+    fun `an unestablished ledger state is reported as LEDGER_STATE_UNKNOWN, not as a confirmed posting`() {
+        val calls = RecordingActivities(
+            failBookToLedger = true,
+            failReverseBookToLedger = true,
+            reverseBookToLedgerFailureType = "LedgerStateUnknown",
+        )
+        worker.registerActivitiesImplementations(calls)
+        env.start()
+
+        val result = newWorkflow().settle(UUID.randomUUID())
+
+        assertThat(result)
+            .describedAs("the workflow must report the status the activity actually wrote")
+            .isEqualTo(SettlementStatus.LEDGER_STATE_UNKNOWN)
+        assertThat(calls.rejectSettlement.get()).isZero()
+    }
+
+    /**
+     * A refused money reversal outranks any ledger obligation: customer funds have moved and not
+     * come back, which is critical, while a GL entry needing a correction is not.
+     */
+    @Test
+    fun `a refused money reversal outranks a ledger obligation in the reported status`() {
+        val calls = RecordingActivities(
+            failBookToLedger = true,
+            failReverseCredit = true,
+            failReverseBookToLedger = true,
+        )
+        worker.registerActivitiesImplementations(calls)
+        env.start()
+
+        val result = newWorkflow().settle(UUID.randomUUID())
+
+        assertThat(result).isEqualTo(SettlementStatus.REVERSAL_FAILED)
     }
 
     /** A clean unwind still reaches its terminal state — REJECTED must stay reachable. */
@@ -222,6 +298,7 @@ class SettlementWorkflowImplTest {
         private val failBookToLedger: Boolean = false,
         private val failReverseCredit: Boolean = false,
         private val failReverseBookToLedger: Boolean = false,
+        private val reverseBookToLedgerFailureType: String = "LedgerReversalUnsupported",
     ) : SettlementActivities {
         val debitPayer = AtomicInteger(0)
         val creditPayee = AtomicInteger(0)
@@ -265,9 +342,11 @@ class SettlementWorkflowImplTest {
             order += "reverseBookToLedger"
             reverseBookToLedger.incrementAndGet()
             if (failReverseBookToLedger) {
+                // The TYPE is what the workflow reads to tell a confirmed standing posting from an
+                // unestablished one, so it is a parameter here rather than a literal.
                 throw ApplicationFailure.newNonRetryableFailure(
-                    "ledger reversal unsupported",
-                    "LedgerReversalUnsupported",
+                    "ledger compensation failed",
+                    reverseBookToLedgerFailureType,
                 )
             }
         }

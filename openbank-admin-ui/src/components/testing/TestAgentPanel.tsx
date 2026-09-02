@@ -16,6 +16,8 @@ type AgentGovernance = {
 }
 
 const FLAKY_HUNTER_EVAL_BACKLOG_URL = 'https://github.com/JiRaska/open-bank-oss/issues/7040'
+const FINDINGS_DISPLAY_LIMIT = 5
+const FINDING_SEVERITY_ORDER: Record<TestAgentFinding['severity'], number> = { CRITICAL: 0, WARNING: 1 }
 
 function evalEvidenceDetail(state: AgentGovernance['evalEvidence'], t: (cs: string, en: string) => string): string {
   switch (state) {
@@ -35,6 +37,9 @@ export function TestAgentPanel() {
   const [available, setAvailable] = useState<boolean | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [governance, setGovernance] = useState<AgentGovernance | null>(null)
+  const visibleFindings = [...findings]
+    .sort((left, right) => FINDING_SEVERITY_ORDER[left.severity] - FINDING_SEVERITY_ORDER[right.severity])
+    .slice(0, FINDINGS_DISPLAY_LIMIT)
   useEffect(() => { void fetch('/api/test-intelligence/agents', { cache: 'no-store' }).then(async response => {
     if (!response.ok) { setAvailable(false); return }
     const body = await response.json() as { findings: TestAgentFinding[]; available: boolean; governance?: AgentGovernance }
@@ -62,7 +67,7 @@ export function TestAgentPanel() {
       {available === null ? <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Načítám agentní nálezy…', 'Loading agent findings…')}</span>
         : !available ? <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Agent v tomto prostředí není dostupný. Měřená evidence výše zůstává úplná a beze změny.', 'The agent is unavailable in this environment. Measured evidence above remains complete and unchanged.')}</span>
           : findings.length === 0 ? <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t('Žádné aktivní nálezy. To není důkaz bezchybnosti; jen aktuální výstup agentova omezeného charteru.', 'No active findings. This is not proof of correctness; only the current output of the agent’s bounded charter.')}</span>
-            : <div style={{ display: 'grid', gap: 8 }}>{findings.slice(0, 5).map(finding => <div key={finding.id} style={{ display: 'grid', gridTemplateColumns: '90px 1fr auto', gap: 10, alignItems: 'center', fontSize: 12 }}><span style={{ color: finding.severity === 'CRITICAL' ? '#dc2626' : '#d97706', fontWeight: 700 }}>{finding.severity}</span><span><strong>{finding.component}</strong> · {finding.title}{finding.rootCause && <small style={{ display: 'block', color: 'var(--text-tertiary)', marginTop: 3 }}>{finding.rootCause}</small>}</span>{finding.proposalUrl && <a href={finding.proposalUrl} target="_blank" rel="noreferrer" aria-label={t('Otevřít návrh agenta', 'Open agent proposal')}><ExternalLink size={14}/></a>}</div>)}</div>}
+            : <div style={{ display: 'grid', gap: 8 }}>{visibleFindings.map(finding => <div key={finding.id} style={{ display: 'grid', gridTemplateColumns: '90px 1fr auto', gap: 10, alignItems: 'center', fontSize: 12 }}><span style={{ color: finding.severity === 'CRITICAL' ? '#dc2626' : '#d97706', fontWeight: 700 }}>{finding.severity}</span><span><strong>{finding.component}</strong> · {finding.title}{finding.rootCause && <small style={{ display: 'block', color: 'var(--text-tertiary)', marginTop: 3 }}>{finding.rootCause}</small>}</span>{finding.proposalUrl && <a href={finding.proposalUrl} target="_blank" rel="noreferrer" aria-label={t('Otevřít návrh agenta', 'Open agent proposal')}><ExternalLink size={14}/></a>}</div>)}{findings.length > FINDINGS_DISPLAY_LIMIT && <span role="status" style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t(`Zobrazeno ${visibleFindings.length} z ${findings.length} nálezů.`, `Showing ${visibleFindings.length} of ${findings.length} findings.`)}</span>}</div>}
     </div>
   </section>
 }

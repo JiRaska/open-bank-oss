@@ -32,6 +32,7 @@ export function ExplorerGuide({ eyebrow = 'OpenBank Explorer', title, children, 
           src={mascot === 'lioness' ? '/brand/explorer-prague-lioness.webp' : '/brand/openbank-explorer.webp'}
           alt=""
           fill
+          loading={compact ? 'lazy' : 'eager'}
           sizes={compact ? '160px' : '(max-width: 720px) 180px, 260px'}
           className={`${styles.image} ${mascot === 'lioness' ? styles.lioness : ''}`}
         />

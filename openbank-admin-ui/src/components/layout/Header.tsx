@@ -199,9 +199,9 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
             onMouseLeave={e => { if (!menuOpen) e.currentTarget.style.background = 'transparent' }}
           >
             <div style={{
-              width: '26px', height: '26px', background: 'var(--ob-accent-hover)', borderRadius: '50%',
+              width: '26px', height: '26px', background: 'var(--accent-text)', borderRadius: '50%',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '11px', fontWeight: 700, color: '#fff', flexShrink: 0,
+              fontSize: '11px', fontWeight: 700, color: 'var(--surface-1)', flexShrink: 0,
             }}>{initials}</div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
               <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.2 }}>
