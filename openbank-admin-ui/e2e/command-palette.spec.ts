@@ -39,7 +39,11 @@ test('keeps quick search truthful through an outage and retry', async ({ page })
     })
   })
 
+  const sessionReady = page.waitForResponse(response =>
+    response.url().endsWith('/api/auth/session') && response.ok(),
+  )
   await page.goto('/dashboard')
+  await sessionReady
   await page.keyboard.press('Control+K')
 
   const dialog = page.getByRole('dialog', { name: /Rychlé hledání|Quick search/ })
