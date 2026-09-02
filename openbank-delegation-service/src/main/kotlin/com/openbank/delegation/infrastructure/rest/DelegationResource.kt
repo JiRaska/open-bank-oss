@@ -10,14 +10,18 @@ import com.openbank.delegation.application.port.`in`.CheckDelegationUseCase
 import com.openbank.delegation.application.port.`in`.GetDelegationUseCase
 import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
 import com.openbank.delegation.application.port.`in`.OfferDelegationUseCase
+import com.openbank.delegation.application.port.`in`.PreviewDelegationCommand
+import com.openbank.delegation.application.port.`in`.PreviewDelegationUseCase
 import com.openbank.delegation.application.port.`in`.RespondDelegationUseCase
 import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
 import com.openbank.delegation.application.port.`in`.RevokeDelegationUseCase
 import com.openbank.delegation.application.port.`in`.SuspendDelegationCommand
 import com.openbank.delegation.infrastructure.rest.dto.CheckDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.DelegationCheckResponse
+import com.openbank.delegation.infrastructure.rest.dto.DelegationPreviewResponse
 import com.openbank.delegation.infrastructure.rest.dto.DelegationResponse
 import com.openbank.delegation.infrastructure.rest.dto.OfferDelegationRequest
+import com.openbank.delegation.infrastructure.rest.dto.PreviewDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.RevokeDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.SuspendDelegationRequest
 import com.openbank.libs.authz.Authorize
@@ -50,6 +54,7 @@ import java.util.UUID
 @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
 class DelegationResource(
     private val offerDelegation: OfferDelegationUseCase,
+    private val previewDelegation: PreviewDelegationUseCase,
     private val respondDelegation: RespondDelegationUseCase,
     private val revokeDelegation: RevokeDelegationUseCase,
     private val getDelegation: GetDelegationUseCase,
@@ -57,6 +62,35 @@ class DelegationResource(
     private val idempotencyStore: IdempotencyStore,
     private val objectMapper: ObjectMapper,
 ) {
+
+    @Operation(summary = "Validate a delegation draft without consuming SCA or creating a grant")
+    @POST
+    @Path("/preview")
+    @Authorize(action = "delegation.preview", resource = "#request.grantorPartyId")
+    suspend fun preview(
+        request: PreviewDelegationRequest?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): DelegationPreviewResponse {
+        requireNotNull(request) { "request body is required" }
+        previewDelegation.preview(
+            PreviewDelegationCommand(
+                callerPartyId = customerPartyId,
+                grantorPartyId = request.grantorPartyId,
+                granteePartyId = request.granteePartyId,
+                resourceType = request.resourceType,
+                resourceId = request.resourceId,
+                capabilities = request.capabilities,
+                approvalPolicy = request.approvalPolicy,
+                requiredApprovals = request.requiredApprovals,
+                perTransactionLimit = request.perTransactionLimit?.toDomain(),
+                dailyLimit = request.dailyLimit?.toDomain(),
+                monthlyLimit = request.monthlyLimit?.toDomain(),
+                exposure = request.exposure?.toDomain(),
+                validTo = request.validTo,
+            ),
+        )
+        return DelegationPreviewResponse()
+    }
 
     // SecurityIdentity, not @Context SecurityContext: in a Kotlin `suspend` resource method the
     // @Context principal does not reliably resolve to the bearer token — the same reason

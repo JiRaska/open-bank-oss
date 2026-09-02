@@ -7,9 +7,12 @@ package com.openbank.delegation.application.usecase
 import com.openbank.delegation.application.port.`in`.CallerPartyId
 import com.openbank.delegation.application.port.`in`.CheckDelegationCommand
 import com.openbank.delegation.application.port.`in`.CheckDelegationUseCase
+import com.openbank.delegation.application.port.`in`.DelegationCandidate
 import com.openbank.delegation.application.port.`in`.GetDelegationUseCase
 import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
 import com.openbank.delegation.application.port.`in`.OfferDelegationUseCase
+import com.openbank.delegation.application.port.`in`.PreviewDelegationCommand
+import com.openbank.delegation.application.port.`in`.PreviewDelegationUseCase
 import com.openbank.delegation.application.port.`in`.RespondDelegationUseCase
 import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
 import com.openbank.delegation.application.port.`in`.RevokeDelegationUseCase
@@ -77,6 +80,10 @@ class DelegationUnsupportedConstraintException(val code: String, message: String
 }
 
 @ApplicationScoped
+// One aggregate service deliberately owns the complete delegation lifecycle and its shared
+// authority gates. Splitting preview into another bean would duplicate the exact checks that offer
+// must repeat and make the supposedly harmless path drift from the authority-creating one.
+@Suppress("TooManyFunctions")
 class DelegationService(
     private val delegationRepository: DelegationRepository,
     private val scaChallengeClient: ScaChallengeClient,
@@ -84,6 +91,7 @@ class DelegationService(
     private val resourceOwnershipClient: ResourceOwnershipClient,
     private val clock: Clock,
 ) : OfferDelegationUseCase,
+    PreviewDelegationUseCase,
     RespondDelegationUseCase,
     RevokeDelegationUseCase,
     GetDelegationUseCase,
@@ -105,11 +113,7 @@ class DelegationService(
 
     override suspend fun offer(command: OfferDelegationCommand): DelegationGrant {
         val now = OffsetDateTime.now(clock)
-        requireCallerIs(command.callerPartyId, command.grantorPartyId)
-        rejectUnenforcedCeilings(command)
-        rejectUnenforcedApprovalPolicy(command)
-        verifyResourceOwnership(command)
-        val parties = verifyEligibility(command)
+        val parties = validateCandidate(command)
         // SCA last of the three gates: it SPENDS the challenge, so a request that was going to be
         // refused anyway must not cost the customer their ceremony.
         verifyAndConsumeSca(
@@ -157,6 +161,20 @@ class DelegationService(
                 occurredAt = clock.instant(),
             ),
         )
+    }
+
+    override suspend fun preview(command: PreviewDelegationCommand) {
+        validateCandidate(command)
+        // Intentionally no SCA lookup/consume, repository write or event. Preview proves only that
+        // this exact draft is currently offerable; offer repeats every authoritative check.
+    }
+
+    private suspend fun validateCandidate(command: DelegationCandidate): CounterpartyNames {
+        requireCallerIs(command.callerPartyId, command.grantorPartyId)
+        rejectUnenforcedCeilings(command)
+        rejectUnenforcedApprovalPolicy(command)
+        verifyResourceOwnership(command)
+        return verifyEligibility(command)
     }
 
     override suspend fun accept(
@@ -383,7 +401,7 @@ class DelegationService(
      * sure of it — so an invariant in the constructor would make every one of them unrehydratable
      * the moment this deploys.
      */
-    private fun rejectUnenforcedCeilings(command: OfferDelegationCommand) {
+    private fun rejectUnenforcedCeilings(command: DelegationCandidate) {
         val hasCumulativeCeiling = command.dailyLimit != null || command.monthlyLimit != null
         val canSpend = command.capabilities.any { it in DelegationGrant.EXECUTION_CAPABILITIES }
         if (hasCumulativeCeiling && !canSpend) {
@@ -421,7 +439,7 @@ class DelegationService(
      * projection and counting decisions where the money moves — in that order, or the counter is
      * a second unread field.
      */
-    private fun rejectUnenforcedApprovalPolicy(command: OfferDelegationCommand) {
+    private fun rejectUnenforcedApprovalPolicy(command: DelegationCandidate) {
         if (command.approvalPolicy != ApprovalPolicy.SOLO) {
             throw DelegationUnsupportedConstraintException(
                 code = DelegationUnsupportedConstraintException.CODE_APPROVAL_POLICY_UNSUPPORTED,
@@ -439,7 +457,7 @@ class DelegationService(
      * naming a stranger's account grants access to that account. Fail closed on UNVERIFIABLE:
      * an ownership lookup we could not perform is not permission.
      */
-    private suspend fun verifyResourceOwnership(command: OfferDelegationCommand) {
+    private suspend fun verifyResourceOwnership(command: DelegationCandidate) {
         val verdict = resourceOwnershipClient.verifyOwnership(
             command.grantorPartyId,
             command.resourceType,
@@ -533,7 +551,7 @@ class DelegationService(
      * offers, never wave them through. KYC requirements: FULL for execution
      * capabilities (they move money), BASIC for everything read-only/propose-only.
      */
-    private suspend fun verifyEligibility(command: OfferDelegationCommand): CounterpartyNames {
+    private suspend fun verifyEligibility(command: DelegationCandidate): CounterpartyNames {
         val grantor = partyEligibilityClient.eligibilityOf(command.grantorPartyId)
         if (!grantor.active) {
             throw DelegationEligibilityException("grantor party ${command.grantorPartyId} is not active")
@@ -552,7 +570,7 @@ class DelegationService(
      * function with a real return value has none — so the same three unchanged throws crossed the
      * threshold. The gate is behaviourally identical.
      */
-    private fun requireGranteeKyc(command: OfferDelegationCommand, grantee: PartyEligibility) {
+    private fun requireGranteeKyc(command: DelegationCandidate, grantee: PartyEligibility) {
         val needsFullKyc = command.capabilities.any { it in DelegationGrant.EXECUTION_CAPABILITIES }
         val requiredKyc = if (needsFullKyc) "FULL" else "BASIC"
         if (KYC_RANK.getValue(grantee.kycLevel) < KYC_RANK.getValue(requiredKyc)) {
