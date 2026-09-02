@@ -305,6 +305,7 @@ gates:
       ADR-0237 sat `planned` while its own adoption gate was enforced).
     review_after: "2027-02-19"
     min_subjects: 100   # 147 enforced gates in the manifest today (2026-08-19)
+    selftest_inputs: [".github/scripts/check-adr-delivery-evidence.py"]
     selftest: |
       python3 .github/scripts/check-adr-delivery-evidence.py --self-test
     run: |
@@ -329,6 +330,7 @@ gates:
     name: "scheduler liveness adoption (ADR-0237)"
     group: gitops
     mode: enforced
+    selftest_inputs: [".github/scripts/check-scheduler-liveness.py"]
     selftest: |
       python3 .github/scripts/check-scheduler-liveness.py --self-test
     run: |
@@ -536,6 +538,7 @@ gates:
     group: gitops
     mode: enforced
     budget_seconds: 30   # 7.6s in CI
+    selftest_inputs: ["openbank-infra/scripts/gen-network-policies.py"]
     selftest: python3 openbank-infra/scripts/gen-network-policies.py --self-test
     selftest_expect: pass
     run: |
@@ -571,6 +574,7 @@ gates:
     name: "code-only cross-namespace edges (issue #2691 stage 1, enforced)"
     group: gitops
     mode: enforced
+    selftest_inputs: [".github/scripts/check-network-policy-code-edges.py"]
     selftest: |
       python3 .github/scripts/check-network-policy-code-edges.py --self-test
     run: |
@@ -592,6 +596,7 @@ gates:
       (no python3 in the admin-ui build image); they had already drifted to 20 of 44 services
       scored differently, so their equivalence is enforced rather than hand-audited.
     review_after: 2027-02-19
+    selftest_inputs: [".github/scripts/check-readiness-collectors-agree.py"]
     selftest: |
       python3 .github/scripts/check-readiness-collectors-agree.py --self-test
     min_subjects: 40   # 44 services scored today (2026-08-19)
@@ -622,6 +627,7 @@ gates:
       invisible to unit tests, health probes and review.
     review_after: 2027-02-19
     min_subjects: 100   # 147 entity classes in strategy-less services today (2026-08-19)
+    selftest_inputs: [".github/scripts/check-entity-column-names.py"]
     selftest: |
       python3 .github/scripts/check-entity-column-names.py --self-test
     run: |
@@ -647,6 +653,7 @@ gates:
       that dependency — measured on three services in #6240.
     review_after: 2027-02-22
     min_subjects: 8   # 10 typed JAX-RS providers in openbank-libs-* today (2026-08-22)
+    selftest_inputs: [".github/scripts/check-provider-type-classpath.py"]
     selftest: |
       python3 .github/scripts/check-provider-type-classpath.py --self-test
     run: |
@@ -679,6 +686,7 @@ gates:
       database most likely to be misconfigured is the one guaranteed not to alert.
     review_after: "2027-02-28"
     min_subjects: 40   # 62 CNPG Clusters declared in gitops today (2026-08-30)
+    selftest_inputs: [".github/scripts/check-cnpg-scrape-coverage.py"]
     selftest: |
       python3 .github/scripts/check-cnpg-scrape-coverage.py --self-test
     run: |
@@ -726,6 +734,7 @@ gates:
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
     group: gitops
     mode: enforced
+    selftest_inputs: [".github/scripts/check-podmonitor-namespace-coverage.py"]
     selftest: |
       python3 .github/scripts/check-podmonitor-namespace-coverage.py --self-test
     min_subjects: 18   # 38 namespaces running workloads today (2026-08-09)
@@ -744,6 +753,7 @@ gates:
     name: "Temporal namespaces a worker polls are registered (enforced)"
     group: gitops
     mode: enforced
+    selftest_inputs: [".github/scripts/check-temporal-namespace-registration.py"]
     selftest: |
       python3 .github/scripts/check-temporal-namespace-registration.py --self-test
     run: |
@@ -779,6 +789,7 @@ gates:
       caller, not a threshold, so nothing tuned it back into existence.
     review_after: "2027-02-19"
     min_subjects: 90   # 121 alert rules in the gitops PrometheusRules today (2026-08-20)
+    selftest_inputs: [".github/scripts/check-alert-window-vs-subject-period.py"]
     selftest: |
       python3 .github/scripts/check-alert-window-vs-subject-period.py --self-test
     run: |
@@ -802,6 +813,7 @@ gates:
     review_after: "2027-02-21"
     min_subjects: 1   # only the Loki ruler is hand-configured today; operator-managed
                       # Prometheus gets its pathPrefix from alertingEndpoints and is not a subject
+    selftest_inputs: [".github/scripts/check-alertmanager-url-route-prefix.py"]
     selftest: |
       python3 .github/scripts/check-alertmanager-url-route-prefix.py --selftest
     run: |
@@ -823,6 +835,7 @@ gates:
     review_after: "2027-02-21"
     min_subjects: 4   # 5 line-filtered selectors today (2026-08-21); the Falco pair is safe by
                       # namespace pinning and must stay counted, not skipped
+    selftest_inputs: [".github/scripts/check-loki-rule-self-match.py"]
     selftest: |
       python3 .github/scripts/check-loki-rule-self-match.py --selftest
     run: |
@@ -862,6 +875,7 @@ gates:
     group: gitops
     budget_seconds: 46
     mode: enforced
+    selftest_inputs: ["openbank-infra/scripts/generate-service-runbooks.py"]
     selftest: python3 openbank-infra/scripts/generate-service-runbooks.py --self-test
     selftest_expect: pass
     run: |
@@ -898,6 +912,7 @@ gates:
     # manifest being able to answer "which gates are falsifiable". Default
     # `selftest_expect: pass`: the command is the checker's own harness, which exits 0 when it has
     # proved the gate's red is reachable.
+    selftest_inputs: [".github/scripts/check-oidc-client-secret-wiring.py"]
     selftest: |
       python3 .github/scripts/check-oidc-client-secret-wiring.py --selftest
     run: |
@@ -916,6 +931,7 @@ gates:
     name: "messaging channel is servable by the image actually deployed (SRMSG00071)"
     group: gitops
     mode: enforced
+    selftest_inputs: [".github/scripts/check-msg-channel-image-parity.py"]
     selftest: |
       python3 .github/scripts/check-msg-channel-image-parity.py --self-test
     budget_seconds: 108   # was 40 with the comment "9.2s in CI"; the warehouse says
@@ -994,6 +1010,7 @@ gates:
     name: "db-backup association gate — every backed-up CNPG cluster has pod identity (enforced)"
     group: gitops
     mode: enforced
+    selftest_inputs: ["openbank-infra/scripts/check-db-backup-associations.py"]
     selftest: python3 openbank-infra/scripts/check-db-backup-associations.py --self-test
     selftest_expect: pass
     run: |
@@ -1046,6 +1063,7 @@ gates:
       cluster with no backup and on an empty exemption reason, and stays silent on a
       declared backup, a reasoned exemption and a non-CNPG kind: Cluster.
     min_subjects: 50
+    selftest_inputs: ["openbank-infra/scripts/check-cnpg-backup-declared.py"]
     selftest: python3 openbank-infra/scripts/check-cnpg-backup-declared.py --self-test
     selftest_expect: pass
     run: |
@@ -1069,6 +1087,7 @@ gates:
     name: "probe/scrape port has a listener (issue #2872, enforced)"
     group: gitops
     mode: enforced
+    selftest_inputs: [".github/scripts/check-probe-port-listener.py"]
     selftest: python3 .github/scripts/check-probe-port-listener.py --selftest
     selftest_expect: pass
     min_subjects: 50   # 116 probed/scraped ports today (2026-08-09)
@@ -1121,6 +1140,7 @@ gates:
     group: supplychain
     mode: enforced
     min_subjects: 6   # 13 measured 2026-09-01; half, so the fleet can shrink without a red
+    selftest_inputs: [".github/scripts/check-license-headers.py"]
     selftest: |
       python3 .github/scripts/check-license-headers.py --selftest
     run: |
@@ -1141,6 +1161,7 @@ gates:
     group: supplychain
     budget_seconds: 52
     mode: enforced
+    selftest_inputs: [".github/scripts/check-stale-comment-references.py"]
     selftest: |
       python3 .github/scripts/check-stale-comment-references.py --self-test
     run: |
@@ -1150,6 +1171,7 @@ gates:
     name: "gh repo context in checkoutless jobs (issue #2841, enforced)"
     group: supplychain
     mode: enforced
+    selftest_inputs: [".github/scripts/check-gh-repo-context.py"]
     selftest: |
       python3 .github/scripts/check-gh-repo-context.py --self-test
     run: |
@@ -1159,6 +1181,7 @@ gates:
     name: "Gradle home isolation on self-hosted runners (enforced)"
     group: supplychain
     mode: enforced
+    selftest_inputs: [".github/scripts/check-gradle-user-home-isolation.py"]
     selftest: |
       python3 .github/scripts/check-gradle-user-home-isolation.py --self-test
     run: |
@@ -1191,6 +1214,7 @@ gates:
     name: "release-registration consistency (rule 3, ADR-0029)"
     group: supplychain
     mode: enforced
+    selftest_inputs: ["openbank-infra/scripts/check-release-registration.py"]
     selftest: python3 openbank-infra/scripts/check-release-registration.py --self-test
     selftest_expect: pass
     run: |
@@ -1212,6 +1236,7 @@ gates:
     verified: "2026-08-09 — heuristic by design (classifies from PR title before the squash commit exists); PR-only, still noisy-not-wrong, no graduation planned"
     when: pull_request
     needs_base: required
+    selftest_inputs: ["openbank-infra/scripts/check-release-scope-mismatch.py"]
     selftest: python3 openbank-infra/scripts/check-release-scope-mismatch.py --self-test
     selftest_expect: pass
     run: |
@@ -1412,6 +1437,7 @@ gates:
     name: "workflow run-step size"
     group: lint
     mode: enforced
+    selftest_inputs: [".github/scripts/check-workflow-run-step-size.py"]
     selftest: |
       python3 .github/scripts/check-workflow-run-step-size.py --self-test
     run: |
@@ -1429,6 +1455,7 @@ gates:
     name: "Gradle Actions-cache writer budget (issue #3299, enforced)"
     group: lint
     mode: enforced
+    selftest_inputs: [".github/scripts/check-gradle-cache-writers.py"]
     selftest: |
       python3 .github/scripts/check-gradle-cache-writers.py --self-test
     run: |
@@ -1606,6 +1633,7 @@ gates:
     name: "evals gate replay (ADR-0148, enforced)"
     group: registry
     mode: enforced
+    selftest_inputs: [".github/scripts/run-evals.py"]
     selftest: |
       python3 .github/scripts/run-evals.py --self-test
     run: |
@@ -1899,6 +1927,7 @@ gates:
     name: "No duplicate resource or env-list entry in a gitops manifest (issues #3450/#3460, enforced)"
     group: gitops
     mode: enforced
+    selftest_inputs: [".github/scripts/check-gitops-duplicate-resources.py"]
     selftest: |
       python3 .github/scripts/check-gitops-duplicate-resources.py --self-test
     min_subjects: 300   # 647 gitops manifests today (2026-08-09)
@@ -1953,6 +1982,7 @@ gates:
     name: "no gate disappears from the manifest silently (enforced)"
     group: registry
     mode: enforced
+    selftest_inputs: [".github/scripts/check-gates-not-deregistered.py"]
     selftest: |
       python3 .github/scripts/check-gates-not-deregistered.py --self-test
     run: |
@@ -1979,6 +2009,7 @@ gates:
     group: registry
     budget_seconds: 41
     mode: enforced
+    selftest_inputs: [".github/scripts/check-gate-script-registration.py"]
     selftest: |
       python3 .github/scripts/check-gate-script-registration.py --self-test
     run: |
@@ -2097,6 +2128,7 @@ gates:
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
     group: gitops
     mode: enforced
+    selftest_inputs: [".github/scripts/check-opa-sidecar-bundle-shape.py"]
     selftest: |
       python3 .github/scripts/check-opa-sidecar-bundle-shape.py --self-test
     min_subjects: 20   # 42 OPA sidecars today (2026-08-09)
@@ -2120,6 +2152,7 @@ gates:
     name: "ESO cert-reader grant covers what ExternalSecrets read (#2872, enforced)"
     group: gitops
     mode: enforced
+    selftest_inputs: [".github/scripts/check-kafka-cert-reader-grant.py"]
     selftest: |
       python3 .github/scripts/check-kafka-cert-reader-grant.py --self-test
     run: |
@@ -2147,6 +2180,7 @@ gates:
     name: "an injected Quarkus extension bean has the config that activates it (#2872, enforced)"
     group: kotlin
     mode: enforced
+    selftest_inputs: [".github/scripts/check-extension-bean-config.py"]
     selftest: |
       python3 .github/scripts/check-extension-bean-config.py --self-test
     run: |
@@ -2191,6 +2225,7 @@ gates:
       a pass. Documented in four places and re-broken anyway — prose is not a control.
     review_after: '2027-02-21'
     min_subjects: 240
+    selftest_inputs: [".github/scripts/check-configproperty-supplied.py"]
     selftest: |
       python3 .github/scripts/check-configproperty-supplied.py --self-test
     run: |
@@ -2213,6 +2248,7 @@ gates:
     group: lint
     mode: enforced
     min_subjects: 55   # 114 measured 2026-09-01; half, so the fleet can shrink without a red
+    selftest_inputs: [".github/scripts/check-route-exports.py"]
     selftest: |
       python3 .github/scripts/check-route-exports.py --self-test
     run: |
@@ -2222,6 +2258,7 @@ gates:
     name: "compliance-page evidence citations (#2370, enforced)"
     group: registry
     mode: enforced
+    selftest_inputs: [".github/scripts/check-compliance-matrix.py"]
     selftest: |
       python3 .github/scripts/check-compliance-matrix.py --self-test
     run: |
@@ -2243,6 +2280,7 @@ gates:
     name: "OpenSSF Gold gap-doc evidence citations (#3884, enforced)"
     group: registry
     mode: enforced
+    selftest_inputs: [".github/scripts/check-openssf-gold-evidence.py"]
     selftest: |
       python3 .github/scripts/check-openssf-gold-evidence.py --self-test
     run: |
@@ -2573,6 +2611,7 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 165   # 339 measured 2026-09-01; half, so the fleet can shrink without a red
+    selftest_inputs: [".github/scripts/check-domain-purity.py"]
     selftest: |
       python3 .github/scripts/check-domain-purity.py --self-test
     run: |
@@ -2606,6 +2645,7 @@ gates:
     group: kotlin
     budget_seconds: 37
     mode: enforced
+    selftest_inputs: [".github/scripts/check-libs-annotations-implemented.py"]
     selftest: |
       python3 .github/scripts/check-libs-annotations-implemented.py --self-test
     run: |
@@ -2625,6 +2665,7 @@ gates:
     name: "pacticipant name is a module directory (Pact webhook contract)"
     group: api
     mode: enforced
+    selftest_inputs: [".github/scripts/check-pacticipant-matches-module.py"]
     selftest: |
       python3 .github/scripts/check-pacticipant-matches-module.py --self-test
     run: |
@@ -2693,6 +2734,7 @@ gates:
     name: "Pact provider replay + broker publication (issues #2338, #7621, enforced)"
     group: api
     mode: enforced
+    selftest_inputs: [".github/scripts/check-pact-provider-replay.py"]
     selftest: |
       python3 .github/scripts/check-pact-provider-replay.py --selftest
     run: |
@@ -2723,6 +2765,7 @@ gates:
     rationale: "A released package with no component key never enters released.tsv, so its release produces no SBOM, no provenance attestation and no VEX document — silently, since the release itself still succeeds. This gate makes that gap a finding instead of an absence nothing else can see."
     review_after: "2027-08-31"
     min_subjects: 60
+    selftest_inputs: [".github/scripts/check-release-evidence-coverage.py"]
     selftest: |
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
     run: |
@@ -2978,6 +3021,7 @@ gates:
     name: "Kafka topic existence (issue #2598, enforced)"
     group: data
     mode: enforced
+    selftest_inputs: [".github/scripts/check-kafka-topics-exist.py"]
     selftest: |
       python3 .github/scripts/check-kafka-topics-exist.py --selftest
     run: |
@@ -2995,6 +3039,7 @@ gates:
     group: data
     mode: enforced
     min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
+    selftest_inputs: [".github/scripts/check-flyway-default-datasource.py"]
     selftest: |
       python3 .github/scripts/check-flyway-default-datasource.py --selftest
     run: |
@@ -3007,6 +3052,7 @@ gates:
     name: "object store blobs migration (issue #3081, enforced)"
     group: data
     mode: enforced
+    selftest_inputs: [".github/scripts/check-object-store-blobs-migration.py"]
     selftest: |
       python3 .github/scripts/check-object-store-blobs-migration.py --selftest
     run: |
@@ -3092,6 +3138,7 @@ gates:
     min_subjects: 150   # 235 panel queries across 27 dashboards today (2026-08-19)
     rationale: "A panel over a metric nothing emits renders 'No data', which is indistinguishable from a metric that is merely quiet — so nobody opening the dashboard can tell it is broken."
     review_after: "2027-02-19"
+    selftest_inputs: [".github/scripts/check-dashboard-metric-emitted.py"]
     selftest: |
       python3 .github/scripts/check-dashboard-metric-emitted.py --selftest
     selftest_expect: pass
@@ -3109,6 +3156,7 @@ gates:
     min_subjects: 6   # 6 model_name routes in litellm-config.yaml today (2026-08-21)
     rationale: "An unpriced model is costed at $0, so the spend dashboards and the 25 USD/day AiFleetDailySpendHigh ceiling understate real cost with no error anywhere; and a price book that disagrees with the gateway's own declared cost means the control that meters and the control that alerts are enforcing two different numbers. AiSpendUnpriced detects the first at runtime, but only once the model carries traffic and only if somebody actions it — it fired for openai/gpt-oss-120b and nobody did."
     review_after: "2027-02-21"
+    selftest_inputs: [".github/scripts/check-llm-price-book.py"]
     selftest: |
       python3 .github/scripts/check-llm-price-book.py --selftest
     selftest_expect: pass
@@ -3122,6 +3170,7 @@ gates:
     min_subjects: 80   # 115 alert rules in gitops PrometheusRule CRs today (2026-08-19)
     rationale: "A critical money-path alert that cannot fire reads exactly like a healthy one; nothing in Prometheus, promtool or Alertmanager distinguishes them."
     review_after: "2027-02-19"
+    selftest_inputs: [".github/scripts/check-alert-metric-emitted.py"]
     selftest: |
       python3 .github/scripts/check-alert-metric-emitted.py --selftest
     selftest_expect: pass
@@ -3143,6 +3192,7 @@ gates:
     mode: enforced
     rationale: "A money-path event topic audit-service is not subscribed to, not attributed for, or has no Read ACL on writes nothing to the tamper-evident trail and raises no error anywhere — and audit_entries is append-only with source_service chain-hashed into record_hash, so neither the missing row nor a wrong attribution can be repaired afterwards."
     review_after: "2027-02-20"
+    selftest_inputs: [".github/scripts/check-audit-money-path-subscription.py"]
     selftest: |
       python3 .github/scripts/check-audit-money-path-subscription.py --root . --selftest
     selftest_expect: pass
@@ -3186,6 +3236,7 @@ gates:
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
     mode: enforced
+    selftest_inputs: [".github/scripts/check-kafka-acl-coverage.py"]
     selftest: |
       python3 .github/scripts/check-kafka-acl-coverage.py --selftest
     run: |
@@ -3205,6 +3256,7 @@ gates:
     rationale: "A service whose outbox producer reads KAFKA_BOOTSTRAP_SERVERS falls through to SmallRye's bare localhost:9092 default when its Deployment omits the env var — the pod stays Ready and only the reactive-messaging channel's own readiness probe (or a hand-read log) shows the outbox dispatcher parking every event DEAD after retry exhaustion (#4701)."
     review_after: "2027-02-19"
     min_subjects: 30   # 42 Kafka-using services checked today (2026-08-19)
+    selftest_inputs: [".github/scripts/check-kafka-deployment-wiring.py"]
     selftest: |
       python3 .github/scripts/check-kafka-deployment-wiring.py --selftest
     run: |
@@ -3227,6 +3279,7 @@ gates:
     rationale: "A migration whose PR merges after a higher-numbered sibling has already been applied live crashes the service on every boot ('Detected resolved migration not applied to database: N') — each PR's own CI ran green against its own base and could not see the other, per this repo's own 'PR green is about the base, not main' trap (#5628, security-scanner's 4h+ outage)."
     review_after: "2027-02-19"
     min_subjects: 250   # 350 migrations across 53 services checked today (2026-08-19)
+    selftest_inputs: [".github/scripts/check-flyway-version-commit-order.py"]
     selftest: |
       python3 .github/scripts/check-flyway-version-commit-order.py --selftest
     run: |
@@ -3297,6 +3350,7 @@ gates:
     verified: "2026-08-16 — producer self-test and enforced PR-diff mode pass"
     when: pull_request
     needs_base: required
+    selftest_inputs: ["openbank-infra/scripts/check-db-migration.py"]
     selftest: python3 openbank-infra/scripts/check-db-migration.py --self-test
     selftest_expect: pass
     run: |
@@ -3580,6 +3634,7 @@ gates:
     name: "threat-model coverage (ADR-0030 D2)"
     group: security
     mode: enforced
+    selftest_inputs: ["openbank-infra/scripts/check-threat-models.py"]
     selftest: python3 openbank-infra/scripts/check-threat-models.py --self-test
     selftest_expect: pass
     run: |
@@ -3599,6 +3654,7 @@ gates:
     mode: enforced
     when: pull_request
     needs_base: required
+    selftest_inputs: ["openbank-infra/scripts/check-threat-model-diff.py"]
     selftest: python3 openbank-infra/scripts/check-threat-model-diff.py --self-test
     selftest_expect: pass
     run: |
@@ -3654,6 +3710,7 @@ gates:
     name: "Compliance-page evidence (issue #2370, enforced)"
     group: security
     mode: enforced
+    selftest_inputs: [".github/scripts/check-compliance-evidence.py"]
     selftest: |
       python3 .github/scripts/check-compliance-evidence.py --selftest
     run: |
@@ -3664,6 +3721,7 @@ gates:
     group: security
     mode: enforced
     min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
+    selftest_inputs: [".github/scripts/check-scheduler-exercised.py"]
     selftest: |
       python3 .github/scripts/check-scheduler-exercised.py --selftest
     run: |
@@ -4410,6 +4468,7 @@ gates:
       statements of one fan-out for exactly that reason and no gate could see it.
     review_after: "2027-02-28"
     min_subjects: 40   # 58 released components with a release-please component today (2026-08-30)
+    selftest_inputs: [".github/scripts/check-vex-overlay-coverage.py"]
     selftest: |
       python3 .github/scripts/check-vex-overlay-coverage.py --self-test
     run: |
@@ -4568,9 +4627,13 @@ gates:
   - id: argocd-sync-integrity-unit-test
     name: "the ArgoCD Synced-but-applying-nothing detector still classifies, and is still wired (#6371, enforced)"
     group: gitops
+    budget_seconds: 30   # 2.0-2.8s locally over 3 runs; no CI observation yet, so set
+                        # generously rather than risk a false red on a slower runner.
+                        # Retune from the warehouse once it has run.
     mode: enforced
     rationale: "ArgoCD reported Synced/Healthy on an app it had applied nothing to for three weeks, and no metric exposes the condition that recorded it; the replacement detector runs in-cluster, so only this gate can notice it being unwired or its comparison being broken."
     review_after: "2027-02-23"
+    selftest_inputs: [".github/scripts/check-argocd-sync-integrity.py"]
     selftest: python3 .github/scripts/check-argocd-sync-integrity.py --self-test
     selftest_expect: pass
     run: |
