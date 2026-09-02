@@ -105,6 +105,34 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(page.getByText(/AI AGENT/)).toBeVisible()
 })
 
+test('never paints an unavailable evidence bundle healthy', async ({ page }) => {
+  await page.unroute('**/api/test-intelligence')
+  await page.route('**/api/test-intelligence', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      schemaVersion: 1,
+      collectedAt: '1970-01-01T00:00:00.000Z',
+      components: [], contracts: [], mutations: [], performance: [], performanceHistory: [],
+      syntheticJourneys: [], clientExperiences: [], history: [], runHistory: [], testCases: [],
+      totals: {
+        components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0,
+        failingEvidence: 0, missingEvidence: 0, staleEvidence: 0,
+      },
+      warnings: ['test-intelligence.json is not bundled'],
+    }),
+  }))
+
+  await page.goto('/system/tests')
+
+  await expect(page.locator('.ti-health')).toContainText(/NEEDS ATTENTION\s*1\s*signal to inspect/)
+  await expect(page.getByText('EVIDENCE HEALTHY', { exact: true })).not.toBeVisible()
+  const assurance = page.getByRole('region', { name: 'Testing assurance map' })
+  await expect(assurance.getByRole('button', { name: /CI evidence/ })).toContainText('unknown')
+  await expect(assurance.getByRole('button', { name: /Testcontainers runtime/ })).toContainText('unknown')
+  await expect(assurance).not.toContainText('passed')
+})
+
 test('keeps the evidence flow usable at the mobile breakpoint', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/system/tests')

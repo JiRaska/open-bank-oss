@@ -25,6 +25,18 @@ type Stage = {
   tone: string
 }
 
+export function testIntelligenceCollectionUnavailable(
+  report?: Pick<TestIntelligenceReport, 'totals'> | null,
+): boolean {
+  return Boolean(report && report.totals.components === 0)
+}
+
+export function testIntelligenceCollectionNeedsAttention(
+  report?: Pick<TestIntelligenceReport, 'totals' | 'warnings'> | null,
+): boolean {
+  return testIntelligenceCollectionUnavailable(report) || Boolean(report?.warnings.length)
+}
+
 export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceReport | null }) {
   const { t } = useLanguage()
   const [selected, setSelected] = useState<StageId>('prove')
@@ -95,7 +107,8 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
   const crossLayerAttention = (report?.performance ?? []).filter(item => item.state !== 'passed' || item.plan?.blocker).length
     + (report?.syntheticJourneys ?? []).filter(item => item.status === 'planned' || item.state !== 'passed').length
     + (report?.clientExperiences ?? []).reduce((sum, client) => sum + (client.rum.platforms?.filter(platform => platform.runtime !== 'passed').length ?? 0), 0)
-  const attention = componentAttention + crossLayerAttention
+  const collectionAttention = testIntelligenceCollectionNeedsAttention(report) ? 1 : 0
+  const attention = componentAttention + crossLayerAttention + collectionAttention
   const activeJourneys = report?.syntheticJourneys.filter(item => item.status === 'active').length ?? 0
   const runtimeProofs = report?.components.reduce((sum, component) => sum + component.testInfrastructure.observed.filter(event => event.lifecycle === 'started').length, 0) ?? 0
   const traceProofs = report?.components.filter(component => component.evidence.some(evidence => evidence.kind === 'trace' && evidence.state === 'passed')).length ?? 0
@@ -112,7 +125,9 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
       </div>
       <div className={`ti-health ${attention ? 'attention' : ''}`}><i />
         <span>{report ? (attention ? t('VYŽADUJE POZORNOST', 'NEEDS ATTENTION') : t('DŮKAZY ZDRAVÉ', 'EVIDENCE HEALTHY')) : t('ČEKÁM NA DATA', 'AWAITING DATA')}</span>
-        <strong>{report ? `${attention}` : '—'}</strong><small>{t('signálů k prověření', 'signals to inspect')}</small>
+        <strong>{report ? `${attention}` : '—'}</strong><small>{attention === 1
+          ? t('signál k prověření', 'signal to inspect')
+          : t('signálů k prověření', 'signals to inspect')}</small>
       </div>
     </header>
 
