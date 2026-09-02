@@ -63,6 +63,8 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     // Consumer-driven contract for the ledger-service postJournal call (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
+    // Admin UI pending-approval contract: generated consumer pact + live HTTP provider replay.
+    testImplementation(libs.pact.provider)
 }
 
 // Coverage floor (ADR-0020, ratchet-only — issue #321: billing was the only money-path
