@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.0...delegation-service-v0.13.1) (2026-09-02)
+
+
+### Security
+
+* **delegation:** make lifecycle transitions monotonic ([#8232](https://github.com/JiRaska/open-bank-oss/issues/8232)) ([da16bee](https://github.com/JiRaska/open-bank-oss/commit/da16beed4acd537dddef4bd6fd070733665bd69d))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.12.0...delegation-service-v0.13.0) (2026-09-02)
 
 
