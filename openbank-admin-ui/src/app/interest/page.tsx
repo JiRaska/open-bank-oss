@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { AlertTriangle, ShieldAlert, TrendingUp, Search, CheckCircle2, RefreshCw, Percent, Calendar } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -52,7 +52,6 @@ export default function InterestPage() {
     kind: AccessBlock
     snapshot: AccrualRecord[] | null
   } | null>(null)
-  const reloadInFlight = useRef(false)
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { data, loading, unavailable, waking, reload } = useServiceResource<AccrualRecord[]>(
     svcUrl('interest-service', '/api/v1/interest/accruals'),
@@ -72,16 +71,11 @@ export default function InterestPage() {
   const settledFailure = unavailable !== null && !loading && !waking
   const showingRetainedSnapshot = settledFailure && visibleSnapshot
 
-  useEffect(() => {
-    if (!loading) reloadInFlight.current = false
-  }, [data, loading, unavailable])
-
   const requestReload = useCallback(() => {
-    if (loading || reloadInFlight.current) return
+    if (loading) return
     setRetainedAccessBlock(currentAccessBlock
       ? { kind: currentAccessBlock, snapshot: data }
       : null)
-    reloadInFlight.current = true
     reload()
   }, [currentAccessBlock, data, loading, reload])
 
