@@ -51,7 +51,7 @@ ALTER TABLE domestic_delegated_spend_bindings
     ADD CONSTRAINT chk_domestic_delegated_spend_contract
         CHECK (
             schema_version = 1
-            AND aggregate_type = 'DelegationSpendReservation'
+            AND upper(aggregate_type) = 'DELEGATIONSPENDRESERVATION'
             AND source_service = 'delegation-service'
             AND resource_type = 'ACCOUNT'
             AND operation_type = 'DOMESTIC_PAYMENT'

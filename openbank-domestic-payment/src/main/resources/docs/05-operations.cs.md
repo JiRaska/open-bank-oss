@@ -89,6 +89,26 @@ Symptom: každé založení vrací `RECEIVED`, AML případy s `SCREENING_UNAVAI
 2. Zkontrolovat dostupnost Kafky a logy dispatcheru (`DomesticPaymentOutboxDispatcher`).
 3. Prohlédnout `FAILED` řádky: `SELECT event_id, last_error, attempt_count FROM domestic_payment_outbox WHERE status='FAILED';` — publish je obalený circuit breakerem, takže výpadek Kafky ho rozpojí a samo se zotaví.
 
+### Aktivace a obnova delegovaného utrácení
+
+Receiver delegovaného utrácení je záměrně ve výchozím stavu vypnutý. Aktivujte jej až poté, co
+consumer `openbank.delegation.spend-reservation-state` obnoví projekci od `earliest`, lag je nulový
+a projekce po terminální revizi následované opožděnou rezervovanou revizí zůstane terminální. U
+kompaktovaného proudu se aplikuje nejvyšší `reservationVersion` z payloadu, nikdy poslední pozorovaný
+záznam.
+
+Při přechodu na request fingerprint nejprve zastavte vytváření plateb, nechte doběhnout maximální
+timeout requestu, přepněte všechny writery na zdravý nový image a teprve pak tvorbu znovu otevřete.
+Starý nullable fingerprint záměrně vrací `409 IDEMPOTENCY_KEY_REUSED`; není autoritou pro replay.
+U nejednoznačného requestu nevyzývejte klienta k novému klíči — nejprve ověřte stav platby a proveďte
+reconciliation.
+
+Finalizer zapínejte jako poslední. Smí uvolnit jen binding, který domestic-payment atomicky označil
+za neexistující; timeouty a neznámé výsledky zůstávají rezervované. Při zapnutí musí existovat jeho
+workflow-liveness signál. Pro rollback zastavte nové delegované vytvoření, vyčistěte/reconcileujte
+všechny rezervované bindingy a outbox záznamy a až pak vypněte writer — nikdy neobnovujte Redis ani
+neprokázaný legacy fingerprint jako autoritu requestu.
+
 ### Nelegální přechod stavu (409)
 
 Volající zkusil přechod, který stavový automat zakazuje (viz [03 — API](./03-api.md)). Není retryovatelné; oprav cílový stav volajícího.

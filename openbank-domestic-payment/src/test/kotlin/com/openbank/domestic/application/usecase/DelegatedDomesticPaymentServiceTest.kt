@@ -64,17 +64,18 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `missing local projection returns the future 425 semantic without touching payment storage`() = runBlocking {
-        coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns null
+    fun `missing local projection returns the future 425 semantic without touching payment storage`(): Unit =
+        runBlocking {
+            coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns null
 
-        val result = service.createDelegatedPayment(RESERVATION_ID, command())
+            val result = service.createDelegatedPayment(RESERVATION_ID, command())
 
-        assertThat(result).isEqualTo(DelegatedDomesticPaymentResult.ReservationProjectionPending)
-        coVerify(exactly = 0) { paymentRepository.saveDelegated(any(), any(), any(), any()) }
-    }
+            assertThat(result).isEqualTo(DelegatedDomesticPaymentResult.ReservationProjectionPending)
+            coVerify(exactly = 0) { paymentRepository.saveDelegated(any(), any(), any(), any()) }
+        }
 
     @Test
-    fun `permanent absence tombstone returns the future 410 semantic`() = runBlocking {
+    fun `permanent absence tombstone returns the future 410 semantic`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.FINALIZED_ABSENT,
         )
@@ -86,7 +87,7 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `debtor coordinates resolving to another account fail closed without creation`() = runBlocking {
+    fun `debtor coordinates resolving to another account fail closed without creation`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.PENDING,
         )
@@ -102,7 +103,7 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `reserved account owned by another party fails closed without creation`() = runBlocking {
+    fun `reserved account owned by another party fails closed without creation`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.PENDING,
         )
@@ -117,7 +118,7 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `unavailable account authority is retryable and has no creation side effects`() = runBlocking {
+    fun `unavailable account authority is retryable and has no creation side effects`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.PENDING,
         )
@@ -131,7 +132,7 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `unavailable account owner authority is retryable and has no creation side effects`() = runBlocking {
+    fun `unavailable account owner authority is retryable and has no creation side effects`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.PENDING,
         )
@@ -144,48 +145,49 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `projection supplies trusted tuple and debit owner even when command attempts to override it`() = runBlocking {
-        val projected = binding(DelegatedSpendBindingState.PENDING)
-        val capturedPayment = slot<DomesticPayment>()
-        val capturedDebitOwner = slot<UUID>()
-        coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns projected
-        coEvery {
-            paymentRepository.saveDelegated(
-                capture(capturedPayment),
-                any(),
-                any(),
-                capture(capturedDebitOwner),
+    fun `projection supplies trusted tuple and debit owner even when command attempts to override it`(): Unit =
+        runBlocking {
+            val projected = binding(DelegatedSpendBindingState.PENDING)
+            val capturedPayment = slot<DomesticPayment>()
+            val capturedDebitOwner = slot<UUID>()
+            coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns projected
+            coEvery {
+                paymentRepository.saveDelegated(
+                    capture(capturedPayment),
+                    any(),
+                    any(),
+                    capture(capturedDebitOwner),
+                )
+            } answers {
+                val candidate = capturedPayment.captured
+                DelegatedPaymentSaveOutcome.Replayed(candidate.copy(id = UUID.randomUUID()))
+            }
+            val maliciousDelegation = UUID.randomUUID()
+            val maliciousReservation = UUID.randomUUID()
+            val maliciousActor = UUID.randomUUID()
+            val maliciousAccount = UUID.randomUUID()
+
+            val result = service.createDelegatedPayment(
+                RESERVATION_ID,
+                command().copy(
+                    actorId = maliciousActor,
+                    actorScope = "attacker-controlled",
+                    delegationId = maliciousDelegation,
+                    reservationId = maliciousReservation,
+                    debtorAccountId = maliciousAccount,
+                ),
             )
-        } answers {
-            val candidate = capturedPayment.captured
-            DelegatedPaymentSaveOutcome.Replayed(candidate.copy(id = UUID.randomUUID()))
+
+            assertThat(result).isInstanceOf(DelegatedDomesticPaymentResult.Accepted::class.java)
+            assertThat(capturedPayment.captured.initiatedByPartyId).isEqualTo(GRANTEE_ID)
+            assertThat(capturedPayment.captured.delegationId).isEqualTo(DELEGATION_ID)
+            assertThat(capturedPayment.captured.reservationId).isEqualTo(RESERVATION_ID)
+            assertThat(capturedPayment.captured.debtorAccountId).isEqualTo(ACCOUNT_ID)
+            assertThat(capturedDebitOwner.captured).isEqualTo(GRANTOR_ID)
+            assertThat(capturedPayment.captured.transferScope).isEqualTo(DomesticTransferScope.INTERNAL_CLIENT)
+            coVerify(exactly = 1) { accountLookup.findAccountIdByIban(DEBTOR_IBAN) }
+            coVerify(exactly = 1) { accountLookup.findPartyByAccountId(ACCOUNT_ID) }
         }
-        val maliciousDelegation = UUID.randomUUID()
-        val maliciousReservation = UUID.randomUUID()
-        val maliciousActor = UUID.randomUUID()
-        val maliciousAccount = UUID.randomUUID()
-
-        val result = service.createDelegatedPayment(
-            RESERVATION_ID,
-            command().copy(
-                actorId = maliciousActor,
-                actorScope = "attacker-controlled",
-                delegationId = maliciousDelegation,
-                reservationId = maliciousReservation,
-                debtorAccountId = maliciousAccount,
-            ),
-        )
-
-        assertThat(result).isInstanceOf(DelegatedDomesticPaymentResult.Accepted::class.java)
-        assertThat(capturedPayment.captured.initiatedByPartyId).isEqualTo(GRANTEE_ID)
-        assertThat(capturedPayment.captured.delegationId).isEqualTo(DELEGATION_ID)
-        assertThat(capturedPayment.captured.reservationId).isEqualTo(RESERVATION_ID)
-        assertThat(capturedPayment.captured.debtorAccountId).isEqualTo(ACCOUNT_ID)
-        assertThat(capturedDebitOwner.captured).isEqualTo(GRANTOR_ID)
-        assertThat(capturedPayment.captured.transferScope).isEqualTo(DomesticTransferScope.INTERNAL_CLIENT)
-        coVerify(exactly = 1) { accountLookup.findAccountIdByIban(DEBTOR_IBAN) }
-        coVerify(exactly = 1) { accountLookup.findPartyByAccountId(ACCOUNT_ID) }
-    }
 
     private fun assertNoCreationSideEffects() {
         coVerify(exactly = 0) { paymentRepository.findByIdempotencyKey(any()) }
