@@ -277,9 +277,17 @@ change_requirements:
     requires:
       - "spec.backup.barmanObjectStore.destinationPath is set, OR the cluster carries
          openbank.io/backup-exempt-reason with a non-empty reason"
-    gate: cnpg-backup-declared
-    enforced: advisory
-    target_enforce_date: "2026-09-15"
+    gate: cnpg-backup-declared-gate
+    # GRADUATED EARLY, 13 days before its 2026-09-15 date, because the same PR made the gate
+    # able to fail at all. It carried `mode: enforced` from the day it was added (#4993) while
+    # invoking its checker without --enforce, so a finding exited 0 and the gate was green by
+    # construction. Leaving this record on `advisory` after fixing that would have reproduced,
+    # in the very PR that reports it, the drift the sibling entry below documents.
+    #
+    # The graduation condition is met and was measured, not assumed: 0 findings across all 61
+    # CNPG Cluster manifests on 2026-09-02, and the gate is falsifiable — stripping the
+    # `backup:` block from a real cluster manifest takes it red.
+    enforced: enforced
     ci_producer: "openbank-infra/scripts/check-cnpg-backup-declared.py"
     # The sibling of db_backup_association, for the case that rule CANNOT see. Its producer
     # scans for clusters that DECLARE a barmanObjectStore and skips the rest (`if not dest:
