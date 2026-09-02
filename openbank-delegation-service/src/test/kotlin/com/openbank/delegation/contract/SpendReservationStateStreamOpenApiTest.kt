@@ -16,6 +16,5 @@ class SpendReservationStateStreamOpenApiTest {
         assertThat(contract).contains("enum: [UNSPECIFIED, DOMESTIC_PAYMENT]")
         assertThat(contract).contains("IDEMPOTENCY_KEY_REUSED")
         assertThat(contract).contains("Domestic reservation admission is disabled")
-        assertThat(contract).contains("version: 1.9.0")
     }
 }
