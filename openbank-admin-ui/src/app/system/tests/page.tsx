@@ -14,7 +14,9 @@ import { filterTestCases, type TestTriageFilter } from '@/lib/test-intelligence-
 import type {
   ComponentTestPosture, EvidenceKind, EvidenceState, TestIntelligenceReport,
 } from '@/lib/types/test-intelligence'
-import { TestIntelligenceFlow } from '@/components/testing/TestIntelligenceFlow'
+import {
+  TestIntelligenceFlow, testIntelligenceCollectionUnavailable,
+} from '@/components/testing/TestIntelligenceFlow'
 import { TestAgentPanel } from '@/components/testing/TestAgentPanel'
 import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
 
@@ -53,10 +55,11 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
  */
 function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
   const { t } = useLanguage()
+  const collectionUnavailable = testIntelligenceCollectionUnavailable(report)
   const syntheticActive = report.syntheticJourneys.filter(item => item.status === 'active')
   const syntheticState = aggregateEvidenceState(syntheticActive.map(item => item.state))
   const runtimeRows = report.components.filter(component => component.testInfrastructure.declared.length > 0)
-  const runtimeState: EvidenceState = runtimeRows.some(component => {
+  const runtimeState: EvidenceState = collectionUnavailable ? 'unknown' : runtimeRows.length === 0 ? 'not-run' : runtimeRows.some(component => {
     const observed = component.testInfrastructure.observed
     return observed.filter(item => item.lifecycle === 'stopped').length < observed.filter(item => item.lifecycle === 'started').length
   }) ? 'unknown' : runtimeRows.some(component => component.testInfrastructure.observed.length === 0) ? 'unknown' : 'passed'
@@ -65,7 +68,8 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
     clientEvidence.flatMap(client => [...client.evidence.map(item => item.state), client.rum.state]),
     'not-run',
   )
-  const ciState: EvidenceState = report.totals.failingEvidence > 0 ? 'failed'
+  const ciState: EvidenceState = collectionUnavailable ? 'unknown'
+    : report.totals.failingEvidence > 0 ? 'failed'
     : (report.totals.unresolvedEvidence ?? report.totals.unknownEvidence ?? 0) > 0 ? 'unknown'
       : report.totals.missingEvidence > 0 || report.totals.staleEvidence > 0 ? 'stale' : 'passed'
   const cards: { tab: Tab; title: string; eyebrow: string; state: EvidenceState; detail: string }[] = [
