@@ -7,7 +7,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
   await page.route('**/api/test-intelligence', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
     schemaVersion: 1, collectedAt: '2026-08-22T12:00:00.000Z',
-    components: [{ component: 'openbank-ledger-service', released: true, moneyPath: true, evidence: [{ kind: 'integration', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'JUnit:test', environment: 'ci', counts: { discovered: 12, executed: 12, passed: 12, failed: 0, skipped: 0, errors: 0 } }, { kind: 'trace', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'trace-contract:ledger-posting', environment: 'ci', detail: '1 executed marker(s); JUnit suite passed', run: { id: '4242', attempt: 1, commit: '1234567890abcdef', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/4242', observedAt: '2026-08-22T11:00:00.000Z' } }, { kind: 'e2e', state: 'failed', observedAt: '2026-08-22T11:00:00.000Z', source: 'test-intelligence-run:v1', environment: 'ci', counts: { discovered: 2, executed: 2, passed: 1, failed: 1, skipped: 0, errors: 0 }, diagnostics: [{ kind: 'playwright-report', name: 'playwright-report-4242-a1', url: 'https://example.test/run/4242#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true }] }], coverage: { state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'kover.xml', lines: { covered: 80, missed: 20, percentage: 80 }, branches: { covered: 6, missed: 4, percentage: 60 } }, testInfrastructure: { declared: ['postgres'], observed: [{ resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'started', observedAt: '2026-08-22T10:59:00.000Z' }, { resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'stopped', observedAt: '2026-08-22T11:01:00.000Z' }] } }],
+    components: [{ component: 'openbank-ledger-service', released: true, moneyPath: true, evidence: [{ kind: 'integration', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'JUnit:test', environment: 'ci', counts: { discovered: 12, executed: 12, passed: 12, failed: 0, skipped: 0, errors: 0 } }, { kind: 'contract', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'Pact:consumer', environment: 'ci' }, { kind: 'contract', state: 'failed', observedAt: '2026-08-22T11:01:00.000Z', source: 'Pact:provider', environment: 'ci' }, { kind: 'trace', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'trace-contract:ledger-posting', environment: 'ci', detail: '1 executed marker(s); JUnit suite passed', run: { id: '4242', attempt: 1, commit: '1234567890abcdef', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/4242', observedAt: '2026-08-22T11:00:00.000Z' } }, { kind: 'e2e', state: 'failed', observedAt: '2026-08-22T11:00:00.000Z', source: 'test-intelligence-run:v1', environment: 'ci', counts: { discovered: 2, executed: 2, passed: 1, failed: 1, skipped: 0, errors: 0 }, diagnostics: [{ kind: 'playwright-report', name: 'playwright-report-4242-a1', url: 'https://example.test/run/4242#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true }] }], coverage: { state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'kover.xml', lines: { covered: 80, missed: 20, percentage: 80 }, branches: { covered: 6, missed: 4, percentage: 60 } }, testInfrastructure: { declared: ['postgres'], observed: [{ resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'started', observedAt: '2026-08-22T10:59:00.000Z' }, { resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'stopped', observedAt: '2026-08-22T11:01:00.000Z' }] } }],
     contracts: [], mutations: [], requiredControls: [{ id: 'openbank-ledger-service:mutation', component: 'openbank-ledger-service', kind: 'mutation', state: 'not-run', observedAt: null, reason: 'Mutation score must meet the fleet threshold (70%).', blocker: 'No retained immutable mutation evidence.' }],
     platformCapabilities: [{ id: 'independent-probes', title: 'Independent multi-region probes', state: 'external-blocked', blocker: 'No separately operated probe fleet is provisioned.', evidence: 'issue-7207' }],
     performance: [{ id: 'money-path-smoke', component: null, state: 'passed', observedAt: '2026-08-22T10:00:00.000Z', source: 'perf/k6/money-path-smoke.js', thresholds: 1, metrics: { p95Ms: 220.4, errorRatePercent: 0.2, checkPassRatePercent: 99.8, requests: 150 } }], performanceHistory: [],
@@ -36,7 +36,10 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(page.getByRole('region', { name: /Testing assurance map/ })).toBeVisible()
   await expect(page.getByText('Required-control gaps')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Deterministic required controls' })).toContainText('openbank-ledger-service:mutation')
-  await expect(page.getByRole('region', { name: 'Platform capability boundaries' })).toContainText('No separately operated probe fleet is provisioned.')
+  const capabilityMatrix = page.getByRole('region', { name: 'Platform capability boundaries' })
+  await expect(capabilityMatrix).toContainText('Platform capability boundary matrix')
+  await expect(capabilityMatrix).toContainText('No separately operated probe fleet is provisioned.')
+  await expect(capabilityMatrix.getByRole('columnheader', { name: 'Boundary / blocker' })).toBeVisible()
   // The queue must expose absent layers as evidence gaps instead of silently
   // treating the fixture's missing simulation evidence as a pass.
   await expect(page.getByText('Deterministic simulations', { exact: true })).toBeVisible()
@@ -52,6 +55,8 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await page.getByRole('button', { name: /AI finds relationships/ }).click()
   await expect(page.getByText('AI cannot rewrite evidence, skip a gate or approve its own remediation.')).toBeVisible()
   await expect(page.getByRole('cell', { name: /openbank-ledger-serviceMONEY/ })).toBeVisible()
+  const componentMatrix = page.getByRole('region', { name: 'Component evidence matrix' })
+  await expect(componentMatrix.locator('td[data-component="openbank-ledger-service"][data-evidence-kind="contract"]')).toHaveText('failed')
   await page.getByRole('button', { name: /Běhy|Execution/ }).click()
   await expect(page.getByText('trace', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'trace-contract:ledger-posting' })).toHaveAttribute('href', 'https://example.test/run/4242')
@@ -98,6 +103,34 @@ test('renders the animated evidence system and consolidates test dimensions', as
   await expect(page.getByText('Mobile RUM is opt-in and its runtime signal is independent of CI.')).toBeVisible()
   await expect(page.getByText('12 sampled traces · 2 error span-counter increments')).toBeVisible()
   await expect(page.getByText(/AI AGENT/)).toBeVisible()
+})
+
+test('never paints an unavailable evidence bundle healthy', async ({ page }) => {
+  await page.unroute('**/api/test-intelligence')
+  await page.route('**/api/test-intelligence', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      schemaVersion: 1,
+      collectedAt: '1970-01-01T00:00:00.000Z',
+      components: [], contracts: [], mutations: [], performance: [], performanceHistory: [],
+      syntheticJourneys: [], clientExperiences: [], history: [], runHistory: [], testCases: [],
+      totals: {
+        components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0,
+        failingEvidence: 0, missingEvidence: 0, staleEvidence: 0,
+      },
+      warnings: ['test-intelligence.json is not bundled'],
+    }),
+  }))
+
+  await page.goto('/system/tests')
+
+  await expect(page.locator('.ti-health')).toContainText(/NEEDS ATTENTION\s*1\s*signal to inspect/)
+  await expect(page.getByText('EVIDENCE HEALTHY', { exact: true })).not.toBeVisible()
+  const assurance = page.getByRole('region', { name: 'Testing assurance map' })
+  await expect(assurance.getByRole('button', { name: /CI evidence/ })).toContainText('unknown')
+  await expect(assurance.getByRole('button', { name: /Testcontainers runtime/ })).toContainText('unknown')
+  await expect(assurance).not.toContainText('passed')
 })
 
 test('keeps the evidence flow usable at the mobile breakpoint', async ({ page }) => {

@@ -3,13 +3,13 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
-  CreditCard, Search, RefreshCw, CheckCircle2, XCircle, Clock, ChevronRight, Plus, ShieldCheck,
+  CreditCard, Search, RefreshCw, CheckCircle2, XCircle, Clock, ChevronRight, Plus, ShieldCheck, X,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { hasPermission } from '@/lib/auth/roles'
@@ -52,6 +52,8 @@ export default function CardsPage() {
   const [visible, setVisible] = useState(PAGE_SIZE)
   const [pending, setPending] = useState<{ card: Card; transition: CardTransition } | null>(null)
   const [issuing, setIssuing] = useState(false)
+  const cardsResultsRef = useRef<HTMLElement>(null)
+  const closeFocusOverrideRef = useRef<HTMLElement | null>(null)
 
   // Single graceful data path (admin-ui rule #1): the hook classifies a non-OK
   // BFF response and auto-wakes a scaled-to-zero pod (KEDA, ADR-0057) instead of
@@ -84,13 +86,23 @@ export default function CardsPage() {
 
   const page = filtered.slice(0, visible)
   const highlightedCard = cards.find(c => c.id === highlighted) ?? null
+  const hasFilters = search.trim().length > 0 || statusFilter !== ALL || typeFilter !== ALL
 
   const open = useCallback((cardId: string) => router.push(`/cards/${cardId}`), [router])
+  const clearFilters = () => {
+    setSearch('')
+    setStatusFilter(ALL)
+    setTypeFilter(ALL)
+    setVisible(PAGE_SIZE)
+  }
 
   const onSelectTransition = (card: Card, tr: CardTransition) => {
     setHighlighted(card.id)
     ops.setFeedback(null)
-    if (tr.irreversible) setPending({ card, transition: tr })
+    if (tr.irreversible) {
+      closeFocusOverrideRef.current = null
+      setPending({ card, transition: tr })
+    }
     else void ops.runTransition(card, tr)
   }
 
@@ -124,7 +136,7 @@ export default function CardsPage() {
               }}
             />
             {canIssue && (
-              <button className="btn btn-primary btn-sm" onClick={() => { ops.setFeedback(null); setIssuing(true) }}>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => { ops.setFeedback(null); setIssuing(true) }}>
                 <Plus size={13} aria-hidden="true" /> {t('Vydat kartu', 'Issue a card')}
               </button>
             )}
@@ -146,29 +158,30 @@ export default function CardsPage() {
 
         <CardLifecycleMap current={highlightedCard?.status} />
 
-        <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />
+        {!pending && <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />}
 
         {/* Table */}
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'grid', gap: '10px' }}>
             <div style={{ position: 'relative' }}>
-              <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
               <input value={search} onChange={e => { setSearch(e.target.value); setVisible(PAGE_SIZE) }}
                 placeholder={t('Hledat podle PAN, držitele nebo produktu…', 'Search by PAN, cardholder or product…')}
                 aria-label={t('Hledat karty', 'Search cards')}
+                aria-controls="cards-results"
                 style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
               <div role="group" aria-label={t('Filtr podle stavu', 'Filter by status')} style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                <button type="button" aria-pressed={statusFilter === ALL} style={chip(statusFilter === ALL)} onClick={() => { setStatusFilter(ALL); setVisible(PAGE_SIZE) }}>
+                <button type="button" aria-controls="cards-results" aria-pressed={statusFilter === ALL} style={chip(statusFilter === ALL)} onClick={() => { setStatusFilter(ALL); setVisible(PAGE_SIZE) }}>
                   {t('Vše', 'All')} · {cards.length}
                 </button>
                 {CARD_STATUSES.filter(s => countBy(s) > 0).map(s => {
                   const c = cardStatusColor(s)
                   const active = statusFilter === s
                   return (
-                    <button key={s} type="button" aria-pressed={active} onClick={() => { setStatusFilter(active ? ALL : s); setVisible(PAGE_SIZE) }}
+                    <button key={s} type="button" aria-controls="cards-results" aria-pressed={active} onClick={() => { setStatusFilter(active ? ALL : s); setVisible(PAGE_SIZE) }}
                       style={{ ...chip(active), background: active ? c.bg : 'var(--surface-2)', color: active ? c.text : 'var(--text-secondary)', borderColor: active ? c.border : 'var(--border)' }}>
                       {s} · {countBy(s)}
                     </button>
@@ -179,23 +192,36 @@ export default function CardsPage() {
                 {CARD_TYPES.filter(ct => cards.some(c => c.cardType === ct)).map(ct => {
                   const active = typeFilter === ct
                   return (
-                    <button key={ct} type="button" aria-pressed={active} style={chip(active)} onClick={() => { setTypeFilter(active ? ALL : ct); setVisible(PAGE_SIZE) }}>
+                    <button key={ct} type="button" aria-controls="cards-results" aria-pressed={active} style={chip(active)} onClick={() => { setTypeFilter(active ? ALL : ct); setVisible(PAGE_SIZE) }}>
                       {ct}
                     </button>
                   )
                 })}
               </div>
+              {hasFilters && <button type="button" className="btn btn-ghost btn-sm" onClick={clearFilters} aria-controls="cards-results" aria-label={t('Vyčistit všechny filtry karet', 'Clear all card filters')}>
+                <X size={13} aria-hidden="true" /> {t('Vyčistit filtry', 'Clear filters')}
+              </button>}
             </div>
+            <p role="status" aria-live="polite" style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-tertiary)' }}>
+              {hasFilters
+                ? t(`${filtered.length} karet odpovídá filtrům`, `${filtered.length} cards match the filters`)
+                : t(`${cards.length} karet v portfoliu`, `${cards.length} cards in the portfolio`)}
+            </p>
           </div>
 
-          {loading ? (
+          <section
+            ref={cardsResultsRef}
+            id="cards-results"
+            tabIndex={-1}
+            aria-label={t('Výsledky karet', 'Card results')}
+          >
+          {unavailable && <DataUnavailable kind={unavailable.kind} service={t('Card-issuance-service', 'Card-issuance-service')} feature={t('Karty', 'Cards')} lang={language} dense={cards.length > 0} />}
+          {loading && cards.length === 0 ? (
             <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} />
               <div>{t('Načítám karty…', 'Loading cards…')}</div>
             </div>
-          ) : unavailable ? (
-            <DataUnavailable kind={unavailable.kind} service={t('Card-issuance-service', 'Card-issuance-service')} feature={t('Karty', 'Cards')} lang={language} />
-          ) : filtered.length === 0 ? (
+          ) : unavailable && cards.length === 0 ? null : filtered.length === 0 ? (
             <DataUnavailable kind="no_data" feature={t('Karty', 'Cards')} lang={language}
               detail={cards.length === 0
                 ? t('Služba běží, zatím nebyly vydány žádné karty.', 'The service is running; no cards have been issued yet.')
@@ -261,13 +287,14 @@ export default function CardsPage() {
                   {t(`Zobrazeno ${page.length} z ${filtered.length}`, `Showing ${page.length} of ${filtered.length}`)}
                 </span>
                 {page.length < filtered.length && (
-                  <button className="btn btn-ghost btn-sm" onClick={() => setVisible(v => v + PAGE_SIZE)}>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setVisible(v => v + PAGE_SIZE)} aria-label={t('Načíst další karty', 'Load more cards')}>
                     {t('Načíst další', 'Load more')}
                   </button>
                 )}
               </div>
             </>
           )}
+          </section>
         </div>
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginTop: '14px', fontSize: '11.5px', color: 'var(--text-tertiary)' }}>
@@ -284,8 +311,16 @@ export default function CardsPage() {
           card={pending.card}
           transition={pending.transition}
           busy={ops.busy !== null}
+          feedback={ops.feedback}
+          closeFocusOverrideRef={closeFocusOverrideRef}
           onCancel={() => setPending(null)}
-          onConfirm={reason => void ops.runTransition(pending.card, pending.transition, reason).then(ok => { if (ok) setPending(null) })}
+          onDismissFeedback={() => ops.setFeedback(null)}
+          onConfirm={reason => void ops.runTransition(pending.card, pending.transition, reason).then(ok => {
+            if (ok) {
+              closeFocusOverrideRef.current = cardsResultsRef.current
+              setPending(null)
+            }
+          })}
         />
       )}
 

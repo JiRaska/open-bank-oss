@@ -11,6 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { hasRole, ROLES } from '@/lib/auth/roles'
 import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { useSingleFlight } from '@/lib/mutations/singleFlight'
 
 interface ClosedPeriod {
   id: string
@@ -66,6 +67,7 @@ export function RegulatoryPeriodPanel() {
   const [acting, setActing] = useState<'draft' | 'verify' | 'freeze' | null>(null)
   const [confirmed, setConfirmed] = useState(false)
   const [notice, setNotice] = useState<Notice>(null)
+  const flight = useSingleFlight()
 
   const isOwnDraft = !!period?.draftedBy && currentPrincipals.some(principal => principal === period.draftedBy)
   const reportReady = period?.status === 'FROZEN' && period.evidenceState === 'LINES_V1'
@@ -98,55 +100,59 @@ export function RegulatoryPeriodPanel() {
   }, [load])
 
   const mutate = useCallback(async (action: 'draft' | 'freeze') => {
-    setActing(action); setNotice(null)
-    try {
-      const response = await fetch(endpoint(date, action === 'freeze' ? '/freeze' : ''), {
-        method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(20_000),
-      })
-      if (!response.ok) {
-        setNotice({
-          ok: false,
-          text: action === 'freeze'
-            ? t('Zmrazení bylo odmítnuto. Checker musí být jiný než maker a otisk musí stále souhlasit.', 'Freeze was refused. The checker must differ from the maker and the evidence hash must still match.')
-            : t('Draft nelze vytvořit. Období musí být ukončené a předvaha vyvážená.', 'The draft cannot be created. The period must have ended and the trial balance must be balanced.'),
+    await flight.run(`regulatory-period:${date}`, async () => {
+      setActing(action); setNotice(null)
+      try {
+        const response = await fetch(endpoint(date, action === 'freeze' ? '/freeze' : ''), {
+          method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(20_000),
         })
-        return
+        if (!response.ok) {
+          setNotice({
+            ok: false,
+            text: action === 'freeze'
+              ? t('Zmrazení bylo odmítnuto. Checker musí být jiný než maker a otisk musí stále souhlasit.', 'Freeze was refused. The checker must differ from the maker and the evidence hash must still match.')
+              : t('Draft nelze vytvořit. Období musí být ukončené a předvaha vyvážená.', 'The draft cannot be created. The period must have ended and the trial balance must be balanced.'),
+          })
+          return
+        }
+        const updated = await response.json() as ClosedPeriod
+        setPeriod(updated); setVerification(null); setConfirmed(false)
+        setNotice({
+          ok: true,
+          text: action === 'freeze'
+            ? t('Období je zmrazené jako neměnný regulatorní důkaz.', 'The period is frozen as immutable regulatory evidence.')
+            : t('Draft vytvořen. Zmrazení musí provést jiný operátor po nezávislém ověření.', 'Draft created. A different operator must independently verify and freeze it.'),
+        })
+      } catch {
+        setNotice({ ok: false, text: t('Ledger-service neodpověděl.', 'Ledger-service did not respond.') })
+      } finally {
+        setActing(null)
       }
-      const updated = await response.json() as ClosedPeriod
-      setPeriod(updated); setVerification(null); setConfirmed(false)
-      setNotice({
-        ok: true,
-        text: action === 'freeze'
-          ? t('Období je zmrazené jako neměnný regulatorní důkaz.', 'The period is frozen as immutable regulatory evidence.')
-          : t('Draft vytvořen. Zmrazení musí provést jiný operátor po nezávislém ověření.', 'Draft created. A different operator must independently verify and freeze it.'),
-      })
-    } catch {
-      setNotice({ ok: false, text: t('Ledger-service neodpověděl.', 'Ledger-service did not respond.') })
-    } finally {
-      setActing(null)
-    }
-  }, [date, t])
+    })
+  }, [date, flight, t])
 
   const verify = useCallback(async () => {
-    setActing('verify'); setNotice(null); setConfirmed(false)
-    try {
-      const response = await fetch(endpoint(date, '/verify'), { cache: 'no-store', signal: AbortSignal.timeout(15_000) })
-      if (!response.ok) throw new Error(String(response.status))
-      const result = await response.json() as Verification
-      setVerification(result)
-      setNotice({
-        ok: result.matches && result.balanced,
-        text: result.matches && result.balanced
-          ? t('Otisk souhlasí a předvaha je vyvážená.', 'The evidence hash matches and the trial balance is balanced.')
-          : t('Ověření selhalo — období nesmí být zmrazeno ani použito pro reporting.', 'Verification failed — the period must not be frozen or used for reporting.'),
-      })
-    } catch {
-      setVerification(null)
-      setNotice({ ok: false, text: t('Ověření období se nezdařilo.', 'Period verification failed.') })
-    } finally {
-      setActing(null)
-    }
-  }, [date, t])
+    await flight.run(`regulatory-period:${date}`, async () => {
+      setActing('verify'); setNotice(null); setConfirmed(false)
+      try {
+        const response = await fetch(endpoint(date, '/verify'), { cache: 'no-store', signal: AbortSignal.timeout(15_000) })
+        if (!response.ok) throw new Error(String(response.status))
+        const result = await response.json() as Verification
+        setVerification(result)
+        setNotice({
+          ok: result.matches && result.balanced,
+          text: result.matches && result.balanced
+            ? t('Otisk souhlasí a předvaha je vyvážená.', 'The evidence hash matches and the trial balance is balanced.')
+            : t('Ověření selhalo — období nesmí být zmrazeno ani použito pro reporting.', 'Verification failed — the period must not be frozen or used for reporting.'),
+        })
+      } catch {
+        setVerification(null)
+        setNotice({ ok: false, text: t('Ověření období se nezdařilo.', 'Period verification failed.') })
+      } finally {
+        setActing(null)
+      }
+    })
+  }, [date, flight, t])
 
   return (
     <section aria-labelledby="regulatory-period-title">
@@ -160,15 +166,15 @@ export function RegulatoryPeriodPanel() {
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
             {t('Měsíc', 'Month')}{' '}
-            <input aria-label={t('Datum v měsíci', 'Date within month')} type="date" value={date} max={lastCompletedMonthEnd()} onChange={event => setDate(event.target.value)} className="input" style={{ width: '150px' }} />
+            <input aria-label={t('Datum v měsíci', 'Date within month')} type="date" value={date} max={lastCompletedMonthEnd()} disabled={loading || flight.busy} onChange={event => setDate(event.target.value)} className="input" style={{ width: '150px' }} />
           </label>
-          <button className="btn btn-secondary" onClick={() => void load()} disabled={loading || !date}>
-            <RefreshCw size={13} className={loading ? 'animate-spin' : undefined} /> {t('Obnovit', 'Refresh')}
+          <button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading || flight.busy || !date} aria-busy={loading}>
+            <RefreshCw size={13} aria-hidden="true" className={loading ? 'animate-spin' : undefined} /> {t('Obnovit', 'Refresh')}
           </button>
         </div>
       </div>
 
-      {notice && <div role="status" style={{ padding: '10px 14px', marginBottom: '12px', borderRadius: 'var(--r-md)', background: notice.ok ? 'var(--success-bg)' : 'var(--warning-bg)', color: notice.ok ? 'var(--success)' : 'var(--warning)', border: `1px solid ${notice.ok ? 'var(--success-border)' : 'var(--warning-border)'}` }}>{notice.text}</div>}
+      {notice && <div role={notice.ok ? 'status' : 'alert'} style={{ padding: '10px 14px', marginBottom: '12px', borderRadius: 'var(--r-md)', background: notice.ok ? 'var(--success-bg)' : 'var(--warning-bg)', color: notice.ok ? 'var(--success)' : 'var(--warning)', border: `1px solid ${notice.ok ? 'var(--success-border)' : 'var(--warning-border)'}` }}>{notice.text}</div>}
 
       {loading ? <div className="skeleton" style={{ height: '180px' }} /> : unavailable ? (
         <div className="card"><DataUnavailable kind={unavailable} service="Ledger-service" feature={t('regulatorní období', 'regulatory period')} lang={language} /></div>
@@ -177,7 +183,7 @@ export function RegulatoryPeriodPanel() {
           <AlertTriangle size={22} style={{ color: 'var(--warning)', marginBottom: '8px' }} />
           <div style={{ fontWeight: 700 }}>{t('Pro tento měsíc neexistuje regulatorní uzávěrka', 'No regulatory close exists for this month')}</div>
           <p style={{ margin: '6px auto 16px', maxWidth: '560px', fontSize: '12px', color: 'var(--text-secondary)' }}>{t('FINREP/COREP náhled zůstane zablokovaný, dokud maker nevytvoří DRAFT a nezávislý checker jej nezmrazí.', 'FINREP/COREP preview remains blocked until a maker creates a DRAFT and an independent checker freezes it.')}</p>
-          {canManage && <button className="btn btn-primary" onClick={() => void mutate('draft')} disabled={acting !== null}><ShieldCheck size={13} /> {acting === 'draft' ? t('Vytvářím…', 'Creating…') : t('Vytvořit DRAFT (maker)', 'Create DRAFT (maker)')}</button>}
+          {canManage && <button type="button" className="btn btn-primary" onClick={() => void mutate('draft')} disabled={flight.busy} aria-busy={acting === 'draft'}><ShieldCheck size={13} aria-hidden="true" /> {acting === 'draft' ? t('Vytvářím…', 'Creating…') : t('Vytvořit DRAFT (maker)', 'Create DRAFT (maker)')}</button>}
         </div>
       ) : (
         <div className="card" style={{ padding: '18px' }}>
@@ -199,17 +205,17 @@ export function RegulatoryPeriodPanel() {
           {period.status === 'DRAFT' && canManage && (
             <div style={{ marginTop: '18px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button className="btn btn-secondary" onClick={() => void mutate('draft')} disabled={acting !== null}>{t('Obnovit DRAFT (maker)', 'Refresh DRAFT (maker)')}</button>
-                <button className="btn btn-secondary" onClick={() => void verify()} disabled={acting !== null}><CheckCircle2 size={13} /> {acting === 'verify' ? t('Ověřuji…', 'Verifying…') : t('Nezávisle ověřit', 'Verify independently')}</button>
+                <button type="button" className="btn btn-secondary" onClick={() => void mutate('draft')} disabled={flight.busy} aria-busy={acting === 'draft'}>{t('Obnovit DRAFT (maker)', 'Refresh DRAFT (maker)')}</button>
+                <button type="button" className="btn btn-secondary" onClick={() => void verify()} disabled={flight.busy} aria-busy={acting === 'verify'}><CheckCircle2 size={13} aria-hidden="true" /> {acting === 'verify' ? t('Ověřuji…', 'Verifying…') : t('Nezávisle ověřit', 'Verify independently')}</button>
               </div>
               {isOwnDraft && <p style={{ marginTop: '10px', fontSize: '12px', color: 'var(--warning)' }}>{t('Jste maker tohoto draftu. Zmrazení musí provést jiný operátor.', 'You are this draft’s maker. A different operator must freeze it.')}</p>}
               {verification?.matches && verification.balanced && !isOwnDraft && (
                 <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginTop: '12px', fontSize: '12px' }}>
-                  <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} />
+                  <input type="checkbox" checked={confirmed} disabled={flight.busy} onChange={event => setConfirmed(event.target.checked)} />
                   {t('Potvrzuji nezávislou kontrolu období a chápu, že zmrazení vytvoří neměnný regulatorní důkaz.', 'I confirm an independent review and understand that freezing creates immutable regulatory evidence.')}
                 </label>
               )}
-              <button className="btn btn-primary" style={{ marginTop: '12px' }} onClick={() => void mutate('freeze')} disabled={!freezeReady || acting !== null}><ShieldCheck size={13} /> {acting === 'freeze' ? t('Zmrazuji…', 'Freezing…') : t('Zmrazit období (checker)', 'Freeze period (checker)')}</button>
+              <button type="button" className="btn btn-primary" style={{ marginTop: '12px' }} onClick={() => void mutate('freeze')} disabled={!freezeReady || flight.busy} aria-busy={acting === 'freeze'}><ShieldCheck size={13} aria-hidden="true" /> {acting === 'freeze' ? t('Zmrazuji…', 'Freezing…') : t('Zmrazit období (checker)', 'Freeze period (checker)')}</button>
             </div>
           )}
         </div>

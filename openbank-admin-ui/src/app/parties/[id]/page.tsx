@@ -228,7 +228,7 @@ function PartyDetailPage() {
           </div>
 
           {/* Related entities (ADR-0231 D3) — the party → accounts walk is chips, not UUID copying. */}
-          <RelatedAccounts partyId={party.id} />
+          <RelatedAccounts key={party.id} partyId={party.id} />
         </div>
       )}
 
@@ -242,17 +242,31 @@ type AccountRef = { id: string; accountNumber: string; currencyCode?: string; st
 function RelatedAccounts({ partyId }: { partyId: string }) {
   const { t } = useLanguage()
   const [accounts, setAccounts] = useState<AccountRef[] | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     const ctrl = new AbortController()
     fetch(svcUrl('account-service', '/api/v1/accounts', { partyId, limit: '20' }), {
       signal: ctrl.signal, cache: 'no-store',
     })
-      .then(r => (r.ok ? r.json() : null))
-      .then(d => setAccounts(d ? (d.data ?? []) : []))
-      .catch(() => setAccounts([]))
+      .then(r => {
+        if (!r.ok) throw new Error(`Related accounts HTTP ${r.status}`)
+        return r.json()
+      })
+      .then(d => setAccounts(d?.data ?? []))
+      .catch(error => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setUnavailable(true)
+      })
     return () => ctrl.abort()
-  }, [partyId])
+  }, [partyId, reloadKey])
+
+  const retry = () => {
+    setAccounts(null)
+    setUnavailable(false)
+    setReloadKey(key => key + 1)
+  }
 
   return (
     <div className="card" style={{ padding: '20px' }}>
@@ -260,7 +274,15 @@ function RelatedAccounts({ partyId }: { partyId: string }) {
         <Users size={15} style={{ color: 'var(--accent)' }} />
         <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('Související účty', 'Related accounts')}</span>
       </div>
-      {accounts === null ? (
+      {unavailable ? (
+        <div role="status" aria-live="polite" style={{ fontSize: '12px', color: 'var(--warning-text)' }}>
+          <div>{t('Související účty se nepodařilo načíst — tento stav neznamená, že subjekt nemá žádné účty.', 'Related accounts could not be loaded — this does not mean the party has no accounts.')}</div>
+          <button type="button" onClick={retry} aria-label={t('Zkusit znovu načíst související účty', 'Retry loading related accounts')}
+            style={{ marginTop: '10px', padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+            {t('Zkusit znovu', 'Try again')}
+          </button>
+        </div>
+      ) : accounts === null ? (
         <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Načítám…', 'Loading…')}</div>
       ) : accounts.length === 0 ? (
         <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Žádné účty', 'No accounts')}</div>

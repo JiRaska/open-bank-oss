@@ -3,6 +3,8 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { RegulatoryPeriodPanel } from '@/components/closings/RegulatoryPeriodPanel'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { ROLES } from '@/lib/auth/roles'
@@ -30,6 +32,12 @@ afterEach(() => {
 })
 
 describe('Regulatory period maker/checker panel', () => {
+  it('guards every critical action with the same synchronous single-flight key', () => {
+    const source = readFileSync(join(process.cwd(), 'src/components/closings/RegulatoryPeriodPanel.tsx'), 'utf8')
+    expect(source.match(/flight\.run\(`regulatory-period:\$\{date\}`/g)).toHaveLength(2)
+    expect(source).not.toContain('<button className=')
+  })
+
   it('turns a missing period into an explicit maker action without exposing GL values', async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return new Response(JSON.stringify(draft), { status: 200 })

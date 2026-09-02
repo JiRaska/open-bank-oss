@@ -71,9 +71,12 @@ const safeEvidence = (items: ReadonlyArray<{ kind: string; state: string; observ
       : 'unknown',
   }))
 
-const safeRequiredControls = (items: ReadonlyArray<{ kind: string; state: string }> | undefined) =>
+const safeRequiredControls = (items: ReadonlyArray<{ kind: string; state: string; observedAt?: string | null }> | undefined) =>
   (items ?? []).filter(item => REQUIRED_CONTROL_KINDS.has(item.kind) && EVIDENCE_STATES.has(item.state))
-    .map(item => ({ kind: item.kind, state: item.state }))
+    .map(item => ({
+      kind: item.kind,
+      state: runtimeFreshnessState(item.state as EvidenceState, item.observedAt),
+    }))
 
 const boundedText = (value: unknown): string | null => {
   if (typeof value !== 'string') return null

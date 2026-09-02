@@ -12,7 +12,11 @@ describe('legacy shell pages use the shared header contract', () => {
     }
 
     const detail = fs.readFileSync(path.join(process.cwd(), 'src/app/delegations/[id]/page.tsx'), 'utf8')
+    const coverageProbe = fs.readFileSync(
+      path.join(process.cwd(), 'src/components/delegations/CoverageProbe.tsx'),
+      'utf8',
+    )
     expect(detail).toContain('className="breadcrumb"')
-    expect(detail).toContain("fetch('/api/delegations/check'")
+    expect(coverageProbe).toContain("fetch('/api/delegations/check'")
   })
 })

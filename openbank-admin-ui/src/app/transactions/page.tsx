@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowLeftRight, Search, RefreshCw, Filter, X } from 'lucide-react'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
@@ -47,6 +47,7 @@ interface SearchResult {
 const CHANNELS = ['API', 'BRANCH', 'ATM', 'MOBILE', 'INTERNET', 'BATCH']
 const STATUSES = ['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'REVERSED']
 const TYPES    = ['DEBIT', 'CREDIT', 'TRANSFER', 'FEE', 'INTEREST', 'REVERSAL', 'ADJUSTMENT']
+const PAGE_SIZE = 50
 
 export default function TransactionsPage() {
   const { t, language } = useLanguage()
@@ -54,6 +55,9 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(false)
   const [failure, setFailure] = useState<BffFailure | null>(null)
   const [result, setResult] = useState<SearchResult | null>(null)
+  const [resultQueryKey, setResultQueryKey] = useState<string | null>(null)
+  const searchGeneration = useRef(0)
+  const activeRequest = useRef<AbortController | null>(null)
 
   // Search fields
   const [accountId, setAccountId]         = useState('')
@@ -71,8 +75,32 @@ export default function TransactionsPage() {
   const [channel, setChannel]             = useState('')
 
   const hasFilters = [iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax, channel].some(Boolean)
+  const queryKey = [accountId, iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax, channel].join('\u0000')
+  const queryChanged = result !== null && resultQueryKey !== queryKey
+
+  useEffect(() => () => {
+    searchGeneration.current += 1
+    activeRequest.current?.abort()
+  }, [])
+
+  function invalidatePendingSearch() {
+    searchGeneration.current += 1
+    activeRequest.current?.abort()
+    activeRequest.current = null
+    setLoading(false)
+  }
+
+  function updateSearchField(setter: (value: string) => void, value: string) {
+    invalidatePendingSearch()
+    setter(value)
+  }
 
   async function search(offset = 0) {
+    const generation = ++searchGeneration.current
+    activeRequest.current?.abort()
+    const controller = new AbortController()
+    activeRequest.current = controller
+    const requestedQueryKey = queryKey
     setLoading(true); setFailure(null)
     try {
       const params = new URLSearchParams()
@@ -89,30 +117,38 @@ export default function TransactionsPage() {
       if (amountMin)     params.set('amountMin', amountMin)
       if (amountMax)     params.set('amountMax', amountMax)
       if (channel)       params.set('channel', channel)
-      params.set('limit', '50')
+      params.set('limit', String(PAGE_SIZE))
       params.set('offset', String(offset))
 
-      const res = await fetch(svcUrl('transaction-service', '/api/v1/transactions/search', Object.fromEntries(params)))
+      const res = await fetch(
+        svcUrl('transaction-service', '/api/v1/transactions/search', Object.fromEntries(params)),
+        { cache: 'no-store', signal: controller.signal },
+      )
+      if (generation !== searchGeneration.current) return
       if (!res.ok) {
         // Degrade gracefully: a 404 here almost always means transaction-service
         // is not deployed in this environment (most of the fleet isn't in the
         // sandbox), not that the search itself failed. Distinguish the cases so
         // the operator sees a meaningful state instead of a raw "HTTP 404".
-        setFailure(await classifyBffFailure(res))
-        setResult(null)
+        const nextFailure = await classifyBffFailure(res)
+        if (generation === searchGeneration.current) setFailure(nextFailure)
         return
       }
-      setResult(await res.json())
+      const nextResult = await res.json() as SearchResult
+      if (generation !== searchGeneration.current) return
+      setResult(nextResult)
+      setResultQueryKey(requestedQueryKey)
     } catch {
       // Network-level failure (BFF unreachable from the browser).
-      setFailure('unreachable')
-      setResult(null)
+      if (generation === searchGeneration.current) setFailure('unreachable')
     } finally {
-      setLoading(false)
+      if (activeRequest.current === controller) activeRequest.current = null
+      if (generation === searchGeneration.current) setLoading(false)
     }
   }
 
   function clearFilters() {
+    invalidatePendingSearch()
     setIban(''); setBban(''); setReferenceNumber(''); setEndToEndId('')
     setCounterparty(''); setStatus(''); setType(''); setDateFrom('')
     setDateTo(''); setAmountMin(''); setAmountMax(''); setChannel('')
@@ -135,21 +171,21 @@ export default function TransactionsPage() {
             <label className="sr-only" htmlFor="transaction-account-id">{t('Hledat podle ID účtu', 'Search by account ID')}</label>
             <input id="transaction-account-id" className="input" style={{ paddingLeft: '30px', width: '100%' }}
               placeholder={t('ID účtu (UUID)…', 'Account ID (UUID)…')}
-              value={accountId} onChange={e => setAccountId(e.target.value)}
+              value={accountId} onChange={e => updateSearchField(setAccountId, e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()} />
           </div>
           <div style={{ position: 'relative', flex: 1, minWidth: '180px' }}>
             <label className="sr-only" htmlFor="transaction-iban">{t('Filtrovat podle IBAN', 'Filter by IBAN')}</label>
             <input id="transaction-iban" className="input" style={{ width: '100%' }}
               placeholder={t('IBAN (CZ65 0800 …)', 'IBAN (CZ65 0800 …)')}
-              value={iban} onChange={e => setIban(e.target.value)}
+              value={iban} onChange={e => updateSearchField(setIban, e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()} />
           </div>
           <div style={{ position: 'relative', flex: 1, minWidth: '160px' }}>
             <label className="sr-only" htmlFor="transaction-bban">{t('Filtrovat podle BBAN', 'Filter by BBAN')}</label>
             <input id="transaction-bban" className="input" style={{ width: '100%' }}
               placeholder={t('BBAN (123456-1234567890/0800)', 'BBAN (123456-1234567890/0800)')}
-              value={bban} onChange={e => setBban(e.target.value)}
+              value={bban} onChange={e => updateSearchField(setBban, e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()} />
           </div>
           <button type="button" className="btn btn-secondary" onClick={() => setShowFilters(f => !f)} aria-expanded={showFilters} aria-controls="transaction-search-filters">
@@ -168,52 +204,52 @@ export default function TransactionsPage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
               <div>
                 <label htmlFor="transaction-reference" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Referenční číslo', 'Reference number')}</label>
-                <input id="transaction-reference" className="input" style={{ width: '100%' }} placeholder={t('TXN202506…', 'TXN202506…')} value={referenceNumber} onChange={e => setReferenceNumber(e.target.value)} />
+                <input id="transaction-reference" className="input" style={{ width: '100%' }} placeholder={t('TXN202506…', 'TXN202506…')} value={referenceNumber} onChange={e => updateSearchField(setReferenceNumber, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-e2e-id" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('End-to-End ID', 'End-to-End ID')}</label>
-                <input id="transaction-e2e-id" className="input" style={{ width: '100%' }} placeholder={t('E2E-ID…', 'E2E-ID…')} value={endToEndId} onChange={e => setEndToEndId(e.target.value)} />
+                <input id="transaction-e2e-id" className="input" style={{ width: '100%' }} placeholder={t('E2E-ID…', 'E2E-ID…')} value={endToEndId} onChange={e => updateSearchField(setEndToEndId, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-counterparty" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Protistrana (název)', 'Counterparty (name)')}</label>
-                <input id="transaction-counterparty" className="input" style={{ width: '100%' }} placeholder={t('Jan Novák…', 'Jane Smith…')} value={counterparty} onChange={e => setCounterparty(e.target.value)} />
+                <input id="transaction-counterparty" className="input" style={{ width: '100%' }} placeholder={t('Jan Novák…', 'Jane Smith…')} value={counterparty} onChange={e => updateSearchField(setCounterparty, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-status" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Status', 'Status')}</label>
-                <select id="transaction-status" className="input" style={{ width: '100%' }} value={status} onChange={e => setStatus(e.target.value)}>
+                <select id="transaction-status" className="input" style={{ width: '100%' }} value={status} onChange={e => updateSearchField(setStatus, e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
                   {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="transaction-type" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Typ transakce', 'Transaction type')}</label>
-                <select id="transaction-type" className="input" style={{ width: '100%' }} value={type} onChange={e => setType(e.target.value)}>
+                <select id="transaction-type" className="input" style={{ width: '100%' }} value={type} onChange={e => updateSearchField(setType, e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
                   {TYPES.map(ty => <option key={ty} value={ty}>{ty}</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="transaction-channel" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Kanál', 'Channel')}</label>
-                <select id="transaction-channel" className="input" style={{ width: '100%' }} value={channel} onChange={e => setChannel(e.target.value)}>
+                <select id="transaction-channel" className="input" style={{ width: '100%' }} value={channel} onChange={e => updateSearchField(setChannel, e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
                   {CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="transaction-date-from" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Datum od', 'Date from')}</label>
-                <input id="transaction-date-from" className="input" type="date" style={{ width: '100%' }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+                <input id="transaction-date-from" className="input" type="date" style={{ width: '100%' }} value={dateFrom} onChange={e => updateSearchField(setDateFrom, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-date-to" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Datum do', 'Date to')}</label>
-                <input id="transaction-date-to" className="input" type="date" style={{ width: '100%' }} value={dateTo} onChange={e => setDateTo(e.target.value)} />
+                <input id="transaction-date-to" className="input" type="date" style={{ width: '100%' }} value={dateTo} onChange={e => updateSearchField(setDateTo, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-amount-min" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka od (CZK)', 'Amount from (CZK)')}</label>
-                <input id="transaction-amount-min" className="input" type="number" style={{ width: '100%' }} placeholder="0.00" value={amountMin} onChange={e => setAmountMin(e.target.value)} />
+                <input id="transaction-amount-min" className="input" type="number" style={{ width: '100%' }} placeholder="0.00" value={amountMin} onChange={e => updateSearchField(setAmountMin, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-amount-max" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka do (CZK)', 'Amount to (CZK)')}</label>
-                <input id="transaction-amount-max" className="input" type="number" style={{ width: '100%' }} placeholder="999999.00" value={amountMax} onChange={e => setAmountMax(e.target.value)} />
+                <input id="transaction-amount-max" className="input" type="number" style={{ width: '100%' }} placeholder="999999.00" value={amountMax} onChange={e => updateSearchField(setAmountMax, e.target.value)} />
               </div>
             </div>
             {hasFilters && (
@@ -224,14 +260,21 @@ export default function TransactionsPage() {
           </div>
         )}
 
-        {failure && <DataUnavailable kind={failure} service="Transaction-service" feature={t('Vyhledávání transakcí', 'Transaction search')} lang={language} />}
+        {failure && <DataUnavailable kind={failure} service="Transaction-service" feature={t('Vyhledávání transakcí', 'Transaction search')} lang={language} dense={result !== null} />}
 
         {/* Results */}
         {result && (
           <div>
-            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', justifyContent: 'space-between' }}>
-              <span>{t('Nalezeno:', 'Found:')} <strong style={{ color: 'var(--text-primary)' }}>{result.count}</strong> {t('transakcí', 'transactions')}</span>
-              <span>{t('Zobrazeno:', 'Showing:')} {result.data.length}</span>
+            <div aria-live="polite" style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+              <span>
+                {result.data.length === 0
+                  ? t('Na této stránce nejsou žádné transakce', 'No transactions on this page')
+                  : t(
+                    `Transakce ${result.offset + 1}–${result.offset + result.data.length}`,
+                    `Transactions ${result.offset + 1}–${result.offset + result.data.length}`,
+                  )}
+              </span>
+              <span>{t(`Stránka ${Math.floor(result.offset / PAGE_SIZE) + 1}`, `Page ${Math.floor(result.offset / PAGE_SIZE) + 1}`)}</span>
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table className="table">
@@ -267,6 +310,26 @@ export default function TransactionsPage() {
                 </tbody>
               </table>
             </div>
+            <nav aria-label={t('Stránkování transakcí', 'Transaction pagination')} style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                aria-label={t('Předchozí stránka transakcí', 'Previous transaction page')}
+                disabled={loading || queryChanged || result.offset === 0}
+                onClick={() => search(Math.max(0, result.offset - PAGE_SIZE))}
+              >
+                {t('Předchozí', 'Previous')}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                aria-label={t('Další stránka transakcí', 'Next transaction page')}
+                disabled={loading || queryChanged || result.data.length !== PAGE_SIZE}
+                onClick={() => search(result.offset + PAGE_SIZE)}
+              >
+                {t('Další', 'Next')}
+              </button>
+            </nav>
           </div>
         )}
 

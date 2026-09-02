@@ -228,8 +228,11 @@ jobs:
       # runs. Read by the openapi-request-schema-conformance step below.
       - name: Build + test (:${{ inputs.service }})
         run: |
-          # Capture only image/lifecycle/time from this job's Docker daemon. Do not
-          # export container id, labels, ports, hostnames or environment variables.
+          # Capture image/lifecycle/time plus a transient daemon id from this job's Docker
+          # stream. The collector uses the id only to resolve one-to-one duplicate
+          # observations and strips it before schema validation/publication; it is never
+          # exported in the run envelope, artifact, UI or AI input. Without this local key,
+          # two concurrent containers of the same image could be collapsed as one lifecycle.
           EVIDENCE_DIR="${{ inputs.service }}/build/test-intelligence/runtime"
           mkdir -p "${EVIDENCE_DIR}"
           # Restrict the daemon stream to container objects so Testcontainers exec wait-strategy
@@ -237,7 +240,7 @@ jobs:
           # verdict: redacted aggregate lifecycle counts still need correlation before they can
           # establish cleanup or a leak (rendered as unknown by the Test Intelligence UI).
           docker events --filter type=container --filter event=start --filter event=die \
-            --format '{"image":"{{.Actor.Attributes.image}}","lifecycle":"{{.Action}}","observedAtUnix":{{.Time}}}' \
+            --format '{"image":"{{.Actor.Attributes.image}}","containerId":"{{.Actor.ID}}","lifecycle":"{{.Action}}","observedAtUnix":{{.Time}}}' \
             > "${EVIDENCE_DIR}/docker-events.jsonl" &
           docker_events_pid=$!
           cleanup_test_evidence() {
@@ -444,27 +447,34 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Default: F (or the triggering ref) is checked out and published, unchanged. The
-          # exceptional mode checks out deployed P; its one approved fixture is later read as a
-          # named blob from F, never by merging/checking out F's runtime.
-          ref: ${{ inputs.provider_version != '' && inputs.provider_version || inputs.ref }}
+          # Start from the workflow's trusted main checkout.  `actions/checkout` resolves a
+          # workflow-dispatch input as a branch/tag lookup before it resolves an arbitrary
+          # historical SHA, which makes the documented `verify-provider --ref <deployed-sha>`
+          # recovery path fail before our on-main ancestry gate can run.  A subsequent explicit
+          # `git checkout --detach` resolves that already-fetched commit after proving it is on
+          # main; blank inputs retain the triggering SHA exactly as before.
+          ref: ${{ github.sha }}
           fetch-depth: ${{ inputs.ref == '' && inputs.provider_version == '' && 1 || 0 }}
 
-      - name: Refuse a default ref that is not an ancestor of main
-        if: inputs.ref != '' && inputs.provider_version == ''
+      - name: Check out a requested provider version only after proving it is on main
+        if: inputs.ref != '' || inputs.provider_version != ''
         env:
-          REF: ${{ inputs.ref }}
+          REF: ${{ inputs.provider_version != '' && inputs.provider_version || inputs.ref }}
         run: |
+          set -euo pipefail
           # Publishing a verification says "this provider version satisfies the consumer contract",
-          # and can-i-deploy then lets a deploy through on it. Allowing an off-main sha would let a
-          # branch that never merged authorise a production deploy, so this is a gate, not a nicety.
+          # and can-i-deploy then lets a deploy through on it.  Resolve the requested commit from
+          # the full main history, then reject anything that is not an on-main ancestor before it
+          # replaces the trusted triggering checkout.
           git fetch --quiet origin main
-          if ! git merge-base --is-ancestor "$REF" origin/main; then
+          RESOLVED_REF="$(git rev-parse --verify "${REF}^{commit}")"
+          if ! git merge-base --is-ancestor "$RESOLVED_REF" origin/main; then
             echo "::error::$REF is not an ancestor of origin/main. A verification may only be" \
                  "published for a commit that is on main (#3306)."
             exit 1
           fi
-          echo "$REF is on main — publishing the verification against it."
+          git checkout --detach --quiet "$RESOLVED_REF"
+          echo "$RESOLVED_REF is on main — publishing the verification against it."
 
       - name: Check out P and overlay the one approved Ledger provider fixture from F
         env:
@@ -539,7 +549,7 @@ jobs:
         id: ecr_login
         if: ${{ steps.ecr_auth.outcome == 'success' }}
         continue-on-error: true
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
       - name: Pre-warm Testcontainers image cache via ECR
         continue-on-error: true
         env:
@@ -687,7 +697,7 @@ jobs:
       # service's actual consumer-pact set would be silently wrong. No continue-on-error, no
       # if: always() — a failure here fails the job.
       - name: Download build's consumer-pact artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v6.2.1
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v6.2.1
         with:
           name: consumer-pacts-${{ inputs.service }}
           path: pact-handoff

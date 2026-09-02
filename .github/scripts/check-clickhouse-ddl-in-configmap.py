@@ -24,8 +24,30 @@
 # fresh cluster have this?"). Both directions are errors — a ConfigMap object with no resource behind
 # it is DDL with no source of record.
 #
-# WHAT IT DOES NOT CHECK: that the two definitions of an object AGREE. A caller depending on a
-# column added by a redefinition still needs its own assertion (see customer-360.test.ts).
+# It also checks the two things the object set CANNOT express, because a migration that only
+# REDEFINES existing objects moves no object into the set and is therefore invisible to a set
+# comparison by construction:
+#
+#   COLUMN PARITY  — every `ALTER TABLE openbank_analytics.<t> ADD COLUMN <c>` in a resource must be
+#   accounted for in the ConfigMap's own definition of that table (in its CREATE TABLE body, or by
+#   the same ALTER). A fresh cluster otherwise lacks the column entirely, and the sink's
+#   `FORMAT JSONEachRow` insert names it: ClickHouse 24.8 defaults `input_format_skip_unknown_fields`
+#   to 1, so the value is DROPPED rather than rejected — no error anywhere.
+#
+#   DEFINITION AGREEMENT — for an object created on both sides, the LAST definition in resource-
+#   version order must match the LAST definition in ConfigMap key order, compared on SQL with
+#   comments stripped and whitespace collapsed (not byte-identical: the two are indented
+#   differently, and forcing bytes to match is what the object-set comparison was avoiding).
+#
+# That second property is what V9__synthetic_provenance.sql needed and did not have: it adds
+# `bronze_events.synthetic` and re-cuts silver_current_state / silver_history / silver_as_of /
+# gold_daily_event_volume with `WHERE synthetic = 0`, creating no new object, so the parity check
+# was green for the whole time none of it had reached a fresh cluster (issue #7645).
+#
+# WHAT IT STILL DOES NOT CHECK: that either copy matches the LIVE warehouse. Nothing in this repo
+# executes either artefact against a running cluster — the ConfigMap runs from
+# /docker-entrypoint-initdb.d on an EMPTY data dir only, and the resources are applied by hand.
+# This gate makes the two committed artefacts agree; it cannot make the cluster agree with them.
 #
 #   python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --root .
 #   python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
@@ -50,18 +72,69 @@ CREATE_RE = re.compile(
 )
 
 
+# The whole CREATE statement, up to its terminating semicolon — used for definition agreement.
+CREATE_STMT_RE = re.compile(
+    r"(CREATE\s+(?:OR\s+REPLACE\s+)?(?:MATERIALIZED\s+)?(?:VIEW|TABLE|DICTIONARY)\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?openbank_analytics\.([A-Za-z_][A-Za-z0-9_]*)\b.*?;)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# ALTER TABLE openbank_analytics.<table> ADD COLUMN [IF NOT EXISTS] <column>
+ALTER_ADD_RE = re.compile(
+    r"ALTER\s+TABLE\s+openbank_analytics\.([A-Za-z_][A-Za-z0-9_]*)\s+"
+    r"ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+
+VERSION_RE = re.compile(r"^V(\d+)__")
+
+
+def live_sql(text: str) -> str:
+    """DDL with comment lines removed: every one of these files quotes its own statements in prose,
+    and a commented example would otherwise count as real DDL."""
+    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("--"))
+
+
 def objects(text: str) -> set[str]:
-    """Objects a chunk of DDL creates. Comment lines are stripped first: every one of these files
-    quotes its own statements in prose, and a commented example would otherwise count as created."""
-    live = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("--"))
-    return {m.lower() for m in CREATE_RE.findall(live)}
+    """Objects a chunk of DDL creates."""
+    return {m.lower() for m in CREATE_RE.findall(live_sql(text))}
+
+
+def normalize(stmt: str) -> str:
+    """A CREATE statement reduced to what it MEANS to ClickHouse: comments already gone, whitespace
+    collapsed, case folded. The two artefacts are indented differently on purpose, so comparing
+    bytes would fail on formatting and force them to be copies rather than to agree."""
+    return re.sub(r"\s+", " ", stmt).strip().lower()
+
+
+def last_definitions(chunks: list[str]) -> dict[str, str]:
+    """The definition of each object that WINS, given chunks in application order. A later
+    CREATE OR REPLACE supersedes an earlier one, so only the last one describes the end state."""
+    out: dict[str, str] = {}
+    for chunk in chunks:
+        for stmt, obj in CREATE_STMT_RE.findall(live_sql(chunk)):
+            out[obj.lower()] = normalize(stmt)
+    return out
+
+
+def added_columns(text: str) -> set[tuple[str, str]]:
+    """(table, column) pairs a chunk of DDL adds by ALTER."""
+    return {(t.lower(), c.lower()) for t, c in ALTER_ADD_RE.findall(live_sql(text))}
+
+
+def resource_order(path: Path) -> tuple[int, str]:
+    """Resources apply in migration-version order, ties broken by name. Two files may legitimately
+    claim one version (V9 does today); where they touch disjoint objects the tie is immaterial, and
+    where they do not, the name order is at least deterministic rather than filesystem-dependent."""
+    m = VERSION_RE.match(path.name)
+    return (int(m.group(1)) if m else 0, path.name)
 
 
 def check(root: Path) -> tuple[list[str], int]:
     """Returns (errors, objects examined). The count is the gate's subject floor: a broken glob or a
     regex that stops matching leaves the verdict clean, and only the count can say so."""
     errors: list[str] = []
-    sql_files = sorted(root.glob(SQL_GLOB))
+    sql_files = sorted(root.glob(SQL_GLOB), key=resource_order)
     cm_path = root / CONFIGMAP
 
     # A probe that finds no subject must say so, not pass. Both inputs are required to exist: this
@@ -90,6 +163,43 @@ def check(root: Path) -> tuple[list[str], int]:
             f"the init ConfigMap creates openbank_analytics.{obj}, which no clickhouse/V*.sql "
             f"resource creates — DDL with no source of record"
         )
+
+    # COLUMN PARITY. An ALTER adds no object, so the comparison above cannot see it at all.
+    cm_text = cm_path.read_text()
+    cm_live = live_sql(cm_text)
+    cm_added = added_columns(cm_text)
+    for f in sql_files:
+        for table, column in sorted(added_columns(f.read_text())):
+            if (table, column) in cm_added:
+                continue
+            # Accept the column being declared in the ConfigMap's CREATE TABLE body instead — that is
+            # the better shape for a cluster built from nothing, and it is equally correct.
+            body = next(
+                (
+                    stmt
+                    for stmt, obj in CREATE_STMT_RE.findall(cm_live)
+                    if obj.lower() == table and stmt.lstrip().upper().startswith("CREATE TABLE")
+                ),
+                "",
+            )
+            if re.search(rf"(?<![A-Za-z0-9_]){re.escape(column)}(?![A-Za-z0-9_])", body, re.IGNORECASE):
+                continue
+            errors.append(
+                f"{f.name} adds column openbank_analytics.{table}.{column}, which the init ConfigMap "
+                f"neither declares on {table} nor adds — a warehouse built from scratch would not "
+                f"have it, and an insert naming it is silently dropped, not rejected"
+            )
+
+    # DEFINITION AGREEMENT. A migration that only redefines existing objects is invisible above.
+    res_last = last_definitions([f.read_text() for f in sql_files])
+    cm_last = last_definitions([cm_text])
+    for obj in sorted(set(res_last) & set(cm_last)):
+        if res_last[obj] != cm_last[obj]:
+            errors.append(
+                f"openbank_analytics.{obj} is defined differently by the clickhouse/V*.sql resources "
+                f"and by the init ConfigMap — the last resource to define it has not reached the "
+                f"ConfigMap, so a fresh warehouse would build an older version of this object"
+            )
 
     return (errors, len(set(seen) | cm_objects))
 
