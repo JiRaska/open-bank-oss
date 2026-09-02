@@ -4,6 +4,10 @@ quarkus:
 
   http:
     port: 8126
+    # Full-suite Quarkus profiles restart the application in one test worker. A fixed default
+    # test port can still be held by the preceding profile during that hand-off, so let Quarkus
+    # allocate an available port and propagate it to RestAssured.
+    test-port: 0
     cors:
       ~: true
       origins: "http://localhost:3000"

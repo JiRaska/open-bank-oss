@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.7.0
+  version: 1.8.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -160,6 +160,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: Not the grantor, and not a bank-initiated revoke }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/grantor/{partyId}:
     get:
       tags: [Delegations]
@@ -214,6 +215,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: The authenticated party is not the grantee }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/decline:
     post:
       tags: [Delegations]
@@ -232,6 +234,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: The authenticated party is not the grantee }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/renounce:
     post:
       tags: [Delegations]
@@ -250,6 +253,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: The authenticated party is not the grantee }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/suspend:
     post:
       tags: [Delegations]
@@ -268,6 +272,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: Bank-initiated only — requires an operator/admin session and no X-Customer-Party-Id }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/reinstate:
     post:
       tags: [Delegations]
@@ -281,6 +286,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: Bank-initiated only — requires an operator/admin session and no X-Customer-Party-Id }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/check:
     post:
       tags: [Delegations]

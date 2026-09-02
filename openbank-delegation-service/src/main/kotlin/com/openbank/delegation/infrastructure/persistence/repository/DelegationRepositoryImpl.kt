@@ -5,10 +5,12 @@
 package com.openbank.delegation.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.delegation.application.port.out.DelegationConcurrentTransitionException
 import com.openbank.delegation.application.port.out.DelegationOutboxRepository
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.infrastructure.persistence.entity.DelegationGrantEntity
 import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -27,20 +29,59 @@ class DelegationRepositoryImpl(
 ) : DelegationRepository,
     PanacheRepository<DelegationGrantEntity> {
 
-    // merge, not persist: the aggregate carries an application-assigned @Id, so persist()
-    // schedules an INSERT even for an existing row and fails on the PK for every lifecycle
-    // transition (accept/revoke/suspend). merge is the upsert the transitions need.
-    override suspend fun save(grant: DelegationGrant): DelegationGrant =
-        Panache.withTransaction { mergeGrant(grant) }.awaitSuspending().toDomain()
-
     override suspend fun save(grant: DelegationGrant, event: DomainEvent): DelegationGrant = Panache.withTransaction {
-        mergeGrant(grant).flatMap { merged ->
-            outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(merged)
+        val write = if (
+            grant.status == DelegationStatus.OFFERED && grant.lifecycleRevision == INITIAL_LIFECYCLE_REVISION
+        ) {
+            persistNew(grant)
+        } else {
+            updateLifecycle(grant).replaceWith(grant)
         }
-    }.awaitSuspending().toDomain()
+        write.flatMap { saved ->
+            outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(saved)
+        }
+    }.awaitSuspending()
 
-    private fun mergeGrant(grant: DelegationGrant): Uni<DelegationGrantEntity> =
-        Panache.getSession().flatMap { session -> session.merge(DelegationGrantEntity.fromDomain(grant)) }
+    private fun persistNew(grant: DelegationGrant): Uni<DelegationGrant> = Panache.getSession().flatMap { session ->
+        session.persist(DelegationGrantEntity.fromDomain(grant)).replaceWith(grant)
+    }
+
+    /**
+     * Compare-and-set only the lifecycle-owned mutable fields. Capabilities, parties and resource
+     * are immutable after offer, so there is no reason to merge a detached full row. The V8 trigger
+     * independently enforces the state graph and revision increment, including for an older writer
+     * that is still rolling out and does not know this column.
+     */
+    private fun updateLifecycle(grant: DelegationGrant): Uni<Int> {
+        val expectedRevision = grant.lifecycleRevision - 1
+        if (expectedRevision < INITIAL_LIFECYCLE_REVISION) {
+            return Uni.createFrom().failure(
+                IllegalArgumentException("lifecycle transition must advance revision from zero"),
+            )
+        }
+        return update(
+            "status = ?1, lifecycleRevision = ?2, acceptScaSessionId = ?3, updatedAt = ?4, " +
+                "closedAt = ?5, closedBy = ?6, closedReason = ?7 " +
+                "where id = ?8 and lifecycleRevision = ?9",
+            grant.status,
+            grant.lifecycleRevision,
+            grant.acceptScaSessionId,
+            grant.updatedAt,
+            grant.closedAt,
+            grant.closedBy,
+            grant.closedReason,
+            grant.id,
+            expectedRevision,
+        ).flatMap { count ->
+            if (count == 1) {
+                Uni.createFrom().item(count)
+            } else {
+                Uni.createFrom().failure(
+                    DelegationConcurrentTransitionException(grant.id, expectedRevision),
+                )
+            }
+        }
+    }
 
     private fun outboxMessage(event: DomainEvent): OutboxMessage = OutboxMessage(
         aggregateId = event.aggregateId,
@@ -78,18 +119,29 @@ class DelegationRepositoryImpl(
             .list<DelegationGrantEntity>()
     }.map { list -> list.map { it.toDomain() } }
 
-    override fun markExpired(id: UUID, expiredAt: OffsetDateTime, event: DomainEvent): Uni<Boolean> =
-        Panache.withTransaction {
-            update(
-                "status = 'EXPIRED', updatedAt = ?1, closedAt = ?1 where id = ?2 and status = 'ACTIVE'",
-                expiredAt,
-                id,
-            ).flatMap { count ->
-                if (count > 0L) {
-                    outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(true)
-                } else {
-                    Uni.createFrom().item(false)
-                }
+    override fun markExpired(
+        id: UUID,
+        expectedLifecycleRevision: Long,
+        expiredAt: OffsetDateTime,
+        event: DomainEvent,
+    ): Uni<Boolean> = Panache.withTransaction {
+        update(
+            "status = 'EXPIRED', lifecycleRevision = lifecycleRevision + 1, " +
+                "updatedAt = ?1, closedAt = ?1 where id = ?2 and status = 'ACTIVE' " +
+                "and lifecycleRevision = ?3",
+            expiredAt,
+            id,
+            expectedLifecycleRevision,
+        ).flatMap { count ->
+            if (count > 0) {
+                outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(true)
+            } else {
+                Uni.createFrom().item(false)
             }
         }
+    }
+
+    private companion object {
+        const val INITIAL_LIFECYCLE_REVISION = 0L
+    }
 }

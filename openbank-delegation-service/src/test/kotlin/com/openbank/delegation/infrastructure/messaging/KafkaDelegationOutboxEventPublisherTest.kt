@@ -49,6 +49,7 @@ class KafkaDelegationOutboxEventPublisherTest {
     private fun realEventPayload(): String = mapper.writeValueAsString(
         DelegationRevoked(
             aggregateId = UUID.randomUUID(),
+            lifecycleRevision = 2,
             grantorPartyId = UUID.randomUUID(),
             granteePartyId = UUID.randomUUID(),
             resourceType = com.openbank.delegation.domain.model.DelegationResourceType.ACCOUNT,

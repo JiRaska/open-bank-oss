@@ -16,7 +16,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Delegation Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Domain events emitted when a customer-to-party delegation grant changes state (ADR-0232).
 
@@ -90,12 +90,11 @@ operations:
       contract. Configured as `mp.messaging.outgoing.delegation-events-out` in its
       `application.yaml`.
 
-      **Consumers: none in this repository today.** Two are in flight and not yet merged —
-      `openbank-account-service` (#3058, `account_delegation_projection`) and
-      `openbank-card-issuance-service` (#3105, `card_delegation_projection`). Both build a local
-      read model so that enforcing a delegation never requires a synchronous call to
-      delegation-service. When either merges, add it here; a consumer absent from this list is a
-      consumer nobody has agreed to keep compatible.
+      **Consumers:** `openbank-account-service` (`account_delegation_projection`) and
+      `openbank-card-issuance-service` (`card_delegation_projection`). Both build a local enforcement
+      model so authorising a delegated action never requires a synchronous call to this service.
+      Their durable per-grant lifecycle cursors compare `lifecycleRevision`; Kafka delivery order,
+      `occurredAt` and wall-clock arrival are not used as conflict resolution.
     messages:
       - $ref: '#/channels/delegationEvents/messages/DelegationOffered'
       - $ref: '#/channels/delegationEvents/messages/DelegationActivated'
@@ -155,7 +154,7 @@ components:
       description: |
         Fields every event carries, from `com.openbank.libs.domain.event.DomainEvent`. The payload
         is the serialized event data class itself — there is no wrapper object.
-      required: [eventId, aggregateId, aggregateType, eventType, version, occurredAt]
+      required: [eventId, aggregateId, aggregateType, eventType, version, occurredAt, lifecycleRevision]
       properties:
         eventId:
           type: string
@@ -177,6 +176,17 @@ components:
           type: string
           format: date-time
           description: ISO-8601 instant at which the transition happened, not when it was published.
+        lifecycleRevision:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Monotonic status-transition revision for this grant. Zero is OFFERED and every legal
+            lifecycle transition increments exactly once. Consumers MUST compare this value with
+            their durable per-grant cursor and apply only a strictly newer event; arrival time and
+            `occurredAt` are not ordering controls. An authority-opening event without this field
+            must fail closed. A revisionless authority-removing event is legacy input and must
+            install an irreversible tombstone until the grant is reconciled or reissued.
     parties:
       type: object
       required: [grantorPartyId, granteePartyId]
