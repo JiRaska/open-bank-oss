@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.12.0...delegation-service-v0.13.0) (2026-09-02)
+
+
+### Features
+
+* **delegation:** preview client grants before SCA ([#8173](https://github.com/JiRaska/open-bank-oss/issues/8173)) ([cb8065c](https://github.com/JiRaska/open-bank-oss/commit/cb8065c425dde53ba02073b938ca908f2f3e7dfc))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.11.0...delegation-service-v0.12.0) (2026-09-01)
 
 
