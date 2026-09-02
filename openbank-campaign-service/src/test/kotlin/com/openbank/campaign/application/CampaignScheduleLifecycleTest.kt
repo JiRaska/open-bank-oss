@@ -25,6 +25,7 @@ import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SegmentRule
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -141,6 +142,7 @@ class CampaignScheduleLifecycleTest {
             },
             journeys = journeys,
             scheduler = scheduler,
+            metrics = mockk(relaxed = true),
             explicitGraphActivationEnabled = false,
         )
     }

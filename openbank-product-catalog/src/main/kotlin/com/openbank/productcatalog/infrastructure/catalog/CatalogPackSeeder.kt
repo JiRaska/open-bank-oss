@@ -161,6 +161,7 @@ class CatalogPackSeeder(
                 "/catalog-packs/banking/legacy-product-v1.schema.json",
             ),
             PackSchema("banking", "org.openbank.banking.loan", 1, "/catalog-packs/banking/loan-v1.schema.json"),
+            PackSchema("banking", "org.openbank.banking.loan", 2, "/catalog-packs/banking/loan-v2.schema.json"),
             PackSchema(
                 "insurance",
                 "org.openbank.insurance.term-life",

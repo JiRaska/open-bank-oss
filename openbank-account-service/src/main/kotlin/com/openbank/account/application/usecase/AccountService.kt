@@ -97,13 +97,20 @@ class AccountService(
         when (val lookup = productCatalog.findById(command.productId)) {
             is ProductLookupResult.NotFound ->
                 throw ProductNotEligibleException(command.productId, "product does not exist")
-            is ProductLookupResult.Found ->
+            is ProductLookupResult.Found -> {
                 if (lookup.product.status != "ACTIVE") {
                     throw ProductNotEligibleException(
                         command.productId,
                         "product status is ${lookup.product.status}, not ACTIVE",
                     )
                 }
+                if (lookup.product.currency != command.currency.code) {
+                    throw ProductNotEligibleException(
+                        command.productId,
+                        "product currency is ${lookup.product.currency}, not ${command.currency.code}",
+                    )
+                }
+            }
             ProductLookupResult.Unavailable -> Unit
         }
 
@@ -143,7 +150,7 @@ class AccountService(
         }
 
         // Operational money lives in the balance-service (N3 / ADR-0024). Balance init is
-        // event-driven (ADR-0073): balance-service's BalanceInitConsumer creates the zero
+        // event-driven (ADR-0267): balance-service's BalanceInitConsumer creates the zero
         // balance from the AccountCreated event below. The previous synchronous REST init
         // failed for onboarding accounts opened from a Kafka consumer (no request JWT to
         // propagate → fail-closed; blocking REST call on the Vert.x event loop threw) and,
@@ -229,7 +236,7 @@ class AccountService(
                 version = updated.version,
                 previousStatus = previous,
                 newStatus = updated.status,
-                reason = "KYC + AML cleared (ADR-0073)",
+                reason = "KYC + AML cleared (ADR-0267)",
                 occurredAt = clock.instant(),
                 sourceService = "account-service",
             ),

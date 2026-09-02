@@ -4,12 +4,13 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, Lock, Unlock, XCircle, AlertCircle } from 'lucide-react'
 import { accountApi } from '@/lib/api'
 import { EntityChip } from '@/components/entities/EntityChip'
+import { Can } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import type { Account, AccountBalance } from '@/types'
@@ -32,6 +33,7 @@ export default function AccountDetailPage() {
   const [error, setError]       = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [acting, setActing]     = useState(false)
+  const actionInFlight = useRef(false)
   const [actionIntent, setActionIntent] = useState<'freeze' | 'unfreeze' | 'close' | null>(null)
   const [actionReason, setActionReason] = useState('')
 
@@ -59,12 +61,18 @@ export default function AccountDetailPage() {
   }
 
   async function doAction(action: 'freeze' | 'unfreeze' | 'close', reason: string) {
-    if (!account) return
+    if (!account || actionInFlight.current) return
+    const normalizedReason = reason.trim()
+    if (!normalizedReason) {
+      setActionError(t('Pro tuto změnu uveďte důvod do auditní stopy.', 'Provide a reason for this change in the audit trail.'))
+      return
+    }
+    actionInFlight.current = true
     setActing(true); setActionError(null)
     try {
-      if (action === 'freeze')   await accountApi.freeze(id, reason)
-      if (action === 'unfreeze') await accountApi.unfreeze(id, reason)
-      if (action === 'close')    await accountApi.close(id, reason)
+      if (action === 'freeze')   await accountApi.freeze(id, normalizedReason)
+      if (action === 'unfreeze') await accountApi.unfreeze(id, normalizedReason)
+      if (action === 'close')    await accountApi.close(id, normalizedReason)
       await load()
       setActionIntent(null)
       setActionReason('')
@@ -77,12 +85,15 @@ export default function AccountDetailPage() {
         close:    t('Účet se nepodařilo zrušit. Zkuste to prosím znovu.', 'The account could not be closed. Please try again.'),
       }
       setActionError(human[action])
-    } finally { setActing(false) }
+    } finally {
+      actionInFlight.current = false
+      setActing(false)
+    }
   }
 
   if (loading) return (
-    <div style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <RefreshCw size={14} className="animate-spin" /> {t('Načítám účet…', 'Loading account…')}
+    <div role="status" aria-live="polite" style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <RefreshCw size={14} aria-hidden="true" className="animate-spin" /> {t('Načítám účet…', 'Loading account…')}
     </div>
   )
 
@@ -105,24 +116,33 @@ export default function AccountDetailPage() {
           <span className={STATUS_PILL[account.status] ?? 'pill pill-neutral'}>{account.status}</span>
           <Link href="/accounts" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true"/> {t('Zpět', 'Back')}</Link>
           {account.status === 'ACTIVE' && (
-            <button className="btn btn-secondary" onClick={() => requestAction('freeze')} disabled={acting}>
-              <Lock size={13} aria-hidden="true"/> {t('Zmrazit', 'Freeze')}
-            </button>
+            <Can permission="accounts:freeze">
+              <button type="button" className="btn btn-secondary" onClick={() => requestAction('freeze')} disabled={acting} aria-busy={acting} aria-label={t('Zmrazit účet', 'Freeze account')}>
+                <Lock size={13} aria-hidden="true"/> {t('Zmrazit', 'Freeze')}
+              </button>
+            </Can>
           )}
           {account.status === 'FROZEN' && (
-            <button className="btn btn-secondary" onClick={() => requestAction('unfreeze')} disabled={acting}>
-              <Unlock size={13} aria-hidden="true"/> {t('Odzmrazit', 'Unfreeze')}
-            </button>
+            <Can permission="accounts:freeze">
+              <button type="button" className="btn btn-secondary" onClick={() => requestAction('unfreeze')} disabled={acting} aria-busy={acting} aria-label={t('Odmrazit účet', 'Unfreeze account')}>
+                <Unlock size={13} aria-hidden="true"/> {t('Odzmrazit', 'Unfreeze')}
+              </button>
+            </Can>
           )}
           {account.status !== 'CLOSED' && (
-            <button
-              className="btn btn-secondary"
-              onClick={() => requestAction('close')}
-              disabled={acting}
-              style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)' }}
-            >
-              <XCircle size={13} aria-hidden="true"/> {t('Zrušit účet', 'Close')}
-            </button>
+            <Can permission="accounts:close">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => requestAction('close')}
+                disabled={acting}
+                aria-busy={acting}
+                aria-label={t('Zrušit účet', 'Close account')}
+                style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)' }}
+              >
+                <XCircle size={13} aria-hidden="true"/> {t('Zrušit účet', 'Close')}
+              </button>
+            </Can>
           )}
         </div>}
       />
@@ -162,7 +182,7 @@ export default function AccountDetailPage() {
             <button type="button" className="btn btn-secondary" onClick={() => { setActionIntent(null); setActionReason(''); setActionError(null) }} disabled={acting}>
               {t('Zrušit', 'Cancel')}
             </button>
-            <button type="button" className="btn btn-primary" onClick={() => doAction(actionIntent, actionReason)} disabled={acting}>
+            <button type="button" className="btn btn-primary" onClick={() => doAction(actionIntent, actionReason)} disabled={acting || !actionReason.trim()} aria-busy={acting}>
               {acting ? t('Ukládám…', 'Saving…') : t('Potvrdit změnu', 'Confirm change')}
             </button>
           </div>
@@ -171,6 +191,7 @@ export default function AccountDetailPage() {
 
       {actionError && (
         <div
+          role="alert"
           className="form-error"
           style={{
             marginBottom: '16px', padding: '12px 16px',

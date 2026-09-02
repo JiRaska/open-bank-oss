@@ -29,7 +29,31 @@ jobs:
   drift-check:
     name: Regenerate consumer pacts and diff against committed
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The fleet-wide regeneration reached 18m10s while successful and twice hit the old 20m
+    # ceiling on #7001 before Gradle could finish. Keep the full derived scope and drift proof;
+    # the extra headroom covers cold-cache variance without weakening either assertion below.
+    timeout-minutes: 30
+    # This job regenerates EVERY consumer pact in one Gradle invocation, and the scope is derived
+    # from the @Pact annotations — so it grows by one module each time anyone adds a pact, while
+    # the heap did not grow at all. It set no GRADLE_OPTS, so the daemon ran on Gradle's default,
+    # and at 31 modules it tipped over:
+    #
+    #   * What went wrong:
+    #   Execution failed for task ':openbank-onboarding-service:quarkusGenerateTestAppModel'
+    #   > Java heap space
+    #
+    # onboarding-service is not the problem and is not even a subject of the change that hit this
+    # (`:openbank-onboarding-service:quarkusGenerateTestAppModel` builds in 6s on its own) — it was
+    # simply the module the daemon happened to be on when memory ran out. That is what makes the
+    # failure so misleading: it names an innocent module, on a PR that touched a different one.
+    #
+    # The number to watch is the derived scope, not this heap. `derive-pact-drift-scope.sh` will
+    # keep adding modules; if this OOMs again, split the regeneration into batches rather than
+    # raising the ceiling a second time. 6g matches the fleet's heaviest lanes rather than the
+    # 3g eight other workflows use, because this one invocation configures every module those
+    # lanes handle one at a time.
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

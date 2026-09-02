@@ -56,6 +56,37 @@ class SettlementRepositoryImplIT {
         updatedAt = Instant.now(),
     )
 
+    /**
+     * Real-Postgres cover for the two queries the #5705 stranded gauges call every 30s. They are
+     * the only part of this change that can fail purely at runtime: `find("status = ?1 order by
+     * createdAt asc")` is an HQL string, so a wrong property name compiles cleanly and throws on
+     * first execution — and the caller is a `@Scheduled` tick whose exception nobody is watching,
+     * which would leave the gauges frozen at 0 and the alerts permanently, silently quiet. A stub
+     * repository cannot detect that; only this can.
+     */
+    @Test
+    fun `countByStatus and oldestCreatedAt answer from a real database`() {
+        val status = SettlementStatus.LEDGER_REVERSED // unused by the other tests in this class
+        val before = onVertxContext { repository.countByStatus(status) }
+
+        val older = newSettlement(status).copy(createdAt = Instant.parse("2020-01-01T00:00:00Z"))
+        val newer = newSettlement(status).copy(createdAt = Instant.parse("2026-01-01T00:00:00Z"))
+        onVertxContext { repository.create(newer) }
+        onVertxContext { repository.create(older) }
+
+        assertThat(onVertxContext { repository.countByStatus(status) }).isEqualTo(before + 2)
+        assertThat(onVertxContext { repository.oldestCreatedAt(status) })
+            .describedAs("must be the OLDEST row, not merely any row — inserted newest-first on purpose")
+            .isEqualTo(older.createdAt)
+    }
+
+    /** An empty state must answer null, which the gauge renders as an age of 0 rather than a stale one. */
+    @Test
+    fun `oldestCreatedAt is null for a state holding no settlements`() {
+        assertThat(onVertxContext { repository.oldestCreatedAt(SettlementStatus.CREDITED_REVERSED) }).isNull()
+        assertThat(onVertxContext { repository.countByStatus(SettlementStatus.CREDITED_REVERSED) }).isZero()
+    }
+
     @Test
     fun `create persists the settlement and findById reads it back`() {
         val settlement = newSettlement()

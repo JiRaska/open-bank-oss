@@ -37,7 +37,7 @@ interface CaseCoordinatorConfig {
      */
     fun case(): CaseGroup
 
-    interface CaseGroup {
+    interface CaseGroup : CaseDeliveryGroup {
         @WithDefault("case-coordinator")
         fun openAgents(): Set<String>
 
@@ -80,7 +80,9 @@ interface CaseCoordinatorConfig {
 
         @WithDefault("40")
         fun maxContributions(): Int
+    }
 
+    interface CaseDeliveryGroup {
         /** Shadow mode is valid only for the bounded non-money-path incident-response pilot. */
         @WithDefault("HITL")
         fun deliveryMode(): CaseDeliveryMode

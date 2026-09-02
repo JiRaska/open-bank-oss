@@ -1,15 +1,34 @@
-# Mobile RUM dashboard (ADR-0088 §D4). Visualises the Real-User-Monitoring spans
-# the KMP app now emits (Android android-agent + iOS Ktor OTLP exporter) via the
-# hardened ingest gateway → Tempo. RED panels are driven by the Tempo metrics-
-# generator span-metrics (traces_spanmetrics_*, service="openbank-app") — same
-# zero-extra-instrumentation source as the backend RED board (ADR-0082). The raw
-# traces panel uses TraceQL on Tempo so you can open a device span and follow it
-# straight into the backend trace (one trace id, tap→ledger). Crash-free health
-# lives on the companion "Mobile Crashes" board (GlitchTip).
+# Mobile RUM dashboard (ADR-0088 D4). Visualises the Real-User-Monitoring spans
+# the KMP app emits via the hardened ingest gateway (ADR-0089) -> Tempo. RED panels
+# are driven by the Tempo metrics-generator span-metrics (traces_spanmetrics_*,
+# service="openbank-app") -- same zero-extra-instrumentation source as the backend
+# RED board (ADR-0082). The raw traces panel uses TraceQL on Tempo so you can open a
+# device span and follow it straight into the backend trace (one trace id,
+# tap -> ledger). Crash-free health lives on the companion "Mobile Crashes" board
+# (GlitchTip).
 #
-# Populates once a device with a debug build logs in and navigates (RUM is off by
-# default / OIDC-gated; spans carry only the pseudonymous party_id, dropped at the
-# gateway until O6). If panels are empty, drive some screens on the phone first.
+# Current customer-app source implements consent-gated OTLP export on Android and iOS.
+# That is capability evidence, not runtime proof: the span-metrics below establish sampled
+# mobile arrival but do not reliably identify the emitting OS. Delivery for both halves is
+# in JiRaska/openbank-app, a separate repo (ADR-0147).
+#
+# READING AN EMPTY BOARD -- see docs/runbooks/0013-rum-cardinality.md.
+# Empty is the normal state and does not mean the app has no traffic. RUM is off by
+# default, OIDC/consent-gated, debug builds only, and the gateway samples at 25%, so
+# the measured arrival rate is a burst of one or two spans every few hours. Verified
+# 2026-08-20: exactly one openbank-app trace in a 6h window, and it correctly joined
+# the backend trace (screen.HOME + POST /api/v1/copilot/chat/stream in one trace id),
+# so ingest and context propagation both work -- it is volume that is absent.
+#
+# The per-screen panels below key on span_name (the app names screen spans
+# "screen.<NAME>", e.g. screen.HOME), NOT on the screen.name ATTRIBUTE. Current Android
+# and iOS source also sets bounded screen.name/app.version/os/device attributes, but older
+# deployed clients may not; no panel here depends on those optional dimensions.
+#
+# openbank-admin-ui is deliberately NOT on this board: ADR-0088 D4 rejected browser
+# RUM as the wrong surface (internal operator console). The gateway also emits no
+# CORS headers and accepts only customer-realm tokens, so admin-ui could not export
+# here without an ADR-level reversal.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -38,7 +57,7 @@ data:
           "title": "How to read this board",
           "type": "text",
           "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
-          "options": { "mode": "markdown", "content": "**Mobile RUM** — device-side spans from the KMP app (Android + iOS) through the hardened ingest gateway → Tempo.\n\n- **R/E/D** below come from Tempo span-metrics (`service=openbank-app`), no extra instrumentation.\n- **Screen views** = `screen.<name>` spans emitted per navigation; the active screen span's W3C context flows onto the next API call, so a RUM trace continues **tap → ledger** (open it in the *RUM traces* panel).\n- **Off by default / OIDC-gated**: only debug builds with a logged-in session emit. Only the pseudonymous `party_id` identifies a session (dropped at the gateway until O6). Crash-free health → *Mobile Crashes* board." }
+          "options": { "mode": "markdown", "content": "**Mobile RUM** \u2014 device-side spans from the KMP app through the hardened ingest gateway \u2192 Tempo. Android and iOS exporters exist in current app source; this board proves sampled arrival, not per-OS deployment.\n\n- **Empty is normal.** RUM is off by default, OIDC/consent-gated, debug builds only, and the gateway samples at 25%. Measured 2026-08-20: ~1 trace per 6h. An empty board is **not** evidence the app has no traffic \u2014 see `docs/runbooks/0013-rum-cardinality.md` before escalating.\n- **R/E/D** come from Tempo span-metrics (`service=openbank-app`), no extra instrumentation.\n- **Screen panels key on `span_name`** (`screen.<NAME>`). Current Android/iOS source also emits bounded `screen.name`, `app.version`, `os.*` and `device.model`; live values appear only after a newly built, consented client is sampled.\n- Tap \u2192 ledger works: a device span and the backend span share one trace id. Open one in the *RUM traces* panel.\n- **admin-ui is not here on purpose**: ADR-0088 D4 rejected browser RUM as the wrong surface.\n- Only the pseudonymous `party_id` identifies a session. Crash-free health \u2192 *Mobile Crashes* board." }
         },
         {
           "title": "Screen-view rate (per screen)",

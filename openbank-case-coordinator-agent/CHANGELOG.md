@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.7.0...case-coordinator-agent-v0.8.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.6.2...case-coordinator-agent-v0.7.0) (2026-08-22)
+
+
+### Features
+
+* **admin-ui:** add evidence-backed Agent Control Room ([#6424](https://github.com/JiRaska/open-bank-oss/issues/6424)) ([02317dd](https://github.com/JiRaska/open-bank-oss/commit/02317ddd2080efa3d6293999b39c3e1099fb009b))
+
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.6.1...case-coordinator-agent-v0.6.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **case-coordinator:** bump thread API contract ([#5887](https://github.com/JiRaska/open-bank-oss/issues/5887)) ([a4e80bd](https://github.com/JiRaska/open-bank-oss/commit/a4e80bd00df2ecf6f274d52a1304c30c154f7e4a))
+
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.6.0...case-coordinator-agent-v0.6.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **case-coordinator:** bump API contract to 1.2.0 for the shadow-pilot additions ([#5881](https://github.com/JiRaska/open-bank-oss/issues/5881)) ([c13e7f6](https://github.com/JiRaska/open-bank-oss/commit/c13e7f69287a84a40847ead6c1755ef2ab24ff09))
+
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.5.0...case-coordinator-agent-v0.6.0) (2026-08-20)
+
+
+### Features
+
+* **case-coordinator:** isolate incident shadow pilot ([#5861](https://github.com/JiRaska/open-bank-oss/issues/5861)) ([c78a10d](https://github.com/JiRaska/open-bank-oss/commit/c78a10d78732c186c390382aed5c7e6e36d0e777))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.4.5...case-coordinator-agent-v0.5.0) (2026-08-18)
 
 

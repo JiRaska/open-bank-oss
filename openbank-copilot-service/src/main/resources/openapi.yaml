@@ -7,7 +7,7 @@ openapi: "3.1.0"
 
 info:
   title: OpenBank Copilot Service API
-  version: "1.2.0"
+  version: "1.3.0"
   description: |
     Customer-facing AI assistant (mobile copilot), per ADR-0089.
 
@@ -116,6 +116,14 @@ paths:
         an unknown token. The confirm is re-checked against the OPA policy gate (ADR-0034,
         fail-closed: an unreachable PDP denies), and the token is single-use — it is deleted on
         confirm, on expiry, and on an ownership mismatch is left untouched.
+
+        NOT YET WIRED (issue #5900): no production code issues a proposal token, so on a
+        deployed pod this operation can only answer 404. The live human-in-the-loop route is
+        the `[PROPOSAL_END:{...}]` sentinel on the chat SSE stream, which the app takes into
+        the existing customer-edge payment + SCA flow without a second round-trip. This
+        operation also performs no SCA itself — it validates ownership, TTL and the OPA gate
+        and returns an action id; nothing downstream executes. Do not build a client against
+        it until both ends land.
       security:
         - bearerAuth: []
       parameters:

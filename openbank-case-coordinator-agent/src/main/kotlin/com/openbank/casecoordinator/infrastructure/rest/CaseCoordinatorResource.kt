@@ -8,6 +8,8 @@ package com.openbank.casecoordinator.infrastructure.rest
 import com.openbank.casecoordinator.application.CaseCapabilityGate
 import com.openbank.casecoordinator.application.CaseOpenResult
 import com.openbank.casecoordinator.application.CaseOpenService
+import com.openbank.casecoordinator.application.CaseSignalAuthorizationResult
+import com.openbank.casecoordinator.application.CaseSignalAuthorizationService
 import com.openbank.casecoordinator.application.CaseThreadService
 import com.openbank.casecoordinator.application.workflow.CaseWorkflow
 import com.openbank.casecoordinator.domain.model.CaseClass
@@ -47,6 +49,7 @@ class CaseCoordinatorResource(
     private val workflowClient: WorkflowClient,
     private val temporalConfig: TemporalConfig,
     private val identity: SecurityIdentity,
+    private val signalAuthorization: CaseSignalAuthorizationService,
 ) {
 
     data class Status(val service: String, val status: String)
@@ -150,6 +153,7 @@ class CaseCoordinatorResource(
 
     @POST
     @Path("/cases/{caseId}/signals")
+    @Blocking
     @RolesAllowed("ROLE_ADMIN", "ROLE_OPERATOR")
     fun signal(@PathParam("caseId") caseId: String?, request: SignalRequest?): Response {
         val id = requireNotNull(caseId) { "caseId path parameter is required" }
@@ -162,8 +166,27 @@ class CaseCoordinatorResource(
         // one the caller proved it may act as, not one it named. Answering 503 first would also
         // make the decision unobservable wherever Temporal is off.
         if (!gate.permitsAssertedIdentity(identity.roles, agentId)) return assertedIdentityDenied()
+        val capability = when (type) {
+            "join" -> "case.join"
+            "contribute" -> "case.contribute"
+            "supersede", "request-synthesis" -> null
+            else -> throw IllegalArgumentException("unknown signal type '$type'")
+        }
+        val collaborationAuthorization = capability?.let {
+            when (val result = signalAuthorization.authorize(id, agentId, it)) {
+                is CaseSignalAuthorizationResult.Authorized -> result
+                CaseSignalAuthorizationResult.Denied -> return Response.status(Response.Status.FORBIDDEN)
+                    .entity(errorBody("signal '$type' denied for the requested agent")).build()
+                CaseSignalAuthorizationResult.UnknownCase -> return Response.status(Response.Status.NOT_FOUND)
+                    .entity(errorBody("no running case with id '$id'")).build()
+                CaseSignalAuthorizationResult.PolicyUnavailable -> return Response.status(
+                    Response.Status.SERVICE_UNAVAILABLE,
+                )
+                    .entity(errorBody("case collaboration policy is unavailable")).build()
+            }
+        }
         if (!temporalConfig.enabled()) return temporalUnavailable()
-        if (!capable(type, agentId)) {
+        if (capability == null && !capable(type, agentId)) {
             return Response.status(Response.Status.FORBIDDEN)
                 // agentId is NOT echoed (#4834), matching the openCase denial. It is free-form
                 // request-body input, and reflecting it verbatim tells the caller nothing it did
@@ -171,7 +194,7 @@ class CaseCoordinatorResource(
                 // it against the four known signal literals, so it is a bounded server-side value.
                 .entity(errorBody("signal '$type' denied for the requested agent")).build()
         }
-        return deliver(id, type, agentId, request)
+        return deliver(id, type, agentId, request, capability, collaborationAuthorization)
     }
 
     private fun capable(type: String, agentId: String): Boolean = when (type) {
@@ -182,17 +205,33 @@ class CaseCoordinatorResource(
         else -> throw IllegalArgumentException("unknown signal type '$type'")
     }
 
-    private fun deliver(id: String, type: String, agentId: String, request: SignalRequest): Response {
+    private fun deliver(
+        id: String,
+        type: String,
+        agentId: String,
+        request: SignalRequest,
+        capability: String?,
+        authorization: CaseSignalAuthorizationResult.Authorized?,
+    ): Response {
         val stub = workflowClient.newWorkflowStub(CaseWorkflow::class.java, id)
         return try {
             when (type) {
-                "join" -> stub.join(JoinSignal(agentId, request.role ?: "participant"))
+                "join" -> stub.join(
+                    JoinSignal(
+                        agentId,
+                        request.role ?: "participant",
+                        requireNotNull(authorization).signalId,
+                        authorization.rolloutId,
+                    ),
+                )
                 "contribute" -> stub.contribute(
                     ContributeSignal(
                         agentId = agentId,
                         summary = requireNotNull(request.summary) { "summary is required for contribute" },
                         evidenceRefs = request.evidenceRefs ?: emptyList(),
                         contested = request.contested ?: false,
+                        signalId = requireNotNull(authorization).signalId,
+                        rolloutId = authorization.rolloutId,
                     ),
                 )
                 "supersede" -> stub.supersede(
@@ -205,6 +244,9 @@ class CaseCoordinatorResource(
                     ),
                 )
                 else -> stub.requestSynthesis(SynthesisRequest(agentId))
+            }
+            if (capability != null && authorization != null) {
+                signalAuthorization.recordInvoked(id, agentId, capability, authorization)
             }
             Response.accepted().build()
         } catch (e: WorkflowNotFoundException) {

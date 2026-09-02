@@ -10,6 +10,13 @@ tags: [crypto-keys, secrets, compliance]
 summary: "This ADR becomes the platform's key inventory of record with custody and rotation per key class, and sets a preference order from no key at all through short-lived leaves to long-lived keys, ending the circular ADR-0007/0094 deferral."
 ---
 
+> **Delivery update (2026-08-20):** D6 is now shipped as the provider-neutral
+> [`0012-cryptographic-key-compromise`](../runbooks/0012-cryptographic-key-compromise.md)
+> runbook. It defines durable incident declaration, evidence preservation, fail-closed
+> containment, replacement verification, and closure artifacts. It intentionally does
+> not claim that a live KMS rotation or tabletop has been executed; those remain
+> operational acceptance evidence for D1/D6.
+
 # ADR-0172 — Cryptographic key management and lifecycle
 
 ## Context

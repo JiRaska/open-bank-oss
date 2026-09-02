@@ -5,6 +5,7 @@
 package com.openbank.finrep.contract
 
 import au.com.dius.pact.consumer.MockServer
+import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonArray
 import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonBody
 import au.com.dius.pact.consumer.dsl.PactDslWithProvider
 import au.com.dius.pact.consumer.junit5.PactConsumerTestExt
@@ -15,11 +16,15 @@ import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.F0101Mapper
+import com.openbank.finrep.domain.model.BalanceVerdict
+import com.openbank.finrep.infrastructure.client.ClosedPeriodResponse
 import com.openbank.finrep.infrastructure.client.ClosedPeriodTrialBalanceResponse
 import com.openbank.finrep.infrastructure.client.LedgerRestClient
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.QueryParam
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -69,15 +74,17 @@ import java.time.LocalDate
  * template still fixes the required field types for a non-empty response, and finrep's mappers fold
  * over an empty list to an all-zero template.
  *
- * Only the three line fields finrep actually consumes (`code`, `type`, `net`) are declared — a
- * consumer contract must not pin provider fields it does not read (`glAccountId`, `name`,
- * `currency`, `totalDebit`, `totalCredit` are ledger's business).
+ * Only the four line fields finrep actually consumes (`code`, `type`, `net`, `currency`) are
+ * declared — a consumer contract must not pin provider fields it does not read (`glAccountId`,
+ * `name`, `totalDebit`, `totalCredit` are ledger's business). `currency` moved from the second
+ * list to the first with issue #5987, when the balance check began evaluating the double-entry
+ * identity per currency.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-ledger-service", pactVersion = PactSpecVersion.V3)
 class LedgerTrialBalancePactConsumerTest {
 
-    private val json = jacksonObjectMapper()
+    private val json = jacksonObjectMapper().findAndRegisterModules()
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun trialBalanceWithEntriesPact(builder: PactDslWithProvider): RequestResponsePact = builder
@@ -107,6 +114,60 @@ class LedgerTrialBalancePactConsumerTest {
                     line.stringType("code", "1100-CASH-CLEARING-CZK")
                     line.stringType("type", "ASSET")
                     line.decimalType("net", 150_000.00)
+                    // Added with issue #5987: finrep now READS `currency`, because the double-entry
+                    // identity behind `isBalanced` holds per currency and a global sum would let a
+                    // CZK line cancel a lost EUR one. A consumer pact must pin exactly the fields
+                    // the consumer consumes — no more (that was the rule when this line was absent)
+                    // and no fewer (the client's `currency` is non-nullable, so a provider that
+                    // stopped sending it would fail deserialization at runtime, not here).
+                    line.stringType("currency", "CZK")
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun livePreviewTrialBalancePact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has frozen monthly trial balance for the reporting date")
+        .uponReceiving("GET the mutable monthly GL trial balance for an internal working preview")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/trial-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.stringValue("period", "MONTH:2026-06")
+                o.booleanType("balanced", true)
+                o.minArrayLike("lines", 0, 1) { line ->
+                    line.stringType("code", "1100-CASH-CLEARING-CZK")
+                    line.stringType("type", "ASSET")
+                    line.decimalType("net", 150_000.00)
+                    line.stringType("currency", "CZK")
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun closedPeriodsPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has frozen monthly trial balance for the reporting date")
+        .uponReceiving("GET closed periods available for regulatory reporting")
+        .path(LEDGER_PERIODS_PATH)
+        .query("from=$CLOSED_PERIODS_FROM&to=$CLOSED_PERIODS_TO")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonArray { a ->
+                a.`object` { period ->
+                    period.stringValue("periodType", "MONTH")
+                    period.stringValue("to", REPORTING_DATE)
+                    period.stringValue("status", "FROZEN")
+                    period.stringValue("evidenceState", "LINES_V1")
                 }
             }.build(),
         )
@@ -130,15 +191,69 @@ class LedgerTrialBalancePactConsumerTest {
         assertThat(line.code).isNotBlank()
         assertThat(line.type).isNotBlank()
         assertThat(line.net).isNotNull()
+        assertThat(line.currency).isNotBlank()
 
         // ... and the mapper must accept them: proves the contract feeds a real F01.01 render,
         // not merely that some JSON parsed.
         val template = F0101Mapper.map(
-            response.lines.map { TrialBalanceLineDto(code = it.code, accountType = it.type, net = it.net) },
+            TrialBalanceSnapshot(
+                lines = response.lines.map {
+                    TrialBalanceLineDto(code = it.code, accountType = it.type, net = it.net, currency = it.currency)
+                },
+                ledgerReportsBalanced = response.balanced,
+            ),
             LocalDate.parse(REPORTING_DATE),
         )
-        assertThat(template.cells.map { it.rowRef }).containsExactly("r010", "r380", "r490")
-        assertThat(template.cells.first().value).isEqualByComparingTo(BigDecimal("150000.00"))
+        assertThat(template.cells.map { it.rowRef }).contains("r0380")
+        assertThat(template.cells.single { it.rowRef == "r0380" }.value).isEqualByComparingTo(BigDecimal("150000.00"))
+        // The pact's single ASSET line does not tie out on its own, so the contract also proves the
+        // balance check runs over real contract data and can answer `false` (issue #5987) — it is
+        // not merely unit-testable against hand-built fixtures.
+        assertThat(template.isBalanced).isFalse()
+        // And the contract body is itself a disagreement: it declares `balanced: true` alongside a
+        // lines array that does not tie out. That is exactly the wire shape a truncated response
+        // has — a producer verdict computed over lines the consumer did not all receive — so the
+        // cross-check of issue #6011 is exercised against contract data rather than a fixture.
+        assertThat(response.balanced).isTrue()
+        assertThat(template.balanceVerdict).isEqualTo(BalanceVerdict.SOURCES_DISAGREE)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "closedPeriodsPact")
+    fun `the ledger client exposes immutable reporting period eligibility`(mockServer: MockServer) {
+        assertThat(ledgerPeriodsPath).isEqualTo(LEDGER_PERIODS_PATH)
+
+        val body = given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .queryParam(closedPeriodsFromParam, CLOSED_PERIODS_FROM)
+            .queryParam(closedPeriodsToParam, CLOSED_PERIODS_TO)
+            .get(ledgerPeriodsPath)
+            .then()
+            .statusCode(200)
+            .extract().body().asString()
+        val periods: List<ClosedPeriodResponse> = json.readValue(body)
+
+        assertThat(periods).hasSize(1)
+        val period = periods.single()
+        assertThat(period.periodType).isEqualTo("MONTH")
+        assertThat(period.to).isEqualTo(LocalDate.parse(REPORTING_DATE))
+        assertThat(period.status).isEqualTo("FROZEN")
+        assertThat(period.evidenceState).isEqualTo("LINES_V1")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "livePreviewTrialBalancePact")
+    fun `the ledger client uses a distinct explicit path for the mutable working preview`(mockServer: MockServer) {
+        assertThat(ledgerLiveTrialBalancePath)
+            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/trial-balance")
+
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get(ledgerLiveTrialBalancePath.replace("{asOf}", REPORTING_DATE))
+            .then()
+            .statusCode(200)
     }
 
     /** Issues the request against the path the production client is annotated with. */
@@ -166,6 +281,9 @@ class LedgerTrialBalancePactConsumerTest {
          * the annotation is measured against.
          */
         const val LEDGER_MONTH_TRIAL_BALANCE_PATH = "/api/v1/ledger/periods/MONTH"
+        const val LEDGER_PERIODS_PATH = "/api/v1/ledger/periods"
+        const val CLOSED_PERIODS_FROM = "1970-01-01"
+        const val CLOSED_PERIODS_TO = "9999-12-31"
 
         /** Ledger's query-parameter name for the as-of date — likewise literal. */
         /** A FINREP quarter-end reference date. */
@@ -173,6 +291,13 @@ class LedgerTrialBalancePactConsumerTest {
 
         private val getTrialBalanceMethod =
             LedgerRestClient::class.java.getDeclaredMethod("getTrialBalance", String::class.java)
+        private val getLiveTrialBalanceMethod =
+            LedgerRestClient::class.java.getDeclaredMethod("getLiveTrialBalance", String::class.java)
+        private val listClosedPeriodsMethod = LedgerRestClient::class.java.getDeclaredMethod(
+            "listClosedPeriods",
+            String::class.java,
+            String::class.java,
+        )
 
         /**
          * `@Path` on the interface + `@Path` on the method, joined the way JAX-RS resolves them.
@@ -182,6 +307,17 @@ class LedgerTrialBalancePactConsumerTest {
             LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
             getTrialBalanceMethod.getAnnotation(Path::class.java).value,
         ).joinToString("/") { it.trim('/') }.let { "/$it" }
+
+        val ledgerLiveTrialBalancePath: String = listOf(
+            LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
+            getLiveTrialBalanceMethod.getAnnotation(Path::class.java).value,
+        ).joinToString("/") { it.trim('/') }.let { "/$it" }
+
+        val ledgerPeriodsPath: String = LedgerRestClient::class.java.getAnnotation(Path::class.java).value
+        val closedPeriodsFromParam: String =
+            listClosedPeriodsMethod.parameterAnnotations[0].filterIsInstance<QueryParam>().single().value
+        val closedPeriodsToParam: String =
+            listClosedPeriodsMethod.parameterAnnotations[1].filterIsInstance<QueryParam>().single().value
 
         /** The query-parameter name the production client sends the as-of date under. */
     }

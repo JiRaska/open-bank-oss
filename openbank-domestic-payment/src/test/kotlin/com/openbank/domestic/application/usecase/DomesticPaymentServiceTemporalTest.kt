@@ -13,6 +13,7 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -109,6 +110,17 @@ class DomesticPaymentServiceTemporalTest {
     }
 
     @Test
+    fun `createPayment persists trusted synthetic taint in the durable outbox boundary`() {
+        val outbox = io.mockk.slot<OutboxMessage>()
+        coEvery { repo.findByIdempotencyKey(any()) } returns null
+        coEvery { repo.save(any(), capture(outbox)) } answers { firstArg() }
+
+        runBlocking { service.createPayment(command(synthetic = true)) }
+
+        assertThat(outbox.captured.synthetic).isTrue()
+    }
+
+    @Test
     fun `createPayment derives EXTERNAL scope for a non-own-bank creditor`() {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
 
@@ -141,6 +153,7 @@ class DomesticPaymentServiceTemporalTest {
         idempotencyKey: String = "dom-idem-new",
         creditorBankCode: String = " 0100 ",
         actorId: UUID? = null,
+        synthetic: Boolean = false,
     ) = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
         debtorAccountId = UUID.randomUUID(),
@@ -161,6 +174,7 @@ class DomesticPaymentServiceTemporalTest {
         statementLabel = "  Monthly settlement  ",
         endToEndId = "   ",
         actorId = actorId,
+        synthetic = synthetic,
     )
 
     /** No-op workflow so the dispatch has a registered type on the queue; behaviour is tested elsewhere. */

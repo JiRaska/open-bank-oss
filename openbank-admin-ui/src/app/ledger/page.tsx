@@ -4,11 +4,12 @@
 
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Search, ChevronDown, ChevronRight } from 'lucide-react'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { AuthGuard } from '@/components/auth/AuthGuard'
 import type { JournalEntry, CursorPage } from '@/types'
 import { PageHeader } from '@/components/ui/PageHeader'
 
@@ -48,12 +49,13 @@ export default function LedgerPage() {
   }
 
   async function search() {
-    setLoading(true); setUnavailable(null); setMoreError(null); setExpanded(null)
+    setLoading(true); setUnavailable(null); setMoreError(null)
     try {
-      setResult(await loadPage())
+      const next = await loadPage()
+      setResult(next)
+      setExpanded(null)
     } catch (error) {
       // Timeout / abort / network — the BFF or ledger-service didn't answer.
-      setResult(null)
       setUnavailable({ kind: (error as Error).message as UnavailableKind || 'unreachable' })
     } finally { setLoading(false) }
   }
@@ -75,6 +77,7 @@ export default function LedgerPage() {
   }
 
   return (
+    <AuthGuard permission="accounts:view">
     <div>
       <PageHeader breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Hlavní kniha', 'General Ledger')}</span></div>} title={t('Hlavní kniha', 'General Ledger')} subtitle={t('Zápisy v podvojném účetnictví', 'Double-entry journal entries')} />
 
@@ -90,8 +93,8 @@ export default function LedgerPage() {
           <input id="ledger-from-date" type="date" className="input" style={{ width: '150px' }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
           <label htmlFor="ledger-to-date" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Do', 'To')}</label>
           <input id="ledger-to-date" type="date" className="input" style={{ width: '150px' }} value={toDate} onChange={e => setToDate(e.target.value)} />
-          <button className="btn btn-primary" onClick={search} disabled={loading}>
-            <Search size={13} />
+          <button type="button" className="btn btn-primary" onClick={search} disabled={loading} aria-busy={loading}>
+            <Search size={13} aria-hidden="true" />
             {loading ? t('Načítání…', 'Loading…') : t('Načíst záznamy', 'Load Entries')}
           </button>
           {result && (
@@ -102,7 +105,7 @@ export default function LedgerPage() {
         </div>
 
         {/* Calm, explained unavailable state — never a raw HTTP status. */}
-        {unavailable && (
+        {unavailable && !result && (
           <DataUnavailable
             kind={unavailable.kind}
             service={t('Ledger-service', 'Ledger-service')}
@@ -112,7 +115,27 @@ export default function LedgerPage() {
           />
         )}
 
-        {!unavailable && (
+        {unavailable && result && <div role="status" aria-live="polite">
+          <DataUnavailable
+            kind={unavailable.kind}
+            service={t('Ledger-service', 'Ledger-service')}
+            feature={t('Aktualizace hlavní knihy', 'General Ledger refresh')}
+            lang={language}
+            dense
+          />
+          <p style={{ margin: '6px 16px 10px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+            {t(
+              'Zobrazen je poslední úspěšný výsledek pro vybrané období. Novější účetní zápisy zatím nemusí být zahrnuté.',
+              'Showing the last successful result for the selected period. Newer journal entries may not be included yet.',
+            )}
+          </p>
+        </div>}
+
+        {loading && result && <p role="status" aria-live="polite" style={{ margin: '10px 16px 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {t('Aktualizuji hlavní knihu; poslední výsledek zůstává dostupný.', 'Refreshing the General Ledger; the last result remains available.')}
+        </p>}
+
+        {(!unavailable || result) && (
         <div style={{ overflowX: 'auto' }}>
           <table className="data-table">
             <thead>
@@ -131,17 +154,17 @@ export default function LedgerPage() {
               {!result && !loading && (
                 <tr><td colSpan={8}><div className="empty-state">{t('Vyberte období a klikněte na "Načíst záznamy".', 'Select a date range and click "Load Entries".')}</div></td></tr>
               )}
-              {loading && (
+              {loading && !result && (
                 <tr><td colSpan={8}><div className="empty-state">{t('Načítání záznamů hlavní knihy…', 'Loading journal entries…')}</div></td></tr>
               )}
               {!loading && result && result.data.length === 0 && (
                 <tr><td colSpan={8}><div className="empty-state">{t('Pro toto období nebyly nalezeny žádné záznamy.', 'No journal entries found for this period.')}</div></td></tr>
               )}
-              {!loading && result?.data.map(entry => {
+              {result?.data.map(entry => {
                 const isOpen = expanded === entry.id
                 return (
-                  <>
-                    <tr key={entry.id}>
+                  <Fragment key={entry.id}>
+                    <tr>
                       <td style={{ color: 'var(--text-tertiary)', paddingLeft: '14px' }}>
                         <button type="button" className="btn btn-ghost" style={{ padding: '3px' }} aria-label={isOpen ? t('Skrýt řádky deníku', 'Hide journal lines') : t('Zobrazit řádky deníku', 'Show journal lines')} aria-expanded={isOpen} aria-controls={`ledger-entry-${entry.id}`} onClick={() => setExpanded(isOpen ? null : entry.id)}>
                           {isOpen ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
@@ -169,7 +192,7 @@ export default function LedgerPage() {
                       </td>
                     </tr>
                     {isOpen && (
-                      <tr key={`${entry.id}-exp`}>
+                      <tr>
                         <td colSpan={8} style={{ padding: 0, background: 'var(--surface-2)' }}>
                           <div id={`ledger-entry-${entry.id}`} style={{ padding: '12px 20px 12px 50px', borderBottom: '2px solid var(--accent-border)' }}>
                             <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
@@ -216,7 +239,7 @@ export default function LedgerPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
             </tbody>
@@ -227,12 +250,13 @@ export default function LedgerPage() {
         {result?.pagination.hasNextPage && (
           <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
             {moreError && <p role="alert" style={{ margin: '0 0 8px', fontSize: '12px', color: 'var(--danger-text)' }}>{moreError}</p>}
-            <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={loadMore} disabled={loadingMore}>
+            <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={loadMore} disabled={loadingMore} aria-busy={loadingMore}>
               {loadingMore ? t('Načítám…', 'Loading…') : t('Načíst další', 'Load more')}
             </button>
           </div>
         )}
       </div>
     </div>
+    </AuthGuard>
   )
 }

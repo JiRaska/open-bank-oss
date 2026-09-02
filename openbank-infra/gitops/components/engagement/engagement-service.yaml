@@ -48,7 +48,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-engagement-opa-bundle.sh.
-        openbank.tech/policy-checksum: "3ffef2929f3415b9"
+        openbank.tech/policy-checksum: "8db63577c74178a4"
       labels:
         app.kubernetes.io/name: engagement-service
         app.kubernetes.io/part-of: engagement
@@ -67,7 +67,7 @@ spec:
           # src/main (this merge itself, first) triggers auto-deploy to build a real image and
           # open a gitops PR replacing this with the actual sha. Until then, Kyverno's
           # cosign-signature/SBOM-attestation admission policies reject a tag nothing ever pushed.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-4f2d6e5e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-b12fa82e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

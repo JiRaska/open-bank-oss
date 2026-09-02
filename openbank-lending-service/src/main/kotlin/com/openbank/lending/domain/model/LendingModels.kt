@@ -13,11 +13,20 @@ import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.lending.DelinquencyBucket
 import com.openbank.libs.lending.EclHorizon
 import com.openbank.libs.lending.Ifrs9Stage
+import com.openbank.libs.lending.origination.CreditProductKind
 import com.openbank.libs.lending.origination.OriginationState
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
+
+/** Immutable catalog evidence used to price and constrain an originated loan. */
+data class CatalogLoanSnapshot(
+    val offeringId: UUID,
+    val revisionId: UUID,
+    val contentHash: String,
+    val schemaVersion: Int,
+)
 
 /** Servicing and termination lifecycle of a booked loan (ADR-0028, ADR-0215 D1). */
 enum class LoanStatus {
@@ -120,6 +129,12 @@ data class LoanApplication(
     val decidedAt: OffsetDateTime? = null,
     val jurisdiction: String? = null,
     val productType: String? = null,
+    /**
+     * ADR-0269 rule 3: which of the three credit shapes this application is, and therefore which
+     * steps the customer walks. Defaults to UNSECURED — the only intake route that exists today —
+     * so an existing caller keeps the behaviour it already had.
+     */
+    val productKind: CreditProductKind = CreditProductKind.UNSECURED,
     val packVersion: Int? = null,
     val verifiedIncomeMonthly: Money? = null,
     val existingDebtServiceMonthly: Money? = null,
@@ -133,6 +148,7 @@ data class LoanApplication(
     val policyVersions: String? = null,
     val decisionInputHash: String? = null,
     val decidedEngineAt: OffsetDateTime? = null,
+    val catalogSnapshot: CatalogLoanSnapshot? = null,
 )
 
 /** A live loan booked from an approved, disbursed application. */
@@ -225,6 +241,7 @@ data class LoanApplicationRequest(
     val ageYears: Int? = null,
     val residency: String? = null,
     val employmentTenureMonths: Int? = null,
+    val catalogOfferingId: UUID? = null,
 )
 
 /**

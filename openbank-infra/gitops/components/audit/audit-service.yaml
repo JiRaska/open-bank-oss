@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-audit-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "0abbbe4ed712e13f"
+        openbank.tech/policy-checksum: "1803ec97f1dbb79e"
     spec:
       serviceAccountName: audit-service
       securityContext:
@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: audit-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-4f2d6e5e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-3b62a4a5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -103,6 +103,19 @@ spec:
             # warns and continues.
             - name: QUARKUS_CONFIG_LOCATIONS
               value: /mnt/msg-config/override.properties
+            # ADR-0031 D5: the asymmetric signing key is held by KMS; the alias is only
+            # the signing input. AuditAnchorService records KMS's immutable returned key id
+            # with each anchor so verification remains correct across key rotation.
+            # The audit-service Pod Identity receives only Sign/Verify/GetPublicKey on this key.
+            # Pod Identity supplies credentials, while the AWS SDK resolves its region separately.
+            - name: AWS_REGION
+              value: eu-north-1
+            - name: AUDIT_ANCHOR_SIGNER
+              value: kms
+            - name: AUDIT_ANCHOR_SIGNING_REQUIRED
+              value: "true"
+            - name: AUDIT_ANCHOR_KMS_KEY_ID
+              value: alias/openbank-audit-anchor
             # ADR-0034 Phase 5 / issue #1797: audit-service shipped @Authorize with the app default
             # AUTHZ_ENFORCE=true and NO sidecar — so the PDP call failed and audit.read / audit.verify
             # failed closed (HTTP 422). The `opa` sidecar below now answers the PDP call; this explicit

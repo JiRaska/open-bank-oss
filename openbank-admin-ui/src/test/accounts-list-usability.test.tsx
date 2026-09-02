@@ -26,7 +26,7 @@ describe('account search accessibility', () => {
     const query = screen.getByLabelText('Search accounts by number, IBAN, or Party ID')
     expect(query).toHaveAttribute('aria-describedby', 'accounts-query-help')
     fireEvent.change(query, { target: { value: '12' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Search accounts' }))
 
     await screen.findByText('1234567890')
     expect(query).not.toHaveAttribute('aria-describedby')

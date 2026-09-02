@@ -11,7 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
 
 const PID_SERVICE = '/api/svc/pid-service'
 
@@ -27,11 +27,37 @@ interface PidRecord {
   validUntil?: string
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  ACTIVE:   'var(--success)',
-  INACTIVE: 'var(--text-muted)',
-  EXPIRED:  'var(--warning)',
-  REVOKED:  'var(--danger)',
+interface BankIdSyncPayload {
+  readonly bankIdSub: string
+  readonly givenName: string
+  readonly familyName: string
+  readonly birthdate: string
+  readonly gender: string
+  readonly birthplace: string
+  readonly nationalities: readonly string[]
+  readonly idDocuments: readonly {
+    readonly type: string
+    readonly number: string
+    readonly issuingCountry: string
+    readonly issuedAt: string
+    readonly expiresAt: string
+  }[]
+  readonly email?: string
+  readonly phone?: string
+}
+
+interface PendingBankIdSync {
+  readonly partyId: string
+  readonly payload: BankIdSyncPayload
+}
+
+// PID lifecycle deliberately treats expired credentials as renewal work and a
+// revoked credential as a security concern. Those meanings are stricter than
+// the shared consent-oriented defaults for the same words.
+function pidStatusTone(status: string): Tone {
+  if (status === 'EXPIRED') return 'warning'
+  if (status === 'REVOKED') return 'danger'
+  return statusTone(status)
 }
 
 export default function PidPage() {
@@ -63,6 +89,10 @@ export default function PidPage() {
     idDocExpiresAt: ''
   })
   const [formSubmitting, setFormSubmitting] = useState(false)
+  // Party creation and BankID enrichment are two separate writes. Bind the confirmed party ID
+  // to the immutable payload submitted for that party, so recovery cannot enrich it with form
+  // values edited after the non-idempotent POST /parties began.
+  const [pendingBankIdSync, setPendingBankIdSync] = useState<PendingBankIdSync | null>(null)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -102,66 +132,76 @@ export default function PidPage() {
     setFormSubmitting(true)
     setError(null)
     setSuccessMsg(null)
-    
+
+    const checkpoint = pendingBankIdSync
     const requiredFields = [
       'givenName', 'familyName', 'birthdate', 'bankIdSub', 'nationalities', 
       'gender', 'birthplace', 'idDocType', 'idDocNumber', 'idDocCountry', 
       'idDocIssuedAt', 'idDocExpiresAt'
     ];
-    
-    for (const field of requiredFields) {
-      if (!formData[field as keyof typeof formData]) {
-        setError(t(`Prosím vyplňte všechna povinná pole (${field}).`, `Please fill all required fields (${field}).`));
-        setFormSubmitting(false);
-        return;
+
+    if (!checkpoint) {
+      for (const field of requiredFields) {
+        if (!formData[field as keyof typeof formData]) {
+          setError(t(`Prosím vyplňte všechna povinná pole (${field}).`, `Please fill all required fields (${field}).`));
+          setFormSubmitting(false);
+          return;
+        }
       }
     }
-    
+
     try {
       const nationalitiesArray = formData.nationalities.split(',').map(s => s.trim()).filter(Boolean)
-      
-      const createPayload = {
-        partyType: 'NATURAL_PERSON',
+      const syncPayload: BankIdSyncPayload = checkpoint?.payload ?? {
+        bankIdSub: formData.bankIdSub,
         givenName: formData.givenName,
         familyName: formData.familyName,
         birthdate: formData.birthdate,
-        bankIdSub: formData.bankIdSub,
-        nationalities: nationalitiesArray.length > 0 ? nationalitiesArray : ['CZ'],
-        verificationSource: 'BANKID',
-        initialRole: 'CUSTOMER',
-        onboardingChannel: 'BANKID'
+        gender: formData.gender,
+        birthplace: formData.birthplace,
+        nationalities: nationalitiesArray,
+        idDocuments: [{
+          type: formData.idDocType,
+          number: formData.idDocNumber,
+          issuingCountry: formData.idDocCountry,
+          issuedAt: formData.idDocIssuedAt,
+          expiresAt: formData.idDocExpiresAt
+        }],
+        email: formData.email || undefined,
+        phone: formData.phone || undefined
       }
-      
-      const res = await fetch(`${PID_SERVICE}/api/v1/parties`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(createPayload)
-      })
-      if (!res.ok) throw new Error(t('Vytvoření strany selhalo. Zkuste to prosím znovu.', 'Failed to create party. Please try again.'))
 
-      const party = await res.json()
-      const partyId = party.id || party.partyId
-
-      if (formData.bankIdSub) {
-        const syncPayload = {
-          bankIdSub: formData.bankIdSub,
+      let partyId = checkpoint?.partyId
+      if (!partyId) {
+        const createPayload = {
+          partyType: 'NATURAL_PERSON',
           givenName: formData.givenName,
           familyName: formData.familyName,
           birthdate: formData.birthdate,
-          gender: formData.gender,
-          birthplace: formData.birthplace,
-          nationalities: nationalitiesArray,
-          idDocuments: [{
-            type: formData.idDocType,
-            number: formData.idDocNumber,
-            issuingCountry: formData.idDocCountry,
-            issuedAt: formData.idDocIssuedAt,
-            expiresAt: formData.idDocExpiresAt
-          }],
-          email: formData.email || undefined,
-          phone: formData.phone || undefined
+          bankIdSub: formData.bankIdSub,
+          nationalities: nationalitiesArray.length > 0 ? nationalitiesArray : ['CZ'],
+          verificationSource: 'BANKID',
+          initialRole: 'CUSTOMER',
+          onboardingChannel: 'BANKID'
         }
 
+        const res = await fetch(`${PID_SERVICE}/api/v1/parties`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(createPayload)
+        })
+        if (!res.ok) throw new Error(t('Vytvoření strany selhalo. Zkuste to prosím znovu.', 'Failed to create party. Please try again.'))
+
+        const party = await res.json() as { id?: unknown; partyId?: unknown }
+        const createdPartyId = party.id || party.partyId
+        if (typeof createdPartyId !== 'string' || !createdPartyId) {
+          throw new Error(t('Služba nevrátila ID vytvořené strany.', 'The service did not return the created party ID.'))
+        }
+        partyId = createdPartyId
+        setPendingBankIdSync({ partyId: createdPartyId, payload: syncPayload })
+      }
+
+      if (syncPayload.bankIdSub) {
         const syncRes = await fetch(`${PID_SERVICE}/api/v1/parties/${partyId}/sync/bankid`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -169,10 +209,14 @@ export default function PidPage() {
         })
 
         if (!syncRes.ok) {
-          throw new Error(t(`Záznam vytvořen (ID: ${partyId}), ale synchronizace BankID selhala. Zkuste to prosím znovu.`, `Record created (ID: ${partyId}), but BankID sync failed. Please try again.`))
+          const retryable = syncRes.status === 408 || syncRes.status === 425 || syncRes.status === 429 || syncRes.status >= 500
+          throw new Error(retryable
+            ? t(`Záznam vytvořen (ID: ${partyId}), ale synchronizace BankID dočasně selhala. Zopakujte pouze synchronizaci BankID.`, `Record created (ID: ${partyId}), but BankID sync failed temporarily. Retry BankID sync only.`)
+            : t(`Záznam vytvořen (ID: ${partyId}), ale synchronizace BankID byla odmítnuta (HTTP ${syncRes.status}). Nevytvářejte další stranu; před opakováním synchronizace vyřešte chybu služby nebo dat.`, `Record created (ID: ${partyId}), but BankID sync was rejected (HTTP ${syncRes.status}). Do not create another party; resolve the service or data error before retrying sync.`))
         }
       }
-      
+
+      setPendingBankIdSync(null)
       setShowNewForm(false)
       setFormData({ 
         givenName: '', familyName: '', birthdate: '', bankIdSub: '', nationalities: 'CZ', 
@@ -181,7 +225,7 @@ export default function PidPage() {
       load()
       setSuccessMsg(t('Záznam úspěšně vytvořen a synchronizován.', 'Record created and synchronized successfully.'))
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Failed to create record'
+      const msg = e instanceof Error ? e.message : t('Vytvoření záznamu selhalo.', 'Failed to create record.')
       setError(msg)
     } finally {
       setFormSubmitting(false)
@@ -189,7 +233,7 @@ export default function PidPage() {
   }
 
   return (
-    <AuthGuard>
+    <AuthGuard permission="pid:view">
       <div style={{ animation: 'fadeIn 0.2s ease-out', maxWidth: '1400px', margin: '0 auto' }}>
         <PageHeader
           icon={<Map size={18} aria-hidden="true" />}
@@ -198,11 +242,18 @@ export default function PidPage() {
           breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">PID</span></div>}
           actions={<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button className="btn btn-secondary" onClick={load} disabled={loading}>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={load}
+                disabled={loading}
+                aria-busy={loading}
+                aria-label={t('Obnovit PID záznamy', 'Refresh PID records')}
+              >
                 <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
                 {t('Obnovit', 'Refresh')}
               </button>
-              <button className="btn btn-secondary" onClick={() => setShowNewForm(true)}>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowNewForm(true)} aria-label={t('Otevřít rychlé vytvoření PID záznamu', 'Open PID quick create')}>
                 {t('Rychlé vytvoření', 'Quick Create')}
               </button>
               <Can permission="parties:create">
@@ -261,6 +312,15 @@ export default function PidPage() {
               <strong>{t('Rychlé vytvoření je pouze předvyplnění. Právně závazná AML identifikace vyžaduje plný onboarding a ověření.', 'Quick create is only pre-filling. Legally binding AML identification requires full onboarding and verification.')}</strong>
             </div>
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {pendingBankIdSync && (
+                <div role="status" style={{ padding: '12px', background: 'var(--info-bg)', color: 'var(--info-text)', border: '1px solid var(--info-border)', borderRadius: '6px', fontSize: '13px' }}>
+                  {t(
+                    `Strana ${pendingBankIdSync.partyId} už byla vytvořena. Údaje jsou uzamčené; další pokus zopakuje pouze synchronizaci BankID se stejnou stranou a původně odeslanou identitou.`,
+                    `Party ${pendingBankIdSync.partyId} was already created. The fields are locked; the next attempt retries BankID sync against the same party and originally submitted identity only.`,
+                  )}
+                </div>
+              )}
+              <fieldset disabled={formSubmitting || pendingBankIdSync !== null} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div style={{ gridColumn: '1 / -1' }}>
                   <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{t('Základní údaje', 'Basic Info')}</h4>
@@ -439,12 +499,19 @@ export default function PidPage() {
                   />
                 </div>
               </div>
+              </fieldset>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowNewForm(false)} disabled={formSubmitting}>
                   {t('Zrušit', 'Cancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={formSubmitting}>
-                  {formSubmitting ? t('Vytvářím...', 'Creating...') : t('Vytvořit', 'Create')}
+                  {formSubmitting
+                    ? pendingBankIdSync
+                      ? t('Synchronizuji...', 'Syncing...')
+                      : t('Vytvářím...', 'Creating...')
+                    : pendingBankIdSync
+                      ? t('Znovu synchronizovat BankID', 'Retry BankID sync')
+                      : t('Vytvořit', 'Create')}
                 </button>
               </div>
             </form>
@@ -538,9 +605,7 @@ export default function PidPage() {
                     </Can>
                   </td>
                   <td>
-                    <span className="pill" style={{ background: `${STATUS_COLORS[r.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLORS[r.status] ?? 'var(--text-muted)' }}>
-                      {r.status}
-                    </span>
+                    <StatusBadge status={r.status} tone={pidStatusTone(r.status)} />
                   </td>
                   <td>
                     {r.verified ? <CheckCircle2 size={14} color="var(--success)" /> : <Clock size={14} color="var(--warning)" />}

@@ -74,6 +74,7 @@ class ProductCatalogLookupPactConsumerTest {
                 o.stringValue("id", CURRENT_PERSONAL_PRODUCT_ID)
                 o.stringType("code", "CURRENT_PERSONAL")
                 o.stringType("status", "ACTIVE")
+                o.stringType("currency", "EUR")
             }.build(),
         )
         .toPact()
@@ -108,6 +109,7 @@ class ProductCatalogLookupPactConsumerTest {
         assertThat(product.id).isEqualTo(CURRENT_PERSONAL_PRODUCT_ID)
         assertThat(product.code).isEqualTo("CURRENT_PERSONAL")
         assertThat(product.status).isNotBlank()
+        assertThat(product.currency).isEqualTo("EUR")
     }
 
     @Test

@@ -109,3 +109,84 @@ spec:
               increase() lookback wide enough to cover a daily feed truncates
               silently. The gauge carries its state forward with no lookback at
               all; the counter is read at triage time.
+
+        # 3. A job still runs, and takes too long doing it (issue #6169). Liveness above cannot see
+        # this: a sweep that degrades from 6s to 300s records a success every time, so the age
+        # gauge stays green while the job walks toward overrunning its own slot — at which point
+        # `ConcurrentExecution.SKIP` starts dropping runs with nothing logged.
+        #
+        # WHY NOT THE SPAN HISTOGRAM. `traces_spanmetrics_latency_bucket` is the obvious source and
+        # is unusable here: its `le` set is 0.1/0.25/0.5/1/2/5/+Inf and every agent-oversight sweep
+        # lands in (5s, +Inf], so histogram_quantile returns exactly 5.00 on every run — the metric
+        # is SATURATED and no threshold above 5s is expressible from it at all (measured live in
+        # #6168). Widening the window converts a never-firing rule into a never-clearing one; the
+        # signal needed a different instrument, not a retuned rule, so the job now records its own
+        # timer (DomainMetrics.registerWorkflowRun).
+        #
+        # WHAT THE NUMBER IS. Mean wall-clock per run over 2h, measured IN THE JOB'S PROCESS —
+        # `_sum / _count`, not a percentile. A quantile is not available at this sample size and
+        # never was: a 30-minute job contributes ~4 observations to a 2h window, and
+        # histogram_quantile over four samples returns the maximum, which is the same defect one
+        # layer down. `_max` is likewise not used: Micrometer's timer max decays over a few minutes,
+        # so between two sweeps it reads 0. The mean over ≥4 runs detects SUSTAINED degradation and
+        # deliberately not one slow outlier — the outlier case is a dashboard question.
+        #
+        # WHY THIS ONE CAN FIRE, against both measured failure modes:
+        #  * window vs subject period — [2h] against a 30m cron is W > P, so the condition does not
+        #    decay between invocations and `for: 30m` matures. The #6041 shape (rate[15m], for: 15m,
+        #    30m subject: 44 points pending, zero firing) needs W <= P and is structurally excluded.
+        #  * ratio blindness at total failure — the denominator here is ALL runs, not the successful
+        #    ones, so it does not vanish when everything is failing; the timer records a
+        #    `outcome="failure"` sample too, and the rule sums over outcome. The only way the
+        #    denominator disappears is no runs at all, which is WorkflowLivenessStale's question,
+        #    not this one — and the `> 0` filter makes that hand-off explicit rather than leaving a
+        #    0/0 NaN to be reasoned about.
+        #
+        # VALUE AT t=0 ON A COLD POD: the budget gauge is registered at startup and reads its
+        # declared value; the timer is registered at startup too and reads count = 0, sum = 0. So
+        # `increase(count[2h])` is 0, the `> 0` filter drops the series, the division yields
+        # nothing, and the rule is SILENT — no boot-time breach, and none hidden behind `for:`.
+        # That re-derivation is the thing WorkflowLivenessStale did not do (#2239): it shipped
+        # asserting a seed it did not have and fired 15 minutes after every deploy until #4208.
+        #
+        # The threshold is a SERIES, not a literal, exactly as WorkflowLivenessStale compares
+        # against openbank_workflow_expected_interval_seconds. So this rule carries no service list
+        # and no per-job constant: a workflow opts in by calling registerWorkflowRun with its own
+        # budget, and a workflow that has not opted in has no budget series and is matched by
+        # nothing.
+        - alert: WorkflowRunDurationHigh
+          expr: |
+            (
+              sum by (workflow) (increase(openbank_workflow_run_duration_seconds_sum[2h]))
+              /
+              (sum by (workflow) (increase(openbank_workflow_run_duration_seconds_count[2h])) > 0)
+            )
+            > on (workflow) group_left()
+            max by (workflow) (openbank_workflow_run_budget_seconds)
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            # 30m: agent-oversight-sweep's `agent.oversight.cron` (0 0/30 * * * ?), the only
+            # subscriber today. Declared so check-alert-window-vs-subject-period.py can do the
+            # arithmetic rather than trust this comment.
+            subject_period: 30m
+            summary: "{{ $labels.workflow }} averages {{ $value | humanizeDuration }} per run, over its declared budget"
+            description: >-
+              The scheduled workflow {{ $labels.workflow }} still runs and still succeeds — this is
+              not a liveness gap and WorkflowLivenessStale is correctly quiet. Its mean run over the
+              last two hours exceeds openbank_workflow_run_budget_seconds, the budget its own code
+              declares. That matters before it looks like an outage: a run approaching its cron
+              period gets the next run SKIPPED by the scheduler, silently, and the heartbeat keeps
+              reading healthy because the in-flight run does eventually finish.
+
+              Split by outcome first — openbank_workflow_run_duration_seconds_count{workflow="..."}
+              carries outcome="success" and outcome="failure". A rising failure count with a small
+              duration is a different fault (fail-fast, look at the error path) from a rising
+              success duration (the work itself got slower: an upstream dependency, an LLM
+              gateway, a query that lost its index).
+
+              Do NOT reach for traces_spanmetrics_latency_bucket to confirm this. Its top finite
+              bucket is 5 seconds, so for any job in this class it reports 5.00 whatever the truth
+              is (#6169).

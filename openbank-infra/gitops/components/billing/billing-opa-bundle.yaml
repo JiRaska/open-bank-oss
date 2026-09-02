@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: billing-service
     app.kubernetes.io/part-of: billing
   annotations:
-    openbank.tech/policy-checksum: "bca32c57e7ed62c5"
+    openbank.tech/policy-checksum: "3deb0b360583661d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -561,11 +561,11 @@ data:
     # console path (re-run an assessment, and the phase 2c-ii posting verbs once
     # they land behind the four-eyes gate).
     allowed_reasons contains "operator-billing-write" if {
-    	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
-    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-    	role in input.principal.roles
-    	startswith(input.action, "billing.")
+        input.principal.type == "HUMAN"
+        not startswith(input.principal.id, "service-account-")
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        startswith(input.action, "billing.")
     }
 
     # 2026-08-05 (#3734): operator-billing-write was role-only, and rules.yaml's role_action_matrix
@@ -576,17 +576,25 @@ data:
     # account-service's billing-discovery read is INBOUND from billing, and product-catalog fees are
     # read via catalog, not billing), so there is no identity-scoped grant to preserve: the
     # exclusion closes the role-only path and this veto closes the matrix path for the edge (base
-    # rest.rego gates its allow head on `not prohibited`). billing.read stays reachable to M2M via
-    # base operator-read-any — the fleet-wide M2M read over-grant is tracked separately in #3734.
+    # rest.rego gates its allow head on `not prohibited`).
     prohibited if {
-    	input.principal.id == "service-account-openbank-edge"
-    	input.action in {
-    		"billing.post",
-    		"billing.reverse",
-    		"billing.approval.decide",
-    	}
+        input.principal.id == "service-account-openbank-edge"
+        input.action in {
+            "billing.post",
+            "billing.reverse",
+            "billing.approval.decide",
+        }
     }
 
+    # Ordinary billing.read stays reachable to M2M via base operator-read-any, but
+    # billing.approval.read is different: it exposes the maker, action and resource id of every
+    # pending four-eyes decision. Deny it to every service account; some client_credentials
+    # principals currently retain type HUMAN and ROLE_OPERATOR, so checking type or role alone is
+    # insufficient to enforce the staff-only boundary.
+    prohibited if {
+        startswith(input.principal.id, "service-account-")
+        input.action == "billing.approval.read"
+    }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -1104,12 +1112,19 @@ data:
       - openbank-delegation-service            # ADR-0232: mints payment rights (customer-to-party grants) without moving
                                                 # money itself — money-path for the same reason consent/vop are. Threat
                                                 # model: docs/threat-models/openbank-delegation-service.md. four-eyes assessed:
-                                                # delegation.offer/revoke/suspend are self-service or fraud-signal actions
-                                                # with SCA-bound ceremonies on both ends; the bank-side suspend lands via
-                                                # the fraud pipeline, not an operator console, so there is no
-                                                # maker/checker pair to gate yet. Revisit when the operator
-                                                # backoffice surface ships.
-      - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
+                                                # delegation.offer/revoke are self-service with SCA-bound ceremonies on both
+                                                # ends. The bank-side suspend was justified here as landing "via the fraud
+                                                # pipeline, not an operator console" — that is NOT true (#4403): fraud scoring
+                                                # is shadow-only and drives no suspension, so this exemption rested on a
+                                                # control that does not exist. The exemption still holds on the narrower and
+                                                # true ground that no operator suspend endpoint has shipped, so there is no
+                                                # maker/checker pair to gate yet. Revisit when the operator backoffice
+                                                # surface ships, and do not re-derive it from the fraud pipeline.
+      - openbank-fraud-service                # ADR-0084: v4 rule engine live; scoring is SHADOW-ONLY on every rail. The domestic-payment
+                                               # enforcement gate (issue #667) was MERGED AND THEN DELETED by 189fe7b03 (PR #2122,
+                                               # closing issue #1917) — this comment credited it as merely flag-gated until #4403.
+                                               # No fraud verdict changes any payment outcome today: the four wired rails call
+                                               # POST /fraud/score and log the result. See ADR-0084's 2026-08-09 correction block.
                                                # four-eyes assessed (issue #938 follow-up): the only REST surface today is a stateless
                                                # POST /fraud/score (fraud.score) — no operator case-decision, rule-config, or manual
                                                # override endpoint exists yet, so there is nothing real to maker-checker gate. Revisit
@@ -1355,6 +1370,7 @@ data:
             - sanctions.create
             - sanctions.trigger
             - sanctions.update
+            - sctInstPayment.approval.decide
             - sctInstPayment.create
             - sepaPayment.approval.decide
             - sepaPayment.create

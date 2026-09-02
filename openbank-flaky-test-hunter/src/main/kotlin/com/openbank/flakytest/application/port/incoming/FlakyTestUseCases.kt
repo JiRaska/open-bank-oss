@@ -8,6 +8,7 @@ package com.openbank.flakytest.application.port.incoming
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.domain.model.FlakyTestReport
 import com.openbank.flakytest.domain.model.RunTrigger
+import com.openbank.flakytest.domain.model.TestIntelligenceAnalysisRequest
 
 interface RunFlakyTestCheckUseCase {
     /** Runs a sweep and WAITS for the report — the operator trigger, where a human is holding
@@ -32,4 +33,9 @@ interface RunFlakyTestCheckUseCase {
 interface GetFindingsUseCase {
     suspend fun getActive(): List<FlakyTestFinding>
     suspend fun getById(id: String): FlakyTestFinding?
+}
+
+/** Bounded evidence analysis. It may create reviewable findings, never a remediation. */
+interface AnalyzeTestIntelligenceUseCase {
+    suspend fun analyze(request: TestIntelligenceAnalysisRequest): List<FlakyTestFinding>
 }

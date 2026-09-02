@@ -44,6 +44,7 @@ import {
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { StageBoard, summariseBy, type StageDef } from '@/components/flow/StageBoard'
 import { CampaignPlanningBoard, type CampaignPlan } from '@/components/campaigns/CampaignPlanningBoard'
 
@@ -266,7 +267,7 @@ export default function CampaignsPage() {
     return t('Sledujte živou cestu', 'Follow the live journey')
   }
 
-  return (
+  return <AuthGuard permission="campaign:view">
     <div className="space-y-6">
       <PageHeader
         title={t('Kampaně', 'Campaigns')}
@@ -276,9 +277,11 @@ export default function CampaignsPage() {
         )}
         icon={<Megaphone className="h-6 w-6" />}
         actions={
-          <Link href="/campaigns/new" className="btn btn-primary" style={{ fontSize: 12 }}>
-            {t('Nová kampaň', 'New campaign')}
-          </Link>
+          <Can permission="campaign:create">
+            <Link href="/campaigns/new" className="btn btn-primary" style={{ fontSize: 12 }}>
+              {t('Nová kampaň', 'New campaign')}
+            </Link>
+          </Can>
         }
       />
 
@@ -316,9 +319,11 @@ export default function CampaignsPage() {
                   <h2>{t('Od nápadu k další akci. V jednom tahu.', 'From idea to next action. In one flow.')}</h2>
                   <p>{t('Pracovní plocha pro rozhodnutí, ne inventář kampaní.', 'A decision workspace, not a campaign inventory.')}</p>
                 </div>
-                <Link href="/campaigns/new" className="campaign-control-create">
-                  <Sparkles size={14} /> {t('Vytvořit cestu', 'Create journey')}
-                </Link>
+                <Can permission="campaign:create">
+                  <Link href="/campaigns/new" className="campaign-control-create">
+                    <Sparkles size={14} /> {t('Vytvořit cestu', 'Create journey')}
+                  </Link>
+                </Can>
               </div>
               <div className="campaign-control-flow" aria-label={t('Tok práce kampaně', 'Campaign work flow')}>
                 <div className="campaign-flow-node" data-state="brief">
@@ -512,7 +517,7 @@ export default function CampaignsPage() {
               className="w-72 rounded-md border bg-transparent px-3 py-1.5 text-sm"
             />
             {stateFilter && (
-              <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => setStateFilter(null)} data-testid="clear-state">
+              <button type="button" className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => setStateFilter(null)} data-testid="clear-state">
                 {t('Filtr:', 'Filter:')} {label(stateFilter)} ✕
               </button>
             )}
@@ -603,5 +608,5 @@ export default function CampaignsPage() {
         </>
       )}
     </div>
-  )
+  </AuthGuard>
 }

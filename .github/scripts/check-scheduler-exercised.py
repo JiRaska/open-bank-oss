@@ -42,6 +42,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
 # The scheduler turned back ON, in any of the spellings a @TestProfile uses.
@@ -59,7 +61,6 @@ BASELINE = {
     "openbank-aml-service",
     "openbank-card-issuance-service",
     "openbank-interest-service",
-    "openbank-notification-service",
     "openbank-onboarding-service",
     "openbank-sanctions-service",
     "openbank-sdd-service",
@@ -88,14 +89,21 @@ def strip_kt_comments(text: str) -> str:
     return "".join(out)
 
 
-def scan() -> tuple[set[str], set[str]]:
-    """(services that disable it and have @Scheduled, services whose tests re-enable it)"""
+def scan() -> tuple[set[str], set[str], int]:
+    """(services that disable it and have @Scheduled, services whose tests re-enable it, walked)
+
+    The walked count is the corpus. Both returned SETS are filtered subsets, and the existing
+    zero-guard below only catches the total collapse — a scan that reached 3 of 61 services
+    would still find a couple of disablers and read as a fleet in good order.
+    """
     disables_with_scheduled, reenables = set(), set()
+    walked = 0
     for svc_dir in sorted(REPO.glob("openbank-*/")):
         svc = svc_dir.name
         app = svc_dir / "src/main/resources/application.yaml"
         if not app.is_file():
             continue
+        walked += 1
         try:
             conf = strip_comments(app.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError):
@@ -113,7 +121,7 @@ def scan() -> tuple[set[str], set[str]]:
         if any(REENABLES.search(strip_kt_comments(p.read_text(encoding="utf-8", errors="ignore")))
                for p in test_src.rglob("*.kt")):
             reenables.add(svc)
-    return disables_with_scheduled, reenables
+    return disables_with_scheduled, reenables, walked
 
 
 def selftest() -> int:
@@ -131,7 +139,7 @@ def selftest() -> int:
         if got != want:
             print(f"selftest FAIL: {src!r} -> {got}, want {want} ({why})")
             ok = False
-    disabled, _ = scan()
+    disabled, _, _ = scan()
     for must in ("openbank-ledger-service", "openbank-billing-service"):
         if must not in disabled:
             print(f"selftest FAIL: {must} disables the scheduler per #2204 but the scan missed it")
@@ -150,7 +158,8 @@ def main() -> int:
     if args.selftest:
         return selftest()
 
-    disabled, reenabled = scan()
+    disabled, reenabled, walked = scan()
+    gatelib.subjects(walked, "services with an application.yaml walked")
     if not disabled:
         print("::error::check-scheduler-exercised: found no service disabling the scheduler — "
               "the scan is broken, not the fleet clean.")

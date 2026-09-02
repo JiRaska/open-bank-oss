@@ -4,7 +4,9 @@
 
 package com.openbank.campaign.application.usecase
 
+import com.openbank.campaign.application.port.out.CampaignMetricsPort
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.EnrolmentAttempt
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
@@ -35,6 +37,7 @@ class TriggeredEnrolmentService(
     private val segments: SegmentRegistry,
     private val segmentEvaluation: SegmentEvaluationPort,
     private val journeys: JourneySignaller,
+    private val metrics: CampaignMetricsPort,
 ) {
 
     private val log = Logger.getLogger(TriggeredEnrolmentService::class.java)
@@ -90,6 +93,10 @@ class TriggeredEnrolmentService(
                 completedAt = null,
             ),
         )
+        // Only ENROLLED is counted. The other five outcomes are the overwhelming majority of this
+        // path — a product event arrives for every party in the bank — and counting them would bury
+        // the one series that says a trigger actually started a journey.
+        metrics.enrolmentRecorded(EnrolmentAttempt.STARTED)
         log.infof("Triggered enrolment: campaign=%s party=%s trigger=%s", campaignId, partyId, campaign.trigger)
         return TriggeredEnrolment.ENROLLED
     }

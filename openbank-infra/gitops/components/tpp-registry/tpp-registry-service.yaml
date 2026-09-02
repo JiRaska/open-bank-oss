@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-tpp-registry-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "c7fba1f3f7cb74d7"
+        openbank.tech/policy-checksum: "61cd39ceb157abcf"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: tpp-registry-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tpp-registry-service:sandbox-4f2d6e5e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-tpp-registry-service:sandbox-bd090160
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

@@ -1,0 +1,174 @@
+{
+  "consumer": {
+    "name": "openbank-interest-service"
+  },
+  "interactions": [
+    {
+      "description": "GET one published catalog revision event for interest synchronization",
+      "providerStates": [
+        {
+          "name": "a published fixed-rate deposit revision exists for interest synchronization"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/events",
+        "query": {
+          "limit": [
+            "1"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "items": [
+            {
+              "aggregateId": "30000000-0000-0000-0000-000000000010",
+              "aggregateType": "catalog.revision",
+              "eventType": "com.openbank.catalog.revision_published",
+              "headers": {
+
+              },
+              "id": "40000000-0000-0000-0000-000000000010",
+              "occurredAt": "2027-01-01T00:00:00Z",
+              "payload": {
+
+              },
+              "schemaVersion": 1
+            }
+          ],
+          "nextCursor": "MQ"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the immutable published fixed-rate catalog revision",
+      "providerStates": [
+        {
+          "name": "a published fixed-rate deposit revision exists for interest synchronization"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/revisions/30000000-0000-0000-0000-000000000010"
+      },
+      "response": {
+        "body": {
+          "checkerId": "pact-interest-checker",
+          "content": {
+            "attributes": {
+              "currency": "EUR",
+              "interest": {
+                "annualRate": "0.012345678901234567",
+                "dayCount": "ACT_365",
+                "payoutFrequency": "MONTHLY",
+                "rateType": "FIXED"
+              },
+              "productType": "SAVINGS"
+            },
+            "documentCodes": [
+
+            ],
+            "eligibility": [
+
+            ],
+            "name": {
+              "en": "Interest pact deposit"
+            },
+            "prices": [
+
+            ],
+            "relationships": [
+
+            ]
+          },
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "createdAt": "2027-01-01T00:00:00Z",
+          "effectiveFrom": "2027-01-01T00:00:00Z",
+          "effectiveTo": null,
+          "id": "30000000-0000-0000-0000-000000000010",
+          "makerId": "pact-interest-author",
+          "number": 1,
+          "offeringId": "20000000-0000-0000-0000-000000000010",
+          "reason": "published fixed-rate fixture",
+          "revision": 0,
+          "schemaRef": {
+            "id": "org.openbank.banking.deposit",
+            "version": 2
+          },
+          "state": "PUBLISHED",
+          "updatedAt": "2027-01-01T00:00:00Z"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the offering owning the published fixed-rate revision",
+      "providerStates": [
+        {
+          "name": "a published fixed-rate deposit revision exists for interest synchronization"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/offerings/20000000-0000-0000-0000-000000000010"
+      },
+      "response": {
+        "body": {
+          "code": "PACT_INTEREST_OFFERING",
+          "id": "20000000-0000-0000-0000-000000000010",
+          "market": {
+            "brands": [
+
+            ],
+            "channels": [
+
+            ],
+            "countries": [
+
+            ],
+            "locales": [
+
+            ],
+            "segments": [
+
+            ]
+          },
+          "revision": 0,
+          "specificationId": "10000000-0000-0000-0000-000000000010"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-product-catalog"
+  }
+}

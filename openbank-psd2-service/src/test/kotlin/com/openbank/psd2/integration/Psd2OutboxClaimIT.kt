@@ -11,6 +11,8 @@ import com.openbank.psd2.it.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
@@ -32,8 +34,20 @@ import java.time.Instant
  * (the claiming pod crashed or was evicted) must not strand the row forever.
  */
 @QuarkusTest
+@TestProfile(Psd2OutboxClaimIT.RepositoryIsolationProfile::class)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class Psd2OutboxClaimIT {
+
+    /**
+     * This test owns the state transition directly.  The production dispatcher remains enabled;
+     * disabling it only for this profile prevents its scheduled tick from claiming a row between
+     * [seedPending] and this test's first repository claim.
+     */
+    class RepositoryIsolationProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "openbank.outbox.dispatch-enabled" to "false",
+        )
+    }
 
     @Inject
     lateinit var repository: Psd2OutboxRepositoryImpl

@@ -281,6 +281,11 @@ RUN addgroup -S openbank && adduser -S openbank -G openbank
 COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+# OpenTelemetry preload. Both files sit at the package root rather than inside the standalone
+# bundle because Next.js only emits application code there; a --require preload is invisible to
+# its file tracing. See otel-bootstrap.cjs for why the SDK cannot be started from
+# instrumentation.ts (instrumentation-http patches node:http too late to catch the server).
+COPY --from=build /app/otel-bootstrap.cjs /app/otel-scrub.cjs ./
 COPY --from=docs-collector /docs-bundle ./docs-bundle
 COPY --from=sbom-collector /sbom-bundle ./sbom-bundle
 COPY --from=openapi-collector /openapi-bundle ./openapi-bundle
@@ -320,6 +325,9 @@ COPY --chmod=0644 openbank-admin-ui/test-results.json ./test-results.json
 # (empty scaffold when there are no pacts/pitest reports to collect).
 # --chmod=0644 for the same UID-100 readability reason as test-results.json.
 COPY --chmod=0644 openbank-admin-ui/quality-report.json ./quality-report.json
+# Unified provenance-aware test evidence (ADR-0273). Legacy test/quality
+# projections remain bundled through the compatibility window.
+COPY --chmod=0644 openbank-admin-ui/test-intelligence.json ./test-intelligence.json
 # CI-produced AWS Cost Explorer snapshot (read-only consumer; see
 # src/app/api/finops/costs/route.ts). build-push-admin-ui.sh runs
 # scripts/collect-aws-costs.mjs before the build so this file always exists
@@ -385,6 +393,7 @@ ENV OPENBANK_OPENAPI_BUNDLE=/app/openapi-bundle
 ENV OPENBANK_FLAGS_BUNDLE=/app/flags-bundle
 ENV OPENBANK_CHANGELOG_BUNDLE=/app/changelog-bundle
 ENV OPENBANK_TEST_RESULTS=/app/test-results.json
+ENV OPENBANK_TEST_INTELLIGENCE=/app/test-intelligence.json
 ENV OPENBANK_READINESS=/app/prod-readiness.json
 ENV OPENBANK_COST_REPORT=/app/cost-report.json
 ENV OPENBANK_AGENTS_FILE=/app/agents.yaml
@@ -396,4 +405,10 @@ ENV OPENBANK_GOVERNANCE_DOCS=/app/governance-bundle
 ENV OPENBANK_SECURITY_GRAPH=/app/security-graph.json
 ENV OPENBANK_INFRA_LIFECYCLE=/app/infra-lifecycle.json
 ENV OPENBANK_INFRA_VULNS=/app/infra-vulns.json
+# Preload the OpenTelemetry SDK before the application so instrumentation-http can patch
+# node:http before the server loads it. Self-gating: without OTEL_EXPORTER_OTLP_ENDPOINT the
+# bootstrap starts no SDK and costs one require (ADR-0075 inv. 2). Baked here rather than left to
+# the manifest so an environment that sets the endpoint cannot get tracing that silently exports
+# nothing — the exact failure this replaced.
+ENV NODE_OPTIONS="--require /app/otel-bootstrap.cjs"
 CMD ["node", "server.js"]

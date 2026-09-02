@@ -38,10 +38,14 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Consumer-driven contract against consent-service (ADR-0063). engagement-service gates every
+    // promotional impression on this call, and it was verified nowhere.
+    testImplementation(libs.pact.consumer)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.wiremock.standalone)
 }
 

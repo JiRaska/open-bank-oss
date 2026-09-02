@@ -18,8 +18,6 @@ export type MoneyWorkflow = {
   workflowCs: string
   stepsCs: string[]
   stepsEn: string[]
-  flagCs: string
-  flagEn: string
 }
 
 export const MONEY_WORKFLOWS: MoneyWorkflow[] = [
@@ -32,8 +30,6 @@ export const MONEY_WORKFLOWS: MoneyWorkflow[] = [
     workflowCs: 'DomesticPaymentWorkflow',
     stepsCs: ['Validace IBAN + limit', 'Rezervace sald', 'Odeslání na CERTIS/instant rail', 'Potvrzení settlement', 'Kompenzace při odmítnutí'],
     stepsEn: ['IBAN + limit validation', 'Balance reservation', 'Submit to CERTIS/instant rail', 'Settlement confirmation', 'Compensation on rejection'],
-    flagCs: 'flag: domestic-payment-temporal-workflow=ON',
-    flagEn: 'flag: domestic-payment-temporal-workflow=ON',
   },
   {
     icon: Globe,
@@ -44,8 +40,6 @@ export const MONEY_WORKFLOWS: MoneyWorkflow[] = [
     workflowCs: 'SepaPaymentWorkflow',
     stepsCs: ['Validace BIC + SEPA pravidla', 'ISO 20022 pacs.008 sestavení', 'Odeslání do SWIFT/EBA', 'SCT/SCT Inst potvrzení', 'Kompenzace přes pacs.004'],
     stepsEn: ['BIC + SEPA rules validation', 'ISO 20022 pacs.008 assembly', 'Submit to SWIFT/EBA', 'SCT/SCT Inst confirmation', 'Compensation via pacs.004'],
-    flagCs: 'flag: sepa-payment-temporal-workflow=ON',
-    flagEn: 'flag: sepa-payment-temporal-workflow=ON',
   },
   {
     icon: Repeat2,
@@ -56,8 +50,6 @@ export const MONEY_WORKFLOWS: MoneyWorkflow[] = [
     workflowCs: 'FxConversionWorkflow',
     stepsCs: ['Sestavení kurzu (ECB + spread)', 'G5 screening', 'Odpis zdrojové měny', 'Připsání cílové měny', 'Journal entry pár (ADR-0039)'],
     stepsEn: ['Rate assembly (ECB + spread)', 'G5 screening', 'Debit source currency', 'Credit target currency', 'Journal entry pair (ADR-0039)'],
-    flagCs: 'flag: fx-temporal-workflow=ON',
-    flagEn: 'flag: fx-temporal-workflow=ON',
   },
   {
     icon: BarChart2,
@@ -68,7 +60,5 @@ export const MONEY_WORKFLOWS: MoneyWorkflow[] = [
     workflowCs: 'StatementCloseWorkflow',
     stepsCs: ['Agregace transakcí dne/měsíce/roku', 'Výpočet úrokových nákladů', 'Export na S3 + Kafka výpis', 'Potvrzení uzávěrky'],
     stepsEn: ['Aggregate daily/monthly/yearly transactions', 'Compute interest charges', 'Export to S3 + Kafka statement', 'Closing confirmation'],
-    flagCs: 'flag: statement-temporal-workflow=ON',
-    flagEn: 'flag: statement-temporal-workflow=ON',
   },
 ]

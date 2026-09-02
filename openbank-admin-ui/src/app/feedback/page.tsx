@@ -36,9 +36,17 @@ const CATEGORY_LABEL_EN: Record<string, string> = {
   BUG: 'Bug', IDEA: 'Idea', CONFUSING: 'Confusing',
 }
 
+function formatFeedbackTimestamp(value: string | null | undefined, locale: string): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
 export default function ScreenFeedbackPage() {
   const { language } = useLanguage()
   const cs = language === 'cs'
+  const dateLocale = cs ? 'cs-CZ' : 'en-GB'
   const [data, setData] = useState<ScreenFeedbackBoard | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -59,7 +67,7 @@ export default function ScreenFeedbackPage() {
   const catLabel = (c: string) => (cs ? CATEGORY_LABEL_CS[c] : CATEGORY_LABEL_EN[c]) ?? c
 
   if (loading && !data) {
-    return <div className="page"><p>{cs ? 'Načítám…' : 'Loading…'}</p></div>
+    return <div className="page"><p role="status" aria-live="polite">{cs ? 'Načítám…' : 'Loading…'}</p></div>
   }
   if (!data?.available) {
     return (
@@ -88,7 +96,14 @@ export default function ScreenFeedbackPage() {
         icon={<MessageSquare size={18} aria-hidden="true" />}
         title={cs ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'}
         subtitle={cs ? 'Kvalitativní signály z operátorských obrazovek.' : 'Qualitative signals from operator screens.'}
-        actions={<button className="btn btn-secondary" onClick={() => void load()}>
+        actions={<button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => void load()}
+          disabled={loading}
+          aria-busy={loading}
+          aria-label={cs ? 'Obnovit zpětnou vazbu k obrazovkám' : 'Refresh screen feedback'}
+        >
           <RefreshCw size={16} aria-hidden="true" /> {cs ? 'Obnovit' : 'Refresh'}
         </button>}
       />
@@ -125,7 +140,7 @@ export default function ScreenFeedbackPage() {
           <tbody>
             {data.recent.map((r) => (
               <tr key={r.reference}>
-                <td>{r.occurredAt}</td>
+                <td>{formatFeedbackTimestamp(r.occurredAt, dateLocale)}</td>
                 <td>{r.screenId}</td>
                 <td>{catLabel(r.category)}</td>
                 <td>{r.comment}</td>

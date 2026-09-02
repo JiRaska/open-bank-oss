@@ -70,6 +70,8 @@ export default function ServiceConfigPage() {
             </span>
           )}
           <button
+            type="button"
+            aria-busy={loading}
             onClick={() => { setLoading(true); refresh() }}
             style={{
               display: 'flex', alignItems: 'center', gap: '6px',
@@ -78,7 +80,7 @@ export default function ServiceConfigPage() {
               cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)',
             }}
           >
-            <RefreshCw size={12} className={loading ? 'spinning' : ''} />
+            <RefreshCw size={12} aria-hidden="true" className={loading ? 'spinning' : ''} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}
@@ -111,6 +113,7 @@ export default function ServiceConfigPage() {
         {snapshots.map(snap => {
           const cfg = snap.config
           const isOpen = expanded === snap.name
+          const panelId = `service-config-${snap.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`
           const healthStatus = !snap.reachable ? 'down' : snap.health?.status === 'UP' ? 'up' : snap.health?.status === 'DOWN' ? 'down' : 'degraded'
           const hasCustomConfig = cfg && (cfg.rateLimit || cfg.circuitBreaker || cfg.retry || cfg.timeout)
 
@@ -122,6 +125,9 @@ export default function ServiceConfigPage() {
             >
               {/* Row header */}
               <button
+                type="button"
+                aria-expanded={isOpen}
+                aria-controls={isOpen ? panelId : undefined}
                 onClick={() => toggle(snap.name)}
                 style={{
                   width: '100%',
@@ -141,7 +147,7 @@ export default function ServiceConfigPage() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ color: 'var(--text-tertiary)', display: 'flex' }}>
-                    {isOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
+                    {isOpen ? <ChevronDown size={14} aria-hidden="true"/> : <ChevronRight size={14} aria-hidden="true"/>}
                   </span>
                   <HealthDot status={healthStatus} />
                   <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{snap.name}</span>
@@ -169,7 +175,7 @@ export default function ServiceConfigPage() {
 
               {/* Expanded detail */}
               {isOpen && (
-                <div style={{ padding: '16px', background: 'var(--surface)' }}>
+                <div id={panelId} role="region" aria-label={t('Detail konfigurace služby', 'Service configuration details')} style={{ padding: '16px', background: 'var(--surface)' }}>
                   {!snap.reachable ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#dc2626', fontSize: '13px', padding: '8px 0' }}>
                       <Circle size={10} fill="#dc2626" stroke="none" />

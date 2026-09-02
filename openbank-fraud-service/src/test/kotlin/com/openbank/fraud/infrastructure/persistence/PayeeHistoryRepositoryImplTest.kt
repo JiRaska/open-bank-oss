@@ -4,6 +4,7 @@
 
 package com.openbank.fraud.infrastructure.persistence
 
+import com.openbank.fraud.application.port.out.FraudMetricsPort
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -31,7 +32,8 @@ class PayeeHistoryRepositoryImplTest {
 
     private val pool = mockk<PgPool>()
 
-    private val repository = PayeeHistoryRepositoryImpl(pool)
+    private val metrics = mockk<FraudMetricsPort>(relaxed = true)
+    private val repository = PayeeHistoryRepositoryImpl(pool, metrics, APPLIED_SIGNAL_WINDOW)
 
     private fun emptyRowIterator(): RowIterator<Row> {
         val iter = mockk<RowIterator<Row>>()
@@ -52,6 +54,9 @@ class PayeeHistoryRepositoryImplTest {
     private fun mockRowSet(iter: RowIterator<Row>): RowSet<Row> {
         val rowSet = mockk<RowSet<Row>>()
         every { rowSet.iterator() } returns iter
+        // Non-zero rowCount = "the upsert applied". The suppressed (rowCount 0) case is only
+        // decidable against a real database — see PayeeHistoryRepositoryImplIT.
+        every { rowSet.rowCount() } returns 1
         return rowSet
     }
 
@@ -108,5 +113,9 @@ class PayeeHistoryRepositoryImplTest {
         assertThat(result.firstSeenAt).isEqualTo(firstSeen.toInstant())
         assertThat(result.lastPaidAt).isEqualTo(lastPaid.toInstant())
         assertThat(result.paymentCount).isEqualTo(4L)
+    }
+
+    private companion object {
+        const val APPLIED_SIGNAL_WINDOW = 100
     }
 }

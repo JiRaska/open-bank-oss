@@ -204,6 +204,7 @@ locals {
     # Measured 2026-08-02 across the live fleet: 52 CNPG clusters declare
     # barmanObjectStore, 51 archive fine, and campaign was the only one broken.
     campaign         = { namespace = "campaign", sa = "campaign-db" }
+    referral         = { namespace = "referral", sa = "referral-db" }
     devops           = { namespace = "devops-agent", sa = "devops-db" }
     docstruth        = { namespace = "docs-truth-agent", sa = "docstruth-db" }
     document-service = { namespace = "documents", sa = "document-service-db" }
@@ -245,6 +246,12 @@ locals {
     # DBs a barmanObjectStore each. Two different kinds of false statement, one effect.
     mcp     = { namespace = "platform", sa = "mcp-db" }
     litellm = { namespace = "ai-platform", sa = "litellm-db" }
+    # langfuse-db arrives with the self-hosted LLM-observability store (ADR-0265). Same reason as
+    # every entry above: its Cluster declares a barmanObjectStore into this bucket, and without the
+    # association here every WAL archive fails with "Unable to locate credentials" while the pod
+    # stays Ready — a cluster with no recovery point and nothing anywhere going red about it. The
+    # `db-backup-association` gate is what caught this one before it merged.
+    langfuse = { namespace = "ai-platform", sa = "langfuse-db" }
     # copilot-db arrives with the durable conversation-history store (#3710). Its gitops
     # manifest declares a barmanObjectStore into this bucket, so without the association here
     # every WAL archive would fail with "Unable to locate credentials" and the cluster would
@@ -258,6 +265,10 @@ locals {
     # `kind: Cluster` manifests rather than from the rollout comments in this file, which have
     # asserted "all remaining clusters" incorrectly three times now (#1444).
     engagement = { namespace = "engagement", sa = "engagement-db" }
+    # Reserve the Pod Identity association before the reviewed Incentive CNPG Cluster is synced.
+    # The future Cluster uses barmanObjectStore under incentive-db; declaring its service account
+    # here prevents the otherwise silent "Ready but no WAL archive credentials" failure at first boot.
+    incentive = { namespace = "incentive", sa = "incentive-db" }
   }
 }
 

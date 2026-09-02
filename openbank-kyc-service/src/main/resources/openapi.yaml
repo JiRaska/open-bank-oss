@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: KYC Service API
-  version: 1.6.0
+  version: 1.7.0
   description: Know Your Customer case management — open cases, run checks, approve/reject.
   license:
     name: Apache-2.0
@@ -117,7 +117,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [IDENTITY, SANCTIONS, PEP, ADVERSE_MEDIA, SOURCE_OF_FUNDS]
+            enum: [IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA]
       requestBody:
         required: true
         content:
@@ -291,13 +291,18 @@ components:
 
     UpdateCheckRequest:
       type: object
-      required: [result]
+      required: [status]
       properties:
+        status:
+          type: string
+          description: >
+            The new CheckStatus. Values are the domain `CheckStatus` constants verbatim —
+            `KycResource.updateCheck` calls `CheckStatus.valueOf(req.status)`, so anything else
+            is rejected with 400.
+          enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]
         result:
           type: string
-          enum: [PASS, FAIL, PENDING, MANUAL_REVIEW]
-        notes:
-          type: string
+          description: Free-text outcome note recorded against the check. Optional.
 
     KycCaseApprovalRequest:
       type: object

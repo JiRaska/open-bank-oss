@@ -323,11 +323,32 @@ def score_c4_data(short: str, att, today) -> tuple[int, str]:
     return s, f"{len(migs)} migrations, rollback_note={'y' if rollback else 'n'}"
 
 
+def is_undeployed(short: str) -> bool:
+    """True when the service has NO workload in gitops at all — not a Deployment, not a Rollout.
+
+    Distinct from "deployed but unscraped" and from "stateless". A released component with no
+    workload cannot own a CNPG cluster, a PodMonitor namespace or a NetworkPolicy, so the cells
+    that read those all report absences the service could not have avoided while it stays
+    undeployed. openbank-tax-reporting-service is the one such service today and it is
+    deliberate — `openbank-infra/aws/envs/sandbox-platform/ecr-service-repositories.tf` names it
+    as "a released component with no gitops workload, no auto-deploy entry and — correctly — no
+    repository" (#5760). Naming that state is the honest representation; it is NOT a pass, see
+    [ServiceReadiness.compute_gate].
+    """
+    return service_namespace(short, GITOPS) is None
+
+
 def score_c5_backup(short: str, att, today) -> tuple[int, str]:
     if is_stateless(declared_datastore(short, REPO)):
         # No datastore, nothing to back up. finrep scored 0 ("no CNPG cluster") for the absence
         # of a cluster it must not have — an unachievable 0 that read like a missing backup.
         return 2, "n/a — declares no datastore (stateless), nothing to back up"
+    if is_undeployed(short):
+        # Still 0 — a stateful service with no backup is not ready, and an undeployed one is not
+        # ready either. Only the EVIDENCE changes: "no CNPG cluster" reads as a backup someone
+        # forgot to configure and sends the reader to the gitops backup docs, when the cluster is
+        # absent because the entire workload is (#5760). The gate says which of the two it is.
+        return 0, "no CNPG cluster — service has no gitops workload at all"
     clusters = gitops_files_for(short, "Cluster")
     cnpg = [f for f in clusters if "postgres" in f.name or "cnpg" in read(f).lower()]
     if not cnpg:
@@ -469,7 +490,23 @@ class ServiceReadiness:
             need = 3 if (self.money_path and code in critical) else 2
             if s < need:
                 ok = False
-        self.gate = "GO" if ok else "NO-GO"
+        # A released component with no workload anywhere in gitops gets its own verdict. It is
+        # NOT a pass and can never become one from here: NOT-DEPLOYED is only ever reached in
+        # place of NO-GO — a service that clears every dimension while undeployed is impossible
+        # (C8 scores at most 1 without a namespace), and the `ok` branch is checked first anyway,
+        # so no score this state can produce is treated more leniently than before.
+        #
+        # What it buys: "not production-ready" and "not in production" are different facts and
+        # used to render identically. tax-reporting sat in the NO-GO column next to 25 services
+        # that ARE deployed and failing a control, so its actual blocker — an undecided
+        # deployment (#5760, #5706) — was invisible in every headline the matrix produced, and
+        # three of its cells read as missing controls rather than as consequences.
+        if ok:
+            self.gate = "GO"
+        elif is_undeployed(self.service):
+            self.gate = "NOT-DEPLOYED"
+        else:
+            self.gate = "NO-GO"
 
 
 def collect(short: str, att, today: str) -> ServiceReadiness:

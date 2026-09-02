@@ -19,6 +19,7 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -74,6 +75,14 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
                 .replaceWith(transaction.copy(version = transaction.version + 1))
         }.awaitSuspending()
     }
+
+    override suspend fun countStuckSagas(olderThan: Instant): Long = Panache.withSession {
+        count(
+            "status in ?1 and initiatedAt <= ?2",
+            NON_TERMINAL_STATUSES,
+            olderThan,
+        )
+    }.awaitSuspending()
 
     // Truly simultaneous writers both pass the version-matched read before either commits; the
     // loser's flush then fails the @Version check (0 rows). Same conflict, same 409 (#465).
@@ -133,6 +142,15 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
                 .range(query.offset, query.offset + query.limit - 1)
                 .list()
         }.awaitSuspending().map { it.toDomain() }
+    }
+
+    private companion object {
+        /**
+         * The saga is still in flight in exactly these two states; COMPLETED / FAILED / REVERSED
+         * are terminal. Stored as the enum *names* because `TransactionEntity.status` is a String
+         * column.
+         */
+        val NON_TERMINAL_STATUSES = listOf(TransactionStatus.PENDING.name, TransactionStatus.PROCESSING.name)
     }
 }
 

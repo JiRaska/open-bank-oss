@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.persistence.mapper
 
+import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralStatus
 import com.openbank.lending.domain.model.CollateralType
@@ -57,6 +58,12 @@ class LendingMapperTest {
             decisionReason = "affordability",
             createdAt = createdAt,
             decidedAt = createdAt.plusDays(1),
+            catalogSnapshot = CatalogLoanSnapshot(
+                UUID.fromString("10000000-0000-0000-0000-000000000013"),
+                UUID.fromString("20000000-0000-0000-0000-000000000013"),
+                "c".repeat(64),
+                2,
+            ),
         )
 
         val entity = mapper.toEntity(application)

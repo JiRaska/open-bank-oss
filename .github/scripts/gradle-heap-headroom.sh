@@ -16,8 +16,11 @@
 #
 # Wraps the command, samples every JVM it spawns, and reports peak heap per JVM against that
 # JVM's own maximum. Writes a table to $GITHUB_STEP_SUMMARY when running under Actions, and always
-# to stdout. Emits a ::warning when any JVM crosses WARN_AT_PERCENT of its ceiling, or when the
-# machine's available RAM drops below MIN_FREE_MB.
+# to stdout. Emits a ::warning when the machine's available RAM drops below MIN_FREE_MB — the
+# physical, actionable signal. A JVM crossing WARN_AT_PERCENT of its own ceiling is reported as a
+# ::notice, NOT a warning: that percentage tracks the ceiling rather than demand, so it can neither
+# be cleared by raising -Xmx nor distinguish a healthy run from a dying one. The measurement that
+# established this, and the limitation it leaves behind, are recorded at the report block below.
 #
 # Deliberately NEVER changes the build's verdict: it exits with the wrapped command's exit code and
 # nothing else. A measurement that can fail a build is a measurement people delete.
@@ -209,13 +212,46 @@ else
   fi
 fi
 
+# --- interpreting `peak used / -Xmx` --------------------------------------------------------
+#
+# This percentage does NOT measure how close the build is to running out of heap, and it must
+# never be used on its own to justify raising -Xmx. Measured on the full `fleet-lint` graph —
+# same commit, same machine, `--rerun-tasks` so all three executed the identical 1140 actionable
+# tasks — varying ONLY the ceiling (#5949):
+#
+#     -Xmx3g   peak 3066 MiB = 99%   daemon died: "running out of JVM heap space"
+#     -Xmx6g   peak 5837 MiB = 95%   BUILD SUCCESSFUL
+#     -Xmx10g  peak 8758 MiB = 85%   BUILD SUCCESSFUL
+#
+# Three things follow, and together they are why this block no longer emits "raise -Xmx":
+#   * The figure tracks the CEILING, not demand. The same 1140 tasks occupied 2921 MiB MORE heap
+#     at 10g than at 6g without doing one unit of extra work — a generational collector lets
+#     occupancy grow toward whatever ceiling it is given and only collects harder under pressure.
+#     So "94% of -Xmx" is very close to what this build reports at ANY -Xmx.
+#   * It therefore cannot separate healthy from dying. The healthy 6g run (95%) sits nearer the
+#     dead 3g run (99%) than it does the healthy 10g run (85%) — and 85% is the warning line, so
+#     the largest and most comfortable configuration measured would be flagged too.
+#   * The action it recommended did not even clear it: +67% of ceiling (6g -> 10g) moved the
+#     reading from 95% to 85%, i.e. onto the line. It was an unfollowable instruction, which is
+#     why four turns of #2177 raised -Xmx and the warning came straight back.
+#
+# The percentage is still worth printing — a sharp CHANGE in it, at a fixed -Xmx, is a real
+# signal — so it is emitted as a ::notice. The ::warning is reserved for available system RAM,
+# which is a physical quantity with a real remedy and is emitted above.
+#
+# LIMITATION, recorded rather than papered over: with this change nothing here PREDICTS an OOM.
+# Occupancy cannot, and no cheaper instrument in this script can. The detector for the failure
+# remains after-the-fact — `fleet-lint.yml`'s classifier, which labels an OOM'd run `kind=infra`
+# so a truncated run cannot read as a lint finding. RE-CHECK TRIGGER: if `fleet-lint` ever aborts
+# with `kind=infra`, or the daemon's peak at a FIXED -Xmx moves by more than ~10 points between
+# runs, re-run the ceiling sweep above before touching any number — the useful quantity is how
+# the peak moves at a constant ceiling, never its distance from the ceiling.
 if [ "$worst" -ge "$WARN_AT_PERCENT" ]; then
-  # "Raise -Xmx" is only sound advice when the MACHINE has memory to give. If the runner
-  # already bottomed out below MIN_FREE_MB, a bigger heap makes the fork failures worse,
-  # not better — and the two warnings would otherwise print adjacent, opposite
-  # instructions. The first real run of this script on the CodeQL job did exactly that:
-  # "only 499 MiB of available system RAM" immediately followed by "raise -Xmx". Advice
-  # that contradicts itself is worse than none, because someone acts on one half.
+  # A memory-starved runner is a genuine, actionable finding, and it is the one case where the
+  # occupancy figure adds something: a big heap on a machine with nothing left to give is a
+  # "reduce the footprint" signal. Note this warning must never advise raising -Xmx — the first
+  # real run of this script on the CodeQL job printed "only 499 MiB of available system RAM"
+  # immediately followed by "raise -Xmx", and advice that contradicts itself is worse than none.
   if [ "${memory_starved:-0}" = "1" ]; then
     echo "::warning title=Gradle heap pressure on a full runner::\`$label\` peaked at ${worst}% of its configured -Xmx AND the runner bottomed out at ${min_free:-?} MiB of available RAM. Do NOT raise -Xmx here — the machine has nothing to give, and a larger heap makes the worker-fork failures worse. Reduce the concurrent footprint instead (fewer parallel workers, a smaller Kotlin daemon heap, or less work per job). See #2330."
     echo >> "$report"
@@ -223,13 +259,14 @@ if [ "$worst" -ge "$WARN_AT_PERCENT" ]; then
     echo "> (${min_free:-?} MiB free at the floor). This is a *reduce the footprint* signal," >> "$report"
     echo "> not a *raise -Xmx* one." >> "$report"
   else
-    echo "::warning title=Gradle heap headroom low::\`$label\` peaked at ${worst}% of its configured -Xmx (warn at ${WARN_AT_PERCENT}%). This build did not OOM, but the next fleet growth may. Raise -Xmx in this workflow's GRADLE_OPTS before it goes red, not after. See #2177."
+    echo "::notice title=Gradle heap occupancy::\`$label\` peaked at ${worst}% of its configured -Xmx. This is NOT a headroom reading and is not a reason to raise -Xmx: measured on this build, occupancy tracks the ceiling it is given (99% at 3g, 95% at 6g, 85% at 10g for identical work), so it cannot tell a healthy run from a dying one. The runner had ${min_free:-?} MiB of RAM free at its lowest point — that is the number that constrains this job. See #5949."
     echo >> "$report"
-    echo "> :warning: Peaked at **${worst}%** of -Xmx — above the ${WARN_AT_PERCENT}% warning line." >> "$report"
+    echo "> Peaked at **${worst}%** of -Xmx. Occupancy tracks the ceiling, not demand — see the" >> "$report"
+    echo "> note in \`gradle-heap-headroom.sh\` before reading this as headroom (#5949)." >> "$report"
   fi
 elif [ "$worst" -ge 0 ]; then
   echo >> "$report"
-  echo "Peak was **${worst}%** of -Xmx (warning line ${WARN_AT_PERCENT}%)." >> "$report"
+  echo "Peak was **${worst}%** of -Xmx (notice line ${WARN_AT_PERCENT}%)." >> "$report"
 fi
 
 cat "$report"

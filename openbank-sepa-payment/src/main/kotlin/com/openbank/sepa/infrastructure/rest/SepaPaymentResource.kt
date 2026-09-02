@@ -7,6 +7,9 @@ package com.openbank.sepa.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.security.actorName
+import com.openbank.libs.security.actorType
+import com.openbank.libs.web.ApiVersionResponseFilter
 import com.openbank.sepa.application.port.`in`.HandlePaymentReturnCommand
 import com.openbank.sepa.application.port.`in`.ListSepaPaymentsQuery
 import com.openbank.sepa.application.port.`in`.PaymentConfirmationUseCase
@@ -26,8 +29,11 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.container.ContainerRequestContext
+import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.core.SecurityContext
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.net.URI
@@ -141,8 +147,28 @@ class SepaPaymentResource(
     @RolesAllowed("ROLE_API", "ROLE_ADMIN")
     @Authorize(action = "sepaPayment.handleReturn")
     @Operation(summary = "Handle inbound pacs.004 payment return from clearing")
-    suspend fun handlePaymentReturn(pacs004Xml: String): Response {
-        val payment = paymentUseCase.handlePaymentReturn(HandlePaymentReturnCommand(pacs004Xml))
+    suspend fun handlePaymentReturn(
+        pacs004Xml: String,
+        @Context securityContext: SecurityContext,
+        @Context requestContext: ContainerRequestContext,
+    ): Response {
+        // Issue #6056. The actor is taken from the SECURITY CONTEXT and the correlation id from the
+        // property `CorrelationIdRequestFilter` set on this request — never from the pacs.004 body.
+        // The whole point of the record is that the party whose action is in dispute does not get
+        // to write the part of it that names them.
+        //
+        // `correlationId` is read from the request property rather than the MDC accessor in
+        // libs-security: this handler is `suspend`, and MDC is not guaranteed to survive the
+        // dispatch onto a coroutine, whereas the request property is on the request itself. It is
+        // the same value the response's `X-Correlation-ID` header carries.
+        val payment = paymentUseCase.handlePaymentReturn(
+            HandlePaymentReturnCommand(
+                pacs004Xml = pacs004Xml,
+                actorId = securityContext.actorName,
+                actorType = securityContext.actorType,
+                correlationId = requestContext.getProperty(ApiVersionResponseFilter.CORRELATION_ID_KEY)?.toString(),
+            ),
+        )
         return Response.ok(payment.toResponse()).build()
     }
 }

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -206,14 +206,12 @@ components:
           enum: [OTP_SMS, OTP_EMAIL, TOTP, PUSH]
         purpose:
           type: string
-          # NOTE: this list does NOT match the ScaPurpose enum the service actually accepts
-          # (PAYMENT_INITIATION, CONSENT_GRANT, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS,
-          # DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
-          # SAVINGS_WITHDRAW_APPROVAL). PAYMENT_AUTHORIZATION / CONSENT / ACCOUNT_CHANGE have
-          # never been valid values. Pre-existing drift, deliberately NOT corrected here:
-          # deleting the three phantom values is a breaking spec change and belongs in its own
-          # PR. Only the new value is added, so this list is one entry less wrong than before.
-          enum: [PAYMENT_AUTHORIZATION, LOGIN, CONSENT, ACCOUNT_CHANGE, SAVINGS_WITHDRAW_APPROVAL]
+          # The ScaPurpose enum as the service accepts it. PAYMENT_AUTHORIZATION / CONSENT /
+          # ACCOUNT_CHANGE were published here for the life of the file and have never been
+          # valid values; the drift this comment used to describe is corrected as of #5962.
+          enum: [PAYMENT_INITIATION, CONSENT_GRANT, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS,
+                 DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
+                 SAVINGS_WITHDRAW_APPROVAL]
         contextData:
           type: object
 
@@ -237,7 +235,7 @@ components:
           type: string
         status:
           type: string
-          enum: [PENDING, VERIFIED, FAILED, EXPIRED]
+          enum: [PENDING, COMPLETED, FAILED, EXPIRED, CANCELLED]
         attemptsRemaining:
           type: integer
         expiresAt:

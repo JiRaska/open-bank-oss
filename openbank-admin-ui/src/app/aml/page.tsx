@@ -4,7 +4,7 @@
 
 'use client'
 import { useState } from 'react'
-import { ShieldAlert, Search, Clock, RefreshCw, AlertTriangle, User, Play, AlertOctagon } from 'lucide-react'
+import { ShieldAlert, Search, Clock, RefreshCw, AlertTriangle, User, AlertOctagon } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
@@ -27,25 +27,18 @@ interface AmlCase {
 export default function AmlPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const [scanning, setScanning] = useState(false)
   const [search, setSearch] = useState('')
+  const [lastSuccessfulAt, setLastSuccessfulAt] = useState<Date | null>(null)
   const { data, loading, unavailable, waking, reload } = useServiceResource<AmlCase[]>(
     svcUrl('aml-service', '/api/v1/aml/cases'),
-    { select: (raw) => (Array.isArray(raw) ? (raw as AmlCase[]) : ((raw as { cases?: AmlCase[] }).cases ?? [])) },
+    { select: (raw) => {
+      setLastSuccessfulAt(new Date())
+      return Array.isArray(raw) ? (raw as AmlCase[]) : ((raw as { cases?: AmlCase[] }).cases ?? [])
+    } },
   )
   const cases = data ?? []
-  // The service can still be scanned when it's merely idle (a POST wakes it);
-  // only a hard-down state blocks the button.
-  const serviceReachable = !unavailable || unavailable.kind === 'no_data' || unavailable.kind === 'scaled_to_zero'
-
-  const triggerScan = async () => {
-    setScanning(true)
-    try {
-      await fetch(svcUrl('aml-service', '/api/v1/aml/scan'), { method: 'POST' })
-      setTimeout(() => { reload(); setScanning(false) }, 3000)
-    } catch { setScanning(false) }
-  }
-
+  const hasSnapshot = data !== null
+  const showingRetainedSnapshot = unavailable !== null && hasSnapshot
   const filtered = cases.filter(c =>
     c.customerName?.toLowerCase().includes(search.toLowerCase()) ||
     c.riskLevel?.toLowerCase().includes(search.toLowerCase()) ||
@@ -63,7 +56,7 @@ export default function AmlPage() {
           title={t('AML Monitoring', 'AML Monitoring')}
           subtitle={t('Prevence praní špinavých peněz — monitoring transakcí a správa případů', 'Anti-Money Laundering — transaction monitoring & case management')}
           icon={<ShieldAlert size={20} aria-hidden="true" />}
-          actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          actions={<div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <ServiceStatusBadge
               label="aml-service :8117"
               loading={loading}
@@ -76,14 +69,29 @@ export default function AmlPage() {
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
               }}
             />
-            <button onClick={triggerScan} disabled={scanning || !serviceReachable} className="btn btn-primary btn-sm" style={{ background: 'var(--accent)', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: scanning || !serviceReachable ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: scanning || !serviceReachable ? 0.6 : 1 }}>
-              <Play size={13} style={{ animation: scanning ? 'pulse 1s infinite' : 'none' }} />
-              {scanning ? t('Kontroluji…', 'Scanning…') : t('Spustit AML kontrolu', 'Run AML scan')}
+            <span role="status" style={{ fontSize: '12px', color: 'var(--text-tertiary)', maxWidth: '280px', textAlign: 'right' }}>
+              {t('Automatické AML skenování není v tomto prostředí nakonfigurováno.', 'Automated AML scanning is not configured in this environment.')}
+            </span>
+            <button type="button" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit AML případy', 'Refresh AML cases')} className="btn btn-secondary btn-sm">
+              <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
             </button>
           </div>}
         />
 
-        {escalated.length > 0 && (
+        {showingRetainedSnapshot && <div role="status" aria-live="polite" style={{ marginBottom: 20 }}>
+          <DataUnavailable kind={unavailable.kind} service={t('AML-service', 'AML-service')} feature={t('Aktualizace AML případů', 'AML case refresh')} lang={language} dense />
+          <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+            {t('Zobrazen je poslední úspěšný snapshot', 'Showing the last successful snapshot')}
+            {lastSuccessfulAt ? ` (${lastSuccessfulAt.toLocaleString(numberLocale)})` : ''}.
+            {' '}{t('Riziko, skóre i stav případu se od té doby mohly změnit.', 'Risk, score, and case status may have changed since then.')}
+          </p>
+        </div>}
+
+        {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {t('Aktualizuji AML případy; poslední snapshot zůstává dostupný.', 'Refreshing AML cases; the last snapshot remains available.')}
+        </p>}
+
+        {hasSnapshot && escalated.length > 0 && (
           <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
             background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
             display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -102,14 +110,14 @@ export default function AmlPage() {
           </div>
         )}
 
-        <div className="grid-4" style={{ marginBottom: '24px' }}>
+        {hasSnapshot && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
             { label: t('Případů celkem', 'Total Cases'), value: cases.length, icon: <ShieldAlert size={16} />, color: 'var(--accent)' },
             { label: t('Vysoké riziko', 'High Risk'), value: highRisk.length, icon: <AlertTriangle size={16} />, color: 'var(--danger)' },
             { label: t('Čeká na review', 'Pending Review'), value: pending.length, icon: <Clock size={16} />, color: 'var(--warning)' },
             { label: t('Eskalováno', 'Escalated'), value: escalated.length, icon: <AlertOctagon size={16} />, color: '#dc2626' },
           ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.color === 'var(--danger)' || k.color === '#dc2626' ? 'danger' : k.color === 'var(--warning)' ? 'warning' : undefined} />)}
-        </div>
+        </div>}
 
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -121,11 +129,11 @@ export default function AmlPage() {
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
           </div>
-          {loading ? (
-            <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-              <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám případy…', 'Loading cases…')}</div>
+          {loading && !hasSnapshot ? (
+            <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+              <RefreshCw size={20} aria-hidden="true" className="animate-spin" style={{ marginBottom: '8px' }} /><div>{t('Načítám případy…', 'Loading cases…')}</div>
             </div>
-          ) : unavailable ? (
+          ) : unavailable && !hasSnapshot ? (
             // aml-service didn't answer through the BFF. Classify honestly — idle
             // (scale-to-zero, ADR-0057), not deployed, or a real outage — instead
             // of the old copy that falsely claimed the service was up.
@@ -137,7 +145,7 @@ export default function AmlPage() {
               lang={language}
               detail={search
                 ? t('Žádný případ neodpovídá zadanému filtru. Zkuste upravit hledaný výraz.', 'No case matches the filter. Try adjusting the search term.')
-                : t('Služba běží, ale zatím neeviduje žádné AML případy. Spusťte kontrolu tlačítkem „Spustit AML kontrolu".', 'Service is up but no AML cases recorded yet. Run a scan using the "Run AML scan" button.')}
+                : t('Služba běží, ale zatím neeviduje žádné AML případy. Automatické skenování není v tomto prostředí nakonfigurováno.', 'Service is up but no AML cases recorded yet. Automated AML scanning is not configured in this environment.')}
             />
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>

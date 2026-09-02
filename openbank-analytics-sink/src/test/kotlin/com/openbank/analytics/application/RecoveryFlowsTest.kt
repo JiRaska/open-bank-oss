@@ -9,8 +9,10 @@ import com.openbank.analytics.application.port.out.AnalyticsSink
 import com.openbank.analytics.application.port.out.BackfillSource
 import com.openbank.analytics.application.port.out.DeadLetterRecord
 import com.openbank.analytics.application.port.out.DeadLetterSink
+import com.openbank.analytics.application.port.out.DurableBackfillUnavailableException
 import com.openbank.analytics.application.port.out.IntegrityAnchor
 import com.openbank.analytics.application.port.out.WormArchive
+import com.openbank.analytics.infrastructure.reconcile.NoOpBackfillSource
 import com.openbank.libs.analytics.AnalyticsEnvelope
 import com.openbank.libs.analytics.BackfillRequest
 import com.openbank.libs.analytics.BackfillWindow
@@ -92,6 +94,26 @@ class RecoveryFlowsTest {
         consumer.consume(Message.of("broken"))
 
         assertThat(dlq.records.map { it.contentHash }.distinct()).hasSize(1)
+    }
+
+    @Test
+    fun `unconfigured durable backfill fails closed instead of reporting an empty success`() = runBlocking<Unit> {
+        val request = BackfillRequest(
+            source = IngestSource.BACKFILL,
+            from = Instant.parse("2026-01-01T00:00:00Z"),
+            to = Instant.parse("2026-01-01T01:00:00Z"),
+            reason = "replay outage gap",
+            requestedBy = "ops-1",
+        )
+
+        assertThat(
+            runCatching {
+                NoOpBackfillSource().read(
+                    BackfillWindow(request.from, request.to),
+                    request,
+                )
+            }.exceptionOrNull(),
+        ).isInstanceOf(DurableBackfillUnavailableException::class.java)
     }
 
     @Test

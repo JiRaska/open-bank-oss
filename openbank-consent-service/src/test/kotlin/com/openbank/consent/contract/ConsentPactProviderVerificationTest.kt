@@ -148,6 +148,95 @@ class ConsentPactProviderVerificationTest {
         ps.executeUpdate()
     }
 
+    /**
+     * State for campaign-service's `CampaignToConsentPactConsumerTest`: the platform do-not-contact
+     * read every outbound touch depends on (ADR-0219 D3).
+     *
+     * This replay is the control that was missing. `GET /api/v1/suppressions/party/{partyId}`
+     * answered 500 on EVERY call from the day it shipped, because SuppressionEntity mapped six of
+     * its ten columns to names V6 never created (#5711). No unit test could see it — they mock the
+     * repository, so no SQL is issued — and campaign's ContactPolicyGate fails closed, so the only
+     * symptom was campaigns quietly not sending. Replaying the interaction against a REAL Postgres
+     * is what turns that into a red build.
+     *
+     * The CHECK constraint on `suppressions` requires value IS NULL for scope 'ALL', which is
+     * exactly the shape the consumer pins.
+     */
+    @State("an ALL-scope suppression is active for the pact suppressed party")
+    fun activeSuppressionExists() {
+        dataSource.connection.use { c ->
+            c.autoCommit = false
+            // Idempotent: pact-jvm 4.7.3 invokes each @State setup callback twice per interaction.
+            if (!rowExists(c, "SELECT 1 FROM suppressions WHERE id = ?::uuid", PACT_SUPPRESSION_ID)) {
+                c.prepareStatement(INSERT_SUPPRESSION_SQL).use { ps ->
+                    ps.setString(1, PACT_SUPPRESSION_ID)
+                    ps.setString(2, PACT_SUPPRESSED_PARTY_ID)
+                    ps.executeUpdate()
+                }
+                c.commit()
+            }
+        }
+    }
+
+    /**
+     * State for campaign-service's live consent check (ADR-0198 D4). The grantee and scope are the
+     * ones campaign actually sends — `openbank.campaign.consent-grantee` defaults to
+     * `party-service:marketing-comms`, and the scope is MARKETING_COMMS_EMAIL. A state seeded with
+     * a plausible-looking grantee would verify a request this consumer never makes.
+     */
+    @State("an ACTIVE MARKETING_COMMS_EMAIL consent covers the pact consented party")
+    fun activeMarketingConsentExists() {
+        dataSource.connection.use { c ->
+            c.autoCommit = false
+            if (!rowExists(c, "SELECT 1 FROM consents WHERE id = ?::uuid", PACT_MARKETING_CONSENT_ID)) {
+                c.prepareStatement(INSERT_MARKETING_CONSENT_SQL).use { ps ->
+                    ps.setString(1, PACT_MARKETING_CONSENT_ID)
+                    ps.setString(2, PACT_CONSENTED_PARTY_ID)
+                    ps.setString(3, PACT_MARKETING_GRANTEE_ID)
+                    ps.executeUpdate()
+                }
+                c.prepareStatement("INSERT INTO consent_scopes (consent_id, scope) VALUES (?::uuid, ?)").use { ps ->
+                    ps.setString(1, PACT_MARKETING_CONSENT_ID)
+                    ps.setString(2, "MARKETING_COMMS_EMAIL")
+                    ps.executeUpdate()
+                }
+                c.commit()
+            }
+        }
+    }
+
+    /**
+     * State for engagement-service's `EngagementToConsentPactConsumerTest`. Distinct from the
+     * campaign one on purpose: engagement gates promotional impressions on MARKETING_COMMS_INAPP,
+     * a separate grant from the EMAIL scope campaign's pact pins, so seeding one would not satisfy
+     * the other.
+     */
+    @State("an ACTIVE MARKETING_COMMS_INAPP consent covers the pact engagement party")
+    fun activeInAppConsentExists() {
+        dataSource.connection.use { c ->
+            c.autoCommit = false
+            if (!rowExists(c, "SELECT 1 FROM consents WHERE id = ?::uuid", PACT_INAPP_CONSENT_ID)) {
+                c.prepareStatement(INSERT_MARKETING_CONSENT_SQL).use { ps ->
+                    ps.setString(1, PACT_INAPP_CONSENT_ID)
+                    ps.setString(2, PACT_ENGAGEMENT_PARTY_ID)
+                    ps.setString(3, PACT_MARKETING_GRANTEE_ID)
+                    ps.executeUpdate()
+                }
+                c.prepareStatement("INSERT INTO consent_scopes (consent_id, scope) VALUES (?::uuid, ?)").use { ps ->
+                    ps.setString(1, PACT_INAPP_CONSENT_ID)
+                    ps.setString(2, "MARKETING_COMMS_INAPP")
+                    ps.executeUpdate()
+                }
+                c.commit()
+            }
+        }
+    }
+
+    private fun rowExists(c: Connection, sql: String, id: String): Boolean = c.prepareStatement(sql).use { ps ->
+        ps.setString(1, id)
+        ps.executeQuery().use { rs -> rs.next() }
+    }
+
     @State("no consent exists with the pact unknown-consent id")
     fun unknownConsentDoesNotExist() {
         // No setup: a fresh Testcontainer DB satisfies this by construction, and nothing in this
@@ -171,5 +260,35 @@ class ConsentPactProviderVerificationTest {
         const val PACT_PARTY_ID = "c2c2c2c2-d3d3-4e4e-8f8f-a8a8a8a8a8a8"
         const val PACT_GRANTEE_ID = "agent:pact-verify-mcp"
         const val PACT_ACCOUNT_IBAN = "CZ6508000000192000145399"
+
+        private val INSERT_SUPPRESSION_SQL = """
+            INSERT INTO suppressions (
+                id, party_id, scope, value, reason_code, source, created_by, created_at
+            ) VALUES (
+                ?::uuid, ?::uuid, 'ALL', NULL, 'CUSTOMER_OPTOUT', 'preference-centre',
+                'pact-operator', NOW()
+            )
+        """.trimIndent()
+
+        private val INSERT_MARKETING_CONSENT_SQL = """
+            INSERT INTO consents (
+                id, party_id, grantee_id, grantee_type, grantee_name, status,
+                valid_from, valid_to, frequency_per_day, created_at, updated_at
+            ) VALUES (
+                ?::uuid, ?::uuid, ?, 'CUSTOMER_AGENT', 'Pact Verify Marketing', 'ACTIVE',
+                NOW() - INTERVAL '1 day', NOW() + INTERVAL '30 days', 4, NOW(), NOW()
+            )
+        """.trimIndent()
+
+        /** Must equal the ids in openbank-campaign-service's CampaignToConsentPactConsumerTest. */
+        const val PACT_SUPPRESSION_ID = "c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3"
+        const val PACT_SUPPRESSED_PARTY_ID = "c1c1c1c1-c1c1-c1c1-c1c1-c1c1c1c1c1c1"
+        const val PACT_CONSENTED_PARTY_ID = "c2c2c2c2-c2c2-c2c2-c2c2-c2c2c2c2c2c2"
+        const val PACT_MARKETING_CONSENT_ID = "c4c4c4c4-c4c4-4c4c-8c4c-c4c4c4c4c4c4"
+        const val PACT_MARKETING_GRANTEE_ID = "party-service:marketing-comms"
+
+        /** Must equal the ids in openbank-engagement-service's EngagementToConsentPactConsumerTest. */
+        const val PACT_INAPP_CONSENT_ID = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2"
+        const val PACT_ENGAGEMENT_PARTY_ID = "e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1"
     }
 }

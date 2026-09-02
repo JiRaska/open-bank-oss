@@ -35,7 +35,7 @@ Služba dodržuje hexagonální architekturu OpenBank (ADR-0002): doména bez fr
 
 - `TppEntry` — agregát (id, tppId, name, countryCode, nca, roles, status, Subject DN + expirace QWAC/QSeal, časová razítka, pole blacklistu).
 - enum `TppRole` — `AISP`, `PISP`, `PIISP`, `ASPSP`.
-- enum `TppStatus` — `ACTIVE`, `SUSPENDED`, `REVOKED`, `BLACKLISTED`.
+- enum `TppStatus` — `ACTIVE`, `SUSPENDED`, `REVOKED`, `BLACKLISTED`. Zapisují se pouze `ACTIVE` (registrace) a `BLACKLISTED` (blacklist API); zbylé dva dnes nemají zapisovatele (#6489). `checkAuthorization` odmítá každý stav jiný než `ACTIVE`, takže kontrola je správná pro všechny čtyři.
 - `TppAuthorizationResult` — read model vracený kontrolou autorizace.
 - `EbaRegisterSyncState` — value object evidence syncu.
 

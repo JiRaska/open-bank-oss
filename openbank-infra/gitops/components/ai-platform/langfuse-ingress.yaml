@@ -1,0 +1,45 @@
+# Public edge for the Langfuse UI (ADR-0031 D7).
+#
+# Security posture: a deliberate, documented exception to ADR-0056's "no public pre-auth surface"
+# default, on the same terms as the Pact Broker's (ADR-0092) — and it deserves a harder look than
+# that one did, because the payload is different. The broker exposes API contracts; this exposes
+# PROMPTS AND COMPLETIONS, which on any environment carrying real customer traffic would be
+# customer data at rest behind an application login. It is acceptable here because the sandbox is
+# synthetic-data-only by construction (ADR-0089 D6 pins the hosted model path to synthetic data),
+# sign-up is disabled (`AUTH_DISABLE_SIGNUP=true`), and the single operator account is seeded from
+# OpenBao. Before this pattern is copied to an environment with real data it needs SSO in front of
+# it, not a stronger password.
+#
+# Traces are ingested in-cluster over the Service (litellm -> langfuse.ai-platform.svc:3000); this
+# Ingress carries the human UI only, so removing it degrades visibility, never ingestion.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: langfuse
+  namespace: ai-platform
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
+      more_set_headers "X-Frame-Options: SAMEORIGIN";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+      more_set_headers "X-Robots-Tag: noindex, nofollow";
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - langfuse.open-bank.tech
+      secretName: langfuse-tls
+  rules:
+    - host: langfuse.open-bank.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: langfuse
+                port:
+                  number: 3000

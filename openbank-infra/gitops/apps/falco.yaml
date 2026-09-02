@@ -97,17 +97,25 @@ spec:
         # the whole file, loudly). `/etc/falco/rules.d` loads AFTER falco_rules.yaml
         # (chart values `falco.rules_files`), so these overrides win.
         #
-        # NOT DONE, DELIBERATELY: `Run shell untrusted` (3150/day) is left NOISY. Its
-        # condition requires a `protected_shell_spawner` ancestor (an http/db/nosql/
-        # mail server binary, or a JVM running kafka/tomcat/elasticsearch/...), and
-        # NOTHING in this repo identifies which of those is spawning a shell every
-        # ~30s. Every CronJob and sidecar this repo does declare has a plain
-        # entrypoint parent and so cannot be the source. An exception written from a
-        # guess would silence the rule that catches general RCE, which is the same
-        # write-only control with extra steps. It needs one Loki query against the
-        # live events (see the PR body for #5734) and then a tuning it can justify.
-        # It is NOTICE, so leaving it noisy costs log volume and nothing else — no
-        # alert below can see it.
+        # `Run shell untrusted` (was 3150/day, 1189/day at time of writing) is now
+        # tuned. The previous note here said it needed "one Loki query against the
+        # live events and then a tuning it can justify" — that query has been run,
+        # and both spawners turned out to be exactly the `protected_shell_spawner`
+        # ancestors the rule's condition names, which is why the repo's own manifests
+        # could not identify them: neither shell is declared anywhere in this repo,
+        # both are spawned at runtime by a third-party server binary.
+        #
+        #   350/388 sampled: parent_exepath=/usr/local/nginx/sbin/nginx,
+        #     gparent=nginx-ingress-c, user=www-data, proc_exepath=/bin/busybox,
+        #     command=sh -c eval "printf %s\0 x $1 $2" sh
+        #     /etc/nginx/owasp-modsecurity-crs/rules/RESPONSE-*.conf
+        #     -> nginx expanding OWASP CRS rule-file globs at config load. nginx is
+        #        an http server, hence a protected_shell_spawner.
+        #    38/388 sampled: parent_exepath=/usr/lib/postgresql/18/bin/postgres,
+        #     ggparent=manager, proc_exepath=/bin/dash,
+        #     command=sh -c /controller/manager wal-restore --log-destination ...
+        #     -> CNPG's restore_command. postgres is a db_server_binary, hence also
+        #        a protected_shell_spawner.
         # ==========================================================================
         customRules:
           openbank-tuning.yaml: |-
@@ -172,12 +180,76 @@ spec:
                 (k8s.ns.name = "messaging"
                  and k8s.pod.name startswith "strimzi-cluster-operator")
 
+            # (5) Strimzi's ENTITY operator (issue #6033) — the pod that hosts
+            # the user-operator and topic-operator, both fabric8 Kubernetes
+            # clients whose entire job is to reconcile KafkaUser / KafkaTopic
+            # custom resources through the API server. (4) does not cover it:
+            # the pod is named after the Kafka CR
+            # (`components/kafka/kafka.yaml`: `openbank-cluster`), not after the
+            # cluster operator, so the `strimzi-cluster-operator` prefix cannot
+            # match. Measured 2026-08-21 over a 6h window, this one pod is 726
+            # of the rule's 793 remaining events (92%).
+            #
+            # SCOPE: namespace AND pod-name prefix AND container name AND
+            # parent process — one dimension tighter than (4), because a
+            # two-container pod running a JVM is a bigger thing to except than
+            # a single-purpose operator pod. Concretely, all of these still
+            # fire: the Kafka brokers, Apicurio, kafka-ui and the kafka-exporter
+            # in ns `messaging`; a pod with this name prefix in any other
+            # namespace; a third container injected into this pod as a sidecar;
+            # and — the one that matters — any process in these two containers
+            # that is not the operator JVM itself, since an exec'd shell, curl
+            # or kubectl has the JVM (or a shell) as its parent, never `tini`.
+            #
+            # RESIDUAL, stated, and it is the same one macro (3) already
+            # accepts for the admin-ui BFF: code execution INSIDE the operator
+            # JVM would no longer trip THIS rule, because it would inherit the
+            # excepted process identity. It still trips the shell-spawn,
+            # drop-and-execute and sensitive-file rules, and the operator's
+            # RBAC is what caps the damage. Everything else in the pod, the
+            # namespace and the cluster keeps this rule's coverage.
+            #
+            # Not keyed on `proc.name`: those are JVM thread names truncated to
+            # 15 characters (`JdkHttpClientFa`, `HttpClient-1-Se`,
+            # `operator-thread`), which are a property of the JDK's internal
+            # naming and would rot on any Strimzi or JDK bump. `container.name`
+            # is set by the operator that creates the pod and is stable.
+            - macro: openbank_strimzi_entity_operator
+              condition: >
+                (k8s.ns.name = "messaging"
+                 and k8s.pod.name startswith "openbank-cluster-entity-operator"
+                 and container.name in (user-operator, topic-operator)
+                 and proc.pname = "tini")
+
+            # (6) CNPG's INSTANCE manager. (1) already excepts ns `cnpg-system`, which holds
+            # the CNPG *operator* — but the instance manager is a different process that runs
+            # inside every database pod, so it lives in `ledger`, `accounts`,
+            # `security-scanner` and every other namespace that owns a Postgres. Those hold the
+            # business data path and must NOT get a blanket namespace exception, which is why
+            # this is scoped to the binary instead.
+            #
+            # It is the container entrypoint (parent=containerd-shim, command=manager) and its
+            # job is to watch its own Cluster CR through the API server. Measured 2026-08-21
+            # AFTER the earlier tuning landed: 71 events in 6h (~284/day) and 5 of the 5
+            # remaining events in the last hour — i.e. 100% of what this rule still reports.
+            #
+            # SCOPE: the exepath AND the process name. `/controller/manager` is a CNPG-specific
+            # path no other workload in this estate has. Still firing: any OTHER process in a
+            # database pod (postgres itself, a debug shell, anything dropped in) reaching the
+            # API server, which is the case this rule exists for.
+            - macro: openbank_cnpg_instance_manager
+              condition: >
+                (proc.exepath = "/controller/manager"
+                 and proc.name = "manager")
+
             - macro: user_known_contact_k8s_api_server_activities
               condition: >
                 (openbank_controller_namespaces
                  or openbank_kubectl_cronjob_image
                  or openbank_admin_ui_bff
-                 or openbank_strimzi_operator)
+                 or openbank_strimzi_operator
+                 or openbank_strimzi_entity_operator
+                 or openbank_cnpg_instance_manager)
               override:
                 condition: replace
 
@@ -227,6 +299,75 @@ spec:
             # source and makes this macro dead. That is a Terraform change to
             # local.arc_reaper_image and is out of scope for a gitops PR —
             # tracked in the #5734 PR body. Delete this macro when it lands.
+            # ---------------------------------------------------------------
+            # Run shell untrusted  (1189/day, NOTICE)
+            #
+            # Both exceptions are scoped to the COMMAND, not to the spawner alone.
+            # "nginx may spawn shells" and "postgres may spawn shells" would each
+            # silence a textbook RCE path on an internet-facing proxy and on a
+            # money-path database respectively — the rule's whole purpose. Keyed on
+            # the specific command instead, an attacker-spawned shell under either
+            # parent still fires, because it will not be expanding CRS globs or
+            # running CNPG's wal-restore.
+            #
+            # Both are load-bearing third-party behaviour, not something this repo
+            # can remove at source (contrast the arc-reaper macro below, whose
+            # proper fix IS to change the image): nginx expands its include globs
+            # through a shell on every config load, and CNPG implements
+            # restore_command as a shell-invoked call into /controller/manager.
+            #
+            # Upstream's `postgres_running_cnpg` misses this TWICE over:
+            #   (proc.pname=postgres and proc.cmdline startswith
+            #    "sh -c /controller/manager wal-archive")
+            # It covers only wal-ARCHIVE, while most events measured here are
+            # wal-RESTORE; and it is anchored with `startswith`, while this CNPG
+            # version invokes `sh -c -- /controller/manager wal-archive` — note the
+            # `--`, which defeats the prefix match even for the verb it does name.
+            # Hence `contains` and both verbs here. Likewise `nginx_starting_nginx`
+            # covers nginx re-exec'ing itself, not glob expansion. Both look like
+            # upstream gaps worth reporting rather than local quirks; noted in the
+            # PR body rather than filed, since that is a third-party tracker.
+            # Keyed on the COMMAND SHAPE, not on the CRS path. The first draft used
+            # `contains "owasp-modsecurity-crs"` and, measured against 600 live
+            # events, silenced only 69% — nginx expands `.data` globs
+            # (unix-shell.data, lfi-os-files.data, web-shells-php.data ...) with a
+            # BARE filename and no directory prefix, so the path never appears in
+            # the command. `sh -c eval "printf %s\0 x $1 $2" sh <file>` is nginx's
+            # glob-expansion idiom and is the stable discriminator. Still tight:
+            # scoped to nginx as the parent in the ingress namespace, so any other
+            # shell nginx spawns — the RCE this rule exists for — still fires.
+            - macro: openbank_nginx_glob_expansion
+              condition: >
+                (k8s.ns.name = "ingress-nginx"
+                 and proc.pname = "nginx"
+                 and proc.cmdline startswith "sh -c eval")
+
+            # Not namespace-scoped on purpose: CNPG runs a cluster in every service
+            # namespace that owns a database, so pinning namespaces here would be a
+            # list that silently goes stale the next time a service gets its own
+            # Postgres. The command is the discriminator.
+            - macro: openbank_cnpg_wal_shipping
+              condition: >
+                (proc.pname = "postgres"
+                 and (proc.cmdline contains "/controller/manager wal-restore"
+                      or proc.cmdline contains "/controller/manager wal-archive"))
+
+            # `user_shell_container_exclusions` is the hook the stock rule provides
+            # for exactly this — upstream ships it as `(never_true)` and the rule
+            # ends with `and not user_shell_container_exclusions`. Verified against
+            # falcosecurity/rules `falco_rules.yaml`, not assumed: the first draft
+            # of this block overrode a plausible-sounding `user_known_shell_spawn_
+            # activities`, which appears NOWHERE in the ruleset and would have been
+            # a silent no-op — the exact "configured-looking and inert" shape this
+            # file's own header warns about. The rule's only `user_known_*` hook is
+            # `user_known_shell_spawn_binaries`, and that is a LIST of process
+            # names, which cannot express either condition above.
+            - macro: user_shell_container_exclusions
+              condition: >
+                (openbank_nginx_glob_expansion or openbank_cnpg_wal_shipping)
+              override:
+                condition: replace
+
             - macro: openbank_arc_reaper_apk_bootstrap
               condition: >
                 (k8s.ns.name = "arc-runners"
@@ -240,6 +381,45 @@ spec:
 
         falcosidekick:
           enabled: false
+
+        # Falco's own Prometheus metrics (issue #6236, follow-up to #6237).
+        #
+        # Before this, Prometheus held ZERO `falco_*` series — measured 2026-08-21 — so the only
+        # thing the estate knew about the runtime-security agent was whether its pods were Ready.
+        # `FalcoAgentNotReady` (prometheus-rules-runtime-security.yaml) is built on exactly that
+        # DaemonSet-readiness proxy, and it was chosen because it was the only observable available,
+        # not because it was the best one. A Ready pod with a ruleset that failed to load, or one
+        # dropping syscalls, is indistinguishable from a healthy one through that proxy.
+        #
+        # `metrics.enabled` is the only switch needed: the chart derives
+        # `webserver.prometheus_metrics_enabled` from it (verified by rendering 9.1.0 — the
+        # rendered falco.yaml carries `prometheus_metrics_enabled: true`). Two separate keys that
+        # must agree is the shape that produces a configured-looking, inert feature, so it is worth
+        # stating that the chart, not this file, keeps them in step.
+        metrics:
+          enabled: true
+          # THE DEFAULT IS 1h AND WOULD HAVE MADE THIS INERT-LOOKING-BUT-STALE. `interval` is how
+          # often Falco RECOMPUTES its metrics snapshot, not how often Prometheus reads it. Left at
+          # the chart default, a 30s scrape would return the same hour-old numbers 120 times, every
+          # gauge lagging reality by up to an hour — and nothing would look broken. This estate has
+          # already shipped that exact defect once, in the LLM price book recording rules, where an
+          # `interval: 1h` rule was resolvable for 5 minutes in every 60 against Prometheus's 5m
+          # lookback (#6063 merged inert, fixed by #6151).
+          interval: 1m
+          # Per-CPU kernel counters multiply every counter by the core count on every node. Left off
+          # (the chart default) deliberately: 13 nodes is already the multiplier that matters, and
+          # per-rule counters below are the signal worth paying for.
+          kernelEventCountersPerCPUEnabled: false
+
+        serviceMonitor:
+          create: true
+          # 30s against a 1m recompute rather than the chart's 15s: scraping four times per refresh
+          # buys nothing but samples, and scraping exactly once per refresh risks aliasing past an
+          # update. The Service and the `type: falco-metrics` label the selector needs are both
+          # created by the chart when metrics.enabled is set.
+          interval: 30s
+          labels:
+            release: kube-prometheus-stack
 
         # Node-agent priority (same class as CNI/kube-proxy): sandbox nodes
         # run at the max-pods (ENI IP) limit, where a default-priority DS pod

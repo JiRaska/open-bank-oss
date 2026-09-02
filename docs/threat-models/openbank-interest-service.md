@@ -23,6 +23,7 @@ money-path service, not adjacent.
 [Scheduler / Admin-UI] --HTTPS/internal--> [openbank-interest-service]
                                                 |
                      account lookup        ---|---> [account-service] (AccountDirectoryAdapter)
+                     published rate snapshot ---|---> [product-catalog] (immutable revision lookup)
                      capitalization journal ---|---> [ledger-service] (RestLedgerPostingAdapter, CapitalizationJournalFactory)
                      debit remittance       ---|---> [transaction-service] (TransactionServiceClient)
                      settlement ack         <---|--- [Kafka: withholding-remittance-settlement]
@@ -30,7 +31,7 @@ money-path service, not adjacent.
 ```
 
 - **External entities:** scheduler (internal trigger, no external caller), admin-UI (ROLE_OPERATOR/ADMIN for read/ops endpoints).
-- **Trust boundaries:** service → ledger-service (mTLS + OIDC, fail-closed via `LedgerCallGuard`); service → transaction-service (mTLS + OIDC); service → Kafka (mTLS, consumer/producer ACLs).
+- **Trust boundaries:** service → ledger-service (mTLS + OIDC, fail-closed via `LedgerCallGuard`); service → transaction-service (mTLS + OIDC); service → product-catalog (OIDC, immutable published-revision lookup only); service → Kafka (mTLS, consumer/producer ACLs).
 - **Assets:** accrued/capitalized interest amounts, withholding tax rate and remittance amounts, account balances (indirectly, via the ledger postings this service issues).
 
 ## 3. Authn/Authz
@@ -49,14 +50,21 @@ money-path service, not adjacent.
 | **I**nfo disclosure | Expose per-account interest/withholding amounts via error bodies or metrics | Error bodies carry codes only; metrics are low-cardinality (no account-id/amount labels, ADR-0077/0079) |
 | **D**oS | Flood the manual capitalization/remittance trigger, or replay settlement events | `@RolesAllowed` gate on manual triggers; idempotency key on both the ledger posting and the transaction-service debit guards duplicate runs |
 | **E**oP | Use the withholding remittance path to move funds unrelated to actual accrued tax | Remittance amount computed solely from `WithholdingRemittancePolicy` against the service's own accrual ledger, not from caller-supplied input; downstream `transaction-service` is the authoritative amount boundary |
+| **T**ampering | A catalog change makes historical or future accruals use an unintended rate | Consume only a maker-checker-published immutable revision; persist its content hash, effective interval and source revision locally; never resolve the latest catalog document during accrual; reject unsupported tiered profiles until their calculation is explicitly implemented |
 
 ## 5. Residual risks / assumptions
 
 - **Withholding-tax remittance to the tax authority is not yet wired to an external filing system** (#999 tracks actual remittance-to-authority; today the debit lands in an internal remittance-holding account). The money-path risk this threat model covers is the *internal* debit/capitalization flow, which is live.
-- **Interest rate configuration** is operator-managed and out of scope for this document (covered by the product-catalog/pricing threat surface).
+- Catalog-projected rate snapshots are an additional inbound reference-data boundary. A missing, malformed, stale or unsupported snapshot must prevent accrual for its affected product/currency; it must never fall back to a different current rate.
 - **Settlement ack consumer** (`WithholdingRemittanceSettlementConsumer`) trusts the Kafka topic's mTLS/ACL boundary as its authentication; no additional payload-level signature.
 
 ## 6. Change log
+
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
+- **2026-08-20** — Added catalog fixed-rate snapshot boundary. Only immutable maker-checker-published
+  revisions with a content hash and UTC-day-aligned effective interval can materialize a local rate.
+  Unsupported or malformed profiles are durably rejected; catalog outages do not advance the cursor.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `productId` on capitalize and effectiveRate — #3104's own reproduction case. Both handlers are non-suspend, so `POST /api/v1/interest/capitalize/{accountId}` without `?productId=` threw at the method boundary and rendered 500 before any authorization-independent work ran. No fund movement is reachable without the parameter in either the old or the new behaviour — the change is purely which status the rejected request carries, and 5xx here also burnt this service's SLO error budget. No new caller or boundary. Rollback: revert.
 - **2026-08-03** — Prohibit service-account principals from interest writes (#3679 follow-up). The

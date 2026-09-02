@@ -13,7 +13,8 @@ import {
 } from 'lucide-react'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { LifecycleStrip, type CompLifecycle } from '@/components/infra/LifecycleStrip'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge, TONE_BORDER_LEFT_CLASS, statusTone } from '@/components/ui'
+import { cn } from '@/lib/utils'
 
 type InfraStatus = 'UP' | 'DOWN' | 'UNKNOWN'
 
@@ -68,26 +69,9 @@ type KafkaTopic = {
   segmentSize: number
 }
 
-const STATUS_STYLES: Record<InfraStatus, { border: string; bg: string; text: string }> = {
-  UP:      { border: 'var(--success-border)', bg: 'var(--success-bg)',  text: 'var(--success)' },
-  DOWN:    { border: 'var(--danger-border)',  bg: 'var(--danger-bg)',   text: 'var(--danger)' },
-  UNKNOWN: { border: 'var(--border)',         bg: 'var(--surface-2)',   text: 'var(--text-secondary)' },
-}
-
-function StatusBadge({ status }: { status: InfraStatus }) {
-  const s = STATUS_STYLES[status]
+function InfrastructureStatusBadge({ status }: { status: InfraStatus }) {
   const icon = status === 'UP' ? <CheckCircle2 size={13} /> : status === 'DOWN' ? <XCircle size={13} /> : <AlertTriangle size={13} />
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: '5px',
-      padding: '3px 9px', borderRadius: '20px',
-      background: s.bg, border: `1px solid ${s.border}`,
-      color: s.text, fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em',
-    }}>
-      {icon}
-      {status}
-    </div>
-  )
+  return <StatusBadge status={status} leading={icon} />
 }
 
 export default function InfrastructurePage() {
@@ -200,8 +184,8 @@ export default function InfrastructurePage() {
               {upgradable} {t('k aktualizaci', 'upgradable')}
             </span>
           )}
-          <button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+          <button type="button" onClick={load} disabled={loading} aria-busy={loading} aria-label={t('Obnovit stav infrastruktury', 'Refresh infrastructure status')} className="btn btn-secondary btn-sm">
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}
@@ -238,10 +222,10 @@ export default function InfrastructurePage() {
             {INFRA_COMPONENTS.map(comp => {
               const st = statuses[comp.id]
               const status: InfraStatus = st?.status ?? 'UNKNOWN'
-              const styles = STATUS_STYLES[status]
+              const tone = statusTone(status)
 
               return (
-                <div key={comp.id} className="card" style={{ padding: '18px', borderLeft: `4px solid ${styles.text}` }}>
+                <div key={comp.id} className={cn('card tone-border-left', TONE_BORDER_LEFT_CLASS[tone])} style={{ padding: '18px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <div style={{ padding: '7px', background: 'var(--surface-2)', borderRadius: '7px', color: 'var(--text-secondary)' }}>
@@ -254,7 +238,7 @@ export default function InfrastructurePage() {
                         </div>
                       </div>
                     </div>
-                    <StatusBadge status={status} />
+                    <InfrastructureStatusBadge status={status} />
                   </div>
 
                   {st && (

@@ -6,15 +6,13 @@
 #
 # Ledger posting is synchronous REST to ledger-service (double-entry on every
 # cash event); outbox → Kafka carries downstream analytics events.
-# LENDING_LEDGER_BACKEND=rest activates RestLedgerPostingAdapter; the default
-# `none` keeps the no-op bound for offline builds.
-#
-# LENDING_BORROWER_CREDIT_BACKEND=rest activates the disbursement's customer-facing leg
-# (#3931): the ledger journal above only ever touches internal GL accounts (Loans
-# Receivable, Funding Clearing), so without this a disbursed loan books an asset for the
-# bank and pays the customer nothing — confirmed live before this fix, 44 active loans /
-# 6.6M CZK principal, none of it reaching an account. Same activation shape as
-# LENDING_LEDGER_BACKEND, one env var gating both the account lookup and the credit call.
+# Adapter selection (RestLedgerPostingAdapter; AccountServiceClient + BorrowerCreditClient
+# for the disbursement's customer-facing leg, #3931) is BUILD-time — the `%prod` defaults in
+# the service's application.yaml, not the LENDING_*_BACKEND env vars below. Those env vars
+# read as activation switches and are not: until #6057 the image shipped the no-op ledger
+# adapter, which returned success, while this Rollout set LENDING_LEDGER_BACKEND=rest.
+# OPENBANK_TEMPORAL_ENABLED is the third instance of the same shape (#6085).
+# See the per-var comments in the container spec.
 #
 # Money-path service (ADR-0030): 2 approvals + threat model required on every PR.
 # Progressive delivery: Argo Rollout canary (ADR-0098).
@@ -41,7 +39,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-lending-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "19f5cea6df7afc55"
+        openbank.tech/policy-checksum: "39adb28b0be5d9ac"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -52,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: lending-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-lending-service:sandbox-4f2d6e5e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-lending-service:sandbox-5f018396
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -107,17 +105,22 @@ spec:
                 secretKeyRef:
                   name: lending-service-oidc
                   key: OIDC_CLIENT_SECRET
-            # Activate the real RestLedgerPostingAdapter. Without this the no-op
-            # default stays bound and all ledger posts are silently dropped.
+            # NOT an activation switch. lending.ledger.backend is an @IfBuildProperty gate,
+            # resolved at image AUGMENTATION and frozen: this env var cannot bind the real
+            # adapter, and until #6057 it did not — the image shipped NoOpLedgerPostingPort,
+            # which returned success, and every lending general-ledger posting was discarded.
+            # The shipped selection is now the `%prod` default in the service's
+            # application.yaml. This var is kept only so it stays consistent with the image;
+            # LendingAdapterBindingVerifier refuses to boot if the two ever disagree.
             - name: LENDING_LEDGER_BACKEND
               value: rest
             # Ledger service in-cluster URL (default resolves only localhost).
             - name: LEDGER_SERVICE_URL
               value: http://ledger-service.ledger.svc:8101
-            # Activate AccountServiceClient + BorrowerCreditClient (#3931). Without this
-            # the no-op default stays bound: findCurrentAccount always returns null, and
-            # disburse() correctly fails loud rather than booking a loan nobody was paid —
-            # but "fails loud" still means every disbursement fails, so this must be set.
+            # Same build-time caveat as LENDING_LEDGER_BACKEND above (#6057): this never
+            # activated AccountServiceClient + BorrowerCreditClient (#3931), because
+            # lending.borrower-credit.backend was absent from application.yaml entirely and the
+            # gate saw a missing property. The shipped selection is now the `%prod` default.
             - name: LENDING_BORROWER_CREDIT_BACKEND
               value: rest
             - name: ACCOUNT_SERVICE_URL
@@ -138,6 +141,16 @@ spec:
             # expiry, reflection wait). The temporal-platform-ingress NetworkPolicy
             # lists the lending namespace, otherwise the worker's onStart gRPC to
             # temporal-frontend:7233 is DROPPED and the service never boots.
+            #
+            # ⚠ Same build-time caveat as LENDING_LEDGER_BACKEND above (#6085). This var did
+            # NOT activate TemporalOriginationWorkflowAdapter: @IfBuildProperty is resolved at
+            # augmentation and the class was removed from the image, so the @Default
+            # NoOpOriginationWorkflowPort was bound and returned the real adapter's success
+            # value. No origination durable timer was ever armed — while the worker half, which
+            # is NOT build-time gated, polled the task queue the whole time with nothing ever
+            # starting a workflow on it. The shipped selection is now the `%prod` default in
+            # the service's application.yaml; this var is kept only so it stays consistent with
+            # the image, and LendingAdapterBindingVerifier refuses to boot if the two disagree.
             - name: OPENBANK_TEMPORAL_ENABLED
               value: "true"
             - name: OPENBANK_TEMPORAL_SERVER_URL

@@ -28,7 +28,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { classifyBffFailure, type BffFailure } from './bff'
 
-export type ServiceUnavailable = { kind: BffFailure | 'no_data' }
+export type ServiceUnavailable = {
+  kind: BffFailure | 'no_data'
+  /** Upstream HTTP status when this failure came from a response. */
+  status?: number
+}
 
 export interface ServiceResource<T> {
   data: T | null
@@ -82,35 +86,41 @@ export function useServiceResource<T = unknown>(
   const reload = useCallback(() => setNonce(n => n + 1), [])
 
   useEffect(() => {
-    if (!url) {
-      setLoading(false)
-      return
-    }
+    if (!url) return
     const { select, maxWakeRetries = 3, retryDelayMs = 4000, timeoutMs = 10_000 } = optsRef.current
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    let activeController: AbortController | null = null
     let attempt = 0
 
-    const scheduleRetry = (kind: BffFailure) => {
+    const scheduleRetry = (kind: BffFailure, status?: number) => {
       attempt += 1
       setWaking(true)
       // Show the calm "idle / waking" panel while we keep polling.
-      setUnavailable({ kind })
+      setUnavailable({ kind, status })
       timer = setTimeout(run, retryDelayMs)
     }
 
     async function run() {
+      if (attempt === 0) {
+        setLoading(true)
+        setUnavailable(null)
+        setWaking(false)
+      }
+      const controller = new AbortController()
+      activeController = controller
+      const deadline = setTimeout(() => controller.abort(), timeoutMs)
       try {
-        const res = await fetch(url!, { signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' })
+        const res = await fetch(url!, { signal: controller.signal, cache: 'no-store' })
         if (cancelled) return
         if (!res.ok) {
           const kind = await classifyBffFailure(res)
           if (cancelled) return
           if (WAKE_KINDS.has(kind) && attempt < maxWakeRetries) {
-            scheduleRetry(kind)
+            scheduleRetry(kind, res.status)
             return
           }
-          setUnavailable({ kind })
+          setUnavailable({ kind, status: res.status })
           setWaking(false)
           setLoading(false)
           return
@@ -131,20 +141,21 @@ export function useServiceResource<T = unknown>(
         setUnavailable({ kind: 'unreachable' })
         setWaking(false)
         setLoading(false)
+      } finally {
+        clearTimeout(deadline)
+        if (activeController === controller) activeController = null
       }
     }
 
-    setLoading(true)
-    setUnavailable(null)
-    setWaking(false)
     run()
 
     return () => {
       cancelled = true
       if (timer) clearTimeout(timer)
+      activeController?.abort()
     }
     // `url` + `nonce` are the only real inputs; options are read via ref.
   }, [url, nonce])
 
-  return { data, loading, unavailable, waking, reload }
+  return { data, loading: url ? loading : false, unavailable, waking, reload }
 }

@@ -10,6 +10,13 @@ tags: [governance, observability, ci]
 summary: "Turn end-to-end liveness claims into CI-checked facts through four mechanisms: an event-consumer liveness gate, a lineage-vs-code audit, a shared workflow-liveness watchdog, and drift qualification, each shipped advisory-first."
 ---
 
+> **Delivery update (2026-08-20):** Mechanisms 1 and 3 are enforced in CI, including
+> the scheduler adoption ratchet and the real cron/liveness integration coverage added
+> through ADR-0237. The remaining producer-only topics are explicit, reviewable
+> allowlist entries or tracked business gaps; this ADR does not treat an allowlist as
+> a working consumer. Mechanism 2/4 production lineage and sustained-drift evidence
+> still require the corresponding fleet/runtime checks.
+
 # ADR-0160 — End-to-end integration liveness and drift-detection standard
 
 > **Delivery note (2026-07-13, updated same day).** Mechanism 1 shipped and validated: PR #995

@@ -23,6 +23,8 @@ data class PostJournalCommand(
     val description: String?,
     val lines: List<JournalLineRequest>,
     val postedBy: UUID,
+    /** Trusted inbound synthetic taint, copied only into this posting's durable outbox events. */
+    val synthetic: Boolean = false,
     /**
      * Extra outbox rows to enqueue in the SAME transaction as this posting's own `JournalPosted`
      * + `AccountBookedChanged` rows (#1201 proposed fix 3) — for a caller whose own domain event

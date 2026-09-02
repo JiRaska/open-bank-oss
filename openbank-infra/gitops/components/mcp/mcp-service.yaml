@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-mcp-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "f9a1fb54622749be"
+        openbank.tech/policy-checksum: "355c3f9e3043443a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mcp-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-41a2fd0c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-3b62a4a5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

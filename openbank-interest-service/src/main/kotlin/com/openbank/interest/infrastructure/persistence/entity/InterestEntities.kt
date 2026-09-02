@@ -24,6 +24,90 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 @Entity
+@Table(name = "catalog_interest_sync_state")
+class CatalogInterestSyncStateEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "consumer", length = 64)
+    var consumer: String = ""
+
+    @Column(name = "cursor")
+    var cursor: String? = null
+
+    @Column(name = "updated_at")
+    var updatedAt: OffsetDateTime = OffsetDateTime.MIN
+}
+
+@Entity
+@Table(name = "catalog_interest_event_receipts")
+class CatalogInterestEventReceiptEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "event_id", columnDefinition = "uuid")
+    var eventId: UUID = Ids.newId()
+
+    @Column(name = "event_type", length = 128)
+    var eventType: String = ""
+
+    @Column(name = "outcome", length = 32)
+    var outcome: String = ""
+
+    @Column(name = "reason", length = 512)
+    var reason: String? = null
+
+    @Column(name = "processed_at")
+    var processedAt: OffsetDateTime = OffsetDateTime.MIN
+}
+
+@Entity
+@Table(name = "catalog_interest_rate_snapshots")
+class CatalogInterestRateSnapshotEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "revision_id", columnDefinition = "uuid")
+    var revisionId: UUID = Ids.newId()
+
+    @Column(name = "offering_id", columnDefinition = "uuid")
+    var offeringId: UUID = Ids.newId()
+
+    @Column(name = "specification_id", columnDefinition = "uuid")
+    var specificationId: UUID = Ids.newId()
+
+    @Column(name = "config_id", columnDefinition = "uuid")
+    var configId: UUID? = null
+
+    @Column(name = "schema_id", length = 128)
+    var schemaId: String = ""
+
+    @Column(name = "schema_version")
+    var schemaVersion: Int = 0
+
+    @Column(name = "content_hash", length = 64)
+    var contentHash: String = ""
+
+    @Column(name = "currency", length = 3)
+    var currency: String? = null
+
+    @Column(name = "annual_rate", precision = 20, scale = 18)
+    var annualRate: BigDecimal? = null
+
+    @Column(name = "day_count", length = 16)
+    var dayCount: String? = null
+
+    @Column(name = "effective_from")
+    var effectiveFrom: LocalDate? = null
+
+    @Column(name = "effective_to")
+    var effectiveTo: LocalDate? = null
+
+    @Column(name = "outcome", length = 32)
+    var outcome: String = ""
+
+    @Column(name = "reason", length = 512)
+    var reason: String? = null
+
+    @Column(name = "created_at")
+    var createdAt: OffsetDateTime = OffsetDateTime.MIN
+}
+
+@Entity
 @Table(name = "interest_rate_configs")
 class InterestRateConfigEntity : PanacheEntityBase() {
     @Id
@@ -44,7 +128,9 @@ class InterestRateConfigEntity : PanacheEntityBase() {
     @Enumerated(EnumType.STRING)
     var rateType: InterestRateType = InterestRateType.FIXED
 
-    @Column(name = "annual_rate", precision = 10, scale = 6)
+    // Catalog v2 carries exact decimal strings with up to 18 fractional digits. Keep that
+    // precision through the reference-data boundary; binary/scale truncation changes money.
+    @Column(name = "annual_rate", precision = 20, scale = 18)
     var annualRate: BigDecimal = BigDecimal.ZERO
 
     @Column(name = "min_balance", precision = 20, scale = 4)

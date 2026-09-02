@@ -1,4 +1,4 @@
-# aml-service: AML screening case lifecycle + onboarding auto-screen (ADR-0073). Namespace: aml.
+# aml-service: AML screening case lifecycle + onboarding auto-screen (ADR-0267 §2). Namespace: aml.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

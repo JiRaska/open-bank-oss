@@ -7,7 +7,7 @@
 - **Prověřování všech 27 fleet služeb** každých 30 minut přes HTTP — kontrola dosažitelnosti přes `/q/health`, security headerů na API portu a expozice aktuátorů.
 - **Spouštění 6 kontrol OWASP Top 10** na každé službě: security headery (A05), citlivá data v health endpointu (A02), expozice OpenAPI (A05 info-disclosure), neautentizované aktuátorové endpointy (A01), CORS wildcard (A05) a dosažitelnost služby (A05).
 - **Skórování každé služby** 0–100 a přiřazení písmenkového grade (A+ → F), výpočet `PlatformSecurityReport` pokrývajícího všechny služby.
-- **Správu ICT incidentů** — compliance důstojníci mohou hlásit, sledovat a aktualizovat životní cyklus DORA-grade ICT incidentů přes API `IctIncidentResource`. Incidenty jsou drženy v in-memory mapě, ne v databázi.
+- **Správu ICT incidentů** — compliance důstojníci mohou hlásit, sledovat a aktualizovat životní cyklus DORA-grade ICT incidentů přes API `IctIncidentResource`. Incidenty jsou trvale uloženy v registru `ict_incidents` a zůstávají dostupné po restartu podu.
 - **Vysílání eventů ICT incidentů** přímo do Kafka topicu `openbank.security.ict.incident`. Žádný outbox a žádná transakční záruka neexistuje; výsledky skenů se jako eventy nepublikují vůbec.
 
 ## Co služba NEDĚLÁ

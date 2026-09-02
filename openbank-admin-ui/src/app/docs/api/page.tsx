@@ -419,6 +419,7 @@ export default function ApiCatalogPage() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [expandedMethod, setExpandedMethod] = useState<{svc: string, path: string, method: string} | null>(null)
   const [groupFilter, setGroupFilter] = useState('all')
+  const [query, setQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'rest' | 'async'>('rest')
   // Code-derived catalog (ADR-0029 D3) — authoritative release/api versions,
   // money-path flag and governance gaps, keyed by module name. Overlays the
@@ -545,7 +546,14 @@ export default function ApiCatalogPage() {
   // Editorial cards first (rich metadata, port-ordered), catalog-derived extras last.
   const allServices = [...SERVICES, ...derived]
   const groups = ['all', ...Array.from(new Set(allServices.map(s => s.group)))]
-  const filtered = groupFilter === 'all' ? allServices : allServices.filter(s => s.group === groupFilter)
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const filtered = allServices.filter(svc => {
+    if (groupFilter !== 'all' && svc.group !== groupFilter) return false
+    if (!normalizedQuery) return true
+    const status = statuses[svc.id]
+    return [svc.name, svc.id, svc.desc, ...(status?.paths ?? [])]
+      .some(value => value.toLocaleLowerCase().includes(normalizedQuery))
+  })
 
   // Translate a group key (kept canonical/English as the GROUP_COLORS + filter key).
   const groupLabel = (g: string) => g === 'all' ? t('Vše', 'All') : t(GROUP_LABELS_CS[g] ?? g, g)
@@ -561,33 +569,50 @@ export default function ApiCatalogPage() {
         title={t('API Katalog', 'API Catalog')}
         subtitle={t(`Swagger/OpenAPI dokumentace ${allServices.length} služeb · live status · proklik na Swagger UI`, `Swagger/OpenAPI documentation for ${allServices.length} services · live status · link to Swagger UI`)}
         icon={<FileCode aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
-        actions={<button className="btn btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+        actions={<button type="button" className="btn btn-secondary" onClick={load} disabled={loading} aria-busy={loading}>
+            <RefreshCw aria-hidden="true" size={13} className={loading ? 'animate-spin' : ''} />
             {t('Obnovit', 'Refresh')}
           </button>}
       />
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '0' }}>
+      <div role="group" aria-label={t('Typ API dokumentace', 'API documentation type')} style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '0' }}>
         {(['rest', 'async'] as const).map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)} style={{
+          <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => setActiveTab(tab)} style={{
             padding: '8px 16px', fontSize: '13px', fontWeight: 600,
             background: 'transparent', border: 'none',
             borderBottom: activeTab === tab ? '2px solid #6366f1' : '2px solid transparent',
             color: activeTab === tab ? '#6366f1' : 'var(--text-secondary)',
             cursor: 'pointer', fontFamily: 'inherit', marginBottom: '-1px',
           }}>
-            {tab === 'rest' ? '⚡ REST APIs' : '📨 AsyncAPI / Kafka'}
+            <span aria-hidden="true">{tab === 'rest' ? '⚡' : '📨'}</span>{tab === 'rest' ? ' REST APIs' : ' AsyncAPI / Kafka'}
           </button>
         ))}
       </div>
 
       {activeTab === 'rest' && (
         <>
+      <div style={{ display: 'flex', gap: '12px', alignItems: 'end', flexWrap: 'wrap', marginBottom: '12px' }}>
+        <label htmlFor="api-catalog-search" style={{ flex: '1 1 280px', minWidth: '220px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+          {t('Hledat službu nebo endpoint', 'Search service or endpoint')}
+          <input
+            id="api-catalog-search"
+            type="search"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={t('Např. payments, /api/v1/accounts', 'e.g. payments, /api/v1/accounts')}
+            className="input"
+            style={{ display: 'block', width: '100%', marginTop: '5px' }}
+          />
+        </label>
+        <span aria-live="polite" style={{ fontSize: '12px', color: 'var(--text-tertiary)', paddingBottom: '8px' }}>
+          {t(`${filtered.length} služeb`, `${filtered.length} services`)}
+        </span>
+      </div>
       {/* Group filter */}
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
+      <div role="group" aria-label={t('Filtrovat podle domény', 'Filter by domain')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
         {groups.map(g => (
-          <button key={g} onClick={() => setGroupFilter(g)}
+          <button key={g} type="button" aria-pressed={groupFilter === g} onClick={() => setGroupFilter(g)}
             style={{
               padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
               border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent)') : 'var(--border)'}`,
@@ -848,6 +873,12 @@ export default function ApiCatalogPage() {
             </div>
           )
         })}
+        {!loading && filtered.length === 0 && (
+          <div role="status" style={{ padding: '28px 18px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: 'var(--r-lg)', color: 'var(--text-secondary)' }}>
+            <strong>{t('Žádná služba neodpovídá filtru', 'No services match this filter')}</strong>
+            <div style={{ marginTop: '6px', fontSize: '12px' }}>{t('Zkuste jiný název, endpoint nebo doménu.', 'Try another service name, endpoint, or domain.')}</div>
+          </div>
+        )}
       </div>
         </>
       )}

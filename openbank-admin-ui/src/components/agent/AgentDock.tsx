@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { isPublicSurface } from '@/lib/auth/publicSurface'
 import { Bot, Send, X, Loader2, Wrench, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react'
 
 interface ToolCall { tool: string; allowed: boolean; resultPreview: string }
@@ -14,8 +15,34 @@ interface ToolCall { tool: string; allowed: boolean; resultPreview: string }
 interface Msg { role: 'user' | 'assistant'; content: string; toolCalls?: ToolCall[]; isProposal?: boolean }
 interface ModelInfo { id: string; provider: string; sensitivity: string }
 
+/**
+ * Human label for a model id. The VALUE stays the raw id — that is what agent-service resolves and
+ * what every audit event records, so the option value must never diverge from it. Only the visible
+ * text is friendlier.
+ *
+ * An unknown id falls through to its own last path segment rather than to a generic "model":
+ * whoever adds a route to litellm-config should get something readable in the picker without having
+ * to remember to edit this file, and a stale mapping must never hide which model is actually
+ * selected.
+ */
+const MODEL_LABELS: Record<string, string> = {
+  'mock-echo': 'mock (offline)',
+  'llama-3.3-70b-versatile': 'Llama 3.3 70B · free tier',
+  'openai/gpt-oss-120b': 'GPT-OSS 120B · fast',
+  'deepseek-ai/DeepSeek-V4-Pro': 'DeepSeek V4 Pro · strongest',
+}
+
+export function modelLabel(id: string): string {
+  // `??` is not enough on its own: 'vendor/'.split('/').pop() is an EMPTY STRING, not undefined,
+  // so it would pass through and render a blank option the operator cannot identify. The final
+  // literal covers the same shape for an empty id — agent-service should never send one, and if it
+  // ever does the picker must still show a row you can see and report, not an invisible one.
+  return MODEL_LABELS[id] || id.split('/').filter(Boolean).pop() || id || '(unnamed model)'
+}
+
 export function AgentDock() {
   const pathname = usePathname()
+  const publicSurface = isPublicSurface(pathname)
   const { t } = useLanguage()
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Msg[]>([])
@@ -26,16 +53,18 @@ export function AgentDock() {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!open || models.length) return
+    if (publicSurface || !open || models.length) return
     fetch('/api/agent/chat')
       .then(r => r.json())
       .then(d => { setModels(d.models ?? []); setModel(d.default ?? '') })
       .catch(() => {})
-  }, [open, models.length])
+  }, [open, models.length, publicSurface])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, busy])
+
+  if (publicSurface) return null
 
   async function send() {
     const text = input.trim()
@@ -115,7 +144,7 @@ export function AgentDock() {
                 aria-label={t('Model asistenta', 'Assistant model')}
                 style={{ fontSize: 11, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-secondary)' }}
               >
-                {models.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
+                {models.map(m => <option key={m.id} value={m.id} title={m.id}>{modelLabel(m.id)}</option>)}
               </select>
             )}
           </div>

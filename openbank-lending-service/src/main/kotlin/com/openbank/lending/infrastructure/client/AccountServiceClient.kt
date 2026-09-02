@@ -4,6 +4,7 @@
 package com.openbank.lending.infrastructure.client
 
 import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.arc.properties.IfBuildProperty
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
@@ -33,6 +34,7 @@ import java.util.UUID
  * a state that should be reachable.
  */
 @RegisterRestClient(configKey = "account-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)
@@ -50,6 +52,9 @@ private const val LIST_LIMIT = 50
 private const val ACCOUNT_STATUS_ACTIVE = "ACTIVE"
 private const val ACCOUNT_TYPE_CURRENT = "CURRENT"
 
+// `@Unremovable`: see the note on BorrowerCreditClient — a test asserts this bean's PRESENCE
+// (LedgerAdapterBindingIT, #6057) and the test-scope stub would otherwise make it removable.
+@io.quarkus.arc.Unremovable
 @ApplicationScoped
 @Alternative
 @Priority(REST_ADAPTER_PRIORITY)

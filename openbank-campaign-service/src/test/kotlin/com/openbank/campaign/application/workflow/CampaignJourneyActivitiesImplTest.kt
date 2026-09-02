@@ -10,6 +10,7 @@ import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.ConversionContext
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
+import com.openbank.campaign.application.port.out.SendHandoffOutcome
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignState
@@ -18,11 +19,13 @@ import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
+import com.openbank.campaign.infrastructure.observability.CampaignMetricsAdapter
 import com.openbank.libs.contact.ContactConsentPort
 import com.openbank.libs.contact.ContactCounterPort
 import com.openbank.libs.contact.ContactPolicy
 import com.openbank.libs.contact.ContactPolicyGate
 import com.openbank.libs.contact.ContactSuppressionPort
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -58,6 +61,27 @@ class CampaignJourneyActivitiesImplTest {
     private val notificationSend: NotificationSendPort = mockk()
     private val bannerPlacement: BannerPlacementPort = mockk()
 
+    // A REAL adapter over a real registry, never a verified mock: the claim these tests make is
+    // that the counter an alert reads actually moved, and a `verify { metrics.sendAttempted(..) }`
+    // establishes only that a method was called.
+    private val registry = SimpleMeterRegistry()
+    private val metrics = CampaignMetricsAdapter().apply { bindTo(registry) }
+
+    private fun sends(channel: String, outcome: String): Double = registry.find(CampaignMetricsAdapter.SENDS_METRIC)
+        .tag("channel", channel)
+        .tag("outcome", outcome)
+        .counter()
+        ?.count() ?: 0.0
+
+    /**
+     * Deliberately NOT the elvis-to-zero helper above. A counter Micrometer has never created is
+     * ABSENT, and an absent series reads as `0.0` through `?: 0.0` — so an eager-registration test
+     * written on top of that helper passes against lazily-registered meters and proves nothing.
+     */
+    private fun sendCounterOrNull(channel: String, outcome: String) = registry.find(
+        CampaignMetricsAdapter.SENDS_METRIC,
+    ).tag("channel", channel).tag("outcome", outcome).counter()
+
     private val campaignId = UUID.randomUUID()
     private val partyId = UUID.randomUUID()
 
@@ -83,6 +107,7 @@ class CampaignJourneyActivitiesImplTest {
             gate,
             notificationSend,
             bannerPlacement,
+            metrics,
             dryRun = false,
         ) {
             override fun <T> runBlockingOnWorker(block: suspend () -> T): T = runBlocking { block() }
@@ -128,6 +153,11 @@ class CampaignJourneyActivitiesImplTest {
         val recorded = slot<SendRecord>()
         coVerify(exactly = 1) { sendLog.record(capture(recorded)) }
         assertThat(recorded.captured.outcome).isEqualTo(SendOutcome.FAILED)
+        assertThat(sends("email", "failed")).isEqualTo(1.0)
+        // The negative control is the whole point: a refused publish must not appear in the series
+        // that says campaign-service is still handing work to notification-service.
+        assertThat(sends("email", "handed_off")).isEqualTo(0.0)
+        assertThat(sends("email", "dry_run")).isEqualTo(0.0)
     }
 
     @Test
@@ -151,5 +181,27 @@ class CampaignJourneyActivitiesImplTest {
         val recorded = slot<SendRecord>()
         coVerify(exactly = 1) { sendLog.record(capture(recorded)) }
         assertThat(recorded.captured.outcome).isEqualTo(SendOutcome.SENT)
+        assertThat(sends("email", "handed_off")).isEqualTo(1.0)
+        assertThat(sends("email", "failed")).isEqualTo(0.0)
+        // And specifically not as a dry run — the two must never be the same number.
+        assertThat(sends("email", "dry_run")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `every send outcome the alerts read exists at zero before any step runs`() {
+        // Micrometer creates a counter on first increment, so a lazily-registered
+        // openbank_campaign_sends_total{outcome="handed_off"} is ABSENT — not zero — on a service
+        // that has handed nothing off, and `increase(...[6h]) == 0` then matches nothing at all.
+        SendHandoffOutcome.entries.forEach { outcome ->
+            val counter = sendCounterOrNull("email", outcome.name.lowercase())
+            assertThat(counter)
+                .describedAs(
+                    "email/%s must EXIST before any traffic — an absent series makes " +
+                        "`increase(...[6h]) == 0` match nothing at all",
+                    outcome,
+                )
+                .isNotNull
+            assertThat(counter!!.count()).isEqualTo(0.0)
+        }
     }
 }

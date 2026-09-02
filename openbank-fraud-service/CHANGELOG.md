@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.14.0...fraud-service-v0.15.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.13.2...fraud-service-v0.14.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.13.1...fraud-service-v0.13.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.13.0...fraud-service-v0.13.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **fraud:** dedupe both aggregates against the applied-id set, not a last-writer marker ([#5789](https://github.com/JiRaska/open-bank-oss/issues/5789)) ([#6040](https://github.com/JiRaska/open-bank-oss/issues/6040)) ([6df930b](https://github.com/JiRaska/open-bank-oss/commit/6df930bdb17826a0110891a24241cd1fee88c339))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.12.1...fraud-service-v0.13.0) (2026-08-20)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **fraud:** dedupe velocity_aggregates on redelivery ([#5716](https://github.com/JiRaska/open-bank-oss/issues/5716)) ([#5786](https://github.com/JiRaska/open-bank-oss/issues/5786)) ([1fd2170](https://github.com/JiRaska/open-bank-oss/commit/1fd21708c799c625447923c3bd1ac2d574005d2c))
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.12.0...fraud-service-v0.12.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **fraud:** dedupe velocity_aggregates on redelivery ([#5716](https://github.com/JiRaska/open-bank-oss/issues/5716)) ([#5786](https://github.com/JiRaska/open-bank-oss/issues/5786)) ([1fd2170](https://github.com/JiRaska/open-bank-oss/commit/1fd21708c799c625447923c3bd1ac2d574005d2c))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.11.2...fraud-service-v0.12.0) (2026-08-18)
 
 

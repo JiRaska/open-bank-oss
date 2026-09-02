@@ -68,12 +68,39 @@ quarkus:
     tls:
       verification: ${OIDC_TLS_VERIFICATION:none}
 
+  # Client-credentials principal for the two calls that do NOT propagate the customer's own
+  # bearer (see the rule-5 comment below): ConsentQueryClient and CreditProfileReadClient both
+  # register OidcClientRequestReactiveFilter, which mints from THIS block, not the resource-server
+  # `oidc:` block above. Same client-id/secret/issuer as the fleet's other internal service callers
+  # (e.g. openbank-agent-service's oidc-client).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: ${OIDC_TLS_VERIFICATION:none}
+
   # READ tools call the customer edge (ADR-0065) AS the customer — the inbound bearer is propagated
   # (ADR-0089 D5); the edge is ROLE_CUSTOMER and enforces ownership, so the assistant only ever reaches
   # the caller's own data. (Calling internal domain services directly would 403 — they want SERVICE roles.)
   rest-client:
     customer-edge:
       url: ${CUSTOMER_EDGE_URL:http://localhost:8128}
+    # ADR-0269 rule 5. These two are NOT called with the propagated customer bearer, unlike the edge
+    # above: "did this customer grant this scope" is not a question their own token may answer about
+    # itself, and analytics-sink's profile route is an internal operator surface. The customer's
+    # protection is the consent check that must pass before the profile is read at all.
+    consent-service:
+      url: ${CONSENT_SERVICE_URL:http://localhost:8107}
+      connect-timeout: 2000
+      read-timeout: 3000
+    analytics-sink:
+      url: ${ANALYTICS_SINK_URL:http://localhost:8110}
+      connect-timeout: 2000
+      read-timeout: 3000
 
 # Customer copilot configuration (ADR-0089).
 copilot:
@@ -84,6 +111,22 @@ copilot:
   guardrail:
     # block (default) stops the turn on a prompt-injection hit; advisory only audits (ADR-0089 D3).
     mode: ${COPILOT_GUARDRAIL_MODE:block}
+  # Model-based content safety (Llama Guard via the LiteLLM gateway, ADR-0031 guardrails / ADR-0174).
+  # Complements the deterministic prompt-injection guard above; neither replaces the other.
+  # Disabled by default so no environment silently starts calling a classifier on upgrade — when
+  # disabled every classification reports `unavailable`, never `safe`, so the state is visible in
+  # openbank_guardrail_classifications{decision="unavailable"} instead of looking clean.
+  content-safety:
+    enabled: ${COPILOT_CONTENT_SAFETY_ENABLED:false}
+    # In-cluster gateway; the provider key never reaches this pod (ADR-0175).
+    endpoint: ${COPILOT_CONTENT_SAFETY_ENDPOINT:}
+    model: ${COPILOT_CONTENT_SAFETY_MODEL:meta-llama/llama-guard-4-12b}
+    api-key: ${COPILOT_CONTENT_SAFETY_API_KEY:}
+    # What an UNAVAILABLE verdict means on THIS surface. false for customer help: refusing to answer
+    # a balance question because a classifier is unreachable is worse than answering it, and the
+    # injection guard + OPA tool gate + SCA still stand between the customer and any action. Flip to
+    # true on any state-changing surface.
+    fail-closed: ${COPILOT_CONTENT_SAFETY_FAIL_CLOSED:false}
   # The ModelGateway seam is constant; only the backend changes per environment (ADR-0089 D6).
   #   sandbox    -> public free / mock provider (synthetic data only)
   #   production -> in-cluster vLLM or EU zero-retention (deferred, FinOps ADR-0027)
@@ -93,15 +136,31 @@ copilot:
       - id: mock-echo
         provider: mock
         sensitivity: hosted
-      # OpenAI-compatible backend (NVIDIA NIM, Groq, vLLM, …). id is sent verbatim as the upstream
-      # model name and is env-driven (COPILOT_MODEL_ID) so the served model can be swapped without an
-      # image rebuild — set COPILOT_MODEL_ID and COPILOT_DEFAULT_MODEL to the SAME value.
-      # Endpoint is also env-driven (COPILOT_MODEL_ENDPOINT) so the backend can be swapped without a
-      # rebuild — e.g. switch between NVIDIA NIM and Groq by updating GitOps env vars only.
+      # OpenAI-compatible backend. `id` is sent verbatim as the upstream model name and is the
+      # CALLER-FACING id: reached through the gateway it is a litellm-config `model_name`, never a
+      # provider's own id. Both id and endpoint are env-driven (COPILOT_MODEL_ID /
+      # COPILOT_MODEL_ENDPOINT) so the backend can be swapped without an image rebuild — set
+      # COPILOT_MODEL_ID and COPILOT_DEFAULT_MODEL to the SAME value.
+      #
+      # ADR-0174/0175 (#1919): the in-cluster LiteLLM gateway is the single pod allowed to egress to
+      # a hosted LLM provider, so the provider key never lands in this pod. Endpoint and id therefore
+      # DEFAULT to exactly what the deployment sets in
+      # openbank-infra/gitops/components/copilot/copilot-service.yaml — one route, exercised by both
+      # local dev and prod, instead of two of which only one is ever used. Same shape as the
+      # content-safety and embedding endpoints above/below, which already go through this gateway.
+      #
+      # It used to default to `https://integrate.api.nvidia.com/v1` + `mistralai/mistral-nemotron`.
+      # NVIDIA does still serve that id, but the gateway does NOT (#6077): a provider base-URL
+      # hard-coded next to a caller-facing id asserts a mapping this file cannot see and nothing
+      # validates — the defect class of #5736/#6076. To go direct to a provider instead, override
+      # BOTH env vars together; changing one alone is the bug.
+      #
       # HOSTED (off-cluster) — sandbox/synthetic data only; production must pin to in-cluster/EU (D6).
-      - id: ${COPILOT_MODEL_ID:mistralai/mistral-nemotron}
+      # Local dev: `kubectl port-forward -n ai-platform svc/litellm 4000:4000`, or override
+      # COPILOT_MODEL_ENDPOINT. Neither the build nor the tests need it — they run on `mock-echo`.
+      - id: ${COPILOT_MODEL_ID:deepseek-ai/DeepSeek-V3.2}
         provider: openai-compat
-        endpoint: ${COPILOT_MODEL_ENDPOINT:https://integrate.api.nvidia.com/v1}
+        endpoint: ${COPILOT_MODEL_ENDPOINT:http://litellm.ai-platform.svc:4000/v1}
         sensitivity: hosted
       # Production (deferred): register a self-hosted/EU model and flip COPILOT_DEFAULT_MODEL to it.
       # - id: vllm-cs
@@ -112,6 +171,25 @@ copilot:
     # Backend API key for the openai-compat provider. Empty in dev; ESO/OpenBao in deploy.
     # Shared across backends — update OpenBao copilot-service/MODEL_API_KEY when switching providers.
     api-key: ${COPILOT_MODEL_API_KEY:}
+  # Hybrid retrieval over the help corpus (ADR-0183, ADR-0265 slice 4). Off by default: with it off
+  # the copilot keeps the keyword-only behaviour it has always had, and every retrieval increments
+  # openbank_copilot_retrieval_total{mode="keyword_only"} so the state is visible rather than assumed.
+  retrieval:
+    semantic-enabled: ${COPILOT_SEMANTIC_RETRIEVAL_ENABLED:false}
+    embedding-endpoint: ${COPILOT_EMBEDDING_ENDPOINT:}
+    embedding-model: ${COPILOT_EMBEDDING_MODEL:BAAI/bge-m3}
+    # MUST match the migration's vector(1024). A mismatch is caught in the adapter, not by the DB.
+    embedding-dimensions: ${COPILOT_EMBEDDING_DIMENSIONS:1024}
+    embedding-api-key: ${COPILOT_EMBEDDING_API_KEY:}
+    # Re-checks content hashes; embeds only what changed, so the steady-state cost is one query.
+    #
+    # An INTERVAL with an initial delay, not a cron: a cron leaves a freshly deployed environment
+    # with an empty index — and therefore keyword-only search — until the next scheduled hour. The
+    # 90s delay is deliberate rather than 0: at boot the gateway route, the projected secret and the
+    # database connection may all still be settling, and a failed run here is harmless because the
+    # next tick retries it.
+    index-interval: ${COPILOT_INDEX_INTERVAL:6h}
+    index-initial-delay: ${COPILOT_INDEX_INITIAL_DELAY:90s}
   # OPA per-tool gate (ADR-0089 D3, ADR-0034). Off by default (advisory); flip to true in gitops
   # once copilot-opa-bundle.yaml is deployed and the sidecar is live (issue #998 advisory→enforce).
   opa:
@@ -130,6 +208,17 @@ mp:
   messaging:
     incoming:
       party-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.copilot.party-events-in
         connector: smallrye-kafka
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -149,6 +238,12 @@ authz:
     datasource:
       devservices:
         enabled: true
+        # pgvector is required by V3 (semantic retrieval). The default Dev Services image is stock
+        # postgres, which has no `vector` extension, so Flyway aborts at V3 and EVERY @QuarkusTest in
+        # this module reports as an error rather than a migration problem. In the deployed cluster
+        # the extension comes from the CNPG image plus the Database resource; under test it comes
+        # from this image, which is stock postgres plus pgvector and nothing else.
+        image-name: pgvector/pgvector:pg18
     # No broker under test: the PARTY_ERASED consumer is covered by a plain unit test, and a Kafka
     # Dev Services container would only slow every @QuarkusTest in this module down. health-enabled
     # false keeps the unreachable channel from failing readiness in the boot smoke test.

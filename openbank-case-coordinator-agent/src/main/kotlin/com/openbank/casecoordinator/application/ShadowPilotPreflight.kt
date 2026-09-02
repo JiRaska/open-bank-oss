@@ -55,7 +55,9 @@ class ShadowPilotPreflight(
             "Shadow pilot cannot start while $openRuns legacy case workflow run(s) are open"
         }
         dataSource.connection.use { connection ->
-            connection.prepareStatement("INSERT INTO case_shadow_pilot_preflight (rollout_id) VALUES (?) ON CONFLICT DO NOTHING").use {
+            connection.prepareStatement(
+                "INSERT INTO case_shadow_pilot_preflight (rollout_id) VALUES (?) ON CONFLICT DO NOTHING",
+            ).use {
                 it.setString(1, rolloutId)
                 it.executeUpdate()
             }
@@ -63,7 +65,9 @@ class ShadowPilotPreflight(
     }
 
     private fun alreadyCompleted(rolloutId: String): Boolean = dataSource.connection.use { connection ->
-        connection.prepareStatement("SELECT EXISTS (SELECT 1 FROM case_shadow_pilot_preflight WHERE rollout_id = ?)").use { statement ->
+        connection.prepareStatement(
+            "SELECT EXISTS (SELECT 1 FROM case_shadow_pilot_preflight WHERE rollout_id = ?)",
+        ).use { statement ->
             statement.setString(1, rolloutId)
             statement.executeQuery().use { result -> result.next() && result.getBoolean(1) }
         }

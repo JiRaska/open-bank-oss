@@ -20,9 +20,24 @@ import jakarta.inject.Inject
  * Micrometer adapter for [FinrepMetricsPort] (ADR-0077 Tier C). Emits, all tagged
  * `service="finrep"`:
  *
- *  - `openbank_finrep_templates_rendered_total{framework,template,balanced}` — render rate, and for
- *    FINREP whether the balance sheet actually balanced. `balanced="false"` is a supervisory defect,
- *    not a warning; `balanced="not_applicable"` is COREP, which defines no such identity.
+ *  - `openbank_finrep_templates_rendered_total{framework,template,balanced,balance_verdict}` —
+ *    render rate, and for FINREP whether the balance sheet actually balanced. `balanced="false"` is
+ *    a supervisory defect, not a warning; `balanced="not_applicable"` is COREP, which defines no
+ *    such identity.
+ *
+ *    `balance_verdict` says WHICH of the two independent sources objected (issue #6011), a bounded
+ *    four-value tag from `BalanceVerdict`. The one worth alerting on separately is
+ *    `sources_disagree`: it is not an accounting defect at all but an EVIDENCE defect — the lines
+ *    finrep evaluated are not the lines ledger evaluated, i.e. the response was truncated,
+ *    filtered or paginated between the two services. That case renders a well-formed 200 of
+ *    under-reported figures and, when the survivors happen to still tie out, passes finrep's own
+ *    recomputation; `trial_balance.lines` only shows a collapse to ZERO, not a partial loss.
+ *    `ledger_flag_absent` is a contract change, not a books problem, and is deliberately not the
+ *    same series as `agreed_imbalanced`.
+ *
+ *    The tag is named for what it establishes — an agreement or disagreement between two published
+ *    verdicts — never "verified" or "reconciled", neither of which this service is in a position to
+ *    claim about a ledger it only reads.
  *  - `openbank_finrep_template_render_duration_seconds{framework,template}` — includes the ledger
  *    trial-balance hop, which is the only I/O on the path.
  *  - `openbank_finrep_trial_balance_lines{framework,template}` — the size of the input the report was
@@ -58,6 +73,7 @@ class FinrepMetricsAdapter(private val registry: MeterRegistry?) : FinrepMetrics
             .tag("framework", framework)
             .tag("template", render.templateId)
             .tag("balanced", render.balanced?.toString() ?: NOT_APPLICABLE)
+            .tag("balance_verdict", render.balanceVerdict?.name?.lowercase() ?: NOT_APPLICABLE)
             .description("Rendered FINREP/COREP templates")
             .register(r)
             .increment()

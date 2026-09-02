@@ -115,6 +115,15 @@ quarkus:
       enabled: false
     management:
       enabled: false
+  openbank:
+    outbox:
+      # #7539: the real StandingOrderOutboxDispatcher scheduled tick (poll-interval 5s,
+      # initial-delay 5s) is otherwise live during every @QuarkusTest in this module and can
+      # race a test's own manual outbox manipulation (e.g. StandingOrderOutboxClaimIT stomping
+      # claimed_at to force a stale row) -- the scheduler can claim/dispatch/markSent the row
+      # out from under the test before its own assertion runs, an intermittent false failure of
+      # the reclaim assertion, not a defect in claimProcessable itself.
+      dispatch-enabled: false
 openbank:
   rate-limit:
     enabled: true
@@ -158,6 +167,17 @@ mp:
       # a service-scoped consumer group), and auto.offset.reset stays `latest` so a fresh deploy does
       # NOT replay historical due events and re-initiate old payments.
       standing-order-due-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.standing-order.standing-order-due-in
         connector: smallrye-kafka
         topic: openbank.standing-orders.order.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer

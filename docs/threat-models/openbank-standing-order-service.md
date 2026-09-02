@@ -105,6 +105,8 @@ openbank-sdd-service.
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-17** — DOMESTIC/INTERNAL execution routing + premature-completion fix (#889).
   **New trust boundaries added to §2:** service → account-service (`AccountServiceClient`,
   read-only IBAN lookup) and service → transaction-service (`TransactionServiceClient`, `TRANSFER`).

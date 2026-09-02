@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.12.0...sepa-payment-v0.13.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.11.1...sepa-payment-v0.12.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.11.0...sepa-payment-v0.11.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **sepa-payment:** record who processed a pacs.004 return, durably ([#6072](https://github.com/JiRaska/open-bank-oss/issues/6072)) ([f953707](https://github.com/JiRaska/open-bank-oss/commit/f9537074d808c833dc7222e10678f31d3122c516)), closes [#6056](https://github.com/JiRaska/open-bank-oss/issues/6056)
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.10.1...sepa-payment-v0.11.0) (2026-08-20)
+
+
+### Features
+
+* **sepa-payment:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5691](https://github.com/JiRaska/open-bank-oss/issues/5691)) ([dc737f5](https://github.com/JiRaska/open-bank-oss/commit/dc737f572a2dc368231d255ec4741137e6cd5531))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.10.0...sepa-payment-v0.10.1) (2026-08-18)
 
 

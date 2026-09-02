@@ -123,7 +123,7 @@ const NAMESPACES: NS[] = [
       node('admin-ui', ['admin-ui (tato aplikace)', 'admin-ui (this app)'], 'live', ['Operations konzole v Next.js, kterou právě používáte — nasazena in-cluster v ns admin-ui. ArgoCD app admin-ui Synced + Healthy.', 'The Next.js operations console you are using — deployed in-cluster in ns admin-ui. ArgoCD app admin-ui Synced + Healthy.']),
       node('services', ['Nasazeno 10+ doménových vertikál', '10+ domain verticals deployed'], 'partial', ['Živé GitOps aplikace: ledger, balances, payments (sepa/domestic/instant), sca, consent, agent (platform ns), notifications (T2 scale-to-zero), product-catalog, security-scanner. ~24 zbývajících služeb (anacredit, lending, sdd, swift, party, kyc, aml, sanctions, audit, dispute, card-issuance, clearing, interest, statement, fx, tpp-registry, psd2, pid, standing-order, transaction a další) čeká na onboarding do GitOps.', 'GitOps apps live: ledger, balances, payments (sepa/domestic/instant), sca, consent, agent (platform ns), notifications (T2 scale-to-zero), product-catalog, security-scanner. ~24 remaining services (anacredit, lending, sdd, swift, party, kyc, aml, sanctions, audit, dispute, card-issuance, clearing, interest, statement, fx, tpp-registry, psd2, pid, standing-order, transaction, and others) pending GitOps onboarding.']),
       node('notification-svc', ['Notification Service (T2)', 'Notification Service (T2)'], 'live', ['ArgoCD app notifications Synced. KEDA ScaledObject vlastní počet replik — ustálený stav je 0 podů (FinOps T2, ADR-0057). Probouzí se na lagu consumer-group openbank.notification.requests; vyprázdní se a vrátí na 0 po cooldownu.', 'ArgoCD app notifications Synced. KEDA ScaledObject owns replica count — steady state is 0 pods (FinOps T2, ADR-0057). Wakes on openbank.notification.requests consumer-group lag; drains and returns to 0 after cooldown.']),
-      node('security-scanner-svc', ['Security Scanner', 'Security Scanner'], 'live', ['ArgoCD app security-scanner Synced. Každých 30 min sonduje všechny /q/health endpointy flotily; report se čte přes REST, DORA ICT incidenty jdou do openbank.security.ict.incident. Bez perzistence — výsledky jsou v paměti (#4709).', 'ArgoCD app security-scanner Synced. Probes all fleet /q/health endpoints every 30 min; the report is served over REST and DORA ICT incidents go to openbank.security.ict.incident. No persistence — results are in-memory (#4709).']),
+      node('security-scanner-svc', ['Security Scanner', 'Security Scanner'], 'live', ['ArgoCD app security-scanner Synced. Každých 30 min sonduje všechny /q/health endpointy flotily; report se čte přes REST, DORA ICT incidenty jdou do openbank.security.ict.incident. Report je bez perzistence (v paměti), ale DORA ICT incidenty se od V5__create_ict_incidents.sql ukládají do vlastní Postgres (#4728) — dřív žily jen v ConcurrentHashMap a restart podu je tiše smazal.', 'ArgoCD app security-scanner Synced. Probes all fleet /q/health endpoints every 30 min; the report is served over REST and DORA ICT incidents go to openbank.security.ict.incident. The probe report is unpersisted (in-memory), but DORA ICT incidents have had their own Postgres table since V5__create_ict_incidents.sql (#4728) — before that they lived only in a ConcurrentHashMap and a pod restart silently emptied the register.']),
     ],
   },
   {
@@ -154,7 +154,7 @@ const NAMESPACES: NS[] = [
 
 function StatusDot({ status }: { status: Status }) {
   const m = STATUS_META[status]
-  return <m.Icon size={13} style={{ color: m.color, flexShrink: 0 }} />
+  return <m.Icon aria-hidden="true" size={13} style={{ color: m.color, flexShrink: 0 }} />
 }
 
 type CloudNodeBoxProps = { n: Node; selectedId: string | null; liveStatus: Record<string, InfraStatusResult> | null; t: (cs: string, en: string) => string; onSelect: (node: Node) => void }
@@ -165,7 +165,7 @@ function CloudNodeBox({ n, selectedId, liveStatus, t, onSelect }: CloudNodeBoxPr
   const probeId = INFRA_PROBE_MAP[n.id]
   const probe = probeId && liveStatus ? liveStatus[probeId] : null
   const pm = probe ? PROBE_META[probe.status] : null
-  return <button onClick={() => onSelect(n)} title={t(...n.desc)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`, boxShadow: active ? `0 0 0 2px ${m.color}55` : 'none', color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', textAlign: 'left' }}>
+  return <button type="button" onClick={() => onSelect(n)} title={t(...n.desc)} aria-label={`${t(...n.name)} — ${t(...m.label)}`} aria-pressed={active} aria-controls={active ? 'cloud-architecture-selection' : undefined} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`, boxShadow: active ? `0 0 0 2px ${m.color}55` : 'none', color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', textAlign: 'left' }}>
     <StatusDot status={n.status} />
     {t(...n.name)}
     {pm && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '4px', padding: '1px 5px', borderRadius: '10px', background: pm.bg, border: `1px solid ${pm.color}44`, fontSize: '10px', fontWeight: 700, color: pm.color }}><pm.Icon size={9} aria-hidden="true" />{pm.label}</span>}
@@ -235,20 +235,23 @@ export default function CloudArchitecturePage() {
         })}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', fontSize: '11px', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Info size={13} />
+            <Info aria-hidden="true" size={13} />
             {t('Diagram = strategie (ADR-0027); badge', 'Diagram = strategy (ADR-0027); badge')}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', padding: '1px 5px', borderRadius: '10px', background: '#ecfdf5', border: '1px solid #6ee7b744', fontSize: '10px', fontWeight: 700, color: '#059669' }}>
-              <Wifi size={9} />UP
+              <Wifi aria-hidden="true" size={9} />UP
             </span>
             {t('= živý probe z EKS openbank-sandbox.', '= live probe from EKS openbank-sandbox.')}
           </span>
           {checkedAt && <span>{t('Naposledy:', 'Last:')} {checkedAt}</span>}
           <button
+            type="button"
             onClick={() => void fetchStatus()}
             disabled={refreshing}
+            aria-busy={refreshing}
+            aria-label={t('Obnovit stav infrastruktury', 'Refresh infrastructure status')}
             style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: '1px solid var(--border)', borderRadius: '6px', padding: '3px 8px', cursor: refreshing ? 'not-allowed' : 'pointer', color: 'var(--text-secondary)', fontSize: '11px', fontFamily: 'inherit', opacity: refreshing ? 0.6 : 1 }}
           >
-            <RefreshCw size={11} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+            <RefreshCw aria-hidden="true" size={11} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>
@@ -298,14 +301,14 @@ export default function CloudArchitecturePage() {
         </div>
 
         {selected && (
-          <div className="card" style={{ padding: '18px', position: 'sticky', top: '16px' }}>
+          <div id="cloud-architecture-selection" className="card" role="region" aria-label={t('Detail architektonického prvku', 'Architecture element details')} style={{ padding: '18px', position: 'sticky', top: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <StatusDot status={selected.status} />
                 <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{t(...selected.name)}</span>
               </div>
-              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0 }}>
-                <X size={16} />
+              <button type="button" onClick={() => setSelected(null)} aria-label={t('Zavřít detail architektury', 'Close architecture details')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0 }}>
+                <X aria-hidden="true" size={16} />
               </button>
             </div>
             <span style={{

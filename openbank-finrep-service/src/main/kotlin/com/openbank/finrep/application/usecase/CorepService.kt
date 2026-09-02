@@ -6,12 +6,13 @@ package com.openbank.finrep.application.usecase
 
 import com.openbank.finrep.application.port.inbound.CorepUseCase
 import com.openbank.finrep.application.port.inbound.GetCorepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.application.port.out.FinrepMetricsPort
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.RegulatoryFramework
 import com.openbank.finrep.application.port.out.TemplateFailureReason
 import com.openbank.finrep.application.port.out.TemplateRender
-import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.C0100Mapper
 import com.openbank.finrep.domain.model.CorepTemplate
 import jakarta.enterprise.context.ApplicationScoped
@@ -24,18 +25,18 @@ import java.time.LocalDate
  * provisions, etc.) is out of scope for this increment.
  *
  * The rendered return deliberately carries **flagged data gaps** rather than silent omissions
- * (ADR-0097): capital-structure rows have no GL accounts behind them yet, so they are reported as
- * explicit zeros marked `isDataGap`. That flag is the honest thing to do and also invisible — the
- * `data_gap_cells` histogram on [FinrepMetricsPort] is how far the report is from submittable.
+ * (ADR-0097): a render with no recognised 6000-6060 capital source is reported as explicit zeros
+ * marked `isDataGap`. Once those ledger accounts carry balances, the mapper derives the own-funds
+ * subtotals and `data_gap_cells` proves that the source gap cleared.
  */
 @ApplicationScoped
 class CorepService(private val ledgerPort: LedgerPort, private val metrics: FinrepMetricsPort) : CorepUseCase {
 
     override suspend fun getTemplate(query: GetCorepTemplateQuery): CorepTemplate {
         val startedAt = System.nanoTime()
-        val lines = trialBalance(query.asOf)
+        val snapshot = trialBalance(query.asOf, query.evidence)
         val template = when (query.templateId) {
-            "C_01.00" -> C0100Mapper.map(lines, query.asOf)
+            "C_01.00" -> C0100Mapper.map(snapshot.lines, query.asOf)
             else -> {
                 metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.UNKNOWN_TEMPLATE)
                 throw IllegalArgumentException("Unknown or unimplemented COREP template: ${query.templateId}")
@@ -45,11 +46,13 @@ class CorepService(private val ledgerPort: LedgerPort, private val metrics: Finr
             TemplateRender(
                 framework = RegulatoryFramework.COREP,
                 templateId = template.templateId,
-                trialBalanceLines = lines.size,
+                trialBalanceLines = snapshot.lines.size,
                 cells = template.cells.size,
                 dataGapCells = template.cells.count { it.isDataGap },
                 // COREP defines no balance-sheet identity, so "balanced" is neither true nor false.
                 balanced = null,
+                // ... and therefore no cross-check verdict either: there is nothing to agree with.
+                balanceVerdict = null,
                 duration = Duration.ofNanos(System.nanoTime() - startedAt),
             ),
         )
@@ -62,8 +65,11 @@ class CorepService(private val ledgerPort: LedgerPort, private val metrics: Finr
      * REST-client failure mode (connect, timeout, 5xx, deserialisation) means the same thing here.
      */
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun trialBalance(asOf: LocalDate): List<TrialBalanceLineDto> = try {
-        ledgerPort.getTrialBalance(asOf)
+    private suspend fun trialBalance(asOf: LocalDate, evidence: TrialBalanceEvidence): TrialBalanceSnapshot = try {
+        when (evidence) {
+            TrialBalanceEvidence.FROZEN -> ledgerPort.getTrialBalance(asOf)
+            TrialBalanceEvidence.LIVE_PREVIEW -> ledgerPort.getLiveTrialBalance(asOf)
+        }
     } catch (e: Exception) {
         metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.LEDGER_UNAVAILABLE)
         throw e

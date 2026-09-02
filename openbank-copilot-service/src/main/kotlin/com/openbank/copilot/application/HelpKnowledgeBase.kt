@@ -18,9 +18,23 @@ import org.jboss.logging.Logger
  */
 @Startup
 @ApplicationScoped
-class HelpKnowledgeBase {
+class HelpKnowledgeBase : com.openbank.copilot.application.port.out.CorpusSource {
 
     data class Passage(val docTitle: String, val source: String, val text: String)
+
+    /**
+     * A corpus passage with the identity the derived vector index needs (ADR-0183): a deterministic
+     * [chunkId] so re-indexing rewrites rows instead of accumulating them, and a [contentHash] so an
+     * unchanged corpus costs zero embedding calls.
+     */
+    data class Chunk(
+        val chunkId: String,
+        val source: String,
+        val docTitle: String,
+        val ordinal: Int,
+        val content: String,
+        val contentHash: String,
+    )
 
     data class Hit(val passage: Passage, val score: Double)
 
@@ -44,6 +58,30 @@ class HelpKnowledgeBase {
 
     fun search(query: String, k: Int = TOP_K): List<Hit> = rank(query, passages, k)
 
+    /**
+     * The same passages, keyed for the vector index. Derived from the loaded corpus rather than
+     * re-read from the classpath, so the index and the answers can never be built from two
+     * different readings of the same resources.
+     */
+    override fun chunks(): List<Chunk> {
+        var ordinal = 0
+        return passages.map { p ->
+            val n = ordinal++
+            val hash = sha256(p.text)
+            Chunk(
+                // Identity is (source, ordinal), NOT the content hash: keying by hash would make an
+                // edited paragraph a new row and leave the old one orphaned until the prune, and the
+                // prune is exactly the step that must not be load-bearing.
+                chunkId = sha256("${p.source}#$n"),
+                source = p.source,
+                docTitle = p.docTitle,
+                ordinal = n,
+                content = p.text,
+                contentHash = hash,
+            )
+        }
+    }
+
     companion object {
         const val MIN_CHUNK = 40
         const val MIN_TERM = 3
@@ -61,6 +99,10 @@ class HelpKnowledgeBase {
                 .sortedByDescending { it.score }
                 .take(k)
         }
+
+        fun sha256(s: String): String = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(s.toByteArray())
+            .joinToString("") { "%02x".format(it) }
 
         private fun terms(s: String): Set<String> =
             s.lowercase().split(NON_WORD).filter { it.length >= MIN_TERM }.toSet()

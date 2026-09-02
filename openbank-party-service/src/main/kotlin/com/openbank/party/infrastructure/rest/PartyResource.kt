@@ -28,6 +28,7 @@ import com.openbank.party.domain.model.Address
 import com.openbank.party.domain.model.DocumentType
 import com.openbank.party.domain.model.KycStatus
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyClassification
 import com.openbank.party.domain.model.PartyGdprExport
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
@@ -135,7 +136,11 @@ class PartyResource {
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
-        val party = partyUseCase.createParty(req.toCommand(idempotencyKey))
+        val classification = req.classification()
+        require(classification != PartyClassification.SYNTHETIC || securityIdentity.hasRole("ROLE_ADMIN")) {
+            "only ROLE_ADMIN may create a synthetic party"
+        }
+        val party = partyUseCase.createParty(req.toCommand(idempotencyKey, classification))
         return Response.created(URI.create("/api/v1/parties/${party.id}")).entity(party.toResponse()).build()
     }
 
@@ -152,7 +157,7 @@ class PartyResource {
     @RolesAllowed("ROLE_API")
     @Operation(summary = "Match phone-number hashes against parties who opted into being discoverable")
     suspend fun lookupDirectory(req: DirectoryLookupRequest): Response =
-        Response.ok(mapOf("matches" to partyUseCase.lookupByPhoneHashes(req.phoneHashes))).build()
+        Response.ok(mapOf("matches" to partyUseCase.lookupByPhoneHashes(req.requireHashes()))).build()
 
     /** Turn this party's pay-to-phone findability on or off. Revocable at any time. */
     @PUT
@@ -627,8 +632,14 @@ data class CreatePartyRequest(
     // asked/answered — operator-created parties never send these.
     val consentGdpr: Boolean? = null,
     val consentMarketing: Boolean? = null,
+    /** Explicit only for bank-owned production canaries; omitted stays CUSTOMER. */
+    val classification: String? = null,
 ) {
-    fun toCommand(key: String): CreatePartyCommand {
+    fun classification(): PartyClassification = classification?.let {
+        PartyClassification.valueOf(it.uppercase())
+    } ?: PartyClassification.CUSTOMER
+
+    fun toCommand(key: String, classification: PartyClassification = classification()): CreatePartyCommand {
         require(!email.isNullOrBlank()) { "email is required" }
         return CreatePartyCommand(
             key, PartyType.valueOf(partyType), legalName, tradingName,
@@ -636,6 +647,7 @@ data class CreatePartyRequest(
             id?.takeIf { it.isNotBlank() }?.let { UUID.fromString(it) },
             consentGdpr = consentGdpr,
             consentMarketing = consentMarketing,
+            classification = classification,
         )
     }
 }
@@ -687,6 +699,7 @@ data class AddressRequest(
 fun Party.toSimpleResponse() = mapOf(
     "id" to id,
     "partyType" to partyType,
+    "classification" to classification,
     "status" to status,
     "legalName" to legalName,
     "tradingName" to tradingName,
@@ -696,7 +709,11 @@ fun Party.toSimpleResponse() = mapOf(
 )
 
 fun Party.toResponse() = mapOf(
-    "id" to id, "partyType" to partyType, "status" to status, "legalName" to legalName,
+    "id" to id,
+    "partyType" to partyType,
+    "classification" to classification,
+    "status" to status,
+    "legalName" to legalName,
     "tradingName" to tradingName, "email" to email, "phone" to phone,
     "kycStatus" to kycStatus, "address" to address, "createdAt" to createdAt, "updatedAt" to updatedAt,
     // Onboarding-time consent snapshot (consentGdpr is informational/non-revocable — see
@@ -712,6 +729,7 @@ fun PartyGdprExport.toResponse() = mapOf(
     "subject" to mapOf(
         "id" to party.id,
         "partyType" to party.partyType,
+        "classification" to party.classification,
         "status" to party.status,
         "legalName" to party.legalName,
         "tradingName" to party.tradingName,
@@ -756,7 +774,30 @@ private const val GDPR_EXPORT_SCOPE =
         "subject-access response is a tracked follow-up (ADR-0118 §6)."
 
 /** Address-book hashes to match. See PhoneDirectory for what the hashing does and does not buy. */
-data class DirectoryLookupRequest(val phoneHashes: List<String> = emptyList())
+data class DirectoryLookupRequest(
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     *
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS of
+     * a collection. So `{"phoneHashes": [null]}` deserialises happily into a `List<String>` holding
+     * a null, and `PartyService.lookupByPhoneHashes` NPEs on `it.trim()`. Kotlin's non-null element
+     * type was a compile-time promise nothing kept; writing the type honestly is what makes
+     * [requireHashes] reachable instead of dead code.
+     */
+    val phoneHashes: List<String?> = emptyList(),
+) {
+    /**
+     * The hashes, with every element proven present.
+     *
+     * A null ENTRY is a malformed JSON document, which is a different thing from the malformed
+     * hash CONTENT the use case already tolerates by design (it silently drops anything that is not
+     * 64 hex characters). `IllegalArgumentException` is mapped to 400 by libs-runtime's
+     * `CommonExceptionMappers`; no service-local mapper is added (#526).
+     */
+    fun requireHashes(): List<String> = phoneHashes.mapIndexed { index, hash ->
+        requireNotNull(hash) { "phoneHashes[$index] must not be null" }
+    }
+}
 
 data class DiscoverableRequest(val discoverable: Boolean = false)
 

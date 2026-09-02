@@ -5,6 +5,7 @@
 package com.openbank.document.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -22,6 +23,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * (fills the RAMCOVA_SMLOUVA template's `{{product.name}}` clause once an account exists).
  */
 @RegisterRestClient(configKey = "product-catalog-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterProvider(ProductCatalogHostHeaderFilter::class)
 @Produces(MediaType.APPLICATION_JSON)

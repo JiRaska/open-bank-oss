@@ -2,8 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// ADR-0230 + ADR-0232: single-grant detail — capabilities, ceilings, status timeline, and the
-// coverage probe.
+// ADR-0230 + ADR-0232: single-grant detail — capabilities, ceilings, status timeline, and a
+// side-effect-free resource access eligibility check.
 //
 // The bank-side actions (suspend / reinstate / revoke) are stated as UNAVAILABLE in place rather
 // than rendered as disabled buttons. A greyed-out button says "you lack the right"; the true
@@ -14,7 +14,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, ShieldQuestion, Lock } from 'lucide-react'
@@ -23,6 +23,10 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EntityChip } from '@/components/entities/EntityChip'
+import { DelegationAuditTimeline } from '@/components/delegations/DelegationAuditTimeline'
+import { CoverageProbe } from '@/components/delegations/CoverageProbe'
+import { LegacyCapabilityEvidence } from '@/components/delegations/LegacyCapabilityEvidence'
+import { isAssignablePresetCapability } from '@/lib/delegations/rolePresets'
 import {
   DelegationStatusBadge,
   capabilityLabels,
@@ -31,31 +35,55 @@ import {
   type Grant,
 } from '@/components/delegations/GrantView'
 
-type CheckOutcome = { granted: boolean; reason?: string | null; code?: string | null }
+function formatDelegationTimestamp(
+  value: string | null | undefined,
+  locale: string,
+): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
+}
 
 export default function DelegationDetailPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const params = useParams<{ id: string }>()
   const id = params?.id
 
   const [grant, setGrant] = useState<Grant | null>(null)
   const [unavail, setUnavail] = useState<UnavailableKind | null>(null)
 
-  const load = useCallback(async () => {
+  useEffect(() => {
     if (!id) return
-    setUnavail(null)
-    try {
-      const res = await fetch(`/api/delegations/${id}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
-      if (!res.ok) { setUnavail(await classifyBffFailure(res)); setGrant(null); return }
-      setGrant((await res.json()) as Grant)
-    } catch {
-      setUnavail('unreachable')
+    const controller = new AbortController()
+    void (async () => {
+      // Cross the effect boundary before updating React state and abort the old request when the
+      // route changes. A slow response for grant A must never overwrite already-selected grant B.
+      await Promise.resolve()
+      if (controller.signal.aborted) return
+      setUnavail(null)
       setGrant(null)
-    }
+      try {
+        const res = await fetch(`/api/delegations/${id}`, {
+          cache: 'no-store',
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]),
+        })
+        if (controller.signal.aborted) return
+        if (!res.ok) {
+          const failure = await classifyBffFailure(res)
+          if (!controller.signal.aborted) setUnavail(failure)
+          return
+        }
+        const nextGrant = (await res.json()) as Grant
+        if (!controller.signal.aborted) setGrant(nextGrant)
+      } catch {
+        if (!controller.signal.aborted) setUnavail('unreachable')
+      }
+    })()
+    return () => controller.abort()
   }, [id])
-
-  useEffect(() => { load() }, [load])
 
   return (
     <div>
@@ -93,7 +121,7 @@ export default function DelegationDetailPage() {
               <dd>{grant.resourceType}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Oprávnění', 'Capabilities')}</dt>
-              <dd>{capabilityLabels(grant.capabilities)}</dd>
+              <dd>{capabilityLabels(grant.capabilities.filter(isAssignablePresetCapability))}<LegacyCapabilityEvidence capabilities={grant.capabilities} /></dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Režim schvalování', 'Approval policy')}</dt>
               <dd>{grant.approvalPolicy ?? '—'}</dd>
@@ -108,116 +136,26 @@ export default function DelegationDetailPage() {
               <dd>{formatCeiling(grant.monthlyLimit, numberLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Platnost od', 'Valid from')}</dt>
-              <dd>{grant.validFrom ?? '—'}</dd>
+              <dd>{formatDelegationTimestamp(grant.validFrom, dateLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Platnost do', 'Valid until')}</dt>
-              <dd>{grant.validTo ?? t('bez omezení', 'no expiry')}</dd>
+              <dd>{grant.validTo ? formatDelegationTimestamp(grant.validTo, dateLocale) : t('bez omezení', 'no expiry')}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Vytvořeno', 'Created')}</dt>
-              <dd>{grant.createdAt ?? '—'}</dd>
+              <dd>{formatDelegationTimestamp(grant.createdAt, dateLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Naposledy změněno', 'Last changed')}</dt>
-              <dd>{grant.updatedAt ?? '—'}</dd>
+              <dd>{formatDelegationTimestamp(grant.updatedAt, dateLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Ukončeno', 'Closed')}</dt>
-              <dd>{grant.closedAt ? `${grant.closedAt} — ${grant.closedReason ?? ''}` : '—'}</dd>
+              <dd>{grant.closedAt ? `${formatDelegationTimestamp(grant.closedAt, dateLocale)} — ${grant.closedReason ?? ''}` : '—'}</dd>
             </dl>
           </div>
 
-          <CoverageProbe grant={grant} />
+          <DelegationAuditTimeline grantId={grant.id} currentStatus={grant.status} />
+          <CoverageProbe key={grant.id} grant={grant} />
           <BankSideActions />
         </>
-      )}
-    </div>
-  )
-}
-
-/**
- * Asks delegation-service the same question its enforcement points ask. A grant row shows what
- * exists; only the authority knows how status, ceilings, expiry and capability combine, so an
- * operator answering "could this delegate really have done that?" from the table is guessing.
- */
-function CoverageProbe({ grant }: { grant: Grant }) {
-  const { t } = useLanguage()
-  const [capability, setCapability] = useState(grant.capabilities?.[0] ?? '')
-  const [amount, setAmount] = useState('')
-  const [outcome, setOutcome] = useState<CheckOutcome | null>(null)
-  const [failed, setFailed] = useState(false)
-
-  const run = useCallback(async () => {
-    setFailed(false)
-    setOutcome(null)
-    const body: Record<string, unknown> = {
-      granteePartyId: grant.granteePartyId,
-      resourceType: grant.resourceType,
-      resourceId: grant.resourceId,
-      capability,
-    }
-    const parsed = Number(amount)
-    if (amount.trim() !== '' && Number.isFinite(parsed)) {
-      body.amount = { amount: parsed, currency: grant.perTransactionLimit?.currency ?? 'CZK' }
-    }
-    try {
-      const res = await fetch('/api/delegations/check', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(8000),
-      })
-      if (!res.ok) { setFailed(true); return }
-      setOutcome((await res.json()) as CheckOutcome)
-    } catch {
-      setFailed(true)
-    }
-  }, [grant, capability, amount])
-
-  return (
-    <div className="card" style={{ padding: '16px', marginTop: '16px' }}>
-      <h2 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '2px' }}>
-        <ShieldQuestion size={15} color="var(--accent)" style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-        {t('Ověření pokrytí', 'Coverage probe')}
-      </h2>
-      <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
-        {t(
-          'Zeptá se delegační služby na stejnou otázku, jakou klade vynucovací bod. Nic nemění.',
-          'Asks delegation-service the same question the enforcement point asks. Changes nothing.',
-        )}
-      </p>
-
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <select
-          className="input"
-          value={capability}
-          onChange={e => setCapability(e.target.value)}
-          aria-label={t('Oprávnění k ověření', 'Capability to probe')}
-        >
-          {(grant.capabilities ?? []).map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <input
-          className="input"
-          value={amount}
-          onChange={e => setAmount(e.target.value)}
-          placeholder={t('Částka (nepovinné)', 'Amount (optional)')}
-          aria-label={t('Částka k ověření', 'Amount to probe')}
-          style={{ maxWidth: '200px' }}
-        />
-        <button className="btn btn-primary" onClick={run} disabled={!capability}>
-          {t('Ověřit', 'Probe')}
-        </button>
-      </div>
-
-      {failed && (
-        <p style={{ marginTop: '10px', fontSize: '13px', color: 'var(--text-tertiary)' }}>
-          {t('Ověření se teď nepodařilo provést.', 'The probe could not be run right now.')}
-        </p>
-      )}
-
-      {outcome && (
-        <div style={{ marginTop: '12px', fontSize: '13px' }}>
-          <strong>{outcome.granted ? t('Povoleno', 'Allowed') : t('Zamítnuto', 'Denied')}</strong>
-          {outcome.code && <span style={{ marginLeft: '8px', color: 'var(--text-tertiary)' }}>{outcome.code}</span>}
-          {outcome.reason && <div style={{ color: 'var(--text-tertiary)', marginTop: '4px' }}>{outcome.reason}</div>}
-        </div>
       )}
     </div>
   )

@@ -4,9 +4,12 @@
 
 package com.openbank.campaign.application.usecase
 
+import com.openbank.campaign.application.port.out.CampaignMetricsPort
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
+import com.openbank.campaign.application.port.out.EnrolmentAttempt
 import com.openbank.campaign.application.port.out.EnrolmentRepository
+import com.openbank.campaign.application.port.out.IncentiveOfferRegistry
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
@@ -22,6 +25,7 @@ import com.openbank.campaign.domain.model.ConversionCatalog
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.ExperimentCohort
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StopCondition
@@ -31,6 +35,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -63,6 +68,7 @@ class CampaignService @Inject constructor(
     private val segmentEvaluation: SegmentEvaluationPort,
     private val journeys: JourneySignaller,
     private val scheduler: CampaignScheduler,
+    private val metrics: CampaignMetricsPort,
     /**
      * Explicit graphs remain off until their isolated Temporal worker queue is deployed and proven
      * healthy. Their workflow type never shares a queue with legacy journeys, so a rollback pauses
@@ -71,6 +77,9 @@ class CampaignService @Inject constructor(
     @ConfigProperty(name = "openbank.campaign.explicit-graph-activation-enabled", defaultValue = "false")
     private val explicitGraphActivationEnabled: Boolean,
 ) {
+
+    @Inject
+    lateinit var incentiveOffers: IncentiveOfferRegistry
 
     private val log = Logger.getLogger(CampaignService::class.java)
 
@@ -86,8 +95,10 @@ class CampaignService @Inject constructor(
         schedule: CampaignSchedule? = null,
         trigger: String? = null,
         decisions: List<CampaignDecision> = emptyList(),
+        incentiveOfferRef: IncentiveOfferRef? = null,
     ): Campaign {
         val resolvedSegment = validateDraftReferences(segmentRef, conversionRule, trigger)
+        val resolvedIncentive = validateIncentiveOffer(incentiveOfferRef)
         val campaign = Campaign(
             id = Ids.newId(),
             name = name,
@@ -103,6 +114,7 @@ class CampaignService @Inject constructor(
             schedule = schedule,
             trigger = trigger,
             decisions = decisions,
+            incentiveOfferRef = resolvedIncentive,
             state = CampaignState.DRAFT,
             createdBy = createdBy,
             approvedBy = null,
@@ -121,8 +133,9 @@ class CampaignService @Inject constructor(
             definition.conversionRule,
             definition.trigger,
         )
+        val resolvedIncentive = validateIncentiveOffer(definition.incentiveOfferRef)
         return campaigns.save(
-            existing.revise(definition.copy(segmentRef = resolvedSegment)),
+            existing.revise(definition.copy(segmentRef = resolvedSegment, incentiveOfferRef = resolvedIncentive)),
         )
     }
 
@@ -148,6 +161,7 @@ class CampaignService @Inject constructor(
             schedule = source.schedule,
             trigger = source.trigger,
             decisions = source.decisions,
+            incentiveOfferRef = source.incentiveOfferRef,
         )
     }
 
@@ -171,6 +185,15 @@ class CampaignService @Inject constructor(
             "unknown trigger '$trigger' — must be one of ${TriggerCatalog.ALL.keys.sorted()}"
         }
         return SegmentRef(segment.name, segment.version)
+    }
+
+    /** Pins only an exact published offer revision; Studio never owns redemption or value mutation. */
+    private suspend fun validateIncentiveOffer(ref: IncentiveOfferRef?): IncentiveOfferRef? {
+        if (ref == null) return null
+        return incentiveOffers.resolvePublished(ref)
+            ?: throw CampaignReferenceNotFoundException(
+                "published incentive offer ${ref.name}@${ref.version} (${ref.id}) not found",
+            )
     }
 
     suspend fun get(id: UUID): Campaign? = campaigns.findById(id)
@@ -262,6 +285,9 @@ class CampaignService @Inject constructor(
         check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can enrol (state: ${campaign.state})" }
         val segment = segments.load(campaign.segmentRef.name, campaign.segmentRef.version)
             ?: throw NoSuchElementException("segment ${campaign.segmentRef} not found")
+        // Measured around the whole sweep, segment evaluation included: the silver-layer query is
+        // the slow half and the part that degrades first.
+        val sweepStartedAt = Instant.now()
         val partyIds = segmentEvaluation.evaluate(segment)
         var started = 0
         var failed = 0
@@ -287,6 +313,7 @@ class CampaignService @Inject constructor(
                         ),
                     )
                     started++
+                    metrics.enrolmentRecorded(EnrolmentAttempt.HOLDOUT)
                 } else {
                     // Start FIRST, persist on success. The workflow id is the idempotency key
                     // (ADR-0200 D1) — `startJourney` swallows WorkflowExecutionAlreadyStarted — so a
@@ -311,15 +338,18 @@ class CampaignService @Inject constructor(
                         ),
                     )
                     started++
+                    metrics.enrolmentRecorded(EnrolmentAttempt.STARTED)
                 }
             } catch (e: Exception) {
                 // Per party, so one bad party is local rather than fatal: the loop used to abort on
                 // the first failure, leaving every party after it unenrolled by a fault that had
                 // nothing to do with them. The count returned is what actually started.
                 failed++
+                metrics.enrolmentRecorded(EnrolmentAttempt.FAILED)
                 log.errorf(e, "campaign.enrol failed campaign=%s party=%s", id, partyId)
             }
         }
+        metrics.enrolmentBatchCompleted(Duration.between(sweepStartedAt, Instant.now()))
         return EnrolmentOutcome(enrolled = started, failed = failed)
     }
 

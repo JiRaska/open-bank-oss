@@ -7,7 +7,7 @@
 - **Probes all 27 fleet services** every 30 minutes via HTTP, checking reachability through `/q/health`, security headers on the API port, and actuator exposure.
 - **Runs 6 OWASP Top 10 checks** on each service: security headers (A05), sensitive data in health endpoint (A02), OpenAPI exposure (A05 info-disclosure), unauthenticated actuator endpoints (A01), CORS wildcard misconfiguration (A05), and service reachability (A05).
 - **Scores each service** 0–100 and assigns a letter grade (A+ → F), computing a `PlatformSecurityReport` covering all services.
-- **Manages ICT incidents** — compliance officers can report, track, and update the lifecycle of DORA-grade ICT incidents through the `IctIncidentResource` API. Incidents are held in an in-memory map, not a database.
+- **Manages ICT incidents** — compliance officers can report, track, and update the lifecycle of DORA-grade ICT incidents through the `IctIncidentResource` API. Incidents are persisted in the `ict_incidents` register and remain queryable across pod restarts.
 - **Emits ICT incident events** directly to the Kafka topic `openbank.security.ict.incident`. There is no outbox and no transactional guarantee; scan results are not published as events at all.
 
 ## What the service does NOT do

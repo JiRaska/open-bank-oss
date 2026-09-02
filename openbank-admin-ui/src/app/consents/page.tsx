@@ -47,6 +47,7 @@ export default function ConsentsPage() {
   const [term, setTerm] = useState('')
   const [party, setParty] = useState<PartyHit | null>(null)
   const [rows, setRows] = useState<Consent[] | null>(null)
+  const [loadedQuery, setLoadedQuery] = useState<string | null>(null)
   const [failure, setFailure] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -62,9 +63,14 @@ export default function ConsentsPage() {
     if (!q) return
     const gen = ++generation.current
     const lensAtRequest = lens
+    const queryKey = `${lensAtRequest}:${q}`
+    const canRetainSnapshot = loadedQuery === queryKey && rows !== null
     setLoading(true)
     setFailure(null)
-    setRows(null)
+    if (!canRetainSnapshot) {
+      setRows(null)
+      setLoadedQuery(null)
+    }
     try {
       // The lens is read ONCE, at request time — never from the closure after the await, where it
       // may already describe a different query.
@@ -78,6 +84,7 @@ export default function ConsentsPage() {
       const data = (await res.json()) as Consent[]
       if (gen !== generation.current) return
       setRows(data)
+      setLoadedQuery(queryKey)
       // NOT `no_data`: consent-service answered, it just holds no consent for this key. The old copy
       // said "the data source contains no records yet", which an operator cannot tell apart from a
       // broken page — and was false whenever any other party had a consent. Rendered below instead.
@@ -109,6 +116,7 @@ export default function ConsentsPage() {
                 // MARKETING_COMMS_EMAIL rows on screen while the select read "By grantee".
                 generation.current += 1
                 setRows(null)
+                setLoadedQuery(null)
                 setFailure(null)
                 setParty(null)
                 setLoading(false)
@@ -158,6 +166,8 @@ export default function ConsentsPage() {
               }}
             />
             <button
+              type="button"
+              aria-busy={loading}
               onClick={() => lookup()}
               disabled={loading || !term.trim()}
               style={{
@@ -168,9 +178,11 @@ export default function ConsentsPage() {
                 opacity: loading || !term.trim() ? 0.6 : 1,
               }}
             >
-              <Search size={15} /> {t('Vyhledat', 'Look up')}
+              <Search size={15} aria-hidden="true" /> {t('Vyhledat', 'Look up')}
             </button>
             <button
+              type="button"
+              aria-busy={loading}
               onClick={() => { setTerm(MARKETING_GRANTEE); void lookup(MARKETING_GRANTEE) }}
               disabled={loading}
               style={{
@@ -209,6 +221,7 @@ export default function ConsentsPage() {
           service="Consent-service"
           feature={t('Souhlasy', 'Consents')}
           lang={language === 'cs' ? 'cs' : 'en'}
+          dense={rows !== null}
         />
       )}
 
@@ -235,7 +248,7 @@ export default function ConsentsPage() {
         </div>
       )}
 
-      {!loading && rows && rows.length > 0 && (
+      {rows && rows.length > 0 && (
         <div className="card" style={{ overflowX: 'auto' }}>
           <table className="table">
             <thead>

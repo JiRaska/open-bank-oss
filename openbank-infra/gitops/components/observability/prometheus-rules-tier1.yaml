@@ -82,15 +82,57 @@ spec:
           annotations:
             summary: "High error rate on {{ $labels.service }}"
             description: ">10% of spans on {{ $labels.service }} are erroring at >0.5 err/s (5m window)."
+        # SAMPLE-DENSITY GUARD, ADDED BY #6054. Without the second clause this rule was
+        # STRUCTURALLY UNABLE TO FIRE for sparse subjects, and could not be fixed by widening
+        # the window. `histogram_quantile(0.99, ...)` over a window holding ~15 spans does not
+        # return a 99th percentile — it returns the top populated bucket, i.e. the MAXIMUM. For
+        # `openbank-agent-service`, whose slow traffic is a 30-minute LLM oversight sweep
+        # (`agent.oversight.cron`), that maximum is the top finite bucket (5s) on EVERY run, so
+        # the condition is true by construction for the ~4 minutes the [5m] window still holds
+        # the run, and then has no samples left. Measured live over 12h on 2026-08-21
+        # (20:32Z-08:32Z): 26 `pending` episodes, lengths [3,4,4,...,4,2] minutes, start-gaps
+        # 30m — length capped at the rate window, gap equal to the cron period. `for: 10m` never
+        # matured, 0 firing.
+        #
+        # Widening the window is NOT the fix and was measured, not assumed: at [45m] the same
+        # expression is true for 311 consecutive minutes (#6054 replay, and the #6053 table),
+        # because the sweep is ALWAYS slower than 2s. So the two available settings are
+        # never-firing and never-clearing; there is no third. The histogram's top finite bucket
+        # is 5s, so no threshold above 5s is even expressible here — latency of a multi-second
+        # LLM batch job is not a question this metric can answer at any window.
+        #
+        # The guard is derived from the data rather than from a service list, so it needs no
+        # maintenance as services come and go. Measured separation over the same 12h, calls per
+        # 5m window: the 31 request-driven services have p50 >= 71.6 (lowest min 26.4, and each
+        # spends <=1.1% of the window under 30 with a longest run of 4m); the 11 sparse subjects
+        # peak at 21.7. Replaying old-vs-new over the window: every one of the 57 condition-true
+        # points on request-driven services is preserved with identical run lengths, and 119
+        # points on sparse subjects (101 of them agent-service) are dropped. At t=0 on a cold pod
+        # `increase(...calls_total[5m])` is 0, the guard is false and the rule is silent, so this
+        # adds no boot-time firing — it can only ever make the rule quieter, never louder.
+        #
+        # What this deliberately does NOT do: it does not give the 11 sparse subjects a latency
+        # alert. For `agent-oversight-sweep` the deployed compensating control is
+        # `WorkflowLivenessStale` over `openbank_workflow_last_success_age_seconds` (ADR-0237),
+        # verified loaded and reporting for that workflow. Per-run DURATION remains uncovered and
+        # is tracked separately — it needs a run timer, not a span-percentile rule.
+        #
+        # The `and`-guard shape is this file's own convention: `HighErrorRate` directly above
+        # carries the same absolute-rate floor for the same reason.
         - alert: HighLatencyP99
           expr: |
             histogram_quantile(0.99, sum by (service, le) (rate(traces_spanmetrics_latency_bucket[5m]))) > 2
+            and
+            sum by (service) (increase(traces_spanmetrics_calls_total[5m])) >= 30
           for: 10m
           labels:
             severity: warning
           annotations:
             summary: "P99 latency >2s on {{ $labels.service }}"
-            description: "{{ $labels.service }} p99 span latency above 2s for >10m."
+            description: >-
+              {{ $labels.service }} p99 span latency above 2s for >10m, over a 5m window holding
+              at least 30 spans. Subjects below that density are excluded on purpose (#6054):
+              a p99 of ~15 samples is the maximum, not a percentile.
         - alert: OutboxBacklogStuck
           expr: openbank_outbox_backlog > 100
           for: 15m

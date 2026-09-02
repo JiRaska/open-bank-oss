@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.4...onboarding-service-v0.9.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.3...onboarding-service-v0.8.4) (2026-08-23)
+
+
+### Bug Fixes
+
+* **onboarding:** SCA enrolments are seeded, not dropped, and device_count is derived ([#6617](https://github.com/JiRaska/open-bank-oss/issues/6617)) ([2c50318](https://github.com/JiRaska/open-bank-oss/commit/2c503183bafbff66fed399e43de8222470beb57e)), closes [#6248](https://github.com/JiRaska/open-bank-oss/issues/6248)
+
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.2...onboarding-service-v0.8.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.1...onboarding-service-v0.8.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **onboarding:** stop counting a dropped projection as a success ([#6258](https://github.com/JiRaska/open-bank-oss/issues/6258)) ([488eea6](https://github.com/JiRaska/open-bank-oss/commit/488eea6cfb85370f242421d2691e3835275b8645))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.0...onboarding-service-v0.8.1) (2026-08-20)
 
 

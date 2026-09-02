@@ -60,6 +60,15 @@ mp:
         topic: openbank.onboarding.funnel.events
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Credit-journey funnel telemetry (ADR-0269 rule 8) -> analytics-sink -> ClickHouse. A
+      # SEPARATE topic from the onboarding funnel on purpose: that one is an anonymous public write,
+      # this one is authenticated and keyed by party, and mixing them would put credit-interest
+      # signals on a stream anyone can post to.
+      credit-funnel-out:
+        connector: smallrye-kafka
+        topic: openbank.credit.funnel.events
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
       # In-app screen feedback (ADR-0192) -> analytics-sink -> ClickHouse. Metadata + the
       # screenshot's object-store key only; the PNG itself never enters Kafka (FeedbackPublisher).
       feedback-out:
@@ -90,6 +99,17 @@ mp:
       # this channel consumable in the live cluster (separate, out-of-scope follow-up; see
       # the gitops manifest comment).
       party-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.customer-edge.party-events-in
         connector: smallrye-kafka
         topic: party.events
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -137,6 +157,7 @@ openbank:
     notification-service-url: ${NOTIFICATION_SERVICE_URL:http://notification-service.notifications.svc:8112}
     engagement-service-url: ${ENGAGEMENT_SERVICE_URL:http://engagement-service.engagement.svc:8153}
     campaign-service-url: ${CAMPAIGN_SERVICE_URL:https://campaign-service.campaign.svc:8443}
+    incentive-service-url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
     statement-service-url: ${STATEMENT_SERVICE_URL:http://statement-service.statements.svc:8136}
     standing-order-service-url: ${STANDING_ORDER_SERVICE_URL:http://standing-order-service.payments.svc:8121}
     fx-service-url:      ${FX_SERVICE_URL:http://fx-service.fx.svc:8119}

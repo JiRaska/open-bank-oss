@@ -58,6 +58,14 @@ spec:
           name: openbank.engagement.events
           patternType: literal
         operations: [Read, Describe]
+      # Authoritative, no-PII attributed incentive lifecycle outcomes. Campaign only projects
+      # these after it validates the opaque interaction ref and immutable campaign offer; it never
+      # reserves, commits or issues a reward.
+      - resource:
+          type: topic
+          name: openbank.incentive.events
+          patternType: literal
+        operations: [Read, Describe]
       # Consume the product events that count as a conversion (ADR-0245 D2). Read-only, and the
       # service only ever appends an outcome row from them — it cannot cause, suppress or alter a
       # send, so the blast radius of this grant is a reporting number.
@@ -114,3 +122,87 @@ spec:
           name: openbank-campaign-service-engagement-events
           patternType: literal
         operations: [Read, Describe]
+      - resource:
+          type: group
+          name: openbank-campaign-service-incentive-events
+          patternType: literal
+        operations: [Read, Describe]
+      # #5745: SmallRye dead-letter topic for the `account-conversions-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.campaign.account-conversions-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `account-triggers-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.campaign.account-triggers-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `card-conversions-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.campaign.card-conversions-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `card-triggers-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.campaign.card-triggers-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `consent-events-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.campaign.consent-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `engagement-events-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.campaign.engagement-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # Dead-letter sink for malformed or persistently unprojectable Incentive events. It must be
+      # writable independently of the source-topic read grant, otherwise the configured parking
+      # strategy becomes a consumer retry loop.
+      - resource:
+          type: topic
+          name: openbank.dlq.campaign.incentive-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `notification-outcomes-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.campaign.notification-outcomes-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"

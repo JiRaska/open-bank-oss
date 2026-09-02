@@ -10,6 +10,7 @@ import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingEvent
 import com.openbank.onboarding.domain.model.OnboardingRecord
 import com.openbank.onboarding.domain.model.PartyStage
+import com.openbank.onboarding.domain.model.ProjectionResult
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.just
@@ -73,6 +74,8 @@ class OnboardingProjectionServiceTest {
         val partyId = UUID.randomUUID()
         val slot = slot<OnboardingRecord>()
         coEvery { repo.upsert(capture(slot)) } just runs
+
+        coEvery { repo.findByPartyId(any()) } returns null
 
         service.applyEvent(
             OnboardingEvent.PartyCreated(
@@ -166,6 +169,7 @@ class OnboardingProjectionServiceTest {
         val slot = slot<OnboardingRecord>()
         coEvery { repo.findByPartyId(partyId) } returns existing
         coEvery { repo.upsert(capture(slot)) } just runs
+        coEvery { repo.recordDeviceEnrolment(partyId, "cred-abc", any()) } returns 1
 
         service.applyEvent(
             OnboardingEvent.DeviceEnrolled(
@@ -178,6 +182,118 @@ class OnboardingProjectionServiceTest {
         with(slot.captured) {
             assertThat(scaEnrolled).isTrue()
             assertThat(deviceCount).isEqualTo(1)
+            assertThat(funnelStage).isEqualTo(FunnelStage.ACTIVE)
+        }
+    }
+
+    // ── applyEvent: the party row does not exist yet (#6248) ──────────────────
+
+    /**
+     * No branch may drop an event. Parameterised over all four so a branch added later cannot
+     * quietly opt out — `DeviceEnrolled` is the one that was measured losing events, but the
+     * other three lose KYC and status transitions the same way, and nothing replays any of them.
+     */
+    @Test
+    fun `applyEvent seeds a record on every branch that needs one, and never drops the event`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val at = Instant.parse("2026-08-19T12:56:36Z")
+        val events = listOf(
+            OnboardingEvent.DeviceEnrolled(partyId, "cred-abc", at),
+            OnboardingEvent.PartyStatusChanged(partyId, PartyStage.ACTIVE, at),
+            OnboardingEvent.KycCaseOpened(partyId, UUID.randomUUID(), at),
+            OnboardingEvent.KycStatusChanged(partyId, UUID.randomUUID(), KycStage.APPROVED, at),
+        )
+        val written = mutableListOf<OnboardingRecord>()
+        coEvery { repo.findByPartyId(partyId) } returns null
+        coEvery { repo.upsert(capture(written)) } just runs
+        coEvery { repo.recordDeviceEnrolment(partyId, "cred-abc", any()) } returns 1
+
+        assertThat(events.map { service.applyEvent(it) })
+            .describedAs("all four branches seed rather than drop")
+            .containsOnly(ProjectionResult.APPLIED_TO_SEEDED_RECORD)
+
+        assertThat(written).describedAs("every event wrote a row").hasSize(4)
+        assertThat(written).allSatisfy { assertThat(it.partyId).isEqualTo(partyId) }
+        // The seeded row invents no identity it was not given.
+        assertThat(written).allSatisfy { assertThat(it.legalName).isNull() }
+    }
+
+    /**
+     * The other half of the contract: a real update must NOT report a seed. Without this the
+     * assertion above passes against a projection that returns APPLIED_TO_SEEDED_RECORD
+     * unconditionally.
+     */
+    @Test
+    fun `applyEvent returns APPLIED when the row exists`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { repo.findByPartyId(partyId) } returns sampleRecord(
+            partyId,
+            funnelStage = FunnelStage.SCA_PENDING,
+            kycStatus = KycStage.APPROVED,
+        )
+        coEvery { repo.upsert(any()) } just runs
+        coEvery { repo.recordDeviceEnrolment(partyId, "cred-abc", any()) } returns 1
+
+        val result = service.applyEvent(
+            OnboardingEvent.DeviceEnrolled(partyId, "cred-abc", Instant.parse("2026-08-19T12:56:36Z")),
+        )
+
+        assertThat(result).isEqualTo(ProjectionResult.APPLIED)
+    }
+
+    /**
+     * `deviceCount` is whatever the ledger says, never `existing + 1`. Replaying an event the
+     * read model has already seen must converge, not inflate — that is what makes a backfill of
+     * the enrolments lost to #4353 safe to run more than once.
+     */
+    @Test
+    fun `applyEvent DeviceEnrolled takes deviceCount from the ledger, not from an increment`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val existing = sampleRecord(partyId, funnelStage = FunnelStage.ACTIVE, kycStatus = KycStage.APPROVED)
+            .copy(scaEnrolled = true, deviceCount = 7)
+        val slot = slot<OnboardingRecord>()
+        coEvery { repo.findByPartyId(partyId) } returns existing
+        coEvery { repo.upsert(capture(slot)) } just runs
+        // The ledger already holds this credential: a replay changes nothing.
+        coEvery { repo.recordDeviceEnrolment(partyId, "cred-abc", any()) } returns 7
+
+        service.applyEvent(
+            OnboardingEvent.DeviceEnrolled(partyId, "cred-abc", Instant.parse("2026-08-19T12:56:36Z")),
+        )
+
+        assertThat(slot.captured.deviceCount)
+            .describedAs("a replayed enrolment must not become an 8th device")
+            .isEqualTo(7)
+    }
+
+    /**
+     * `PARTY_CREATED` arriving after an SCA or KYC event must fill in identity, not reset
+     * progress. The old branch wrote a fixed `scaEnrolled = false, deviceCount = 0,
+     * kycStatus = null, funnelStage = REGISTERED` over whatever the row held.
+     */
+    @Test
+    fun `applyEvent PartyCreated preserves projected state on an existing row`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val existing = sampleRecord(partyId, funnelStage = FunnelStage.ACTIVE, kycStatus = KycStage.APPROVED)
+            .copy(scaEnrolled = true, deviceCount = 2, partyStatus = PartyStage.ACTIVE)
+        val slot = slot<OnboardingRecord>()
+        coEvery { repo.findByPartyId(partyId) } returns existing
+        coEvery { repo.upsert(capture(slot)) } just runs
+
+        service.applyEvent(
+            OnboardingEvent.PartyCreated(
+                partyId,
+                "Jana Nova",
+                "jana@example.test",
+                Instant.parse("2026-08-19T12:56:12Z"),
+            ),
+        )
+
+        with(slot.captured) {
+            assertThat(legalName).isEqualTo("Jana Nova")
+            assertThat(scaEnrolled).describedAs("SCA state survives a late PARTY_CREATED").isTrue()
+            assertThat(deviceCount).isEqualTo(2)
+            assertThat(kycStatus).isEqualTo(KycStage.APPROVED)
             assertThat(funnelStage).isEqualTo(FunnelStage.ACTIVE)
         }
     }

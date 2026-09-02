@@ -110,7 +110,23 @@ spec:
           # (HR000068 schedulers that had never run, SRCFG00040 at boot, the persist-vs-merge
           # duplicate-key 500s, fx-service's "skipping its revaluation leg"), and no metric existed
           # for any of them.
-          ruler:
+          #
+          # THE KEY IS `rulerConfig`, NOT `ruler` (issue #5734). This block was written as
+          # `loki.ruler:` from #3060 until 2026-08-20. That is not a chart key — the grafana/loki
+          # chart calls it `loki.rulerConfig` — and Helm drops an unknown value key SILENTLY, with
+          # no error, no warning, and a perfectly healthy pod. So for the whole life of the Loki
+          # ruler, EVERY line below was inert and the ruler ran on defaults: rule storage stayed
+          # `s3` (pointed at the ruler bucket, which nothing writes to) instead of `local:/rules`
+          # where the sidecar puts the rules, and `alertmanager_url` stayed EMPTY. Measured live
+          # against `/config` and `/prometheus/api/v1/rules` on 2026-08-20: three rule ConfigMaps
+          # present on disk under /rules/fake, and the ruler reporting ZERO rule groups loaded.
+          # Every log-based alert in this estate — silent-failures, endpoint-availability, and the
+          # Falco runtime alerts added hours earlier by #5850 — had therefore never evaluated once,
+          # and could not have delivered anything if it had.
+          # Same family as the 21 Argo Rollouts with zero series (mis-nested Helm keys dropped
+          # without a word); `check-loki-rules.py` now asserts this key renders, so it cannot
+          # silently revert.
+          rulerConfig:
             enable_api: true
             # Rules come from ConfigMaps in git via the chart's k8s-sidecar (see sidecar.rules
             # below), so the ruler reads them off local disk. This deliberately does NOT use the
@@ -128,7 +144,26 @@ spec:
               kvstore:
                 store: inmemory
             # The missing half. Without this a rule evaluates, fires, and is delivered nowhere.
-            alertmanager_url: http://kube-prometheus-stack-alertmanager.observability.svc:9093
+            #
+            # THE `/tools/alertmanager` SUFFIX IS LOAD-BEARING. This Alertmanager runs behind a
+            # route prefix (`--web.route-prefix=/tools/alertmanager`, from
+            # `alertmanagerSpec.routePrefix` so it can be served under admin.open-bank.tech/tools),
+            # so the bare service URL answers 404 on every API path. The ruler appends
+            # `/api/v2/alerts` to whatever it is given, posts it, gets a 404, and DROPS the
+            # notification — with no error surfaced anywhere a human looks. Measured live
+            # 2026-08-21, the first time a Loki rule ever fired in this estate:
+            #   loki_prometheus_notifications_sent_total   = 10
+            #   loki_prometheus_notifications_errors_total = 10   <- every single one
+            #   loki_prometheus_notifications_dropped_total = 10
+            # and the ruler reporting `state: firing` while Alertmanager held zero such alerts.
+            # From inside the cluster:
+            #   POST …:9093/api/v2/alerts                    -> 404
+            #   POST …:9093/tools/alertmanager/api/v2/alerts -> 200
+            # Prometheus itself is unaffected because prometheus-operator configures its
+            # Alertmanager target with `pathPrefix`; this ruler is hand-configured and had no
+            # such help. A firing rule that is dropped at delivery is indistinguishable, from
+            # every dashboard in this estate, from a rule that never fired.
+            alertmanager_url: http://kube-prometheus-stack-alertmanager.observability.svc:9093/tools/alertmanager
             enable_alertmanager_v2: true
             # The SAME half again, for recording rules — and it is a separate switch. An alerting
             # rule needs alertmanager_url; a RECORDING rule needs remote_write, and without it the

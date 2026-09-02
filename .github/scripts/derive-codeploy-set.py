@@ -113,7 +113,11 @@ PAIR_LINE = ("There is no verified pact", "The verification for the pact between
 # with one that has pacts. Before this class existed these same blocks arrived as UNVERIFIED
 # (already eligible) or as PENDING_BUILD (excluded, and mislabelled), so the allow-list
 # entry keeps the honest half of today's behaviour rather than widening it.
-CODEPLOY_CLASSES = ("UNVERIFIED", "REGRESSION", "UNVERIFIABLE")
+# PROVIDER_UNVERIFIED (#6568) is eligible for the same reason UNVERIFIABLE is: a co-deploy that
+# includes the provider republishes verifications at the version being deployed, which is exactly
+# what the block is missing. Omitting it would not be neutral — an unlisted class falls through
+# every branch below and the set analysis silently stops mentioning those services at all.
+CODEPLOY_CLASSES = ("UNVERIFIED", "REGRESSION", "UNVERIFIABLE", "PROVIDER_UNVERIFIED")
 TRANSIENT_CLASSES = ("PENDING_BUILD",)
 
 # NOT_ASKED (#3454) is ineligible for a set by construction — CODEPLOY_CLASSES is an

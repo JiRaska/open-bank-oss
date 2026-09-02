@@ -75,6 +75,12 @@ quarkus:
     account-service:
       url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
       scope: jakarta.inject.Singleton
+    # Immutable catalog revision and durable event cursor used only by the reference-data
+    # snapshotter. Accrual reads its own PostgreSQL snapshot/config rows and never resolves the
+    # mutable "latest" catalog representation on the money path.
+    product-catalog:
+      url: ${PRODUCT_CATALOG_URL:http://localhost:8104}
+      scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
   shutdown:
@@ -150,6 +156,13 @@ authz:
 # differs from its GL account's (the V14 cash-clearing bug); withholding-tax payable is CZK-only
 # because ADR-0033 §E withholds only CZK interest.
 interest:
+  catalog-sync:
+    # Expand safely: disabled until an environment gives the openbank-services principal catalog
+    # read access and opts into the migration. Enabling later is idempotent because receipts and the
+    # cursor commit with each snapshot.
+    enabled: ${INTEREST_CATALOG_SYNC_ENABLED:false}
+    interval: ${INTEREST_CATALOG_SYNC_INTERVAL:30s}
+    initial-delay: ${INTEREST_CATALOG_SYNC_INITIAL_DELAY:15s}
   ledger:
     system-actor-id: ${INTEREST_LEDGER_SYSTEM_ACTOR_ID:00000000-0000-0000-0000-0000000000cc}
     gl:
@@ -214,6 +227,17 @@ mp:
       # back to quarkus.application.name, auto.offset.reset stays `latest` so a fresh deploy does
       # not replay historical remittances and re-pay them.
       interest-withholding-remitted-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.interest.interest-withholding-remitted-in
         connector: smallrye-kafka
         topic: openbank.interest.accrual.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer

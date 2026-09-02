@@ -92,7 +92,7 @@ class AccountServiceLifecycleTest {
             )
     }
 
-    // ── Activation (ADR-0073) ─────────────────────────────────────────────────
+    // ── Activation (ADR-0267) ─────────────────────────────────────────────────
 
     @Test
     fun `activateAccount transitions PENDING_ACTIVATION to ACTIVE and publishes the exact transition`(): Unit =

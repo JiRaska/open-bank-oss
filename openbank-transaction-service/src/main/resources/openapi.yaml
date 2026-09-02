@@ -10,7 +10,7 @@ info:
   # Minor bump (1.11.0 -> 1.12.0): additive only — GET /approvals (the checker's queue, issue
   # #5679, mirroring sanctions' #3472) plus two additive fields on the PATCH .../approvals/{id}
   # response (makerId, createdAt). No breaking change.
-  version: 1.12.0
+  version: 1.13.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -109,12 +109,12 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PENDING, COMPLETED, REVERSED, FAILED]
+            enum: [PENDING, PROCESSING, COMPLETED, FAILED, REVERSED]
         - name: type
           in: query
           schema:
             type: string
-            enum: [CREDIT, DEBIT, REVERSAL, FEE]
+            enum: [DEBIT, CREDIT, TRANSFER, FEE, INTEREST, REVERSAL, ADJUSTMENT]
         - name: dateFrom
           in: query
           schema:

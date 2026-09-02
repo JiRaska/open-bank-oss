@@ -129,7 +129,14 @@ export default function OnboardingAnalyticsPage() {
             <input type="date" value={to} min={from} max={isoDay(new Date())} onChange={e => setTo(e.target.value)}
               className="input" style={{ padding: '5px 8px', fontSize: '12px' }} />
           </label>
-          <button className="btn btn-secondary" onClick={load} disabled={loading}>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={load}
+            disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit analytiku onboardingu', 'Refresh onboarding analytics')}
+          >
             <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
@@ -149,8 +156,8 @@ export default function OnboardingAnalyticsPage() {
             feature={t('Konverze onboardingu', 'Onboarding conversion')} lang={language} />
         </div>
       ) : loading && !data ? (
-        <div className="card" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>
-          <RefreshCw size={20} style={{ animation: 'spin 1s linear infinite' }} />
+        <div role="status" aria-live="polite" className="card" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>
+          <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 1s linear infinite' }} />
         </div>
       ) : !data || data.available === false ? (
         <div className="card" style={{ padding: 0 }}>

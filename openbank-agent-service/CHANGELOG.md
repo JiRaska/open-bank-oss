@@ -1,5 +1,88 @@
 # Changelog
 
+## [1.25.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.25.0...agent-service-v1.25.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **agent:** reject a null array element with 400 instead of 500 ([#8008](https://github.com/JiRaska/open-bank-oss/issues/8008)) ([f7beb2d](https://github.com/JiRaska/open-bank-oss/commit/f7beb2d9653a67b048fce01139a352d73428a29a)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [1.25.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.24.0...agent-service-v1.25.0) (2026-08-25)
+
+
+### Features
+
+* **testing:** add trace contract kit ([#6805](https://github.com/JiRaska/open-bank-oss/issues/6805)) ([bcee169](https://github.com/JiRaska/open-bank-oss/commit/bcee1697140bbe1f96fec33a6ed6ddf7f90ab109))
+
+## [1.24.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.23.2...agent-service-v1.24.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [1.23.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.23.1...agent-service-v1.23.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **agent:** stop substituting actorId for a missing audit aggregateId ([#6579](https://github.com/JiRaska/open-bank-oss/issues/6579)) ([5268ef9](https://github.com/JiRaska/open-bank-oss/commit/5268ef98e7ec987266119606d49e5b0034e9e3cf))
+
+## [1.23.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.23.0...agent-service-v1.23.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.22.0...agent-service-v1.23.0) (2026-08-22)
+
+
+### Features
+
+* **agent:** time the oversight sweep with its own run-duration metric ([#6208](https://github.com/JiRaska/open-bank-oss/issues/6208)) ([ca7eb98](https://github.com/JiRaska/open-bank-oss/commit/ca7eb98b01c679cb8f8dd90c6ba0b33ca5ba42e3)), closes [#6169](https://github.com/JiRaska/open-bank-oss/issues/6169)
+
+## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.21.0...agent-service-v1.22.0) (2026-08-21)
+
+
+### Features
+
+* **agent:** durable AI audit provenance ([#6209](https://github.com/JiRaska/open-bank-oss/issues/6209)) ([8a862f3](https://github.com/JiRaska/open-bank-oss/commit/8a862f387594f934f91bf5befcbc966ccf40abad))
+
+## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.2...agent-service-v1.21.0) (2026-08-21)
+
+
+### Features
+
+* **agent:** put the content-safety classifier on the operator plane too ([#6204](https://github.com/JiRaska/open-bank-oss/issues/6204)) ([13a21b5](https://github.com/JiRaska/open-bank-oss/commit/13a21b5835739937a16bcfdbb233381d305f3089)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
+
+### Bug Fixes
+
+* **agent:** default the model endpoint to the LiteLLM gateway, not decommissioned Groq ([#6076](https://github.com/JiRaska/open-bank-oss/issues/6076)) ([026e071](https://github.com/JiRaska/open-bank-oss/commit/026e071106f6405b2343ed27a93210a8c800428c)), closes [#5736](https://github.com/JiRaska/open-bank-oss/issues/5736)
+* **agent:** run the oversight sweep off the event loop — enforcement was degrading ([#6223](https://github.com/JiRaska/open-bank-oss/issues/6223)) ([55b538d](https://github.com/JiRaska/open-bank-oss/commit/55b538d95125a7fae0643266ecde8b38068526fc))
+
+## [1.20.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.1...agent-service-v1.20.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** record an LLM metric on every streaming outcome ([#5960](https://github.com/JiRaska/open-bank-oss/issues/5960)) ([f6fdb0f](https://github.com/JiRaska/open-bank-oss/commit/f6fdb0fc302acb7d84b288ee29d2d98b9de1e994))
+
+## [1.20.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.0...agent-service-v1.20.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **agent:** correct the model-selection notes — I measured the cap, not the models ([#5923](https://github.com/JiRaska/open-bank-oss/issues/5923)) ([0e9c8af](https://github.com/JiRaska/open-bank-oss/commit/0e9c8af3399d43d32463ada59623f69dd3bc5cb2))
+
+## [1.20.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.3...agent-service-v1.20.0) (2026-08-20)
+
+
+### Features
+
+* **copilot:** add model-based content-safety guardrail (Llama Guard) ([#5670](https://github.com/JiRaska/open-bank-oss/issues/5670)) ([e62a476](https://github.com/JiRaska/open-bank-oss/commit/e62a47656c403c9e9fcb608207313ec3e9c61a86))
+
 ## [1.19.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.2...agent-service-v1.19.3) (2026-08-17)
 
 

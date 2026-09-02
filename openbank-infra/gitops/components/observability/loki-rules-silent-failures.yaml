@@ -43,13 +43,38 @@ data:
       - name: openbank.logs.silent-failures
         interval: 5m
         rules:
+          # `pod!~"loki-.*"` ON EVERY UNSCOPED RULE IN THIS GROUP IS LOAD-BEARING, NOT TIDINESS.
+          #
+          # Loki logs every query it serves, and the log line contains the query text — so a rule
+          # of the shape `{namespace=~".+"} |= "LITERAL"` matches Loki's own record of itself
+          # running. It is a feedback loop that can never clear: the rule fires, the firing causes
+          # another evaluation, the evaluation is logged, the log satisfies the rule.
+          #
+          # Measured 2026-08-21, within minutes of the ruler evaluating a rule for the first time
+          # in this estate (#6032): all three unscoped rules here were `firing`, and all three were
+          # false positives. Over 6h, `{namespace=~".+"}`:
+          #     HR000068                       102 lines -> 0 with pod!~"loki-.*"
+          #     SRCFG00040                      94 lines -> 0
+          #     duplicate key value violates   289 lines -> 1 (and that one benign, see below)
+          # Every single one came from `pod=loki-0`. Excluding only the ruler's own component
+          # (`!= "component=ruler"`) is NOT enough and was tried: the query FRONTEND logs the same
+          # text for any Grafana panel or ad-hoc query containing the literal, so 66 of 78 survived.
+          # The pod is the boundary that holds.
+          #
+          # The tell that this is the mechanism, rather than a coincidence: the Falco rules in
+          # loki-rules-falco-runtime.yaml grep for literals the same way and were `inactive`
+          # throughout — their selector is `{namespace="falco"}`, which cannot match loki-0.
+          #
+          # A rule in this file that greps for a literal and does not pin `namespace` to one that
+          # excludes Loki MUST carry this exclusion. `check-loki-rule-self-match.py` enforces it.
+
           # A scheduler that aborts on the missing Vert.x context. `HR000068` is Hibernate
           # Reactive's own code, so this matches the exception rather than our prose about it —
           # prose gets reworded, an exception code does not.
           - alert: SchedulerMissingVertxContext
             expr: |
               sum by (namespace, app) (
-                count_over_time({namespace=~".+"} |= "HR000068" [15m])
+                count_over_time({namespace=~".+", pod!~"loki-.*"} |= "HR000068" [15m])
               ) > 0
             for: 5m
             labels:
@@ -68,7 +93,7 @@ data:
           - alert: ConfigPropertyMissingAtBoot
             expr: |
               sum by (namespace, app) (
-                count_over_time({namespace=~".+"} |= "SRCFG00040" [15m])
+                count_over_time({namespace=~".+", pod!~"loki-.*"} |= "SRCFG00040" [15m])
               ) > 0
             for: 5m
             labels:
@@ -86,7 +111,19 @@ data:
           - alert: PanacheAssignedIdInsertOnly
             expr: |
               sum by (namespace, app) (
-                count_over_time({namespace=~".+"} |= "duplicate key value violates" [15m])
+                count_over_time(
+                  {namespace=~".+", pod!~"loki-.*"}
+                    |= "duplicate key value violates"
+                    # Temporal re-registers its default namespace on every startup and takes the
+                    # unique-constraint rejection as the "already exists" answer — 3 lines a day,
+                    # forever, always the same key. It is Temporal's own table and cannot be the
+                    # Panache assigned-@Id defect this alert is named for, so it is excluded by
+                    # CONSTRAINT NAME rather than by namespace: a genuine clash in the temporal
+                    # namespace still fires. Leaving it in would have made this detector
+                    # permanently firing, which is how a real detection gets ignored.
+                    != "namespaces_pkey"
+                  [15m]
+                )
               ) > 0
             for: 5m
             labels:

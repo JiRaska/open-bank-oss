@@ -17,6 +17,7 @@ import com.openbank.agent.domain.model.ToolInvocation
 import com.openbank.agent.domain.policy.EnforcementMode
 import com.openbank.agent.domain.policy.GateOutcome
 import com.openbank.agent.domain.policy.PolicyDecision
+import com.openbank.libs.testing.trace.TraceContract
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -72,6 +73,10 @@ class AgentChatServiceTracingTest {
                 coEvery { sanitizeToolResult(any(), any()) } answers { secondArg() }
                 every { blocks() } returns true
             }
+            contentSafety = mockk {
+                coEvery { checkUserInput(any(), any()) } returns false
+                coEvery { checkAssistantOutput(any(), any()) } returns false
+            }
             killSwitch = mockk { every { haltReason(any()) } returns null }
             tracer = tracerProvider.get("test")
         }
@@ -122,6 +127,11 @@ class AgentChatServiceTracingTest {
             assertThat(a["openbank.agent.tool_calls"]).isEqualTo(1L)
             assertThat(a["openbank.agent.is_proposal"]).isEqualTo(false)
             assertThat(a["openbank.agent.model_id"]).isEqualTo("mock-echo")
+            TraceContract.from(exported)
+                .requiresSpan("agent.run")
+                .requiresAttribute("agent.run", "openbank.agent.result")
+                .hasNoErrorSpan()
+                .verifiedAs("agent-run")
         }
     }
 
@@ -139,6 +149,11 @@ class AgentChatServiceTracingTest {
             assertThat(a["openbank.agent.result"]).isEqualTo("DENIED")
             assertThat(a["openbank.agent.detail"]).isEqualTo("kill_switch")
             assertThat(a["openbank.agent.tool_calls"]).isEqualTo(0L)
+            TraceContract.from(exported)
+                .requiresSpan("agent.run")
+                .requiresAttribute("agent.run", "openbank.agent.detail")
+                .hasNoErrorSpan()
+                .verifiedAs("agent-denied-run")
         }
     }
 }

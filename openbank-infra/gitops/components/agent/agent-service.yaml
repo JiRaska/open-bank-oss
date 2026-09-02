@@ -54,7 +54,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-4f2d6e5e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-bd090160
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -96,12 +96,40 @@ spec:
             # model id to `groq/llama-3.3-70b-versatile`, so the model name is unchanged and this is
             # an endpoint + key change only. The provider key now lives solely in the ai-platform
             # gateway pod, which is the one workload permitted to leave the cluster.
+            # Default flipped off the free Groq tier. That tier enforces 12k tokens/min, and a
+            # tool round is 2+ completions each carrying the prompt, the tool schemas and the
+            # (capped) results — so a burst of clicks trips it and the assistant answers "I'm being
+            # rate-limited", which reads to an operator as the feature being broken. gpt-oss-120b
+            # is paid, measured at 2.9s on a real Czech admin prompt (vs 9.6s for DeepSeek-V4-Pro)
+            # and ~35x cheaper per output token than that stronger sibling. Both are in the picker;
+            # this only decides what a fresh session starts with.
             - name: AGENT_DEFAULT_MODEL
-              value: llama-3.3-70b-versatile
+              value: openai/gpt-oss-120b
             - name: AGENT_MODEL_ENDPOINT
               value: http://litellm.ai-platform.svc:4000/v1
             # LiteLLM virtual key (OpenBao litellm/KEY_AGENT_SERVICE via ESO), not a provider key.
             # Optional so an un-seeded key degrades the chat call instead of CrashLooping the pod.
+            # Model-based content safety on the operator plane (ADR-0265). Same gateway, same
+            # virtual key as the chat model — no second credential and no second egress path.
+            - name: AGENT_CONTENT_SAFETY_ENABLED
+              value: "true"
+            - name: AGENT_CONTENT_SAFETY_ENDPOINT
+              value: http://litellm.ai-platform.svc:4000/v1
+            - name: AGENT_CONTENT_SAFETY_MODEL
+              value: meta-llama/llama-guard-4-12b
+            # fail-closed stays FALSE here, deliberately: refusing an operator's read-only question
+            # because a classifier is unreachable is worse than answering it, and the charter tool
+            # allow-list, the OPA gate and the HITL proposal queue still bound what any answer can
+            # cause. Every unavailable verdict is audited and counted regardless, so this is a
+            # declared posture rather than a silent one.
+            - name: AGENT_CONTENT_SAFETY_FAIL_CLOSED
+              value: "false"
+            - name: AGENT_CONTENT_SAFETY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agent-service-secrets
+                  key: AGENT_MODEL_API_KEY
+                  optional: true
             - name: AGENT_MODEL_API_KEY
               valueFrom:
                 secretKeyRef:

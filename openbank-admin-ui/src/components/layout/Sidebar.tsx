@@ -55,7 +55,7 @@ const customerNav: NavItem[] = [
   { nameCs: 'Strany',      nameEn: 'Parties',    href: '/parties',    icon: Users,          permission: 'parties:view' },
   { nameCs: 'KYC',         nameEn: 'KYC',         href: '/kyc',        icon: ShieldCheck,    permission: 'kyc:view' },
   { nameCs: 'Onboarding',  nameEn: 'Onboarding',  href: '/onboarding', icon: ClipboardList,  permission: 'onboarding:view' },
-  { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'onboarding:view' },
+  { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view' },
   { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view' },
 ]
 
@@ -77,23 +77,21 @@ const paymentsNav: NavItem[] = [
 const complianceNav: NavItem[] = [
   { nameCs: 'AML',                nameEn: 'AML',              href: '/aml',               icon: AlertOctagon,          permission: 'compliance:view' },
   { nameCs: 'Fraud',              nameEn: 'Fraud',            href: '/fraud',             icon: ShieldAlert,           permission: 'compliance:view' },
-  { nameCs: 'Sankce',             nameEn: 'Sanctions',        href: '/sanctions',         icon: Shield,                permission: 'compliance:view' },
+  { nameCs: 'Sankce',             nameEn: 'Sanctions',        href: '/sanctions',         icon: Shield,                permission: 'sanctions:view' },
   { nameCs: 'Spory',              nameEn: 'Disputes',         href: '/disputes',          icon: MessageSquareWarning,  permission: 'compliance:view' },
   { nameCs: 'Customer 360',        nameEn: 'Customer 360',     href: '/customer-360',      icon: Users,                 permission: 'compliance:view' },
-  { nameCs: 'Kampaně',            nameEn: 'Campaigns',        href: '/campaigns',         icon: Megaphone,             permission: 'compliance:view' },
-  { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'compliance:view' },
+  { nameCs: 'Kampaně',            nameEn: 'Campaigns',        href: '/campaigns',         icon: Megaphone,             permission: 'campaign:view' },
+  { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'campaign:view' },
   { nameCs: 'Souhlasy',           nameEn: 'Consents',         href: '/consents',          icon: FileSignature,           permission: 'compliance:view' },
   // ADR-0212 D4: four-eyes activation of the jurisdictional credit compliance packs. Filed under
-  // compliance, not lending, because the backing endpoints are ROLE_COMPLIANCE/ROLE_ADMIN — a
-  // lending officer cannot propose or decide one.
-  { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'compliance:view' },
+  { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view' },
   { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view' },
   { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view' },
 ]
 
 const opsNav: NavItem[] = [
-  { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'payments:view' },
-  { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'system:view' },
+  { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'pid:view' },
+  { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
 
@@ -117,14 +115,18 @@ const docsNav: NavItem[] = [
 ]
 
 const platformNav: NavItem[] = [
+  // Test evidence is a first-class platform capability. Keeping the only link
+  // near the bottom of System made an implemented route effectively invisible.
+  { nameCs: 'Test Intelligence', nameEn: 'Test Intelligence', href: '/system/tests', icon: FlaskConical, permission: 'system:view', badge: 'LIVE' },
   { nameCs: 'FinOps',   nameEn: 'FinOps',   href: '/finops',   icon: PiggyBank,  permission: 'system:view' },
   { nameCs: 'DevOps',   nameEn: 'DevOps',   href: '/devops',   icon: GitBranch,  permission: 'system:view' },
-  { nameCs: 'IAOps',    nameEn: 'IAOps',    href: '/iaops',    icon: Bot,        permission: 'system:view' },
+  { nameCs: 'Řídicí centrum agentů', nameEn: 'Agent Control Room', href: '/iaops', icon: Bot, permission: 'system:view' },
+  { nameCs: 'Živé agentní případy', nameEn: 'Live Agent Cases', href: '/iaops/cases', icon: GitBranch, permission: 'system:view' },
   { nameCs: 'Flaky testy', nameEn: 'Flaky Tests', href: '/iaops/flaky-test-hunter', icon: Bug, permission: 'system:view' },
   { nameCs: 'Temporal', nameEn: 'Temporal', href: '/temporal', icon: Zap,        permission: 'system:view' },
   { nameCs: 'Tok workflow', nameEn: 'Workflow Flow', href: '/temporal/flow', icon: Workflow, permission: 'system:view' },
   { nameCs: 'Observability', nameEn: 'Observability', href: '/observability', icon: Activity, permission: 'system:view' },
-  { nameCs: 'Schvalování', nameEn: 'Approvals', href: '/approvals', icon: ClipboardCheck, permission: 'system:view' },
+  { nameCs: 'Schvalování', nameEn: 'Approvals', href: '/approvals', icon: ClipboardCheck, permission: 'approvals:view' },
 ]
 
 // Internal tool UIs, reachable at /tools/<tool> on this same host behind the
@@ -144,10 +146,9 @@ const sysNav: NavItem[] = [
   { nameCs: 'Tech Inventory',   nameEn: 'Tech Inventory',  href: '/system/inventory', icon: Package,           permission: 'system:view' },
   { nameCs: 'Infrastruktura',   nameEn: 'Infrastructure',  href: '/infrastructure',   icon: Server,            permission: 'system:view' },
   { nameCs: 'Topologie infra',  nameEn: 'Infra Topology',  href: '/infrastructure/topology', icon: Network,     permission: 'system:view' },
-  { nameCs: 'Test Coverage',    nameEn: 'Test Coverage',   href: '/system/tests',     icon: FlaskConical,      permission: 'system:view' },
   { nameCs: 'Připravenost prod',nameEn: 'Prod Readiness',  href: '/system/readiness', icon: ClipboardCheck,    permission: 'system:view' },
   { nameCs: 'Konfigurace',      nameEn: 'Configuration',   href: '/system/config',    icon: SlidersHorizontal, permission: 'system:config' },
-  { nameCs: 'Agent (MCP)',      nameEn: 'Agent (MCP)',     href: '/system/agent',     icon: Bot,               permission: 'system:view' },
+  { nameCs: 'Agent (MCP)',      nameEn: 'Agent (MCP)',     href: '/system/agent',     icon: Bot,               permission: 'agent:view' },
   { nameCs: 'Nastavení',        nameEn: 'Settings',        href: '/settings',         icon: Settings, lockedPermission: 'settings:view' },
 ]
 

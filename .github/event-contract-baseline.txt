@@ -16,9 +16,6 @@ openbank-balance-service:openbank.balance.events
 openbank-card-issuance-service:openbank.cards.events
 openbank-clearing-service:openbank.clearing.batch.event
 openbank-consent-service:openbank.consent.events
-openbank-customer-edge:openbank.customer.audit
-openbank-customer-edge:openbank.feedback.events
-openbank-customer-edge:openbank.onboarding.funnel.events
 openbank-dispute-service:openbank.dispute.events
 openbank-document-service:openbank.documents.document.event
 openbank-domestic-payment:openbank.domestic.payment.events

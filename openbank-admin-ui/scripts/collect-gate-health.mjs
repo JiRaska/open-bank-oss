@@ -41,6 +41,11 @@ const getArg = (flag, dflt) => {
 const OUT = getArg('--out', 'gate-health.json')
 const RUNS = parseInt(getArg('--runs', '20'), 10)
 const GATE_DETAIL_RUNS = parseInt(getArg('--gate-detail-runs', '5'), 10)
+// A build-time observability collector must degrade, never strand a deployment
+// behind one unavailable GitHub API connection. Keep this bounded and allow a
+// runner-specific override for diagnosed transient network conditions.
+const REQUEST_TIMEOUT_MS = Math.max(1_000, Math.min(30_000,
+  parseInt(process.env.OPENBANK_GATE_HEALTH_TIMEOUT_MS || '5000', 10) || 5000))
 const now = new Date()
 
 const TOKEN = process.env.GITHUB_TOKEN || ''
@@ -50,6 +55,7 @@ const API = 'https://api.github.com'
 async function gh(pathname, opts = {}) {
   const res = await fetch(`${API}${pathname}`, {
     ...opts,
+    signal: opts.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: {
       Authorization: `Bearer ${TOKEN}`,
       Accept: 'application/vnd.github+json',
@@ -73,6 +79,14 @@ async function ghJson(pathname) {
 // the caller must treat that run as shard-only, not crash the whole collector over one gap.
 async function downloadArtifactJson(artifact, workdir) {
   try {
+    // CodeQL js/http-to-file-access: the GitHub Actions API is a trusted, authenticated source
+    // (not a "download from evil.com" backdoor pattern) and the zip is only ever unzipped and
+    // read back as JSON, never executed — but the path built from `artifact.id` below is worth
+    // hardening on its own terms (CWE-434): reject anything that isn't the safe integer the
+    // API contract promises before it reaches path.join, rather than trusting the shape.
+    if (!Number.isInteger(artifact.id) || artifact.id < 0) {
+      throw new Error(`unexpected artifact id shape: ${JSON.stringify(artifact.id)}`)
+    }
     const res = await gh(`/repos/${REPO}/actions/artifacts/${artifact.id}/zip`, {
       redirect: 'follow',
     })

@@ -125,7 +125,7 @@ class AccountServiceTest {
                 )
             }
 
-            // Balance init is event-driven (ADR-0073, #550): openAccount no longer makes a
+            // Balance init is event-driven (ADR-0267, #550): openAccount no longer makes a
             // synchronous balancePort.initialize REST call — balance-service's BalanceInitConsumer
             // seeds the zero balance from the AccountCreated event above. Encode that contract.
             coVerify(exactly = 0) { balancePort.initialize(any(), any(), any()) }
@@ -352,7 +352,7 @@ class AccountServiceTest {
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         coEvery { productCatalog.findById(command.productId) } returns
-            ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "DRAFT"))
+            ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "DRAFT", "CZK"))
 
         assertThatThrownBy { runBlocking { service.openAccount(command) } }
             .isInstanceOf(ProductNotEligibleException::class.java)
@@ -368,7 +368,7 @@ class AccountServiceTest {
         coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
         coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
         coEvery { productCatalog.findById(command.productId) } returns
-            ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "ACTIVE"))
+            ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "ACTIVE", "CZK"))
         every { ibanGenerator.generate(command.currency) } returns iban
         coEvery { accountRepository.existsByIban(iban) } returns false
         coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
@@ -377,6 +377,21 @@ class AccountServiceTest {
         val result = service.openAccount(command)
 
         assertThat(result.status).isEqualTo(AccountStatus.ACTIVE)
+    }
+
+    @Test
+    fun `openAccount refuses a confirmed product currency mismatch`() {
+        val command = openAccountCommand()
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        coEvery { productCatalog.findById(command.productId) } returns
+            ProductLookupResult.Found(CatalogProduct(command.productId, "SAVINGS_STANDARD", "ACTIVE", "EUR"))
+
+        assertThatThrownBy { runBlocking { service.openAccount(command) } }
+            .isInstanceOf(ProductNotEligibleException::class.java)
+            .hasMessageContaining("EUR, not CZK")
+
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
     }
 
     @Test

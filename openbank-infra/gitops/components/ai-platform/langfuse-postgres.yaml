@@ -1,0 +1,66 @@
+# Single-owner Postgres for Langfuse (cluster-wide CNPG operator, ADR-0119).
+# Generates the langfuse-db-app secret (username/password/uri) + langfuse-db-rw Service.
+#
+# WHY A SECOND CLUSTER RATHER THAN A DATABASE IN litellm-db. ADR-0009 is database-per-service and
+# these are two services with opposite write profiles: LiteLLM writes small, transactional rows on
+# the money path of every LLM call (virtual-key spend counters — losing them is a control outage,
+# see postgres.yaml), while Langfuse writes bulk observability traces whose volume is driven by
+# traffic and whose loss costs history, not enforcement. Sharing one 10Gi volume would let a trace
+# spike fill the disk that the spend ceiling depends on — and that exact failure already happened to
+# litellm-db at 2Gi (#3975): CNPG parked it in `phase: "Not enough disk space"` for 25 h while the
+# application pod beside it stayed 1/1 Running, so every pod-level health view showed green.
+#
+# Sized 20Gi, larger than litellm-db's 10Gi, because traces are the bulk data here. Retention is
+# bounded by the ingestion side, not by the disk: Langfuse keeps traces indefinitely unless told
+# otherwise, so this volume is the thing to watch first when the AI stack gets real traffic.
+#
+# Credentials via EKS Pod Identity on the langfuse-db ServiceAccount (aws/.../db-backups.tf) —
+# barman reads the SDK chain, no secret. Sandbox S3 lifecycle expires after 35d.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: langfuse-db
+  namespace: ai-platform
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  # ECR pull-through rather than ghcr.io (issue #1290), and the ref is set here rather than left to
+  # the Kyverno mutating webhook: CNPG reconciles the running pod against spec.imageName, so a
+  # mutated image makes the pod drift and be recreated every ~10s.
+  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 20Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+      max_wal_size: "512MB"
+  bootstrap:
+    initdb:
+      database: langfuse
+      owner: langfuse
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/langfuse-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: langfuse-db-daily
+  namespace: ai-platform
+spec:
+  schedule: "0 19 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: langfuse-db

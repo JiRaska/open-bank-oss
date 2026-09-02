@@ -26,4 +26,12 @@ describe('party creation UI', () => {
     expect(form).toContain('role="alert"')
     expect(form).toContain('<Save size={13} aria-hidden="true"')
   })
+
+  it('blocks duplicate create submissions before React can render the disabled state', () => {
+    expect(form).toContain("import { useRef, useState } from 'react'")
+    expect(form).toContain('const createInFlight = useRef(false)')
+    expect(form).toContain('if (createInFlight.current) return')
+    expect(form).toContain('createInFlight.current = true')
+    expect(form).toContain('createInFlight.current = false')
+  })
 })

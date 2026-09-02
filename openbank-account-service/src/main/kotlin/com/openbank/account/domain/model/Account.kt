@@ -72,7 +72,7 @@ data class Account(
         return copy(status = AccountStatus.ACTIVE)
     }
 
-    /** Activate an onboarding account once its party has cleared KYC + AML (ADR-0073). */
+    /** Activate an onboarding account once its party has cleared KYC + AML (ADR-0267). */
     fun activate(): Account {
         check(status == AccountStatus.PENDING_ACTIVATION) { "Cannot activate account in status $status" }
         return copy(status = AccountStatus.ACTIVE)
@@ -85,6 +85,7 @@ data class Account(
 enum class AccountType {
     CURRENT,
     SAVINGS,
+    TERM_DEPOSIT,
     NOSTRO,
     GL_ASSET,
     GL_LIABILITY,

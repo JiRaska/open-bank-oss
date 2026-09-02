@@ -32,6 +32,13 @@
 #
 # config_ordinal=500 forces this source to outrank the baked application.yaml (~254). Loaded via
 # QUARKUS_CONFIG_LOCATIONS on the Deployment (audit-service.yaml).
+#
+# agent-audit-events-in's group.id/auto.offset.reset override is NOT added here yet — the
+# `AgentAuditConsumer` that declares that channel hasn't deployed. Declaring the channel in
+# gitops config before the image that names it is exactly SRMSG00071 (a configured channel
+# with no connector is a hard boot failure), the same sequencing hazard #5661 hit for
+# notification-service's delegation-events-in. Add the two lines back once the image with
+# `AgentAuditConsumer` is live (mirrors #5700's restoration of that override).
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.19.0...interest-service-v0.20.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.18.0...interest-service-v0.19.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.17.2...interest-service-v0.18.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.17.1...interest-service-v0.17.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.17.0...interest-service-v0.17.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.16.0...interest-service-v0.17.0) (2026-08-20)
+
+
+### Features
+
+* **product-catalog:** govern downstream product terms ([#5841](https://github.com/JiRaska/open-bank-oss/issues/5841)) ([932d639](https://github.com/JiRaska/open-bank-oss/commit/932d63921fb3b8a8c63741deaeb4214a6e8fa142))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.15.1...interest-service-v0.16.0) (2026-08-18)
 
 

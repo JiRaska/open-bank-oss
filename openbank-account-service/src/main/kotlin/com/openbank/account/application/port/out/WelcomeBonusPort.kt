@@ -9,7 +9,7 @@ import java.util.UUID
 
 /**
  * Grants the one-time onboarding welcome bonus by initiating an incoming credit to a freshly
- * activated account (ADR-0073). The credit goes through transaction-service as a real, double-entry
+ * activated account (ADR-0267). The credit goes through transaction-service as a real, double-entry
  * money-path payment (Dr bank cash-clearing / Cr customer deposit) — never a direct balance poke.
  *
  * Idempotent by construction: the implementation keys the transaction on the account id, so a

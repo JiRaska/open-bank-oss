@@ -8,6 +8,7 @@ import com.openbank.anacredit.application.port.out.AnaCreditMetricsPort
 import com.openbank.anacredit.application.port.out.LoanStageEventOutcome
 import com.openbank.anacredit.application.port.out.LoanStageProjectionRepository
 import com.openbank.anacredit.domain.model.LoanStageProjection
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -24,14 +25,33 @@ import java.util.UUID
  *
  * Same shape as `kyc-service`/`aml-service`'s `PartyEventConsumer`: `suspend @Incoming` (Quarkus
  * dispatches on the Vert.x event loop with a duplicated context, so the reactive-Panache write inside
- * [LoanStageProjectionRepository] runs correctly), poison-pill safe (a parse/domain failure is caught,
- * logged, and the message is acked — one malformed event must not wedge the consumer group; the
- * canonical lending stream can be replayed).
+ * [LoanStageProjectionRepository] runs correctly).
  *
- * Every consumption reports its terminal outcome to [AnaCreditMetricsPort]. That is the point of the
- * meter rather than a nicety: acking a bad event is the correct behaviour, so a broken producer, a
- * schema change or a wedged projection write leaves the stage projection frozen with nothing but an
- * INFO/ERROR line to show for it. `outcome=parse_error|malformed|apply_error` is that population.
+ * **Failure handling separates two things this consumer used to conflate (#5698/#5745).**
+ *
+ * A **malformed event** — unparseable JSON, no `loanId`, no `newStage` — is unretryable: replaying it
+ * fails identically forever. It is logged, counted and acked. That is the genuine poison pill, and it
+ * is the only case that may be acked on failure.
+ *
+ * A **failed projection write** is the opposite: the event is fine, the database is not, and the work
+ * must happen once it recovers. Acking there froze the loan's IFRS 9 stage and DPD at their previous
+ * values with nothing but an ERROR line to show for it — and AnaCredit exposure is a *regulatory*
+ * return, so a stage that silently stops advancing is a wrong number on a filed report, not a stale
+ * dashboard. `applyIfNewer` is idempotent and ordering-safe, so a retry or a redelivery is free.
+ * Those failures now go through [EventRetry.withRetry] and are RETHROWN.
+ *
+ * **What the rethrow does, and what it deliberately does not promise.** The mechanism this handler
+ * controls is the rethrow: the record is not acknowledged as done. What follows is the connector's
+ * `failure-strategy` for `lending-events-in` — `dead-letter-queue` parks the record in the configured
+ * topic, SmallRye's default `fail` stops the channel. That is configuration, not a property of this
+ * code, so this KDoc does not state today's value: #5745 section B found the whole family of #5698
+ * fixes asserting a dead-letter that only four channels fleet-wide actually had, and #5751 is wiring
+ * this one to `openbank.dlq.anacredit.lending-events-in`. Read the channel's config, or the
+ * `check-incoming-dlq-wiring` gate, for the current answer.
+ *
+ * Every consumption still reports its terminal outcome to [AnaCreditMetricsPort], `apply_error`
+ * included — the counter is incremented *before* the rethrow, so the population survives whichever
+ * failure-strategy the channel is configured with.
  *
  * Idempotent + ordering-safe: [LoanStageProjectionRepository.applyIfNewer] only writes when the
  * incoming event's timestamp is strictly newer than the projection's current value, so an out-of-order
@@ -102,32 +122,41 @@ class LoanStageEventConsumer {
     }
 
     /**
-     * Write the projection and report the terminal outcome. A write failure is logged, counted and
-     * swallowed — the message is acked so one bad row cannot wedge the consumer group, and the
-     * canonical lending stream can be replayed.
+     * Write the projection and report the terminal outcome.
+     *
+     * A write failure is a dependency being down, not a bad event: it is retried a bounded number of
+     * times and then RETHROWN, so the platform sees a failure instead of an ack that did nothing. The
+     * `apply_error` counter is still incremented first, so the metric records every terminal failure
+     * regardless of which failure-strategy the channel is configured with.
      */
-    @Suppress("TooGenericExceptionCaught") // any write failure means the same thing: ack and count it
+    @Suppress("TooGenericExceptionCaught") // count the terminal outcome for ANY failure, then rethrow
     private suspend fun apply(projection: LoanStageProjection) {
         try {
-            if (projections.applyIfNewer(projection)) {
-                log.infof(
-                    "[lending-events-in] Applied stage projection for loan %s: %s (DPD %d)",
-                    projection.loanId,
-                    projection.stage,
-                    projection.daysPastDue,
-                )
-                metrics.loanStageEvent(LoanStageEventOutcome.APPLIED)
-            } else {
-                log.infof(
-                    "[lending-events-in] Ignored stale/duplicate loan.stage_changed for loan %s " +
-                        "(existing projection is already at least as recent)",
-                    projection.loanId,
-                )
-                metrics.loanStageEvent(LoanStageEventOutcome.STALE)
+            EventRetry.withRetry(log, "loan.stage_changed projection", projection.loanId) {
+                applyOnce(projection)
             }
         } catch (e: Exception) {
-            log.errorf(e, "[lending-events-in] Failed to apply stage projection for loan %s", projection.loanId)
             metrics.loanStageEvent(LoanStageEventOutcome.APPLY_ERROR)
+            throw e
+        }
+    }
+
+    private suspend fun applyOnce(projection: LoanStageProjection) {
+        if (projections.applyIfNewer(projection)) {
+            log.infof(
+                "[lending-events-in] Applied stage projection for loan %s: %s (DPD %d)",
+                projection.loanId,
+                projection.stage,
+                projection.daysPastDue,
+            )
+            metrics.loanStageEvent(LoanStageEventOutcome.APPLIED)
+        } else {
+            log.infof(
+                "[lending-events-in] Ignored stale/duplicate loan.stage_changed for loan %s " +
+                    "(existing projection is already at least as recent)",
+                projection.loanId,
+            )
+            metrics.loanStageEvent(LoanStageEventOutcome.STALE)
         }
     }
 }

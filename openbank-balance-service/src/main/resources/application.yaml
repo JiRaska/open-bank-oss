@@ -132,15 +132,37 @@ mp:
       # filters by eventType and only projects AccountBookedChanged). Gated OFF by
       # openbank.balance.projection.enabled until the Phase D-2 cutover removes the saga debit.
       ledger-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.balance.ledger-events-in
         connector: smallrye-kafka
         topic: openbank.ledger.journal.posted
         group.id: openbank-balance-service
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest
-      # ADR-0073: create a zero balance row when an account is created (event-driven init,
+      # ADR-0267 §3: create a zero balance row when an account is created (event-driven init,
       # so onboarding accounts opened from a Kafka consumer get a balance without the
       # synchronous authenticated REST call). initializeBalance is idempotent.
       balance-init-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.balance.balance-init-in
         connector: smallrye-kafka
         topic: openbank.accounts.account.created
         group.id: openbank-balance-service

@@ -7,12 +7,13 @@ import { NextResponse } from 'next/server'
 // Langfuse→Prometheus bridge metrics (ADR-0112 P1). Falls back to mock data
 // when the bridge is not yet deployed (sandbox / local dev).
 export const dynamic = 'force-dynamic'
+const PROMETHEUS_QUERY_TIMEOUT_MS = 5_000
 
 export interface AgentCostEntry {
   agentId: string
   model: string
   tokensLast24h: number
-  tokensLast7d: number
+  tokensLast7d: number | null
   costLast24hUsd: number
   costLast7dUsd: number
   budgetMonthlyUsd: number | null
@@ -25,10 +26,38 @@ export interface AiCostsData {
   available: boolean
   collectedAt: string
   totalCostLast7dUsd: number
-  totalCostLast30dUsd: number
-  selfHostedPct: number   // % of cost on self-hosted vLLM vs. Anthropic API
+  totalCostLast30dUsd: number | null
+  selfHostedPct: number | null
+  coverage: MetricsCoverage
   agents: AgentCostEntry[]
   anomalies: FinOpsAnomaly[]
+}
+
+export interface MetricsCoverage {
+  source: 'prometheus'
+  retentionHours: number
+  dataFrom: string
+  dataTo: string
+  lastSuccessfulLoad: string | null
+  windows: Record<'24h' | '7d' | '30d', { requestedHours: number; availableHours: number; partial: boolean }>
+}
+
+function metricsCoverage(now: Date, successful: boolean): MetricsCoverage {
+  const configured = Number(process.env.PROMETHEUS_RETENTION_HOURS ?? '12')
+  const retentionHours = Number.isFinite(configured) && configured > 0 ? configured : 12
+  const available = (requestedHours: number) => Math.min(requestedHours, retentionHours)
+  return {
+    source: 'prometheus',
+    retentionHours,
+    dataFrom: new Date(now.getTime() - retentionHours * 60 * 60 * 1000).toISOString(),
+    dataTo: now.toISOString(),
+    lastSuccessfulLoad: successful ? now.toISOString() : null,
+    windows: {
+      '24h': { requestedHours: 24, availableHours: available(24), partial: retentionHours < 24 },
+      '7d': { requestedHours: 168, availableHours: available(168), partial: retentionHours < 168 },
+      '30d': { requestedHours: 720, availableHours: available(720), partial: retentionHours < 720 },
+    },
+  }
 }
 
 export interface FinOpsAnomaly {
@@ -46,7 +75,7 @@ export interface FinOpsAnomaly {
 async function fetchFromPrometheus(query: string, prometheusUrl: string): Promise<number | null> {
   try {
     const url = `${prometheusUrl}/api/v1/query?query=${encodeURIComponent(query)}`
-    const res = await fetch(url)
+    const res = await fetch(url, { signal: AbortSignal.timeout(PROMETHEUS_QUERY_TIMEOUT_MS) })
     if (!res.ok) return null
     const json = await res.json() as { data?: { result?: Array<{ value?: [unknown, string] }> } }
     const result = json?.data?.result?.[0]?.value?.[1]
@@ -57,6 +86,7 @@ async function fetchFromPrometheus(query: string, prometheusUrl: string): Promis
 }
 
 export async function GET() {
+  const now = new Date()
   const prometheusUrl = process.env.PROMETHEUS_URL ?? 'http://prometheus-operated.observability:9090'
   const langfuseUp = await fetchFromPrometheus('langfuse_up', prometheusUrl)
   const langfuseAvailable = langfuseUp === 1
@@ -65,10 +95,11 @@ export async function GET() {
     // Return illustrative mock data when Langfuse→Prometheus bridge not yet deployed
     const mock: AiCostsData = {
       available: false,
-      collectedAt: new Date().toISOString(),
+      collectedAt: now.toISOString(),
       totalCostLast7dUsd: 0,
-      totalCostLast30dUsd: 0,
-      selfHostedPct: 0,
+      totalCostLast30dUsd: null,
+      selfHostedPct: null,
+      coverage: metricsCoverage(now, false),
       agents: [],
       anomalies: [],
     }
@@ -77,25 +108,27 @@ export async function GET() {
 
   // Live path: query Langfuse bridge metrics
   const agentIds = ['copilot', 'holmes-rca', 'finops-agent', 'fleet-monitor', 'code-review']
-  const agents: AgentCostEntry[] = []
+  const agentResults = await Promise.all(agentIds.map(async (agentId): Promise<AgentCostEntry | null> => {
+    const [tokens24h, cost24h, cost7d, cost30d] = await Promise.all([
+      fetchFromPrometheus(
+        `sum(increase(langfuse_agent_tokens_total{agent_id="${agentId}"}[24h]))`, prometheusUrl
+      ),
+      fetchFromPrometheus(
+        `sum(increase(langfuse_agent_tokens_total{agent_id="${agentId}"}[24h]) * on(model) group_left() langfuse_model_cost_per_token)`, prometheusUrl
+      ),
+      fetchFromPrometheus(
+        `sum(increase(langfuse_agent_tokens_total{agent_id="${agentId}"}[7d]) * on(model) group_left() langfuse_model_cost_per_token)`, prometheusUrl
+      ),
+      fetchFromPrometheus(
+        `sum(increase(langfuse_agent_tokens_total{agent_id="${agentId}"}[30d]) * on(model) group_left() langfuse_model_cost_per_token)`, prometheusUrl
+      ),
+    ])
 
-  for (const agentId of agentIds) {
-    const tokens24h = await fetchFromPrometheus(
-      `sum(increase(langfuse_agent_tokens_total{agent_id="${agentId}"}[24h]))`, prometheusUrl
-    )
-    const cost24h = await fetchFromPrometheus(
-      `sum(increase(langfuse_agent_tokens_total{agent_id="${agentId}"}[24h]) * on(model) group_left() langfuse_model_cost_per_token)`, prometheusUrl
-    )
-    const cost7d = await fetchFromPrometheus(
-      `sum(increase(langfuse_agent_tokens_total{agent_id="${agentId}"}[7d]) * on(model) group_left() langfuse_model_cost_per_token)`, prometheusUrl
-    )
-    const cost30d = await fetchFromPrometheus(
-      `sum(increase(langfuse_agent_tokens_total{agent_id="${agentId}"}[30d]) * on(model) group_left() langfuse_model_cost_per_token)`, prometheusUrl
-    )
+    if (tokens24h == null && cost24h == null) return null
 
-    if (tokens24h == null && cost24h == null) continue
-
-    const budgetMonthlyUsd: number | null = null  // TODO: read from agents.yaml limits.monthly_budget_usd
+    // No monthly USD budget is configured in the current agents.yaml contract. Keep this
+    // explicitly unavailable so consumers cannot render a fabricated budget percentage.
+    const budgetMonthlyUsd: number | null = null
     const burnRate: AgentCostEntry['burnRate'] =
       cost24h == null ? 'normal'
       : cost24h > 10 ? 'exceeded'
@@ -103,28 +136,31 @@ export async function GET() {
       : cost24h > 1  ? 'normal'
       : 'low'
 
-    agents.push({
+    return {
       agentId,
       model: 'mixed',
       tokensLast24h: tokens24h ?? 0,
-      tokensLast7d: 0,
+      tokensLast7d: null,
       costLast24hUsd: cost24h ?? 0,
       costLast7dUsd: cost7d ?? 0,
       budgetMonthlyUsd,
       budgetUsedPct: budgetMonthlyUsd != null && cost30d != null ? (cost30d / budgetMonthlyUsd) * 100 : null,
       burnRate,
       anomalyZ: null,
-    })
-  }
+    }
+  }))
+  const agents = agentResults.filter((entry): entry is AgentCostEntry => entry !== null)
 
   const totalCost7d = agents.reduce((s, a) => s + a.costLast7dUsd, 0)
 
   return NextResponse.json({
     available: true,
-    collectedAt: new Date().toISOString(),
+    collectedAt: now.toISOString(),
     totalCostLast7dUsd: totalCost7d,
-    totalCostLast30dUsd: 0,
-    selfHostedPct: 60,
+    totalCostLast30dUsd: null,
+    // The current bridge exports aggregate token/cost series, not provider-placement evidence.
+    selfHostedPct: null,
+    coverage: metricsCoverage(now, true),
     agents,
     anomalies: [],
   } satisfies AiCostsData)

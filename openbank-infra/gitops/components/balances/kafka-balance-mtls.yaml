@@ -3,7 +3,7 @@
 # balance-service is both a producer and a consumer:
 #   Produces: openbank.balance.events (two channels: balance-events-out + balance-outbox-out)
 #   Consumes: openbank.ledger.journal.posted (group: openbank-balance-service, ADR-0039 Phase D)
-#             openbank.accounts.account.created (group: openbank-balance-service, ADR-0073)
+#             openbank.accounts.account.created (group: openbank-balance-service, ADR-0267 §3)
 #
 # ACL model (ADR-0137): one KafkaUser = one mTLS identity for ALL of this service's Kafka
 # traffic. The global gate allow.everyone.if.no.acl.found=true remains until all ~33 clients
@@ -47,6 +47,26 @@ spec:
           name: openbank-balance-service
           patternType: literal
         operations: [Read]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `balance-init-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.balance.balance-init-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `ledger-events-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.balance.ledger-events-in
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
 ---
 # Project balance-service keystore from `messaging` into `balances` namespace.

@@ -48,6 +48,7 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs"))
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)

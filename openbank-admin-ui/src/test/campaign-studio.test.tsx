@@ -10,9 +10,19 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
 import NewCampaignPage from '@/app/campaigns/new/page'
 
-const routerPush = vi.hoisted(() => vi.fn())
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { roles: ['ROLE_ADMIN'] } }, status: 'authenticated' }),
+  signIn: vi.fn(),
+  SessionProvider: ({ children }: { children: React.ReactNode }) => children,
+}))
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: routerPush }), useSearchParams: () => new URLSearchParams() }))
+const routerPush = vi.hoisted(() => vi.fn())
+const navigation = vi.hoisted(() => ({ query: '' }))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: routerPush }),
+  useSearchParams: () => new URLSearchParams(navigation.query),
+}))
 
 const CAMPAIGN_ID = '7b1f1d5e-0d2a-4a6a-8f7e-2c1b9a0d3e4f'
 
@@ -29,6 +39,17 @@ const CADENCES = {
 const TRIGGERS = {
   state: 'ok',
   items: [{ trigger: 'ACCOUNT_OPENED', humanForm: 'when an account is opened' }],
+}
+
+const INCENTIVES = {
+  state: 'ok',
+  items: [{
+    ref: { id: '0c42be3d-f632-4f12-bdb3-2e326a471a7f', name: 'welcome-reward', version: 2 },
+    productScope: ['current-account'],
+    effectiveFrom: '2026-08-01T00:00:00Z',
+    expiresAt: '2026-12-31T23:59:59Z',
+    stackingPolicy: 'EXCLUSIVE',
+  }],
 }
 
 const TEMPLATES = {
@@ -90,6 +111,7 @@ describe('campaign studio', () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
     routerPush.mockReset()
+    navigation.query = ''
   })
 
   /**
@@ -208,6 +230,125 @@ describe('campaign studio', () => {
     expect(createBody).not.toHaveProperty('trigger')
   }, 15000)
 
+  it('pins the exact published incentive revision in the campaign draft', async () => {
+    let createBody: Record<string, unknown> | undefined
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/api/segments')) return { ok: true, status: 200, json: async () => SEGMENTS }
+      if (url.includes('/api/incentives')) return { ok: true, status: 200, json: async () => INCENTIVES }
+      if (url.includes('/api/campaigns/templates')) return { ok: true, status: 200, json: async () => TEMPLATES }
+      if (url.includes('/api/campaigns/cadences')) return { ok: true, status: 200, json: async () => CADENCES }
+      if (url.includes('/api/campaigns/triggers')) return { ok: true, status: 200, json: async () => TRIGGERS }
+      if (url === '/api/campaigns') {
+        createBody = JSON.parse(String(init?.body))
+        return { ok: true, status: 200, json: async () => ({ state: 'ok', campaign: { id: CAMPAIGN_ID } }) }
+      }
+      return { ok: true, status: 200, json: async () => ({}) }
+    }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(screen.getByRole('option', { name: /welcome-reward@2/ })).toBeTruthy())
+    fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Rewarded welcome' } })
+    fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open current accounts' } })
+    fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
+    fireEvent.change(document.getElementById('c-incentive')!, { target: { value: INCENTIVES.items[0].ref.id } })
+    fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'Welcome' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+
+    await waitFor(() => expect(createBody).toMatchObject({ incentiveOfferRef: INCENTIVES.items[0].ref }))
+  }, 15000)
+
+  it('restores the pinned incentive when an existing draft is reopened', async () => {
+    navigation.query = 'draft=draft-with-reward'
+    const stored = {
+      ...detail('DRAFT').campaign,
+      incentiveOfferRef: INCENTIVES.items[0].ref,
+      steps: [{
+        order: 1,
+        template: 'MARKETING_PRODUCT_OFFER_PUSH',
+        channel: 'PUSH',
+        variables: { offerTitle: 'Welcome' },
+        delaySeconds: 0,
+      }],
+    }
+    vi.stubGlobal('fetch', mockFetch({
+      '/api/segments': SEGMENTS,
+      '/api/incentives': INCENTIVES,
+      '/api/campaigns/draft-with-reward': { campaign: stored, sources: { campaign: 'ok' } },
+    }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(document.getElementById('c-incentive')).toHaveValue(INCENTIVES.items[0].ref.id))
+  }, 15000)
+
+  it('shows and blocks a pinned draft revision that is no longer published', async () => {
+    navigation.query = 'draft=retired-reward-draft'
+    const retiredRef = { id: 'f53d192d-c6ac-4dac-a889-86416674925a', name: 'retired-reward', version: 4 }
+    vi.stubGlobal('fetch', mockFetch({
+      '/api/segments': SEGMENTS,
+      '/api/incentives': { state: 'ok', items: [] },
+      '/api/campaigns/retired-reward-draft': {
+        campaign: {
+          ...detail('DRAFT').campaign,
+          incentiveOfferRef: retiredRef,
+          steps: [{
+            order: 1,
+            template: 'MARKETING_PRODUCT_OFFER_PUSH',
+            channel: 'PUSH',
+            variables: { offerTitle: 'Welcome' },
+            delaySeconds: 0,
+          }],
+        },
+        sources: { campaign: 'ok' },
+      },
+    }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/no longer published/))
+    expect(document.getElementById('c-incentive')).toHaveValue(retiredRef.id)
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
+  }, 15000)
+
+  it('distinguishes an undeployed incentive service from a valid empty catalogue', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/api/segments': SEGMENTS,
+      '/api/incentives': { state: 'not_deployed', items: [] },
+    }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/not deployed in this environment/))
+    expect(document.getElementById('c-incentive')).toBeDisabled()
+  }, 15000)
+
+  it('fails closed when an almost-valid incentive item omits a required contract field', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/api/segments': SEGMENTS,
+      '/api/incentives': {
+        state: 'ok',
+        items: [{
+          ...INCENTIVES.items[0],
+          stackingPolicy: undefined,
+        }],
+      },
+    }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/catalogue is currently unavailable/))
+    expect(document.getElementById('c-incentive')).toBeDisabled()
+    expect(screen.queryByRole('option', { name: /welcome-reward/ })).toBeNull()
+  }, 15000)
+
+  it('does not reinterpret a missing items field as a valid empty catalogue', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/api/segments': SEGMENTS,
+      '/api/incentives': { state: 'ok' },
+    }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/catalogue is currently unavailable/))
+    expect(document.getElementById('c-incentive')).toBeDisabled()
+  }, 15000)
+
   it('authors both content arms and submits a measurable A/B experiment', async () => {
     let createBody: Record<string, unknown> | undefined
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -301,6 +442,29 @@ describe('campaign studio', () => {
     expect(funnel.getByText('Click-event / impression-event ratio')).toBeTruthy()
     expect(within(screen.getByTestId('campaign-attention-next-evidence')).getByText('Set a measurable outcome before choosing a surface')).toBeTruthy()
     expect(funnel.getByText(/18 click events; 120 impression events on Home banner/)).toBeTruthy()
+  }, 15000)
+
+  it('reports only committed incentive outcomes as redeemed', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        campaign: {
+          ...active.campaign,
+          incentiveOfferRef: { id: 'f69b33a4-07e4-4bf6-b61c-f08bfc019136', name: 'term-deposit-welcome', version: 2 },
+        },
+        incentives: { reserved: 18, committed: 7, released: 4, expired: 3 },
+        sources: { ...active.sources, incentives: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-incentive-funnel')).toBeTruthy(), { timeout: 8000 })
+    const funnel = within(screen.getByTestId('campaign-incentive-funnel'))
+    expect(funnel.getByText('Redeemed')).toBeTruthy()
+    expect(funnel.getByText('7')).toBeTruthy()
+    expect(funnel.getByText('Held, not redeemed')).toBeTruthy()
+    expect(funnel.getByText('18')).toBeTruthy()
   }, 15000)
 
   it('keeps independent app events out of a made-up attention funnel', async () => {

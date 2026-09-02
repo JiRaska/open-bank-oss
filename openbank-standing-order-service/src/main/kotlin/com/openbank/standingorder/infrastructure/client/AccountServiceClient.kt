@@ -4,6 +4,7 @@
 
 package com.openbank.standingorder.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -27,6 +28,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * answer here, not an error — resolved to `null`, not retried or logged loud.
  */
 @RegisterRestClient(configKey = "account-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)

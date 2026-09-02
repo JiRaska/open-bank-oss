@@ -53,13 +53,46 @@ class OpenAiCompatibleLlmGatewayClient(
     // stays a plain constructible class — `DomainMetrics` is the CDI bean that implements it, and
     // producing one from here would drag Micrometer into every consumer's Arc type closure.
     private val metrics: LlmCallMetricsPort = LlmCallMetricsPort.NONE,
+    // Defaults ON, because a correlation id nobody wires up is a correlation id that does not exist
+    // — and this is the one place all nine gateway callers pass through. The provider answers null
+    // wherever OpenTelemetry is absent, so switching it on costs nothing where there is no trace.
+    private val traceIds: TraceIdProvider = OtelTraceIdProvider,
 ) : LlmGatewayPort {
 
     private val log = Logger.getLogger(OpenAiCompatibleLlmGatewayClient::class.java)
 
+    // Derived once from the configured endpoint, not per call: it cannot change for a given client.
+    private val provider = LlmCallMetricsPort.providerOf(baseUrl)
+
     private val http: HttpClient = http ?: HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_S))
         .build()
+
+    /**
+     * Builds the chat request body. Extracted from [chat] purely so that method stays inside the
+     * detekt `LongMethod` budget — it crossed it at 61 lines when the trace-id correlation landed
+     * (#5959), which reddened the full-fleet lint gate (#6023).
+     */
+    private fun buildRequest(systemPrompt: String, userPrompt: String): ChatRequest {
+        // LiteLLM forwards `metadata` verbatim to its logging callbacks, so `trace_id` is what the
+        // gateway hands Langfuse instead of minting one — that is the whole join between the two
+        // evidence trails. Omitted entirely when there is no valid trace: an absent key leaves
+        // LiteLLM's own id generation in charge, whereas a placeholder would fuse unrelated calls
+        // onto one trace. Every other OpenAI-compatible backend ignores an unknown top-level field,
+        // and it is NON_NULL-serialized, so a null adds nothing to the wire.
+        // runCatching, not a bare call: [TraceIdProvider] documents that it must never throw, and a
+        // documented obligation is not an enforced one — a caller-supplied provider that breaks would
+        // otherwise propagate out of chat() and cost a completion for want of a correlation id. This
+        // read sits OUTSIDE the request try/catch, so nothing else would have caught it.
+        val traceId = runCatching { traceIds.currentTraceId() }.getOrNull()?.takeIf { isValidTraceId(it) }
+        return ChatRequest(
+            model = model,
+            messages = listOf(ChatMessage("system", systemPrompt), ChatMessage("user", userPrompt)),
+            temperature = temperature,
+            maxTokens = maxTokens,
+            metadata = traceId?.let { ChatMetadata(traceId = it) },
+        )
+    }
 
     @Suppress("TooGenericExceptionCaught") // IOException + parse errors have no common base worth splitting
     override suspend fun chat(systemPrompt: String, userPrompt: String): String? {
@@ -68,16 +101,11 @@ class OpenAiCompatibleLlmGatewayClient(
             // Recorded, not silent: an agent that has never had a key looks identical to one that
             // is simply idle unless this series exists, and "the AI features were never switched
             // on" is exactly the state this repo keeps discovering months late.
-            metrics.recordCall(model, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0)
+            metrics.recordCall(model, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0, provider)
             return null
         }
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
-        val body = ChatRequest(
-            model = model,
-            messages = listOf(ChatMessage("system", systemPrompt), ChatMessage("user", userPrompt)),
-            temperature = temperature,
-            maxTokens = maxTokens,
-        )
+        val body = buildRequest(systemPrompt, userPrompt)
         // Nanos, not a Timer.Sample: the metrics port is a pure-domain interface and may not carry a
         // Micrometer type. Measured around the whole attempt, so a timeout — the slowest and most
         // interesting case — is timed too rather than being dropped with the exception.
@@ -101,6 +129,7 @@ class OpenAiCompatibleLlmGatewayClient(
                     0,
                     0,
                     System.nanoTime() - startedAt,
+                    provider,
                 )
                 return null
             }
@@ -111,6 +140,7 @@ class OpenAiCompatibleLlmGatewayClient(
                 parsed.usage?.promptTokens ?: 0,
                 parsed.usage?.completionTokens ?: 0,
                 System.nanoTime() - startedAt,
+                provider,
             )
             parsed.choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
         } catch (ex: Exception) {
@@ -121,6 +151,7 @@ class OpenAiCompatibleLlmGatewayClient(
                 0,
                 0,
                 System.nanoTime() - startedAt,
+                provider,
             )
             null
         }
@@ -142,8 +173,35 @@ internal data class ChatRequest(
     val temperature: Double = 0.2,
     @JsonProperty("max_tokens") val maxTokens: Int = 700,
     val stream: Boolean = false,
+    val metadata: ChatMetadata? = null,
 )
 
+/**
+ * The LiteLLM proxy's pass-through metadata block (ADR-0265 slice 3 tail, #5671).
+ *
+ * Only [traceId] is carried. It is the caller's own W3C trace id, which makes the Langfuse trace
+ * addressable by something the calling service already knows — both for incident reconstruction and
+ * as the only falsifiable ingestion probe available on Langfuse v2.
+ */
+@JsonInclude(JsonInclude.Include.NON_NULL)
+internal data class ChatMetadata(@JsonProperty("trace_id") val traceId: String)
+
+// ignoreUnknown, like every other wire type here — and it is NOT cosmetic. Providers return extra
+// fields INSIDE the message object: `tool_calls` and `function_call` (null on a plain answer, but
+// present), and `reasoning_content` from every reasoning model. Without this annotation Jackson
+// throws on the whole response:
+//
+//   Unrecognized field "tool_calls" (class ...ChatMessage), not marked as ignorable
+//
+// Measured live on 2026-08-21: EVERY content-safety classification came back `unavailable` with
+// reason=transport because of this line, so the guardrail was deployed, enabled, and classifying
+// nothing. The shared gateway client parses through the same type, so the defect was not confined
+// to the guardrail — it was one provider response shape away from silencing every LLM caller that
+// routes through here.
+//
+// It surfaced only because the verdict is three-valued: had `unavailable` been folded into `safe`,
+// a guardrail answering nothing would have looked exactly like a guardrail seeing nothing wrong.
+@JsonIgnoreProperties(ignoreUnknown = true)
 internal data class ChatMessage(val role: String, val content: String)
 
 @JsonIgnoreProperties(ignoreUnknown = true)

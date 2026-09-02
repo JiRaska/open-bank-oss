@@ -13,6 +13,8 @@ import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.application.port.out.CatalogLoanProfile
+import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.InstallmentRepository
@@ -25,6 +27,7 @@ import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
+import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
@@ -62,6 +65,8 @@ import com.openbank.libs.lending.origination.OriginationTransitionResult
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -83,7 +88,7 @@ import java.util.UUID
 // three-line economic change in a file move. The same call CustomerEdgeResource made. Splitting the
 // servicing/provisioning loops out is a real follow-up, not a drive-by.
 @Suppress("LongParameterList", "TooManyFunctions", "LargeClass")
-class LendingService(
+class LendingService @Inject constructor(
     private val applications: LoanApplicationRepository,
     private val loans: LoanRepository,
     private val installments: InstallmentRepository,
@@ -100,6 +105,7 @@ class LendingService(
     private val decisionEngine: OriginationDecisionService,
     private val borrowerAccounts: com.openbank.lending.application.port.out.BorrowerAccountLookupPort,
     private val borrowerCredit: com.openbank.lending.application.port.out.BorrowerCreditPort,
+    private val catalogLoanProfiles: CatalogLoanProfilePort = UnusedCatalogLoanProfilePort,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,
@@ -109,6 +115,8 @@ class LendingService(
     CollateralUseCase,
     ProvisioningUseCase,
     RunProvisioningCycleUseCase {
+
+    private val log = Logger.getLogger(LendingService::class.java)
 
     private val machine = OriginationStateMachine()
 
@@ -188,7 +196,37 @@ class LendingService(
         }
 
     private fun Uni<LoanApplication>.signalWorkflow(): Uni<LoanApplication> =
-        call { app -> workflowPort.stateEntered(app.id, app.status, reflectionDaysFor(app)) }
+        call { app -> armTimers(app.id, app.status, reflectionDaysFor(app)) }
+
+    /**
+     * Reports a state entry to the durable-timer backend and **reads the answer** (#6085).
+     *
+     * The port used to return `Uni<Unit>` from both implementations, so the offline no-op's
+     * discard was indistinguishable from the Temporal adapter's success and no call site could
+     * have noticed. [TimerArmingOutcome] gives the two outcomes different values; this is the
+     * consumer that acts on the difference. A field nothing reads is a latent trap, not a control.
+     *
+     * It deliberately does not fail the chain: arming a timer accompanies the transition, it is
+     * not the transition, and refusing here would take the whole origination path down in an
+     * offline build (ADR-0028 D3). Making a *shipped* image reach this branch is what
+     * `LendingAdapterBindingVerifier` prevents, at boot, before any application exists.
+     */
+    private fun armTimers(
+        applicationId: LoanApplicationId,
+        state: OriginationState,
+        reflectionPeriodDays: Int?,
+    ): Uni<TimerArmingOutcome> =
+        workflowPort.stateEntered(applicationId, state, reflectionPeriodDays).invoke { outcome ->
+            if (outcome != TimerArmingOutcome.ARMED) {
+                log.warnf(
+                    "application %s entered %s with NO durable timer armed (%s): the document-SLA, " +
+                        "offer-expiry and reflection-period waits are unenforced for it.",
+                    applicationId.value,
+                    state,
+                    outcome,
+                )
+            }
+        }
 
     private fun Uni<LoanApplication>.emitEvidence(
         from: String,
@@ -238,7 +276,38 @@ class LendingService(
 
     // --- Origination --------------------------------------------------------------------------------
 
-    override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
+    override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> =
+        request.catalogOfferingId?.let { offeringId ->
+            catalogLoanProfiles.resolvePublished(offeringId).flatMap { profile ->
+                applyCatalogProfile(request, proposedBy, profile)
+            }
+        } ?: applyLegacy(request, proposedBy, null)
+
+    private fun applyCatalogProfile(
+        request: LoanApplicationRequest,
+        proposedBy: String,
+        profile: CatalogLoanProfile,
+    ): Uni<LoanApplication> {
+        require(request.requestedAmount.currency.code == profile.currency) {
+            "Requested currency does not match catalog"
+        }
+        require(request.termPeriods == profile.tenorMonths) { "Requested term does not match catalog" }
+        require(request.periodsPerYear == MONTHS_PER_YEAR) { "Catalog loans require monthly periods" }
+        require(request.method == profile.method) { "Requested amortization method does not match catalog" }
+        require(profile.minPrincipal == null || request.requestedAmount.amount >= profile.minPrincipal) {
+            "Requested amount is below the catalog minimum"
+        }
+        require(profile.maxPrincipal == null || request.requestedAmount.amount <= profile.maxPrincipal) {
+            "Requested amount exceeds the catalog maximum"
+        }
+        return applyLegacy(request.copy(nominalAnnualRate = profile.nominalAnnualRate), proposedBy, profile.snapshot)
+    }
+
+    private fun applyLegacy(
+        request: LoanApplicationRequest,
+        proposedBy: String,
+        catalogSnapshot: com.openbank.lending.domain.model.CatalogLoanSnapshot?,
+    ): Uni<LoanApplication> {
         complianceGuard.checkOriginationAllowed(request.jurisdiction, request.productType)
         require(request.requestedAmount.isPositive()) { "Requested amount must be positive" }
         require(request.termPeriods > 0) { "Term must be at least one period" }
@@ -266,10 +335,11 @@ class LendingService(
             ageYears = request.ageYears,
             residency = request.residency,
             employmentTenureMonths = request.employmentTenureMonths,
+            catalogSnapshot = catalogSnapshot,
         )
         return applications.save(application).call { saved ->
             val state = if (originationConfig.autoApprove) straightThrough(saved).status else saved.status
-            workflowPort.stateEntered(saved.id, state, reflectionDaysFor(saved))
+            armTimers(saved.id, state, reflectionDaysFor(saved))
         }.map { saved ->
             if (originationConfig.autoApprove) straightThrough(saved) else saved
         }.call { saved ->
@@ -284,6 +354,11 @@ class LendingService(
                 ),
             )
         }
+    }
+
+    private data object UnusedCatalogLoanProfilePort : CatalogLoanProfilePort {
+        override fun resolvePublished(offeringId: UUID): Uni<CatalogLoanProfile> =
+            Uni.createFrom().failure(IllegalStateException("catalog loan profiles are not configured"))
     }
 
     /**
@@ -1304,5 +1379,6 @@ class LendingService(
 
     private companion object {
         const val MAX_LIST_LIMIT = 100
+        const val MONTHS_PER_YEAR = 12
     }
 }

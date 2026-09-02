@@ -186,19 +186,54 @@ model-gateway:
     - id: mock-echo
       provider: mock
       sensitivity: hosted
-    # Groq — free, fast, OpenAI-compatible. `id` is sent verbatim as the upstream model name.
-    # Served by the single `openai-compat` adapter; needs an API key (see agent.model.openai).
+    # `id` is sent verbatim as the upstream model name, and is the CALLER-FACING id: it is a
+    # `model_name` in litellm-config, never a provider's own id. Served by the single
+    # `openai-compat` adapter; needs an API key (see agent.model.openai).
     #
-    # ADR-0174/0175 (#1919): in a deployed environment the endpoint is repointed at the in-cluster
-    # LiteLLM gateway (`http://litellm.ai-platform.svc:4000/v1`) via AGENT_MODEL_ENDPOINT, so the
-    # gateway is the single pod allowed to leave the cluster to a US LLM provider and the provider
-    # key never lands in this pod. The model id is unchanged — litellm-config maps
-    # `llama-3.3-70b-versatile` to `groq/llama-3.3-70b-versatile` — so this is an endpoint + key
-    # change only. The direct-to-Groq URL stays the default for local dev / `./gradlew quarkusDev`,
-    # where there is no gateway to route through.
+    # ADR-0174/0175 (#1919): the LiteLLM gateway is the single pod allowed to leave the cluster to
+    # a US LLM provider, so the provider key never lands in this pod. The endpoint therefore
+    # DEFAULTS to the in-cluster gateway — the same value the deployment sets in
+    # AGENT_MODEL_ENDPOINT — which is also the fleet convention (`LLM_GATEWAY_URL` in
+    # finops-agent, docs-truth-agent, governance-auditor, release-steward, flaky-test-hunter and
+    # authz-policy-auditor). Local dev reaches it with `kubectl port-forward -n ai-platform
+    # svc/litellm 4000:4000`, or overrides AGENT_MODEL_ENDPOINT; nothing here is needed for the
+    # build or the tests, which run on `mock-echo`.
+    #
+    # It used to default direct-to-Groq. That was wrong in two ways once #6041 landed: Groq
+    # DECOMMISSIONED `llama-3.3-70b-versatile` (404 `model_not_found`, issue #5736), and the two
+    # ids below have never been Groq ids at all — the gateway resolves all three to DeepInfra.
+    # A provider base-URL hard-coded next to a caller-facing id is the bug: it asserts a mapping
+    # this file cannot see. There are now ZERO `model: groq/` routes in litellm-config.
     - id: llama-3.3-70b-versatile
       provider: openai-compat
-      endpoint: ${AGENT_MODEL_ENDPOINT:https://api.groq.com/openai/v1}
+      endpoint: ${AGENT_MODEL_ENDPOINT:http://litellm.ai-platform.svc:4000/v1}
+      sensitivity: hosted
+    # Alternatives to the entry above, served through the SAME gateway endpoint and the same
+    # virtual key — a model entry here plus a route in litellm-config, no code change.
+    #
+    # WHY THESE TWO AND NOT WHATEVER IS TOP OF A LEADERBOARD: they were measured against a real
+    # Czech admin prompt through the gateway before being registered — gpt-oss-120b in 1-3s,
+    # DeepSeek-V4-Pro in 2.6-9.6s, both cleanly. Kimi-K3 was rejected on latency (44.7s) and
+    # Llama-4-Maverick answered HTTP 429 "Model busy"; GLM-5.2 is perfectly usable at 6.9s and is
+    # simply not needed as a third option. A config review cannot see any of that.
+    #
+    # BOTH REGISTERED MODELS ARE REASONING MODELS, which constrains one number here: the token
+    # budget is spent on reasoning BEFORE any answer text, so a low max_tokens returns an EMPTY
+    # content field rather than a short answer. Measured on gpt-oss-120b: 40 -> empty
+    # (finish_reason=length), 128 -> truncated mid-sentence, 512 -> finishes in 189 tokens. The
+    # loop's MAX_OUTPUT_TOKENS is 512, so this works; lowering it to save tokens would silently
+    # turn replies into blanks, which the UI renders as "(no reply)".
+    #
+    # Both stay `sensitivity: hosted`: they are off-cluster US providers, so the ADR-0031 D6
+    # sensitive-context routing must not choose them. That tier still needs a self-hosted model,
+    # which is the `vLLM` line ADR-0265 left as planned.
+    - id: openai/gpt-oss-120b
+      provider: openai-compat
+      endpoint: ${AGENT_MODEL_ENDPOINT:http://litellm.ai-platform.svc:4000/v1}
+      sensitivity: hosted
+    - id: deepseek-ai/DeepSeek-V4-Pro
+      provider: openai-compat
+      endpoint: ${AGENT_MODEL_ENDPOINT:http://litellm.ai-platform.svc:4000/v1}
       sensitivity: hosted
     # The SAME openai-compat adapter serves any OpenAI-shaped backend — just change endpoint+key:
     # - id: qwen2.5                       # self-hosted Ollama for the SELF_HOSTED (sensitive) tier
@@ -304,6 +339,21 @@ agent:
           - query.payments.readonly
           - query.disputes.readonly
           - query.observability.readonly
+  # Model-based content safety (Llama Guard via the LiteLLM gateway, ADR-0031 guardrails /
+  # ADR-0265). Complements the deterministic filter above; neither replaces the other. Off by
+  # default, and when off every classification reports `unavailable` rather than `safe`, so the
+  # state is visible in openbank_guardrail_classifications{decision="unavailable"} instead of
+  # looking like a clean bill of health.
+  content-safety:
+    enabled: ${AGENT_CONTENT_SAFETY_ENABLED:false}
+    # The in-cluster gateway; the provider key never reaches this pod (ADR-0175).
+    endpoint: ${AGENT_CONTENT_SAFETY_ENDPOINT:}
+    model: ${AGENT_CONTENT_SAFETY_MODEL:meta-llama/llama-guard-4-12b}
+    api-key: ${AGENT_CONTENT_SAFETY_API_KEY:}
+    # What an UNAVAILABLE verdict means on the operator plane. false: refusing an operator's
+    # read-only question because a classifier is down is worse than answering it, and the charter
+    # allow-list, the OPA gate and the HITL queue still bound what any answer can cause.
+    fail-closed: ${AGENT_CONTENT_SAFETY_FAIL_CLOSED:false}
 
 mp:
   messaging:
@@ -318,6 +368,17 @@ mp:
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
       oversight-events:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.agent.oversight-events
         connector: smallrye-kafka
         topic: ${AGENT_OVERSIGHT_KAFKA_TOPIC:openbank.oversight-triggers}
         enabled: ${AGENT_OVERSIGHT_KAFKA_ENABLED:false}
@@ -352,3 +413,10 @@ mp:
         # map, not a real OS env var, so they don't exercise this failure mode. This properties-file
         # mechanism is the CORRECT choice for a hyphenated channel like `oversight-events`, not
         # merely a stylistic alternative.
+    outgoing:
+      agent-audit-events-out:
+        connector: smallrye-kafka
+        topic: ${AGENT_AUDIT_KAFKA_TOPIC:openbank.agent.audit.events}
+        enabled: ${AGENT_AUDIT_KAFKA_ENABLED:false}
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer

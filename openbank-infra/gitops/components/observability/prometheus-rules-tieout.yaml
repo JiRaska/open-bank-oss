@@ -31,6 +31,8 @@ spec:
           labels:
             severity: critical
           annotations:
+            # Subject: ledger-service TieOutScheduler, cron `0 0 6 * * ?`. No `for:`, so one true evaluation fires.
+            subject_period: 24h
             summary: "Sub-ledger tie-out break detected by the 06:00 ledger tie-out run"
             description: >-
               openbank_subledger_tieout_break_total increased within the last daily cycle —

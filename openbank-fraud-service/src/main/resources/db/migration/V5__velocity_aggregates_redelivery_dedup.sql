@@ -1,0 +1,28 @@
+-- Issue #5716: velocity_aggregates had no redelivery dedup, so a retried/redelivered
+-- transaction.initiated event re-added the amount and re-incremented the count. This did not
+-- matter while TransactionSignalConsumer swallowed every failure and acked (#5698) — nothing was
+-- ever redelivered — but #5715 makes transient failures rethrow so the connector can dead-letter
+-- and redeliver, which makes the gap reachable.
+--
+-- The guard mirrors payee_history (V3): last_transaction_id records the aggregateId of the last
+-- signal actually applied to THIS row, and the upsert's DO UPDATE ... WHERE skips the increment
+-- when the incoming aggregateId matches it. NULL (a signal with no aggregateId) is never
+-- deduplicated — it carries no identity to deduplicate by — exactly as in payee_history.
+--
+-- Partial-failure decision: the marker is PER ROW, i.e. per (account, window, currency,
+-- window_start), not per event. recordTransaction issues one statement per window, and the three
+-- are deliberately NOT wrapped in one transaction: each window converges independently, so a retry
+-- after a partial failure re-applies only the windows that had not been applied and skips the ones
+-- that had. Wrapping the set in a transaction would still need this marker (a retry after a
+-- committed set must not re-apply), so the marker is the load-bearing part either way.
+--
+-- Known bound, same as payee_history: this is a LAST-writer marker, not an applied-event set, so it
+-- deduplicates a redelivery that arrives before any other event for the same bucket. An out-of-order
+-- replay (A, B, A) would still double-count A. Covering that needs an applied-event ledger, which is
+-- a larger change than this defect warrants; recorded here so the limit is not rediscovered as a
+-- surprise.
+--
+-- Rollback: ALTER TABLE velocity_aggregates DROP COLUMN last_transaction_id;
+-- (Backfill note: existing rows get NULL, which means "no signal recorded yet" — the first signal
+-- after the migration is applied normally, so no counter is lost or double-applied.)
+ALTER TABLE velocity_aggregates ADD COLUMN last_transaction_id UUID;

@@ -17,7 +17,7 @@
 // caller can see how stale the view is rather than assuming it is live.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { auth } from '@/auth'
+import { requireApiPermission } from '@/lib/auth/api-permission'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +25,7 @@ const CLICKHOUSE_URL = process.env.CLICKHOUSE_URL || 'http://localhost:8123'
 const CLICKHOUSE_USER = process.env.CLICKHOUSE_USER
 const CLICKHOUSE_PASSWORD = process.env.CLICKHOUSE_PASSWORD
 const DB = 'openbank_analytics'
+const CLICKHOUSE_TIMEOUT_MS = 8_000
 
 // A partyId reaches ClickHouse inside a SQL string, so it is validated as a UUID before it gets
 // anywhere near the query. ClickHouse's HTTP interface takes raw SQL and this route builds it, so
@@ -63,6 +64,7 @@ async function chQuery(sql: string): Promise<Record<string, unknown>[]> {
     headers,
     body: sql,
     cache: 'no-store',
+    signal: AbortSignal.timeout(CLICKHOUSE_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`ClickHouse ${res.status}`)
   const body = (await res.json()) as { data?: Record<string, unknown>[] }
@@ -123,8 +125,10 @@ function empty(partyId: string, error?: string): Customer360 {
 }
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ partyId: string }> }) {
-  const session = await auth()
-  if (!session) return NextResponse.json(empty('', 'unauthorized'), { status: 401 })
+  const access = await requireApiPermission('compliance:view')
+  if (!access.ok) {
+    return NextResponse.json(empty('', access.error), { status: access.status })
+  }
 
   const { partyId } = await ctx.params
   if (!UUID_RE.test(partyId)) {

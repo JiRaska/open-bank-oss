@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 
 interface ToolDef {
   name: string
@@ -75,7 +76,7 @@ export default function AgentPage() {
 
   useEffect(() => { loadTools() }, [loadTools])
 
-  return (
+  return <AuthGuard permission="agent:view">
     <div>
       <PageHeader
         breadcrumb={<div className="breadcrumb">
@@ -88,8 +89,8 @@ export default function AgentPage() {
         title={t('Agent služba', 'Agent Service')}
         subtitle={t('MCP server zpřístupňující nástroje OpenBank AI agentům · JSON-RPC 2.0 přes HTTP', 'MCP server exposing OpenBank tools to AI agents · JSON-RPC 2.0 over HTTP')}
         icon={<Bot aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
-        actions={<button className="btn btn-secondary" onClick={loadTools} disabled={loading}>
-          <RefreshCw size={13} className={cn(loading && 'animate-spin')} />
+        actions={<button type="button" className="btn btn-secondary" onClick={loadTools} disabled={loading} aria-busy={loading} aria-label={t('Obnovit nástroje agenta', 'Refresh agent tools')}>
+          <RefreshCw size={13} aria-hidden="true" className={cn(loading && 'animate-spin')} />
           {t('Obnovit', 'Refresh')}
         </button>}
       />
@@ -169,8 +170,8 @@ export default function AgentPage() {
 
       {/* Loading */}
       {loading && !error && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-          <RefreshCw size={15} className="animate-spin" style={{ color: 'var(--accent)' }} />
+        <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+          <RefreshCw size={15} aria-hidden="true" className="animate-spin" style={{ color: 'var(--accent)' }} />
           {t('Připojování k MCP serveru…', 'Connecting to MCP server…')}
         </div>
       )}
@@ -306,7 +307,7 @@ export default function AgentPage() {
         </div>
       </div>
     </div>
-  )
+  </AuthGuard>
 }
 
 function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boolean; onToggle: () => void }) {
@@ -317,6 +318,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
 
   const properties = tool.inputSchema.properties ?? {}
   const required   = tool.inputSchema.required ?? []
+  const panelId = `agent-tool-${tool.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 
   const run = async () => {
     setRunning(true); setResult(null)
@@ -332,6 +334,9 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
     <div className="card" style={{ overflow: 'hidden' }}>
       {/* Header */}
       <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={expanded ? panelId : undefined}
         onClick={onToggle}
         style={{
           width: '100%', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
@@ -346,7 +351,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', minWidth: 0 }}>
           <span style={{ color: 'var(--text-tertiary)', marginTop: '1px', flexShrink: 0 }}>
-            {expanded ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}
+            {expanded ? <ChevronDown size={13} aria-hidden="true"/> : <ChevronRight size={13} aria-hidden="true"/>}
           </span>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'JetBrains Mono, monospace' }}>
@@ -364,7 +369,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
 
       {/* Expanded body */}
       {expanded && (
-        <div style={{ padding: '16px', background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div id={panelId} role="region" aria-label={t('Parametry a výsledek nástroje', 'Tool parameters and result')} style={{ padding: '16px', background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {/* Parameters */}
           {Object.entries(properties).length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -393,19 +398,23 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
           )}
 
           {/* Run button */}
-          <div>
-            <button
-              className="btn btn-primary"
-              onClick={run}
-              disabled={running}
-              style={{ background: running ? 'var(--text-tertiary)' : 'var(--accent)' }}
-            >
-              {running
-                ? <><RefreshCw size={13} className="animate-spin"/> {t('Probíhá…', 'Running…')}</>
-                : <><Play size={13}/> {t('Spustit nástroj', 'Run tool')}</>
-              }
-            </button>
-          </div>
+          <Can permission="agent:execute" fallback={<div className="text-xs text-muted-foreground">{t('Spuštění nástrojů vyžaduje oprávnění agenta.', 'Tool execution requires agent authorization.')}</div>}>
+            <div>
+              <button
+                type="button"
+                aria-busy={running}
+                className="btn btn-primary"
+                onClick={run}
+                disabled={running}
+                style={{ background: running ? 'var(--text-tertiary)' : 'var(--accent)' }}
+              >
+                {running
+                  ? <><RefreshCw size={13} aria-hidden="true" className="animate-spin"/> {t('Probíhá…', 'Running…')}</>
+                  : <><Play size={13} aria-hidden="true"/> {t('Spustit nástroj', 'Run tool')}</>
+                }
+              </button>
+            </div>
+          </Can>
 
           {/* Result */}
           {result && (

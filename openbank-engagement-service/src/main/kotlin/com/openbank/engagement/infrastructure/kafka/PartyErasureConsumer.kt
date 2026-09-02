@@ -7,6 +7,7 @@ package com.openbank.engagement.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.AdverseStateRepository
 import com.openbank.engagement.domain.model.AdverseState
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
@@ -33,7 +34,7 @@ class PartyErasureConsumer(private val adverseState: AdverseStateRepository, pri
     @Incoming("party-events-in")
     suspend fun consume(payload: String) {
         val partyId = parse(payload) ?: return
-        withBoundedRetry(log, "erasure exclusion for party $partyId") {
+        EventRetry.withRetry(log, "erasure exclusion for party $partyId", null) {
             adverseState.setActive(partyId, AdverseState.ERASURE_REQUESTED, Instant.now())
             log.infof("ADR-0220 D3.5: excluded party %s from targeting (PARTY_ERASED)", partyId)
         }

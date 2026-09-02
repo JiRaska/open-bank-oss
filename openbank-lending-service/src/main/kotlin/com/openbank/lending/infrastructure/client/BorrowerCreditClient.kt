@@ -5,6 +5,7 @@ package com.openbank.lending.infrastructure.client
 
 import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.arc.properties.IfBuildProperty
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
@@ -36,6 +37,7 @@ import java.util.UUID
  * booking a loan disbursement needs, with no scheme or clearing calendar involved.
  */
 @RegisterRestClient(configKey = "transaction-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/transactions")
 @Produces(MediaType.APPLICATION_JSON)
@@ -61,6 +63,12 @@ data class TransactionAck(val id: UUID, val status: String)
 // Same alternative priority as RestLedgerPostingAdapter (this module).
 private const val REST_ADAPTER_PRIORITY = 100
 
+// `@Unremovable` because a test asserts this bean's PRESENCE (LedgerAdapterBindingIT, #6057).
+// The test-scope `@Priority(200)` stubs outrank it, which makes it unused, and ArC would then
+// remove it for a reason unrelated to the build-time gate under test — the assertion would fail
+// against correct code. No effect in production, where nothing outranks it. `@IfBuildProperty`
+// still disables it outright when the backend is not selected, so the negative case is unaffected.
+@io.quarkus.arc.Unremovable
 @ApplicationScoped
 @Alternative
 @Priority(REST_ADAPTER_PRIORITY)

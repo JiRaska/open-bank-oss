@@ -22,6 +22,8 @@ import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SegmentRule
+import com.openbank.campaign.infrastructure.observability.CampaignMetricsAdapter
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -42,6 +44,15 @@ class TriggeredEnrolmentTest {
     private val inSegment = UUID.randomUUID()
     private val outOfSegment = UUID.randomUUID()
     private val segment = Segment("new-customers", 1, listOf(SegmentRule.PartyStatusIs("ACTIVE")))
+
+    // A REAL adapter over a real registry (#5705).
+    private val registry = SimpleMeterRegistry()
+    private val metrics = CampaignMetricsAdapter().apply { bindTo(registry) }
+
+    private fun enrolments(outcome: String): Double = registry.find(CampaignMetricsAdapter.ENROLMENTS_METRIC)
+        .tag("outcome", outcome)
+        .counter()
+        ?.count() ?: 0.0
 
     private fun campaign(state: CampaignState = CampaignState.ACTIVE, trigger: String? = "ACCOUNT_OPENED") = Campaign(
         id = campaignId,
@@ -104,6 +115,7 @@ class TriggeredEnrolmentTest {
             override suspend fun matches(segment: Segment, partyId: UUID) = partyId in members
         },
         journeys = journeys,
+        metrics = metrics,
     )
 
     @Test
@@ -116,6 +128,7 @@ class TriggeredEnrolmentTest {
         assertThat(outcome).isEqualTo(TriggeredEnrolment.ENROLLED)
         assertThat(journeys.started).containsExactly(inSegment to JourneyType.LINEAR)
         assertThat(enrolments.saved.map { it.partyId }).containsExactly(inSegment)
+        assertThat(enrolments("started")).isEqualTo(1.0)
     }
 
     @Test
@@ -130,6 +143,10 @@ class TriggeredEnrolmentTest {
             .describedAs("the trigger decides when, the segment decides who — this is the audience boundary")
             .isEmpty()
         assertThat(enrolments.saved).isEmpty()
+        // The negative control that makes the tag load-bearing: an event that qualified nobody
+        // must leave the series flat, or "campaign-service is enrolling" would be true of a
+        // service enrolling nobody.
+        assertThat(enrolments("started")).isEqualTo(0.0)
     }
 
     @Test

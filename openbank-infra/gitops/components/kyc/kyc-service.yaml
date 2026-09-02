@@ -48,7 +48,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-kyc-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "b5722dfd32300931"
+        openbank.tech/policy-checksum: "a10ac4b220dcc91c"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -59,7 +59,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kyc-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyc-service:sandbox-4f2d6e5e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyc-service:sandbox-3b62a4a5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -120,7 +120,15 @@ spec:
             # (never a silent PASSED), but every new case would need an operator's attention.
             - name: SANCTIONS_SERVICE_URL
               value: http://sanctions-service.sanctions.svc:8123
-            # Sandbox straight-through KYC (ADR-0073): auto-approve cases opened from
+            # Orphaned-party reconciliation (issue #5698): kyc-service enumerates the party
+            # register hourly and reports parties that never got a KYC case, as
+            # openbank_kyc_orphaned_parties. Read-only — it opens no cases. Without this the
+            # rest-client falls back to its localhost dev default and every pass fails, which
+            # shows up as a stale kyc-orphaned-party-detection liveness heartbeat rather than
+            # as a silent "no orphans" (the gauges are not reset on a failed pass).
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8111
+            # Sandbox straight-through KYC (ADR-0116 §4): auto-approve cases opened from
             # PARTY_CREATED so onboarding activates without an operator. MUST be false in prod.
             - name: OPENBANK_KYC_AUTO_APPROVE
               value: "true"

@@ -10,6 +10,10 @@ import java.util.UUID
 /**
  * Outbound port for persisting and retrieving [ProposalToken] instances (ADR-0089 D2, Track A).
  *
+ * **[save] has no caller in `src/main`** (#5900): no production code issues a [ProposalToken], so
+ * both adapters below are only ever read from and [find] always misses. See [ProposalToken] for why
+ * the live HITL path does not go through this store and what building Track A would take.
+ *
  * Two adapters:
  * - `infrastructure.persistence.InMemoryProposalTokenStore` — single-node dev/test (active when
  *   build property `copilot.token-store=memory` or in the `%test` profile)

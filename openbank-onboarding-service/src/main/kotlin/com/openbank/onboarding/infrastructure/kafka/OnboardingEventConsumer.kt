@@ -11,6 +11,7 @@ import com.openbank.onboarding.application.usecase.OnboardingProjectionService
 import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingEvent
 import com.openbank.onboarding.domain.model.PartyStage
+import com.openbank.onboarding.domain.model.ProjectionResult
 import com.openbank.onboarding.infrastructure.observability.ProjectionOutcomeMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -181,7 +182,12 @@ class OnboardingEventConsumer(private val clock: Clock) {
         return when (type) {
             "DEVICE_ENROLLED" -> OnboardingEvent.DeviceEnrolled(
                 partyId = partyId,
-                credentialId = node.path("credentialId").asText(""),
+                // sca-service sends both; `credentialId` is the stable identity of the key
+                // material and `deviceId` the row id. Fall back rather than default to "",
+                // because an empty credential id collapses every one of a party's devices onto
+                // the same ledger key and silently caps device_count at 1.
+                credentialId = node.path("credentialId").asText("").takeIf { it.isNotBlank() }
+                    ?: node.path("deviceId").asText(""),
                 occurredAt = occurredAt,
             )
             else -> null
@@ -215,7 +221,7 @@ class OnboardingEventConsumer(private val clock: Clock) {
 
     @Suppress("TooGenericExceptionCaught")
     private suspend fun project(event: OnboardingEvent, topic: String) {
-        try {
+        val result = try {
             EventRetry.withRetry(log, "[$topic] Projection of ${event::class.simpleName}", partyIdOf(event)) {
                 projection.applyEvent(event)
             }
@@ -225,7 +231,27 @@ class OnboardingEventConsumer(private val clock: Clock) {
             metrics.record(topic, ProjectionOutcomeMetrics.Outcome.FAILED)
             throw e
         }
-        metrics.record(topic, ProjectionOutcomeMetrics.Outcome.PROJECTED)
+        // A seed is NOT an ordinary success (#6248). This used to be a *drop* counted as
+        // PROJECTED, which is how 15 DEVICE_ENROLLED events were consumed with zero lag, reached
+        // no row, and left every alert reading healthy.
+        when (result) {
+            ProjectionResult.APPLIED ->
+                metrics.record(topic, ProjectionOutcomeMetrics.Outcome.PROJECTED)
+
+            ProjectionResult.APPLIED_TO_SEEDED_RECORD -> {
+                // INFO, not WARN: nothing is lost any more. It is logged at all because the
+                // ordering is otherwise invisible per-party — the metric says how many, only
+                // this line says which, and a row with no legal name is a question an operator
+                // will eventually ask about.
+                log.infof(
+                    "[%s] Seeded onboarding record for party %s from %s: PARTY_CREATED has not arrived yet",
+                    topic,
+                    partyIdOf(event),
+                    event::class.simpleName,
+                )
+                metrics.record(topic, ProjectionOutcomeMetrics.Outcome.SEEDED_UNKNOWN_PARTY)
+            }
+        }
     }
 
     // ── JSON helpers ─────────────────────────────────────────────────────────

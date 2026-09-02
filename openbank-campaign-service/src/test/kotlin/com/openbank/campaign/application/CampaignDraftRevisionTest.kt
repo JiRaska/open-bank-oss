@@ -133,6 +133,7 @@ class CampaignDraftRevisionTest {
             segmentEvaluation = mockk<SegmentEvaluationPort>(),
             journeys = mockk<JourneySignaller>(),
             scheduler = mockk<CampaignScheduler>(),
+            metrics = mockk(relaxed = true),
             explicitGraphActivationEnabled = false,
         )
     }

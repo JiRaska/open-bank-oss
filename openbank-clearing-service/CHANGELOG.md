@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.8.1...clearing-service-v0.9.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.8.0...clearing-service-v0.8.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.10...clearing-service-v0.8.0) (2026-08-19)
 
 

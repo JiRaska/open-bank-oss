@@ -78,7 +78,7 @@
       "id": "D5",
       "title": "AI-attributed, tamper-evident audit",
       "status": "partial",
-      "detail": "Every tool-call decision (agent.mcp.tool_call), tool-execution outcome (agent.mcp.tool_exec) and model completion emits an AuditEvent (actorType=AI_AGENT) with model_id, prompt_hash, policy_decision. Hash-chain live (audit_entries.record_hash/prev_hash, V5) + periodic externally-signed anchors (audit_anchor, V6): GET /api/v1/audit/anchors/verify detects wholesale rewrites; default signer is HMAC-SHA256 with key held outside the audit DB. Remaining: AI-attribution payload fields in the release evidence bundle and the production KMS/cosign-keyed anchor signer (asymmetric, third-party verifiable)."
+      "detail": "Every tool-call decision (agent.mcp.tool_call), tool-execution outcome (agent.mcp.tool_exec) and model completion emits an AuditEvent (actorType=AI_AGENT) with model_id, prompt_hash, policy_decision. Hash-chain live (audit_entries.record_hash/prev_hash, V5) + periodic externally-signed anchors (audit_anchor, V6): GET /api/v1/audit/anchors/verify detects wholesale rewrites. The sandbox deployment requests the AWS KMS asymmetric signer, and the implementation records the immutable KMS key identity with each signature. Remaining: independently attested runtime evidence of captured KMS-signed anchors and AI-attribution payload fields in the release evidence bundle."
     },
     {
       "id": "D6",
@@ -174,11 +174,11 @@
       "Model completions audited (agent.model.complete)",
       "Audit envelope + Kafka pipeline",
       "Hash-chain (record_hash/prev_hash, V5)",
-      "Externally-signed anchors (V6, HMAC-SHA256 key outside DB)"
+      "Externally-signed anchors (V6; AWS KMS signer configured in sandbox)"
     ],
     "planned": [
       "By-actor live query endpoint (audit-service)",
-      "Production KMS/cosign anchor signer (asymmetric, third-party verifiable)",
+      "Independently attested runtime evidence of KMS-signed anchors",
       "ai_attribution populated in evidence bundle",
       "Approval decisions (human_approver, reason)"
     ]
@@ -186,7 +186,7 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "e93d82f28786d1ef",
+      "sha256": "ddeb3865d205fd7f",
       "count": 16,
       "ids": [
         "compliance-officer",
@@ -218,7 +218,7 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "81928b131b4bf83d",
+      "sha256": "2a5250af4a6d24c1",
       "counts": {
         "external": 2,
         "not-applicable": 2,
@@ -249,6 +249,55 @@
           "flaky-test-hunter",
           "case-coordinator"
         ]
+      },
+      "promptsByCharter": {
+        "compliance-officer": [
+          "oversight.v1"
+        ],
+        "ui-assistant": [
+          "system.v1",
+          "system.v2",
+          "system.v3",
+          "catalog-review.v1"
+        ],
+        "customer-copilot": [
+          "system.v1"
+        ],
+        "devops-agent": [
+          "diagnosis.v1",
+          "remediation.v1"
+        ],
+        "control-liveness-sentinel": [
+          "system.v1",
+          "system.v2",
+          "system.v3"
+        ],
+        "rca-investigator": [],
+        "ledger-domain-engineer": [],
+        "mcp-anonymous": [],
+        "ap2-anonymous": [],
+        "finops-agent": [
+          "system.v1"
+        ],
+        "governance-auditor": [
+          "system.v1"
+        ],
+        "release-steward": [
+          "system.v1"
+        ],
+        "docs-truth-agent": [
+          "system.v1"
+        ],
+        "authz-policy-auditor": [
+          "system.v1"
+        ],
+        "flaky-test-hunter": [
+          "system.v1",
+          "system.v2"
+        ],
+        "case-coordinator": [
+          "system.v1"
+        ]
       }
     },
     "evals": {
@@ -257,7 +306,31 @@
       "baselinePresent": true,
       "defaultMinPassRate": 1.0,
       "overrideCount": 0,
-      "overrideCharters": []
+      "overrideCharters": [],
+      "suiteCharters": [
+        "compliance-officer",
+        "control-liveness-sentinel",
+        "customer-copilot",
+        "devops-agent",
+        "ui-assistant"
+      ],
+      "recordedCharters": [
+        "compliance-officer",
+        "control-liveness-sentinel",
+        "customer-copilot",
+        "devops-agent",
+        "ui-assistant"
+      ],
+      "missingSuiteCharters": [
+        "authz-policy-auditor",
+        "case-coordinator",
+        "docs-truth-agent",
+        "finops-agent",
+        "flaky-test-hunter",
+        "governance-auditor",
+        "release-steward"
+      ],
+      "missingRecordingCharters": []
     },
     "registryPromptLoaders": {
       "services": [
@@ -358,7 +431,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "0fa2e67d34cc0ff7"
+        "sha256": "2bd1d114462d2c5f"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }

@@ -102,7 +102,7 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
 |---|---|---|
 | **S**poofing | Rogue caller posts a forged pacs.004 to `/returns` | Endpoint requires `ROLE_SERVICE` (OIDC client-credentials); cluster-internal only (NetworkPolicy); clearing-simulator identity verified by OIDC CC token |
 | **T**ampering | Malformed or XXE-injected pacs.004 XML | `Pacs004Reader` (openbank-libs) configures `XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES = false` and `IS_RESOLVING_ENTITY_REFERENCES = false` before parsing |
-| **R**epudiation | Denial of having processed a return | All `/returns` invocations logged via existing `AuditService` with correlation id, `OrgnlEndToEndId`, reason code, and actor identity |
+| **R**epudiation | Denial of having processed a return | Every `/returns` invocation writes a `sepa.payment.returned` non-repudiation record into `sepa_payment_outbox` **in the same transaction as the `RETURNED` transition** (`SepaPaymentService.handlePaymentReturn` -> `SepaPaymentRepository.updateWithEvidence`), carrying the `OrgnlEndToEndId`, the pacs.004 reason code, the correlation id, whether the ledger reversal actually happened, and the **authenticated** actor — `SecurityContext.actorName`/`actorType`, derived server-side in `SepaPaymentResource`, never read from the pacs.004 body. The outbox dispatcher (`openbank.outbox.dispatch-enabled: true`) publishes it to `openbank.sepa.payment.events`, which openbank-audit-service already consumes into the append-only, hash-chained `audit_entries` store. Proved end to end by `SepaPaymentReturnAuditEvidenceIT` — real HTTP + real Postgres, row read back over an independent JDBC connection (issue #6056; before it, this row credited an `AuditService` present in no source file, and the service had no audit publisher of any kind) |
 | **I**nfo disclosure | Return reason codes (AC04, AM09, etc.) visible to unauthorised parties | Reason codes and return details accessible to `ROLE_OPERATOR`/`ROLE_ADMIN` only; `ROLE_VIEWER` sees payment status (`RETURNED`) but not raw reason code |
 | **D**oS | Replay of the same pacs.004 | `RETURNED` transition is idempotent — a second call with the same `OrgnlEndToEndId` returns 409 (already RETURNED), no double-reversal |
 | **E**oP | Reversal credited to wrong account | `transaction-service /reverse` validates that the transaction being reversed is owned by the payment's `debtorAccountId`; cross-account reversals are rejected with 403 |
@@ -140,6 +140,36 @@ unreachable document-service fails only the download, never a payment transition
 simply stops existing).
 
 ## 6. Change log
+
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass: screening and SCA still run. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
+- **2026-08-20** — The `/returns` non-repudiation control now exists (issue #6056). It did not
+  before: the R row of §5a credited an `AuditService` that is present in no source file in this
+  repository, and `openbank-sepa-payment/src/main` contained no audit publisher of any kind. The
+  two things that did happen — an application log line and the payment row's own status transition
+  — are both written by the same code path whose behaviour a repudiation dispute puts in question,
+  so neither could ever be evidence against it.
+  - **What was built**: a `SepaPaymentReturnedEvent` (`sepa.payment.returned`) written into the
+    existing transactional outbox in the SAME transaction as the `RETURNED` transition, so the
+    record and the act commit together or neither does. It carries `OrgnlEndToEndId`, the pacs.004
+    reason code, the correlation id, the measured `reversalPerformed` outcome, and the actor.
+  - **Where the evidence lands**: `openbank.sepa.payment.events` -> openbank-audit-service's
+    `AuditConsumer` -> the append-only, hash-chained `audit_entries` table. **Deliberately not**
+    `com.openbank.libs.audit.AuditEventPublisher`: the only implementation of that interface in
+    this repository is `LoggingAuditEventPublisher`, and a log line is not an evidentiary record.
+    The field names match what `AuditConsumer` actually reads (`eventType`, `actorId`, `actorType`,
+    `correlationId`, `occurredAt`, `sourceService`, `paymentId`), so the row is EVENT-attributed
+    rather than landing on its `"unknown"` sentinels — `source_service` is chain-hashed into
+    `record_hash`, so attribution cannot be corrected afterwards.
+  - **Attribution is server-derived**, from `SecurityContext`, never from the request body. The
+    pacs.004 carries no actor field and none is read from it; a record whose actor is supplied by
+    the party whose action is in dispute is not a control.
+  - **No new trust boundary, no new caller, no API change**: same endpoint, same role gate
+    (`ROLE_API`/`ROLE_ADMIN`), same OPA action, same topic, same request and response bodies. The
+    only new data on the wire is the evidence event itself, on an existing internal topic.
+  - **Risk class**: accountability/evidence (DORA Art. 17 reconstruction). **Rollback**: revert the
+    commit — the return path returns to transitioning with no record, i.e. the state this entry
+    describes as the defect.
 
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
   `sepaPayment.transitionStatus` four-eyes decision parked at 202 was discoverable only by

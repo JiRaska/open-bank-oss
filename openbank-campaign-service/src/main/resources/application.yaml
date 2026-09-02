@@ -81,6 +81,12 @@ quarkus:
   # policy is covered by the OPA gate and the rego tests, neither of which needs the app running.
   authz:
     enforce: false
+  openbank:
+    campaign:
+      # HTTP contract tests exercise a seeded, complete local projection. Production stays
+      # fail-closed until a reviewed rollout/catch-up confirmation enables this read model.
+      incentive-outcome-projection:
+        ready: true
 
 
 openbank:
@@ -90,6 +96,10 @@ openbank:
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-campaign}
   campaign:
+    # Never render an empty local read model as an authoritative zero during the first Kafka
+    # catch-up. A reviewed operational step enables this only after the consumer is usable.
+    incentive-outcome-projection:
+      ready: ${CAMPAIGN_INCENTIVE_OUTCOME_PROJECTION_READY:false}
     decision-task-queue: ${OPENBANK_CAMPAIGN_DECISION_TASK_QUEUE:openbank-campaign-decision}
     worker:
       enabled: ${CAMPAIGN_WORKER_ENABLED:true}
@@ -101,6 +111,9 @@ openbank:
 
 consent-service:
   url: http://localhost:8106
+
+incentive-service:
+  url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
 
 analytics:
   clickhouse-url: ${CLICKHOUSE_URL:http://localhost:8123}
@@ -126,11 +139,37 @@ mp:
         value:
           serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
+      # Producer-owned, no-PII reservation outcomes. Earliest is deliberate: this derived funnel
+      # must rebuild retained attributed history when the consumer is first rolled out.
+      incentive-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.campaign.incentive-events-in
+        connector: smallrye-kafka
+        topic: openbank.incentive.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-incentive-events
+        auto:
+          offset:
+            reset: earliest
       # Attributable in-app attention events emitted by engagement-service.  This is aggregate-only
       # reporting: lag can make a metric temporarily unavailable, but can never affect delivery or
       # enrolment.  Start at latest so enabling the projection cannot reprocess historic, pre-
       # attribution app behaviour into a campaign funnel.
       engagement-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.campaign.engagement-events-in
         connector: smallrye-kafka
         topic: openbank.engagement.events
         value:
@@ -145,6 +184,17 @@ mp:
       # consent-events-in: two channels in one group makes both subscriptions one member set, so a
       # rebalance on either topic churns the other, and the two offsets can never be reset apart.
       notification-outcomes-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.campaign.notification-outcomes-in
         connector: smallrye-kafka
         topic: openbank.notification.outcomes.v1
         value:
@@ -159,6 +209,17 @@ mp:
       # that had not sent anything at the time. The attribution window in ConversionCatalog would
       # reject most of them, which is exactly the kind of correctness nobody should have to rely on.
       account-conversions-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.campaign.account-conversions-in
         connector: smallrye-kafka
         topic: openbank.accounts.account.created
         value:
@@ -169,6 +230,17 @@ mp:
           offset:
             reset: latest
       card-conversions-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.campaign.card-conversions-in
         connector: smallrye-kafka
         topic: openbank.cards.events
         value:
@@ -186,6 +258,17 @@ mp:
       # `earliest` the first deploy would replay the entire history of account openings and card
       # issuances and enrol every party who ever qualified — a mass send, from a config line.
       account-triggers-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.campaign.account-triggers-in
         connector: smallrye-kafka
         topic: openbank.accounts.account.created
         value:
@@ -196,6 +279,17 @@ mp:
           offset:
             reset: latest
       card-triggers-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.campaign.card-triggers-in
         connector: smallrye-kafka
         topic: openbank.cards.events
         value:
@@ -206,6 +300,17 @@ mp:
           offset:
             reset: latest
       consent-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.campaign.consent-events-in
         connector: smallrye-kafka
         topic: openbank.consent.events
         value:

@@ -29,6 +29,7 @@ class AccountApiIT {
     companion object {
         private val partyId = UUID.fromString("00000000-1111-0000-0000-000000000001")
         private val productId = UUID.fromString("00000000-2222-0000-0000-000000000001")
+        private val eurProductId = UUID.fromString("00000000-2222-0000-0000-000000000002")
         private var createdAccountId: String? = null
 
         init {
@@ -90,7 +91,7 @@ class AccountApiIT {
         val payload = """
             {
               "partyId": "$partyId",
-              "productId": "$productId",
+              "productId": "$eurProductId",
               "accountType": "SAVINGS",
               "currencyCode": "EUR",
               "legalName": "Test Customer"
@@ -112,6 +113,34 @@ class AccountApiIT {
         } Then {
             statusCode(201)
             header("X-Idempotency-Replayed", equalTo("true"))
+        }
+    }
+
+    @Test
+    @Order(5)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `POST accounts persists a term deposit account`() {
+        val payload = """
+            {
+              "partyId": "$partyId",
+              "productId": "00000000-2222-0000-0000-000000000002",
+              "accountType": "TERM_DEPOSIT",
+              "currencyCode": "EUR",
+              "legalName": "Test Customer"
+            }
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", UUID.randomUUID().toString())
+            body(payload)
+        } When {
+            post("/api/v1/accounts")
+        } Then {
+            statusCode(201)
+            body("accountType", equalTo("TERM_DEPOSIT"))
+            body("currencyCode", equalTo("EUR"))
+            body("status", equalTo("ACTIVE"))
         }
     }
 

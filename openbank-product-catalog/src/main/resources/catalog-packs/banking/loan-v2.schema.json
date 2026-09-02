@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:catalog-schema:org.openbank.banking.loan:2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["productType", "currency", "tenorMonths", "amortizationMethod", "nominalAnnualRate", "accrualBasis", "allocationOrder"],
+  "properties": {
+    "productType": { "type": "string", "enum": ["INSTALLMENT_LOAN", "MORTGAGE", "AUTO_LOAN", "STUDENT_LOAN", "CREDIT_LINE"] },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "tenorMonths": { "type": "integer", "minimum": 1, "maximum": 480 },
+    "amortizationMethod": { "type": "string", "enum": ["ANNUITY", "EQUAL_PRINCIPAL", "BULLET"] },
+    "nominalAnnualRate": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+      "description": "Canonical non-negative decimal annual rate. Lending snapshots this exact value at application time."
+    },
+    "accrualBasis": { "type": "string", "enum": ["ACT_360", "ACT_365", "ACT_ACT", "THIRTY_360"] },
+    "allocationOrder": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": { "type": "string", "enum": ["FEES", "PENALTY", "INTEREST", "PRINCIPAL"] }
+    },
+    "minPrincipalAmount": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+    "maxPrincipalAmount": { "type": "string", "pattern": "^[1-9][0-9]*(\\.[0-9]+)?$" },
+    "gracePeriodDays": { "type": "integer", "minimum": 0, "maximum": 365 },
+    "collateralRequired": { "type": "boolean" },
+    "earlyRepaymentPenaltyPct": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+    "fees": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "name", "amountKind", "waivable"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "amountKind": { "type": "string", "enum": ["FIXED", "PERCENT_OF_PRINCIPAL"] },
+          "waivable": { "type": "boolean" },
+          "waiveCondition": { "type": "string", "maxLength": 256 }
+        }
+      }
+    }
+  }
+}

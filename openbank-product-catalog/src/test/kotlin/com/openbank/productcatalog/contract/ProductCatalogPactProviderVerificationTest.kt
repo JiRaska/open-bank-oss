@@ -138,4 +138,10 @@ class ProductCatalogPactProviderVerificationTest {
 
     @State("Product Studio independently checkable draft exists")
     fun productStudioCheckableDraftExists() = catalogFixtures.independentlyCheckableDraftExists()
+
+    @State("a published fixed-rate deposit revision exists for interest synchronization")
+    fun publishedFixedRateDepositRevisionExists() = catalogFixtures.publishedFixedRateDepositRevisionExists()
+
+    @State("a published priced loan revision exists for lending originations")
+    fun publishedPricedLoanRevisionExists() = catalogFixtures.publishedPricedLoanRevisionExists()
 }

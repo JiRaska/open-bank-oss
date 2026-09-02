@@ -54,6 +54,8 @@ data class CreatePartyCommand(
     /** Onboarding consent capture (mobile app "Agreement" step). Null = not asked/answered. */
     val consentGdpr: Boolean? = null,
     val consentMarketing: Boolean? = null,
+    /** Bank-owned canary only; the REST adapter authorizes this transition to ROLE_ADMIN. */
+    val classification: PartyClassification = PartyClassification.CUSTOMER,
 )
 
 /**

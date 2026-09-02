@@ -12,6 +12,7 @@ import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.InAppSurface
+import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -32,6 +33,11 @@ interface CampaignRepository {
      * guard in the service — a DRAFT campaign has not passed four-eyes and must not enrol anyone.
      */
     suspend fun findActiveByTrigger(trigger: String): List<Campaign>
+}
+
+/** Resolve only immutable published offers; reservation and redemption never cross this port. */
+interface IncentiveOfferRegistry {
+    suspend fun resolvePublished(ref: IncentiveOfferRef): IncentiveOfferRef?
 }
 
 interface EnrolmentRepository {
@@ -110,6 +116,28 @@ interface CampaignEngagementRepository {
     suspend fun metrics(campaignId: UUID): List<CampaignEngagementMetric>
 }
 
+/** Authoritative incentive lifecycle outcomes; only [COMMITTED] is a redeemed reward. */
+enum class CampaignIncentiveOutcomeStatus { RESERVED, COMMITTED, RELEASED, EXPIRED }
+
+/** No-PII evidence projected from the Incentive Service's attributed v2 events. */
+data class CampaignIncentiveOutcomeEvent(
+    val eventId: UUID,
+    val reservationId: UUID,
+    val attributionRef: UUID,
+    val offerRef: IncentiveOfferRef,
+    val status: CampaignIncentiveOutcomeStatus,
+    val occurredAt: Instant,
+)
+
+data class CampaignIncentiveFunnel(val reserved: Long, val committed: Long, val released: Long, val expired: Long)
+
+interface CampaignIncentiveOutcomeRepository {
+    /** False means the event or lifecycle transition was already projected. */
+    suspend fun record(campaignId: UUID, stepOrder: Int, event: CampaignIncentiveOutcomeEvent): Boolean
+
+    suspend fun funnel(campaignId: UUID): CampaignIncentiveFunnel
+}
+
 /** A single cell of the per-step funnel: how many sends of [outcome] step [stepOrder] produced. */
 data class StepOutcomeCount(val stepOrder: Int, val outcome: SendOutcome, val count: Long)
 
@@ -130,7 +158,13 @@ data class CampaignEnrolmentCount(val campaignId: UUID, val count: Long)
 data class ConversionContext(val firstSentAt: Instant?, val alreadyConverted: Boolean)
 
 /** Server-owned campaign context for one opaque app interaction reference. */
-data class CampaignInteractionAttribution(val campaignId: UUID, val stepOrder: Int, val channel: Channel)
+data class CampaignInteractionAttribution(
+    val campaignId: UUID,
+    val stepOrder: Int,
+    val channel: Channel,
+    /** Immutable treatment selected on the reviewed campaign; null means the campaign has no reward. */
+    val incentiveOfferRef: IncentiveOfferRef? = null,
+)
 
 @Suppress("TooManyFunctions") // One aggregate port; see PanacheSendLogRepository's matching rationale.
 interface SendLogRepository {
@@ -148,6 +182,12 @@ interface SendLogRepository {
      */
     suspend fun attributionForAppInteraction(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? =
         null
+
+    /**
+     * Resolve a server-produced interaction for an internal outcome event. No party is returned or
+     * stored; callers must additionally match the immutable campaign offer before projecting it.
+     */
+    suspend fun attributionForIncentiveOutcome(interactionRef: UUID): CampaignInteractionAttribution? = null
 
     /**
      * Lifetime SENT rows for one party in one campaign — the observable state the ADR-0200 D1

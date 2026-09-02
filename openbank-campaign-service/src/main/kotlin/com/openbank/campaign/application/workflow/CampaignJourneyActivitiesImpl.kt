@@ -6,11 +6,14 @@ package com.openbank.campaign.application.workflow
 
 import com.openbank.campaign.application.port.out.BannerPlacementPort
 import com.openbank.campaign.application.port.out.BannerPlacementRequest
+import com.openbank.campaign.application.port.out.CampaignMetricsPort
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.NotificationSendRequest
+import com.openbank.campaign.application.port.out.SendHandoffOutcome
 import com.openbank.campaign.application.port.out.SendLogRepository
+import com.openbank.campaign.application.port.out.StepResolution
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDelivery
 import com.openbank.campaign.domain.model.CampaignState
@@ -55,6 +58,7 @@ open class CampaignJourneyActivitiesImpl(
     private val contactGate: ContactPolicyGate,
     private val notificationSend: NotificationSendPort,
     private val bannerPlacement: BannerPlacementPort,
+    private val metrics: CampaignMetricsPort,
     /**
      * When true, a step runs every gate and then stops short of the transport: nothing is emitted to
      * notification-service on any channel, and the send log records DRY_RUN.
@@ -107,6 +111,7 @@ open class CampaignJourneyActivitiesImpl(
         sendLog.record(
             SendRecord(Ids.newId(), campaignId, partyId, stepOrder, SendOutcome.SKIPPED_CONDITION, Instant.now()),
         )
+        metrics.stepResolved(StepResolution.SKIPPED_CONDITION)
         enrolments.findByCampaignAndParty(campaignId, partyId)?.let {
             enrolments.save(it.copy(currentStep = stepOrder + 1))
         }
@@ -129,12 +134,14 @@ open class CampaignJourneyActivitiesImpl(
     @Suppress("TooGenericExceptionCaught")
     @MarketingCallSite
     internal suspend fun deliverStepGated(campaignId: UUID, partyId: UUID, stepOrder: Int): StepOutcome {
-        val campaign = campaigns.findById(campaignId) ?: return StepOutcome.CAMPAIGN_CLOSED
-        campaign.deliveryStateOutcome()?.let { return it }
+        val campaign = campaigns.findById(campaignId)
+            ?: return resolved(StepResolution.CAMPAIGN_CLOSED, StepOutcome.CAMPAIGN_CLOSED)
+        campaign.deliveryStateOutcome()?.let { return resolved(resolutionFor(it), it) }
         if (sendLog.conversionContextFor(campaignId, partyId).alreadyConverted) {
-            return StepOutcome.GOAL_REACHED
+            return resolved(StepResolution.GOAL_REACHED, StepOutcome.GOAL_REACHED)
         }
-        val step = campaign.steps.firstOrNull { it.order == stepOrder } ?: return StepOutcome.SUPPRESSED
+        val step = campaign.steps.firstOrNull { it.order == stepOrder }
+            ?: return resolved(StepResolution.STEP_NOT_FOUND, StepOutcome.SUPPRESSED)
         // The assignment is stored on the enrolment before its workflow starts. Do not choose an
         // arm at this point: a retry must send the same treatment, and an audit must explain which
         // wording the person was actually offered.
@@ -193,6 +200,11 @@ open class CampaignJourneyActivitiesImpl(
                 SendOutcome.DRY_RUN,
                 delivery.channel,
             )
+            // DRY_RUN gets its own outcome value and never shares one with HANDED_OFF. This branch
+            // returns SENT and writes a send-log row while nothing leaves the process, and the flag
+            // it depends on defaults to TRUE — so a counter that folded the two together would
+            // report a fully working campaign in an environment that has emitted nothing, ever.
+            metrics.sendAttempted(delivery.channel, SendHandoffOutcome.DRY_RUN)
             return StepOutcome.SENT
         }
         try {
@@ -221,6 +233,7 @@ open class CampaignJourneyActivitiesImpl(
                 SendOutcome.FAILED,
                 delivery.channel,
             )
+            metrics.sendAttempted(delivery.channel, SendHandoffOutcome.FAILED)
             throw e
         }
         sendLog.record(
@@ -231,6 +244,10 @@ open class CampaignJourneyActivitiesImpl(
             SendOutcome.SENT,
             delivery.channel,
         )
+        // Recorded after the transport returned, so the counter can never claim a hand-off that did
+        // not happen. `handed_off`, not `delivered`: this service holds no delivery credentials
+        // (ADR-0200 D3), so delivery is not a fact it is in any position to assert.
+        metrics.sendAttempted(delivery.channel, SendHandoffOutcome.HANDED_OFF)
         return StepOutcome.SENT
     }
 
@@ -242,7 +259,14 @@ open class CampaignJourneyActivitiesImpl(
             context.stepOrder,
             outcomeFor(decision.denyReason),
         )
+        metrics.stepResolved(suppressionFor(decision.denyReason))
         return StepOutcome.SUPPRESSED
+    }
+
+    /** Record [resolution] and hand back [outcome] — one call per `return` path, never two. */
+    private fun resolved(resolution: StepResolution, outcome: StepOutcome): StepOutcome {
+        metrics.stepResolved(resolution)
+        return outcome
     }
 
     override fun advanceStep(campaignId: UUID, partyId: UUID, stepOrder: Int) = runBlockingOnWorker {
@@ -285,6 +309,10 @@ open class CampaignJourneyActivitiesImpl(
     override fun markCompleted(campaignId: UUID, partyId: UUID) = runBlockingOnWorker {
         enrolments.findByCampaignAndParty(campaignId, partyId)?.let {
             enrolments.save(it.copy(state = EnrolmentState.COMPLETED, completedAt = Instant.now()))
+            // Inside the `let`: an enrolment that is not there was not moved to a terminal state,
+            // and counting the call rather than the transition would report journeys finishing on a
+            // service whose repository is returning nothing.
+            metrics.enrolmentTerminal(EnrolmentState.COMPLETED)
         }
         Unit
     }
@@ -299,6 +327,7 @@ open class CampaignJourneyActivitiesImpl(
         }
         enrolments.findByCampaignAndParty(campaignId, partyId)?.let {
             enrolments.save(it.copy(state = state, completedAt = Instant.now()))
+            metrics.enrolmentTerminal(state)
         }
         Unit
     }
@@ -327,6 +356,25 @@ open class CampaignJourneyActivitiesImpl(
         private fun contactClassFor(channel: Channel): ContactClass = when (channel) {
             Channel.BANNER -> ContactClass.PROMOTIONAL_IMPRESSION
             Channel.EMAIL, Channel.PUSH -> ContactClass.OUTBOUND_SEND
+        }
+
+        /** Metric tag for a gate denial, one value per policy reason the log already separates. */
+        private fun suppressionFor(reason: ContactDenyReason?): StepResolution = when (reason) {
+            ContactDenyReason.SUPPRESSED_LIST -> StepResolution.SUPPRESSED_LIST
+            ContactDenyReason.SEND_CAP_REACHED -> StepResolution.SUPPRESSED_CAP
+            ContactDenyReason.QUIET_HOURS -> StepResolution.SUPPRESSED_QUIET_HOURS
+            ContactDenyReason.NO_CONSENT -> StepResolution.SUPPRESSED_CONSENT
+            ContactDenyReason.IMPRESSION_BUDGET_REACHED,
+            ContactDenyReason.GATE_UNAVAILABLE,
+            null,
+            -> StepResolution.SUPPRESSED_OTHER
+        }
+
+        /** Metric tag for a campaign-state resolution reached before any gate ran. */
+        private fun resolutionFor(outcome: StepOutcome): StepResolution = when (outcome) {
+            StepOutcome.CAMPAIGN_PAUSED -> StepResolution.CAMPAIGN_PAUSED
+            StepOutcome.GOAL_REACHED -> StepResolution.GOAL_REACHED
+            StepOutcome.SENT, StepOutcome.SUPPRESSED, StepOutcome.CAMPAIGN_CLOSED -> StepResolution.CAMPAIGN_CLOSED
         }
 
         /** Gate deny reasons that are POLICY outcomes, recorded per step (ADR-0219). */

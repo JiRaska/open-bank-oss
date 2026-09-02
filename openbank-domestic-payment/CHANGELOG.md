@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.18.0...domestic-payment-v0.19.0) (2026-08-26)
+
+
+### Features
+
+* **domestic-payment:** persist trusted synthetic taint ([#7155](https://github.com/JiRaska/open-bank-oss/issues/7155)) ([536c84e](https://github.com/JiRaska/open-bank-oss/commit/536c84e741687963af055e23590a7c685004b675))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.17.0...domestic-payment-v0.18.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.16.1...domestic-payment-v0.17.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.16.0...domestic-payment-v0.16.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **docs:** repair the 7 .mmd diagrams that do not parse ([#6496](https://github.com/JiRaska/open-bank-oss/issues/6496)) ([c1e6ad7](https://github.com/JiRaska/open-bank-oss/commit/c1e6ad7b14887db70ec3365747f2ed06d9ec02db))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.15.0...domestic-payment-v0.16.0) (2026-08-19)
 
 

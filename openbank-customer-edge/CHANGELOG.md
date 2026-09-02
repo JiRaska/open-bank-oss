@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.71.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.70.0...customer-edge-v0.71.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** unify the three-month FX rate trend ([#7736](https://github.com/JiRaska/open-bank-oss/issues/7736)) ([5e85aa6](https://github.com/JiRaska/open-bank-oss/commit/5e85aa60dab75048024186ff7072c0918cddaeea))
+
+## [0.70.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.69.0...customer-edge-v0.70.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
+## [0.69.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.68.0...customer-edge-v0.69.0) (2026-08-27)
+
+
+### Features
+
+* **customer-edge:** add campaign incentive claims ([#7281](https://github.com/JiRaska/open-bank-oss/issues/7281)) ([e8a1d6c](https://github.com/JiRaska/open-bank-oss/commit/e8a1d6c0cbb8b203666822650c0d0a9f95d26203))
+
+## [0.68.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.67.0...customer-edge-v0.68.0) (2026-08-26)
+
+
+### Features
+
+* **customer-edge:** add term deposit journey ([#6838](https://github.com/JiRaska/open-bank-oss/issues/6838)) ([c99828e](https://github.com/JiRaska/open-bank-oss/commit/c99828e110223ceebe63befda471bd9232720fad))
+
+## [0.67.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.66.1...customer-edge-v0.67.0) (2026-08-22)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 1 — one credit journey, three product shapes, customer-readable projection ([#6230](https://github.com/JiRaska/open-bank-oss/issues/6230)) ([a969810](https://github.com/JiRaska/open-bank-oss/commit/a969810df5541832f63580dfa828efaec81a3ba4))
+
+
+### Bug Fixes
+
+* **docs:** repair the 7 .mmd diagrams that do not parse ([#6496](https://github.com/JiRaska/open-bank-oss/issues/6496)) ([c1e6ad7](https://github.com/JiRaska/open-bank-oss/commit/c1e6ad7b14887db70ec3365747f2ed06d9ec02db))
+
+## [0.66.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.66.0...customer-edge-v0.66.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.66.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.65.1...customer-edge-v0.66.0) (2026-08-21)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 0 — credit-offer consent and the distress suppression floor ([#6226](https://github.com/JiRaska/open-bank-oss/issues/6226)) ([bf87d31](https://github.com/JiRaska/open-bank-oss/commit/bf87d314745d72eae965a256e6f68f34e8bf01b2))
+
 ## [0.65.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.65.0...customer-edge-v0.65.1) (2026-08-19)
 
 

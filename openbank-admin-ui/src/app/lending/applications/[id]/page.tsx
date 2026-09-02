@@ -15,8 +15,9 @@
 // the approval inbox behind SCA, and `/lending`'s own contract says mutations live there. Those
 // actions are rendered VISIBLE and DISABLED with the reason and a link, rather than hidden — an
 // operator who cannot find the control assumes the platform is broken, while a disabled control
-// with a reason teaches them where the control lives. `advance` is exposed because it only walks
-// the graph the machine already validates; it cannot move money.
+// with a reason teaches them where the control lives. Manual advance is currently not configured
+// in the policy bundle, so this screen states that honestly instead of offering a button that the
+// backend will deny.
 //
 // A 403 on the evidence read is ORDINARY (it is ROLE_COMPLIANCE / ROLE_CREDIT_RISK / ROLE_ADMIN,
 // while the queue is also open to ROLE_OPERATOR). It must never render as "this application has no
@@ -77,7 +78,6 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
   const [appState, setAppState] = useState<ReadState>('ok')
   const [evidenceState, setEvidenceState] = useState<ReadState>('ok')
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -140,29 +140,6 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
     return out
   }, [events])
 
-  const advance = async () => {
-    setBusy(true)
-    setNotice(null)
-    try {
-      const res = await fetch(svcUrl('lending-service', `/api/v1/lending/applications/${id}/advance`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({} as { error?: string }))
-        setError(body?.error || `${t('Posun se nezdařil', 'Advance failed')} (HTTP ${res.status})`)
-        return
-      }
-      setError(null)
-      setNotice(t('Žádost posunuta o krok.', 'Application advanced one step.'))
-      await load()
-    } catch {
-      setError(t('lending-service je nedostupný.', 'lending-service is unreachable.'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const stateLabel = (s?: string) =>
     s ? (STATE_LABELS[s] ? (language === 'cs' ? STATE_LABELS[s].cs : STATE_LABELS[s].en) : s) : '—'
 
@@ -183,8 +160,8 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
             <Link href="/lending" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
               <ArrowLeft size={14} /> {t('Zpět na konzoli', 'Back to console')}
             </Link>
-            <button onClick={() => void load()} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+            <button type="button" onClick={() => void load()} disabled={loading} aria-busy={loading} aria-label={t('Obnovit žádost o úvěr', 'Refresh lending application')} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+              <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
             </button>
           </div>
         }
@@ -240,9 +217,9 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
 
           <div className="section-title">{t('Zásahy', 'Interventions')}</div>
           <div className="card" style={{ padding: 14, marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-            <button className="btn btn-primary" style={{ fontSize: 12 }} disabled={busy} onClick={() => void advance()}>
-              {t('Posunout o krok', 'Advance one step')}
-            </button>
+            <span role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+              {t('Ruční posun není v této instalaci nakonfigurován.', 'Manual advance is not configured in this installation.')}
+            </span>
             <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled data-testid="decide-disabled">
               {t('Rozhodnout (4 oči)', 'Decide (four-eyes)')}
             </button>

@@ -15,6 +15,9 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
+    // openbank-libs-runtime's outbound SyntheticTaintClientFilter reads OpenTelemetry baggage.
+    // Keep the narrow API runtime in the fast-jar; the service does not export telemetry itself.
+    implementation("io.opentelemetry:opentelemetry-api")
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 

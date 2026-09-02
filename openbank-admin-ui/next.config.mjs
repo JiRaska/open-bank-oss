@@ -28,7 +28,27 @@ const nextConfig = {
   // that endpoint (this is exactly why /api/test-results 404'd in the sandbox).
   // Marking it external keeps it in node_modules and lets outputFileTracing copy
   // it into the standalone bundle intact.
-  serverExternalPackages: ['pg'],
+  // The OpenTelemetry packages are external for the SAME reason as `pg` above, plus one
+  // that is specific to instrumentation: `@opentelemetry/instrumentation-undici` works by
+  // PATCHING undici at module-load time. Bundling changes module identity, so the patch
+  // applies to webpack's copy and never to the module Next.js actually calls — the SDK
+  // starts, reports nothing wrong, and emits no spans.
+  //
+  // Measured on the standalone artifact rather than inferred: with only `pg` external,
+  // `.next/standalone/node_modules/@opentelemetry` contained exactly ONE entry — `api`.
+  // The SDK, the OTLP exporter, the undici instrumentation, resources and
+  // semantic-conventions were all bundled away, and the deployed pod produced zero spans
+  // while booting cleanly with no error in its log.
+  serverExternalPackages: [
+    'pg',
+    '@opentelemetry/sdk-node',
+    '@opentelemetry/exporter-trace-otlp-proto',
+    '@opentelemetry/instrumentation-undici',
+    '@opentelemetry/instrumentation-http',
+    '@opentelemetry/resources',
+    '@opentelemetry/semantic-conventions',
+    '@opentelemetry/api',
+  ],
   env: {
     NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8100',
     // Default to the public https host (consistent with KC_URL above) — never a cleartext
@@ -48,6 +68,9 @@ const nextConfig = {
     NEXT_PUBLIC_GLITCHTIP_RELEASE:
       process.env.NEXT_PUBLIC_GLITCHTIP_RELEASE ||
       `openbank-admin-ui@${process.env.BUILD_VERSION || 'dev'}`,
+    // This identifies the browser bundle and must therefore be baked at build time. The
+    // collector endpoint stays server-side and environment-specific in the relay route.
+    NEXT_PUBLIC_BUILD_VERSION: process.env.BUILD_VERSION || 'dev',
   },
   async headers() {
     return [{ source: '/(.*)', headers: securityHeaders }]

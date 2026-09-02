@@ -7,17 +7,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   GitBranch, RefreshCw, Rocket, Clock, AlertTriangle, Wrench,
-  CheckCircle2, XCircle, Minus, FlaskConical,
-  Shield, Info, Zap,
+  Info, Zap,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { useAuth } from '@/lib/auth/useAuth'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { QualityGateHealthPanel } from '@/components/devops/QualityGateHealthPanel'
-import type { TestResultsResponse, ServiceTestResult } from '@/lib/types/test-results'
 import type { DevOpsFinding } from '@/app/api/devops/insights/route'
 import { PageHeader } from '@/components/ui/PageHeader'
 
@@ -47,27 +46,6 @@ interface DoraData {
   sources: { git: boolean; prometheus: boolean }
   collectedAt: string
 }
-
-// Money-path services per rules.yaml (used for coverage threshold enforcement)
-const MONEY_PATH = new Set([
-  'openbank-ledger-service',
-  'openbank-transaction-service',
-  'openbank-account-service',
-  'openbank-balance-service',
-  'openbank-sepa-payment',
-  'openbank-sepa-instant',
-  'openbank-domestic-payment',
-  'openbank-clearing-service',
-  'openbank-swift-service',
-  'openbank-fx-service',
-  'openbank-lending-service',
-  'openbank-sca-service',
-  'openbank-consent-service',
-  'openbank-fraud-service',
-])
-
-const COVERAGE_FLOOR_MONEY   = 40  // rules.yaml money_path_floor (enforced/ratcheted baseline; target is 70)
-const COVERAGE_FLOOR_STANDARD = 39
 
 // ── DORA level colours + labels ───────────────────────────────────────────────
 
@@ -155,23 +133,6 @@ function DoraCard({ icon, titleEn, titleCs, value, sub, level, note, noDataMsg }
   )
 }
 
-function CoverageBar({ passed, total, floor }: { passed: number; total: number; floor: number }) {
-  if (total === 0) return <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>
-  const pct = Math.round((passed / total) * 100)
-  const ok = pct >= floor
-  const color = ok ? '#16a34a' : pct >= floor * 0.8 ? '#d97706' : '#dc2626'
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <div style={{ flex: 1, height: '5px', background: 'var(--surface-3)', borderRadius: '3px', overflow: 'hidden', minWidth: '60px', position: 'relative' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.3s ease' }} />
-        <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${floor}%`, width: '1px', background: '#94a3b8', opacity: 0.7 }} />
-      </div>
-      <span style={{ fontSize: '11px', fontWeight: 700, color, minWidth: '34px', textAlign: 'right' }}>{pct}%</span>
-      {!ok && <AlertTriangle size={11} style={{ color: '#d97706', flexShrink: 0 }} />}
-    </div>
-  )
-}
-
 function SourceChip({ available, label }: { available: boolean; label: string }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px',
@@ -225,30 +186,29 @@ function toAgentFinding(f: DevOpsFinding, t: (cs: string, en: string) => string)
 
 function DevOpsContent() {
   const { t, language } = useLanguage()
+  const { hasPermission } = useAuth()
+  const canDecide = hasPermission('devops:decide')
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const numberLocale = dateLocale
   const [dora, setDora] = useState<DoraData | null>(null)
-  const [tests, setTests] = useState<TestResultsResponse | null>(null)
   const [findings, setFindings] = useState<DevOpsFinding[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [deciding, setDeciding] = useState<string | null>(null)
+  const [decisionError, setDecisionError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setUnavailable(null)
     try {
-      const [doraRes, testRes, insightsRes] = await Promise.all([
+      const [doraRes, insightsRes] = await Promise.all([
         fetch('/api/devops/dora', { cache: 'no-store' }),
-        fetch('/api/test-results',  { cache: 'no-store' }),
         fetch('/api/devops/insights', { cache: 'no-store' }),
       ])
 
       if (!doraRes.ok) { setUnavailable({ kind: 'error' }); return }
 
       setDora(await doraRes.json())
-      if (testRes.ok) setTests(await testRes.json())
       if (insightsRes.ok) {
         const ins = await insightsRes.json() as { findings?: DevOpsFinding[] }
         setFindings(ins.findings ?? [])
@@ -266,19 +226,27 @@ function DevOpsContent() {
   // graceful-state rule (no raw HTTP status in the UI).
   const decide = useCallback(async (id: string, action: 'approve' | 'reject') => {
     setDeciding(id)
+    setDecisionError(null)
     try {
-      await fetch('/api/devops/decide', {
+      const res = await fetch('/api/devops/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, action }),
       })
+      if (!res.ok) {
+        setDecisionError(t(
+          'Rozhodnutí se nepodařilo uložit. Pravděpodobně nemáte oprávnění nebo je služba nedostupná.',
+          'The decision could not be saved. You may not have permission or the service is unavailable.',
+        ))
+        return
+      }
       await load()
     } catch {
-      // swallow — the next 60s refresh reconciles state
+      setDecisionError(t('Služba DevOps neodpovídá. Zkuste to prosím znovu.', 'The DevOps service did not respond. Please try again.'))
     } finally {
       setDeciding(null)
     }
-  }, [load])
+  }, [load, t])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -289,26 +257,6 @@ function DevOpsContent() {
   if (unavailable) {
     return <DataUnavailable kind={unavailable.kind} service="devops" feature={t('DevOps přehled', 'DevOps overview')} lang={language} />
   }
-
-  // Coverage table: sort by money-path first, then by fail status
-  const coverageSorted: ServiceTestResult[] = (tests?.services ?? []).slice().sort((a, b) => {
-    const aMp = MONEY_PATH.has(a.service) ? 1 : 0
-    const bMp = MONEY_PATH.has(b.service) ? 1 : 0
-    if (aMp !== bMp) return bMp - aMp
-    const aFail = a.failed + a.errors
-    const bFail = b.failed + b.errors
-    if (aFail !== bFail) return bFail - aFail
-    return a.service.localeCompare(b.service)
-  })
-
-  const moneyPathServices = coverageSorted.filter(s => MONEY_PATH.has(s.service))
-  const moneyPathCompliant = moneyPathServices.filter(s =>
-    s.tests > 0 && Math.round((s.passed / s.tests) * 100) >= COVERAGE_FLOOR_MONEY
-  ).length
-
-  const totalPass = tests ? tests.totals.passed : 0
-  const totalTests = tests ? tests.totals.tests : 0
-  const fleetPassRate = totalTests > 0 ? Math.round((totalPass / totalTests) * 100) : null
 
   const df = dora?.metrics.deploymentFrequency
   const lt = dora?.metrics.leadTime
@@ -336,13 +284,16 @@ function DevOpsContent() {
             </span>
           )}
           <button
+            type="button"
             onClick={load}
             disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit DevOps metriky', 'Refresh DevOps metrics')}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px',
               borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)',
               color: 'var(--text-secondary)', fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}
           >
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}
@@ -429,11 +380,16 @@ function DevOpsContent() {
             )}
             findings={findings.map(f => toAgentFinding(f, t))}
             emptyMessage={t('Žádné aktivní DevOps nálezy — pipeline v pořádku', 'No active DevOps findings — pipeline healthy')}
-            onApprove={id => decide(id, 'approve')}
-            onReject={id => decide(id, 'reject')}
-            decideLabels={{ approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Reject') }}
-            decidingId={deciding}
+            onApprove={canDecide ? id => decide(id, 'approve') : undefined}
+            onReject={canDecide ? id => decide(id, 'reject') : undefined}
+            decideLabels={canDecide ? { approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Reject') } : undefined}
+            decidingId={canDecide ? deciding : null}
           />
+          {decisionError && (
+            <div role="alert" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger-text)', fontSize: '12px' }}>
+              {decisionError}
+            </div>
+          )}
 
           {/* Data source guidance */}
           {dora && (!dora.sources.git || !dora.sources.prometheus) && (
@@ -495,173 +451,15 @@ function DevOpsContent() {
             </div>
           )}
 
-          {/* Test coverage */}
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)',
-            padding: '20px 24px', marginBottom: '20px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <FlaskConical size={16} style={{ color: '#6366f1' }} />
-                <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {t('Pokrytí testy', 'Test Coverage & Pass Rate')}
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                {fleetPassRate !== null && (
-                  <span>
-                    {t('Fleet pass rate', 'Fleet pass rate')}:{' '}
-                    <span style={{ fontWeight: 700, color: fleetPassRate === 100 ? '#16a34a' : fleetPassRate >= 90 ? '#d97706' : '#dc2626' }}>
-                      {fleetPassRate}%
-                    </span>
-                  </span>
-                )}
-                <span>
-                  {t('Money-path ≥70%', 'Money-path ≥70%')}:{' '}
-                  <span style={{ fontWeight: 700, color: moneyPathCompliant === moneyPathServices.length ? '#16a34a' : '#d97706' }}>
-                    {moneyPathCompliant}/{moneyPathServices.length}
-                  </span>
-                </span>
-              </div>
+          {/* Test evidence has one authoritative home.  Do not duplicate a partial JUnit-only
+              projection here: it made DevOps and Test Intelligence disagree about the same run. */}
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Test Intelligence', 'Test Intelligence')}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: 5 }}>{t('Autoritativní pohled na CI běhy, runtime Testcontainers, pokrytí, trace kontrakty, mutace, výkon, syntetiku, klientské E2E a RUM.', 'The authoritative view for CI runs, Testcontainers runtime, coverage, trace contracts, mutation, performance, synthetics, client E2E and RUM.')}</div>
             </div>
-
-            {!tests ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '14px',
-                borderRadius: '8px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                <Info size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  {t(
-                    'Test výsledky nejsou dostupné. Spusť gradle koverXmlReport a sestav admin-ui image.',
-                    'Test results not available. Run gradle koverXmlReport and build the admin-ui image.',
-                  )}
-                </span>
-              </div>
-            ) : (
-              <>
-                <div style={{ marginBottom: '12px', display: 'flex', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '10px',
-                    background: '#ede9fe', color: '#6366f1', fontWeight: 600 }}>
-                    {t('● Money-path (≥70%)', '● Money-path (≥70%)')}
-                  </span>
-                  <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '10px',
-                    background: 'var(--surface-2)', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                    {t('Standard (≥39%)', 'Standard (≥39%)')}
-                  </span>
-                </div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                        {[
-                          t('Služba', 'Service'),
-                          t('Testy', 'Tests'),
-                          t('Prošlo', 'Passed'),
-                          t('Selhalo', 'Failed'),
-                          t('Pass rate', 'Pass Rate'),
-                          t('Typ', 'Type'),
-                        ].map(h => (
-                          <th key={h} style={{ padding: '8px 12px', textAlign: 'left',
-                            color: 'var(--text-tertiary)', fontWeight: 600, fontSize: '11px' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {coverageSorted.map(svc => {
-                        const isMoneyPath = MONEY_PATH.has(svc.service)
-                        const floor = isMoneyPath ? COVERAGE_FLOOR_MONEY : COVERAGE_FLOOR_STANDARD
-                        const hasFail = svc.failed + svc.errors > 0
-                        const passRate = svc.tests > 0 ? Math.round((svc.passed / svc.tests) * 100) : null
-                        const belowFloor = passRate !== null && passRate < floor
-
-                        return (
-                          <tr key={svc.service} style={{
-                            borderBottom: '1px solid var(--border)',
-                            background: isMoneyPath ? 'rgba(99,102,241,0.025)' : hasFail ? 'rgba(220,38,38,0.02)' : 'transparent',
-                          }}>
-                            <td style={{ padding: '9px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              {hasFail
-                                ? <XCircle size={13} style={{ color: '#dc2626', flexShrink: 0 }} />
-                                : svc.tests > 0
-                                  ? <CheckCircle2 size={13} style={{ color: '#16a34a', flexShrink: 0 }} />
-                                  : <Minus size={13} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />}
-                              <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', fontWeight: 500 }}>
-                                {svc.service.replace('openbank-', '')}
-                              </span>
-                              {belowFloor && <AlertTriangle size={11} style={{ color: '#d97706' }} />}
-                            </td>
-                            <td style={{ padding: '9px 12px', textAlign: 'center', fontWeight: 700, color: 'var(--text-primary)' }}>
-                              {svc.tests || <span style={{ color: 'var(--text-tertiary)' }}>0</span>}
-                            </td>
-                            <td style={{ padding: '9px 12px', textAlign: 'center', color: '#16a34a', fontWeight: svc.passed > 0 ? 600 : 400 }}>
-                              {svc.tests > 0 ? svc.passed : '—'}
-                            </td>
-                            <td style={{ padding: '9px 12px', textAlign: 'center',
-                              color: hasFail ? '#dc2626' : 'var(--text-tertiary)', fontWeight: hasFail ? 700 : 400 }}>
-                              {svc.tests > 0 ? (svc.failed + svc.errors || '—') : '—'}
-                            </td>
-                            <td style={{ padding: '9px 12px', minWidth: '140px' }}>
-                              <CoverageBar passed={svc.passed} total={svc.tests} floor={floor} />
-                            </td>
-                            <td style={{ padding: '9px 12px' }}>
-                              {isMoneyPath
-                                ? <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 7px', borderRadius: '10px',
-                                    background: '#ede9fe', color: '#6366f1' }}>money-path</span>
-                                : <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>standard</span>}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
+            <a href="/system/tests" className="btn btn-secondary btn-sm">{t('Otevřít Test Intelligence', 'Open Test Intelligence')} →</a>
           </div>
-
-          {/* Pipeline health summary */}
-          {tests && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '14px', marginBottom: '20px' }}>
-              {[
-                {
-                  label: t('Celkem testů', 'Total Tests'),
-                  value: tests.totals.tests.toLocaleString(numberLocale),
-                  icon: <FlaskConical size={16} />, color: '#6366f1',
-                  sub: `${tests.totals.servicesWithTests}/${tests.totals.services} ${t('služeb', 'services')}`,
-                },
-                {
-                  label: t('Prošlo', 'Passed'),
-                  value: tests.totals.passed.toLocaleString(numberLocale),
-                  icon: <CheckCircle2 size={16} />, color: '#16a34a',
-                  sub: fleetPassRate !== null ? t(`${fleetPassRate} % úspěšnost`, `${fleetPassRate}% pass rate`) : '—',
-                },
-                {
-                  label: t('Selhalo', 'Failed'),
-                  value: (tests.totals.failed).toLocaleString(numberLocale),
-                  icon: <XCircle size={16} />, color: tests.totals.failed > 0 ? '#dc2626' : '#16a34a',
-                  sub: t('unit + integrační', 'unit + integration'),
-                },
-                {
-                  label: t('Money-path compliance', 'Money-path Compliance'),
-                  value: `${moneyPathCompliant}/${moneyPathServices.length}`,
-                  icon: <Shield size={16} />, color: moneyPathCompliant === moneyPathServices.length ? '#16a34a' : '#d97706',
-                  sub: `≥${COVERAGE_FLOOR_MONEY}% ${t('threshold', 'threshold')}`,
-                },
-              ].map(card => (
-                <div key={card.label} className="stat-card">
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>
-                    <div style={{ width: '36px', height: '36px', borderRadius: '10px',
-                      background: `${card.color}18`, display: 'flex', alignItems: 'center',
-                      justifyContent: 'center', color: card.color }}>
-                      {card.icon}
-                    </div>
-                  </div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '2px' }}>
-                    {card.value}
-                  </div>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px' }}>{card.label}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{card.sub}</div>
-                </div>
-              ))}
-            </div>
-          )}
 
           {/* DORA reference */}
           <div style={{ padding: '16px 20px', borderRadius: 'var(--r-lg)', border: '1px solid var(--border)',

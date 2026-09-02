@@ -31,6 +31,9 @@ on:
     branches: [main]
     paths:
       - "openbank-*/src/main/**"
+      # The canonical runtime image reads the service Dockerfile's EXPOSE declaration.
+      # A port-only change therefore requires a rebuild just as source does.
+      - "openbank-*/Dockerfile"
       # openbank-libs/src/main no longer holds compiled code (ADR-0122 moved it to
       # openbank-libs-domain / openbank-libs-runtime, both already covered by the
       # openbank-*/src/main/** glob above) — only its build file and Gradle wrapper
@@ -82,6 +85,15 @@ on:
         type: boolean
         required: false
         default: false
+      codeploy_pact_versions:
+        description: >-
+          Optional JSON object mapping every co-deployed service to the exact 40-character Pact
+          version to evaluate, for example {"openbank-product-catalog":"<sha>"}. Each supplied
+          version must be proven byte-identical to the deploy ref in that service's build inputs;
+          otherwise the co-deploy gate refuses the run. Use this only to replay a previously
+          verified product set after main has moved on.
+        required: false
+        default: ""
       reconcile:
         description: >-
           Run the scheduled reconcile logic immediately (issue #2020). Instead of building the
@@ -89,6 +101,15 @@ on:
           per-service commit, using the same logic as the every-3h schedule tick. This is the
           safe way to recover stale gitops tags when the current HEAD did not change those
           services. When reconcile is true, `services` is ignored and `codeploy` is not used.
+        type: boolean
+        required: false
+        default: false
+      bootstrap_image_only:
+        description: >-
+          Build, sign and attest exactly one service image that has no GitOps manifest yet.
+          This is an artifact-only bootstrap: it never runs the contract deploy gate, rewrites
+          GitOps, opens a PR or deploys a workload. Use the resulting immutable image only in a
+          separately reviewed first-manifest PR.
         type: boolean
         required: false
         default: false
@@ -132,6 +153,10 @@ jobs:
           fetch-depth: 0
 
       - id: detect
+        env:
+          INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
+          INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
+          INPUT_SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -euo pipefail
           # Full fleet — unlike services-ci.yml (which discovers every openbank-*/
@@ -197,7 +222,7 @@ jobs:
             # see it either, because its subject set was release-please's released components and
             # analytics-sink has no version.txt (it owns no OLTP database and cuts no release —
             # ADR-0022). That blindness is fixed in the same PR; this line is the gap it found.
-            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-delegation-service openbank-case-coordinator-agent openbank-analytics-sink'
+            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service'
 
           # Which files changed in this push (compare to the parent commit). We compute this
           # early because the workflow_dispatch guard below also needs to know which services
@@ -230,7 +255,9 @@ jobs:
           # Services changed directly in this push.
           DIRECT_SERVICES=()
           for svc in $ALL_SERVICES; do
-            if grep -qE "^${svc}/(src/main|build\.gradle\.kts)" <<< "$CHANGED_FILES"; then
+            # Keep this aligned with the push trigger: release-please changes only
+            # version.txt, and that release marker must rebuild/deploy the component.
+            if grep -qE "^${svc}/(src/main|build\.gradle\.kts|version\.txt|Dockerfile)" <<< "$CHANGED_FILES"; then
               DIRECT_SERVICES+=("$svc")
             fi
           done
@@ -241,6 +268,31 @@ jobs:
           # commit leaves the contract gate with no pact version for this SHA and produces the
           # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
+              if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
+                echo "::error::bootstrap_image_only and reconcile are mutually exclusive"
+                exit 1
+              fi
+              REQUESTED="$INPUT_SERVICES"
+              if [ "$(wc -w <<< "$REQUESTED" | tr -d ' ')" -ne 1 ]; then
+                echo "::error::bootstrap_image_only requires exactly one service"
+                exit 1
+              fi
+              svc="$REQUESTED"
+              if ! grep -qxF "$svc" <<< "${ALL_SERVICES// /$'\n'}" || [ ! -f "$svc/Dockerfile" ]; then
+                echo "::error::bootstrap target must be a known service with a committed Dockerfile"
+                exit 1
+              fi
+              if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
+                echo "::error::bootstrap_image_only is only for a service with no GitOps manifest"
+                exit 1
+              fi
+              SERVICES_JSON="$(printf '%s\n' "$svc" | jq -R . | jq -sc .)"
+              echo "artifact-only bootstrap → building: $SERVICES_JSON"
+              echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
+              echo "any=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             # Reconcile on demand: use the same logic as the schedule tick, which picks the
             # correct per-service commit instead of forcing everything onto the current HEAD.
             if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
@@ -258,7 +310,7 @@ jobs:
               exit 0
             fi
 
-            REQUESTED="${{ github.event.inputs.services }}"
+            REQUESTED="$INPUT_SERVICES"
             if [ -z "$REQUESTED" ]; then
               echo "::error::workflow_dispatch with empty services is only allowed when reconcile=true. A blank manual dispatch of the full fleet at an unrelated commit creates the NOT_ASKED / missing-pact failures seen in runs 31149468822 and 31150052893. Use reconcile=true to re-drive stranded services, or list explicit services that changed in the current HEAD."
               exit 1
@@ -280,14 +332,40 @@ jobs:
               exit 0
             fi
 
+            # A normal manual dispatch is intentionally limited to service code changed by
+            # this ref: otherwise the broker cannot be asked about the image being built.
+            # The one safe exception is a co-deploy replay with a complete explicit Pact map.
+            # `can-i-deploy` subsequently proves every supplied version byte-identical to this
+            # ref's build inputs before it can open a GitOps PR. Validate the map shape here as
+            # well so a malformed input cannot turn the exception into a broad build bypass.
+            DEPLOYABLE_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
+            EXACT_CODEPLOY_REPLAY=false
+            if [ "${INPUT_CODEPLOY:-}" = "true" ] \
+              && [ -n "${INPUT_CODEPLOY_PACT_VERSIONS:-}" ] \
+              && [ "${INPUT_CODEPLOY_PACT_VERSIONS}" != "{}" ]; then
+              if ! jq -e --argjson services "$DEPLOYABLE_JSON" \
+                'type == "object" and (keys | sort) == ($services | sort) and
+                 all(.[]; type == "string" and test("^[0-9a-f]{40}$"))' \
+                >/dev/null <<< "$INPUT_CODEPLOY_PACT_VERSIONS"; then
+                echo "::error::codeploy_pact_versions must map exactly the requested services to 40-hex versions"
+                exit 1
+              fi
+              EXACT_CODEPLOY_REPLAY=true
+            fi
+
             # Guard: every manually requested service must have changed in the current HEAD,
             # or be a consumer of a changed shared library. Dispatching a service that did not
             # change in this commit means the broker has no pact version for this SHA, which the
-            # contract gate rightfully refuses (#3318), and the build is wasted work.
-            CHANGED_SET="$( { printf '%s\n' "${DIRECT_SERVICES[@]+"${DIRECT_SERVICES[@]}"}"; printf '%s\n' "$LIBS_DEPENDENTS"; } | grep -v '^$' | sort -u )"
+            # contract gate rightfully refuses (#3318), and the build is wasted work. The exact
+            # co-deploy replay above is different: it cannot deploy unless the later gate proves
+            # its supplied Pact versions are byte-identical to these build inputs.
+            # `grep -v` returns 1 when no line remains. That is a valid state for an
+            # explicit replay (the wrapper changes only deployment metadata), not a failed
+            # command; `awk` preserves the filtering semantics while returning success.
+            CHANGED_SET="$( { printf '%s\n' "${DIRECT_SERVICES[@]+"${DIRECT_SERVICES[@]}"}"; printf '%s\n' "$LIBS_DEPENDENTS"; } | awk 'NF' | sort -u )"
             GUARD_FAILED=0
             for svc in "${DEPLOYABLE[@]}"; do
-              if ! grep -qxF "$svc" <<< "$CHANGED_SET"; then
+              if [ "$EXACT_CODEPLOY_REPLAY" != "true" ] && ! grep -qxF "$svc" <<< "$CHANGED_SET"; then
                 echo "::error::workflow_dispatch requested service ${svc} which did not change in HEAD ($(git rev-parse --short HEAD)) and is not a dependent of a changed shared library. The broker has no pact version for this SHA, so the contract gate will REFUSE. Dispatch from the commit that changed ${svc}, or use reconcile=true to recover the correct per-service commit."
                 GUARD_FAILED=1
               fi
@@ -296,7 +374,7 @@ jobs:
               exit 1
             fi
 
-            SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
+            SERVICES_JSON="$DEPLOYABLE_JSON"
             echo "workflow_dispatch → building: $SERVICES_JSON"
             echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
             echo "any=true" >> "$GITHUB_OUTPUT"
@@ -467,7 +545,7 @@ jobs:
 
       - name: ECR login
         id: ecr
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       - name: Build fast-jars (parallel)
         id: build
@@ -823,7 +901,7 @@ jobs:
   can-i-deploy:
     name: can-i-deploy
     needs: [changes, build-push]
-    if: needs.changes.outputs.any == 'true'
+    if: needs.changes.outputs.any == 'true' && github.event.inputs.bootstrap_image_only != 'true'
     # Stays on the self-hosted pool: the Pact Broker has no public ingress
     # (ADR-0056) and is only resolvable over cluster DNS. ARC scale-to-zero
     # serves this label at ~$0 idle.
@@ -871,7 +949,7 @@ jobs:
       # worse than today.
       - name: Cache pact standalone CLI
         id: pact-cli-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/pact
           key: pact-standalone-${{ env.PACT_STANDALONE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
@@ -885,6 +963,7 @@ jobs:
           # such ceiling.
           SERVICES: ${{ needs.changes.outputs.services }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
+          INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
         id: check
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
@@ -931,6 +1010,7 @@ jobs:
     if: |
       always() &&
       needs.changes.outputs.any == 'true' &&
+      github.event.inputs.bootstrap_image_only != 'true' &&
       needs.build-push.result == 'success' &&
       needs.can-i-deploy.result != 'cancelled'
     runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
@@ -1079,6 +1159,10 @@ jobs:
           # so any generator or tool that writes into the tree earlier in the job silently becomes
           # part of the deploy. See admin-ui-deploy.yml for the three defects that caused there.
           add-paths: openbank-infra/gitops/**
+          # workflow_dispatch may run from a recovery ref. Without an explicit base,
+          # create-pull-request targets that stale ref and includes every intervening main
+          # commit in the deploy PR instead of only the rewritten GitOps manifests.
+          base: main
           branch: chore/gitops-auto-deploy-${{ github.sha }}
           delete-branch: true
           commit-message: "chore(gitops): auto-deploy sandbox-${{ github.sha && github.sha || '' }}"
@@ -1147,7 +1231,16 @@ jobs:
                 await new Promise(r => setTimeout(r, 12000));
               }
             }
-            core.notice('could not enable auto-merge after retries — check the App token (GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY) / branch protection');
+            // setFailed, NOT notice (issue #6231): a deploy PR with auto-merge unarmed never
+            // merges, so the deploy silently does not happen — and a notice leaves the job, the
+            // workflow and `Deploy signal` all green, with the only evidence one line in a job
+            // nobody opens. That is the repo's "green run that deployed nothing" shape. The PR
+            // itself is left open and rescuable; what changes is that the run now says so.
+            core.setFailed(
+              `auto-merge could not be enabled on PR #${pull_number} after 8 attempts, so this deploy ` +
+              `will NOT land on its own — the PR stays open until someone merges it. Check the App ` +
+              `token (GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY) and branch protection.`
+            );
 
       # The failure this guards against is silent by construction: create-pull-request logs
       # "Commit verified: false; reason: unsigned" and exits 0, the PR opens with every check

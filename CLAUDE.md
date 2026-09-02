@@ -89,7 +89,19 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
 - **Always fast-jar, never uber-jar.** Service Dockerfiles use `-Dquarkus.package.jar.type=fast-jar`
   and COPY `quarkus-app/`; an uber-jar leaves `quarkus-app/` empty → crashlooping pod.
 - **`@ConfigProperty` optional fields must be `Optional<String>`,** not plain `String`, or a missing
-  value throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`.
+  value throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`. **`defaultValue = ""`
+  is NOT a way to make one optional** — measured 2026-08-21, SmallRye answers `SRCFG00014: required
+  but it could not be found in any config source`, so an empty default leaves the property exactly
+  as required as no default at all. Nor does bean scope help: validation happens once at STARTUP in
+  `ConfigRecorder.validateConfigProperties`, over every injection point, so an `@ApplicationScoped`
+  bean's laziness defers nothing and the service simply does not boot. This bullet had existed for
+  months and audit-service shipped the shape anyway (#5844) — prose is not a control, so
+  `check-configproperty-supplied.py` now enforces both halves, plus the sibling case where
+  `application.yaml` DEFINES the value as empty (`key: ${VAR:}`), which no `defaultValue` rescues.
+  Two things made #5844 cost days rather than minutes, and both generalise: a module CI never
+  rebuilt stays red on `main` unseen, and **a service that cannot boot reports its tests as
+  SKIPPED** — that module read `1 failed, 15 skipped` instead of 143 failures, and a skip count
+  scans as a pass. Read the SKIPPED number, not just the failure count.
 - **Kotlin JUnit5 + `runBlocking` silent drop.** `fun foo() = runBlocking { }` infers a non-`Unit`
   return type and JUnit5 ignores the method. Write `fun foo(): Unit = runBlocking { }` or use a
   coroutine test runner.
@@ -161,6 +173,22 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   named explicitly in the Kotlin use-site form `@field:Column(name = ...)` that a `@Column`-only
   regex cannot match. A gate that cries wolf about correct code is worth less than nothing, so it
   checks the convention, which is fully decidable.
+- **A NUL byte (U+0000) reaching Postgres is a 500, and it arrives ESCAPED — so a raw-byte scan of
+  the request finds nothing and reports clean.** Postgres cannot store U+0000 in any `text`/`varchar`
+  column (`invalid byte sequence for encoding "UTF8": 0x00`, SQLState 22021); Hibernate raises it at
+  flush, far past every handler, so `GenericExceptionMapper` renders a well-formed `INTERNAL_ERROR`
+  body — which is why "it did not crash" and "the response parsed" both pass against it. Rejected
+  fleet-wide now by `libs-runtime`'s `NulByteGuards` (#5913), and two things about it generalise.
+  First, the carrier: five services, **six** operations, and two of them carried the NUL in a QUERY
+  PARAMETER, not a body — those requests have no entity at all, so a Jackson-only guard is
+  structurally green about them. Enumerate the carriers from the fuzz artifacts before choosing where
+  a guard goes. Second, the wire form: inside JSON the character is the six ASCII characters of a
+  `\u0000` escape, legal JSON that Jackson decodes happily, so only the DECODED value answers the
+  question — scanning the stream for byte `0x00` sees nothing, and scanning for the escape as text
+  false-positives on a doubly-escaped backslash. Sibling of the `value too long` / duplicate-key
+  cases in the same issue, which are deliberately NOT this: a length limit is per-column and a
+  `ConstraintViolationException` is 409-or-400 depending on which constraint, so neither is decidable
+  fleet-wide. U+0000 is, because no valid request can carry it and no column can accept it.
 - **A Kotlin annotation binds to the NEXT declaration — a top-level function between `@Path` and its
   class silently steals it.** `McpEndpoint` had `@Path("/mcp")`, then a top-level
   `private fun String?.sanitizeForLog()`, then `class McpEndpoint`. The `@Path` bound to the
@@ -374,6 +402,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   and `McpEndpoint` do.
 
 ### Flyway
+- **An UNTRUSTED extension cannot be created by the role Flyway connects as — the migration is green
+  on every laptop and crashloops in the cluster.** Postgres splits extensions into trusted
+  (`uuid-ossp`, `pgcrypto`, `pg_trgm`, `unaccent` — a database OWNER may create them) and untrusted
+  (`vector`, `postgis`, `postgres_fdw`, `plpython3u` — SUPERUSER only). Every local path connects as
+  superuser (Dev Services, `PostgreSQLContainer`, compose); CNPG hands the deployed app a
+  non-superuser role. Measured against the fleet's own image
+  (`ghcr.io/cloudnative-pg/postgresql:18.1`, pgvector 0.8.1 already bundled): as owner
+  `ERROR: permission denied to create extension "vector"`, as superuser `CREATE EXTENSION`, and as
+  owner against an already-installed one `NOTICE: … already exists, skipping`. That last line is why
+  the two halves compose — a CNPG `Database` resource (`spec.extensions[]`, applied by the operator
+  over its superuser connection) creates it, and `CREATE EXTENSION IF NOT EXISTS` in the migration
+  short-circuits before the permission check, which is what keeps local dev working. Both are
+  load-bearing: drop the resource and the deployed migration dies at line 1; drop the migration line
+  and every developer's database breaks. Enforced by `check-untrusted-pg-extension.py`
+  (`rules.yaml: postgres_extensions`).
 - **Never change a migration after it has been applied to a live DB** — Flyway checksums the whole
   file (comments included), so any edit triggers a `checksum mismatch` startup failure.
 - **Committing migrations does not run them: `migrate-at-start` defaults to FALSE.**
@@ -686,6 +729,25 @@ mechanics, gate declaration, log-reading, bot signing, runner isolation. It load
 touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
 `rules.yaml`, an `application.yaml`, or merging a PR from anywhere.
 
+### Shell probes
+- **A probe fails by reporting CLEAN — source `.github/scripts/lib/probe.sh` instead of
+  re-deriving one.** BSD tools take GNU-ish input, do not error, and return a plausible nothing, so
+  a broken probe is indistinguishable from a clean subject. The library carries the ones this repo
+  has actually got wrong — `probe_utc_epoch` (BSD `date -j -f` ignores the trailing `Z` and parses
+  as LOCAL time: 53 branches falsely flagged), `probe_files_modified_since` (`-newermt "-60 minutes"`
+  is *always* empty on BSD, so a busy worktree reads as idle), `probe_remote_branch_exists`
+  (`git rev-parse origin/<b>` reads the LOCAL tracking ref and a plain fetch never prunes),
+  `probe_pr_failing_checks` (job names contain spaces, so an `awk` column is a word of the NAME),
+  `probe_lint_findings` (a newline-joined file list arrives as ONE argument; post-filtering a
+  linter's output hides the failures that are not findings), and `probe_zombie_runs`.
+  Each is held to a known-positive **and** a known-negative by the enforced
+  `probe-lib-known-positive` gate — `bash .github/scripts/lib/probe.sh --selftest`.
+- **`status=in_progress` is not a measure of CI load: 189 of those runs are wedged** — the run
+  record never transitioned while every one of its jobs is `completed`, the oldest from
+  2026-08-09. They are **not reapable**: both `POST /actions/runs/{id}/cancel` and `.../force-cancel`
+  answer HTTP 500 on every one. Subtract them with `probe_zombie_runs` before any statement about
+  saturation. Three automation workflows account for 163 of the 189.
+
 ### Reviewing a diff
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual
   squash delta; 2-dot includes main's post-divergence commits and makes stale branches look like
@@ -712,6 +774,12 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   `openbank-admin-ui/ai-governance-snapshot.json` (`gen-ai-governance-snapshot.py`; also stale
   after a `prompts/registry.yaml` change). #3771 regenerated none and red-gated main; #4002 is the
   regeneration template.
+- **Don't regenerate by hand — `bash .github/scripts/regen-derived.sh`** runs every generator, in
+  dependency order (derived data before the bundles that embed it), for the sources your branch
+  actually changed; `--all` does the lot unconditionally. It deliberately runs **no checker**, so
+  the regenerate → commit → check order above is structural rather than something you have to
+  remember. Its inventory is held to the generators that exist by the `regen-derived-inventory`
+  gate, in both directions, so a generator added later cannot be silently left out of it.
 
 ### gh CLI
 - **Always write a PR/issue body to a file and pass `--body-file`. Never `--body` with an
@@ -761,6 +829,28 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   close that; only a merge queue or up-to-date-branch enforcement would, and the repo has
   deliberately chosen detection over prevention. So the re-check above is still required — but
   a branch that has been sitting is the risk, not a branch that was created early.
+- **`oasdiff` compares a spec to its own PREVIOUS version, never to the implementation — so a spec
+  enum that was wrong from the first commit is wrong forever, and every gate stays green.** The
+  version axis is watched from both ends and the *truth* axis from neither.
+  `openbank-kyc-service` published `checkType` as
+  `[IDENTITY, SANCTIONS, PEP, ADVERSE_MEDIA, SOURCE_OF_FUNDS]` against a domain
+  `CheckType { IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA }`: three
+  names misspelled, `ADDRESS` (a check `createCase` creates on every case) unpublished, and
+  `SOURCE_OF_FUNDS` a value that has never existed in the code. Its `UpdateCheckRequest` was
+  fiction in the same way — `required: [result]` with `result` carrying the status enum, against a
+  DTO of `(status: String, result: String?)`. So no client generated from that document could call
+  the endpoint at all, and nothing anywhere said so (#5895). It is not one service:
+  `check-openapi-enum-vs-domain.py` (gate `openapi-enum-domain-drift`, pairs a spec enum with the
+  Kotlin enum it serves by value overlap) found **27 more across 16 services** (#5962), several
+  advertising values the code lacks — which a generated client will send and the service will 400.
+  **Two consequences worth carrying.** Correcting one is *breaking* to `oasdiff` (removed enum
+  values) while being unbreakable in fact — the server is byte-identical — so it takes the
+  `correction` class in `check-api-contract.py`: MINOR, no URL major. That reclassification is
+  **mechanical, not declared**, and it only applies while the PR touches *nothing else* in that
+  service, so **put the drift test outside the service directory** or the gate demands a MAJOR it
+  also forbids. And when a downstream spec republishes the same vocabulary, it is evidence about
+  which side is canonical: `openbank-customer-edge` already carried the domain spelling verbatim,
+  which settled all five kyc names before any judgement call was needed.
 - **The same trap fires from an ALREADY-MERGED PR, which is the direction that gets missed.**
   Anticipating it is not the same as checking for it: the instinct is "am I racing anyone?", and that
   scans *open* PRs — but the number is just as easily consumed by something that landed while your

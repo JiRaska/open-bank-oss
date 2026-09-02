@@ -17,6 +17,12 @@ import { SessionProvider } from '@/components/auth/SessionProvider'
 import { StageBoard, summariseBy, toneFor, wrapLabel } from '@/components/flow/StageBoard'
 import CampaignsPage from '@/app/campaigns/page'
 
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { roles: ['ROLE_ADMIN'] } }, status: 'authenticated' }),
+  signIn: vi.fn(),
+  SessionProvider: ({ children }: { children: React.ReactNode }) => children,
+}))
+
 const HOUR = 3_600_000
 const NOW = Date.parse('2026-08-02T12:00:00Z')
 const at = (h: number) => new Date(NOW - h * HOUR).toISOString()

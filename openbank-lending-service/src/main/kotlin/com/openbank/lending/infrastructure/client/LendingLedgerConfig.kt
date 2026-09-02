@@ -22,4 +22,21 @@ interface LendingLedgerConfig {
 
     @WithDefault("00000000-0000-0000-0000-0000000000aa")
     fun systemActorId(): UUID
+
+    /**
+     * The build-time adapter selection, declared here only so it is a legal member of this root.
+     *
+     * `lending.ledger.backend` is consumed by `@IfBuildProperty` and by
+     * `LendingAdapterBindingVerifier`, not through this mapping. But SmallRye validates every
+     * property under a registered `@ConfigMapping` prefix against that root's members, and this
+     * root is registered exactly when `RestLedgerPostingAdapter` — its only consumer — is bound.
+     * Before #6057 that adapter was in no image, so the root was never registered, the validation
+     * never ran, and `lending.ledger.backend` was free to be a non-member. Binding the real adapter
+     * re-activates that validation, and without this declaration the service fails to start with
+     * `SRCFG00050: lending.ledger.backend does not map to any root` — found by
+     * `LedgerAdapterBindingIT`, which is the first thing in this repo ever to boot the application
+     * with the adapter actually bound.
+     */
+    @WithDefault("none")
+    fun backend(): String
 }

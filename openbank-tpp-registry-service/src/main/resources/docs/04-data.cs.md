@@ -18,7 +18,7 @@
 | `country_code` | CHAR(2) NOT NULL | ISO 3166-1 alpha-2 |
 | `nca` | VARCHAR(20) NOT NULL | národní příslušný orgán (`CNB`, `BaFin`, …) |
 | `roles` | VARCHAR(100) NOT NULL | čárkou spojená množina `TppRole` (`AISP,PISP`) |
-| `status` | VARCHAR(20) NOT NULL DEFAULT `ACTIVE` | ACTIVE / SUSPENDED / REVOKED / BLACKLISTED |
+| `status` | VARCHAR(20) NOT NULL DEFAULT `ACTIVE` | doména sloupce: ACTIVE / SUSPENDED / REVOKED / BLACKLISTED. Zapisují se pouze ACTIVE a BLACKLISTED (#6489) |
 | `qwac_subject_dn` | TEXT | Subject DN eIDAS QWAC certifikátu |
 | `qseal_subject_dn` | TEXT | Subject DN eIDAS QSeal certifikátu |
 | `qwac_expires_at` | DATE | expirace QWAC (kontrolováno při autorizaci) |
@@ -93,7 +93,7 @@ Tři sandbox/test TPP jsou vloženy pro local/dev: `CZ-CNB-SANDBOX-001` (AISP,PI
 
 ## Retence
 
-`governance.yaml: retentionPolicy: 5 years`. Záznamy registrace a blacklistu TPP se uchovávají **5 let**, v souladu s PSD2 / povinnostmi vedení záznamů pro důkaz autorizace. Záznamy se při deautorizaci tvrdě nemažou — přechody stavu na `REVOKED`/`BLACKLISTED` zachovávají auditní historii.
+`governance.yaml: retentionPolicy: 5 years`. Záznamy registrace a blacklistu TPP se uchovávají **5 let**, v souladu s PSD2 / povinnostmi vedení záznamů pro důkaz autorizace. Záznamy se při deautorizaci tvrdě nemažou — přechod stavu na `BLACKLISTED` zachovává auditní historii. (`REVOKED` a `SUSPENDED` jsou v enumu deklarovány, ale dnes je nic nezapisuje — viz #6489.)
 
 ## Datová lineage
 

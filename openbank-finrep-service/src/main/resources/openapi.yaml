@@ -13,38 +13,108 @@ info:
   title: OpenBank FINREP / COREP Service
   description: >-
     Supervisory financial and prudential reporting (ADR-0097): renders EBA FINREP templates
-    (F01.01 Balance Sheet, F02.00 Profit & Loss) and the COREP C 01.00 Own Funds template from
+    (F01.01 Assets, F01.02 Liabilities, F01.03 Equity, F02.00 Profit & Loss) and the COREP C 01.00
+    Own Funds template from
     openbank-ledger-service's GL trial balance. Derive-only and stateless — it holds no datastore,
-    moves no money, and has NO ČNB transmission channel; EBA XBRL/DPM taxonomy rendering is
-    explicitly out of scope for this increment.
+    moves no money, and has NO ČNB transmission channel. It exposes an EBA XBRL-CSV *preflight*
+    only: the preflight evaluates governed mapping and trial-balance controls before a future
+    renderer can create a local artifact. It never creates an XBRL file or submits anything.
 
-    Cells are always fully rendered: a value the platform cannot honestly derive is an explicit
-    flagged zero (`isDataGap`), never an omitted row, so a regulatory return never has a silent gap.
-  version: 1.0.0
+    FINREP maps every active account in the governed ledger chart to official EBA 4.2 facts and
+    fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
+    official facts are not emitted by this structured preview. COREP derives its subtotals from
+    explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
+  version: 1.8.0
 tags:
   - name: FINREP
   - name: COREP
 paths:
+  /api/v1/finrep/templates/{templateId}/xbrl-csv/preflight:
+    get:
+      tags: [FINREP]
+      summary: Check whether a FINREP preview is eligible for future XBRL-CSV rendering
+      description: >-
+        Returns an explicit, local readiness result; it does not produce an XBRL-CSV archive,
+        validate an XBRL instance, or contact ČNB. Missing official mappings and a trial-balance
+        disagreement are blockers. A `READY_FOR_RENDERING` result is not a validated regulatory
+        artifact and does not imply a submission is possible.
+      operationId: getFinrepXbrlCsvPreflight
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          description: EBA FINREP template identifier
+          schema: { type: string, enum: [F01.01, F01.02, F01.03, F02.00] }
+        - name: asOf
+          in: query
+          required: false
+          description: Reporting reference date, ISO yyyy-MM-dd. Defaults to today when omitted.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Local rendering preflight; a blocked result is a successful safety check
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/XbrlCsvPreflight' }
+        '400':
+          description: Unknown templateId or an invalid reporting date
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/periods:
+    get:
+      tags: [FINREP]
+      summary: List reporting dates backed by immutable ledger evidence
+      description: >-
+        Returns only MONTH closes whose status is FROZEN and evidence state is LINES_V1. DRAFT,
+        legacy HASH_ONLY, quarter/year and missing closes are excluded; clients must not guess a
+        reporting date or fall back to a mutable trial balance.
+      operationId: listFinrepReportingPeriods
+      responses:
+        '200':
+          description: Available dates, newest first; latest is null when none are available
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportingPeriods' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
   /api/v1/finrep/templates/{templateId}:
     get:
       tags: [FINREP]
       summary: Render a FINREP template as of a reporting date
       description: >-
         Derives the template from the ledger GL trial balance as of `asOf`. Supported
-        `templateId` values are `F01.01` (Balance Sheet) and `F02.00` (Profit & Loss); any other
-        value is rejected.
+        `templateId` values are `F01.01` (Assets), `F01.02` (Liabilities), `F01.03` (Equity) and
+        `F02.00` (Profit & Loss); any other value is rejected. Every active account in the governed
+        chart has an explicit mapping; an unclassified active code produces a visible data gap.
+        `FROZEN` (the default) requires immutable FROZEN / LINES_V1 evidence. `LIVE_PREVIEW`
+        explicitly reads the mutable period aggregate for internal review only; callers must label
+        it provisional and must not export or submit it as a regulatory artefact.
       operationId: getFinrepTemplate
       parameters:
         - name: templateId
           in: path
           required: true
           description: EBA FINREP template identifier
-          schema: { type: string, enum: [F01.01, F02.00] }
+          schema: { type: string, enum: [F01.01, F01.02, F01.03, F02.00] }
         - name: asOf
           in: query
           required: false
           description: Reporting reference date, ISO yyyy-MM-dd. Defaults to today when omitted.
           schema: { type: string, format: date }
+        - name: evidence
+          in: query
+          required: false
+          description: Evidence source. LIVE_PREVIEW is mutable and for internal review only.
+          schema: { type: string, enum: [FROZEN, LIVE_PREVIEW], default: FROZEN }
       responses:
         '200':
           description: The rendered FINREP template
@@ -71,9 +141,12 @@ paths:
         Derives the template from the ledger GL trial balance as of `asOf`. Only `C_01.00`
         (Own Funds) is implemented in this increment; any other value is rejected.
 
-        The ledger's chart of accounts has no capital-structure GL accounts today, so every
-        capital row comes back as an explicit zero with `isDataGap: true` and a `gapReason` — a
-        documented gap, never to be read as an attested zero balance.
+        The mapper derives CET1, Tier 1 and own funds from explicit ledger accounts 6000-6060; it
+        never plugs capital as assets minus liabilities. With no recognised capital source every
+        row is an explicit zero with `isDataGap: true`; absent optional categories in an otherwise
+        recognised capital structure are genuine zeroes. `FROZEN` (the default)
+        requires immutable evidence; `LIVE_PREVIEW` is a mutable internal working view that must
+        never be exported or submitted as a regulatory artefact.
       operationId: getCorepTemplate
       parameters:
         - name: templateId
@@ -86,6 +159,11 @@ paths:
           required: false
           description: Reporting reference date, ISO yyyy-MM-dd. Defaults to today when omitted.
           schema: { type: string, format: date }
+        - name: evidence
+          in: query
+          required: false
+          description: Evidence source. LIVE_PREVIEW is mutable and for internal review only.
+          schema: { type: string, enum: [FROZEN, LIVE_PREVIEW], default: FROZEN }
       responses:
         '200':
           description: The rendered COREP template
@@ -107,6 +185,48 @@ paths:
 
 components:
   schemas:
+    XbrlCsvPreflight:
+      type: object
+      description: >-
+        Local safeguard result for a future EBA XBRL-CSV renderer. This is not an XBRL artifact,
+        validation result, or regulator submission acknowledgement.
+      required: [templateId, period, reportingFrameworkVersion, dpmVersion, taxonomyVersion, state, blockers]
+      properties:
+        templateId: { type: string, example: F01.01 }
+        period: { type: string, format: date }
+        reportingFrameworkVersion: { type: string, example: '4.2' }
+        dpmVersion: { type: string, example: '4.2.1' }
+        taxonomyVersion: { type: string, example: '4.2.0.0' }
+        state:
+          type: string
+          enum: [READY_FOR_RENDERING, BLOCKED]
+          description: >-
+            READY_FOR_RENDERING only means the implemented safeguards pass. It is not a validated
+            XBRL-CSV artifact and must not be submitted to a regulator.
+        blockers:
+          type: array
+          items: { $ref: '#/components/schemas/XbrlCsvBlocker' }
+    XbrlCsvBlocker:
+      type: object
+      required: [code, reason]
+      properties:
+        code:
+          type: string
+          enum: [INCOMPLETE_OFFICIAL_MAPPING, TRIAL_BALANCE_NOT_AGREED]
+        reason: { type: string }
+
+    ReportingPeriods:
+      type: object
+      required: [periods]
+      properties:
+        latest:
+          type: string
+          format: date
+          nullable: true
+        periods:
+          type: array
+          items: { type: string, format: date }
+
     FinrepCell:
       type: object
       description: One FINREP template cell — an (row, column) coordinate with its monetary value.
@@ -115,21 +235,22 @@ components:
         rowRef:
           type: string
           description: EBA FINREP row reference
-          example: r010
+          example: r0380
         colRef:
           type: string
           description: EBA FINREP column reference
-          example: c010
+          example: c0010
         value: { type: number }
         currency: { type: string, example: CZK }
 
     FinrepTemplate:
       type: object
       description: >-
-        One rendered FINREP template. F01.01 populates rows r010 (total assets), r380 (total
-        liabilities) and r490 (derived equity); F02.00 populates r010 (total income), r030 (total
-        expense) and r450 (net profit).
-      required: [templateId, period, cells, isBalanced]
+        A governed FINREP preview using official EBA Reporting Framework 4.2 coordinates for assets,
+        liabilities, equity and profit or loss. Aggregate and material-detail facts are emitted for
+        the platform's closed chart; zero-only facts are omitted. It is structured data, not an XBRL
+        artifact or regulator submission. Values use their natural reporting sign.
+      required: [templateId, period, cells, dataGaps, hasDataGaps, isBalanced, balanceVerdict]
       properties:
         templateId: { type: string, example: F01.01 }
         period:
@@ -139,11 +260,54 @@ components:
         cells:
           type: array
           items: { $ref: '#/components/schemas/FinrepCell' }
+        dataGaps:
+          type: array
+          description: Machine-readable findings covering the official cells this preview cannot derive.
+          items: { $ref: '#/components/schemas/FinrepDataGap' }
+        hasDataGaps:
+          type: boolean
+          description: >-
+            Derived from `dataGaps`. A true value makes this bounded preview ineligible for use as
+            a complete regulatory artifact.
         isBalanced:
           type: boolean
           description: >-
-            Whether the template's internal accounting identity holds. Serialized as `isBalanced`,
-            not `balanced` — see the note at the top of this file.
+            Whether the double-entry identity of the trial balance this template was rendered from
+            holds: the sum of every GL line's debit-minus-credit net is zero, evaluated per
+            currency and required to hold for all of them. An empty trial balance holds trivially
+            — that is an under-reporting condition, reported separately, not a balance failure.
+            Serialized as `isBalanced`, not `balanced` — see the note at the top of this file.
+
+            Historical note (issue #5987): up to API version 1.0.0 both producers passed a
+            hardcoded `true` and F01.01 derived equity as `assets - liabilities`, so the value was
+            a constant and no consumer could ever observe `false`. Do not read a `true` served by
+            an older deployment as evidence that anything was checked.
+
+            Since API version 1.2.0 (issue #6011) `true` additionally requires that
+            openbank-ledger-service's OWN published `balanced` verdict for the same frozen trial
+            balance agrees — it is exactly `balanceVerdict == AGREED_BALANCED`. Requiring both is
+            what makes a truncated response visible: lines lost in transport whose survivors happen
+            to still sum to zero satisfy this service's recomputation on their own.
+        balanceVerdict:
+          type: string
+          enum: [AGREED_BALANCED, AGREED_IMBALANCED, SOURCES_DISAGREE, LEDGER_FLAG_ABSENT]
+          description: >-
+            Which of the two independent balance verdicts objected (issue #6011). `AGREED_BALANCED`
+            and `AGREED_IMBALANCED` are the two sources agreeing; `SOURCES_DISAGREE` means the lines
+            this service evaluated are not the lines the ledger evaluated (a truncated, filtered or
+            paginated response — an evidence defect, not an accounting one); `LEDGER_FLAG_ABSENT`
+            means the ledger response carried no verdict at all, which is a contract change rather
+            than a statement about the books, and is kept distinct from a verdict of `false`.
+
+    FinrepDataGap:
+      type: object
+      required: [code, affectedScope, reason]
+      properties:
+        code: { type: string, example: UNMAPPED_OFFICIAL_CELLS }
+        affectedScope: { type: string, example: "F01.01 except r0380/c0010" }
+        reason:
+          type: string
+          description: Why the affected official cells cannot be derived and why submission is blocked.
 
     CorepCell:
       type: object

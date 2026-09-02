@@ -1,0 +1,198 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service PrometheusRule for openbank-campaign-service (ADR-0077/0079, ADR-0200), issue #5705.
+#
+# Until #5705 campaign-service emitted no application metric of any kind: the pod was scraped
+# (namespace `campaign` is in the fleet PodMonitor), the workload was Ready and ArgoCD was Healthy,
+# and there was simply no series to query. Nothing here could distinguish "campaigns are running"
+# from "campaign-service has contacted nobody since Tuesday".
+#
+# Every series below is registered EAGERLY by CampaignMetricsAdapter.bindTo() at @PostConstruct
+# (the bean is @Startup because @ApplicationScoped is lazy), so it exists at 0.0 from the first
+# scrape. That is load-bearing, not tidiness: Micrometer does not create a counter until its first
+# increment, so `increase(openbank_campaign_sends_total[6h]) == 0` written against a lazily created
+# counter matches NOTHING on a service that has never sent anything — precisely the state these
+# alerts exist to catch. It also creates the boot-time trap the `> 0` guards below answer.
+# CampaignMetricsAdapterTest asserts the rendered Prometheus scrape text, so the exact strings here
+# (dot->underscore, the `_total` suffix, tag order) come from Micrometer rather than from this
+# file's idea of them.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-campaign-alerts
+  namespace: campaign
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: campaign-service
+spec:
+  groups:
+    - name: openbank.campaign.health
+      rules:
+        - alert: CampaignServiceDown
+          expr: up{job="observability/openbank-services", namespace="campaign"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: campaign
+          annotations:
+            summary: "campaign-service is unreachable"
+            description: >-
+              campaign-service (campaign definitions and per-party Temporal journeys) has been
+              unreachable for >2m — no journey can advance and no trigger event can enrol anyone.
+
+        - alert: CampaignJourneysNotResolving
+          # THE alert for this service. Self-normalising by construction: it compares work accepted
+          # against work resolved, so it needs no business-hours guard and no uptime guard — a
+          # freshly started pod has enrolled nobody either, making the first conjunct 0 and the rule
+          # silent, rather than firing 15m after every deploy the way an unguarded
+          # `increase(...) == 0` rule does (the boot-time fourth state this repo has already paid
+          # for once, ADR-0237 / #4208).
+          #
+          # This is the shape of the failure a Temporal-driven journey makes invisible: enrol()
+          # starts a workflow and commits an ACTIVE row, and a worker that never picks the work up
+          # (worker not registered, wrong task queue, Temporal frontend unreachable) leaves every
+          # party at step 0 forever — no HTTP error, no latency change, no log line anyone watches.
+          expr: |
+            sum(increase(openbank_campaign_enrolments_total{outcome="started"}[1h])) > 0
+            and
+            (
+              sum(increase(openbank_campaign_sends_total[1h]))
+              + sum(increase(openbank_campaign_step_outcomes_total[1h]))
+            ) == 0
+          for: 15m
+          labels:
+            severity: critical
+            service: campaign
+          annotations:
+            summary: "campaign-service enrolled parties but resolved no journey step"
+            description: >-
+              {{ $value }} party(ies) were enrolled in the last hour and not one journey step
+              resolved — neither a send nor a suppression. Suspect the Temporal worker: check that
+              the campaign journey worker is registered on its task queue and that
+              temporal-frontend.temporal.svc:7233 is reachable. Enrolments will be sitting ACTIVE
+              at step 0.
+
+        - alert: CampaignSendsAreAllDryRuns
+          # `openbank.campaign.dry-run` defaults to TRUE — deliberately, because the failure of the
+          # other default is discovered by the recipient. The cost is that an environment which
+          # forgets to set it false runs every gate, writes a DRY_RUN send-log row, returns SENT,
+          # and emits NOTHING to notification-service on any channel. Every layer above reports a
+          # perfectly working campaign.
+          #
+          # This is the one alert that reads that state, and it is why DRY_RUN is its own outcome
+          # value rather than a flag shared with a hand-off: the exact shape that previously shipped
+          # a push adapter counting undelivered pushes as delivered, found by a customer.
+          #
+          # Guarded on total sends > 0 so it cannot fire on a pod that has attempted nothing.
+          expr: |
+            sum(increase(openbank_campaign_sends_total{outcome="dry_run"}[1h]))
+              /
+            clamp_min(sum(increase(openbank_campaign_sends_total[1h])), 1e-9)
+              > 0.99
+            and sum(increase(openbank_campaign_sends_total[1h])) > 0
+          for: 30m
+          labels:
+            severity: critical
+            service: campaign
+          annotations:
+            summary: "Every campaign send in the last hour was a dry run"
+            description: >-
+              {{ $value | humanizePercentage }} of campaign delivery attempts in the last hour never
+              left the process. `openbank.campaign.dry-run` is almost certainly still at its default
+              of true in this environment — check the campaign-service manifest. Recipients are
+              being counted as contacted and are not being contacted.
+
+        - alert: CampaignNoSendsInBusinessHours
+          # The issue's literal ask — "campaign-service has processed nothing for six hours".
+          #
+          # The `> 0` guard is what separates "was sending and went quiet" from "has not sent yet
+          # since it started", and it is required, not decorative. The counter is eagerly
+          # registered, so on a fresh pod the series EXISTS and reads 0; without the guard
+          # `increase(...) == 0` is true for every pod for the first six hours of its life and this
+          # warning fires after every deploy during business hours. Same guard, same reason, as
+          # AuditChainVerificationStale in components/observability/prometheus-rules-audit-chain.yaml.
+          #
+          # What the guard deliberately gives up: a pod that has NEVER handed anything off since
+          # restart is not covered here. That case is CampaignJourneysNotResolving's, which catches
+          # it within the hour and at `critical`.
+          expr: |
+            sum(increase(openbank_campaign_sends_total{outcome="handed_off"}[6h])) == 0
+            and sum(openbank_campaign_sends_total{outcome="handed_off"}) > 0
+            and on() hour() >= 6 and on() hour() <= 18
+          for: 30m
+          labels:
+            severity: warning
+            service: campaign
+          annotations:
+            summary: "No campaign sends handed off in 6h (business hours)"
+            description: >-
+              campaign-service has handed nothing to notification-service for 6h during business
+              hours, having done so normally earlier in this pod's life. Either every active
+              campaign finished, or the contact gate is denying everything — cross-check
+              openbank_campaign_step_outcomes_total{outcome=~"suppressed_.*"}.
+
+        - alert: CampaignSendHandoffsFailing
+          # A hand-off failure writes a FAILED send-log row and rethrows, so Temporal retries. A
+          # non-zero rate is therefore not by itself an incident; a sustained one means the retries
+          # are not succeeding either, and those parties are silently dropping out of their journeys.
+          expr: |
+            sum(rate(openbank_campaign_sends_total{outcome="failed"}[15m])) > 0
+          for: 20m
+          labels:
+            severity: warning
+            service: campaign
+          annotations:
+            summary: "campaign send hand-offs to notification-service are failing"
+            description: >-
+              Delivery hand-offs have been failing continuously for 20m. Check the Kafka producer
+              for `openbank.notification.requests` (and the banner placement topic) — the send log
+              is recording FAILED rows and Temporal is retrying the activities.
+
+        - alert: CampaignSuppressingEverything
+          # A contact gate that denies everything is indistinguishable, from every other angle, from
+          # a bank whose customers have all opted out: no error, no latency change, HTTP 200 on
+          # every request, and a send log full of legitimate-looking policy outcomes. Only the ratio
+          # of suppressions to attempts says which it is.
+          #
+          # A gate OUTAGE is excluded by construction rather than by a filter: it throws for the
+          # Temporal retry instead of recording a policy outcome, so it never reaches these series.
+          expr: |
+            sum(increase(openbank_campaign_step_outcomes_total{outcome=~"suppressed_.*"}[1h]))
+              /
+            clamp_min(
+              sum(increase(openbank_campaign_step_outcomes_total{outcome=~"suppressed_.*"}[1h]))
+              + sum(increase(openbank_campaign_sends_total[1h])),
+              1e-9
+            ) > 0.95
+            and sum(increase(openbank_campaign_step_outcomes_total{outcome=~"suppressed_.*"}[1h])) > 10
+          for: 30m
+          labels:
+            severity: warning
+            service: campaign
+          annotations:
+            summary: "Over 95% of campaign journey steps are being suppressed"
+            description: >-
+              {{ $value | humanizePercentage }} of eligible journey steps in the last hour were
+              denied by the ADR-0219 contact gate. Break it down by
+              openbank_campaign_step_outcomes_total{outcome=~"suppressed_.*"}: a spike in
+              `suppressed_consent` points at consent-service, `suppressed_cap` at a mis-set
+              frequency cap, `suppressed_quiet_hours` at a timezone or window change.
+
+        - alert: CampaignEnrolmentFailuresElevated
+          # `enrol` counts a per-party failure and moves on, deliberately (#2953), so nothing throws
+          # and the only trace is a number in a return value nobody watches. Those parties are not
+          # enrolled and will be retried only by the next sweep.
+          expr: |
+            sum(rate(openbank_campaign_enrolments_total{outcome="failed"}[30m]))
+              /
+            clamp_min(sum(rate(openbank_campaign_enrolments_total[30m])), 1e-9)
+              > 0.1
+          for: 30m
+          labels:
+            severity: warning
+            service: campaign
+          annotations:
+            summary: "Over 10% of campaign enrolments are failing"
+            description: >-
+              {{ $value | humanizePercentage }} of per-party enrolment attempts failed in the last
+              30m. The sweep swallows these per party so nothing else reports them — check
+              Temporal workflow starts and the enrolment repository.
