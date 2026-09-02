@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.232.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.232.2...admin-ui-v0.232.3) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** honor notification page contract ([#8103](https://github.com/JiRaska/open-bank-oss/issues/8103)) ([33e5ab8](https://github.com/JiRaska/open-bank-oss/commit/33e5ab841e46c61f0fbff0f20ae781463bdda7df))
+* **admin-ui:** refuse healthy unavailable test evidence ([#8100](https://github.com/JiRaska/open-bank-oss/issues/8100)) ([7bd91ae](https://github.com/JiRaska/open-bank-oss/commit/7bd91ae55527031011aad4251fc03ac773f20462))
+
 ## [0.232.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.232.1...admin-ui-v0.232.2) (2026-09-02)
 
 
