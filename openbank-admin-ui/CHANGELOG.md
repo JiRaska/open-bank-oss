@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.236.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.236.0...admin-ui-v0.236.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** render unknown observability metrics neutrally ([#8243](https://github.com/JiRaska/open-bank-oss/issues/8243)) ([2f39ac0](https://github.com/JiRaska/open-bank-oss/commit/2f39ac039aa3308f53c7cbc018d8700162ab6bf2)), closes [#8242](https://github.com/JiRaska/open-bank-oss/issues/8242)
+
 ## [0.236.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.235.0...admin-ui-v0.236.0) (2026-09-02)
 
 
