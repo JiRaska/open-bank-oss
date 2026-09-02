@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   GitBranch, RefreshCw, Rocket, Clock, AlertTriangle, Wrench,
   Info, Zap,
@@ -19,6 +19,8 @@ import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { QualityGateHealthPanel } from '@/components/devops/QualityGateHealthPanel'
 import type { DevOpsFinding } from '@/app/api/devops/insights/route'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { RemediationReviewDialog } from '@/components/devops/RemediationReviewDialog'
+import { DORA_METRIC_LABEL } from '@/lib/devops/doraMetricLabels'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -148,14 +150,6 @@ function SourceChip({ available, label }: { available: boolean; label: string })
 
 // ── DevOps Insights (AI) — ADR-0119 ───────────────────────────────────────────
 
-// Short bilingual label for the DORA metric a finding impacts.
-const DORA_METRIC_LABEL: Record<NonNullable<DevOpsFinding['doraMetricImpacted']>, { cs: string; en: string }> = {
-  DEPLOYMENT_FREQUENCY:  { cs: 'Frekvence nasazení', en: 'Deployment freq.' },
-  LEAD_TIME_FOR_CHANGES: { cs: 'Průběžná doba',       en: 'Lead time' },
-  CHANGE_FAILURE_RATE:   { cs: 'Chybovost změn',      en: 'Change failure' },
-  TIME_TO_RESTORE:       { cs: 'Doba obnovy',         en: 'Time to restore' },
-}
-
 // Map a devops-agent finding → the shared AgentFinding view-model. Severity is
 // lower-cased (the backend emits WARNING/CRITICAL); the DORA-impact and
 // remediation-kind become tags so the rendering matches every other agent surface.
@@ -196,6 +190,8 @@ function DevOpsContent() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [deciding, setDeciding] = useState<string | null>(null)
   const [decisionError, setDecisionError] = useState<string | null>(null)
+  const [reviewIntent, setReviewIntent] = useState<{ finding: DevOpsFinding; approve: boolean } | null>(null)
+  const reviewTriggerRef = useRef<HTMLElement | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -221,10 +217,12 @@ function DevOpsContent() {
     }
   }, [])
 
-  // HITL decision — an operator approves/rejects a proposed remediation (ADR-0031 D4). On success the
+  // The actual HITL decision call (ADR-0031 D4) — unchanged endpoint/payload/RBAC. On success the
   // finding leaves the active list, so we just refresh. Write action: degrade quietly per the
-  // graceful-state rule (no raw HTTP status in the UI).
-  const decide = useCallback(async (id: string, action: 'approve' | 'reject') => {
+  // graceful-state rule (no raw HTTP status in the UI). Returns whether the decision was recorded,
+  // so the final-review dialog (below) knows whether to close or stay open with the error visible.
+  // Only RemediationReviewDialog's confirm button calls this — see `decide()` just below.
+  const submitDecision = useCallback(async (id: string, action: 'approve' | 'reject'): Promise<boolean> => {
     setDeciding(id)
     setDecisionError(null)
     try {
@@ -238,15 +236,36 @@ function DevOpsContent() {
           'Rozhodnutí se nepodařilo uložit. Pravděpodobně nemáte oprávnění nebo je služba nedostupná.',
           'The decision could not be saved. You may not have permission or the service is unavailable.',
         ))
-        return
+        return false
       }
       await load()
+      return true
     } catch {
       setDecisionError(t('Služba DevOps neodpovídá. Zkuste to prosím znovu.', 'The DevOps service did not respond. Please try again.'))
+      return false
     } finally {
       setDeciding(null)
     }
   }, [load, t])
+
+  // Final review (#7895): Approve/Reject in AgentInsightsPanel no longer decides on a single
+  // click — it opens this review intent, and RemediationReviewDialog's own confirm button is what
+  // calls submitDecision(). This interposes a human checkpoint only; it does not touch the
+  // decision endpoint, payload or RBAC above.
+  const decide = useCallback((id: string, action: 'approve' | 'reject') => {
+    const finding = findings.find(f => f.id === id)
+    if (!finding) return
+    reviewTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setDecisionError(null)
+    setReviewIntent({ finding, approve: action === 'approve' })
+  }, [findings])
+
+  const closeReview = useCallback(() => {
+    setReviewIntent(null)
+    setDecisionError(null)
+    const trigger = reviewTriggerRef.current
+    requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus() })
+  }, [])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -385,6 +404,19 @@ function DevOpsContent() {
             decideLabels={canDecide ? { approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Reject') } : undefined}
             decidingId={canDecide ? deciding : null}
           />
+          {reviewIntent && (
+            <RemediationReviewDialog
+              finding={reviewIntent.finding}
+              approve={reviewIntent.approve}
+              busy={deciding === reviewIntent.finding.id}
+              failed={decisionError !== null}
+              onCancel={closeReview}
+              onConfirm={async () => {
+                const ok = await submitDecision(reviewIntent.finding.id, reviewIntent.approve ? 'approve' : 'reject')
+                if (ok) closeReview()
+              }}
+            />
+          )}
           {decisionError && (
             <div role="alert" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger-text)', fontSize: '12px' }}>
               {decisionError}
