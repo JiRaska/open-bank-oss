@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Issue #6371: ArgoCD applied nothing to `loki` for three weeks while reporting Synced/Healthy,
+# and no ArgoCD metric exposes the `ComparisonError` condition that recorded it. Its own
+# Application rather than folding into the observability component, so the detector can be
+# synced, suspended or rolled back without touching the monitoring stack it would otherwise
+# share a failure domain with.
+# See gitops/components/argocd-sync-verifier/ for the design rationale.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-sync-verifier
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/argocd-sync-verifier
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

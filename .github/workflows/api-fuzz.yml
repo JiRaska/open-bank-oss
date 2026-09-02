@@ -67,6 +67,13 @@ jobs:
       # a service that becomes money-path is fuzzed the day rules.yaml says so. A service that
       # cannot be fuzzed is EXCLUDED OUT LOUD with its reason — a silently shortened list reads as
       # "covered" when it is not, which is the failure this whole issue is about.
+      # The harness's boot-failure CLASSIFIER, exercised against a known crash and a known
+      # timeout before the matrix runs. #6492 was eighteen days of a timeout reported as a
+      # failure; a diagnostic that has only ever printed one message cannot be trusted to tell
+      # the two apart, so prove it here rather than assume it. ~0.1s.
+      - name: Self-test the fuzz harness diagnostics
+        run: .github/scripts/fuzz-services.sh --self-test
+
       - name: Derive service list
         id: derive
         env:

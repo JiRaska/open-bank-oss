@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.232.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.232.3...admin-ui-v0.232.4) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** name a failed recent-runs query instead of an empty list ([#8108](https://github.com/JiRaska/open-bank-oss/issues/8108)) ([d5a7153](https://github.com/JiRaska/open-bank-oss/commit/d5a715357a4961468715323f8165df4a56789348)), closes [#7943](https://github.com/JiRaska/open-bank-oss/issues/7943)
+
+
+### Security
+
+* **admin-ui:** enforce sensitive BFF permissions ([#8017](https://github.com/JiRaska/open-bank-oss/issues/8017)) ([7acf5bd](https://github.com/JiRaska/open-bank-oss/commit/7acf5bd4d4230a38eaeac1f64d8929fcad13d591)), closes [#8016](https://github.com/JiRaska/open-bank-oss/issues/8016)
+
 ## [0.232.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.232.2...admin-ui-v0.232.3) (2026-09-02)
 
 

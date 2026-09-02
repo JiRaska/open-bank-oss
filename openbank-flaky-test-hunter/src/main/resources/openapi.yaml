@@ -5,7 +5,7 @@
 openapi: 3.1.0
 info:
   title: Flaky Test Hunter API
-  version: 1.4.0
+  version: 1.5.0
   description: Internal development-plane agent API. It scans fleet test source; any automated repair is constrained to the agent's own test source and is proposed for human review only.
   license:
     name: AGPL-3.0-only
@@ -48,7 +48,8 @@ paths:
       tags: [Flaky test checks]
       operationId: triggerFlakyTestCheckAsync
       summary: Admit a durable flaky-test workflow without waiting for its report
-      description: A 202 confirms only workflow admission, not completion, a proposal, PR creation, or human approval.
+      description: Legacy mixed-version admission using the current UTC day. A 202 confirms only workflow admission, not completion, a proposal, PR creation, or human approval.
+      deprecated: true
       security: [{ bearerAuth: [ROLE_ADMIN] }]
       responses:
         '202':
@@ -59,7 +60,40 @@ paths:
                 type: object
                 required: [workflowId]
                 properties:
-                  workflowId: { type: string }
+                  workflowId:
+                    type: string
+                    pattern: '^flaky-test-hunter-check-operator_manual-[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/flaky-test-hunter/check/trigger-async-idempotent:
+    post:
+      tags: [Flaky test checks]
+      operationId: triggerFlakyTestCheckAsyncIdempotent
+      summary: Idempotently admit a durable flaky-test workflow
+      description: A 202 confirms only workflow admission. Repeating the request with the same bounded key returns the same workflow ID; an old backend safely returns 404 for this additive route without starting a workflow.
+      security: [{ bearerAuth: [ROLE_ADMIN] }]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must use the current UTC day or the previous UTC day (only for recovery across midnight) and maps to the existing `flaky-test-hunter-check-operator_manual-YYYY-MM-DD` workflow namespace.
+          schema:
+            type: string
+            pattern: '^flaky-test-hunter-operator-manual-[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+            example: flaky-test-hunter-operator-manual-2026-09-02
+      responses:
+        '202':
+          description: Workflow admission accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workflowId]
+                properties:
+                  workflowId:
+                    type: string
+                    pattern: '^flaky-test-hunter-check-operator_manual-[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+        '400': { description: Idempotency-Key is missing or its format or UTC day is not permitted }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/flaky-test-hunter/findings:

@@ -309,6 +309,93 @@ def test_cases(component: str, service: Path) -> list[dict]:
     return sorted(result, key=lambda item: (item["fingerprint"], item["state"]))
 
 
+def escaped_failure_recall(
+    suite_evidence: list[dict],
+    full_suite_cases: list[dict],
+    candidate_fingerprints: list[str],
+    *,
+    full_suite_complete: bool,
+) -> dict:
+    """Evaluate shadow candidates only against a complete, reconciled full-suite oracle.
+
+    This helper deliberately does not publish test-impact evidence. Until a versioned mapping
+    producer and an independent completion marker exist, the run envelope must remain the v1
+    ``unknown``/``unavailable`` state. The controls here establish the recall arithmetic that a
+    future producer has to satisfy without allowing a partial JUnit report to look authoritative.
+    """
+    if full_suite_complete is not True:
+        raise ValueError("test-impact recall requires an explicit completed full-suite result")
+    if not suite_evidence or not full_suite_cases:
+        raise ValueError("test-impact recall requires non-empty full-suite evidence")
+    if not isinstance(candidate_fingerprints, list):
+        raise ValueError("test-impact candidates must be a deterministic list of fingerprints")
+
+    totals = {key: 0 for key in ("discovered", "executed", "passed", "failed", "skipped", "errors")}
+    for suite in suite_evidence:
+        if not isinstance(suite, dict):
+            raise ValueError("test-impact suite evidence is malformed")
+        if suite.get("kind") not in SUITE_KINDS:
+            raise ValueError("test-impact suite kind is invalid")
+        counts = [suite.get(key) for key in totals]
+        if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in counts):
+            raise ValueError("test-impact suite counts must be non-negative integers")
+        duration_ms = suite.get("durationMs")
+        if not isinstance(duration_ms, int) or isinstance(duration_ms, bool) or duration_ms < 0:
+            raise ValueError("test-impact suite duration must be a non-negative integer")
+        if suite["executed"] + suite["skipped"] != suite["discovered"]:
+            raise ValueError("test-impact suite discovery does not reconcile with execution")
+        if suite["passed"] + suite["failed"] + suite["errors"] != suite["executed"]:
+            raise ValueError("test-impact suite execution does not reconcile with outcomes")
+        expected_state = ("failed" if suite["failed"] + suite["errors"] else
+                          "skipped" if suite["executed"] == 0 else "passed")
+        if suite.get("state") != expected_state:
+            raise ValueError("test-impact suite state does not reconcile with outcomes")
+        for key in totals:
+            totals[key] += suite[key]
+
+    for case in full_suite_cases:
+        if (not isinstance(case, dict)
+                or not isinstance(case.get("fingerprint"), str)
+                or not re.fullmatch(r"[0-9a-f]{24}", case["fingerprint"])
+                or case.get("state") not in {"passed", "failed", "skipped"}):
+            raise ValueError("test-impact full-suite case evidence is malformed")
+    if totals["discovered"] != len(full_suite_cases):
+        raise ValueError("test-impact full-suite case count does not reconcile with suite discovery")
+    case_states = {
+        state: sum(case["state"] == state for case in full_suite_cases)
+        for state in ("passed", "failed", "skipped")
+    }
+    if (totals["passed"] != case_states["passed"]
+            or totals["failed"] + totals["errors"] != case_states["failed"]
+            or totals["skipped"] != case_states["skipped"]):
+        raise ValueError("test-impact full-suite testcase outcomes do not reconcile with suite totals")
+
+    if any(not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{24}", item)
+           for item in candidate_fingerprints):
+        raise ValueError("test-impact candidate fingerprint is invalid")
+    candidates = set(candidate_fingerprints)
+    if len(candidates) != len(candidate_fingerprints):
+        raise ValueError("test-impact candidate fingerprints must be unique")
+    executed = {case["fingerprint"] for case in full_suite_cases if case["state"] != "skipped"}
+    if not candidates.issubset(executed):
+        raise ValueError("test-impact candidates must be observed in the executed full suite")
+
+    failures = {case["fingerprint"] for case in full_suite_cases if case["state"] == "failed"}
+    captured = failures & candidates
+    escaped = failures - candidates
+    return {
+        # A fingerprint is the selectable test identity. Parameterized JUnit invocations may
+        # legitimately share one, so compare candidates and failures in that same unit rather
+        # than manufacturing savings by comparing fingerprints with raw invocation rows.
+        "fullSuiteTestCount": len(executed),
+        "candidateCount": len(candidates),
+        "fullSuiteFailureCount": len(failures),
+        "capturedFailureCount": len(captured),
+        "escapedFailureCount": len(escaped),
+        "recall": len(captured) / len(failures) if failures else None,
+    }
+
+
 def coverage(service: Path) -> dict | None:
     report = service / "build" / "reports" / "kover" / "report.xml"
     if not report.exists():
@@ -633,6 +720,111 @@ def main() -> None:
             cases = test_cases("openbank-admin-ui", service)
             assert len(cases) == 3
             assert {item.get("testDefinitionPath") for item in cases} == {"src/test/kotlin/com/openbank/GuardTest.kt", None}
+            suite_rows = list(discovered.values())
+            failing_fingerprint = next(item["fingerprint"] for item in cases if item["state"] == "failed")
+            no_candidates = escaped_failure_recall(suite_rows, cases, [], full_suite_complete=True)
+            assert no_candidates == {
+                "fullSuiteTestCount": 3,
+                "candidateCount": 0,
+                "fullSuiteFailureCount": 1,
+                "capturedFailureCount": 0,
+                "escapedFailureCount": 1,
+                "recall": 0.0,
+            }
+            all_candidates = escaped_failure_recall(
+                suite_rows,
+                cases,
+                [item["fingerprint"] for item in cases],
+                full_suite_complete=True,
+            )
+            assert all_candidates == {
+                "fullSuiteTestCount": 3,
+                "candidateCount": 3,
+                "fullSuiteFailureCount": 1,
+                "capturedFailureCount": 1,
+                "escapedFailureCount": 0,
+                "recall": 1.0,
+            }
+            no_failure_suites = json.loads(json.dumps(suite_rows))
+            for suite in no_failure_suites:
+                suite["passed"] += suite["failed"] + suite["errors"]
+                suite["failed"] = 0
+                suite["errors"] = 0
+                suite["state"] = "passed" if suite["executed"] else "skipped"
+            no_failure_cases = [
+                {**item, "state": "passed"} if item["state"] == "failed" else item
+                for item in cases
+            ]
+            no_failures = escaped_failure_recall(
+                no_failure_suites,
+                no_failure_cases,
+                [item["fingerprint"] for item in no_failure_cases],
+                full_suite_complete=True,
+            )
+            assert no_failures["fullSuiteFailureCount"] == 0
+            assert no_failures["capturedFailureCount"] == 0
+            assert no_failures["escapedFailureCount"] == 0
+            assert no_failures["recall"] is None
+
+            mismatched_suites = json.loads(json.dumps(suite_rows))
+            mismatched_suites[0]["discovered"] += 1
+            mismatched_failures = json.loads(json.dumps(suite_rows))
+            failing_suite = next(item for item in mismatched_failures if item["failed"])
+            failing_suite["failed"] -= 1
+            failing_suite["passed"] += 1
+            mismatched_execution = json.loads(json.dumps(suite_rows))
+            mismatched_execution[0]["executed"] = 0
+            mismatched_execution[0]["skipped"] = mismatched_execution[0]["discovered"]
+            invalid_kind = json.loads(json.dumps(suite_rows))
+            invalid_kind[0]["kind"] = "not-a-suite-kind"
+            mismatched_state = json.loads(json.dumps(suite_rows))
+            mismatched_state[0]["state"] = "failed" if mismatched_state[0]["failed"] == 0 else "passed"
+            rejected_recall_inputs = (
+                (suite_rows, cases, ["f" * 24], True),
+                (suite_rows, cases, [failing_fingerprint, failing_fingerprint], True),
+                (mismatched_suites, cases, [], True),
+                (mismatched_failures, cases, [], True),
+                (mismatched_execution, cases, [], True),
+                (invalid_kind, cases, [], True),
+                (mismatched_state, cases, [], True),
+                ([], [], [], True),
+                (suite_rows, cases, [], False),
+            )
+            for candidate_suites, candidate_cases, candidate_fingerprints, complete in rejected_recall_inputs:
+                try:
+                    escaped_failure_recall(
+                        candidate_suites,
+                        candidate_cases,
+                        candidate_fingerprints,
+                        full_suite_complete=complete,
+                    )
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError("unsafe test-impact recall input was accepted")
+
+            # Parameterized invocations can share one stable fingerprint. Candidate size and
+            # failure recall must use that selectable identity on both sides of the ratio.
+            parameterized_failure = next(item for item in cases if item["state"] == "failed")
+            parameterized_cases = [parameterized_failure, dict(parameterized_failure)]
+            parameterized_suites = [{
+                "kind": "unit", "state": "failed", "discovered": 2, "executed": 2,
+                "passed": 0, "failed": 2, "skipped": 0, "errors": 0, "durationMs": 1,
+            }]
+            parameterized_recall = escaped_failure_recall(
+                parameterized_suites,
+                parameterized_cases,
+                [parameterized_failure["fingerprint"]],
+                full_suite_complete=True,
+            )
+            assert parameterized_recall == {
+                "fullSuiteTestCount": 1,
+                "candidateCount": 1,
+                "fullSuiteFailureCount": 1,
+                "capturedFailureCount": 1,
+                "escapedFailureCount": 0,
+                "recall": 1.0,
+            }
             assert trace_contract_evidence(service) == [
                 {"kind": "trace", "state": "failed", "source": "trace-contract:failed-contract",
                  "detail": "1 executed marker(s); JUnit suite failed"},

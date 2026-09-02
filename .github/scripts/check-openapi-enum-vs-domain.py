@@ -112,8 +112,8 @@ BASELINE: dict[str, str] = {
         "attribution query filters `channel in (PUSH, BANNER)`, so EMAIL is unreturnable.",
     "openbank-campaign-service:DRY_RUN,SENT,SUPPRESSED_CAP,SUPPRESSED_CONSENT,SUPPRESSED_QUIET_HOURS":
         "#5962 — SendOutcome: undeclared CONVERTED/FAILED/SKIPPED_CONDITION/SUPPRESSED_LIST",
-    "openbank-card-issuance-service:MASTERCARD,VISA":
-        "#5962 — CardNetwork: undeclared AMEX/UNIONPAY",
+    "openbank-consent-service:ACTIVE,EXPIRED,PENDING,REJECTED,REVOKED":
+        "#5962 — ConsentStatus: spec-only PENDING; undeclared PENDING_SCA/SUPERSEDED",
     "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
         "#5962 — ActionKind: undeclared FX_CONVERSION",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
