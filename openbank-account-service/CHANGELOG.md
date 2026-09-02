@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.0...account-service-v0.27.1) (2026-09-02)
+
+
+### Security
+
+* **delegation:** reject stale lifecycle projections ([#8220](https://github.com/JiRaska/open-bank-oss/issues/8220)) ([6537342](https://github.com/JiRaska/open-bank-oss/commit/65373422f3e3c38e266e411f219beaceab407005))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.26.0...account-service-v0.27.0) (2026-08-31)
 
 
