@@ -18,6 +18,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
 import { classifyMutation, type MutationFailure } from './mutations'
@@ -48,6 +49,7 @@ export interface CardOperations {
 export function useCardOperations(onChanged?: () => void): CardOperations {
   const { t } = useLanguage()
   const [busy, setBusy] = useState<string | null>(null)
+  const flight = useSingleFlight()
   const [feedback, setFeedback] = useState<Feedback | null>(null)
 
   const failureCopy = useCallback((kind: MutationFailure): string => {
@@ -137,6 +139,11 @@ export function useCardOperations(onChanged?: () => void): CardOperations {
     init: RequestInit,
     okText: string,
   ): Promise<unknown | 'parked' | null> => {
+    // `setBusy` only disables the control on the NEXT render, so two activations in
+    // the same event-loop turn both used to reach `fetch` — two lifecycle
+    // transitions, two limit writes. The lock is claimed synchronously here, at the
+    // single choke point every card mutation already goes through.
+    const outcome = await flight.run(busyKey, async () => {
     setBusy(busyKey)
     setFeedback(null)
     try {
@@ -164,7 +171,11 @@ export function useCardOperations(onChanged?: () => void): CardOperations {
     } finally {
       setBusy(null)
     }
-  }, [failureCopy, fourEyesCopy, onChanged])
+    })
+    // A rejected re-entry is not a failure: the first attempt is still running and
+    // owns the feedback banner. Report it as "nothing happened", never as an error.
+    return wasSkipped(outcome) ? null : outcome
+  }, [flight, failureCopy, fourEyesCopy, onChanged])
 
   const runTransition = useCallback(async (card: Card, transition: CardTransition, reason?: string) => {
     const out = await send(

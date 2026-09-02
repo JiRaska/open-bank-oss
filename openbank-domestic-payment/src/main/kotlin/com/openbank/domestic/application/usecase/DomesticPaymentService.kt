@@ -114,6 +114,7 @@ class DomesticPaymentService(
                 aggregateId = payment.id,
                 eventType = PAYMENT_CREATED_EVENT,
                 payload = eventPublisher.paymentCreatedPayload(payment),
+                synthetic = command.synthetic,
             ),
         )
 

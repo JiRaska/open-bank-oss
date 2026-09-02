@@ -8,31 +8,66 @@ import hashlib
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import tempfile
+from urllib.parse import urlparse
 
 
 SUITE_KINDS = {"unit", "integration", "contract", "e2e", "simulation"}
 SUITE_STATES = {"passed", "failed", "skipped", "not-run"}
-SPECIALIZED_KINDS = {"performance", "mutation", "synthetic"}
+SPECIALIZED_KINDS = {"performance", "mutation", "synthetic", "trace"}
 SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
 INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
+DIAGNOSTIC_KINDS = {"playwright-report"}
+MAX_FUTURE_SKEW = timedelta(minutes=5)
+# Shared resources write their readiness-aware lifecycle directly while the CI
+# Docker event stream sees the same container at daemon start/stop time. Keep
+# one observation when the two sources describe that same lifecycle, without
+# collapsing genuinely separate container cycles.
+RUNTIME_OBSERVATION_DUPLICATE_WINDOW = timedelta(seconds=5)
+
+
+def parse_timestamp(value: object, field: str) -> datetime:
+    """Require an absolute ISO-8601 timestamp before publishing evidence."""
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an absolute ISO-8601 timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an absolute ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must include a timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def trusted_run_url(url: str, run_id: str) -> bool:
+    """Accept only a canonical GitHub Actions run URL for this envelope id."""
+    if not url:
+        return True  # local/offline envelopes have no outbound link
+    parsed = urlparse(url)
+    return (parsed.scheme == "https" and parsed.hostname == "github.com"
+            and not parsed.params and not parsed.query and not parsed.fragment
+            and re.fullmatch(rf"/[^/]+/[^/]+/actions/runs/{re.escape(str(run_id))}", parsed.path) is not None)
 
 
 def validate_envelope(envelope: dict) -> None:
     """Fail closed before CI publishes an envelope that violates the v1 contract."""
     required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
-    if set(envelope) - (required | {"specializedEvidence", "testCases"}) or not required.issubset(envelope):
+    if set(envelope) - (required | {"specializedEvidence", "testCases", "diagnostics", "testImpact"}) or not required.issubset(envelope):
         raise ValueError("run envelope has missing or unknown top-level fields")
     if envelope["schemaVersion"] != 1 or not str(envelope["component"]).startswith("openbank-"):
         raise ValueError("run envelope schemaVersion/component is invalid")
     run = envelope["run"]
     if set(run) != {"id", "attempt", "commit", "branch", "workflow", "url", "observedAt"}:
         raise ValueError("run provenance fields are incomplete")
-    if not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"] or not run["workflow"]:
+    if (not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"]
+            or not run["workflow"] or not trusted_run_url(str(run["url"]), str(run["id"]))):
         raise ValueError("run provenance values are invalid")
+    run_observed_at = parse_timestamp(run["observedAt"], "run.observedAt")
+    if run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW:
+        raise ValueError("run.observedAt exceeds the allowed clock skew")
     for suite in envelope["suites"]:
         if suite["kind"] not in SUITE_KINDS or suite["state"] not in SUITE_STATES:
             raise ValueError("suite kind/state is invalid")
@@ -59,26 +94,94 @@ def validate_envelope(envelope: dict) -> None:
     if set(infrastructure) != {"declared", "observed"} or not set(infrastructure["declared"]).issubset(INFRASTRUCTURE):
         raise ValueError("declared test infrastructure is invalid")
     for item in infrastructure["observed"]:
-        if set(item) != {"resource", "image", "lifecycle", "observedAt"}:
+        required_runtime_fields = {"resource", "image", "lifecycle", "observedAt"}
+        # `reprovisions` is optional and only ever present on a terminal `stopped`: it carries how
+        # many times Quarkus physically reprovisioned that logical resource before it was stopped
+        # (issue #7640). A record is one LOGICAL lifecycle, so without this field the reprovision
+        # count would simply stop being observable rather than being reconciled.
+        if set(item) - (required_runtime_fields | {"resourceScopeId", "reprovisions"}) or not required_runtime_fields.issubset(item):
             raise ValueError("runtime observation contains unsafe or incomplete fields")
         if item["resource"] not in INFRASTRUCTURE or item["lifecycle"] not in {"started", "stopped"} or not item["image"]:
             raise ValueError("runtime observation values are invalid")
+        if "resourceScopeId" in item and not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            str(item["resourceScopeId"]),
+        ):
+            raise ValueError("runtime resource scope id is invalid")
+        if "reprovisions" in item and (
+            item["lifecycle"] != "stopped"
+            or not isinstance(item["reprovisions"], int)
+            or isinstance(item["reprovisions"], bool)
+            or item["reprovisions"] < 1
+        ):
+            raise ValueError("runtime observation reprovision count is invalid")
+        observed_at = parse_timestamp(item["observedAt"], "testInfrastructure.observed.observedAt")
+        if observed_at - run_observed_at > MAX_FUTURE_SKEW:
+            raise ValueError("runtime observation occurs after its run beyond the allowed clock skew")
     for item in envelope.get("specializedEvidence", []):
-        if set(item) - {"kind", "state", "source", "detail"} or not {"kind", "state", "source"}.issubset(item):
+        if set(item) - {"kind", "state", "source", "detail", "variant"} or not {"kind", "state", "source"}.issubset(item):
             raise ValueError("specialized evidence fields are invalid")
         if item["kind"] not in SPECIALIZED_KINDS or item["state"] not in SPECIALIZED_STATES or not item["source"]:
             raise ValueError("specialized evidence values are invalid")
+        if "variant" in item and (item["kind"] != "synthetic" or item["variant"] not in {"chromium", "firefox", "webkit"}):
+            raise ValueError("synthetic evidence variant is invalid")
     for item in envelope.get("testCases", []):
-        if set(item) != {"fingerprint", "kind", "classname", "name", "state", "durationMs"}:
+        required_case_fields = {"fingerprint", "kind", "classname", "name", "state", "durationMs"}
+        if set(item) - (required_case_fields | {"testDefinitionPath"}) or not required_case_fields.issubset(item):
             raise ValueError("test case fields are invalid")
         if (not re.fullmatch(r"[0-9a-f]{24}", item["fingerprint"]) or item["kind"] not in SUITE_KINDS
                 or item["state"] not in {"passed", "failed", "skipped"}
                 or not item["classname"] or not item["name"] or item["durationMs"] < 0):
             raise ValueError("test case values are invalid")
+        path = item.get("testDefinitionPath")
+        if (path is not None and (
+                not re.fullmatch(r"src/test/(?:kotlin|java)/[A-Za-z0-9_./-]+\.(?:kt|java)", path)
+                or any(segment in {".", ".."} for segment in path.split("/"))
+        )):
+            raise ValueError("test case definition path is invalid")
+    impact = envelope.get("testImpact")
+    if impact is not None and impact != {
+        "schemaVersion": 1,
+        "mode": "shadow",
+        "mappingState": "unknown",
+        "selectionState": "unavailable",
+    }:
+        raise ValueError("test impact evidence must remain the explicit v1 unknown/shadow state")
+    for item in envelope.get("diagnostics", []):
+        if set(item) != {"kind", "suiteKind", "name", "url", "retentionDays", "access", "mayContainSensitiveData"}:
+            raise ValueError("diagnostic artifact fields are invalid")
+        if (item["kind"] not in DIAGNOSTIC_KINDS or item["suiteKind"] != "e2e"
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", item["name"])
+                or item["url"] != f'{envelope["run"]["url"]}#artifacts' or item["retentionDays"] != 7
+                or item["access"] != "github-run-authenticated" or item["mayContainSensitiveData"] is not True):
+            raise ValueError("diagnostic artifact values are invalid")
 
 
-def classify(name: str, classname: str, task: str, component: str) -> str:
-    identity = f"{name} {classname} {task}"
+def browser_diagnostics(report_dir: str | None, run_id: str, attempt: int, run_url: str) -> list[dict]:
+    """Describe a retained Playwright report without copying its potentially sensitive contents."""
+    if not report_dir:
+        return []
+    report = Path(report_dir)
+    if not report.is_dir() or not any(item.is_file() for item in report.rglob("*")) or not run_url.startswith("https://"):
+        return []
+    return [{
+        "kind": "playwright-report",
+        "suiteKind": "e2e",
+        "name": f"playwright-report-{run_id}-a{attempt}",
+        "url": f"{run_url}#artifacts",
+        "retentionDays": 7,
+        "access": "github-run-authenticated",
+        "mayContainSensitiveData": True,
+    }]
+
+
+def classify(name: str, classname: str, task: str, component: str, service: Path | None = None) -> str:
+    # A testcase name is assertion prose and often embeds domain fixture data (for
+    # example ``LOAN_PACK_E2E``). It is not a stable declaration of test topology;
+    # using it here can manufacture end-to-end evidence from a unit/integration test.
+    # The JUnit suite classname and Gradle/Playwright task are the producer-owned
+    # identity used for categorisation instead.
+    identity = f"{classname} {task}"
     if re.search(r"integration|inttest", identity, re.I) or re.search(r"IT(?:$|[.$\s])", identity):
         return "integration"
     if re.search(r"pact|contract", identity, re.I):
@@ -87,6 +190,8 @@ def classify(name: str, classname: str, task: str, component: str) -> str:
         return "e2e"
     if component == "openbank-simulation":
         return "simulation"
+    if service is not None and source_declared_kind(service, classname) == "integration":
+        return "integration"
     return "unit"
 
 
@@ -124,7 +229,7 @@ def suites(component: str, service: Path) -> list[dict]:
     for task, tree in junit_suites(root):
         cases = tree.findall(".//testcase")
         sample = cases[0] if cases else None
-        kind = classify(tree.attrib.get("name", ""), sample.attrib.get("classname", "") if sample is not None else "", task, component)
+        kind = classify(tree.attrib.get("name", ""), sample.attrib.get("classname", "") if sample is not None else "", task, component, service)
         row = totals.setdefault(kind, {"kind": kind, "discovered": 0, "executed": 0, "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "durationMs": 0})
         discovered = int(tree.attrib.get("tests", len(cases)))
         failed = int(tree.attrib.get("failures", 0))
@@ -145,25 +250,62 @@ def suites(component: str, service: Path) -> list[dict]:
     return sorted(totals.values(), key=lambda row: row["kind"])
 
 
+def test_definition_path(service: Path, classname: str) -> str | None:
+    """Return a directly verified test source path, never an inferred production dependency.
+
+    JUnit's classname normally names the compiled Kotlin/Java test class. Nested classes map to
+    their enclosing source file. Non-JVM reporters (for example Playwright) deliberately return
+    no path: guessing would turn missing provenance into false impact-analysis evidence.
+    """
+    top_level = classname.split("$", 1)[0]
+    if not re.fullmatch(r"(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Za-z_][A-Za-z0-9_]*", top_level):
+        return None
+    relative = Path(*top_level.split("."))
+    for language, suffix in (("kotlin", ".kt"), ("java", ".java")):
+        candidate = service / "src" / "test" / language / relative.with_suffix(suffix)
+        if candidate.is_file():
+            return candidate.relative_to(service).as_posix()
+    return None
+
+
+def source_declared_kind(service: Path, classname: str) -> str | None:
+    """Read a producer-owned test annotation when JUnit naming alone is insufficient.
+
+    Many Quarkus HTTP tests intentionally keep a concise ``*ResourceTest`` classname.
+    Their runtime topology is declared by ``@QuarkusTest``, not their assertion prose or
+    filename convention. Missing/unreadable source remains unknown to this helper so the
+    conservative caller can retain its existing unit classification.
+    """
+    source_path = test_definition_path(service, classname)
+    if source_path is None:
+        return None
+    source = (service / source_path).read_text(errors="replace")
+    return "integration" if re.search(r"@Quarkus(?:Integration)?Test\b", source) else None
+
+
 def test_cases(component: str, service: Path) -> list[dict]:
-    """Emit secret-free observations with a stable test-definition identity."""
+    """Emit secret-free observations with stable identity and verified test-source provenance."""
     result = []
     root = service / "build" / "test-results"
     for task, tree in junit_suites(root):
         for case in tree.findall(".//testcase"):
             name = case.attrib.get("name", "unknown")
             classname = case.attrib.get("classname", tree.attrib.get("name", "unknown"))
-            kind = classify(name, classname, task, component)
+            kind = classify(name, classname, task, component, service)
             definition = re.sub(r"\s*(?:\[[^]]*]|\([^)]*\))\s*$", "", name).strip() or name
             identity = f"{component}\0{kind}\0{classname}\0{definition}"
             state = "skipped" if case.find("skipped") is not None else "failed" if (
                 case.find("failure") is not None or case.find("error") is not None
             ) else "passed"
-            result.append({
+            item = {
                 "fingerprint": hashlib.sha256(identity.encode()).hexdigest()[:24],
                 "kind": kind, "classname": classname, "name": definition, "state": state,
                 "durationMs": max(0, round(float(case.attrib.get("time", 0)) * 1000)),
-            })
+            }
+            source_path = test_definition_path(service, classname)
+            if source_path is not None:
+                item["testDefinitionPath"] = source_path
+            result.append(item)
     return sorted(result, key=lambda item: (item["fingerprint"], item["state"]))
 
 
@@ -191,6 +333,38 @@ def declared_infrastructure(service: Path) -> list[str]:
     return values
 
 
+def runtime_image_identity(image: str) -> str:
+    """Collapse Docker's canonical-library spelling for lifecycle deduplication only.
+
+    Testcontainers records the image requested by the test (normally ``postgres:tag``),
+    while Docker's event stream expands the same reference to
+    ``docker.io/library/postgres:tag``.  These are one container, not two observations.
+    Keep the original image in the published event for provenance; only the comparison key
+    is normalized, and do not rewrite arbitrary registry names.
+    """
+    for prefix in ("docker.io/library/", "index.docker.io/library/"):
+        if image.startswith(prefix):
+            return image[len(prefix):]
+    return image
+
+
+def public_runtime_image(resource: str, image: object) -> str:
+    """Project an untrusted image reference onto a safe runtime label.
+
+    The raw Docker/Testcontainers image can contain an internal registry hostname,
+    namespace, or (for a malformed local test input) credentials.  The aggregate
+    needs only the declared runtime family plus an optional immutable digest or
+    ordinary tag to reconcile its lifecycle; publishing the original reference
+    would turn a CI evidence artifact into an inventory of private infrastructure.
+    """
+    reference = str(image).rsplit("/", 1)[-1]
+    digest = re.search(r"@sha256:([0-9a-f]{64})$", reference, re.I)
+    if digest:
+        return f"{resource}@sha256:{digest.group(1).lower()}"
+    tag = re.search(r":([A-Za-z0-9][A-Za-z0-9._-]{0,127})$", reference)
+    return f"{resource}:{tag.group(1)}" if tag else resource
+
+
 def observations(service: Path) -> list[dict]:
     result = []
     for file in (service / "build" / "test-intelligence" / "runtime").glob("*.jsonl"):
@@ -203,25 +377,122 @@ def observations(service: Path) -> list[dict]:
                     resource = "postgres" if "postgres" in image else "redpanda" if "redpanda" in image else "valkey" if re.search(r"valkey|redis", image, re.I) else None
                     lifecycle = {"start": "started", "die": "stopped"}.get(item.get("lifecycle"))
                     if resource and lifecycle:
-                        result.append({"resource": resource, "image": image, "lifecycle": lifecycle,
-                                       "observedAt": datetime.fromtimestamp(int(item["observedAtUnix"]), timezone.utc).isoformat().replace("+00:00", "Z")})
+                        # Docker's daemon id is a transient correlation key only. It never
+                        # reaches the schema-valid observation returned below: an envelope
+                        # must not disclose a container identity, but two different daemon
+                        # containers of the same image must not be merged accidentally.
+                        result.append((1, {"resource": resource, "image": public_runtime_image(resource, image), "lifecycle": lifecycle,
+                                          "observedAt": datetime.fromtimestamp(int(item["observedAtUnix"]), timezone.utc).isoformat().replace("+00:00", "Z"),
+                                          "_dockerContainerId": item.get("containerId")}))
                 else:
-                    result.append(item)
+                    # A resource's own recorder marks readiness and carries the
+                    # stronger lifecycle observation than Docker's raw daemon
+                    # stream. Keep that provenance only while deduplicating;
+                    # the published schema deliberately contains no host data.
+                    resource = item.get("resource")
+                    if resource in INFRASTRUCTURE:
+                        item["image"] = public_runtime_image(resource, item.get("image", ""))
+                    result.append((0 if file.name == "testcontainers.jsonl" else 1, item))
             except json.JSONDecodeError:
                 continue
-    return result
+    normalized = []
+    for priority, item in result:
+        try:
+            observed_at = parse_timestamp(item["observedAt"], "testInfrastructure.observed.observedAt")
+        except (KeyError, ValueError):
+            continue
+        normalized.append((priority, observed_at, item))
+    normalized.sort(key=lambda entry: (entry[0], entry[1]))
+
+    def same_lifecycle(observed_at: datetime, item: dict, previous_at: datetime, previous: dict) -> bool:
+        return (
+            item["resource"] == previous["resource"]
+            and runtime_image_identity(item["image"]) == runtime_image_identity(previous["image"])
+            and item["lifecycle"] == previous["lifecycle"]
+            and abs(observed_at - previous_at) <= RUNTIME_OBSERVATION_DUPLICATE_WINDOW
+        )
+
+    # First deduplicate recorder records only. Different opaque scopes are different logical
+    # resource managers even when their lifecycle events happen together.
+    recorder = []
+    docker = []
+    for priority, observed_at, item in normalized:
+        (docker if priority else recorder).append((observed_at, item))
+    deduplicated_recorder = []
+    for observed_at, item in recorder:
+        duplicate = any(
+            same_lifecycle(observed_at, item, previous_at, previous)
+            and (not item.get("resourceScopeId") or not previous.get("resourceScopeId")
+                 or item["resourceScopeId"] == previous["resourceScopeId"])
+            for previous_at, previous in deduplicated_recorder
+        )
+        if not duplicate:
+            deduplicated_recorder.append((observed_at, item))
+
+    # Suppress a daemon event only for an unambiguous one-to-one recorder pairing. A raw stream
+    # with two different daemon ids near one recorder is evidence of two physical containers,
+    # not a reason to hide one. Legacy streams without an id retain the former compatibility
+    # behaviour, because their ambiguity cannot be resolved retrospectively.
+    published = list(deduplicated_recorder)
+    for observed_at, item in docker:
+        matches = [(previous_at, previous) for previous_at, previous in deduplicated_recorder
+                   if same_lifecycle(observed_at, item, previous_at, previous)]
+        docker_id = item.get("_dockerContainerId")
+        same_recorder_raw_count = sum(
+            1 for other_at, other in docker
+            if same_lifecycle(other_at, other, matches[0][0], matches[0][1])
+        ) if len(matches) == 1 else 0
+        if len(matches) == 1 and (not docker_id or same_recorder_raw_count == 1):
+            continue
+        published.append((observed_at, item))
+
+    return [{key: value for key, value in item.items() if key != "_dockerContainerId"}
+            for _, item in sorted(published, key=lambda entry: entry[0])]
 
 
-def specialized_evidence(performance_summary: str | None, mutation_report: str | None) -> list[dict]:
+def trace_contract_evidence(service: Path) -> list[dict]:
+    """Project only markers emitted by an executed, successfully asserted TraceContract."""
+    marker = re.compile(r"(?m)^OPENBANK_TRACE_CONTRACT_V1:([a-z0-9][a-z0-9._-]{0,63})$")
+    results: dict[str, dict] = {}
+    root = service / "build" / "test-results"
+    for _, tree in junit_suites(root):
+        failed = int(tree.attrib.get("failures", 0)) + int(tree.attrib.get("errors", 0)) > 0
+        output = "\n".join(node.text or "" for node in tree.findall(".//system-out"))
+        for contract_id in marker.findall(output):
+            row = results.setdefault(contract_id, {"failed": False, "markers": 0})
+            row["failed"] = row["failed"] or failed
+            row["markers"] += 1
+    return [{
+        "kind": "trace", "state": "failed" if row["failed"] else "passed",
+        "source": f"trace-contract:{contract_id}",
+        "detail": f"{row['markers']} executed marker(s); JUnit suite {'failed' if row['failed'] else 'passed'}",
+    } for contract_id, row in sorted(results.items())]
+
+
+def specialized_evidence(
+    performance_summary: str | None,
+    mutation_report: str | None,
+    performance_not_run_detail: str | None = None,
+    mutation_threshold: float | None = None,
+    synthetic_summary: str | None = None,
+    synthetic_journey: str | None = None,
+    suite_evidence: list[dict] | None = None,
+    browser_vitals: str | None = None,
+    synthetic_variant: str | None = None,
+) -> list[dict]:
     specialized = []
     if performance_summary:
         summary_file = Path(performance_summary)
         summary = json.loads(summary_file.read_text()) if summary_file.exists() else None
         thresholds = [value for metric in (summary or {}).get("metrics", {}).values()
                       for value in (metric.get("thresholds") or {}).values()]
-        failed = sum(1 for value in thresholds if value.get("ok") is False)
+        # k6 summary-export encodes a crossed threshold as bare True (and a passing
+        # threshold as False). Accept the older object fixture form too.
+        failed = sum(1 for value in thresholds if value is True or (isinstance(value, dict) and value.get("ok") is False))
+        detail = (performance_not_run_detail or "performance summary absent") if summary is None \
+            else f"{len(thresholds)} threshold result(s), {failed} breached"
         specialized.append({"kind": "performance", "state": "not-run" if summary is None else "failed" if failed else "passed",
-                            "source": str(summary_file), "detail": f"{len(thresholds)} threshold result(s), {failed} breached"})
+                            "source": str(summary_file), "detail": detail})
     if mutation_report:
         mutation_file = Path(mutation_report)
         if mutation_file.exists():
@@ -229,10 +500,59 @@ def specialized_evidence(performance_summary: str | None, mutation_report: str |
             mutations = root.findall(".//mutation")
             killed = sum(1 for item in mutations if item.attrib.get("status") == "KILLED")
             score = round(killed * 100 / len(mutations), 2) if mutations else None
-            specialized.append({"kind": "mutation", "state": "passed" if mutations else "skipped",
-                                "source": str(mutation_file), "detail": f"{killed}/{len(mutations)} killed ({score if score is not None else 'n/a'}%)"})
+            state = "skipped" if not mutations else (
+                "failed" if mutation_threshold is not None and score is not None and score < mutation_threshold else "passed"
+            )
+            target = f", target {mutation_threshold:g}%" if mutation_threshold is not None else ""
+            specialized.append({"kind": "mutation", "state": state,
+                                "source": str(mutation_file),
+                                "detail": f"{killed}/{len(mutations)} killed ({score if score is not None else 'n/a'}%{target})"})
         else:
             specialized.append({"kind": "mutation", "state": "not-run", "source": str(mutation_file), "detail": "mutation report absent"})
+    if synthetic_summary:
+        if not synthetic_journey or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", synthetic_journey):
+            raise ValueError("--synthetic-summary requires a valid --synthetic-journey id")
+        summary_file = Path(synthetic_summary)
+        summary = json.loads(summary_file.read_text()) if summary_file.exists() else None
+        thresholds = [value for metric in (summary or {}).get("metrics", {}).values()
+                      for value in (metric.get("thresholds") or {}).values()]
+        failed = sum(1 for value in thresholds if value is True or
+                     (isinstance(value, dict) and value.get("ok") is False))
+        specialized.append({
+            "kind": "synthetic",
+            "state": "not-run" if summary is None else "failed" if failed else "passed",
+            "source": f"journey:{synthetic_journey}",
+            "detail": "synthetic summary absent" if summary is None else
+                      f"{len(thresholds)} threshold result(s), {failed} breached",
+        })
+    elif synthetic_journey:
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", synthetic_journey):
+            raise ValueError("--synthetic-journey must be a valid journey id")
+        e2e = next((item for item in (suite_evidence or []) if item["kind"] == "e2e"), None)
+        vital_file = Path(browser_vitals) if browser_vitals else None
+        try:
+            vitals = json.loads(vital_file.read_text()) if vital_file and vital_file.exists() else None
+        except json.JSONDecodeError:
+            vitals = None
+        metrics = (vitals or {}).get("metrics") if (vitals or {}).get("schemaVersion") == 1 and (vitals or {}).get("journey") == synthetic_journey else None
+        sidecar_variant = (vitals or {}).get("browser")
+        if synthetic_variant and synthetic_variant not in {"chromium", "firefox", "webkit"}:
+            raise ValueError("--synthetic-variant must be a supported browser engine")
+        if synthetic_variant and sidecar_variant and sidecar_variant != synthetic_variant:
+            raise ValueError("browser vitals sidecar does not match --synthetic-variant")
+        variant = synthetic_variant or sidecar_variant
+        # A zero CLS is a valid, stable page. A zero FCP is not a paint observation:
+        # k6's summary export uses it for an unavailable paint metric. Do not turn that
+        # absence into a passing browser-performance verdict (#7371).
+        valid = (variant in {"chromium", "firefox", "webkit"} and isinstance(metrics, dict)
+                 and isinstance(metrics.get("fcpMs"), (int, float)) and metrics["fcpMs"] > 0
+                 and isinstance(metrics.get("cls"), (int, float)) and metrics["cls"] >= 0)
+        state = e2e["state"] if e2e and e2e["state"] == "failed" else "passed" if e2e and valid else "not-run"
+        detail = (f"{e2e['executed']}/{e2e['discovered']} browser E2E checks; FCP {round(metrics['fcpMs'])}ms, CLS {metrics['cls']:.3f}"
+                  if e2e and valid else "browser Web Vitals sample absent or unattributable" if e2e else "browser E2E JUnit report absent")
+        specialized.append({"kind": "synthetic", "state": state,
+                            "source": f"journey:{synthetic_journey}", "detail": detail,
+                            **({"variant": variant} if variant else {})})
     return specialized
 
 
@@ -242,7 +562,14 @@ def main() -> None:
     parser.add_argument("--out")
     parser.add_argument("--component")
     parser.add_argument("--performance-summary")
+    parser.add_argument("--performance-not-run-detail")
     parser.add_argument("--mutation-report")
+    parser.add_argument("--mutation-threshold", type=float)
+    parser.add_argument("--synthetic-summary")
+    parser.add_argument("--synthetic-journey")
+    parser.add_argument("--synthetic-variant")
+    parser.add_argument("--browser-vitals")
+    parser.add_argument("--browser-report-dir")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -251,11 +578,27 @@ def main() -> None:
             runtime = service / "build/test-intelligence/runtime"
             runtime.mkdir(parents=True)
             (runtime / "docker-events.jsonl").write_text(
-                '{"image":"postgres:16.3-alpine","lifecycle":"start","observedAtUnix":1787433000}\n'
-                '{"image":"postgres:16.3-alpine","lifecycle":"die","observedAtUnix":1787433060}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-one","lifecycle":"start","observedAtUnix":1787433000}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-one","lifecycle":"die","observedAtUnix":1787433060}\n'
+                # These are two physical daemon containers near the second shared
+                # recorder start. They must not disappear merely because the published
+                # schema intentionally redacts their identities.
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-two","lifecycle":"start","observedAtUnix":1787433010}\n'
+                '{"image":"docker.io/library/postgres:16.3-alpine","containerId":"pg-three","lifecycle":"start","observedAtUnix":1787433010}\n'
+            )
+            # The shared recorder and daemon event stream observe the same
+            # lifecycle at slightly different instants. Keep one event per
+            # lifecycle rather than inflating the UI's runtime evidence count.
+            (runtime / "testcontainers.jsonl").write_text(
+                # The shared recorder may be configured through an internal image
+                # mirror. Its hostname/namespace are not allowed in the aggregate.
+                '{"schemaVersion":1,"resource":"postgres","image":"registry.openbank.invalid/team/postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
+                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:11:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
+                '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:10Z","resourceScopeId":"22222222-2222-4222-8222-222222222222"}\n'
             )
             performance = service / "perf.json"
-            performance.write_text('{"metrics":{"http_req_duration":{"thresholds":{"p(95)<500":{"ok":false}}}}}')
+            # This is k6's actual summary-export form: true means the threshold was crossed.
+            performance.write_text('{"metrics":{"http_req_duration":{"thresholds":{"p(95)<500":true}}}}')
             mutation = service / "mutations.xml"
             mutation.write_text('<mutations><mutation status="KILLED"/><mutation status="SURVIVED"/></mutations>')
             # Negative control for the report discovery itself: a vitest/Playwright
@@ -264,22 +607,38 @@ def main() -> None:
             for task, payload in (
                 ("test", '<testsuites name="vitest" tests="2" failures="1" errors="0" skipped="0" time="1.5">'
                           '<testsuite name="unit" tests="2" failures="1" errors="0" skipped="0" time="1.5">'
-                          '<testcase classname="guard" name="allows" time="0.5"/>'
-                          '<testcase classname="guard" name="denies" time="1.0"><failure/></testcase>'
+                          '<testcase classname="com.openbank.GuardTest" name="allows" time="0.5"/>'
+                          '<testcase classname="com.openbank.GuardTest" name="denies" time="1.0"><failure/></testcase>'
+                          '<system-out>OPENBANK_TRACE_CONTRACT_V1:failed-contract\n'
+                          'OPENBANK_TRACE_CONTRACT_V1:customer supplied trace id</system-out>'
                           '</testsuite></testsuites>'),
                 ("e2e", '<testsuites name="playwright" tests="1" failures="0" errors="0" skipped="0" time="2">'
                         '<testsuite name="nav" tests="1" failures="0" errors="0" skipped="0" time="2">'
                         '<testcase classname="nav.spec.ts" name="loads" time="2"/>'
+                        '<system-out>OPENBANK_TRACE_CONTRACT_V1:public-edge</system-out>'
                         '</testsuite></testsuites>'),
             ):
                 directory = service / "build/test-results" / task
                 directory.mkdir(parents=True, exist_ok=True)
                 (directory / f"{task}.xml").write_text(payload)
+            source = service / "src/test/kotlin/com/openbank/GuardTest.kt"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("package com.openbank\nclass GuardTest\n")
+            quarkus_source = service / "src/test/kotlin/com/openbank/CatalogPlatformResourceTest.kt"
+            quarkus_source.write_text("package com.openbank\n@QuarkusTest\nclass CatalogPlatformResourceTest\n")
             discovered = {row["kind"]: row for row in suites("openbank-admin-ui", service)}
             assert set(discovered) == {"unit", "e2e"}, discovered
             assert (discovered["unit"]["discovered"], discovered["unit"]["failed"]) == (2, 1), discovered
             assert discovered["unit"]["state"] == "failed" and discovered["e2e"]["state"] == "passed"
-            assert len(test_cases("openbank-admin-ui", service)) == 3
+            cases = test_cases("openbank-admin-ui", service)
+            assert len(cases) == 3
+            assert {item.get("testDefinitionPath") for item in cases} == {"src/test/kotlin/com/openbank/GuardTest.kt", None}
+            assert trace_contract_evidence(service) == [
+                {"kind": "trace", "state": "failed", "source": "trace-contract:failed-contract",
+                 "detail": "1 executed marker(s); JUnit suite failed"},
+                {"kind": "trace", "state": "passed", "source": "trace-contract:public-edge",
+                 "detail": "1 executed marker(s); JUnit suite passed"},
+            ]
             # An unparsable report is observed as absent, never as a build failure.
             (service / "build/test-results/test/broken.xml").write_text("<testsuite")
             assert len(suites("openbank-admin-ui", service)) == 2
@@ -293,27 +652,150 @@ def main() -> None:
                 "component": "openbank-admin-ui", "suites": suites("openbank-admin-ui", service),
                 "coverage": None, "testInfrastructure": {"declared": [], "observed": []},
             })
+            # `reprovisions` (issue #7640) is accepted only on a terminal `stopped`, and only as a
+            # positive integer — a `started` carrying one, or a zero, is a malformed record, not a
+            # quietly tolerated one.
+            def envelope_with(observation):
+                return {
+                    "schemaVersion": 1,
+                    "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main",
+                            "workflow": "CI", "url": "", "observedAt": "2026-08-22T00:00:00Z"},
+                    "component": "openbank-admin-ui", "suites": suites("openbank-admin-ui", service),
+                    "coverage": None,
+                    "testInfrastructure": {"declared": [], "observed": [observation]},
+                }
+            base_observation = {"resource": "postgres", "image": "postgres:16.3-alpine",
+                                "observedAt": "2026-08-22T00:00:00Z"}
+            validate_envelope(envelope_with({**base_observation, "lifecycle": "stopped", "reprovisions": 41}))
+            validate_envelope(envelope_with({
+                **base_observation,
+                "lifecycle": "stopped",
+                "resourceScopeId": "11111111-1111-4111-8111-111111111111",
+                "reprovisions": 41,
+            }))
+            for rejected in ({**base_observation, "lifecycle": "started", "reprovisions": 41},
+                             {**base_observation, "lifecycle": "stopped", "reprovisions": 0},
+                             {**base_observation, "lifecycle": "stopped", "reprovisions": True}):
+                try:
+                    validate_envelope(envelope_with(rejected))
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"invalid reprovision count was accepted: {rejected}")
             assert classify("PaymentApiIT", "com.openbank.PaymentApiIT", "test", "openbank-x") == "integration"
             assert classify("UnitTest", "com.openbank.UnitTest", "test", "openbank-x") == "unit"
-            assert [item["lifecycle"] for item in observations(service)] == ["started", "stopped"]
-            specialized = specialized_evidence(str(performance), str(mutation))
-            assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "passed")]
+            assert classify("creates LOAN_PACK_E2E", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x") == "unit"
+            assert classify("reads products", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x", service) == "integration"
+            observed = observations(service)
+            assert [item["lifecycle"] for item in observed] == ["started", "started", "started", "started", "stopped"]
+            assert [item["observedAt"] for item in observed] == [
+                "2026-08-22T21:10:01Z", "2026-08-22T21:10:10Z", "2026-08-22T21:10:10Z",
+                "2026-08-22T21:10:10Z", "2026-08-22T21:11:01Z",
+            ]
+            assert [item.get("resourceScopeId") for item in observed] == [
+                "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", None,
+                None, "11111111-1111-4111-8111-111111111111",
+            ]
+            assert {item["image"] for item in observed} == {"postgres:16.3-alpine"}
+            assert all("openbank.invalid" not in item["image"] for item in observed)
+            assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres@sha256:" + "A" * 64) == "postgres@sha256:" + "a" * 64
+            assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres:tag?credential=secret") == "postgres"
+            assert all("containerId" not in item and "_dockerContainerId" not in item for item in observed)
+            specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
+            assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]
+            assert "target 70%" in specialized[1]["detail"]
+            absent = specialized_evidence(str(service / "missing-summary.json"), None, "no safe target configured")
+            assert absent == [{"kind": "performance", "state": "not-run", "source": str(service / "missing-summary.json"), "detail": "no safe target configured"}]
+            synthetic = specialized_evidence(None, None, synthetic_summary=str(performance), synthetic_journey="public-edge")
+            assert synthetic == [{"kind": "synthetic", "state": "failed", "source": "journey:public-edge", "detail": "1 threshold result(s), 1 breached"}]
+            browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]])
+            assert browser_synthetic == [{"kind": "synthetic", "state": "not-run", "source": "journey:admin-ui-sso-boundary", "detail": "browser Web Vitals sample absent or unattributable"}]
+            browser_vitals = service / "browser-vitals.json"
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004}}')
+            browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert browser_synthetic == [{"kind": "synthetic", "state": "passed", "source": "journey:admin-ui-sso-boundary", "detail": "1/1 browser E2E checks; FCP 321ms, CLS 0.004", "variant": "chromium"}]
+            # A browser summary may encode an unavailable FCP as zero. That must stay
+            # explicit instead of becoming a green Web Vitals sample; zero CLS remains valid.
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":0,"cls":0}}')
+            browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert browser_synthetic == [{"kind": "synthetic", "state": "not-run", "source": "journey:admin-ui-sso-boundary", "detail": "browser Web Vitals sample absent or unattributable", "variant": "chromium"}]
             valid = {
                 "schemaVersion": 1,
-                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "", "observedAt": "2026-08-22T00:00:00Z"},
+                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "observedAt": "2026-08-22T21:12:00Z"},
                 "component": "openbank-x",
                 "suites": [{"kind": "integration", "state": "passed", "discovered": 1, "executed": 1, "passed": 1, "failed": 0, "skipped": 0, "errors": 0, "durationMs": 1}],
                 "coverage": None,
                 "testInfrastructure": {"declared": ["postgres"], "observed": observations(service)},
                 "specializedEvidence": [{"kind": "performance", "state": "passed", "source": "summary.json"}],
                 "testCases": [],
+                "testImpact": {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown", "selectionState": "unavailable"},
             }
+            traversal = {**valid, "testCases": [{
+                "fingerprint": "0123456789abcdef01234567", "kind": "integration",
+                "classname": "com.openbank.GuardTest", "name": "guards", "state": "passed",
+                "durationMs": 1, "testDefinitionPath": "src/test/kotlin/../../outside.kt",
+            }]}
+            try:
+                validate_envelope(traversal)
+                raise AssertionError("a traversing test definition path was accepted")
+            except ValueError:
+                pass
+            invented_impact = json.loads(json.dumps(valid))
+            invented_impact["testImpact"]["mappingState"] = "mapped"
+            try:
+                validate_envelope(invented_impact)
+                raise AssertionError("unverified test impact mapping was accepted")
+            except ValueError:
+                pass
+            (service / "playwright-report").mkdir()
+            (service / "playwright-report/index.html").write_text("diagnostic")
+            valid["diagnostics"] = browser_diagnostics(str(service / "playwright-report"), "1", 1, "https://github.com/JiRaska/open-bank-oss/actions/runs/1")
+            assert valid["diagnostics"] == [{
+                "kind": "playwright-report", "suiteKind": "e2e", "name": "playwright-report-1-a1",
+                "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1#artifacts", "retentionDays": 7,
+                "access": "github-run-authenticated", "mayContainSensitiveData": True,
+            }]
             validate_envelope(valid)
+            untrusted_run = json.loads(json.dumps(valid))
+            untrusted_run["run"]["url"] = "https://attacker.example/actions/runs/1"
+            try:
+                validate_envelope(untrusted_run)
+                raise AssertionError("an untrusted run URL must be rejected")
+            except ValueError:
+                pass
+            untrusted_diagnostic = json.loads(json.dumps(valid))
+            untrusted_diagnostic["diagnostics"][0]["url"] = "https://attacker.example/report"
+            try:
+                validate_envelope(untrusted_diagnostic)
+                raise AssertionError("an off-run diagnostic URL must be rejected")
+            except ValueError:
+                pass
             invalid = json.loads(json.dumps(valid))
             invalid["suites"][0]["executed"] = 0
             try:
                 validate_envelope(invalid)
                 raise AssertionError("invalid suite arithmetic was accepted")
+            except ValueError:
+                pass
+            future_run = json.loads(json.dumps(valid))
+            future_run["run"]["observedAt"] = "2999-01-01T00:00:00Z"
+            try:
+                validate_envelope(future_run)
+                raise AssertionError("a future-dated run was accepted")
+            except ValueError:
+                pass
+            naive_run = json.loads(json.dumps(valid))
+            naive_run["run"]["observedAt"] = "2026-08-22T00:00:00"
+            try:
+                validate_envelope(naive_run)
+                raise AssertionError("a timezone-less run timestamp was accepted")
+            except ValueError:
+                pass
+            future_runtime = json.loads(json.dumps(valid))
+            future_runtime["testInfrastructure"]["observed"][0]["observedAt"] = "2999-01-01T00:00:00Z"
+            try:
+                validate_envelope(future_runtime)
+                raise AssertionError("a runtime observation after its run was accepted")
             except ValueError:
                 pass
         print("test-run evidence collector self-test: classification and runtime red/green paths proven")
@@ -325,20 +807,39 @@ def main() -> None:
     server = os.getenv("GITHUB_SERVER_URL", "")
     repository = os.getenv("GITHUB_REPOSITORY", "")
     run_id = os.getenv("GITHUB_RUN_ID", "local")
-    specialized = specialized_evidence(args.performance_summary, args.mutation_report)
+    run_attempt = int(os.getenv("GITHUB_RUN_ATTEMPT", "1"))
+    run_url = f"{server}/{repository}/actions/runs/{run_id}" if server and repository else ""
+    suite_evidence = suites(component, service)
+    specialized = specialized_evidence(
+        args.performance_summary,
+        args.mutation_report,
+        args.performance_not_run_detail,
+        args.mutation_threshold,
+        args.synthetic_summary,
+        args.synthetic_journey,
+        suite_evidence,
+        args.browser_vitals,
+        args.synthetic_variant,
+    )
+    specialized.extend(trace_contract_evidence(service))
     envelope = {
         "schemaVersion": 1,
         "run": {
-            "id": run_id, "attempt": int(os.getenv("GITHUB_RUN_ATTEMPT", "1")),
+            "id": run_id, "attempt": run_attempt,
             "commit": os.getenv("GITHUB_SHA", "local000"),
             "branch": os.getenv("GITHUB_HEAD_REF") or os.getenv("GITHUB_REF_NAME", "local"),
             "workflow": os.getenv("GITHUB_WORKFLOW", "local"),
-            "url": f"{server}/{repository}/actions/runs/{run_id}" if server and repository else "",
+            "url": run_url,
             "observedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
-        "component": component, "suites": suites(component, service), "testCases": test_cases(component, service), "coverage": coverage(service),
+        "component": component, "suites": suite_evidence, "testCases": test_cases(component, service), "coverage": coverage(service),
+        # v1 intentionally records absence rather than guessing a test-to-production mapping.
+        # A future producer may only advance this after emitting versioned, verified coverage or
+        # dependency edges and measuring recommendations against the preserved full suite (#7207).
+        "testImpact": {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown", "selectionState": "unavailable"},
         "testInfrastructure": {"declared": declared_infrastructure(service), "observed": observations(service)},
         "specializedEvidence": specialized,
+        "diagnostics": browser_diagnostics(args.browser_report_dir, run_id, run_attempt, run_url),
     }
     validate_envelope(envelope)
     output = Path(args.out)

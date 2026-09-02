@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.2...flaky-test-hunter-v0.14.3) (2026-09-01)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** reject a null array element with 400 instead of 500 ([#7994](https://github.com/JiRaska/open-bank-oss/issues/7994)) ([5c29732](https://github.com/JiRaska/open-bank-oss/commit/5c29732654d46781e08be0fa853028a8b0a37fb9))
+
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.1...flaky-test-hunter-v0.14.2) (2026-08-30)
+
+
+### Bug Fixes
+
+* **test-intelligence:** expose deterministic fleet gaps ([938f031](https://github.com/JiRaska/open-bank-oss/commit/938f03118ec1d5fcaa481f4c684a70c2f143360d))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.0...flaky-test-hunter-v0.14.1) (2026-08-27)
+
+
+### Performance
+
+* **flaky-test-hunter:** add read-path smoke coverage ([#7374](https://github.com/JiRaska/open-bank-oss/issues/7374)) ([b93d00d](https://github.com/JiRaska/open-bank-oss/commit/b93d00d3ab19f3705b87212ab0ce60cfd1119f6f))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.13.0...flaky-test-hunter-v0.14.0) (2026-08-26)
+
+
+### Features
+
+* **flaky-test-hunter:** detect unterminated testcontainers ([#7152](https://github.com/JiRaska/open-bank-oss/issues/7152)) ([44ac456](https://github.com/JiRaska/open-bank-oss/commit/44ac4562a52eaa9793eac9dc4996db95c21f5cd8))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.12.0...flaky-test-hunter-v0.13.0) (2026-08-26)
+
+
+### Features
+
+* **testing:** unify governed Test Intelligence evidence ([#7062](https://github.com/JiRaska/open-bank-oss/issues/7062)) ([c95b0be](https://github.com/JiRaska/open-bank-oss/commit/c95b0bec85ae0afee625b872c777490006534faa))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.11.0...flaky-test-hunter-v0.12.0) (2026-08-26)
+
+
+### Features
+
+* **libs-testing:** project executed trace contracts ([#7032](https://github.com/JiRaska/open-bank-oss/issues/7032)) ([54a076f](https://github.com/JiRaska/open-bank-oss/commit/54a076fd7760adba467f1b53ddacb67baca73085))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.10.1...flaky-test-hunter-v0.11.0) (2026-08-26)
+
+
+### Features
+
+* **flaky-test-hunter:** analyze bounded flake history ([#7009](https://github.com/JiRaska/open-bank-oss/issues/7009)) ([efe51b0](https://github.com/JiRaska/open-bank-oss/commit/efe51b07ab0f03ae6dd227d84ad1b8dae42fe542))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.10.0...flaky-test-hunter-v0.10.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** surface failed evidence ([#6998](https://github.com/JiRaska/open-bank-oss/issues/6998)) ([f849536](https://github.com/JiRaska/open-bank-oss/commit/f8495368790c39002b481e5d3d5c156e85d4744e))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.9.0...flaky-test-hunter-v0.10.0) (2026-08-24)
 
 

@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.10.1...finrep-service-v0.10.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* **regulatory:** complete FINREP and COREP previews ([#7296](https://github.com/JiRaska/open-bank-oss/issues/7296)) ([d387b3e](https://github.com/JiRaska/open-bank-oss/commit/d387b3ea51293416dc15a243d248564c2eeacf84))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.10.0...finrep-service-v0.10.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **regulatory:** show actual values before first close ([#7228](https://github.com/JiRaska/open-bank-oss/issues/7228)) ([c700d8f](https://github.com/JiRaska/open-bank-oss/commit/c700d8fc091fd2a73547942ea5020d4ee58af959))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.4...finrep-service-v0.10.0) (2026-08-26)
+
+
+### Features
+
+* **finrep:** add XBRL CSV preflight ([#7125](https://github.com/JiRaska/open-bank-oss/issues/7125)) ([5fa1c63](https://github.com/JiRaska/open-bank-oss/commit/5fa1c6351310a9d6094535522887d5cc41f9c3d6))
+
+## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.3...finrep-service-v0.9.4) (2026-08-26)
+
+
+### Bug Fixes
+
+* **finrep:** restore regulatory previews at runtime ([#7043](https://github.com/JiRaska/open-bank-oss/issues/7043)) ([d688dc4](https://github.com/JiRaska/open-bank-oss/commit/d688dc4c3596bf41cf17abf7b161c4f9b6904882))
+
+## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.2...finrep-service-v0.9.3) (2026-08-26)
+
+
+### Bug Fixes
+
+* **finrep:** expose official coverage gaps ([#7070](https://github.com/JiRaska/open-bank-oss/issues/7070)) ([4676ba0](https://github.com/JiRaska/open-bank-oss/commit/4676ba03068ecb6ac7004b9958f6802c6460cf94))
+
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.1...finrep-service-v0.9.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* **finrep:** align previews with EBA 4.2 ([#7046](https://github.com/JiRaska/open-bank-oss/issues/7046)) ([72c7ff8](https://github.com/JiRaska/open-bank-oss/commit/72c7ff8a3429abe0ba7b79eda154afb3db60e97e))
+
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.9.0...finrep-service-v0.9.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **finrep:** select immutable reporting periods ([#7001](https://github.com/JiRaska/open-bank-oss/issues/7001)) ([9302207](https://github.com/JiRaska/open-bank-oss/commit/9302207dd94677762283f4a6d87c0fdac5ce0bef))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.8.2...finrep-service-v0.9.0) (2026-08-24)
 
 

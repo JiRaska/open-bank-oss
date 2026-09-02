@@ -121,6 +121,7 @@ class InterestEventOutboxImpl @Inject constructor(private val sf: Mutiny.Session
     @WithTransaction override fun append(message: OutboxMessage): Uni<Void> {
         val e = InterestOutboxEntity().apply {
             eventId = message.eventId
+            synthetic = message.synthetic
             aggregateId = message.aggregateId
             eventType = message.eventType
             payload = message.payload

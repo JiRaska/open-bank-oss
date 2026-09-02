@@ -68,8 +68,13 @@ class FlakyTestModelsTest {
             FlakyTestCheckType.PACT_PROVIDER_CLASS_COLLISION,
             FlakyTestCheckType.TEST_COUNT_DRIFT,
             FlakyTestCheckType.MISSING_EXECUTION_EVIDENCE,
+            FlakyTestCheckType.FAILED_TEST_EVIDENCE,
+            FlakyTestCheckType.OBSERVED_FAILING_TESTS,
+            FlakyTestCheckType.OBSERVED_FLAKY_TESTS,
             FlakyTestCheckType.STALE_TEST_EVIDENCE,
             FlakyTestCheckType.UNPROVEN_TEST_INFRASTRUCTURE,
+            FlakyTestCheckType.UNTERMINATED_TEST_INFRASTRUCTURE,
+            FlakyTestCheckType.REQUIRED_CONTROL_GAP,
         )
     }
 

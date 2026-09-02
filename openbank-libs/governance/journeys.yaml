@@ -39,14 +39,18 @@
 #   money_moving   true when the journey initiates a real payment or ledger posting.
 #   cronjob        path to the manifest that runs it — the CronJob and the ConfigMap holding
 #                  its k6 script live in that one file (active only). The script is embedded
-#                  rather than kept as a sibling .js so there is no second copy to drift:
-#                  the same reason the external-feed watch reads its URL out of the committed
-#                  config instead of keeping its own.
+#                  rather than kept as a sibling .js so there is no second copy to drift.
+#                  CI extracts this exact ConfigMap scalar for the PR and post-GitOps-merge
+#                  calls; the periodic CronJob mounts it directly. One executable artifact,
+#                  three call sites, enforced by check-journey-catalog.py.
 #   schedule       cron expression, mirrored from the manifest (active only).
 #   target_schedule intended cadence once a planned journey's blocker is removed. It is shown
 #                  in Test Intelligence but never interpreted as proof that a scheduler exists.
 #   falsification  how to make this journey go red on purpose. A journey that has only ever
 #                  been green is unfalsified — the same rule gates.yaml applies to CI gates.
+#   runtime_note    an active journey's known, evidence-backed runtime prerequisite. It is
+#                  rendered beside the live Kubernetes verdict; it never turns a red run
+#                  into a planned or passing one.
 #   blocked_by     what prevents this from running (planned only).
 
 version: 1
@@ -68,9 +72,52 @@ journeys:
       (or scale the customer-edge Rollout to zero) and the run must exit non-zero within one
       schedule interval. The script reads API_BASE / CUSTOMER_BASE / ADMIN_BASE from __ENV
       with the production hosts as defaults, so this is executable rather than a description.
-      The checks assert status < 500, so a backend outage fails the run while an auth
-      challenge does not. Measured against grafana/k6:1.2.0: a failing threshold exits 99, a
-      passing run exits 0.
+      The checks assert the actual edge contracts: 401 for protected API routes and an explicit
+      SSO redirect for Admin UI. A removed route returning 404 therefore fails rather than
+      reading as availability. Measured against grafana/k6:1.2.0: a failing threshold exits 99,
+      a passing run exits 0.
+
+  - id: product-catalog-read
+    title: "Product catalog read path"
+    capability: >-
+      The sandbox product catalog can serve a non-mutating product list through its real
+      HTTP handler and Postgres-backed projection. This is deliberately a service journey,
+      not a claim about an authenticated customer or a payment.
+    status: active
+    severity: ticket
+    money_moving: false
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-product-catalog-read.yaml
+    schedule: "*/10 * * * *"
+    runtime_note: >-
+      The in-cluster network edge is live, but this protected endpoint requires a dedicated
+      read-only client-credentials identity. Until the identity owner provisions that separate
+      Vault-backed secret, failed runs mean missing authentication evidence — not a green
+      catalog or network result. Tracked by #7324.
+    falsification: >-
+      Scale the product-catalog Deployment to zero, break its database connectivity, or set
+      CATALOG_BASE to a route that returns 5xx. The exact mounted k6 program must fail its
+      status, JSON-shape, and latency thresholds within one scheduled interval.
+
+  - id: admin-ui-sso-boundary
+    title: "Admin UI SSO boundary"
+    capability: >-
+      The public Admin UI reaches and renders its Keycloak SSO boundary in a real browser. This
+      proves the unauthenticated hand-off only; it does not claim an authenticated operator flow.
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
+    browser_variants: [chromium, firefox]
+    schedule: "13 */2 * * *"
+    environment: sandbox
+    falsification: >-
+      Return a 5xx from the Admin UI, remove the Keycloak SSO boundary, or point the browser
+      target at a host that cannot render it. Each scheduled browser variant must fail and retain
+      its immutable evidence envelope.
+    runtime_note: >-
+      This is deliberately credential-free. A separate least-privilege canary identity is still
+      required before an authenticated operator journey can be claimed.
 
   # ---------------------------------------------------------------------------------------
   # PLANNED — the journeys that would have caught the two reported outages. Both need a
@@ -257,6 +304,26 @@ journeys:
     blocked_by: >-
       ADR-0252 phase 3 (#4348) — requires managed Android/iOS canary devices, signed builds,
       synthetic credentials and acknowledgement/cleanup. JVM screenshot tests cannot substitute.
+
+  - id: admin-operator-access
+    title: "Admin operator sign-in and Test Intelligence access"
+    capability: >-
+      A least-privilege bank-owned operator can complete the sandbox SSO flow and reach the
+      Test Intelligence workspace with the intended role boundary. This proves the deployed
+      admin browser path, independently of the Admin UI's CI Playwright evidence.
+    status: planned
+    severity: ticket
+    money_moving: false
+    target_schedule: "*/30 * * * *"
+    falsification: >-
+      Remove the operator role mapping, break the SSO callback, or deny the Test Intelligence
+      API: the journey must fail after authentication on the missing protected workspace or its
+      authorization boundary, not pass merely because the public login page returned HTML.
+    blocked_by: >-
+      Needs a least-privilege bank-owned Keycloak canary identity plus a browser-capable,
+      digest-pinned runner isolated from the current protocol-only k6 CronJob. The existing
+      read-only k6 pod has no Chromium runtime; adding one without a separate security and
+      credential boundary would turn a monitoring gap into a privileged browser foothold.
 
 # ---------------------------------------------------------------------------------------
 # MONEY-PATH ACCOUNTABILITY (ADR-0252 phase 2, #4348)

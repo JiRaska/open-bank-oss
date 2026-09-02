@@ -8,18 +8,14 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `referral` service. Data domain **open-banking**,
 > classification **confidential**, datastore **PostgreSQL**.
 
-## Deployment status — NOT DEPLOYED
+## Deployment status — WORKLOAD STAGED, ACTIVATION PENDING
 
-**This service has no workload anywhere in `openbank-infra/gitops/`** — no Deployment,
-no Rollout, and therefore no namespace, no CNPG cluster, no NetworkPolicy and no
-PodMonitor coverage. It is a released component (it has a `version.txt`) that has never
-run, so **every `kubectl` command below names a namespace that does not exist** and every
-procedure here is a plan rather than a rehearsed one.
-
-The production-readiness matrix reports it as **NOT-DEPLOYED** rather than NO-GO for the
-same reason: the cells it fails are consequences of the absent workload, not controls
-someone skipped, and none of them can be closed by a repo change. Whether this service
-should be deployed is an owner decision — see the service's own `CLAUDE.md`.
+**GitOps deliberately declares zero replicas for this workload.** This is not a live
+service and does not authorize a replica increase, restart, log inspection, traffic claim,
+or metrics/health assertion. Activation remains the separately reviewed step after the
+pinned image, GitOps sync, and live cluster-health evidence are available. After that
+step, health must be checked on the management endpoint `:8086`;
+the public HTTP port is not a health-evidence substitute.
 
 ## Service identity
 
@@ -41,18 +37,13 @@ should be deployed is an owner decision — see the service's own `CLAUDE.md`.
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `referral`.
 
-## Health & probes
+## Runtime operations — DEFERRED
 
-- Readiness: `GET :8155/q/health/ready` · Liveness: `GET :8155/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `referral`); dashboards in Grafana.
-- Logs: `kubectl logs -n referral deploy/referral-service -f`, or Loki
-  `{namespace="referral"}`.
-
-## Routine operations
-
-- **Restart:** `kubectl rollout restart deploy/referral-service -n referral` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/referral-service -n referral --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a manual scale is reverted by ArgoCD).
-- **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
+Do not increase replicas, restart, or use log/metrics commands to activate this staged
+workload. The reviewed activation procedure must first establish the signed image,
+GitOps sync, and actual cluster health. It will then use management health endpoints
+`GET :8086/q/health/ready` and
+`GET :8086/q/health/live`.
 
 ## Common failure modes
 
@@ -66,9 +57,8 @@ triaging an incident that starts on `referral`.
 
 ## Disaster recovery
 
-- **RPO/RTO: undefined** — no backup is configured yet (see the prerequisite below), so no recovery-point/time guarantee can be made today.
-- **⚠ Prerequisite NOT met:** this PostgreSQL cluster has **no backup configured** (`barmanObjectStore` absent — prod-readiness C5=1). **DR is not achievable today** and the RPO/RTO targets above do NOT yet apply. Enabling the CNPG backup is the blocking prerequisite (see the backup sweep). Once enabled, the procedure is:
-- **Mechanism (after enablement):** CNPG continuous WAL + base backups → PITR.
+- **RPO target:** ≤ 5 min (continuous archiving). **RTO target:** ≤ 30 min (restore + warm-up).
+- **Mechanism:** CloudNativePG continuous WAL archiving + base backups to S3 (`barmanObjectStore`). Point-in-time recovery (PITR).
 - **Restore:** create a `Cluster` with `bootstrap.recovery` pointing at the backup object store; CNPG replays WAL to the target time. See runbook 0003 (PG major upgrade) for the cluster-recreate mechanics.
 - **Verify:** `kubectl cnpg status <db>-rw -n <ns>` shows the recovered cluster Healthy and the `*-app` secret regenerated.
 

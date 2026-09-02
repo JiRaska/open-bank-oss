@@ -5,6 +5,7 @@
 package com.openbank.finrep.application.usecase
 
 import com.openbank.finrep.application.port.inbound.GetCorepTemplateQuery
+import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
@@ -27,6 +28,18 @@ class CorepServiceTest {
     // The REAL metrics adapter over a SimpleMeterRegistry rather than a mock port, so the
     // instrumentation assertions below fail if the use case stops emitting.
     private val registry = SimpleMeterRegistry()
+
+    @Test
+    fun `live working preview never reads frozen evidence implicitly`(): Unit = runBlocking {
+        val asOf = LocalDate.of(2026, 7, 31)
+        coEvery { ledgerPort.getLiveTrialBalance(asOf) } returns snapshot(emptyList(), ledgerSays = true)
+        val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
+
+        service.getTemplate(GetCorepTemplateQuery("C_01.00", asOf, TrialBalanceEvidence.LIVE_PREVIEW))
+
+        coVerify(exactly = 1) { ledgerPort.getLiveTrialBalance(asOf) }
+        coVerify(exactly = 0) { ledgerPort.getTrialBalance(any()) }
+    }
 
     @Test
     fun `getTemplate dispatches C_01_00 to the own funds mapper`(): Unit = runBlocking {

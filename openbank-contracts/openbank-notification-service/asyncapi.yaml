@@ -175,7 +175,7 @@ components:
             an unrelated template being added.
         outcome:
           type: string
-          enum: [SENT, SUPPRESSED, FAILED, BOUNCED]
+          enum: [SENT, SUPPRESSED, FAILED, BOUNCED, REROUTED]
           description: |
             The terminal fate. `SENT` means the channel adapter accepted it — for EMAIL that is an
             SMTP accept, which a later bounce can still refine.
@@ -184,6 +184,10 @@ components:
             because ADR-0239 D4 gives it a defined meaning (a later refinement of an earlier `SENT`),
             so a consumer written now must already tolerate it; adding it later would be the breaking
             change. Do not read its presence here as evidence bounce handling exists.
+
+            `REROUTED` means a PUSH had no active device and a separate generic EMAIL request was
+            durably created in the same transaction. It does not mean that email was delivered; the
+            EMAIL row emits its own terminal outcome.
         reason:
           type: [string, 'null']
           description: |
@@ -202,7 +206,8 @@ components:
             one), `mailer_mocked` (issue #4737 — the EMAIL mirror of the above: the mailer is the
             Quarkus mock, so nothing left the process. A mocked send completes *successfully*, so
             this case used to be reported as `SENT` with `sentAt` populated, for a message that was
-            never transmitted). Null on `SENT`.
+            never transmitted), `rerouted_no_active_device` (a PUSH was atomically handed to a
+            separate generic EMAIL request). Null on `SENT`.
         occurredAt:
           type: string
           format: date-time

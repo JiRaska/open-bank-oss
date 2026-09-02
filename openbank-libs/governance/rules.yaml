@@ -373,14 +373,10 @@ change_requirements:
         reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
-      - topic: "openbank.delegation.events"
-        reason: "Tracked future work (ADR-0232 D3): product-service enforcement projections (account/card/savings) are the next implementation slice and are the intended consumers — the publisher ships first so the event contract is stable before consumers land. Re-triage: remove this entry with the first projection consumer PR."
       - topic: "proposal-events"
-        reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). Nothing is published today and three facts say so: the topic is declared nowhere under openbank-infra/, the service is absent from auto-deploy.yml's ALL_SERVICES, and no KafkaUser exists for it. The intended consumer is the oversight/review surface that ADR-0244 D7 describes, not yet built — the producer ships first so the wire shape is stable before consumers land, same shape as the delegation.events and engagement.events entries above. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free."
+        reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). The producer is now fully deployed and the exemption is about the CONSUMER side only: openbank-infra/gitops/components/case-coordinator/kafka-case-coordinator-mtls.yaml declares the KafkaUser with Write+Describe on this topic and says in words \"producer-only ... No consumer side\", and kafka-topic.yaml (the Strimzi KafkaTopic, which does exist) says \"Consumer: none yet\". The intended consumer is the oversight/review surface ADR-0244 D7 describes; the ADR-0031 approval queue reads proposals through agent-service's store/REST today. Same shape as the delegation.events and incentive.events entries above. CORRECTED 2026-08-31 (#7740): this reason previously rested on three facts that are all false on main — the topic IS declared under openbank-infra/ (kafka-topic.yaml + the mTLS ACL), openbank-case-coordinator-agent IS in auto-deploy.yml's ALL_SERVICES, and its KafkaUser DOES exist. The conclusion survived its own evidence, which is the failure mode: a stale justification reads as a verified one. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
-      - topic: "openbank.billing.fee.event"
-        reason: "ADR-0248, temporary — the consumer exists but isn't on main yet: document-service's AnnualFeeSummaryReadyConsumer is in #4122 (open). This is a real cross-PR merge-order gap, not a #889-class abandoned producer. Re-triage: remove this entry once #4122 merges."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -758,12 +754,19 @@ money_path_services:
   - openbank-delegation-service            # ADR-0232: mints payment rights (customer-to-party grants) without moving
                                             # money itself — money-path for the same reason consent/vop are. Threat
                                             # model: docs/threat-models/openbank-delegation-service.md. four-eyes assessed:
-                                            # delegation.offer/revoke/suspend are self-service or fraud-signal actions
-                                            # with SCA-bound ceremonies on both ends; the bank-side suspend lands via
-                                            # the fraud pipeline, not an operator console, so there is no
-                                            # maker/checker pair to gate yet. Revisit when the operator
-                                            # backoffice surface ships.
-  - openbank-fraud-service                # ADR-0084: v4 rule engine live; domestic-payment enforcement gate merged (issue #667, flag default-off pending risk-team threshold calibration)
+                                            # delegation.offer/revoke are self-service with SCA-bound ceremonies on both
+                                            # ends. The bank-side suspend was justified here as landing "via the fraud
+                                            # pipeline, not an operator console" — that is NOT true (#4403): fraud scoring
+                                            # is shadow-only and drives no suspension, so this exemption rested on a
+                                            # control that does not exist. The exemption still holds on the narrower and
+                                            # true ground that no operator suspend endpoint has shipped, so there is no
+                                            # maker/checker pair to gate yet. Revisit when the operator backoffice
+                                            # surface ships, and do not re-derive it from the fraud pipeline.
+  - openbank-fraud-service                # ADR-0084: v4 rule engine live; scoring is SHADOW-ONLY on every rail. The domestic-payment
+                                           # enforcement gate (issue #667) was MERGED AND THEN DELETED by 189fe7b03 (PR #2122,
+                                           # closing issue #1917) — this comment credited it as merely flag-gated until #4403.
+                                           # No fraud verdict changes any payment outcome today: the four wired rails call
+                                           # POST /fraud/score and log the result. See ADR-0084's 2026-08-09 correction block.
                                            # four-eyes assessed (issue #938 follow-up): the only REST surface today is a stateless
                                            # POST /fraud/score (fraud.score) — no operator case-decision, rule-config, or manual
                                            # override endpoint exists yet, so there is nothing real to maker-checker gate. Revisit
@@ -1093,6 +1096,7 @@ coverage:
     provenance_required: [commit, workflow, run_attempt, collected_at]
     testcontainers_runtime_proof: required-when-shared-resource-is-used
     run_history: immutable-per-attempt-artifact-30-days
+    browser_failure_diagnostics: metadata-only-authenticated-artifact-7-days
     compatibility: raw-junit-and-kover-remain-readable-during-expand-migrate-verify
   floors:
     default: 39                         # current openbank-libs floor (ADR-0020)
@@ -1995,8 +1999,13 @@ ci_runners:
     deploy_only_signed_digests: true
   gate: ci-runner-governance
   enforced: planned                     # ADR-0053 Accepted; lint + tofu enable land on rollout
-  target_enforce_date: "2026-08-31"   # ADR-0144
-  blocked_on: "a CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) + the OpenTofu apply for the three scale sets have not both landed yet"
+  target_enforce_date: "2026-11-30"   # ADR-0144. Moved from 2026-08-31, which passed with the
+                                      # blocker unresolved and turned an enforced gate red on every
+                                      # PR regardless of its diff. Extending the horizon is the
+                                      # sanctioned move here; the alternative -- flipping `enforced`
+                                      # to satisfy the date -- would claim a control this repo does
+                                      # not have.
+  blocked_on: "the CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) does not exist: no file under .github/scripts or .github/gates references that key (control: money_path_services is referenced by two, so the probe sees rule keys). The OpenTofu half is less clear than this line used to claim -- arc-runners.tf and arc-runner-reaper.tf are in the tree, but a committed .tf is not an applied one, and that is not checkable from this repository. Corroborating evidence that the pools are not fully provisioned: #6458 records openbank-batch as a declared pool with no capacity and no consumer."
 
 # ---------------------------------------------------------------------------------------
 # Infra apply (ADR-0060). Closes the "as-code without applied" gap: CI applies the

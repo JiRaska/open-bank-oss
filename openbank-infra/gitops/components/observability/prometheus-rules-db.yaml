@@ -150,11 +150,7 @@ spec:
           # (2026-08-19): primaries with a recovery point = 54, replicas without = 19, primaries
           # without = 0 — so today's silence is a measured zero, not a join that never matches.
           #
-          # NOT paired with a backup-staleness alert, deliberately:
-          # cnpg_collector_last_available_backup_timestamp reported swift-service-db as 37.7h stale
-          # while its ScheduledBackup had completed 13h earlier, so any threshold under ~48h fires
-          # on healthy clusters. That metric's semantics need establishing before an alert rests on
-          # it (issue filed).
+          # Paired with PostgresBackupStale below since #5756 established the metric's semantics.
           expr: |
             cnpg_collector_first_recoverability_point == 0
               and on(namespace, pod) cnpg_pg_replication_in_recovery == 0
@@ -164,6 +160,48 @@ spec:
           annotations:
             summary: "Postgres has NO recovery point on {{ $labels.namespace }}/{{ $labels.pod }}"
             description: "This primary has no first recoverability point — no base backup exists, so the database cannot be restored to any moment. WAL archiving alone is not a backup. Check `kubectl get cluster -n {{ $labels.namespace }}` for a barmanObjectStore, then force a base backup with an on-demand `kind: Backup`. Verify by listing the destination in S3, never by reading ContinuousArchiving (runbook 0003)."
+        - alert: PostgresBackupStale
+          # The companion PostgresNoRecoveryPoint deliberately shipped without (#5755): the metric
+          # had reported swift-service-db 37.7h stale while its ScheduledBackup completed 13h
+          # earlier, so "any threshold under ~48h fires on healthy clusters". #5756 re-measured it
+          # and that premise does not hold.
+          #
+          # cnpg_collector_last_available_backup_timestamp mirrors the Cluster's own
+          # .status.lastSuccessfulBackup. Measured 2026-08-26 21:14Z: swift-service-db-2 read
+          # 17.15h and its status said 2026-08-26T04:05:05Z -- the same instant, not a cycle behind.
+          # Across 57 primaries, 56 sat in a 16.4-19.16h band and every ScheduledBackup in the
+          # fleet is daily, so the 37.7h reading was a one-off, not a structural lag.
+          #
+          # 30h, not the 2x-interval 48h the issue proposed: 48h is two missed dailies before
+          # anyone hears, and the measured healthy ceiling is 19.16h, so 30h still leaves ~11h of
+          # headroom over the worst healthy cluster while catching a single missed backup.
+          #
+          # The `> 0` guard is the load-bearing clause, and it is the gauge-boot-zero shape again:
+          # a cluster that has never had a base backup reports the metric as 0, so `time() - 0` is
+          # ~56 YEARS, not a large-but-plausible age. Without the guard this alert pages for
+          # pricing-db-1 -- the exact cluster PostgresNoRecoveryPoint is already firing on -- and
+          # would do the same for every freshly created cluster from the moment it is scraped until
+          # its first backup. "No backup at all" is that alert's job; this one is only about a
+          # backup chain that has stopped advancing.
+          #
+          # The primary filter is currently redundant (replicas report exactly 0 and are already
+          # excluded by the guard above) and is kept deliberately: it states the semantics rather
+          # than relying on the sentinel value staying 0, and it matches PostgresNoRecoveryPoint.
+          #
+          # Verified against live Prometheus, 2026-08-26 (series counts):
+          #   as written                              -> 0    (no false positives)
+          #   same expression at 16h                  -> 56   (the join is not vacuous)
+          #   without the `> 0` guard, at 30h         -> 1    (pricing-db-1, the double-page)
+          expr: |
+            (time() - cnpg_collector_last_available_backup_timestamp) > 30 * 3600
+              and cnpg_collector_last_available_backup_timestamp > 0
+              and on(namespace, pod) cnpg_pg_replication_in_recovery == 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Postgres base backup has gone stale on {{ $labels.namespace }}/{{ $labels.pod }}"
+            description: "This primary's newest completed base backup is over 30h old and every ScheduledBackup in the fleet is daily, so at least one run has been missed. A recovery point still exists, so this is not PostgresNoRecoveryPoint -- the chain has stopped advancing. Check `kubectl get scheduledbackup -n {{ $labels.namespace }}` and `kubectl get backup -n {{ $labels.namespace }}` for the newest attempt and its failure, and confirm against the Cluster's own .status.lastSuccessfulBackup, which is what this metric mirrors (runbook 0003)."
         - alert: PostgresLowCacheHitRatio
           expr: |
             sum by (namespace, pod) (rate(cnpg_pg_stat_database_blks_hit[10m]))

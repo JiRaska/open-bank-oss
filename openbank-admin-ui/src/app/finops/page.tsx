@@ -18,6 +18,7 @@ import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { StatusBadge, type Tone } from '@/components/ui'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -181,7 +182,7 @@ function KpiCard({ icon, label, value, sub, color, accent }: {
 
 function RunwayBar({ days, max }: { days: number; max: number }) {
   const pct = Math.min(Math.round((days / max) * 100), 100)
-  const color = days > 180 ? '#16a34a' : days > 90 ? '#d97706' : '#dc2626'
+  const color = days > 180 ? 'var(--success-text)' : days > 90 ? 'var(--warning-text)' : 'var(--danger-text)'
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
       <div style={{ flex: 1, height: '6px', background: 'var(--surface-3)', borderRadius: '3px', overflow: 'hidden', minWidth: '60px' }}>
@@ -195,22 +196,17 @@ function RunwayBar({ days, max }: { days: number; max: number }) {
 }
 
 function TierBadge({ tier }: { tier: string }) {
-  const cfg: Record<string, { label: string; color: string; bg: string }> = {
-    standard:  { label: 'Standard',  color: '#16a34a', bg: '#dcfce7' },
-    supported: { label: 'Supported', color: '#16a34a', bg: '#dcfce7' },
-    lts:       { label: 'LTS',       color: '#16a34a', bg: '#dcfce7' },
-    rolling:   { label: 'Rolling',   color: '#2563eb', bg: '#dbeafe' },
-    extended:  { label: 'Extended',  color: '#d97706', bg: '#fef9c3' },
-    end_of_life: { label: 'EOL',     color: '#dc2626', bg: '#fee2e2' },
-    upcoming:  { label: 'Upcoming',  color: '#6366f1', bg: '#ede9fe' },
+  const cfg: Record<string, { label: string; tone: Tone }> = {
+    standard: { label: 'Standard', tone: 'success' },
+    supported: { label: 'Supported', tone: 'success' },
+    lts: { label: 'LTS', tone: 'success' },
+    rolling: { label: 'Rolling', tone: 'info' },
+    extended: { label: 'Extended', tone: 'warning' },
+    end_of_life: { label: 'EOL', tone: 'danger' },
+    upcoming: { label: 'Upcoming', tone: 'accent' },
   }
-  const c = cfg[tier] ?? { label: tier, color: 'var(--text-secondary)', bg: 'var(--surface-2)' }
-  return (
-    <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
-      color: c.color, background: c.bg, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-      {c.label}
-    </span>
-  )
+  const c = cfg[tier] ?? { label: tier, tone: 'neutral' as Tone }
+  return <StatusBadge status={tier} label={c.label} tone={c.tone} />
 }
 
 function KindIcon({ kind }: { kind: string }) {
@@ -226,7 +222,11 @@ function KindIcon({ kind }: { kind: string }) {
 
 function HeapBar({ pct, efficiency }: { pct: number | null; efficiency: string }) {
   if (pct === null) return <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>
-  const color = efficiency === 'high' ? '#dc2626' : efficiency === 'normal' ? '#16a34a' : '#6366f1'
+  const color = efficiency === 'high'
+    ? 'var(--danger-text)'
+    : efficiency === 'normal'
+      ? 'var(--success-text)'
+      : 'var(--accent-text)'
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
       <div style={{ flex: 1, height: '5px', background: 'var(--surface-3)', borderRadius: '3px', overflow: 'hidden', minWidth: '60px' }}>

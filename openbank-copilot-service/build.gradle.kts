@@ -56,6 +56,9 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // The custom pgvector lifecycle resources emit the same secret-free runtime evidence as the
+    // shared Testcontainers kit; this remains strictly on the test classpath.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.rest.assured.kotlin)
     // Consumer-driven contract with customer-edge (ADR-0063, issue #2322).
     testImplementation(libs.pact.consumer)

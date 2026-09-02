@@ -87,12 +87,12 @@ fi
 
 # Third assertion: with every pin at TIP, nothing lags (loop-stability guarantee).
 cat > gitops/deploy.yaml <<EOF
-image: repo/openbank-current-svc:sandbox-${TIP}
+image: repo/openbank-current-svc:sandbox-${TIP}-run32826611610
 image: repo/openbank-stale-svc:sandbox-${TIP}
 EOF
 GOT2="$(bash "$PROBE" "$WORK/gitops")"
 if [ "$(echo "$GOT2" | jq -c .)" != "[]" ]; then
-  echo "FAIL: services pinned at tip must not lag (would loop). got: $GOT2"
+  echo "FAIL: current pins, including a manual-refresh tag, must not lag (would loop). got: $GOT2"
   exit 1
 fi
 

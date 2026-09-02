@@ -90,6 +90,20 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-26** — The existing authenticated initiation edge now carries a bounded synthetic
+  classification into the existing `domestic_payment_outbox` event boundary. The resource copies
+  it only from the `SyntheticTaintRequestFilter` request property after that filter has accepted a
+  configured trusted principal; it does **not** accept a request header, JWT claim, MDC value, or
+  an unconfigured caller as synthetic. The property is persisted on the payment-created outbox
+  message so an asynchronous consumer can retain the classification instead of treating a canary
+  payment as real. This adds no caller, role, OPA grant, endpoint, payment-control bypass, or new
+  network edge: authentication, authorisation, SCA, limits, sanctions and fraud remain on the
+  normal initiation path. **STRIDE-S/T:** an untrusted caller attempting to label a real payment as
+  synthetic is mitigated by the fail-closed filter decision and by copying only that server-side
+  property. **Residual risk:** no trusted principal is configured and no downstream regulatory
+  exclusion is claimed here; activating either remains a separately reviewed production change.
+  Rollback: revert this propagation, which restores the previous default of `synthetic=false`.
+
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass: sanctions, fraud, limits and SCA continue to run. It prevents a canary payment becoming indistinguishable before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a

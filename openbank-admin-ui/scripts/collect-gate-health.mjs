@@ -41,6 +41,11 @@ const getArg = (flag, dflt) => {
 const OUT = getArg('--out', 'gate-health.json')
 const RUNS = parseInt(getArg('--runs', '20'), 10)
 const GATE_DETAIL_RUNS = parseInt(getArg('--gate-detail-runs', '5'), 10)
+// A build-time observability collector must degrade, never strand a deployment
+// behind one unavailable GitHub API connection. Keep this bounded and allow a
+// runner-specific override for diagnosed transient network conditions.
+const REQUEST_TIMEOUT_MS = Math.max(1_000, Math.min(30_000,
+  parseInt(process.env.OPENBANK_GATE_HEALTH_TIMEOUT_MS || '5000', 10) || 5000))
 const now = new Date()
 
 const TOKEN = process.env.GITHUB_TOKEN || ''
@@ -50,6 +55,7 @@ const API = 'https://api.github.com'
 async function gh(pathname, opts = {}) {
   const res = await fetch(`${API}${pathname}`, {
     ...opts,
+    signal: opts.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: {
       Authorization: `Bearer ${TOKEN}`,
       Accept: 'application/vnd.github+json',

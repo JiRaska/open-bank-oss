@@ -4,8 +4,12 @@
 
 package com.openbank.anacredit.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import org.opentest4j.TestAbortedException
+import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.PostgreSQLContainer
+import org.testcontainers.utility.DockerImageName
 
 /**
  * Spins up a real PostgreSQL (Testcontainers) and points the datasource at it, so a @QuarkusTest
@@ -15,24 +19,38 @@ import org.testcontainers.containers.PostgreSQLContainer
  */
 class PostgresTestResource : QuarkusTestResourceLifecycleManager {
 
-    private lateinit var postgres: PostgreSQLContainer<*>
+    private var postgres: PostgreSQLContainer<*>? = null
 
     override fun start(): Map<String, String> {
-        postgres = PostgreSQLContainer("postgres:18-alpine")
+        if (!DockerClientFactory.instance().isDockerAvailable) {
+            throw TestAbortedException("Docker not available — skipping Testcontainers IT")
+        }
+        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
             .withDatabaseName("openbank_anacredit")
             .withUsername("openbank")
             .withPassword("openbank")
-        postgres.start()
-        val reactiveUrl = "postgresql://${postgres.host}:${postgres.firstMappedPort}/${postgres.databaseName}"
+        // Keep the handle before start: Quarkus calls stop() after a partial start too, where
+        // lifecycle cleanup must remain visible in Test Intelligence evidence.
+        postgres = pg
+        pg.start()
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
+        val reactiveUrl = "postgresql://${pg.host}:${pg.firstMappedPort}/${pg.databaseName}"
         return mapOf(
             "quarkus.datasource.reactive.url" to reactiveUrl,
-            "quarkus.datasource.jdbc.url" to postgres.jdbcUrl,
-            "quarkus.datasource.username" to postgres.username,
-            "quarkus.datasource.password" to postgres.password,
+            "quarkus.datasource.jdbc.url" to pg.jdbcUrl,
+            "quarkus.datasource.username" to pg.username,
+            "quarkus.datasource.password" to pg.password,
         )
     }
 
     override fun stop() {
-        if (::postgres.isInitialized) postgres.stop()
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
+    }
+
+    private companion object {
+        const val POSTGRES_IMAGE = "postgres:18-alpine"
     }
 }

@@ -79,7 +79,7 @@ class YearCloseResource(private val yearCloseUseCase: YearCloseUseCase) {
     @POST
     @Path("/{fiscalYear}")
     @RolesAllowed(Roles.OPERATOR)
-    @Authorize(action = "ledger.create", resource = "#fiscalYear")
+    @Authorize(action = "ledger.close.draft", resource = "#fiscalYear")
     @Operation(summary = "Create or refresh the DRAFT year-close record from the current trial balance")
     suspend fun createDraft(@PathParam("fiscalYear") fiscalYear: Int): Response {
         val record = yearCloseUseCase.createDraft(

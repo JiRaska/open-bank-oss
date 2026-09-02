@@ -19,7 +19,7 @@
   gap: 9px;
   min-width: 230px;
   padding: 8px 11px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
   background: var(--surface-2);
   border: 1px solid var(--border);

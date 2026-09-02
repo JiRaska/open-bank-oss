@@ -81,6 +81,12 @@ quarkus:
   # policy is covered by the OPA gate and the rego tests, neither of which needs the app running.
   authz:
     enforce: false
+  openbank:
+    campaign:
+      # HTTP contract tests exercise a seeded, complete local projection. Production stays
+      # fail-closed until a reviewed rollout/catch-up confirmation enables this read model.
+      incentive-outcome-projection:
+        ready: true
 
 
 openbank:
@@ -90,6 +96,10 @@ openbank:
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-campaign}
   campaign:
+    # Never render an empty local read model as an authoritative zero during the first Kafka
+    # catch-up. A reviewed operational step enables this only after the consumer is usable.
+    incentive-outcome-projection:
+      ready: ${CAMPAIGN_INCENTIVE_OUTCOME_PROJECTION_READY:false}
     decision-task-queue: ${OPENBANK_CAMPAIGN_DECISION_TASK_QUEUE:openbank-campaign-decision}
     worker:
       enabled: ${CAMPAIGN_WORKER_ENABLED:true}
@@ -101,6 +111,9 @@ openbank:
 
 consent-service:
   url: http://localhost:8106
+
+incentive-service:
+  url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
 
 analytics:
   clickhouse-url: ${CLICKHOUSE_URL:http://localhost:8123}
@@ -126,6 +139,21 @@ mp:
         value:
           serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
+      # Producer-owned, no-PII reservation outcomes. Earliest is deliberate: this derived funnel
+      # must rebuild retained attributed history when the consumer is first rolled out.
+      incentive-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.campaign.incentive-events-in
+        connector: smallrye-kafka
+        topic: openbank.incentive.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-incentive-events
+        auto:
+          offset:
+            reset: earliest
       # Attributable in-app attention events emitted by engagement-service.  This is aggregate-only
       # reporting: lag can make a metric temporarily unavailable, but can never affect delivery or
       # enrolment.  Start at latest so enabling the projection cannot reprocess historic, pre-

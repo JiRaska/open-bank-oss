@@ -149,7 +149,7 @@ charters:
 
   - id: flaky-test-hunter
     status: registered
-    prompts: [system.v1]
+    prompts: [system.v1, system.v2]
     source: openbank-flaky-test-hunter LlmDiagnosisAdapter.SYSTEM_PROMPT
     placeholders: []
 

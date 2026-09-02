@@ -16,10 +16,13 @@ import { CURRENCY_META } from '@/lib/currency-meta'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { FxTrendChart } from '@/components/fx/FxTrendChart'
 
 interface FxRate { baseCurrency: string; quoteCurrency: string; rate: number; timestamp: string }
 interface FxConversion { id: string; fromCurrency: string; toCurrency: string; fromAmount: number; toAmount: number; rate: number; status: string; createdAt: string }
 interface CnbRate { currencyCode: string; amount: number; rate: number; validFor: string; country: string; currency: string }
+interface FxTrendPoint { date: string; rate: string; timestamp: string }
+interface FxTrend { indicative: true; base: string; quote: string; points: FxTrendPoint[]; unavailable?: boolean }
 interface EcbRate { currency: string; rate: number; date: string }
 interface CurrencyMetaType { flag: string; symbol: string; name: string }
 
@@ -176,6 +179,21 @@ export default function FxPage() {
   const [history, setHistory] = useState<Array<{ timestamp: string; source: string; pair: string; rate: number }>>([])
   const [activeTab, setActiveTab] = useState<'cnb' | 'ecb' | 'bank'>('bank')
 
+  // The three-calendar-month ČNB reference-mid trend (issue #7735) — real chronological data
+  // from fx-service via /api/fx/history, the SAME normalization the customer app renders
+  // (src/lib/fx/trend.ts mirrors customer-edge's mapFxHistoryList). Never a client-memory snapshot.
+  const [trend, setTrend] = useState<FxTrend | null>(null)
+  const [trendPair] = useState<{ base: string; quote: string }>({ base: 'EUR', quote: 'CZK' })
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/fx/history?base=${trendPair.base}&quote=${trendPair.quote}`, { cache: 'no-store' })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (!cancelled) setTrend(data) })
+      .catch(() => { if (!cancelled) setTrend(null) })
+    return () => { cancelled = true }
+  }, [trendPair])
+
   const loadData = useCallback(async () => {
     setLoading(true)
     setUnavailable(null)
@@ -198,15 +216,12 @@ export default function FxPage() {
       setFxStatus((data.fxService?.status as FxStatus | undefined) ?? (data.fxService?.up ? 'up' : 'down'))
       setConversions(data.fxService?.conversions ?? [])
 
-      const nowStr = new Date().toISOString()
-      const snap: Array<{ timestamp: string; source: string; pair: string; rate: number }> = []
-      ;(data.cnb?.rates ?? []).slice(0, 5).forEach((r: CnbRate) => {
-        snap.push({ timestamp: nowStr, source: 'CNB', pair: `${r.currencyCode}/CZK`, rate: r.rate / r.amount })
-      })
-      ;(data.ecb?.rates ?? []).slice(0, 5).forEach((r: EcbRate) => {
-        snap.push({ timestamp: nowStr, source: 'ECB', pair: `EUR/${r.currency}`, rate: r.rate })
-      })
-      setHistory(prev => [...snap, ...prev].slice(0, 50))
+      // NOTE (issue #7735): this used to fabricate fake "history" rows here by re-labelling
+      // the CURRENT rate-sheet snapshot with `now` as its timestamp on every refresh — a
+      // client-memory illusion of a time series, never persisted, never a real observation.
+      // The real three-calendar-month CNB trend is fetched separately, from a real endpoint,
+      // in the `trend` effect below. `history` here is now only ever a genuine admin-action
+      // log (margin edits, overrides), appended at the moment those actions actually happen.
     } catch {
       // Timeout / abort / network — the FX aggregate endpoint didn't answer.
       setUnavailable({ kind: 'unreachable' })
@@ -743,11 +758,52 @@ export default function FxPage() {
           </div>
         </div>
 
+        <div style={{ marginBottom: '20px' }}>
+          <FxTrendChart bases={cnbRates.map(rate => rate.currencyCode)} quote="CZK" lang={language} />
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           <div className="card">
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <TrendingUp size={14} style={{ color: 'var(--text-primary)' }} />
+              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                {t(`3měsíční trend ČNB ${trendPair.base}/${trendPair.quote} (orientační)`, `3-Month CNB Trend ${trendPair.base}/${trendPair.quote} (indicative)`)}
+              </span>
+            </div>
+            <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
+              {trend === null && (
+                <div style={{ padding: '16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Načítání…', 'Loading…')}</div>
+              )}
+              {trend?.unavailable && (
+                <div style={{ padding: '16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('FX služba nedostupná', 'FX service unavailable')}</div>
+              )}
+              {trend && !trend.unavailable && trend.points.length === 0 && (
+                <div style={{ padding: '16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Žádná data za posledních 3 měsíce', 'No data for the last 3 months')}</div>
+              )}
+              {trend && !trend.unavailable && trend.points.length > 0 && (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead><tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    {[t('Datum', 'Date'), t('Kurz (střed ČNB)', 'Rate (CNB mid)')].map(h => (
+                      <th key={h} style={{ padding: '8px 16px', position: 'sticky', top: 0, background: 'var(--surface-1)', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {trend.points.map(p => (
+                      <tr key={p.date} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '6px 16px', fontSize: '11px', color: 'var(--text-secondary)' }}>{p.date}</td>
+                        <td style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-primary)' }}>{p.rate}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <History size={14} style={{ color: 'var(--text-primary)' }} />
-              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Historizace (Snapshoty)', 'Rate History (Snapshots)')}</span>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Historie akcí operátora', 'Operator Action Log')}</span>
             </div>
             <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>

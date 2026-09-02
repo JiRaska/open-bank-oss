@@ -38,10 +38,25 @@ data class SyncFromBankIdRequest(
     val gender: Gender? = null,
     val birthplace: String? = null,
     val nationalities: List<String> = emptyList(),
-    val idDocuments: List<IdDocumentDto> = emptyList(),
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS
+     * of a collection, so `{"idDocuments": [null]}` deserialises happily into a
+     * `List<IdDocumentDto>` holding a null. Writing the type honestly is what makes
+     * [requireIdDocuments] reachable instead of dead code.
+     */
+    val idDocuments: List<IdDocumentDto?> = emptyList(),
     val email: String? = null,
     val phone: String? = null,
-)
+) {
+    /**
+     * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`;
+     * no service-local mapper is added (#526).
+     */
+    fun requireIdDocuments(): List<IdDocumentDto> = idDocuments.mapIndexed { index, doc ->
+        requireNotNull(doc) { "idDocuments[$index] must not be null" }
+    }
+}
 
 data class SyncFromRobRequest(
     val robAifo: String,

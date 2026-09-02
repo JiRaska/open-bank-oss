@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -33,7 +34,7 @@ class CampaignPostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
         val pg = PostgreSQLContainer(
-            DockerImageName.parse("docker.io/library/postgres:16.3-alpine")
+            DockerImageName.parse(POSTGRES_IMAGE)
                 .asCompatibleSubstituteFor("postgres"),
         )
             .withUsername("openbank")
@@ -41,10 +42,19 @@ class CampaignPostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
             .withDatabaseName("openbank_campaigns_it")
         pg.start()
         postgres = pg
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
 
-        val rd = GenericContainer(DockerImageName.parse("docker.io/valkey/valkey:7.2-alpine")).withExposedPorts(6379)
-        rd.start()
+        val rd = GenericContainer(DockerImageName.parse(VALKEY_IMAGE)).withExposedPorts(6379)
+        try {
+            rd.start()
+        } catch (e: Exception) {
+            pg.stop()
+            postgres = null
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+            throw TestAbortedException("Valkey failed to start — skipping Testcontainers IT: ${e.message}", e)
+        }
         redis = rd
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
 
         val pgHost = pg.host
         val pgPort = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
@@ -61,7 +71,18 @@ class CampaignPostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        redis?.stop()
-        postgres?.stop()
+        redis?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
+        }
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
+    }
+
+    private companion object {
+        const val POSTGRES_IMAGE = "docker.io/library/postgres:16.3-alpine"
+        const val VALKEY_IMAGE = "docker.io/valkey/valkey:7.2-alpine"
     }
 }

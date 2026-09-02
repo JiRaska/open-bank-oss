@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.20.0...transaction-service-v1.21.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
 ## [1.20.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.19.2...transaction-service-v1.20.0) (2026-08-24)
 
 

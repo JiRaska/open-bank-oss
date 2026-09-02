@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.1...notification-service-v0.29.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **notification:** reject a null map value with 400 instead of 500 ([#8005](https://github.com/JiRaska/open-bank-oss/issues/8005)) ([56bfc37](https://github.com/JiRaska/open-bank-oss/commit/56bfc37ee6c8e8f43964305feeef26c0a3c2a7e2)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.0...notification-service-v0.29.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **notification:** stop acking a failed dispatch and wire its DLQ ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#7588](https://github.com/JiRaska/open-bank-oss/issues/7588)) ([69a64ad](https://github.com/JiRaska/open-bank-oss/commit/69a64ad29cdd06b72b15a7f3b12e760079d66a5f))
+
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.28.0...notification-service-v0.29.0) (2026-08-27)
+
+
+### Features
+
+* **notification:** add safe no-device push fallback ([#7463](https://github.com/JiRaska/open-bank-oss/issues/7463)) ([7c9cc2c](https://github.com/JiRaska/open-bank-oss/commit/7c9cc2c2b87b8d2a6d1a9fc4a5ef2b94a5935012))
+
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.27.0...notification-service-v0.28.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.26.0...notification-service-v0.27.0) (2026-08-24)
 
 

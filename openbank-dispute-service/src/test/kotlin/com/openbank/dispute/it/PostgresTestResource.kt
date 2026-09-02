@@ -4,6 +4,7 @@
 
 package com.openbank.dispute.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -19,12 +20,13 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
-        val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
+        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
             .withUsername("openbank")
             .withPassword("openbank_secret")
             .withDatabaseName("openbank_dispute_it")
         pg.start()
         postgres = pg
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
         val host = pg.host
         val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
         return mapOf(
@@ -37,6 +39,13 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        postgres?.stop()
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
+    }
+
+    private companion object {
+        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
     }
 }

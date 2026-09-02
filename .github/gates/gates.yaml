@@ -100,6 +100,18 @@ gates:
     run: |
       python3 .github/scripts/check-synthetic-taint-rest-clients.py --enforce
 
+  - id: synthetic-outbox-taint-persistence
+    name: "Synthetic taint survives shared transactional outbox persistence (ADR-0252, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A synthetic marker forwarded over REST but replaced by a false default at the asynchronous event boundary makes test activity indistinguishable from real banking activity; both schema and writer mapping must survive together."
+    review_after: "2027-08-25"
+    min_subjects: 20
+    selftest: python3 .github/scripts/check-synthetic-outbox-taint.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-synthetic-outbox-taint.py --enforce
+
   # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an
@@ -333,6 +345,26 @@ gates:
     review_after: "2027-02-19"
     run: |
       bash .github/scripts/supersede-deploy-prs.sh --self-test
+
+  - id: ci-runner-pool-capacity
+    name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      `rules.yaml: ci_runners` declares three ARC scale sets; the OpenTofu creates two.
+      `openbank-batch` is declared with an isolation_rationale and provisioned nowhere, and
+      `infra_apply.runner_routing` still routes the tofu plan lane to it — a job sent there
+      would sit `queued` forever, because "no runner has taken this yet" and "no runner will
+      ever exist" are the same state to every observer. The same gate carries the
+      `pr_jobs_allowed_pools` lint named verbatim in `ci_runners.blocked_on`: a pull_request
+      job must never reach the credential-carrying deploy pool. Declared capacity that does
+      not exist reads exactly like capacity that does.
+    review_after: "2027-08-30"
+    min_subjects: 5   # 3 declared pools + 4 self-hosted runs-on labels today (2026-08-30)
+    selftest: python3 .github/scripts/check-ci-runner-pools.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-ci-runner-pools.py
 
   - id: deploy-drift-declaration
     name: "deployed image pins name a commit (issue #3344, enforced)"
@@ -590,6 +622,76 @@ gates:
       python3 .github/scripts/check-provider-type-classpath.py --self-test
     run: |
       python3 .github/scripts/check-provider-type-classpath.py
+
+  # An alert whose subject emits NO series cannot fire, and nothing anywhere goes red: the
+  # workload is healthy, the rule is valid, promtool is clean, ArgoCD is green, and the
+  # expression matches an empty vector forever. Every Postgres alert in prometheus-rules-db.yaml
+  # was in that state for any CNPG Cluster without `spec.monitoring.enablePodMonitor` --
+  # `PostgresInstanceDown` included, because Prometheus writes `up` per TARGET and an unscraped
+  # cluster is not a target. Measured on origin/main 2026-08-30: 4 of 62 declared clusters, among
+  # them party-db (canonical client identity) and pid-db (the identity golden record), both of
+  # which back up to S3 and had that backup state watched by nothing.
+  #
+  # Same shape as #2255 one layer down, and the same shape as the pact-drift gate that asserted a
+  # diff over a hand-kept module list: a control whose coverage set is maintained separately from
+  # the artifacts it covers reads as PASSING when the set is short, never as UNCHECKED. So the
+  # coverage set is DERIVED from the `kind: Cluster` manifests, and the checker also generates the
+  # PrometheusRule and its promtool fixture from that same derivation -- the alert's denominator
+  # cannot fall behind the manifests without going red. Exemptions need a reason and go stale in
+  # BOTH directions. ENFORCED.
+  - id: cnpg-scrape-coverage
+    name: "every declared CNPG cluster is scraped, and absence pages (#7220, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Absent is not zero. A CNPG cluster with no PodMonitor emits no `cnpg_*` and no `up`, so
+      PostgresNoRecoveryPoint, PostgresBackupStale, PostgresWALArchiveFailing and
+      PostgresInstanceDown all match nothing for it -- indistinguishable from healthy. The
+      database most likely to be misconfigured is the one guaranteed not to alert.
+    review_after: "2027-02-28"
+    min_subjects: 40   # 62 CNPG Clusters declared in gitops today (2026-08-30)
+    selftest: |
+      python3 .github/scripts/check-cnpg-scrape-coverage.py --self-test
+    run: |
+      python3 .github/scripts/check-cnpg-scrape-coverage.py
+
+  # promtool validates that a rule PARSES; it says nothing about whether the rule can fire. The
+  # unit tests under openbank-infra/tests/promtool assert behaviour against the SHIPPED
+  # PrometheusRule manifests (the runner unwraps `.spec` rather than testing a copy that could
+  # drift), and every must-fire case is paired with a must-NOT-fire control so a rule that fired
+  # unconditionally could not pass. Each case was falsified by deleting the clause it covers and
+  # confirming it goes red -- including one that was originally VACUOUS, passing with the `> 0`
+  # sentinel guard removed because promtool's `time()` starts at the unix epoch and `time() - 0`
+  # is therefore minutes, not the ~56 years a real never-backed-up cluster produces. ENFORCED.
+  - id: promql-alert-unit-tests
+    name: "alert rules are unit-tested for what they PREVENT (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      A green promtool `check rules` proves a rule is well-formed, which is exactly the signal
+      that was already green throughout every alerting defect recorded here -- #5736's rule was
+      loaded, health=ok and promtool-clean for the whole 8h40m it failed to fire.
+    review_after: "2027-02-28"
+    min_subjects: 2   # 2 test files today; grows with each alert given a behavioural test
+    env:
+      PROMETHEUS_VERSION: "3.14.0"
+      PROMETHEUS_SHA256: "f665c6da19eb7ba399c915d30c7d9793c9b417bf8a749b504bc470678631478d"
+    selftest: |
+      bash .github/scripts/install-promtool.sh
+      # Prove the harness can FAIL: a test asserting an alert no rule defines must go red.
+      # Without this the runner could silently find no test files and exit 0.
+      d=$(mktemp -d)
+      printf 'rule_files:\n  - prometheus-rules-db.yaml\ntests:\n  - interval: 1m\n    input_series: []\n    alert_rule_test:\n      - eval_time: 1m\n        alertname: NoSuchAlertExists\n        exp_alerts:\n          - exp_labels:\n              severity: critical\n' > "$d/selftest_test.yaml"
+      if bash openbank-infra/tests/promtool/run.sh "$d/selftest_test.yaml" >"$d/out" 2>&1; then
+        echo "SELF-TEST FAIL: the runner passed a test that must fail"; cat "$d/out"; exit 1
+      fi
+      echo "SELF-TEST PASS"
+    run: |
+      bash .github/scripts/install-promtool.sh
+      n=$(find openbank-infra/tests/promtool -name '*_test.yaml' | wc -l)
+      test "$n" -ge 2 || { echo "expected >=2 promtool test files, found $n"; exit 1; }
+      echo "SUBJECTS=$n  # promtool test files"
+      bash openbank-infra/tests/promtool/run.sh
 
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
@@ -955,7 +1057,7 @@ gates:
     review_after: "2027-02-14"
     # The corpus is the checker's own fixture set — its subjects are assertions, not files, so
     # the floor is the number of cases that must run. It drops the day someone deletes one.
-    min_subjects: 14   # 15 today: 9 classifier + 5 end-to-end + 1 retry-count (2026-08-14)
+    min_subjects: 17   # 18 today: 9 classifier + 5 end-to-end + 1 retry-count + 3 placeholder-staleness (2026-08-31)
     run: |
       # The gate IS the selftest here: the artifact under test is the classifier + exit-code
       # contract, not the fleet (verifying 62 real images needs ECR credentials this job does
@@ -964,11 +1066,19 @@ gates:
       # the pre-#1915 shape reddens 7 cases, and changing the final `exit 2` to `exit 1`
       # reddens exactly the one case that asserts the distinction.
       .github/scripts/check-fleet-attestations.sh --self-test
+      # ...and the one assertion the fixtures cannot make: the REAL placeholder allowlist
+      # against the REAL gitops tree. Needs no cosign and no ECR credentials, which is why it
+      # can run here on every PR rather than only in fleet-attestation.yml. Before #7740 the
+      # allowlist could only fail in one direction, and all five of its entries had outlived
+      # their subject — the file's own "remove an entry the moment the service is built" line
+      # had no enforcement behind it.
+      .github/scripts/check-fleet-attestations.sh --check-placeholders
 
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
     mode: enforced
+    min_subjects: 6   # 13 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-license-headers.py --selftest
     run: |
@@ -1529,7 +1639,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-journey-catalog.py --self-test
     selftest_expect: pass
-    min_subjects: 3   # 3 journeys today (2026-08-09): 1 active, 2 planned
+    min_subjects: 12  # 12 governed journeys today (2026-08-26): 1 active, 11 planned
     run: |
       # Falsified against the REAL tree before wiring in, not only in the self-test's temp
       # trees: moving cronjob-journey-public-edge.yaml aside makes it exit 2 naming that
@@ -1873,6 +1983,23 @@ gates:
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
 
+  - id: resolve-tracking-issue-selftest
+    name: "a machine-written ledger resolves to exactly one issue, or fails loudly (issue #5266, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It drives the real resolver against a
+      stub gh and asserts exit code AND resolved number for all 12 cases, including a control
+      asserting that the OLD `.[0]` expression is green on the very input the new one refuses.
+      Falsified before wiring in: reinstating `.[0]` turns 2 of the 12 assertions red.
+    budget_seconds: 30   # no network; ~1s observed
+    rationale: "The old `--search \"$TITLE in:title\" | .[0].number` never checked how many candidates it had. Two open issues shared the flake-ledger title, so 85 records went to #5285 and 1 to #5266 — the ledger silently migrated between them mid-life, and a split ledger reads as a low flake count to whoever opens either half."
+    review_after: "2027-02-28"
+    # Subjects are assertions, not files: the floor drops the day someone deletes a case.
+    min_subjects: 12
+    run: |
+      bash .github/scripts/resolve-tracking-issue.sh --self-test
+
   # Nothing in this repo has ever read a merged PR's required contexts: before #4240,
   # `grep -rl 'required_status_checks\|statusCheckRollup' .github/scripts .github/workflows`
   # returned one hit and it was a comment. A ruleset bypass is recorded only in
@@ -2016,6 +2143,7 @@ gates:
     name: "App Router route.ts exports only route fields (#3262/#3611, enforced)"
     group: lint
     mode: enforced
+    min_subjects: 55   # 114 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-route-exports.py --self-test
     run: |
@@ -2148,6 +2276,7 @@ gates:
     name: "no runBlocking in a @Scheduled body (rules.yaml: scheduled_methods, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 1080   # 2173 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-no-runblocking-in-scheduled.py --self-test
     selftest_expect: pass
     run: |
@@ -2215,6 +2344,7 @@ gates:
     name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 1080   # 2175 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
     selftest_expect: pass
     run: |
@@ -2297,7 +2427,13 @@ gates:
     name: "clock-injection gate — domain/application layers (ADR-0100, #1612)"
     group: kotlin
     mode: enforced
-    min_subjects: 70   # 142 money-path domain/application files today (2026-08-09)
+    min_subjects: 153  # 306 money-path domain/application files today (2026-08-31, #6253).
+    # Was 70 = half of the 142 files counted on 2026-08-09. The corpus then more than doubled
+    # while the floor did not, so it had decayed to 23% of the corpus: measured under #6253,
+    # narrowing rules.yaml money_path_services back to the 8 services this gate shipped with
+    # (the ORIGINAL defect, named in check-clock-injection.sh's own header) scans 143 files and
+    # PASSED floor 70 with rc=0. 153 is half of today's count, per the seeding rule in
+    # check-gate-subject-floor.py.
     selftest: bash .github/scripts/check-clock-injection.sh --self-test
     selftest_expect: pass
     run: |
@@ -2352,6 +2488,7 @@ gates:
     name: "domain-purity gate — hexagonal invariant (ADR-0002, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 165   # 339 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-domain-purity.py --self-test
     run: |
@@ -2458,6 +2595,7 @@ gates:
     name: "a service shipping an outbox dispatcher must construct an OutboxMessage (#4007, enforced)"
     group: kotlin
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-outbox-has-writer.py --self-test
     selftest_expect: pass
@@ -2465,13 +2603,43 @@ gates:
       python3 .github/scripts/check-outbox-has-writer.py .
 
   - id: pact-provider-replay-coverage
-    name: "Pact provider-replay coverage (issue #2338, enforced)"
+    name: "Pact provider replay + broker publication (issues #2338, #7621, enforced)"
     group: api
     mode: enforced
     selftest: |
       python3 .github/scripts/check-pact-provider-replay.py --selftest
     run: |
       python3 .github/scripts/check-pact-provider-replay.py
+
+  # Issue #7597. release-please.yml's "Map released components -> tags" step builds released.tsv
+  # from release-please-config.json's per-package `component` field; a package with a version.txt
+  # but no `component` produces no row, silently — no SBOM, no cosign provenance, no VEX for that
+  # package's release, while the release itself (tag, GitHub Release) looks completely normal.
+  # Measured today: openbank-campaign-service and openbank-tax-reporting-service both have a
+  # version.txt and a `packages` entry with no `component` key.
+  #
+  # This gate deliberately does NOT add the missing `component` keys — that changes the release
+  # tag name (`include-component-in-tag: true`), and version.txt / release-please-config.json /
+  # .release-please-manifest.json are a three-way lockstep for an ALREADY-RELEASED package
+  # (ADR-0029 rule 2), so retagging existing release history is a repo-owner decision, not CI-gate
+  # material. What this enforces is the durable half: a package with a version.txt must resolve to
+  # a component that reaches released.tsv, derived from release-please-config.json every run —
+  # never a hand-kept list — so a THIRD package cannot join the two above silently.
+  #
+  # RATCHET: today's two are baselined in the script with a reason citing #7597; the check fails on
+  # a stale baseline entry in either direction (fixed but still listed, or listed but no longer
+  # released), same contract as check-pact-provider-replay.py above.
+  - id: release-evidence-coverage
+    name: "released package resolves to a component that reaches released.tsv (issue #7597, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "A released package with no component key never enters released.tsv, so its release produces no SBOM, no provenance attestation and no VEX document — silently, since the release itself still succeeds. This gate makes that gap a finding instead of an absence nothing else can see."
+    review_after: "2027-08-31"
+    min_subjects: 60
+    selftest: |
+      python3 .github/scripts/check-release-evidence-coverage.py --self-test
+    run: |
+      python3 .github/scripts/check-release-evidence-coverage.py --enforce
 
   # openapi enum vs the Kotlin enum behind it (issue #5895 / #5962, enforced).
   #
@@ -2566,6 +2734,100 @@ gates:
       bash .github/scripts/install-oasdiff.sh
       python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}" --enforce
 
+  # The gate above classifies the bump against the MERGE-BASE, which is the right question for
+  # "is this bump big enough" and structurally blind to a number that someone else already took.
+  # Measured 2026-08-30: four PRs were green while claiming a version main had already released
+  # (account 1.11.0, consent 1.7.0, card-issuance 1.8.0, campaign 1.43.0). Each forked one minor
+  # lower and bumped by one; a competing PR then landed the same number first. The merge-base still
+  # holds the OLD value, so the contract gate sees a clean minor bump — and git sees nothing either,
+  # because identical text is not a conflict, so the merge is exit 0 and prints nothing. Two checks
+  # each answering a question that is individually right and jointly insufficient.
+  #
+  # This one asks whether the number is still free on the base branch AS IT IS NOW.
+  #
+  # DETECTION, NOT PREVENTION, and the distinction matters: a run is only as fresh as the moment it
+  # executes, so a PR whose last CI run predates a competing merge and then merges with no later run
+  # is invisible here as to any run-time check. Closing that needs a merge queue or up-to-date-branch
+  # enforcement; ADR-0048 deliberately chose detection. What this buys is that a stale claim goes RED
+  # ON THE NEXT RUN instead of merging silently — today all four collisions are green.
+  #
+  # The self-test drives the pure comparison directly and carries must-VIOLATE cases, not only
+  # passing ones, so it can detect its own vacuity. Falsified before merge against the four real
+  # colliding branches (exit 1 each, each naming the taken number) and against two non-colliding
+  # ones (#6486 1.16.0->1.17.0, #6481 1.5.0->1.6.0, exit 0) — it discriminates in both directions
+  # rather than failing everything.
+  # `rules.yaml: four_eyes.verbs` declares which verbs pause for a second approver. Whether that
+  # approval can ever be REQUESTED depends on something else entirely -- the action needs an allow
+  # reason, in `role_action_matrix` or a service rego. Nothing connected the two, and three
+  # money-path actions are declared four-eyes and granted nowhere (#4754): transaction.sweep,
+  # swift.send, sctInstPayment.recall.
+  #
+  # Both consequences are invisible in normal operation. `response_attributes` ride on the ALLOW
+  # object in rest.rego, so a denied decision carries no attributes: `four_eyes_required = true` is
+  # computed and never reaches AuthorizeInterceptor, making the gate structurally unreachable -- and
+  # the day AUTHZ_ENFORCE flips for that service, the endpoint 403s for every principal. The worst
+  # of both states, with no signal either way, because a control that cannot fire produces none.
+  #
+  # Falsified in three directions before merge: a new ungranted action fails (exit 1), a baseline
+  # entry that has become granted fails (exit 1), and the untouched tree passes (exit 0). It also
+  # refuses to run when the policy corpus or the @Authorize corpus comes back empty, rather than
+  # reporting a clean sweep of nothing.
+  #
+  # Two false positives were caught before shipping, both from customer-edge: `customer.*` actions
+  # are granted by ONE prefix rule (`startswith(input.action, "customer.")`), so they appear as no
+  # literal anywhere. A literal-only probe called them ungranted on a service whose AUTHZ_ENFORCE
+  # defaults TRUE, which reads exactly like a live customer-facing outage. The gate reads prefix
+  # rules, and searches bundle ConfigMaps as well as `.rego` files -- transaction-service has no
+  # `*_rest_ext.rego` at all, so a rego-only search would have missed its policy entirely.
+  - id: four-eyes-verb-grantable
+    name: "four-eyes-verb-grantable — a four-eyes action must have an allow reason (ADR-0155, enforced)"
+    group: api
+    mode: enforced
+    when: pull_request
+    min_subjects: 15   # 25 four-eyes actions today; a floor at ~60% catches corpus collapse
+                       # (a renamed annotation, a moved source root) without failing on ordinary
+                       # fleet churn.
+    rationale: >-
+      four_eyes.verbs declares the control; role_action_matrix and the service regos decide whether
+      it can ever fire. Nothing checked that the two agree, and three money-path actions did not.
+    review_after: 2027-03-01   # Re-examine when the three baselined actions are granted: if the
+                               # list reaches empty this becomes a pure ratchet, which is the
+                               # intended end state.
+    selftest: |
+      set -euo pipefail
+      python3 .github/scripts/check-four-eyes-verb-grantable.py --self-test
+    run: |
+      set -euo pipefail
+      git fetch -q origin main
+      python3 .github/scripts/check-four-eyes-verb-grantable.py --ref origin/main --enforce
+
+  - id: openapi-version-not-taken
+    name: "openapi-version-not-taken — info.version still free on the base tip (ADR-0048, enforced)"
+    group: api
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    # No min_subjects: this gate is DIFF-SCOPED, so most PRs legitimately have zero subjects
+    # (they touch no openapi.yaml). A floor here is the "declares a floor and never prints a
+    # count" failure the subject-floor gate exists to catch -- which is exactly how it caught
+    # this entry on its own first CI run. api-contract-gate, diff-scoped for the same reason,
+    # declares none either. The gate still prints SUBJECTS=, including zero, so that "no
+    # subjects" and "did not look" never render identically.
+    rationale: >-
+      api-contract-gate classifies a bump against the merge-base, so it cannot see a version a
+      competing PR already released; four PRs were green on 2026-08-30 claiming taken numbers.
+    review_after: 2027-03-01   # Re-examine if a merge queue or up-to-date-branch enforcement
+                               # lands: either would PREVENT this collision rather than detect
+                               # it late, making this gate redundant. ADR-0048 chose detection,
+                               # so until that changes it stays.
+    selftest: |
+      set -euo pipefail
+      python3 .github/scripts/check-openapi-version-not-taken.py --self-test
+    run: |
+      set -euo pipefail
+      git fetch -q origin main
+      python3 .github/scripts/check-openapi-version-not-taken.py --base "${PR_DIFF_BASE}" --base-ref origin/main --enforce
+
   # ENFORCED against a declared baseline (#2314). It landed advisory because 104 findings
   # cannot be a merge blocker on day one — but an advisory check over a GENERATED comparison
   # is a contradiction (#2216): there is no judgement left to exercise, advisory just makes
@@ -2614,6 +2876,7 @@ gates:
     name: "openapi-server-port — spec dev port vs quarkus.http.port (enforced)"
     group: api
     mode: enforced
+    min_subjects: 26   # 52 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-openapi-server-port.py --self-test
     selftest_expect: pass
     run: |
@@ -2640,6 +2903,7 @@ gates:
     name: "Flyway default datasource, and migrations something actually runs (issue #3080, enforced)"
     group: data
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-flyway-default-datasource.py --selftest
     run: |
@@ -2674,13 +2938,19 @@ gates:
   # ConfigMap a FRESH cluster boots from. Nothing reconciles the two, and a migration that reaches
   # only the resources is invisible — file in git, object present in the sandbox because someone
   # applied it, CI green — until a warehouse is rebuilt without it. V4__screen_feedback_context.sql
-  # sat that way from 2026-07 until #4511. Compares created OBJECTS, not text, in both directions.
+  # sat that way from 2026-07 until #4511. Compares created OBJECTS, not text, in both directions —
+  # PLUS, since #7645, the two properties an object set cannot express: ALTER-added COLUMNS, and
+  # agreement between the last definition of an object on each side. V9__synthetic_provenance.sql
+  # creates no object (it adds bronze_events.synthetic and re-cuts four existing views with
+  # `WHERE synthetic = 0`), so it was structurally invisible to the set comparison and had never
+  # reached the ConfigMap. Definition agreement is compared on comment-stripped, whitespace-collapsed
+  # SQL — the two artefacts are indented differently and need not be byte-identical.
   - id: clickhouse-ddl-configmap-parity
-    min_subjects: 15   # 22 objects today (V1-V5 + the ConfigMap's copies, 2026-08-13)
-    name: "ClickHouse DDL reaches a fresh cluster (issue #4511, enforced)"
+    min_subjects: 15   # 28 objects today (V1-V10 + the ConfigMap's copies, 2026-08-31)
+    name: "ClickHouse DDL reaches a fresh cluster (issues #4511/#7645, enforced)"
     group: data
     mode: enforced
-    rationale: "A migration present only in the operator-applied resource path disappears on a fresh ClickHouse rebuild, silently changing the analytics schema after recovery."
+    rationale: "A migration present only in the operator-applied resource path disappears on a fresh ClickHouse rebuild, silently changing the analytics schema after recovery; a migration that only redefines existing objects is invisible to an object-set comparison, so column and definition parity are checked too."
     review_after: "2027-02-13"
     selftest: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
@@ -2785,6 +3055,38 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-audit-money-path-subscription.py --root . --enforce
+
+  # Companion to `source-service-convention` (which polices the VALUE a producer stamps): this one
+  # polices whether the claim EXISTS AT ALL. The distinction is load-bearing — a convention check's
+  # subject set is the write sites it can find, so a producer that never mentions `sourceService`
+  # has zero write sites, is neither a finding nor a subject, and the check reports a clean fleet in
+  # exactly the state this gate exists to catch.
+  # Scope is DERIVED, never hand-kept: every module declaring a literal `openbank.*` topic under an
+  # `mp.messaging.outgoing.*` channel. A gate whose coverage set is maintained beside the artifacts
+  # it covers reads as PASSING when the list is short, never as UNCHECKED — this repo's most
+  # repeated defect. A new event-producing service enters scope on the commit declaring its channel.
+  # Both write idioms are matched. A quoted-key probe returns ZERO for card-issuance and fx, which
+  # declare `val sourceService` on a serialised data class where the wire key exists only at runtime
+  # as a property name; --self-test pins one known-positive per idiom, and asserts that the
+  # quoted-only probe is still genuinely blind, so a regression fails instead of silently shrinking.
+  # Ratchet, not zero: today's ten undeclared producers are baselined with their owning issue and
+  # the list may only shrink — a stale entry, in either direction, is itself an error.
+  # Why gate rather than sweep: `audit_entries` is append-only AT THE DATABASE (DO INSTEAD NOTHING,
+  # so a normalising UPDATE touches zero rows and REPORTS SUCCESS) and `source_service` is
+  # chain-hashed into `record_hash`. Attribution is unrepairable in retrospect, so the only
+  # available fix is forward-only and every unstamped event permanently costs one more row.
+  - id: source-service-presence
+    min_subjects: 30   # 36 modules produce an openbank.* domain-event topic today (2026-08-31)
+    name: "Every event producer declares sourceService (issues #5256/#6035, enforced)"
+    group: data
+    mode: enforced
+    rationale: "A producer that never states its own name leaves audit-service deriving attribution from the topic name (AttributionSource.TOPIC) instead of recording the producer's claim (EVENT); audit_entries is append-only at the database and source_service is chain-hashed into record_hash, so a row written without the field can never be corrected and the gap costs one permanently-inferred row per event."
+    review_after: "2027-02-28"
+    selftest: |
+      python3 .github/scripts/check-source-service-presence.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-source-service-presence.py --root .
 
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
@@ -3084,10 +3386,34 @@ gates:
     name: "kafka dotted-key ratchet (issues #686/#2945, enforced)"
     group: data
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-kafka-dotted-keys.py --self-test
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
+
+  - id: quoted-sequence-name-ratchet
+    name: "quoted mixed-case Hibernate sequence ratchet (issue #6480, enforced)"
+    group: data
+    mode: enforced
+    rationale: >-
+      A `CREATE SEQUENCE "party_payees_SEQ"` keeps its case, but Hibernate's pooled-id allocator
+      emits `select nextval('party_payees_SEQ')` with the identifier unquoted inside the literal,
+      which Postgres folds to lower case — so it looks up a sequence that does not exist and every
+      insert into that table fails 42P01 at id allocation. The migration applies cleanly and the pod
+      passes its health probes; the failure appears only on the first write. openbank-party-service
+      made this mistake three times and fixed it twice (V5 -> V6, then V16/V18 -> V19/#6467), with
+      V16 and V18 both written after V6 had documented the failure in the same directory — a defect
+      a service reintroduces after fixing it is one review does not see. Baselined rather than flat:
+      the offending statements sit in already-applied migrations that Flyway checksums, so they can
+      never be edited, only repaired forward. Only party-service has ever used the quoted form
+      across the 54 migration files that create a sequence, so this is prevention, not debt paydown.
+    review_after: '2027-02-22'
+    min_subjects: 300
+    selftest: python3 .github/scripts/check-quoted-sequence-names.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-quoted-sequence-names.py --root .
 
   - id: external-feed-declaration-drift
     name: "external feed declaration drift (issue #2204, enforced)"
@@ -3228,6 +3554,7 @@ gates:
     name: "Scheduler exercised in tests (issue #2204, enforced)"
     group: security
     mode: enforced
+    min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: |
       python3 .github/scripts/check-scheduler-exercised.py --selftest
     run: |
@@ -3911,6 +4238,44 @@ gates:
   # disassembly — it checks the one machine-checkable trace it leaves, that the verdict is
   # anchored to a sha256 the build actually resolves rather than to sorting two strings.
   # Falsified against the real pre-fix tree (3356426^): 47 of 47 red, exit 1.
+  # The only VEX gate today, `vex-range-reasoning`, GLOBS the store:
+  # VEX_GLOB = "openbank-libs/governance/vex/*.openvex.json". A gate whose scope is the set of
+  # files that happen to exist cannot report a file that does not, so a released component with
+  # no overlay is not undispositioned-and-flagged -- it is outside the question, and the gate
+  # reads as PASSING rather than as UNCHECKED. Same shape as the pact-drift gate that asserted a
+  # diff over a hand-kept module list, and as #7220 one floor up.
+  #
+  # It has already cost a real miss: referral-service has no overlay, so it silently skipped the
+  # whole 48-file CVE-2025-14969 fan-out and surfaced only as a triage issue seven months later
+  # (#6719). Measured on origin/main 2026-08-30: 58 released components carrying a release-please
+  # `component`, 56 overlays, FOUR components with none. #6988 named three of the four -- the
+  # enumeration finds all of them, which is the difference between a control and an audit.
+  #
+  # The identity is release-please's `component`, never the directory name: it names the tag and
+  # is what release-please.yml passes as $COMPONENT. Keying on the directory reports 60 phantom
+  # mismatches. The derivation also surfaced that TWO packages carry a version.txt and no
+  # `component` at all, so release-please.yml's `if comp and tag` skips them in silence and their
+  # releases produce no SBOM, provenance, VEX or evidence manifest -- declared, not fixed here,
+  # since changing a `component` is release-registration lockstep and the owner's call.
+  #
+  # This does NOT invent dispositions for the four gaps: a VEX statement is a security judgement
+  # about a specific CVE and artifact, and fabricating one to make a gate green would be strictly
+  # worse than the gap. #6717/#6719/#6720 close them on their own evidence. ENFORCED.
+  - id: vex-overlay-coverage
+    name: "every released component is enumerated against the VEX store (#6988, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: >-
+      A shared-artifact CVE fan-out reaches only the components that already have a file, and
+      nothing compares the file set to the component set. referral-service missed all 48
+      statements of one fan-out for exactly that reason and no gate could see it.
+    review_after: "2027-02-28"
+    min_subjects: 40   # 58 released components with a release-please component today (2026-08-30)
+    selftest: |
+      python3 .github/scripts/check-vex-overlay-coverage.py --self-test
+    run: |
+      python3 .github/scripts/check-vex-overlay-coverage.py
+
   - id: vex-range-reasoning
     name: "a VEX verdict reasoned across release lines is anchored to a pinned artifact (#4716, enforced)"
     group: supplychain
@@ -3996,3 +4361,43 @@ gates:
     min_subjects: 30   # 45 incoming channels today (2026-08-21, incl. audit-service agent-audit-events-in)
     run: |
       python3 .github/scripts/check-incoming-dlq-wiring.py --enforce
+
+  # #7645. The ClickHouse warehouse's schema is applied by a ConfigMap mounted into
+  # /docker-entrypoint-initdb.d, and ClickHouse only executes it when the data directory is EMPTY —
+  # so a schema change made after the cluster's first boot is real only for the NEXT fresh boot, and
+  # nothing scanned the migration directory to keep the ConfigMap in step with it. Two migrations
+  # (V9 synthetic_provenance, V10 credit_funnel) were merged and believed-deployed while absent from
+  # the ConfigMap, and a naming collision (two files both claiming V9) sat undetected alongside them.
+  - id: clickhouse-migration-configmap-sync
+    name: "every ClickHouse migration has a matching boot ConfigMap key (#7645, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "The ClickHouse init ConfigMap only runs on an empty data directory, so a migration added to the source-of-record directory without a matching ConfigMap key is invisible to every fresh boot; nothing scanned the two for drift before this gate, and two migrations plus a V9 naming collision had already accumulated unapplied."
+    review_after: "2027-02-28"
+    selftest: python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --self-test
+    selftest_expect: pass
+    min_subjects: 11   # 11 migrations today (2026-08-31)
+    run: |
+      python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --enforce
+
+  # Issue #7648. openbank-admin-ui is migrating hardcoded hex colours (`#1a2b3c`, `#fff`) to the
+  # shared semantic colour tokens in globals.css. #7649 landed a Vitest ratchet
+  # (raw-colour-literal-ratchet.guard.test.ts) that already runs on every admin-ui-touching PR via
+  # the `ui-build` job, so this gate is NOT closing an absent-job gap the way mermaid-parses does
+  # — the subject (app/**/*.tsx, components/**/*.tsx, *.css) is itself scoped to
+  # openbank-admin-ui/, so there is no PR shape that changes the count and skips `changes-ui`. It
+  # exists so the ratchet also gets rationale/review_after/min_subjects tracking and a
+  # `--self-test` this repo's own gate tooling can see, matching every other ratchet-style check
+  # here (check-nonnull-jaxrs-params.py). Keep MAX_RAW_COLOUR_LITERALS in this script and the
+  # Vitest test's own ceiling equal by hand — they scan the same corpus with the same regex.
+  - id: raw-colour-literal-ratchet
+    name: "raw hex colour literals in admin-ui do not increase (#7648, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A raw hex colour literal added outside the token stylesheet is a step away from the semantic colour migration; this only forbids the count from going back up, mirroring the Vitest guard already wired into ui-build."
+    review_after: "2027-02-28"
+    selftest: python3 .github/scripts/check-raw-colour-literal-ratchet.py --self-test
+    selftest_expect: pass
+    min_subjects: 1600   # 1628 raw hex colour literals today (2026-08-31)
+    run: |
+      python3 .github/scripts/check-raw-colour-literal-ratchet.py

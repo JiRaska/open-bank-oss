@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Admin UI browser synthetic
+
+on:
+  schedule:
+    - cron: '13 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      expected_build_sha:
+        description: "Full or short SHA expected from the deployed Admin UI build attestation"
+        required: false
+  push:
+    branches: [main]
+    paths:
+      - 'openbank-admin-ui/scripts/admin-login-synthetic.mjs'
+      - '.github/workflows/admin-ui-browser-synthetic.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  sso-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+      - working-directory: openbank-admin-ui
+        run: npm ci --no-audit --no-fund
+      - working-directory: openbank-admin-ui
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - id: synthetic
+        working-directory: openbank-admin-ui
+        env:
+          OPENBANK_BROWSER: ${{ matrix.browser }}
+          ADMIN_UI_EXPECTED_BUILD_SHA: ${{ inputs.expected_build_sha }}
+          OPENBANK_BROWSER_VITALS_OUTPUT: build/test-intelligence/browser-vitals-${{ matrix.browser }}.json
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/e2e/admin-login-synthetic-${{ matrix.browser }}.xml
+        run: node scripts/admin-login-synthetic.mjs
+      - if: always()
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service openbank-admin-ui --component openbank-admin-ui \
+            --synthetic-journey admin-ui-sso-boundary \
+            --synthetic-variant ${{ matrix.browser }} \
+            --browser-vitals openbank-admin-ui/build/test-intelligence/browser-vitals-${{ matrix.browser }}.json \
+            --out openbank-admin-ui/build/test-intelligence/run-${{ matrix.browser }}.json
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-run-openbank-admin-ui-browser-${{ matrix.browser }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-admin-ui/build/test-intelligence/run-${{ matrix.browser }}.json
+          retention-days: 30
+          if-no-files-found: error

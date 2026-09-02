@@ -5,6 +5,7 @@
 
 package com.openbank.finops
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.testcontainers.containers.PostgreSQLContainer
 
@@ -15,14 +16,19 @@ import org.testcontainers.containers.PostgreSQLContainer
  */
 class PostgresTestResource : QuarkusTestResourceLifecycleManager {
 
+    private companion object {
+        const val POSTGRES_IMAGE = "postgres:18-alpine"
+    }
+
     private lateinit var postgres: PostgreSQLContainer<*>
 
     override fun start(): Map<String, String> {
-        postgres = PostgreSQLContainer("postgres:18-alpine")
+        postgres = PostgreSQLContainer(POSTGRES_IMAGE)
             .withDatabaseName("openbank_finops")
             .withUsername("openbank")
             .withPassword("openbank")
         postgres.start()
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
         val reactiveUrl = "postgresql://${postgres.host}:${postgres.firstMappedPort}/${postgres.databaseName}"
         return mapOf(
             "quarkus.datasource.reactive.url" to reactiveUrl,
@@ -33,6 +39,9 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        if (::postgres.isInitialized) postgres.stop()
+        if (::postgres.isInitialized) {
+            postgres.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+        }
     }
 }

@@ -5,6 +5,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
 import {
   FileSignature, Plus, Search, RefreshCw, Edit, Eye, X, Send, Archive,
@@ -16,7 +17,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge, type Tone } from '@/components/ui'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -90,10 +91,10 @@ async function apiFetch(path: string, opts?: RequestInit) {
   try { return JSON.parse(text) } catch { return null }
 }
 
-const STATUS_COLOR: Record<string, { bg: string; text: string; border: string }> = {
-  DRAFT:     { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' },
-  PUBLISHED: { bg: 'var(--success-bg)', text: 'var(--success-text)', border: 'var(--success-border)' },
-  RETIRED:   { bg: 'var(--surface-3)',  text: 'var(--text-tertiary)', border: 'var(--border)' },
+const TEMPLATE_STATUS_TONE: Record<TemplateStatus, Tone> = {
+  DRAFT: 'warning',
+  PUBLISHED: 'success',
+  RETIRED: 'neutral',
 }
 
 // Generic merge-field tokens offered as clickable chips. These are a UX aid for
@@ -188,15 +189,6 @@ const DEFAULT_SAMPLE_DATA = {
 }
 const DEFAULT_SAMPLE_DATA_TEXT = JSON.stringify(DEFAULT_SAMPLE_DATA, null, 2)
 
-function StatusBadge({ status }: { status?: string }) {
-  const c = STATUS_COLOR[status ?? ''] ?? STATUS_COLOR.DRAFT
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, background: c.bg, color: c.text, border: `1px solid ${c.border}`, letterSpacing: '0.03em' }}>
-      {status ?? 'DRAFT'}
-    </span>
-  )
-}
-
 export default function DocumentTemplatesPage() {
   const { t, language } = useLanguage()
   const { data: session } = useSession()
@@ -267,7 +259,6 @@ export default function DocumentTemplatesPage() {
       setTemplates(items)
       setVisibleCount(PAGE_SIZE)
     } catch (e) {
-      setTemplates([])
       setUnavailable({ kind: e instanceof ApiError ? e.kind : 'unreachable' })
     } finally {
       setLoading(false)
@@ -403,8 +394,14 @@ export default function DocumentTemplatesPage() {
     })
   }
 
+  // ONE lock across save, publish and retire (#7091): they were separate React flags,
+  // so a save could overlap a publish on the same template. React state disables the
+  // control a render too late, so the claim is synchronous.
+  const flight = useSingleFlight()
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    const outcome = await flight.run('template:write', async () => {
     setSaving(true)
     setActionError(null)
     try {
@@ -427,9 +424,12 @@ export default function DocumentTemplatesPage() {
     } finally {
       setSaving(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   const runAction = async (id: string, kind: 'publish' | 'retire') => {
+    const outcome = await flight.run('template:write', async () => {
     setActioning(true)
     setActionError(null)
     try {
@@ -441,6 +441,8 @@ export default function DocumentTemplatesPage() {
     } finally {
       setActioning(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   return (
@@ -479,6 +481,11 @@ export default function DocumentTemplatesPage() {
             {unavailable && (
               <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
                 <DataUnavailable kind={unavailable.kind} service={t('Document-service', 'Document-service')} feature={t('Šablony dokumentů', 'Document templates')} lang={language} dense />
+                {templates.length > 0 && (
+                  <div role="status" aria-live="polite" style={{ padding: '0 16px 14px', color: 'var(--warning-text)', fontSize: '12px', fontWeight: 600 }}>
+                    {t('Zobrazené šablony a jejich publikační stavy jsou poslední dostupná data; obnovení se nezdařilo.', 'Displayed templates and publication states are the last available data; refresh failed.')}
+                  </div>
+                )}
               </div>
             )}
 
@@ -537,7 +544,7 @@ export default function DocumentTemplatesPage() {
                       <td key={j}><div className="skeleton" style={{ height: '13px', width: j === 1 ? '140px' : '60px' }} /></td>
                     ))}</tr>
                   ))}
-                  {!loading && visible.length === 0 && (
+                  {!loading && !unavailable && visible.length === 0 && (
                     <tr><td colSpan={7} style={{ padding: 0 }}>
                       <DataUnavailable kind="no_data" feature={t('Šablony', 'Templates')} lang={language} dense />
                     </td></tr>
@@ -547,7 +554,7 @@ export default function DocumentTemplatesPage() {
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '11px' }}>{tpl.code}</td>
                       <td style={{ fontSize: '13px', fontWeight: 600 }}>{tpl.name}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>v{tpl.version}</td>
-                      <td><StatusBadge status={tpl.status} /></td>
+                      <td><StatusBadge status={tpl.status ?? 'DRAFT'} tone={TEMPLATE_STATUS_TONE[tpl.status ?? 'DRAFT']} /></td>
                       <td style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{tpl.locale ?? '—'}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{tpl.productRef ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>

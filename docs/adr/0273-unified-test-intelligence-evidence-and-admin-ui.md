@@ -62,16 +62,63 @@ The snapshot schema carries:
 
 - `schemaVersion`, `collectedAt` and source-level collection warnings;
 - every component, including components with no evidence;
-- explicit evidence kinds: unit, integration, contract, end-to-end, performance, synthetic,
-  mutation and deterministic simulation;
+- explicit evidence kinds: unit, integration, contract, end-to-end, executed trace contract,
+  performance, synthetic, mutation and deterministic simulation;
 - `passed`, `failed`, `skipped`, `not-run`, `stale`, `blocked` and `unknown` states;
 - source provenance: tool, task or artifact, observation time, commit when the producer supplies
   one, and environment; and
 - separate code-coverage, performance, contract, mutation and synthetic-journey observations.
 
+Failed browser E2E attempts may also carry metadata for a retained Playwright diagnostic report.
+The envelope records only its type, exact run/attempt name, authenticated run URL, seven-day
+retention and an explicit sensitive-data warning. Trace, screenshot, video, DOM and request content
+never enter the canonical JSON. A diagnostic bundle explains a verdict; its presence is not a
+passing verdict and its absence is not rewritten as success. Producer validation and deployment
+projection both require the diagnostic URL to equal the envelope's own run URL plus `#artifacts`;
+an arbitrary HTTPS link is rejected rather than rendered to an operator.
+
+The run URL itself is also an outbound security boundary. A linked run must be an HTTPS
+`github.com/<owner>/<repository>/actions/runs/<same-run-id>` URL with no query or fragment. The
+producer rejects a mismatched host or id. The deployment projection independently keeps the test
+verdict but omits untrusted provenance and emits a collection warning, so tampered evidence cannot
+turn the operator console into a phishing link.
+
 Absence is not zero. `0 tests executed` is a valid observed result; `not-run` means no applicable
 artifact was collected. Missing and stale required evidence are attention states, never silently
 excluded from an average.
+
+Artifact retention is not evidence freshness. The projection applies the same freshness budget to
+versioned service suites and specialised mutation, performance and synthetic verdicts as it does to
+fallback reports and mobile CI. A retained success becomes `stale` after that budget; a recorded
+failure, blocker or unknown control remains the stronger operator verdict and is never laundered by
+age.
+
+The authenticated BFF enforces that budget again at request time and recomputes current posture
+totals. This is intentionally independent of the daily image refresh: a failed deploy cannot leave
+an old successful snapshot green indefinitely. Immutable history retains its original verdict and
+timestamp; only the current operator projection ages.
+
+A success timestamp more than five minutes in the future is `unknown`, never fresh. This bounded
+clock-skew allowance tolerates ordinary runner drift while preventing a malformed or poisoned
+timestamp from extending a green verdict indefinitely. Invalid or missing success timestamps become
+`not-run`; recorded failures and explicit control gaps remain the stronger verdict.
+
+The producer enforces the same causal boundary before publication: run and Testcontainers lifecycle
+timestamps must be timezone-aware ISO-8601 values, a run cannot be more than five minutes ahead of
+the producer clock, and a lifecycle event cannot occur more than five minutes after the run that
+contains it. Consumer-side ageing remains mandatory defence in depth rather than trusting the
+producer alone.
+
+The fleet totals and history count both `unknown` and unresolved (`unknown`, `not-run`, `blocked`)
+observations explicitly. A component may have other passing suites and still contribute unresolved
+evidence; the assurance map remains neutral rather than turning an unresolved contract, performance
+run or control verdict green.
+
+History discovery asks the owning Admin UI deployment workflow's last 100 successful `main` runs
+for artifacts and stops after 30 unique snapshots. It never scans the noisy repository-wide
+artifact stream, where fleet builds make snapshot density arbitrarily sparse. The run ceiling
+bounds API cost, and any shorter history stays visibly shorter rather than being backfilled or
+inferred.
 
 Every reusable service build also emits `test-intelligence-run.schema.json` v1. Its run identity is
 the GitHub run id plus attempt, and it carries commit, branch, workflow, URL and observation time.
@@ -93,6 +140,17 @@ expand phase, service-local TestResource implementations remain compatible and r
 runtime proof from CI; migrating them to shared resources remains desirable because it removes
 duplicated lifecycle/configuration logic and also records proof outside that CI observer. New shared
 topologies belong in `openbank-libs-testing`, not another service-local copy.
+
+Shared resources additionally emit an optional, random UUID `resourceScopeId`. It is opaque and
+job-local: it contains no database name, Docker identity, host, port or credential, is never passed
+to an AI agent, and is not rendered as a value in the operator UI. It identifies one logical shared
+resource-manager family across Quarkus reprovisioned object instances, while separate shared
+resource families retain separate scopes. Repeated physical starts in that scope are collapsed into
+one logical lifecycle; the terminal `stopped` observation carries positive `reprovisions` only when
+such repeats occurred. A balanced scope proves only that the recorder observed matching logical
+manager transitions; neither it nor `reprovisions` proves a Docker cleanup outcome. Missing scope
+data remains valid for service-local resources and Docker daemon observations, preserving
+compatibility while making the boundary explicit.
 
 ### D3 — Immutable bounded history, not a premature service
 
@@ -144,6 +202,12 @@ The consolidated page exposes:
 - declared Testcontainers topology alongside observed start/stop lifecycle proof; and
 - explicit collection warnings and observation timestamps.
 
+The rendered workspace is also scanned in Chromium with the official axe engine against WCAG 2 A,
+AA, 2.1 A and 2.1 AA rules. This is a browser-level gate, not a source-pattern assertion: its first
+red run exposed four shared-header contrast failures that the existing lint and static accessibility
+guards could not observe. Those failures are fixed at the shared header rather than suppressed or
+baselined.
+
 The existing composite quality score is retired from the primary UI. No single score may average
 away a missing required control.
 
@@ -156,7 +220,7 @@ The UI slice is complete when:
 - JUnit, Kover, Pact, Pitest, performance and governed synthetic-journey inputs are represented;
 - the active and planned synthetic journeys render with schedules and blockers;
 - `/system/tests` uses one API and legacy APIs still pass their compatibility tests;
-- focused script, route, component, type, lint and build checks pass; and
+- focused script, route, component, browser WCAG, type, lint and build checks pass; and
 - immutable deployment history is retained without a scheduler, database or new microservice.
 
 The ecosystem delivery is complete only when:
@@ -199,6 +263,11 @@ opening a ticket or PR. The UI renders the agent as unavailable without changing
 and root-cause agents may consume the same report, but they cannot rewrite a run verdict, lower a
 gate, approve their own proposal or turn missing evidence into a prediction.
 
+Agent-returned proposal links cross a separate outbound trust boundary. The BFF renders only a
+canonical pull-request URL in the OpenBank repository, with a numeric id and no query or fragment;
+an arbitrary HTTPS, lookalike-repository or executable URL is discarded while the advisory finding
+remains visible.
+
 ### D8 — Competitive benchmark and banking safety boundary
 
 The 2026-08 benchmark found no single product that closes this whole loop. Datadog provides
@@ -209,33 +278,78 @@ correlates probes and k6/browser checks with metrics, logs and traces. Datadog d
 unskippable tests plus full default-branch runs, and Launchable recommends a later full-suite run,
 because selection cannot observe every dependency.
 
+The comparison is capability-based rather than a claim that OpenBank is categorically "better":
+
+| Proven capability in primary product documentation | Reference platform | OpenBank position | Required next proof |
+|---|---|---|---|
+| Per-test history, flaky lifecycle, wasted CI time and AI-assisted categorisation | Datadog Test Optimization | Same-commit transitions, wasted duration and bounded diagnosis are live; automated quarantine is deliberately absent | Prove an accountable remediation lifecycle without allowing quarantine to green a money-path failure |
+| Coverage/change-driven test selection | Datadog Test Impact Analysis, Tricentis SeaLights, Launchable | Behind: path-scoped service selection exists, but per-test selection is not implemented | Run shadow recommendations against preserved full suites and measure escaped-failure recall before any gate use |
+| Scheduled browser/API journeys with retained results and observability correlation | Grafana Synthetic Monitoring, Checkly | Partially ahead on governed journey ownership, explicit planned/blocked states and banking taint boundaries; the Admin UI SSO boundary now retains separate Chromium and Firefox envelopes with an explicit declared-engine denominator. It remains behind on globally distributed probes and rollout-attested browser verdicts. | Execute every active journey on its declared schedule and add region/private-probe and rollout-attestation evidence without weakening identity |
+| Browser and mobile RUM combined with synthetics and backend telemetry | Dynatrace Digital Experience Monitoring, Datadog RUM/test correlation | Partial: privacy-bounded mobile trace arrival and Admin UI browser CI are separate, honest observations; no full session analytics is claimed | Prove consented Android and iOS exporter arrivals and journey-to-backend correlation in the sandbox |
+| Performance tests as continuous SDLC evidence correlated with system telemetry | Grafana k6 | Local service performance gate executes; the money-path sandbox baseline is explicitly `not-run` without a safe reachable target | Provide an isolated authenticated target/runner, then retain repeated comparable baselines and SLO correlation |
+| Semantic locator healing with confidence and revision history | mabl, Testim | Behind by design: source-reviewed Playwright selectors remain deterministic; the agent cannot silently rewrite them | Evaluate reviewed repair proposals against seeded locator defects before permitting any generated source change |
+| Natural-language test generation and reviewable smart fixes | Functionize | Partial: the agent diagnoses measured gaps and can prepare a human-reviewed proposal, but no generated test is accepted as evidence | Add a defect-seeding corpus, sensitive-data filter, deterministic replay and an accountable generated-test owner |
+| Visual AI with deterministic execution and cross-browser baselines | Applitools | Behind: functional Playwright and committed mobile goldens are enforced, but no owned fleet visual baseline is claimed | Establish screenshot classification, baseline approval ownership, retention and a cross-browser execution grid |
+
+OpenBank's present differentiator is therefore the evidence contract, not feature count: released
+components that did not run stay visible, Testcontainers are split into declared and observed
+runtime, every verdict retains commit/workflow provenance, and AI cannot raise a verdict or approve a
+release. The matrix is also a backlog: any row whose next proof is missing prevents a claim of
+end-to-end completion.
+
+Primary vendor documentation used for the AI-testing rows: mabl advanced auto-heal
+(<https://help.mabl.com/hc/en-us/articles/19078583792404-How-auto-heal-works>), Testim locator
+auto-improvement (<https://help.testim.io/docs/locators-auto-improve>), Functionize Create Agent and
+Smart Fix workflow (<https://support.functionize.com/hc/en-us/articles/32990538896663-Creating-Tests-with-Functionize>)
+and Applitools platform/deterministic authoring documentation (<https://applitools.com/docs/>,
+<https://applitools.com/platform/create/>). These are capability sources, not procurement claims.
+
 OpenBank combines the useful parts with a bank-specific invariant: flaky classification is triage
 metadata, never permission to make a failing money-path or control test green. Predictive selection
 may become an advisory ordering or parallelism input only after full-suite preservation is proven;
 it cannot be the sole required gate. Synthetic traffic must retain trusted identity and taint across
 HTTP, Kafka, traces and regulatory projections; an untrusted HTTP header is never sufficient.
 
+The v1 run envelope therefore records test impact only as an explicit `shadow` / `unknown` /
+`unavailable` observation. This is not a placeholder that consumers may reinterpret as an unaffected
+set: it is a guardrail propagated through the collector, operator UI and browser E2E test. Promotion
+requires versioned, verified test-to-production coverage or dependency edges, plus a measured
+comparison of shadow recommendations against the preserved full suite (#7207).
+
+Test-to-trace correlation uses the existing privacy-preserving `TraceContract`. A successful test
+emits a bounded marker only after at least one trace assertion has passed; the run collector turns
+that JUnit marker into `trace` evidence with the same commit and workflow provenance. Trace ids,
+attribute values and fixtures never enter the marker or snapshot. Source presence alone remains no
+evidence, and the ordinary suite verdict stays authoritative if the enclosing JUnit suite fails.
+
 The admin route is a primary platform destination, first in Platform navigation and pinned in the
 platform persona workspace. Its E2E test navigates from the dashboard through the visible link;
 opening `/system/tests` directly is not evidence of discoverability.
 
+Browser failure diagnostics remain GitHub-authenticated, expire after seven days and are linked from
+the exact E2E observation in the execution and client-experience views. Test Intelligence does not
+proxy or render their potentially sensitive contents. This preserves the existing access boundary
+while removing manual run-to-artifact rediscovery for an authorized operator.
+
 ### D9 — Client experience evidence and RUM boundary
 
 Client quality is part of Test Intelligence, but CI and real-user telemetry remain distinct
-observations. The Admin UI contributes its Playwright and visual-regression evidence; browser RUM
-remains rejected for this internal operator surface by ADR-0088. The separate customer-app repository
+observations. The Admin UI contributes its Playwright and visual-regression evidence plus the
+privacy-bounded, authenticated browser RUM defined by ADR-0274. The separate customer-app repository
 publishes a bounded, immutable envelope containing unit and committed-golden verdicts plus run
 provenance. Missing private-repository access or an expired artifact renders `not-run` with a blocker;
 source presence is never promoted to a completed test.
 
 Mobile RUM is consent-gated runtime evidence. The deploy-time projection records Android/iOS exporter
-capability from a read-only checkout that is excluded from the Docker build context, while the BFF
-queries Tempo span-metrics through Prometheus for sampled `openbank-app` arrival over seven days. A
-non-zero observation proves that telemetry crossed the hardened gateway; it does not prove traffic
-volume, a particular OS deployment, or test success. Zero is an explicit absent observation, not a
-failure, because consent is opt-in. Operator-triggered AI analysis receives only bounded client CI
-kind/state pairs; it does not receive RUM counts, details or source paths. The agent may diagnose a
-missing mobile execution envelope, but cannot synthesize a client verdict or alter CI/RUM state.
+capability from a read-only checkout that is excluded from the Docker build context. The BFF counts
+unique `openbank-app` trace IDs from a bounded seven-day Tempo search (maximum 1,000 results), marks a
+full result page as a lower bound, and uses Tempo span-metrics through Prometheus only for the error
+signal and as a degraded fallback. A non-zero observation proves that telemetry crossed the hardened
+gateway; it does not prove traffic volume, a particular OS deployment, or test success. Zero is an
+explicit absent observation, not a failure, because consent is opt-in. Operator-triggered AI analysis
+receives only bounded client CI kind/state pairs; it does not receive RUM counts, details or source
+paths. The agent may diagnose a missing mobile execution envelope, but cannot synthesize a client
+verdict or alter CI/RUM state.
 
 ## Alternatives considered
 
@@ -309,7 +423,12 @@ missing mobile execution envelope, but cannot synthesize a client verdict or alt
 - [Datadog Test Optimization](https://docs.datadoghq.com/tests/)
 - [Datadog Test Impact Analysis](https://docs.datadoghq.com/tests/test_impact_analysis/)
 - [Datadog Flaky Test Management](https://docs.datadoghq.com/tests/flaky_management/)
+- [Tricentis SeaLights test impact analysis](https://documentation.tricentis.com/sealights/en/content/sealights/support.htm)
 - [Buildkite Test Engine](https://buildkite.com/platform/test-engine/)
 - [Launchable predictive test selection](https://help.launchableinc.com/features/predictive-test-selection/how-launchable-selects-tests/)
 - [Checkly Playwright checks](https://www.checklyhq.com/docs/detect/synthetic-monitoring/playwright-checks/overview/)
 - [Grafana Synthetic Monitoring](https://grafana.com/docs/grafana-cloud/observe-and-act/testing/synthetic-monitoring/introduction/)
+- [Grafana automated performance testing](https://grafana.com/docs/k6/latest/testing-guides/automated-performance-testing/)
+- [Dynatrace RUM and Synthetic Monitoring](https://docs.dynatrace.com/docs/license/capabilities/real-user-synthetic-monitoring)
+- [BrowserStack AI agents](https://www.browserstack.com/docs/test-management/browserstack-ai)
+- [BrowserStack Smart Test Selection](https://www.browserstack.com/docs/automate/selenium/smart-test-selection)

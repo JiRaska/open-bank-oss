@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.26.0...account-service-v0.27.0) (2026-08-31)
+
+
+### Features
+
+* **account:** expose pending approvals in unified inbox ([#7028](https://github.com/JiRaska/open-bank-oss/issues/7028)) ([82512a4](https://github.com/JiRaska/open-bank-oss/commit/82512a459701f9cbc9742a9b06fb5e7e94e5be37))
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.25.0...account-service-v0.26.0) (2026-08-26)
+
+
+### Features
+
+* **customer-edge:** add term deposit journey ([#6838](https://github.com/JiRaska/open-bank-oss/issues/6838)) ([c99828e](https://github.com/JiRaska/open-bank-oss/commit/c99828e110223ceebe63befda471bd9232720fad))
+
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.24.0...account-service-v0.25.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.23.1...account-service-v0.24.0) (2026-08-24)
 
 

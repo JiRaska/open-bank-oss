@@ -27,6 +27,9 @@ import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.domain.saga.SagaState
 import com.openbank.transaction.domain.settlement.SettlementDateResolver
 import com.openbank.transaction.domain.settlement.SettlementDates
+import io.opentelemetry.api.GlobalOpenTelemetry
+import io.opentelemetry.api.trace.SpanKind
+import io.opentelemetry.api.trace.Tracer
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import io.vertx.pgclient.PgException
@@ -49,6 +52,13 @@ class TransactionService(
     private val workflowClient: WorkflowClient,
     private val clock: Clock,
 ) : TransactionUseCase {
+
+    /**
+     * Field injection keeps the public constructor used by existing unit tests stable while
+     * making the trace provider replaceable in the assertion-backed integration contract.
+     */
+    @Inject
+    lateinit var tracer: Tracer
 
     @Inject
     constructor(
@@ -76,7 +86,32 @@ class TransactionService(
         private const val IMPLIED_FX_RATE_SCALE = 8
     }
 
+    @Suppress("TooGenericExceptionCaught")
     override suspend fun initiateTransaction(command: InitiateTransactionCommand): Transaction {
+        val span = activeTracer().spanBuilder("transaction.initiate")
+            .setSpanKind(SpanKind.INTERNAL)
+            .startSpan()
+        try {
+            return initiateTransactionInternal(command).also {
+                // A controlled vocabulary: neither amount, account, party, description nor idempotency key.
+                span.setAttribute("openbank.transaction.status", it.status.name)
+            }
+        } catch (error: Exception) {
+            span.recordException(error)
+            throw error
+        } finally {
+            span.end()
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun activeTracer(): Tracer =
+        if (this::tracer.isInitialized) tracer else GlobalOpenTelemetry.getTracer("openbank-transaction-service")
+
+    // Existing orchestration stays deliberately contiguous; extracting it only to host the
+    // span boundary must not alter payment/Temporal sequencing.
+    @Suppress("LongMethod")
+    private suspend fun initiateTransactionInternal(command: InitiateTransactionCommand): Transaction {
         val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
         if (existing != null) return existing
 

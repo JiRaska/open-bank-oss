@@ -33,6 +33,8 @@ data class CreateDomesticPaymentCommand(
     val statementLabel: String?,
     val endToEndId: String?,
     val actorId: UUID? = null,
+    /** Trusted inbound synthetic taint, copied into the durable outbox boundary. */
+    val synthetic: Boolean = false,
 )
 
 data class ListDomesticPaymentsQuery(

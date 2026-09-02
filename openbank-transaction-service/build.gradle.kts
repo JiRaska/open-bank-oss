@@ -66,6 +66,9 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+    // Assertion-backed trace contracts: the integration test owns the exporter and emits
+    // a machine-readable marker only after its span/attribute assertions pass.
+    testImplementation(project(":openbank-libs-testing"))
     // ADR-0120 Phase 1: in-memory Temporal test environment for the payment workflow tests.
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")

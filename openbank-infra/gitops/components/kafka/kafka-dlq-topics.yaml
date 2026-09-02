@@ -242,6 +242,21 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-campaign-service :: channel `incentive-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.campaign.incentive-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-campaign-service :: channel `notification-outcomes-in`
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
