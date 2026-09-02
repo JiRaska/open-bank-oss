@@ -7,7 +7,7 @@ import { signInAsOperator } from './helpers/auth'
 
 const NOTIFICATION = {
   id: 'notification-42',
-  type: 'EMAIL',
+  template: 'PAYMENT_COMPLETED',
   channel: 'EMAIL',
   recipient: 'customer-42@example.test',
   subject: 'Payment received',
@@ -16,19 +16,33 @@ const NOTIFICATION = {
   createdAt: '2026-08-31T08:00:00Z',
 }
 
+const RECOVERED_NOTIFICATION = {
+  ...NOTIFICATION,
+  recipient: 'customer-42-recovered@example.test',
+  subject: 'Payment notification recovered',
+  sentAt: '2026-08-31T08:02:00Z',
+}
+
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
 })
 
 test('keeps the last notification log during an outage and recovers', async ({ page }) => {
   let available = true
+  let currentNotification = NOTIFICATION
   let requests = 0
-  await page.route('**/api/svc/notification-service/api/v1/notifications', route => {
+  const requestedPages: string[] = []
+  await page.route(url => url.pathname === '/api/svc/notification-service/api/v1/notifications', route => {
     requests += 1
+    const requestUrl = new URL(route.request().url())
+    requestedPages.push(`${requestUrl.searchParams.get('page')}:${requestUrl.searchParams.get('size')}`)
     if (!available) {
       return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
     }
-    return route.fulfill({ contentType: 'application/json', body: JSON.stringify([NOTIFICATION]) })
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [currentNotification], total: 1, page: 0, size: 20 }),
+    })
   })
 
   await page.goto('/notifications')
@@ -42,8 +56,11 @@ test('keeps the last notification log during an outage and recovers', async ({ p
   await expect(page.getByText(/Žádné notifikace nenalezeny|No notifications found/)).toHaveCount(0)
 
   available = true
+  currentNotification = RECOVERED_NOTIFICATION
   await page.getByRole('button', { name: /Obnovit oznámení|Refresh notifications/ }).click()
   await expect(page.getByText(/stav doručení se mohl změnit|delivery status may have changed/)).toBeHidden()
-  await expect(page.getByText(NOTIFICATION.recipient, { exact: true })).toBeVisible()
+  await expect(page.getByText(RECOVERED_NOTIFICATION.recipient, { exact: true })).toBeVisible()
+  await expect(page.getByText(NOTIFICATION.recipient, { exact: true })).toHaveCount(0)
   expect(requests).toBeGreaterThanOrEqual(3)
+  expect(requestedPages).toEqual(Array(requests).fill('0:20'))
 })
