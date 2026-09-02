@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.234.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.233.0...admin-ui-v0.234.0) (2026-09-02)
+
+
+### Features
+
+* **admin-ui:** triage identity verification cases ([#8161](https://github.com/JiRaska/open-bank-oss/issues/8161)) ([8ebf58e](https://github.com/JiRaska/open-bank-oss/commit/8ebf58e6b122ca5ab12003dcadb04cdab8ad06da))
+
+
+### Bug Fixes
+
+* **admin-ui:** let visible interest retries run ([#8169](https://github.com/JiRaska/open-bank-oss/issues/8169)) ([b9788f1](https://github.com/JiRaska/open-bank-oss/commit/b9788f102613cfa57797c4b741afa2486a7fdb28))
+
 ## [0.233.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.232.4...admin-ui-v0.233.0) (2026-09-02)
 
 
