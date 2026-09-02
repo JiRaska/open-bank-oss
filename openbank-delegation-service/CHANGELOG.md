@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.1...delegation-service-v0.13.2) (2026-09-02)
+
+
+### Security
+
+* **delegation:** publish durable spend reservation state ([#8247](https://github.com/JiRaska/open-bank-oss/issues/8247)) ([a017aab](https://github.com/JiRaska/open-bank-oss/commit/a017aab1111abaf702cc708f9e2a39cec56c9b1c))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.0...delegation-service-v0.13.1) (2026-09-02)
 
 
