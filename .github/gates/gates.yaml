@@ -97,6 +97,7 @@ gates:
     min_subjects: 110
     selftest: python3 .github/scripts/check-synthetic-taint-rest-clients.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-synthetic-taint-rest-clients.py"]
     run: |
       python3 .github/scripts/check-synthetic-taint-rest-clients.py --enforce
 
@@ -109,6 +110,7 @@ gates:
     min_subjects: 20
     selftest: python3 .github/scripts/check-synthetic-outbox-taint.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-synthetic-outbox-taint.py"]
     run: |
       python3 .github/scripts/check-synthetic-outbox-taint.py --enforce
 
@@ -122,6 +124,7 @@ gates:
     rationale: "run-gates.py can enforce a wall-time ceiling and a subject floor per gate, but only where the manifest declares them; measured on the ci_gate_runs warehouse only 18 of 197 gates declare a budget, so 179 gates can slow down without limit and nothing objects. Ratcheting the undeclared count means a new gate arrives declared, and the tail is paid down deliberately."
     selftest: python3 .github/scripts/check-gate-observability-declarations.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-gate-observability-declarations.py"]
     run: |
       python3 .github/scripts/check-gate-observability-declarations.py --enforce
 
@@ -377,6 +380,7 @@ gates:
     min_subjects: 5   # 3 declared pools + 4 self-hosted runs-on labels today (2026-08-30)
     selftest: python3 .github/scripts/check-ci-runner-pools.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-ci-runner-pools.py"]
     run: |
       python3 .github/scripts/check-ci-runner-pools.py
 
@@ -386,6 +390,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-deploy-drift.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-deploy-drift.py"]
     run: |
       python3 .github/scripts/check-deploy-drift.py --root . --offline
 
@@ -403,6 +408,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-litellm-model-costs.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-litellm-model-costs.py"]
     run: |
       # Falsified both ways before wiring in: 4 findings against the unpriced tree, 0 after,
       # 9 self-test cases including an explicit zero (which must NOT be treated as a price).
@@ -418,6 +424,7 @@ gates:
     review_after: "2027-02-19"
     selftest: python3 .github/scripts/check-untrusted-pg-extension.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-untrusted-pg-extension.py"]
     run: |
       # Measured, not assumed (ADR-0265): against ghcr.io/cloudnative-pg/postgresql:18.1 the
       # database OWNER gets 'permission denied to create extension "vector"' and the superuser
@@ -437,6 +444,7 @@ gates:
     review_after: "2027-02-19"
     selftest: python3 .github/scripts/check-litellm-config-revision.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-litellm-config-revision.py"]
     run: |
       # LiteLLM parses --config once at startup, so a ConfigMap edit alone changes nothing while
       # ArgoCD reports Synced and Healthy — the manifest has warned about this in prose since
@@ -450,6 +458,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-agent-virtual-keys.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-agent-virtual-keys.py"]
     budget_seconds: 30   # 7.8s in CI
     run: |
       # Falsified in both directions before it was wired in: 4 findings against the
@@ -464,6 +473,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-model-residency-claims.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-model-residency-claims.py"]
     run: |
       # Falsified BOTH ways before wiring in — the distinction this gate exists for is
       # routed-to-EU vs routed-ANYWHERE, and a check that cannot tell those apart is
@@ -490,6 +500,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-oidc-secret-convention.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-oidc-secret-convention.py"]
     budget_seconds: 30   # 14.5s in CI before #4344, ~5s after
     run: |
       # Falsified BOTH ways before wiring in. Detection: 13 cases including the exact #3471
@@ -506,6 +517,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-single-replica-rollout-strategy.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-single-replica-rollout-strategy.py"]
     budget_seconds: 30   # 15.2s in CI before #4344, ~5s after
     run: |
       # Two independent questions over the same manifests. The first is #3545: did the workload
@@ -820,12 +832,17 @@ gates:
     name: "Loki rule load test (enforced)"
     group: gitops
     mode: enforced
-    selftest: |
-      # Scoped by --since exactly as the gate is (#3074): the self-test boots the same real
-      # ruler, so leaving it unscoped would have kept charging every PR the ~90 s the gate
-      # itself no longer costs them.
-      git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --no-tags || true
-      python3 .github/scripts/check-loki-rules.py --self-test --since "origin/${BASE_REF}"
+    # Was scoped by its own --since, which had the skip decision INVERTED where it matters:
+    # on a push to main `git diff main...HEAD` is empty, so the falsification was skipped on
+    # 97.7% of pushes and paid on 46% of pull requests (measured over ci_gate_runs, 14 days to
+    # 2026-09-02) — exactly the wrong way round, since main is the lane that must re-prove the
+    # gate unconditionally. `selftest_inputs` below is the same input set (check-loki-rules.py's
+    # own RULE_INPUTS) driven by the shared mechanism, which runs off a pull request always.
+    selftest: python3 .github/scripts/check-loki-rules.py --self-test
+    selftest_inputs:
+      - "openbank-infra/gitops/components"
+      - "openbank-infra/gitops/apps/loki.yaml"
+      - ".github/scripts/check-loki-rules.py"
     run: |
       # $BASE_REF is exported by the shard in ci.yml. A ${{ }} expression cannot appear in
       # this file: nothing expands it outside the workflow, so bash sees the literal text
@@ -915,6 +932,7 @@ gates:
     budget_seconds: 30   # 7.3s in CI
     selftest: python3 .github/scripts/check-gitops-secret-refs.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-gitops-secret-refs.py"]
     run: |
       python3 .github/scripts/check-gitops-secret-refs.py
 
@@ -941,6 +959,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-incluster-hostnames.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-incluster-hostnames.py"]
     run: |
       python3 .github/scripts/check-incluster-hostnames.py --enforce
 
@@ -1210,6 +1229,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-admin-ui-version-sync.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-admin-ui-version-sync.sh"]
     run: |
       bash .github/scripts/check-admin-ui-version-sync.sh .
 
@@ -1237,6 +1257,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-deploy-coverage.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-deploy-coverage.sh"]
     run: |
       bash .github/scripts/check-deploy-coverage.sh
 
@@ -1443,6 +1464,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-app-version-override.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-app-version-override.sh"]
     run: |
       bash .github/scripts/check-app-version-override.sh .
 
@@ -1456,6 +1478,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-gate-graduation.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-gate-graduation.sh"]
     run: |
       bash .github/scripts/check-gate-graduation.sh
 
@@ -1482,6 +1505,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-advisory-gate-registration.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-advisory-gate-registration.py"]
     run: |
       python3 .github/scripts/check-advisory-gate-registration.py --expect-manifest
 
@@ -1495,6 +1519,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-slo-registry.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-slo-registry.py"]
     run: |
       python3 .github/scripts/check-slo-registry.py
 
@@ -1525,6 +1550,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-prompt-registry.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-prompt-registry.py"]
     run: |
       python3 .github/scripts/check-prompt-registry.py
 
@@ -1556,6 +1582,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-evals-registry.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-evals-registry.py"]
     run: |
       python3 .github/scripts/check-evals-registry.py
 
@@ -1603,6 +1630,7 @@ gates:
       python3 .github/scripts/check-governance-lineage.py --enforce
     selftest: python3 .github/scripts/check-governance-lineage.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-governance-lineage.py"]
 
   # issue #2412 (third residual). openbank-mcp-service masks PII on every tool result
   # UNCONDITIONALLY — deliberately, since a switch that can turn a declared control off is how
@@ -1618,6 +1646,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-mcp-charter-data-scope.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-mcp-charter-data-scope.py"]
     run: |
       python3 .github/scripts/check-mcp-charter-data-scope.py --enforce
 
@@ -1651,6 +1680,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-journey-coverage.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-journey-coverage.py"]
     min_subjects: 20   # 23 money-path services today (2026-08-09)
     run: |
       # Falsified against the REAL tree before wiring in: deleting one service's entry makes it
@@ -1664,6 +1694,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-journey-catalog.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-journey-catalog.py"]
     min_subjects: 12  # 12 governed journeys today (2026-08-26): 1 active, 11 planned
     run: |
       # Falsified against the REAL tree before wiring in, not only in the self-test's temp
@@ -1678,6 +1709,7 @@ gates:
     budget_seconds: 90   # the registry shard is 20s in CI end to end
     selftest: bash .github/scripts/check-adr-registry.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-adr-registry.sh"]
     run: |
       bash .github/scripts/check-adr-registry.sh
 
@@ -1709,6 +1741,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-adr-partial-followup.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-adr-partial-followup.py"]
     run: |
       python3 .github/scripts/check-adr-partial-followup.py --enforce
 
@@ -1730,6 +1763,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-agent-charter-registry.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-agent-charter-registry.sh"]
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
@@ -1739,6 +1773,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-agent-model-parity.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-agent-model-parity.py"]
     min_subjects: 13   # 13 charters declare a real model: today (2026-08-09) — a gate that
                         # examines nothing passes everything, so this floor must move with the
                         # count printed by the gate's own summary line.
@@ -1751,6 +1786,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-agent-case-schema.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-agent-case-schema.py"]
     run: |
       # #3771 added case_classes + case_capabilities to agents.yaml with no validator;
       # a threshold of 1.30 or a second charter holding case.coordinate would parse as
@@ -1780,6 +1816,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-eu-ai-act.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-eu-ai-act.sh"]
     run: |
       bash .github/scripts/check-eu-ai-act.sh
 
@@ -1799,6 +1836,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-ai-act-high-risk-inventory.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-ai-act-high-risk-inventory.py"]
     run: |
       python3 .github/scripts/check-ai-act-high-risk-inventory.py
 
@@ -1873,6 +1911,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-scheduler-cron-syntax.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-scheduler-cron-syntax.py"]
     run: |
       # Nothing in the test layers parses the PRODUCTION cron: the cron IT overrides it with a
       # fast expression and %test overrides it with a never-fire one, so both run against a
@@ -1886,6 +1925,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-scheduled-trigger-emitted.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-scheduled-trigger-emitted.py"]
     run: |
       # Falsified in three directions before wiring in: a new unemitted service fails, a
       # baselined service that becomes covered ALSO fails (so the list cannot rot), and the
@@ -1925,6 +1965,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-dockerfile-no-build-stage.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-dockerfile-no-build-stage.py"]
     run: |
       # This lived as an inline step in ci.yml's `ui-build` job, which runs only when
       # openbank-admin-ui/, */governance.yaml or the governance schema changed. So the gate
@@ -1968,6 +2009,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-main-red-watch.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-main-red-watch.py"]
     run: |
       python3 .github/scripts/check-main-red-watch.py --check-declaration
 
@@ -2047,6 +2089,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-merged-past-red-check.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-merged-past-red-check.py"]
     run: |
       python3 .github/scripts/check-merged-past-red-check.py --check-declaration
 
@@ -2234,6 +2277,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-operator-write-naming.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-operator-write-naming.py"]
     run: |
       python3 .github/scripts/check-operator-write-naming.py
 
@@ -2260,6 +2304,7 @@ gates:
       python3 .github/scripts/check-matrix-write-grants.py --enforce
     selftest: python3 .github/scripts/check-matrix-write-grants.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-matrix-write-grants.py"]
 
   # Admin-ui IAOps governance snapshot drift (ADR-0029 D3 / ADR-0031).
   # openbank-admin-ui/ai-governance-snapshot.json is DERIVED from curated rollout prose
@@ -2273,6 +2318,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/gen-ai-governance-snapshot.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/gen-ai-governance-snapshot.py"]
     run: |
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
 
@@ -2288,6 +2334,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-event-consumer-liveness.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-event-consumer-liveness.py"]
     run: |
       python3 .github/scripts/check-event-consumer-liveness.py --enforce
 
@@ -2305,6 +2352,7 @@ gates:
     min_subjects: 1080   # 2173 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-no-runblocking-in-scheduled.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-no-runblocking-in-scheduled.py"]
     run: |
       python3 .github/scripts/check-no-runblocking-in-scheduled.py
 
@@ -2319,6 +2367,7 @@ gates:
     min_subjects: 500   # 1184 test sources today (2026-08-09)
     selftest: bash .github/scripts/check-test-runblocking-unit.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-test-runblocking-unit.sh"]
     run: |
       bash .github/scripts/check-test-runblocking-unit.sh .
 
@@ -2343,6 +2392,7 @@ gates:
     min_subjects: 900   # 1889 service source files today (2026-08-09)
     selftest: bash .github/scripts/check-exception-mapper-collision.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-exception-mapper-collision.sh"]
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
 
@@ -2374,6 +2424,7 @@ gates:
     min_subjects: 1080   # 2175 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-nonnull-jaxrs-params.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-nonnull-jaxrs-params.py"]
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
@@ -2393,6 +2444,7 @@ gates:
     min_subjects: 16   # 33 dispatch-gated services today (2026-08-09)
     selftest: bash .github/scripts/check-outbox-dispatch-enabled.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-dispatch-enabled.sh"]
     run: |
       bash .github/scripts/check-outbox-dispatch-enabled.sh .
 
@@ -2421,6 +2473,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-new-random-uuid.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-new-random-uuid.py"]
     run: |
       python3 .github/scripts/check-new-random-uuid.py "${PR_DIFF_BASE:-}"
 
@@ -2438,6 +2491,7 @@ gates:
     min_subjects: 1500   # 3121 .kt files today (2026-08-09)
     selftest: bash .github/scripts/check-domain-event-occuredat.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-domain-event-occuredat.sh"]
     run: |
       bash .github/scripts/check-domain-event-occuredat.sh
 
@@ -2464,6 +2518,7 @@ gates:
     # check-gate-subject-floor.py.
     selftest: bash .github/scripts/check-clock-injection.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-clock-injection.sh"]
     run: |
       bash .github/scripts/check-clock-injection.sh
 
@@ -2490,6 +2545,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-accounting-clock.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-accounting-clock.py"]
     run: |
       python3 .github/scripts/check-accounting-clock.py --enforce
 
@@ -2629,6 +2685,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-outbox-has-writer.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-has-writer.py"]
     run: |
       python3 .github/scripts/check-outbox-has-writer.py .
 
@@ -2704,6 +2761,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-openapi-enum-vs-domain.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-openapi-enum-vs-domain.py"]
     run: |
       python3 .github/scripts/check-openapi-enum-vs-domain.py --enforce
 
@@ -2882,6 +2940,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-openapi-route-conformance.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-openapi-route-conformance.py"]
     run: |
       python3 .github/scripts/check-openapi-route-conformance.py --enforce \
         --baseline .github/openapi-route-conformance-baseline.txt
@@ -2896,6 +2955,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-asvs-l3.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-asvs-l3.py"]
     run: |
       python3 .github/scripts/check-asvs-l3.py --enforce --baseline .github/asvs-l3-baseline.txt
 
@@ -2909,6 +2969,7 @@ gates:
     min_subjects: 26   # 52 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-openapi-server-port.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-openapi-server-port.py"]
     run: |
       python3 .github/scripts/check-openapi-server-port.py --enforce
 
@@ -2985,6 +3046,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-clickhouse-ddl-in-configmap.py"]
     run: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --root .
 
@@ -3003,6 +3065,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-aggregate-type-case-fold.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-aggregate-type-case-fold.py"]
     run: |
       python3 .github/scripts/check-aggregate-type-case-fold.py --root .
 
@@ -3115,6 +3178,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-source-service-presence.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-source-service-presence.py"]
     run: |
       python3 .github/scripts/check-source-service-presence.py --root .
 
@@ -3188,6 +3252,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-duplicate-yaml-keys.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-duplicate-yaml-keys.sh"]
     run: |
       bash .github/scripts/check-duplicate-yaml-keys.sh . --enforce
 
@@ -3214,6 +3279,7 @@ gates:
     verified: "2026-08-09 — fleet still not clean per #686; no target date set for --enforce yet"
     selftest: bash .github/scripts/check-dotted-mp-messaging-keys.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-dotted-mp-messaging-keys.sh"]
     run: |
       bash .github/scripts/check-dotted-mp-messaging-keys.sh .
 
@@ -3272,6 +3338,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-event-contract-coverage.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-event-contract-coverage.py"]
     run: |
       python3 .github/scripts/check-event-contract-coverage.py
 
@@ -3306,6 +3373,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-event-contract-code-agreement.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-event-contract-code-agreement.py"]
     run: |
       python3 .github/scripts/check-event-contract-code-agreement.py
 
@@ -3345,6 +3413,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-asyncapi-doc-discriminator.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-asyncapi-doc-discriminator.py"]
     run: |
       python3 .github/scripts/check-asyncapi-doc-discriminator.py
 
@@ -3357,6 +3426,7 @@ gates:
     needs_base: required
     selftest: python3 .github/scripts/check-event-schema-compat.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-event-schema-compat.py"]
     run: |
       python3 .github/scripts/check-event-schema-compat.py --base "${PR_DIFF_BASE}"
 
@@ -3411,6 +3481,7 @@ gates:
     min_subjects: 1500
     selftest: python3 .github/scripts/check-noop-not-success.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-noop-not-success.py"]
     run: |
       python3 .github/scripts/check-noop-not-success.py --root .
 
@@ -3421,6 +3492,7 @@ gates:
     min_subjects: 30   # 61 measured 2026-09-01; half, so the fleet can shrink without a red
     selftest: python3 .github/scripts/check-kafka-dotted-keys.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-kafka-dotted-keys.py"]
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
@@ -3444,6 +3516,7 @@ gates:
     min_subjects: 300
     selftest: python3 .github/scripts/check-quoted-sequence-names.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-quoted-sequence-names.py"]
     run: |
       python3 .github/scripts/check-quoted-sequence-names.py --root .
 
@@ -3453,6 +3526,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-external-feeds.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-external-feeds.py"]
     run: |
       python3 .github/scripts/check-external-feeds.py --root . --offline
 
@@ -3469,6 +3543,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-critical-alert-egress.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-critical-alert-egress.py"]
     run: |
       python3 .github/scripts/check-critical-alert-egress.py
 
@@ -3491,6 +3566,7 @@ gates:
     review_after: "2027-02-13"
     selftest: python3 .github/scripts/check-helm-values-keys.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-helm-values-keys.py"]
     min_subjects: 15   # 20 Helm sources with a valuesObject today (2026-08-13)
     budget_seconds: 180
     run: |
@@ -3570,6 +3646,7 @@ gates:
     review_after: "2027-02-20"
     selftest: python3 .github/scripts/check-threat-model-claims.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-threat-model-claims.py"]
     run: |
       python3 .github/scripts/check-threat-model-claims.py --enforce
 
@@ -3602,6 +3679,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/validate-flags.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/validate-flags.py"]
     run: |
       python3 .github/scripts/validate-flags.py .
 
@@ -3621,6 +3699,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-no-service-principal-type.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-no-service-principal-type.sh"]
     run: |
       bash .github/scripts/check-no-service-principal-type.sh .
 
@@ -3641,6 +3720,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-psd2-anonymous-grant-paths.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-psd2-anonymous-grant-paths.py"]
     run: |
       python3 .github/scripts/check-psd2-anonymous-grant-paths.py --enforce
 
@@ -3661,6 +3741,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-mcp-stub-ports-vs-caller-auth.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-mcp-stub-ports-vs-caller-auth.sh"]
     run: |
       bash .github/scripts/check-mcp-stub-ports-vs-caller-auth.sh .
 
@@ -3683,6 +3764,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-authz-pdp-parity.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-authz-pdp-parity.py"]
     run: |
       python3 .github/scripts/check-authz-pdp-parity.py . --enforce
 
@@ -3706,6 +3788,7 @@ gates:
     min_subjects: 200   # 419 @RolesAllowed sites today (2026-08-09)
     selftest: python3 .github/scripts/check-roles-allowed-realm.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-roles-allowed-realm.py"]
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
   # The sibling of the gate above, one layer earlier: that one asks whether the role a caller
@@ -3729,6 +3812,7 @@ gates:
     min_subjects: 25   # 30 modules register the filter today (2026-08-16)
     selftest: python3 .github/scripts/check-oidc-client-configured.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-oidc-client-configured.py"]
     run: |
       python3 .github/scripts/check-oidc-client-configured.py
   - id: pr-build-cloud-credentials
@@ -3739,6 +3823,7 @@ gates:
     review_after: "2027-08-23"
     selftest: python3 .github/scripts/check-pr-build-cloud-credentials.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-pr-build-cloud-credentials.py"]
     run: |
       python3 .github/scripts/check-pr-build-cloud-credentials.py
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
@@ -3765,6 +3850,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-realm-template-importable.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-realm-template-importable.py"]
     run: |
       python3 .github/scripts/check-realm-template-importable.py
 
@@ -3790,6 +3876,7 @@ gates:
     min_subjects: 2
     selftest: python3 .github/scripts/check-realm-devci-artifact-parity.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-realm-devci-artifact-parity.py"]
     run: |
       python3 .github/scripts/check-realm-devci-artifact-parity.py
 
@@ -3799,6 +3886,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-opa-bundle-parses.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-opa-bundle-parses.py"]
     run: |
       # sca shipped an unloadable bundle on 2026-08-07 (#3748, repaired by #3971): a source
       # rego without a trailing newline made the generator emit `}  agents.rego: |`, which
@@ -3813,6 +3901,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-opa-bundle-apply-size.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-opa-bundle-apply-size.py"]
     run: |
       # A bundle over ~256 KB cannot be installed by client-side apply: the whole
       # object goes into last-applied-configuration and the API server rejects it
@@ -3827,6 +3916,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-configproperty-kotlin-defaults.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-configproperty-kotlin-defaults.py"]
     run: |
       # A Kotlin default on a @ConfigProperty constructor parameter generates a synthetic
       # constructor; Arc builds the bean through it and the annotation is never applied, so
@@ -3844,6 +3934,7 @@ gates:
     review_after: "2027-02-20"
     selftest: python3 .github/scripts/check-build-time-bean-selection.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-build-time-bean-selection.py"]
     run: |
       # Three sources of build-time truth, because reading only one makes the check wrong in
       # both directions: the module's application.yaml with ${VAR:default} collapsed to its
@@ -3864,6 +3955,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-nat-ami-pinned.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-nat-ami-pinned.py"]
     run: |
       # The fck-nat instance IS the private subnets' only egress path, and its `ami` came
       # from a most_recent aws_ami data source. `ami` forces replacement, so every upstream
@@ -3882,6 +3974,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-enforcement-reachability.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-enforcement-reachability.py"]
     run: |
       # AuthorizationService.isAuthorizedForAmount is the only amount-aware account guard in
       # the fleet and the only enforcer of ADR-0232's perTransactionLimit — and every one of
@@ -3899,6 +3992,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-readiness-attestations.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-readiness-attestations.py"]
     run: |
       # attestations.yaml is the ONLY hand-entered input to the prod-readiness matrix, and
       # nothing read it before this gate. It shipped with `consent-service:` as a service
@@ -3924,6 +4018,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-label-descriptions.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-label-descriptions.py"]
     run: |
       # GitHub caps a label description at 100 characters and Label sync fails the whole apply on
       # the first over-long entry, so ONE wordy label turns main red on a push-triggered workflow
@@ -3966,6 +4061,7 @@ gates:
     when: pull_request
     selftest: python3 .github/scripts/check-pr-file-overlap.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-pr-file-overlap.py"]
     run: |
       python3 .github/scripts/check-pr-file-overlap.py
 
@@ -4007,6 +4103,7 @@ gates:
     when: pull_request
     selftest: python3 .github/scripts/check-agent-pr-guard.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-agent-pr-guard.py"]
     run: |
       python3 .github/scripts/check-agent-pr-guard.py
 
@@ -4096,6 +4193,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-manifest-types-only.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-manifest-types-only.sh"]
     min_subjects: 1   # the one file it guards
     run: |
       bash .github/scripts/check-manifest-types-only.sh
@@ -4117,6 +4215,7 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-governance-manifest.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-governance-manifest.sh"]
     min_subjects: 30   # 58 modules with a version.txt today (2026-08-09)
     run: |
       bash .github/scripts/check-governance-manifest.sh
@@ -4138,6 +4237,7 @@ gates:
     review_after: "2027-02-19"
     selftest: bash .github/scripts/check-mermaid-parses.sh --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-mermaid-parses.sh"]
     min_subjects: 220   # 362 diagrams today (2026-08-22): 248 ```mermaid blocks + 114 .mmd files (#6495)
     run: |
       bash .github/scripts/check-mermaid-parses.sh
@@ -4167,6 +4267,7 @@ gates:
     review_after: "2027-02-19"
     selftest: python3 .github/scripts/check-event-handler-swallows.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-event-handler-swallows.py"]
     min_subjects: 100   # 170 files carrying @Incoming/@Scheduled today (2026-08-19)
     run: |
       python3 .github/scripts/check-event-handler-swallows.py --enforce
@@ -4178,6 +4279,7 @@ gates:
     min_subjects: 10   # 21 run: steps in ci.yml today (2026-08-09)
     selftest: python3 .github/scripts/check-gate-invocation-reachability.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-gate-invocation-reachability.py"]
     run: |
       python3 .github/scripts/check-gate-invocation-reachability.py --enforce
 
@@ -4258,6 +4360,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-ruleset-context-parity.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-ruleset-context-parity.py"]
     # 5 required contexts today (2026-08-21). Not applied to a run that could not READ the
     # ruleset: the gate prints `SUBJECTS=UNRESOLVED` there and run-gates.py skips the floor,
     # because 0 contexts from a rate-limited API means "not measured", not "corpus collapsed".
@@ -4320,6 +4423,7 @@ gates:
     review_after: "2027-02-16"
     selftest: python3 .github/scripts/check-vex-range-reasoning.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-vex-range-reasoning.py"]
     min_subjects: 400   # 824 verdict statements across 52 overlays today (2026-08-16)
     budget_seconds: 20  # ~0.3s locally over the 52 overlays
     run: |
@@ -4336,6 +4440,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-advisory-finding-staleness.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-advisory-finding-staleness.py"]
     min_subjects: 3   # 5 advisory-mode gates today (2026-08-09)
     run: |
       python3 .github/scripts/check-advisory-finding-staleness.py --today "$(date -u +%F)" --enforce
@@ -4354,6 +4459,7 @@ gates:
     min_subjects: 100   # ~140 gates today (2026-08-10)
     selftest: python3 .github/scripts/check-gate-lifecycle-metadata.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-gate-lifecycle-metadata.py"]
     run: |
       python3 .github/scripts/check-gate-lifecycle-metadata.py --today "$(date -u +%F)" --enforce
 
@@ -4363,6 +4469,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-gate-subject-floor.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-gate-subject-floor.py"]
     min_subjects: 100   # 130 gates today (2026-08-09)
     run: |
       python3 .github/scripts/check-gate-subject-floor.py --enforce
@@ -4373,6 +4480,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-gate-selftest-declaration.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-gate-selftest-declaration.py"]
     run: |
       python3 .github/scripts/check-gate-selftest-declaration.py --enforce
 
@@ -4394,6 +4502,7 @@ gates:
     review_after: "2027-02-19"
     selftest: python3 .github/scripts/check-incoming-dlq-wiring.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-incoming-dlq-wiring.py"]
     min_subjects: 30   # 45 incoming channels today (2026-08-21, incl. audit-service agent-audit-events-in)
     run: |
       python3 .github/scripts/check-incoming-dlq-wiring.py --enforce
@@ -4412,6 +4521,7 @@ gates:
     review_after: "2027-02-28"
     selftest: python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-clickhouse-migration-configmap-sync.py"]
     min_subjects: 11   # 11 migrations today (2026-08-31)
     run: |
       python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --enforce
@@ -4434,6 +4544,7 @@ gates:
     review_after: "2027-02-28"
     selftest: python3 .github/scripts/check-raw-colour-literal-ratchet.py --self-test
     selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-raw-colour-literal-ratchet.py"]
     min_subjects: 1600   # 1628 raw hex colour literals today (2026-08-31)
     run: |
       python3 .github/scripts/check-raw-colour-literal-ratchet.py
