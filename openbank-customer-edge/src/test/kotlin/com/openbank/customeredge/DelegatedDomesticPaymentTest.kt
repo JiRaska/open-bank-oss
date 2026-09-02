@@ -175,7 +175,7 @@ class DelegatedDomesticPaymentTest {
         val trustedHeaders = slot<Map<String, String>>()
         verify {
             upstream.post(
-                match { it.contains("/api/v1/domestic-payments") },
+                match { it.endsWith("/api/v1/domestic-payments/delegated") },
                 delegate.toString(),
                 any(),
                 "idem-1",

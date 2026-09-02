@@ -4,8 +4,9 @@ openapi: 3.1.0
 info:
   title: Domestic Payment Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
-  # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
-  version: 1.6.0
+  # machine-readable 409 for unsafe Idempotency-Key reuse. 1.7 adds a separately routed,
+  # workload-only delegated create boundary; owner create is unchanged.
+  version: 1.7.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -101,6 +102,52 @@ paths:
                   $ref: '#/components/schemas/DomesticPaymentResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/domestic-payments/delegated:
+    post:
+      tags: [Domestic Payments]
+      summary: Create a delegated domestic payment from customer-edge
+      description: >-
+        Internal workload boundary for the exact customer-edge service identity. The three
+        correlation headers are mandatory and are checked against a durable reservation snapshot
+        before a payment, workflow or outbox message can be created. Clients retry 425 and 503
+        with the same Idempotency-Key; 410 means the reservation was permanently finalized absent.
+      operationId: createDelegatedDomesticPayment
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string}
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Delegation-Id
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+        - name: X-Delegation-Reservation-Id
+          in: header
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDomesticPaymentRequest'
+      responses:
+        '201':
+          description: Payment created, or the durable result of an exact request replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentResponse'
+        '409': {description: Immutable delegated reservation tuple does not match}
+        '410': {description: Reservation was finalized permanently without a payment}
+        '425': {description: Reservation projection is not ready; retry the identical request}
+        '503': {description: Debit-account authority cannot be verified; retry the identical request}
+        '403': {$ref: '#/components/responses/Forbidden'}
 
   /api/v1/domestic-payments/{paymentId}:
     get:

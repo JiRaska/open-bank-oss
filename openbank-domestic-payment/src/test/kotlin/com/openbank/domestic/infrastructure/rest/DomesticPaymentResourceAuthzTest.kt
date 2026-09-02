@@ -68,4 +68,45 @@ class DomesticPaymentResourceAuthzTest {
             statusCode(404)
         }
     }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_OPERATOR"])
+    fun `trusted edge reaches delegated route and gets a retryable projection response`() {
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", "delegated-route-1")
+            header("X-Customer-Party-Id", UUID.randomUUID().toString())
+            header("X-Delegation-Id", UUID.randomUUID().toString())
+            header("X-Delegation-Reservation-Id", UUID.randomUUID().toString())
+            body(validPaymentRequest())
+        } When {
+            post("/api/v1/domestic-payments/delegated")
+        } Then {
+            statusCode(425)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `non edge workload identity cannot use delegated route`() {
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", "delegated-route-2")
+            header("X-Customer-Party-Id", UUID.randomUUID().toString())
+            header("X-Delegation-Id", UUID.randomUUID().toString())
+            header("X-Delegation-Reservation-Id", UUID.randomUUID().toString())
+            body(validPaymentRequest())
+        } When {
+            post("/api/v1/domestic-payments/delegated")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    private fun validPaymentRequest(): String = """
+        {"debtorAccountId":"${UUID.randomUUID()}","debtorAccountNumber":"1234567890","debtorBankCode":"0800",
+        "debtorName":"Grantor","creditorAccountNumber":"0987654321","creditorBankCode":"0100",
+        "creditorName":"Payee","amount":1500.00,"currency":"CZK","priority":"STANDARD",
+        "statementLabel":null,"endToEndId":"delegated-route-test"}
+    """.trimIndent()
 }

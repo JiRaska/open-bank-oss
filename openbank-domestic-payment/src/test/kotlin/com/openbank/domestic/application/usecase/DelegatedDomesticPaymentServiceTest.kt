@@ -7,7 +7,6 @@ package com.openbank.domestic.application.usecase
 import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.application.port.`in`.DelegatedDomesticPaymentResult
 import com.openbank.domestic.application.port.out.AccountLookupPort
-import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
 import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepository
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
@@ -15,15 +14,12 @@ import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DelegatedSpendReservationState
-import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
-import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.slot
 import io.mockk.verify
 import io.temporal.client.WorkflowClient
 import kotlinx.coroutines.runBlocking
@@ -144,22 +140,9 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `projection supplies trusted tuple and debit owner even when command attempts to override it`() = runBlocking {
+    fun `mismatched workload tuple fails closed before account lookup or payment creation`() = runBlocking {
         val projected = binding(DelegatedSpendBindingState.PENDING)
-        val capturedPayment = slot<DomesticPayment>()
-        val capturedDebitOwner = slot<UUID>()
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns projected
-        coEvery {
-            paymentRepository.saveDelegated(
-                capture(capturedPayment),
-                any(),
-                any(),
-                capture(capturedDebitOwner),
-            )
-        } answers {
-            val candidate = capturedPayment.captured
-            DelegatedPaymentSaveOutcome.Replayed(candidate.copy(id = UUID.randomUUID()))
-        }
         val maliciousDelegation = UUID.randomUUID()
         val maliciousReservation = UUID.randomUUID()
         val maliciousActor = UUID.randomUUID()
@@ -176,15 +159,12 @@ class DelegatedDomesticPaymentServiceTest {
             ),
         )
 
-        assertThat(result).isInstanceOf(DelegatedDomesticPaymentResult.Accepted::class.java)
-        assertThat(capturedPayment.captured.initiatedByPartyId).isEqualTo(GRANTEE_ID)
-        assertThat(capturedPayment.captured.delegationId).isEqualTo(DELEGATION_ID)
-        assertThat(capturedPayment.captured.reservationId).isEqualTo(RESERVATION_ID)
-        assertThat(capturedPayment.captured.debtorAccountId).isEqualTo(ACCOUNT_ID)
-        assertThat(capturedDebitOwner.captured).isEqualTo(GRANTOR_ID)
-        assertThat(capturedPayment.captured.transferScope).isEqualTo(DomesticTransferScope.INTERNAL_CLIENT)
-        coVerify(exactly = 1) { accountLookup.findAccountIdByIban(DEBTOR_IBAN) }
-        coVerify(exactly = 1) { accountLookup.findPartyByAccountId(ACCOUNT_ID) }
+        assertThat(result).isInstanceOfSatisfying(DelegatedDomesticPaymentResult.ReservationMismatch::class.java) {
+            assertThat(it.reason).contains("headers")
+        }
+        coVerify(exactly = 0) { accountLookup.findAccountIdByIban(any()) }
+        coVerify(exactly = 0) { accountLookup.findPartyByAccountId(any()) }
+        assertNoCreationSideEffects()
     }
 
     private fun assertNoCreationSideEffects() {
@@ -211,6 +191,9 @@ class DelegatedDomesticPaymentServiceTest {
         priority = DomesticPaymentPriority.STANDARD,
         statementLabel = null,
         endToEndId = "DOM-DELEGATED-TEST",
+        actorId = GRANTEE_ID,
+        delegationId = DELEGATION_ID,
+        reservationId = RESERVATION_ID,
     )
 
     private fun binding(state: DelegatedSpendBindingState) = DelegatedSpendBinding(

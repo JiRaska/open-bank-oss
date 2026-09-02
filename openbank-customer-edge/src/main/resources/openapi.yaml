@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.47.0
+  version: 1.48.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1665,7 +1665,10 @@ paths:
           in: header
           required: true
           description: Stable, non-blank key of at most 128 characters; binds reservation and payment retries.
-          schema: {type: string, minLength: 1, maxLength: 128}
+          # Runtime validates this before any SCA or upstream side effect.  Keep the existing
+          # broad wire schema on /customer/v1 until its versioned deprecation window; tightening
+          # a published request schema would otherwise be a breaking API change.
+          schema: {type: string}
       requestBody:
         required: true
         content:
@@ -1679,9 +1682,6 @@ paths:
                 currency:
                   type: string
                   default: CZK
-                  minLength: 3
-                  maxLength: 3
-                  pattern: '^[A-Za-z]{3}$'
                   description: ISO-style three-letter code; normalized to uppercase before authorization and SCA.
                 creditorAccountNumber: {type: string, description: 'Czech "number/bankcode"', example: '2000145399/0800'}
                 creditorName: {type: string}

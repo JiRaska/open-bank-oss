@@ -2774,7 +2774,11 @@ class CustomerEdgeResource(
                 is SpendReservationResult.Refused -> return result.response
             }
         }
-        val domesticUrl = "$domesticPaymentServiceUrl/api/v1/domestic-payments"
+        val domesticUrl = if (reservation == null) {
+            "$domesticPaymentServiceUrl/api/v1/domestic-payments"
+        } else {
+            "$domesticPaymentServiceUrl/api/v1/domestic-payments/delegated"
+        }
         val domesticResponse = if (reservation == null) {
             // The owner path is intentionally unchanged and carries no delegation evidence.
             upstream.post(domesticUrl, customer.partyId.toString(), enriched, idempotencyKey)

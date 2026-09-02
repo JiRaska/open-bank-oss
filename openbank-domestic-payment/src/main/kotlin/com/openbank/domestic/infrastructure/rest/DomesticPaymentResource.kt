@@ -5,6 +5,8 @@
 package com.openbank.domestic.infrastructure.rest
 
 import com.openbank.domestic.application.port.`in`.DomesticPaymentUseCase
+import com.openbank.domestic.application.port.`in`.DelegatedDomesticPaymentResult
+import com.openbank.domestic.application.port.`in`.DelegatedDomesticPaymentUseCase
 import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
 import com.openbank.domestic.application.port.`in`.PaymentConfirmationUseCase
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
@@ -42,6 +44,7 @@ import java.util.UUID
 @Tag(name = "Domestic Payments", description = "Domestic CZK payment lifecycle")
 class DomesticPaymentResource(
     private val paymentUseCase: DomesticPaymentUseCase,
+    private val delegatedPaymentUseCase: DelegatedDomesticPaymentUseCase,
     private val confirmationUseCase: PaymentConfirmationUseCase,
 ) {
 
@@ -87,10 +90,10 @@ class DomesticPaymentResource(
         // then persist it through the outbox boundary for asynchronous consumers.
         val result = paymentUseCase.createPayment(
             request.toCommand(
-                idempotencyKey,
-                actorId,
-                actorScope,
-                requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
+                idempotencyKey = idempotencyKey,
+                actorId = actorId,
+                actorScope = actorScope,
+                synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
             ),
         )
         val responseBody = result.payment.toResponse()
@@ -99,6 +102,72 @@ class DomesticPaymentResource(
             .entity(responseBody)
         if (result.replayed) response.header("X-Idempotency-Replayed", "true")
         return response.build()
+    }
+
+    /**
+     * Workload-only delegated-create boundary.  The public owner route above deliberately never
+     * accepts delegation context.  This route accepts it only from the exact customer-edge M2M
+     * identity and passes the complete immutable tuple to the local binding state machine.
+     */
+    @POST
+    @Path("/delegated")
+    @RolesAllowed("ROLE_OPERATOR")
+    @Authorize(action = "domestic-payment.create")
+    @Operation(summary = "Create a delegated domestic payment from customer-edge")
+    suspend fun createDelegatedPayment(
+        request: CreateDomesticPaymentRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(CUSTOMER_PARTY_ID_HEADER) customerPartyIdHeader: String?,
+        @HeaderParam(DELEGATION_ID_HEADER) delegationIdHeader: String?,
+        @HeaderParam(DELEGATION_RESERVATION_ID_HEADER) reservationIdHeader: String?,
+        @Context requestContext: ContainerRequestContext,
+    ): Response {
+        require(identity.principal.name == CUSTOMER_EDGE_PRINCIPAL) {
+            "Delegated payment creation is restricted to customer-edge"
+        }
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val customerPartyId = requiredUuid(CUSTOMER_PARTY_ID_HEADER, customerPartyIdHeader)
+        val delegationId = requiredUuid(DELEGATION_ID_HEADER, delegationIdHeader)
+        val reservationId = requiredUuid(DELEGATION_RESERVATION_ID_HEADER, reservationIdHeader)
+        val result = delegatedPaymentUseCase.createDelegatedPayment(
+            reservationId,
+            request.toCommand(
+                idempotencyKey = idempotencyKey,
+                actorId = customerPartyId,
+                actorScope = "$CUSTOMER_EDGE_PRINCIPAL:$customerPartyId",
+                delegationId = delegationId,
+                reservationId = reservationId,
+                synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
+            ),
+        )
+        return when (result) {
+            is DelegatedDomesticPaymentResult.Accepted -> {
+                val response = Response.created(URI.create("/api/v1/domestic-payments/${result.result.payment.id}"))
+                    .entity(result.result.payment.toResponse())
+                if (result.result.replayed) response.header("X-Idempotency-Replayed", "true")
+                response.build()
+            }
+            DelegatedDomesticPaymentResult.ReservationProjectionPending -> delegatedFailure(
+                status = 425,
+                code = "RESERVATION_PROJECTION_PENDING",
+                message = "Delegated spend reservation is not ready; retry with the same idempotency key",
+            )
+            DelegatedDomesticPaymentResult.ReservationFinalizedAbsent -> delegatedFailure(
+                status = 410,
+                code = "RESERVATION_FINALIZED_ABSENT",
+                message = "Delegated spend reservation was finalized without a payment",
+            )
+            is DelegatedDomesticPaymentResult.ReservationMismatch -> delegatedFailure(
+                status = 409,
+                code = "DELEGATED_RESERVATION_MISMATCH",
+                message = result.reason,
+            )
+            DelegatedDomesticPaymentResult.AccountAuthorityUnavailable -> delegatedFailure(
+                status = 503,
+                code = "ACCOUNT_AUTHORITY_UNAVAILABLE",
+                message = "Debit-account authority cannot be verified; retry with the same idempotency key",
+            )
+        }
     }
 
     @GET
@@ -163,5 +232,22 @@ class DomesticPaymentResource(
     ): Response {
         val payment = paymentUseCase.transitionStatus(request.toCommand(paymentId))
         return Response.ok(payment.toResponse()).build()
+    }
+
+    private fun requiredUuid(header: String, value: String?): UUID = try {
+        UUID.fromString(requireNotNull(value?.trim()?.takeIf(String::isNotEmpty)) { "$header header is required" })
+    } catch (_: IllegalArgumentException) {
+        throw IllegalArgumentException("$header header must be a UUID")
+    }
+
+    private fun delegatedFailure(status: Int, code: String, message: String): Response = Response.status(status)
+        .entity(mapOf("status" to status, "code" to code, "error" to message))
+        .build()
+
+    private companion object {
+        const val CUSTOMER_EDGE_PRINCIPAL = "service-account-openbank-edge"
+        const val CUSTOMER_PARTY_ID_HEADER = "X-Customer-Party-Id"
+        const val DELEGATION_ID_HEADER = "X-Delegation-Id"
+        const val DELEGATION_RESERVATION_ID_HEADER = "X-Delegation-Reservation-Id"
     }
 }
