@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.233.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.232.4...admin-ui-v0.233.0) (2026-09-02)
+
+
+### Features
+
+* **admin-ui:** review payment orders before submission ([#7899](https://github.com/JiRaska/open-bank-oss/issues/7899)) ([69de3e8](https://github.com/JiRaska/open-bank-oss/commit/69de3e86047a63eb98cb3d9a3a7ddbe74857ef72))
+* **admin-ui:** teach delegated access across segments ([#8149](https://github.com/JiRaska/open-bank-oss/issues/8149)) ([dd87c79](https://github.com/JiRaska/open-bank-oss/commit/dd87c79560d714fd32fae19359a4541fcb85afcb))
+
+
+### Bug Fixes
+
+* **admin-ui:** expose client gaps in test health ([#8155](https://github.com/JiRaska/open-bank-oss/issues/8155)) ([547f8d2](https://github.com/JiRaska/open-bank-oss/commit/547f8d29a4bd9721315f83e98c81b70cae89b704)), closes [#8148](https://github.com/JiRaska/open-bank-oss/issues/8148)
+* **admin-ui:** hide closed mobile navigation from focus ([#7911](https://github.com/JiRaska/open-bank-oss/issues/7911)) ([e55fa7c](https://github.com/JiRaska/open-bank-oss/commit/e55fa7ccc25964d23475a7f7bb898eaa824db611))
+* **admin-ui:** make FX controls accessible ([#7906](https://github.com/JiRaska/open-bank-oss/issues/7906)) ([202b66c](https://github.com/JiRaska/open-bank-oss/commit/202b66c513da339fe0bf3443d0ea360e58dec3b2))
+* **flaky-test-hunter:** make operator admission idempotent ([#8142](https://github.com/JiRaska/open-bank-oss/issues/8142)) ([9fe0f7d](https://github.com/JiRaska/open-bank-oss/commit/9fe0f7d895439df0529954a283f8c5a43c18a8a4))
+
 ## [0.232.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.232.3...admin-ui-v0.232.4) (2026-09-02)
 
 

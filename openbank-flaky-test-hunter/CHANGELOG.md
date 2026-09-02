@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.3...flaky-test-hunter-v0.14.4) (2026-09-02)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** make operator admission idempotent ([#8142](https://github.com/JiRaska/open-bank-oss/issues/8142)) ([9fe0f7d](https://github.com/JiRaska/open-bank-oss/commit/9fe0f7d895439df0529954a283f8c5a43c18a8a4))
+
 ## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.2...flaky-test-hunter-v0.14.3) (2026-09-01)
 
 

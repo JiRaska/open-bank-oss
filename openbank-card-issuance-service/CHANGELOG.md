@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.0...card-issuance-service-v0.26.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **card-issuance:** reconcile IssueCardRequest with the DTO it describes ([#6019](https://github.com/JiRaska/open-bank-oss/issues/6019)) ([1309980](https://github.com/JiRaska/open-bank-oss/commit/130998006d157543e6769dda19ab73e6f6133728))
+* **card-issuance:** reject a null array element with 400 instead of 500 ([#8009](https://github.com/JiRaska/open-bank-oss/issues/8009)) ([9fc2c38](https://github.com/JiRaska/open-bank-oss/commit/9fc2c38c51e2c5273ed5bb72d2c8448763f8a5c9)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.25.0...card-issuance-service-v0.26.0) (2026-08-24)
 
 
