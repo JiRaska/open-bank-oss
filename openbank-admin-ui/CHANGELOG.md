@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.232.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.232.0...admin-ui-v0.232.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin-ui:** age required test controls ([#8092](https://github.com/JiRaska/open-bank-oss/issues/8092)) ([a7786c9](https://github.com/JiRaska/open-bank-oss/commit/a7786c9bb5a93817bdcdad7b7f28ceb613ba5939))
+* **admin-ui:** improve dashboard contrast and LCP ([#7908](https://github.com/JiRaska/open-bank-oss/issues/7908)) ([4605d11](https://github.com/JiRaska/open-bank-oss/commit/4605d11a5c88821b513516728b414eaa37d60a53))
+* **admin-ui:** load payment details by ID ([#8081](https://github.com/JiRaska/open-bank-oss/issues/8081)) ([2243c90](https://github.com/JiRaska/open-bank-oss/commit/2243c90cc764d3077c5e2f248c6d28864e45b4c4))
+* **admin-ui:** make interest refresh failures recoverable ([#8096](https://github.com/JiRaska/open-bank-oss/issues/8096)) ([36c283f](https://github.com/JiRaska/open-bank-oss/commit/36c283f6ba4534d624e51b27c5fb7095075c9e11))
+* **admin-ui:** make party registration retry-safe ([#7915](https://github.com/JiRaska/open-bank-oss/issues/7915)) ([ff5191e](https://github.com/JiRaska/open-bank-oss/commit/ff5191efc8e996644bca716c8e8865aea85f6295))
+* **admin-ui:** make quick-search states truthful ([#7913](https://github.com/JiRaska/open-bank-oss/issues/7913)) ([ccc22c6](https://github.com/JiRaska/open-bank-oss/commit/ccc22c66e167c271b75eb99c39e2607df8acef2d))
+* **admin-ui:** make sanctions list changes recoverable ([#8069](https://github.com/JiRaska/open-bank-oss/issues/8069)) ([4332d15](https://github.com/JiRaska/open-bank-oss/commit/4332d15e4553a9607c229c94995243f8de678882))
+* **admin-ui:** paginate transaction search results ([#8089](https://github.com/JiRaska/open-bank-oss/issues/8089)) ([43be4fa](https://github.com/JiRaska/open-bank-oss/commit/43be4faece96ca6accb925b89da60a7132d231f6))
+* **admin-ui:** prevent stale account search results ([#7917](https://github.com/JiRaska/open-bank-oss/issues/7917)) ([9ef2b8a](https://github.com/JiRaska/open-bank-oss/commit/9ef2b8a7610712f5f94351b2bebf6dc5b8393d72))
+* **admin-ui:** prioritize critical test findings ([#8094](https://github.com/JiRaska/open-bank-oss/issues/8094)) ([fd5e9c0](https://github.com/JiRaska/open-bank-oss/commit/fd5e9c0b18d32ef9c139211e9d1b6995ce3f7bd0))
+* **admin-ui:** reject thresholdless test evidence ([#8083](https://github.com/JiRaska/open-bank-oss/issues/8083)) ([bb2f05f](https://github.com/JiRaska/open-bank-oss/commit/bb2f05f502581853f5a4f7412819e1c7c6ffc9fa))
+
 ## [0.232.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.231.0...admin-ui-v0.232.0) (2026-09-01)
 
 
