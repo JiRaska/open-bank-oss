@@ -5,7 +5,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
@@ -293,6 +294,7 @@ export default function RegulatoryPage() {
   // table before committing to a download) — `preview` holds the report whose
   // export is being inspected.
   const [preview, setPreview] = useState<Report | null>(null)
+  const previewTriggerRef = useRef<HTMLElement | null>(null)
   const [previewData, setPreviewData] = useState<PreviewData>({ status: 'idle' })
   const [reportingDate, setReportingDate] = useState('')
   const [reportingPeriods, setReportingPeriods] = useState<string[]>([])
@@ -359,6 +361,7 @@ export default function RegulatoryPage() {
 
   function openPreview(id: string, e: React.MouseEvent) {
     e.stopPropagation()
+    previewTriggerRef.current = e.currentTarget as HTMLElement
     const report = REPORTS.find(r => r.id === id)
     if (report) {
       setPreview(report)
@@ -612,20 +615,25 @@ export default function RegulatoryPage() {
 
       {/* Export preview — visual control before download. Shows the exact
           field/value table that will be serialised, plus JSON and CSV export. */}
+      <Dialog.Root open={preview !== null} onOpenChange={open => { if (!open) setPreview(null) }}>
       {preview && (
-        <div
-          onClick={() => setPreview(null)}
+        <Dialog.Portal>
+        <Dialog.Overlay
           style={{
             position: 'fixed', inset: 0, zIndex: 1000,
-            background: 'rgba(0,0,0,0.45)', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', padding: '24px',
+            background: 'rgba(0,0,0,0.45)',
           }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
+        />
+          <Dialog.Content
             className="card"
+            aria-modal="true"
+            onCloseAutoFocus={event => {
+              event.preventDefault()
+              if (previewTriggerRef.current?.isConnected) previewTriggerRef.current.focus()
+            }}
             style={{
-              width: '100%', maxWidth: '680px', maxHeight: '86vh',
+              position: 'fixed', zIndex: 1001, top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+              width: 'calc(100% - 48px)', maxWidth: '680px', maxHeight: '86vh',
               display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0,
             }}
           >
@@ -634,15 +642,17 @@ export default function RegulatoryPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
                 <TableIcon size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <Dialog.Title style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {t('Náhled exportu', 'Export preview')} · {preview.sdatCode}
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{preview.name}</div>
+                  </Dialog.Title>
+                  <Dialog.Description style={{ fontSize: '12px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{preview.name}</Dialog.Description>
                 </div>
               </div>
-              <button type="button" className="btn btn-secondary" style={{ padding: '5px', flexShrink: 0 }} onClick={() => setPreview(null)} aria-label={t('Zavřít náhled exportu', 'Close export preview')}>
-                <X size={15} aria-hidden="true" />
-              </button>
+              <Dialog.Close asChild>
+                <button type="button" className="btn btn-secondary" style={{ padding: '5px', flexShrink: 0 }} aria-label={t('Zavřít náhled exportu', 'Close export preview')}>
+                  <X size={15} aria-hidden="true" />
+                </button>
+              </Dialog.Close>
             </div>
 
             {TEMPLATE_PATHS[preview.id] && (
@@ -748,9 +758,10 @@ export default function RegulatoryPage() {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+          </Dialog.Content>
+        </Dialog.Portal>
       )}
+      </Dialog.Root>
     </div>
   )
 }
