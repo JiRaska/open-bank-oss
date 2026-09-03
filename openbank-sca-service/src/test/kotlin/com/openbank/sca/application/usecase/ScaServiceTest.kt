@@ -168,6 +168,57 @@ class ScaServiceTest {
         coVerify(exactly = 1) { idempotencyStore.save(any(), any(), 300L) }
     }
 
+    /**
+     * The load-bearing guard (#8432). `preferredMethod` comes straight off the request body, and
+     * TOTP had no delivery path at all: `initiate` generated a code, stored it, and sent it
+     * nowhere. The challenge that came back could never be satisfied, so whatever it authorised
+     * could not proceed. Refusing before a challenge exists is the whole fix.
+     */
+    @Test
+    fun `initiate refuses TOTP instead of minting a challenge nobody can satisfy`(): Unit = runBlocking {
+        coEvery { idempotencyStore.get(any()) } returns null
+        coEvery { repository.save(any()) } answers { firstArg() }
+
+        assertThatThrownBy {
+            runBlocking {
+                service.initiate(
+                    InitiateScaCommand(
+                        partyId = UUID.randomUUID(),
+                        purpose = ScaPurpose.LOGIN,
+                        preferredMethod = ScaMethod.TOTP,
+                        dynamicLinkingData = null,
+                        redirectUrl = null,
+                    ),
+                )
+            }
+        }.isInstanceOf(ScaMethodNotDeliverableException::class.java)
+
+        // Nothing may be persisted, and no code may be generated or stored, for a refused method.
+        coVerify(exactly = 0) { repository.save(any()) }
+        coVerify(exactly = 0) { otpStore.store(any(), any(), any()) }
+    }
+
+    @Test
+    fun `the deliverable methods still work`(): Unit = runBlocking {
+        coEvery { idempotencyStore.get(any()) } returns null
+        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
+        coEvery { notificationDispatchGuard.sendPushNotification(any(), any(), any()) } returns Unit
+
+        listOf(ScaMethod.PUSH_NOTIFICATION, ScaMethod.BIOMETRIC).forEach { method ->
+            val result = service.initiate(
+                InitiateScaCommand(
+                    partyId = UUID.randomUUID(),
+                    purpose = ScaPurpose.LOGIN,
+                    preferredMethod = method,
+                    dynamicLinkingData = null,
+                    redirectUrl = null,
+                ),
+            )
+            assertThat(result.method).isEqualTo(method)
+        }
+    }
+
     @Test
     fun `initiate returns existing challenge for idempotent request`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
@@ -280,28 +331,14 @@ class ScaServiceTest {
         coVerify(exactly = 1) { repository.save(any()) }
     }
 
-    @Test
-    fun `initiate generates OTP for TOTP method`(): Unit = runBlocking {
-        val partyId = UUID.randomUUID()
-        every { otpGenerator.generate() } returns "123456"
-        coEvery { idempotencyStore.get(any()) } returns null
-        coEvery { repository.save(any()) } answers { firstArg() }
-        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
-        coEvery { otpStore.store(any(), any(), any()) } returns Unit
-
-        val result = service.initiate(
-            InitiateScaCommand(
-                partyId = partyId,
-                purpose = ScaPurpose.LOGIN,
-                preferredMethod = ScaMethod.TOTP,
-                dynamicLinkingData = null,
-                redirectUrl = null,
-            ),
-        )
-
-        assertThat(result.method).isEqualTo(ScaMethod.TOTP)
-        coVerify(exactly = 1) { otpStore.store(result.id, "123456", 300L) }
-    }
+    // REMOVED (#8432): `initiate generates OTP for TOTP method` asserted that initiate stored a
+    // generated code — and never that anything delivered it, because nothing did. It locked in the
+    // defect: the customer was asked for a code no transport ever sent them. Superseded by
+    // `initiate refuses TOTP instead of minting a challenge nobody can satisfy` above.
+    //
+    // `verify completes challenge on successful OTP verification` below is deliberately kept: it
+    // builds a TOTP challenge directly rather than through initiate, and any challenge already
+    // stored with that method must still be verifiable.
 
     @Test
     fun `verify completes challenge on successful OTP verification`(): Unit = runBlocking {

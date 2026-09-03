@@ -35,6 +35,7 @@ import com.openbank.sca.application.usecase.ScaChallengeNotAwaitingException
 import com.openbank.sca.application.usecase.ScaChallengeNotFoundException
 import com.openbank.sca.application.usecase.ScaChallengePartyMismatchException
 import com.openbank.sca.application.usecase.ScaDynamicLinkingMismatchException
+import com.openbank.sca.application.usecase.ScaMethodNotDeliverableException
 import com.openbank.sca.application.usecase.ScaVerificationFailedException
 import com.openbank.sca.domain.model.DeviceDecisionType
 import com.openbank.sca.domain.model.DynamicLinkingData
@@ -394,6 +395,20 @@ private fun err(code: ErrorCode, msg: String) = ApiError(
 class ScaNotFoundMapper : ExceptionMapper<ScaChallengeNotFoundException> {
     override fun toResponse(e: ScaChallengeNotFoundException): Response =
         Response.status(404).entity(err(ErrorCode.NOT_FOUND, e.message ?: "Not found")).build()
+}
+
+/**
+ * 422, not 400: the request is well formed and the method is a valid enum value — this deployment
+ * simply cannot deliver it. Same status as an expired challenge, which is also a "valid request,
+ * cannot proceed" answer.
+ */
+private const val UNPROCESSABLE_ENTITY = 422
+
+@Provider
+class ScaMethodNotDeliverableMapper : ExceptionMapper<ScaMethodNotDeliverableException> {
+    override fun toResponse(e: ScaMethodNotDeliverableException): Response = Response.status(UNPROCESSABLE_ENTITY)
+        .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Method not deliverable"))
+        .build()
 }
 
 @Provider
