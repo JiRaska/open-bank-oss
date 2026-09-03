@@ -61,6 +61,7 @@ spec:
             severity: warning
             team: security
           annotations:
+            subject_period: continuous
             summary: "Authz deny share on {{ $labels.service }}: {{ $value | humanizePercentage }} for 15m"
             description: >-
               More than 30% of authorization decisions on this service have been denies for
