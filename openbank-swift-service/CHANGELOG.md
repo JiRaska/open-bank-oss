@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.0...swift-service-v0.11.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **standing-order,swift,tax-reporting:** entity timestamp defaults EPOCH -&gt; Instant.now() ([#8462](https://github.com/JiRaska/open-bank-oss/issues/8462)) ([09119bb](https://github.com/JiRaska/open-bank-oss/commit/09119bbcb2c79c5fda9310060cb97d537c777a93))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.10.0...swift-service-v0.11.0) (2026-08-24)
 
 
