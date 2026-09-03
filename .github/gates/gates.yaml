@@ -2504,6 +2504,32 @@ gates:
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
+  # The body-entity arm of the same null-safety class (#7867): Jackson null-checks a data
+  # class's constructor parameters but NOT the ELEMENTS of a collection, so a request DTO's
+  # `List<X>` accepts `[null]` and NPEs at the first dereference — 500 where a 400 belongs.
+  # 23 occurrences are fixed (nullable elements + guards, red-first tests); what remains
+  # reachable is baselined in the script with per-entry reasons (already-correct-400 via a
+  # contains-based guard, or latent stored-wholesale). A NEW occurrence fails; a baseline entry
+  # that no longer occurs is reported too. The self-test pins the must-NOT-flag half (outbound
+  # REST-client interfaces, nullable elements, unreachable DTOs). ENFORCED.
+  - id: null-array-element-ratchet
+    name: "null JSON array element in a request DTO is a 400, not a 500 (issue #7867, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      Jackson null-checks constructor parameters but not collection ELEMENTS, so `[null]`
+      deserialises into a List holding null and NPEs at the first dereference — 500 where a 400
+      belongs. 23 occurrences spread under a green jaxrs-param gate; all fixed with red-first
+      tests, and this ratchet keeps the class from returning.
+    review_after: "2027-03-03"
+    budget_seconds: 40   # ~4s locally over 183 subjects; headroom for runner variance
+    min_subjects: 90   # 183 measured 2026-09-03; half, so the fleet can shrink without a red
+    selftest: python3 .github/scripts/check-null-array-element.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-null-array-element.py"]
+    run: |
+      python3 .github/scripts/check-null-array-element.py --root .
+
   # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
   # a service whose OutboxDispatcher actually gates on this flag silently
   # never dispatches if it's left at its false default — no error,
