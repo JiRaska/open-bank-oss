@@ -3730,9 +3730,12 @@ gates:
     name: "threat-model mitigation claims resolve to real code (ADR-0030 D2, enforced)"
     group: security
     mode: enforced
-    min_subjects: 15   # 23 money-path threat models today (2026-08-20)
-    budget_seconds: 90   # 41s over the 23 models on a warm checkout
-    rationale: "A threat model is a set of claims about running code and nothing checked whether any was true, so a mitigation could name a class that does not exist, a stub, or the very state transition whose truthfulness was the risk — and the document read as coverage in all three cases."
+    min_subjects: 23   # 45 threat models today (2026-09-03); the floor catches a COLLAPSE — a
+                       # renamed directory or a changed glob — not drift, so it sits near half.
+                       # It was 15 against a subject set of 23 money-path models; the subject set
+                       # is now every model in docs/threat-models, derived from the directory.
+    budget_seconds: 90   # 22s over the 45 models on a warm checkout (the corpus read dominates)
+    rationale: "A threat model is a set of claims about running code and nothing checked whether any was true, so a mitigation could name a class that does not exist, a stub, or the very state transition whose truthfulness was the risk — and the document read as coverage in all three cases. Widened 2026-09-03 after a sweep found claims of exactly this kind sitting INSIDE files the gate already opened and reported clean: it read STRIDE mitigation columns only (so §3 prose, residual-risk bullets and change-log entries were unread), its subject set was money_path_services (so 22 of 45 models were never opened), and it resolved a citation by substring over every line including comments (so a name whose only occurrence was a KDoc repeating the same false claim counted as existing)."
     review_after: "2027-02-20"
     selftest: python3 .github/scripts/check-threat-model-claims.py --self-test
     selftest_expect: pass
