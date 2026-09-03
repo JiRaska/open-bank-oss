@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.239.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.239.0...admin-ui-v0.239.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **admin-ui:** retain Playwright retry evidence ([#8246](https://github.com/JiRaska/open-bank-oss/issues/8246)) ([ba2c81b](https://github.com/JiRaska/open-bank-oss/commit/ba2c81b2de24a9f2da8f32f04851bfc6b19f9c55))
+
 ## [0.239.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.238.0...admin-ui-v0.239.0) (2026-09-03)
 
 
