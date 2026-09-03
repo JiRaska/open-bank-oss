@@ -3026,6 +3026,49 @@ gates:
       python3 .github/scripts/check-openapi-route-conformance.py --enforce \
         --baseline .github/openapi-route-conformance-baseline.txt
 
+  # Idempotency, keyed on effect rather than on a marker (#8351, M2 exit criterion).
+  #
+  # The naive version of this gate is the one this repo has already been burned by: openbank-libs
+  # published an @Idempotent annotation that was an inert RUNTIME marker (see
+  # libs-annotations-implemented above), so counting annotations — or counting the presence of an
+  # Idempotency-Key parameter — would certify the exact defect. What decides whether replay
+  # protection can ever engage is narrower and fully decidable: does the header name the CONTRACT
+  # tells a client to send equal the header name the HANDLER binds? When they disagree the
+  # @HeaderParam injects null on every spec-conformant request, and the fleet-standard
+  # `require(!key.isNullOrBlank())` then rejects the call — or, where the key is optional, skips
+  # the store lookup and the store save in silence.
+  #
+  # Both spellings are live here, which is why the comparison is by EXACT NAME: psd2-service
+  # publishes X-Idempotency-Key and binds Idempotency-Key on its whole PIS surface, so every
+  # SEPA/domestic/SIPO initiation from a spec-conformant TPP is rejected by the guard that exists
+  # to make it safe. Normalising the two spellings together would make that invisible.
+  #
+  # The corpus is DERIVED — every mutating operation in every published openapi.yaml, 375 today —
+  # never a hand-kept list of the endpoints someone judged ought to be idempotent. That list is
+  # what the issue originally asked for and it is deliberately NOT built: deciding a given
+  # money-path POST needs a client-supplied key is a judgement (an operator approve/cancel, an
+  # inbound scheme webhook and a batch trigger legitimately take none), and a gate whose scope is
+  # a hand-kept list of the thing it checks reads as PASSING when the list is short.
+  #
+  # SCOPE LIMIT, so a green is not misread: the HEADER carrier only. A key carried as a request
+  # BODY field is a real second idiom here — transaction-service and ledger-service take theirs
+  # that way (9 mutating operations), and internal callers derive one. Those are out of scope,
+  # not clean. Baseline-ratcheted in both directions, same shape as the route-conformance gate.
+  - id: idempotency-contract-parity
+    name: "idempotency-contract-parity — declared key vs bound key (#8351, enforced)"
+    group: api
+    mode: enforced
+    budget_seconds: 30   # 2.1-2.4s measured locally over 3 runs (52 specs + Kotlin walk); headroom for a cold runner
+    rationale: "An idempotency header the contract names and the handler does not bind is replay protection that can never engage: the client sends what the spec says, the handler is injected null, and the endpoint either rejects every conformant call or silently processes every duplicate. Nothing at runtime disagrees with a spec, so this drift is invisible until a duplicate payment lands."
+    review_after: "2027-09-03"
+    min_subjects: 180   # 375 measured 2026-09-03; half, so the fleet can shrink without a red
+    selftest: python3 .github/scripts/check-idempotency-contract-parity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-idempotency-contract-parity.py"]
+    run: |
+      python3 .github/scripts/check-idempotency-contract-parity.py --enforce \
+        --baseline .github/gates/idempotency-parity-baseline.txt
+
   # OWASP ASVS L3 mechanical subset (security baseline Layer 4): V2.1/V8.1/V10.1 are
   # zero-tolerance (clean today), V9.1/V13.1 ratchet against the declared baseline —
   # a NEW plaintext edge or a NEW unspecified resource fails; a paid-off baseline line
