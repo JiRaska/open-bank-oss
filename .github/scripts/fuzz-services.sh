@@ -389,6 +389,17 @@ for svc in $SERVICES; do
       blocked="$(grep -aoE 'Authentication failed: [0-9]+ operation' "fuzz-reports/${svc}-fuzz${logsuffix}.log" | grep -oE '[0-9]+' | head -1 || true)"
       echo "==> [${svc}] ${label}: ${sel:-Selected: ?} auth-blocked=${blocked:-0}"
 
+      # A pass that drove ZERO operations tested nothing, and its green reads exactly like a
+      # finding-free run — the 2026-08-18 run reported 7 failures of 23 where six had never
+      # sent a request, and the job list rendered both kinds identically. Fail LOUDLY, worded
+      # as a harness error so triage does not read it as an HTTP-surface finding.
+      local selected_n
+      selected_n="$(printf '%s' "${sel}" | grep -oE 'Selected: [0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+      if [ -z "${selected_n}" ] || [ "${selected_n}" -eq 0 ]; then
+        echo "::error::[${svc}] ${label}: HARNESS ERROR — schemathesis drove ${selected_n:-no} operations (Selected: ${sel:-?}). The service likely never booted or its OpenAPI was unreachable; this pass is not evidence about the HTTP surface."
+        OVERALL=1
+      fi
+
       # A census of causes, printed next to the count (triage aid, not a verdict — see header).
       local census
       census="$(sed 's/\x1b\[[0-9;]*m//g' "fuzz-reports/${svc}-boot${logsuffix}.log" 2>/dev/null \
