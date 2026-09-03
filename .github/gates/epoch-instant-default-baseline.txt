@@ -19,10 +19,6 @@ openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persi
 openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/YearCloseEntity.kt::var computedAt: Instant = Instant.EPOCH#1
 openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/YearCloseEntity.kt::var createdAt: Instant = Instant.EPOCH#1
 openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/YearCloseEntity.kt::var updatedAt: Instant = Instant.EPOCH#1
-openbank-libs-domain/src/main/kotlin/com/openbank/libs/analytics/AnalyticsEnvelope.kt::val ingestedAt: Instant = Instant.EPOCH,#1
-openbank-libs-domain/src/main/kotlin/com/openbank/libs/flags/FlagDefinition.kt::fun isExpired(asOf: Instant = Instant.EPOCH): Boolean = expiresAt != null && asOf.isAfter(expiresAt)#1
-openbank-libs-domain/src/main/kotlin/com/openbank/libs/flags/FlagDefinition.kt::fun validate(asOf: Instant = Instant.EPOCH): List<String> = buildList {#1
-openbank-libs-domain/src/main/kotlin/com/openbank/libs/foureyes/ApprovalPorts.kt::asOf: Instant = Instant.EPOCH,#1
 openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/domain/Product.kt::val createdAt: Instant = Instant.EPOCH,#1
 openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/domain/Product.kt::val createdAt: Instant = Instant.EPOCH,#2
 openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/domain/Product.kt::val updatedAt: Instant = Instant.EPOCH,#1
