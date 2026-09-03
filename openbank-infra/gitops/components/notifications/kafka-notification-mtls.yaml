@@ -4,8 +4,11 @@
 # ClusterSecretStore). The cluster-CA truststore is shared and also projected.
 #
 # ACLs: notification-service reads from three topics using three separate consumer
-# groups, and — since ADR-0239 D2 — WRITES delivery outcomes onto one topic. That
-# Write grant is the whole of its producer surface; it is not a general producer.
+# groups, and writes to four — one real producer surface (ADR-0239 D2 delivery outcomes) plus one
+# SmallRye dead-letter topic per incoming channel. It is not a general producer. (An earlier
+# version of this comment said the outcomes grant was "the whole of its producer surface"; two DLQ
+# grants below already contradicted it, and #8346 adds the third. A comment asserting current
+# configuration goes stale exactly like one asserting current remote state.)
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
@@ -53,6 +56,19 @@ spec:
           name: openbank.delegation.events
           patternType: literal
         operations: [Read, Describe]
+        host: "*"
+      # #8346 (tail of #5745): SmallRye dead-letter topic for the delegation-events-in channel.
+      # Without Write here the DLQ send itself fails and the consumer wedges on the very failure it
+      # was meant to park — strictly worse than no DLQ at all, which is why this grant lands in the
+      # same change as the failure-strategy and the KafkaTopic CR, not after it. Named explicitly
+      # in application.yaml (nested form, issue #686) because account-service and
+      # card-issuance-service consume the same channel name and would otherwise share the implicit
+      # `dead-letter-topic-delegation-events-in` (#5752).
+      - resource:
+          type: topic
+          name: openbank.dlq.notification.delegation-events-in
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
       # #5698: SmallRye dead-letter topic for the party-events-in channel. Without Write here
       # the DLQ send itself fails and the consumer wedges on the very failure it was meant to

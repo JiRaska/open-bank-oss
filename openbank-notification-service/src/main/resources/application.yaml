@@ -189,6 +189,32 @@ mp:
         # set via the gitops ConfigMap instead (issue #686).
         topic: openbank.delegation.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # #8346 (tail of #5745): DelegationNotificationConsumer.consume returns the Uni it gets
+        # from NotificationConsumer.consume, and since #5745 that Uni FAILS rather than recovers —
+        # its `.onFailure().invoke` only logs, deliberately, so the connector decides (see the
+        # comment at NotificationConsumer.kt:299-314). Without a failure-strategy the connector
+        # default is `fail`, which STOPS the channel: one transient DB error and every delegation
+        # notification silently ceases. This channel's KDoc asserted the opposite until this
+        # change — a comment about configuration going stale exactly like one about remote state.
+        failure-strategy: dead-letter-queue
+        # NESTED, never the dotted leaf key `dead-letter-queue.topic:` — SmallRye's YAML source
+        # quotes any leaf key containing a literal dot, registering it as
+        # ...delegation-events-in."dead-letter-queue.topic", which the connector never reads and
+        # nothing errors about (issue #686). The nested form resolves correctly; aml-service's
+        # DeadLetterQueueConfigResolutionTest proves both directions against the real YAML source.
+        #
+        # In application.yaml rather than the msg-override ConfigMap, unlike this service's two
+        # older channels: the nested form works in every source, so local dev and tests get the
+        # same wiring as the deployed pod. It is also the fleet majority — 20 services name their
+        # DLQ this way. `group.id`/`client.id`/`auto.offset.reset` stay in the ConfigMap because
+        # those keys have no nested spelling the connector reads.
+        #
+        # EXPLICIT, because SmallRye's implicit default is `dead-letter-topic-<channel>`, derived
+        # from the channel name alone. `delegation-events-in` is also declared by account-service
+        # and card-issuance-service, so left implicit all three would dead-letter into one topic
+        # and every alert over it would misattribute (#5752).
+        dead-letter-queue:
+          topic: openbank.dlq.notification.delegation-events-in
 
 # ADR-0155 four-eyes, opted into by opsmessage.compose (ADR-0176 D5). Default false, matching
 # every other four-eyes-wired service (lending, balance, sepa-payment, sepa-instant, account) —
