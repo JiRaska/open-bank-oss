@@ -75,9 +75,13 @@ const STATUS_TONE: Record<DomainStatus, { color: string; bg: string }> = {
 
 // ── Fan-out fetchery — každý vrací partial update domény, nikdy nehodí ───────
 
-type Patch = Partial<Pick<Domain, 'status' | 'score' | 'metricCs' | 'metricEn' | 'unavailableReason'>>
+interface SafeJsonResult {
+  ok: boolean
+  status: number
+  body: unknown
+}
 
-async function safeJson(url: string): Promise<{ ok: boolean; status: number; body: unknown }> {
+async function safeJson(url: string): Promise<SafeJsonResult> {
   try {
     const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
     if (!res.ok) return { ok: false, status: res.status, body: null }
@@ -86,6 +90,11 @@ async function safeJson(url: string): Promise<{ ok: boolean; status: number; bod
     return { ok: false, status: 0, body: null }
   }
 }
+
+// Patch je definován až tady (za safeJson): typový alias končící `>>` těsně před
+// generickou funkcí by se v i18n guard detektoru (`>…<` regex) přečetl jako
+// JSX text — interface SafeJsonResult výše a toto pořadí tomu předchází.
+type Patch = Partial<Pick<Domain, 'status' | 'score' | 'metricCs' | 'metricEn' | 'unavailableReason'>>
 
 const unavailable = (reason: string): Patch => ({ status: 'unavailable', unavailableReason: reason })
 
