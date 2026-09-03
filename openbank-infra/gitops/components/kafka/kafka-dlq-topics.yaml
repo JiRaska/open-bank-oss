@@ -356,6 +356,21 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-delegation-service :: channel `domestic-payment-events-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.delegation.domestic-payment-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-document-service :: channel `account-created-in`
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -616,6 +631,21 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: openbank.dlq.statement.account-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-domestic-payment :: channel `delegated-spend-reservation-state-in`
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.domestic-payment.delegated-spend-reservation-state-in
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster

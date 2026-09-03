@@ -105,6 +105,18 @@ class DomesticPaymentEntity : PanacheEntity() {
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
 
+    @Column(name = "initiated_by_party_id")
+    var initiatedByPartyId: UUID? = null
+
+    @Column(name = "request_fingerprint", length = 64)
+    var requestFingerprint: String? = null
+
+    @Column(name = "delegation_id")
+    var delegationId: UUID? = null
+
+    @Column(name = "reservation_id", unique = true)
+    var reservationId: UUID? = null
+
     /**
      * How many times the #3266 sweep has re-screened this payment. Persistence-only — deliberately
      * absent from the domain model, which describes the payment, not the recovery machinery.

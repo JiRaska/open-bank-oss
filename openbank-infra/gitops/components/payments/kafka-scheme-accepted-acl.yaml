@@ -122,6 +122,26 @@ spec:
       - resource: { type: topic, name: openbank.domestic.payment.events, patternType: literal }
         operations: [Write, Describe]
         host: "*"
+      # Expand-first delegated-spend projection. ACLs may land before the consumer is activated;
+      # absence of a mounted properties override keeps the workload inert.
+      - resource:
+          type: topic
+          name: openbank.delegation.spend-reservation-state
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.domestic-payment.delegated-spend-reservation-state-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: domestic-payment-delegated-spend-binding
+          patternType: literal
+        operations: [Read]
+        host: "*"
       - resource:
           type: topic
           name: payment.scheme-accepted
