@@ -105,7 +105,7 @@ class PartyResourceAuditTest {
         coEvery { res.partyUseCase.exportPartyData(partyId) } returns
             PartyGdprExport(sampleParty(), emptyList(), now)
 
-        res.exportPartyGdpr(partyId)
+        res.exportPartyGdpr(partyId, null)
 
         assertThat(events).singleElement().satisfies({ e ->
             assertThat(e.operation).isEqualTo("party.gdpr-export")
@@ -115,6 +115,9 @@ class PartyResourceAuditTest {
             assertThat(e.resourceId).isEqualTo(partyId.toString())
             assertThat(e.result).isEqualTo(AuditResult.SUCCESS)
             assertThat(e.payload["gdpr_article"]).isEqualTo("15")
+            // #8421: the Art. 30 record must separate a staff read from a subject-initiated one.
+            // actorId is the edge service account for every subject export, so it cannot.
+            assertThat(e.payload["channel"]).isEqualTo("staff")
         })
     }
 
@@ -124,7 +127,7 @@ class PartyResourceAuditTest {
         val res = resource(events)
         coEvery { res.partyUseCase.exportPartyData(partyId) } throws RuntimeException("not found")
 
-        runCatching { res.exportPartyGdpr(partyId) }
+        runCatching { res.exportPartyGdpr(partyId, null) }
 
         assertThat(events).isEmpty()
     }
