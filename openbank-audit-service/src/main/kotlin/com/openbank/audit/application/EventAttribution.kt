@@ -119,6 +119,26 @@ object TopicAttribution {
         "openbank.interest.accrual.event" to "interest-service",
         // openbank-fraud-service/src/main/resources/application.yaml -> fraud-outbox-out.
         "openbank.fraud.hold.changed" to "fraud-service",
+        // Issue #6035, second and final backfill: the last three KNOWN_GAPS entries of
+        // check-audit-money-path-subscription.py. Same rule as the four above -- each value is
+        // read off the module that DECLARES the outgoing channel, never derived from the topic's
+        // domain segment, because `source_service` is chain-hashed into `record_hash` and
+        // `audit_entries` is append-only at the DB, so it gets exactly one chance to be right.
+        // (The segment-derived guess would have been "billing", "standing-orders" and "psd2";
+        // none of the three is the module name.)
+        //
+        // All three publish through the shared outbox relay (`OutboxKafkaHeaders.headersFor`) and
+        // none sets a "sourceService" body field today, so each resolves AttributionSource.TOPIC
+        // through this row; a producer that later populates the field keeps its own value and
+        // upgrades to AttributionSource.EVENT with no edit here.
+        //
+        // openbank-billing-service/src/main/resources/application.yaml -> billing-events-out.
+        "openbank.billing.fee.event" to "billing-service",
+        // openbank-standing-order-service/src/main/resources/application.yaml ->
+        // standing-order-events-out.
+        "openbank.standing-orders.order.event" to "standing-order-service",
+        // openbank-psd2-service/src/main/resources/application.yaml -> psd2-events-out.
+        "openbank.psd2.events" to "psd2-service",
     )
 
     /** Topics with a verified producer entry. Visible for the coverage test. */

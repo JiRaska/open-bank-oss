@@ -234,6 +234,37 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # Issue #6035, second and final backfill: the last three money-path produced topics that
+      # had no Read grant here. Same shape as the four above -- without the grant the topic is
+      # ACL-denied at runtime (allow.everyone.if.no.acl.found=false, components/kafka/kafka.yaml),
+      # silently, as a poll that retries rather than a red pod, and the audit trail then reads
+      # exactly like a quiet period. Each KafkaTopic resource already exists and is owned by its
+      # producer; these are Read grants only, no topic is created here.
+      #
+      # components/kafka/kafka.yaml -- billing's CR is declared there rather than in a
+      # components/billing/ file. It EXISTS: the earlier note in
+      # .github/scripts/check-audit-money-path-subscription.py saying billing had no KafkaTopic CR
+      # was the reason this grant was deferred, and it is no longer true.
+      - resource:
+          type: topic
+          name: openbank.billing.fee.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # components/payments/kafka-topic.yaml
+      - resource:
+          type: topic
+          name: openbank.standing-orders.order.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # components/psd2-service/kafka-topic.yaml
+      - resource:
+          type: topic
+          name: openbank.psd2.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: group
           name: audit-service

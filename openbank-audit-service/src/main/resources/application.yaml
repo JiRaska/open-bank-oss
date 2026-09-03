@@ -192,13 +192,34 @@ mp:
         # header AuditConsumer reads for event_type; none sets a "sourceService" body field, so
         # they resolve AttributionSource.TOPIC through TopicAttribution.
         #
+        # Issue #6035, second and final backfill: the last three producers the check reported as
+        # KNOWN_GAPS. Each was baselined rather than fixed the first time because it needed a
+        # decision the ratchet should not make silently -- and each of those decisions has now
+        # been made, so the gap list is empty and the ratchet covers every money-path topic:
+        #   openbank.billing.fee.event            --
+        #     openbank-billing-service/src/main/resources/application.yaml -> billing-events-out.
+        #     Its KafkaTopic CR was the open question and it EXISTS (components/kafka/kafka.yaml),
+        #     so the Read grant points at a declared topic.
+        #   openbank.standing-orders.order.event  --
+        #     openbank-standing-order-service/src/main/resources/application.yaml ->
+        #     standing-order-events-out (components/payments/kafka-topic.yaml).
+        #   openbank.psd2.events                  --
+        #     openbank-psd2-service/src/main/resources/application.yaml -> psd2-events-out
+        #     (components/psd2-service/kafka-topic.yaml).
+        # All three publish through the standard outbox relay (`OutboxKafkaHeaders.headersFor`),
+        # so each record carries the `ce-type` header AuditConsumer reads for event_type; none
+        # sets a "sourceService" body field, so they resolve AttributionSource.TOPIC through
+        # TopicAttribution.
+        #
         # NOT changed here, deliberately: `auto.offset.reset`. It is already `earliest` for the
-        # deployed channel (audit-service-msg-override ConfigMap, config_ordinal=500). The
-        # existing 22 topics have committed offsets on group `audit-service` and are unaffected;
-        # the four new ones have none, so they are read from their retention start on first
-        # subscribe. That is the intended audit behaviour, not a mass replay of the existing
-        # surface -- but it is a first-subscribe load spike worth knowing about.
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.delegation.spend-reservation-state,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed
+        # deployed channel (audit-service-msg-override ConfigMap, config_ordinal=500). A topic
+        # already on this list has committed offsets on group `audit-service` and is unaffected;
+        # a NEWLY added one has none, so it is read from its retention start on first subscribe.
+        # That is the intended audit behaviour, not a mass replay of the existing surface. All
+        # three topics added above carry `retention.ms: 604800000` (7 days) in their KafkaTopic
+        # CRs, so the backfill is bounded at one week of history per topic -- a one-time
+        # first-subscribe load spike worth knowing about, not an unbounded replay.
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.delegation.spend-reservation-state,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed,openbank.billing.fee.event,openbank.standing-orders.order.event,openbank.psd2.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:

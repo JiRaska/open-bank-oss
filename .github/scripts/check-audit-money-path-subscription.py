@@ -75,30 +75,30 @@ AUDIT_KAFKAUSER = "audit-service"
 # it. Fixing one means DELETING its entries here — and the check fails on an entry that is no
 # longer a gap, so the list cannot drift in either direction.
 #
-# What is left after #6035's first backfill. Four of the original seven -- ledger
-# (openbank.ledger.journal.posted), sdd, interest and fraud -- were wired in all three places and
-# their entries deleted here; a stale entry is itself an error, so a half-fix cannot pass.
+# EMPTY, and that is the point: every money-path produced topic is now covered by the ratchet
+# itself, so a regression in any of the three places is an error rather than a declared exception.
 #
-# The three that remain each need a decision this ratchet should not make silently:
-#  - billing has no KafkaTopic CR for openbank.billing.fee.event at all, so a Read grant would
-#    point at an undeclared topic -- a second way to get silence, and the topic's ownership is
-#    billing's call, not audit's.
-#  - standing-order and psd2 were found by THIS check and named in neither #5859 nor #6035, so
-#    nothing has yet reviewed whether their streams belong in the audit trail.
-_GAP_ISSUE = {
-    "openbank-billing-service": "#6035 - also has no KafkaTopic CR (see the issue)",
-    # Found by THIS check on its first run, and by nothing before it: neither #5859's probe nor
-    # #6035's enumeration named these two. That is the argument for deriving the scope rather
-    # than probing it by hand - a careful manual enumeration of the same set, done twice, was
-    # still two short.
-    "openbank-standing-order-service": "#6035 - found by this check, not named in the issue",
-    "openbank-psd2-service": "#6035 - found by this check, not named in the issue",
-}
-_GAP_TOPICS = {
-    "openbank-billing-service": "openbank.billing.fee.event",
-    "openbank-standing-order-service": "openbank.standing-orders.order.event",
-    "openbank-psd2-service": "openbank.psd2.events",
-}
+# #6035 opened with seven gaps and closed in two backfills. The first wired ledger
+# (openbank.ledger.journal.posted), sdd, interest and fraud. The three that remained were
+# baselined rather than fixed because each needed a decision this ratchet should not make
+# silently, and each has now been made:
+#  - openbank.billing.fee.event was held because this file recorded that billing had "no
+#    KafkaTopic CR at all", so a Read grant would have pointed at an undeclared topic -- a second
+#    way to get silence. That note is stale: the CR exists (components/kafka/kafka.yaml, 1
+#    partition, retention.ms 604800000), so the reason to defer is gone and the entry goes with
+#    it. A comment asserting the current state of a remote-ish artefact has a shelf life and
+#    nothing re-checks it -- which is why the fix is the subscription, not a reworded note.
+#  - openbank.standing-orders.order.event and openbank.psd2.events were found by THIS check and
+#    named in neither #5859 nor #6035 (the argument for deriving the scope rather than probing it
+#    by hand: a careful manual enumeration of the same set, done twice, was still two short).
+#    Both are ordinary money-path domain-event streams published through the shared outbox relay,
+#    so they belong in the audit trail on the same grounds as every other topic on the list;
+#    nothing about them argues for an OUT_OF_SCOPE entry.
+#
+# An entry added here needs a reason, and the check fails on a stale declaration in BOTH
+# directions, so a new gap cannot quietly become permanent.
+_GAP_ISSUE: dict[str, str] = {}
+_GAP_TOPICS: dict[str, str] = {}
 
 # Topics a money-path service produces that are deliberately NOT audit subjects, each with the
 # reason. Separate from KNOWN_GAPS because these are not debt: nothing here is meant to be fixed
