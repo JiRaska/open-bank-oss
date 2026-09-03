@@ -101,15 +101,18 @@ class PartyResource {
      * proxied Art. 15 / Art. 20 request was therefore a 403, and the two rights were unreachable
      * by any data subject (#8421).
      *
-     * Kotlin initializer AND `defaultValue`, matching `UpstreamClient`: field injection runs after
-     * construction and overwrites the initializer, so config still wins, while a hand-built
-     * instance in a unit test is not left with an uninitialized `lateinit`.
+     * `lateinit` with no Kotlin initializer, matching every `@ConfigProperty` field on
+     * `CustomerEdgeResource`: a Kotlin default here would generate a synthetic constructor that
+     * Arc builds the bean through, and the annotation would never be applied — the field would
+     * silently keep the fallback whatever the environment said (`configproperty-kotlin-defaults`).
+     * The annotation's `defaultValue` is what supplies the fallback, and it always applies, so the
+     * field is never actually uninitialized in a CDI context.
      */
     @ConfigProperty(
         name = "openbank.party.gdpr.customer-edge-principal",
         defaultValue = DEFAULT_CUSTOMER_EDGE_PRINCIPAL,
     )
-    var gdprCustomerEdgePrincipal: String = DEFAULT_CUSTOMER_EDGE_PRINCIPAL
+    lateinit var gdprCustomerEdgePrincipal: String
 
     /**
      * Whether this CALLER may exercise a subject's Art. 15 / Art. 20 right on the subject's behalf.
@@ -121,7 +124,11 @@ class PartyResource {
      * documents for the sibling privacy-centre route.
      */
     private fun callerIsCustomerEdge(): Boolean {
-        val permitted = gdprCustomerEdgePrincipal
+        // `::x.isInitialized` rather than a Kotlin default: a unit test that builds this resource
+        // by hand sets only the collaborators it exercises, and an uninitialized `lateinit` read
+        // would throw there instead of refusing. In a CDI context `defaultValue` guarantees it is
+        // set, so this branch is unreachable in production and reads as "no principal configured".
+        val permitted = if (this::gdprCustomerEdgePrincipal.isInitialized) gdprCustomerEdgePrincipal else ""
         return permitted.isNotBlank() && securityIdentity.principal?.name == permitted
     }
 
