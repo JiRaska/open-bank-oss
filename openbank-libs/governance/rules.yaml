@@ -1502,6 +1502,24 @@ authz_policy:
 # ---------------------------------------------------------------------------------------
 # Scheduled-method invariants (issue #2148, fleet sweep #2187).
 # ---------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------
+# Temporal worker disable-switch naming (audit Top-50 E46). Every service that registers a
+# Temporal worker at StartupEvent carries a switch so tests / the fuzz harness / DR manifests
+# can boot without Temporal. The name MUST be derivable: `openbank.<service>.worker.enabled`.
+# An invented-per-service name forces every consumer to hard-code a drifting name list — the
+# 2026-08-18 fuzz run shipped 6 "failures" that never sent a request, partly on this.
+# Enforced by .github/scripts/check-temporal-worker-switch-naming.py (gate
+# temporal-worker-switch-naming). Allowlist entries fail stale in either direction.
+# ---------------------------------------------------------------------------------------
+temporal_worker_switch_naming:
+  convention: "openbank.<service>.worker.enabled"
+  allowlist:
+    - property: "lending.origination.worker.enabled"
+      reason: >-
+        Pre-dates the convention; renaming a live config property is a coordinated change
+        across registrar, application.yaml, tests and deployment config — tracked as a
+        follow-up issue, not a drive-by in the gate PR.
+
 scheduled_methods:
   no_runblocking_in_scheduled_body: true
   # Quarkus invokes a plain (non-`suspend`) @Scheduled method on a bare `executor-thread`,
