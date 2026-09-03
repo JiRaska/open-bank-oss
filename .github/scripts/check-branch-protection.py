@@ -76,9 +76,9 @@ def evaluate(declared, live_ruleset, live_writers):
     min_checks = int(declared.get("compensating_min_required_checks", 5))
 
     if live_ruleset is None:
-        return [f"live ruleset '{ruleset_name}' not found — the declaration "
-                f"assumes it exists; either it was renamed/deleted or the name "
-                f"in rules.yaml is stale"]
+        return [(f"live ruleset '{ruleset_name}' not found — the declaration "
+                 f"assumes it exists; either it was renamed/deleted or the name "
+                 f"in rules.yaml is stale")]
 
     if live_ruleset.get("name") != ruleset_name:
         failures.append(f"ruleset name drift: live={live_ruleset.get('name')!r} "

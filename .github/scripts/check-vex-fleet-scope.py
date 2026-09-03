@@ -16,14 +16,14 @@ WHY THIS EXISTS
   2. A CVE in ONE component's own dependency. Fine per component — untouched
      by this change.
 
-  The fix is a fleet scope: `openbank-libs/governance/vex/_fleet.openvex.json`
+  The fix is a fleet scope: `openbank-libs/governance/vex/_fleet.vex.json`
   carries statements whose products are fleet-wide purls
   (`pkg:generic/openbank-fleet/...`). build-release-evidence.sh folds the
   expansion into every release VEX document (see --expand), so downstream
   consumers see the same document as today; only the AUTHORING is scoped.
 
 WHAT THIS GATE ENFORCES
-  a. `_fleet.openvex.json` is a valid OpenVEX doc and every statement product
+  a. `_fleet.vex.json` is a valid OpenVEX doc and every statement product
      is a fleet purl (a component purl in the fleet doc defeats the purpose).
   b. CONFLICT (hard fail): the same CVE appears in the fleet doc AND in a
      component overlay with a different status — two answers to one question.
@@ -47,7 +47,10 @@ import re
 import sys
 
 VEX_DIR = "openbank-libs/governance/vex"
-FLEET_DOC = os.path.join(VEX_DIR, "_fleet.openvex.json")
+# `_fleet.vex.json` — deliberately NOT `*.openvex.json`: the vex-overlay-coverage
+# gate globs that suffix per released component, and a fleet-scope document is
+# reachable through ALL of them, not orphaned from one.
+FLEET_DOC = os.path.join(VEX_DIR, "_fleet.vex.json")
 FLEET_PURL_PREFIX = "pkg:generic/openbank-fleet/"
 PROMOTE_THRESHOLD = 5
 STATUSES = {"not_affected", "affected", "fixed", "under_investigation"}
@@ -135,7 +138,7 @@ def evaluate(fleet, overlays):
                 warnings.append(
                     f"promotion candidate (#6988 shape): {cve} has the IDENTICAL "
                     f"status {statuses.pop()!r} in {len(occ)} component overlays — "
-                    f"maintain it once in _fleet.openvex.json instead")
+                    f"maintain it once in _fleet.vex.json instead")
 
     return failures, warnings
 
@@ -154,7 +157,7 @@ def expand(fleet, overlays):
     """Merged per-component view for release-evidence folding."""
     out = {}
     for path, stmts in sorted(overlays.items()):
-        comp = os.path.basename(p := path).replace(".openvex.json", "")
+        comp = os.path.basename(path).replace(".openvex.json", "")
         merged = {**fleet_map_as_cve(fleet), **stmts}
         out[comp] = sorted(merged)
     return out
