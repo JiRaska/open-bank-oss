@@ -94,6 +94,8 @@ class KycCaseExpirationJob(
     suspend fun sweepExpiredCases() {
         if (!enabled) return
         val threshold = Instant.now(clock)
+        // observed-by: a scheduled sweep, not an event consumer — no message to ack, no DLQ. A
+        // failed tick is retried by the next cron firing; errorf is the failure signal.
         try {
             val expired = expireBatch(threshold)
             liveness?.recordSuccess()
@@ -129,6 +131,9 @@ class KycCaseExpirationJob(
                 continue
             }
             @Suppress("TooGenericExceptionCaught")
+            // observed-by: this is a scheduled sweep, not an event consumer — there is no message
+            // to ack and no DLQ to lose. A case that fails to update here is still OPEN on the next
+            // tick's query, so the sweep just picks it up again; the warnf log is the failure signal.
             try {
                 val expiredCase = expire(case, threshold)
                 repo.update(expiredCase, KycEvents.caseStatusChanged(expiredCase, threshold))
