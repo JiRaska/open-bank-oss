@@ -77,11 +77,16 @@ data:
     mp.messaging.incoming.kyc-events-in.client.id=notification-service-kyc-${quarkus.uuid}
     mp.messaging.incoming.kyc-events-in.group.id=notification-service-kyc
     mp.messaging.incoming.kyc-events-in.auto.offset.reset=earliest
-    mp.messaging.incoming.consent-events-in.client.id=notification-service-consent-${quarkus.uuid}
-    mp.messaging.incoming.consent-events-in.group.id=notification-service-consent
-    # #8432: `latest`, deliberately unlike the three channels above. This is a NEW consumer group
-    # on `openbank.consent.events`, which has been live for months; `earliest` would replay the
-    # whole retained history and push "a third party was granted access to your accounts" for
-    # every consent ever granted, including ones the customer revoked long ago. A notification is
-    # about something happening now, so the only correct starting point is now.
-    mp.messaging.incoming.consent-events-in.auto.offset.reset=latest
+    # #8432 consent-events-in is DELIBERATELY ABSENT here, and must stay absent until the image
+    # carrying its connector is deployed. Naming a channel in this ConfigMap is enough for
+    # SmallRye to consider it DECLARED; the `connector:` that makes it servable ships in the
+    # service's own application.yaml, inside the image. A declared channel with no connector is a
+    # hard boot failure (SRMSG00071), not a degraded feature — that is the card-issuance
+    # CrashLoopBackOff of 2026-08-02, and check-msg-channel-image-parity.py is the gate written
+    # from it. Phase 2, once this image is live, adds:
+    #   mp.messaging.incoming.consent-events-in.client.id=notification-service-consent-${quarkus.uuid}
+    #   mp.messaging.incoming.consent-events-in.group.id=notification-service-consent
+    #   mp.messaging.incoming.consent-events-in.auto.offset.reset=latest
+    # `latest`, deliberately unlike the channels above: this is a NEW consumer group on a topic
+    # live for months, and `earliest` would replay the whole retained history, pushing "a third
+    # party was granted access to your accounts" for every consent ever granted.

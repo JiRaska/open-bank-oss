@@ -99,6 +99,14 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # #8432: without Write here the DLQ send itself fails and the consumer wedges on the very
+      # failure it was meant to park — the same lockout class as the two DLQ grants above.
+      - resource:
+          type: topic
+          name: openbank.consent.events.notification.dlq
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       - resource:
           type: group
           name: notification-service
