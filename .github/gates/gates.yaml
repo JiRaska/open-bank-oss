@@ -4717,7 +4717,7 @@ gates:
     selftest: python3 .github/scripts/check-no-epoch-instant-default.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-no-epoch-instant-default.py"]
-    min_subjects: 66    # 33+33 after fx + document + libs-domain burn-downs; lower this in each burn-down PR
+    min_subjects: 56    # 28+28 after fx + document + libs-domain + account burn-downs; lower this in each burn-down PR
     run: |
       python3 .github/scripts/check-no-epoch-instant-default.py --root .
 
