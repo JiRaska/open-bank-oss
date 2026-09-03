@@ -101,8 +101,15 @@ while IFS= read -r pin; do
   fi
 
   # Any build-relevant commit on this checkout's HEAD since the pinned image was built?
+  # The path set must match the auto-deploy push trigger EXACTLY — including version.txt:
+  # a release-please commit touches only version.txt, and the push path rebuilds+deploys on
+  # it ("that release marker must rebuild/deploy the component"). When this probe omitted
+  # version.txt, a release-triggered deploy blocked at can-i-deploy stayed stranded FOREVER:
+  # no src/main delta, so no reconcile tick ever re-offered it — clearing-simulator ran 0.5.0
+  # for 9 days after 0.6.0 was cut (#8127). Dockerfile is in for the same reason.
   if [ -n "$(git log --format=%H "${commit}..HEAD" -- \
-              "${svc}/src/main" "${svc}/build.gradle.kts" 2>/dev/null)" ]; then
+              "${svc}/src/main" "${svc}/build.gradle.kts" \
+              "${svc}/version.txt" "${svc}/Dockerfile" 2>/dev/null)" ]; then
     epoch="$(git log -1 --format=%ct "${commit}^{commit}" 2>/dev/null || echo 0)"
     lagging+=("${epoch}	$svc")
   fi
