@@ -19,6 +19,7 @@ obrazovky, které zůstávají autoritativním zdrojem detailu.
 | Maker-checker | `/api/approvals/pending` | `/approvals` |
 | Auditní stopa | `audit-service` | `/audit` |
 | Identita & KYC | `party-service` cases | `/identity-cases` |
+| Supply chain (SBOM) | `/api/sbom/drift` (image↔GitOps shoda, ADR-0030 D5) | `/system/inventory` |
 
 ## Jak číst skóre
 

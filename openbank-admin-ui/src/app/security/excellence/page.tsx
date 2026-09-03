@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   Shield, ScanLine, AlertTriangle, ShieldAlert, AlertOctagon, ClipboardCheck,
-  ScrollText, Fingerprint, RefreshCw, ArrowRight, Scale,
+  ScrollText, Fingerprint, RefreshCw, ArrowRight, Scale, Package,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -205,6 +205,25 @@ async function fetchIdentity(): Promise<Patch> {
   }
 }
 
+async function fetchSbom(): Promise<Patch> {
+  // SBOM drift = image↔GitOps shoda per money-path služba (ADR-0030 D5). 503 znamená
+  // "ještě neproskenováno" — typed unavailable, nikdy falešné OK.
+  const { ok, status, body } = await safeJson('/api/sbom/drift')
+  if (!ok) return unavailable(status === 503 ? 'not_deployed' : status === 401 || status === 403 ? 'unauthorized' : 'unreachable')
+  const services = (body as { services?: Record<string, { status: string; inSync?: boolean }> })?.services ?? {}
+  const entries = Object.values(services)
+  const checked = entries.filter(e => e.status === 'checked')
+  const outOfSync = checked.filter(e => e.inSync === false).length
+  if (checked.length === 0) return unavailable('not_deployed')
+  const ratio = checked.length ? (checked.length - outOfSync) / checked.length : 1
+  return {
+    status: outOfSync > 0 ? 'degraded' : 'ok',
+    score: Math.round(ratio * 100),
+    metricCs: `${outOfSync} mimo sync z ${checked.length} služeb`,
+    metricEn: `${outOfSync} out of sync of ${checked.length} services`,
+  }
+}
+
 // ── Stránka ──────────────────────────────────────────────────────────────────
 
 const DOMAIN_DEFS: Array<Omit<Domain, 'status'>> = [
@@ -232,6 +251,9 @@ const DOMAIN_DEFS: Array<Omit<Domain, 'status'>> = [
   { id: 'identity',  icon: Fingerprint,    href: '/identity-cases',
     nameCs: 'Identita & KYC', nameEn: 'Identity & KYC',
     descCs: 'Ověření identity, deduplikace stran', descEn: 'Identity verification, party dedup' },
+  { id: 'sbom',      icon: Package,        href: '/system/inventory',
+    nameCs: 'Supply chain (SBOM)', nameEn: 'Supply Chain (SBOM)',
+    descCs: 'Image↔GitOps drift, inventář komponent, CVE', descEn: 'Image↔GitOps drift, component inventory, CVEs' },
 ]
 
 export default function SecurityExcellencePage() {
@@ -246,6 +268,7 @@ export default function SecurityExcellencePage() {
     const fetchers: Record<string, () => Promise<Patch>> = {
       posture: fetchPosture, incidents: fetchIncidents, fraud: fetchFraud, aml: fetchAml,
       sanctions: fetchSanctions, approvals: fetchApprovals, audit: fetchAudit, identity: fetchIdentity,
+      sbom: fetchSbom,
     }
     // Fan-out paralelně; každá doména se doplní jakmile odpoví (progressive render).
     await Promise.all(Object.entries(fetchers).map(async ([id, fn]) => {
@@ -378,8 +401,8 @@ export default function SecurityExcellencePage() {
 
         <p style={{ marginTop: 20, fontSize: 12, color: 'var(--text-tertiary)' }}>
           {t(
-            'Hub agreguje read-only signály nad specializovanými obrazovkami — žádná z nich není nahrazena; každá karta vede na její detail. Zdroje: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, party-service.',
-            'The hub aggregates read-only signals over the specialised screens — none of them is replaced; every card drills through to its detail. Sources: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, party-service.',
+            'Hub agreguje read-only signály nad specializovanými obrazovkami — žádná z nich není nahrazena; každá karta vede na její detail. Zdroje: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, party-service, /api/sbom/drift.',
+            'The hub aggregates read-only signals over the specialised screens — none of them is replaced; every card drills through to its detail. Sources: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, party-service, /api/sbom/drift.',
           )}
         </p>
       </div>

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.27.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.2...account-service-v0.27.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* **account:** revoking an unknown authorization answers 404, not 500 ([#8466](https://github.com/JiRaska/open-bank-oss/issues/8466)) ([909dee5](https://github.com/JiRaska/open-bank-oss/commit/909dee547a0bf602792adf60b9df91c28abe55be))
+
+## [0.27.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.1...account-service-v0.27.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **account:** dead-letter into an explicit topic, not the shared implicit one ([#8304](https://github.com/JiRaska/open-bank-oss/issues/8304)) ([4faf359](https://github.com/JiRaska/open-bank-oss/commit/4faf359eb20c990b0a54c9ef79d013ffed4b59c8)), closes [#5752](https://github.com/JiRaska/open-bank-oss/issues/5752)
+
 ## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.0...account-service-v0.27.1) (2026-09-02)
 
 
