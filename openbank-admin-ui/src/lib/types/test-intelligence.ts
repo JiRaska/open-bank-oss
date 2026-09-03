@@ -404,6 +404,13 @@ export interface TestCaseHistory {
   wastedDurationMs: number
   sameCommitTransitions: number
   lastObservedAt: string
+  /** Direct evidence that a passed Playwright testcase needed retry attempts. */
+  retryFlaky?: true
+  /** Latest typed retry observation; failure text and stack output are never retained. */
+  failedAttemptCount?: number
+  failedAttemptDurationMs?: number
+  /** Latest trusted run carrying direct retry-flaky evidence. */
+  retryRun?: TestRunProvenance & { observedAt: string }
 }
 
 export interface TestRunHistoryPoint {

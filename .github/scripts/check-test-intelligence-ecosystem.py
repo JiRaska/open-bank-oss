@@ -231,6 +231,31 @@ def check(root: Path) -> list[str]:
         if (not diagnostic_url_pattern or re.fullmatch(diagnostic_url_pattern, trusted_diagnostic) is None
                 or re.fullmatch(diagnostic_url_pattern, f"{hostile_run}#artifacts") is not None):
             errors.append("run schema permits diagnostic links outside canonical GitHub run artifacts")
+        test_case = schema.get("$defs", {}).get("testCase", {})
+        test_case_properties = test_case.get("properties", {})
+        if set(test_case_properties.get("state", {}).get("enum", [])) != {"passed", "failed", "skipped"}:
+            errors.append("retry-flaky evidence changed the authoritative testcase state vocabulary")
+        retry_contract = {
+            "retryFlaky": {"const": True},
+            "failedAttemptCount": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "failedAttemptDurationMs": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        }
+        for field, expected in retry_contract.items():
+            actual = test_case_properties.get(field, {})
+            if any(actual.get(key) != value for key, value in expected.items()):
+                errors.append(f"run schema cannot represent safe optional retry-flaky metadata: {field}")
+            if field in test_case.get("required", []):
+                errors.append(f"legacy testcase envelopes now require additive retry metadata: {field}")
+        retry_fields = set(retry_contract)
+        dependencies = test_case.get("dependentRequired", {})
+        if any(set(dependencies.get(field, [])) != retry_fields - {field} for field in retry_fields):
+            errors.append("retry-flaky testcase metadata is not an all-or-nothing optional group")
+        retry_state_rule = {
+            "if": {"properties": {"retryFlaky": {"const": True}}, "required": ["retryFlaky"]},
+            "then": {"properties": {"state": {"const": "passed"}}},
+        }
+        if retry_state_rule not in test_case.get("allOf", []):
+            errors.append("run schema allows retry-flaky metadata to change a testcase verdict")
     except (OSError, json.JSONDecodeError) as exc:
         errors.append(f"run schema unavailable: {exc}")
 
@@ -448,6 +473,9 @@ def check(root: Path) -> list[str]:
                    "--browser-report-dir", "playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}"):
         if needle not in ui_workflow:
             errors.append(f"Admin UI test producer is incomplete: {needle}")
+    playwright_config = text(root / "openbank-admin-ui/playwright.config.ts")
+    if "includeRetries: true" not in playwright_config:
+        errors.append("Playwright JUnit omits intra-run retry failures from Test Intelligence evidence")
     deploy_workflow = text(root / ".github/workflows/admin-ui-deploy.yml")
     for needle in ('snapshot_count}" -lt 30', "admin-ui-deploy.yml/runs?branch=main&status=success&per_page=100", "runs/${deploy_run_id}/artifacts?per_page=100", "awk '!seen[$0]++'"):
         if needle not in deploy_workflow:
@@ -456,6 +484,12 @@ def check(root: Path) -> list[str]:
     for needle in ("def browser_diagnostics(", "def trusted_run_url(", '"mayContainSensitiveData": True', '"github-run-authenticated"'):
         if needle not in producer:
             errors.append(f"test producer loses the browser diagnostic privacy contract: {needle}")
+    for needle in ("flakyFailure", "flakyError", "rerunFailure", "rerunError", "def junit_duration_ms(",
+                   "JSON_SAFE_INTEGER_MAX", "def safe_sum_duration_ms(", "total_duration_ms",
+                   '"retryFlaky": True', '"failedAttemptCount"',
+                   '"failedAttemptDurationMs"'):
+        if needle not in producer:
+            errors.append(f"test producer loses bounded Playwright retry-flaky evidence: {needle}")
     for needle in ("const trustedRunUrl =", "const safeRun =", "diagnostics: (run.diagnostics ?? [])", "mayContainSensitiveData: item.mayContainSensitiveData"):
         if needle not in collector:
             errors.append(f"Admin projection loses browser diagnostic metadata: {needle}")
@@ -465,6 +499,22 @@ def check(root: Path) -> list[str]:
         errors.append("Admin UI has no typed Playwright diagnostic artifact")
     if "may contain sensitive browser data" not in tests_page:
         errors.append("Admin UI does not expose the diagnostic privacy warning")
+    for needle in ("function retryFlakyMetadata(item)", "function safeAddNonNegativeIntegers(left, right)",
+                   "function mergeSameRunTestCase(previous, next)", "delete merged.retryFlaky",
+                   "mergedDurationMs !== null", "const latestRunRows =", "const lastState =",
+                   "retryFlakyRows.length > 0",
+                   "failedAttemptCount", "failedAttemptDurationMs", "retryRun"):
+        if needle not in collector:
+            errors.append(f"Admin projection loses direct retry-flaky history: {needle}")
+    if "state: sameCommitTransitions > 0 ? 'flaky' : lastState === 'failed' ? 'failing'" not in collector:
+        errors.append("Admin projection loses deterministic same-commit flake and latest-run failure precedence")
+    for needle in ('status="flaky"', "failed retry attempt(s)", "retryRun"):
+        if needle not in tests_page:
+            errors.append(f"Admin UI does not render direct retry-flaky provenance: {needle}")
+    if "retryRun?:" not in types:
+        errors.append("Admin UI has no typed retry-flaky run provenance")
+    if "item.state === 'skipped' ? 'skipped' : 'stale'" in tests_page:
+        errors.append("Admin UI still mislabels an observed flaky testcase as stale evidence")
     synthetic_route = text(root / "openbank-admin-ui/src/app/api/test-intelligence/route.ts")
     freshness = text(root / "openbank-admin-ui/src/lib/test-intelligence-freshness.ts")
     for needle in ("function enforceRuntimeFreshness", "MAX_FUTURE_SKEW_MS", "observed - Date.now() > MAX_FUTURE_SKEW_MS", "runtimeFreshnessState(item.state, item.observedAt)", "staleEvidence: evidence.filter"):
