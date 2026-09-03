@@ -31,7 +31,7 @@ interface ApprovalRepository {
     suspend fun findPendingActive(
         resourceType: String,
         limit: Int = 50,
-        asOf: Instant = Instant.EPOCH,
+        asOf: Instant,
     ): List<ApprovalEntry>
 
     /** All approval requests (any state) for a specific resource, newest first. */
