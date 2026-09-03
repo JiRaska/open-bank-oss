@@ -1979,6 +1979,14 @@ ci_runners:
       image_builds: dind
       ephemeral_per_job: true
       isolation_rationale: "separate low-capped pool so a scan/cron burst cannot starve the merge-required build lane (ARC has no job preemption — dedicated capacity is the only priority lever)"
+    dr:                                # quarterly resilience lanes: dr-restore-verify, chaos drill, attestation evidence (ADR-0277)
+      scale_set: openbank-dr
+      cloud_write_credentials: false    # no IRSA/cloud role on the pod SA at all
+      secrets: none
+      cluster_api: restore_verify_namespaces_only   # Role+RoleBinding in gitops components/platform, Kyverno-pinned
+      ephemeral_per_job: true
+      triggers: [schedule, workflow_dispatch]       # NEVER PR code — excluded from pr_jobs_allowed_pools by construction
+      isolation_rationale: "cluster-reachable lane for DORA restore/chaos evidence; a credentialled lane PR code must never reach (#6458 class, ADR-0277)"
     deploy:                            # ECR push + ArgoCD sync; post-merge only
       scale_set: openbank-deploy
       credentials: irsa                 # pod ServiceAccount IRSA scoped to ECR push + ArgoCD
