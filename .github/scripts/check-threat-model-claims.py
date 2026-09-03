@@ -164,6 +164,11 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'previous repository contract, replaced by `upsertAll`; only the port KDoc names it',
     'openbank-security-scanner|1. Scope & purpose|openbank.security.scan.event':
         'topic named in CHANGELOGs only; no producer, consumer, contract or KafkaTopic CR',
+    # Retargeted 2026-09-03: #8418 merged and rewrote §5 to say the test is per-service, so the
+    # claim no longer parses there. It survives in the change log, which necessarily names the
+    # thing it is recording the absence of — a phantom by construction, not a defect.
+    'openbank-security-scanner|6. Change log|SecurityContractTest':
+        'no fleet-wide class; nine per-service variants cover 8 of 61 modules (#8418 corrected §5)',
     'openbank-sepa-instant|6. Change log|SctInstOutboxBacklogGaugeTest':
         'test for the outbox dropped by `V4__drop_sct_inst_outbox.sql` (#5126); no such class',
     'openbank-sepa-instant|6. Change log|KafkaSctInstOutboxEventPublisher':
