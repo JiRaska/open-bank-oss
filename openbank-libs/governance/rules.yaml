@@ -1155,7 +1155,23 @@ coverage:
     # 2026-07-07 note above; settlement re-confirmed thin, sanctions was the one that wasn't.)
     # True baselines at rollout (after fixing the KILLED-quote parsing bug): account 49%,
     # transaction 46%, balance 55%, ledger 65%, fx 73%.
-    blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; account/transaction/balance/ledger are below it today (see baselines above)"
+    # Re-measured 2026-09-03 against the last weekly run (33289385445, 2026-08-30). The previous
+    # text named account/transaction/balance/ledger and was wrong in BOTH directions: account
+    # (49 -> 70) and transaction (46 -> 76) have since cleared, while interest, sanctions and
+    # sepa-payment were never named and are below. ledger has gone the wrong way, 65 -> 63.
+    #
+    #     balance   60%  (46/76)      account     70%  (103/146)
+    #     interest  60%  (36/60)      fx          72%  (62/85)
+    #     ledger    63%  (180/283)    domestic    74%  (49/66)
+    #     sanctions 69%  (34/49)      sdd         75%  (46/61)
+    #     sepa-pay  69%  (44/63)      transaction 76%  (80/104)
+    #                                 sepa-instant 77% (35/45)
+    #                                 fraud       89%  (41/46)
+    #
+    # So the flip is blocked by FIVE services, not four, and the two the record has been
+    # pointing at for a month are no longer among them. Read the weekly run before quoting a
+    # number here; these move.
+    blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; balance 60, interest 60, ledger 63, sanctions 69 and sepa-payment 69 are below it as of run 33289385445 (2026-08-30)"
   dast:
     tool: "OWASP ZAP baseline (zaproxy/action-baseline)"   # ADR-0030 D3
     enforced: advisory                  # report-only first cut; no fail_action, no PR gate
