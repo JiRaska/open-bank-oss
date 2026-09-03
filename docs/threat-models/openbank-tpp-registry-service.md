@@ -64,7 +64,7 @@ PSD2 service returns 503 rather than fail-open.
 
 - **2026-09-03** — Doc correction, no behavior change: §5 listed an "In-memory role cache TTL"
   residual risk, asserting that PSD2 service caches registry responses and that the window is tuned
-  by `openbank.tpp.cache-ttl-seconds` (default 60). **Neither the knob nor the cache exists.**
+  by `openbank.tpp.cache-ttl-seconds` (default 60). **The knob does not exist, and neither does the cache.**
   `git grep -l -F openbank.tpp.cache-ttl-seconds` returns only this document, and
   `openbank-psd2-service/src/main/kotlin/com/openbank/psd2/infrastructure/client/TppRegistryClient.kt`
   contains no caching of any kind — no `@CacheResult` (#4011), no TTL, no store — so each authorisation
