@@ -529,6 +529,14 @@ def self_test() -> int:
         fails.append(f"cross-language: {shell_lib} is missing — the shell reader is unchecked")
     elif cases:
         script = (
+            # `set --` FIRST. This file is sourced, and its self-test block keys off `$1`, so a
+            # caller invoked with `--self-test` in its own argv runs the LIBRARY's cases and
+            # `exit 0`s before the caller's ever start — a green that tested nothing. `bash -c`
+            # passes no operands today, so `$1` is unset and this is safe by accident; adding
+            # one operand later (to parameterise the pattern file, say) would make the hijack
+            # live and silent. Clearing the positional parameters makes it structurally
+            # impossible instead of incidentally absent.
+            "set --;"
             f"source {shell_lib};"
             'while IFS= read -r m; do printf "%s\n" "$m" > "$TMPF";'
             ' _gh_retry_classify "$TMPF"; done'
