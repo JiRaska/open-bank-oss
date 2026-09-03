@@ -28,11 +28,7 @@ interface ApprovalRepository {
      * Active (non-expired) PROPOSED rows for [resourceType], oldest first.
      * Used to render the approval queue in the onboarding cockpit.
      */
-    suspend fun findPendingActive(
-        resourceType: String,
-        limit: Int = 50,
-        asOf: Instant,
-    ): List<ApprovalEntry>
+    suspend fun findPendingActive(resourceType: String, limit: Int = 50, asOf: Instant): List<ApprovalEntry>
 
     /** All approval requests (any state) for a specific resource, newest first. */
     suspend fun findByResourceId(resourceType: String, resourceId: String): List<ApprovalEntry>
