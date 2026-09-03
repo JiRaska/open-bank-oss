@@ -153,7 +153,7 @@ audit-service + aml-service consume the event
 |---|---|
 | `libs.idempotency.IdempotencyStore` | Redis-backed deduplication by `idempotencyKey` |
 | `libs.persistence.outbox` | OutboxEntity base, OutboxRepository, OutboxDispatcherBase |
-| `libs.security.BootstrapVerifier` | fail-fast on dev passwords in prod |
+| `libs.security.BootstrapVerifier` — ⬜ **not consumed, does not exist** | **Nothing.** This class is not in `openbank-libs` and never was (`git grep BootstrapVerifier -- '*.kt'` returns 0); ADR-0017 prescribes it and its own delivery note records that it was not shipped. Dev passwords are kept out of prod by ESO/OpenBao `secretKeyRef` injection (ADR-0007), not by libs code (#8426) |
 | `libs.web.ServiceInfoResource` | `/api/v1/info` (build metadata) |
 | `libs.docs.DocsResource` | **this documentation** (`/q/openbank/docs`) |
 | `libs.util.BuildInfo` | runtime tech-stack snapshot |
