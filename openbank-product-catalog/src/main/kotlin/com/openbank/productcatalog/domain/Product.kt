@@ -130,7 +130,10 @@ data class ProductVersion(
     val validTo: LocalDate? = null,
     val isPublic: Boolean = true,
     val changeNote: String? = null,
-    val createdAt: Instant = Instant.EPOCH,
+    /** Version-creation time. Required since the EPOCH-default burn-down (#8357): a version
+     *  stamped 1970-01-01 is a lie every recency assertion agrees with. Seeds pass their
+     *  validity start; live writes pass the caller's clock. */
+    val createdAt: Instant,
 )
 
 data class Product(
@@ -160,8 +163,8 @@ data class Product(
     val versionHistory: List<ProductVersion> = emptyList(),
     val tags: List<String> = emptyList(),
     val eligibilitySegments: List<EligibilitySegment> = listOf(EligibilitySegment.ALL),
-    val createdAt: Instant = Instant.EPOCH,
-    val updatedAt: Instant = Instant.EPOCH,
+    val createdAt: Instant,
+    val updatedAt: Instant,
     /** Optimistic concurrency token; mapped from `products.row_version`, never client-generated. */
     val revision: Long = 0,
 )
