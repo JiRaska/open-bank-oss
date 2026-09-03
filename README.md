@@ -183,6 +183,7 @@ full checklist. Maintainers with Claude Code can also run `/ship-check` — it m
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the services fit together (bounded contexts, runtime patterns, deployment)
 - [`DEPLOYMENT.md`](DEPLOYMENT.md) — how it's built, shipped, and run (local Docker, CI/CD, GitOps, infra, runbooks)
+- [`docs/deployment-reference.md`](docs/deployment-reference.md) — evaluator's reference: topology, sizing tiers, cost estimates, and the production delta
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones M1–M7
 - [`docs/adr/README.md`](docs/adr/README.md) — Architecture Decision Records index, with per-decision delivery status (governance lives in 0029–0031 and 0040)
 - [`docs/strategy/`](docs/strategy/) — BIAN mapping, security baseline, compliance matrix, resilience
