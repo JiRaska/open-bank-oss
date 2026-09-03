@@ -6,7 +6,6 @@ openbank-account-service/src/main/kotlin/com/openbank/account/infrastructure/per
 openbank-account-service/src/main/kotlin/com/openbank/account/infrastructure/persistence/entity/AccountEntities.kt::var createdAt: Instant = Instant.EPOCH#3
 openbank-account-service/src/main/kotlin/com/openbank/account/infrastructure/persistence/entity/AccountEntities.kt::var updatedAt: Instant = Instant.EPOCH#1
 openbank-account-service/src/main/kotlin/com/openbank/account/infrastructure/persistence/entity/AccountEntities.kt::var updatedAt: Instant = Instant.EPOCH#2
-openbank-aml-service/src/main/kotlin/com/openbank/aml/domain/event/AmlCaseEvents.kt::fun AmlCase.toCreatedEvent(now: Instant = Instant.EPOCH) = AmlCaseCreatedEvent(#1
 openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/Card.kt::fun activate(now: Instant = Instant.EPOCH) = also {#1
 openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/Card.kt::fun block(reason: String, now: Instant = Instant.EPOCH) = also {#1
 openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/Card.kt::fun cancel(reason: String?, now: Instant = Instant.EPOCH) = also {#1
