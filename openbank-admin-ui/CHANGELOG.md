@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.237.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.237.1...admin-ui-v0.237.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **admin-ui:** make compliance pack details accessible ([#8253](https://github.com/JiRaska/open-bank-oss/issues/8253)) ([27478f6](https://github.com/JiRaska/open-bank-oss/commit/27478f68c133b9b0c9b5e3acef58935b8d14f138))
+
 ## [0.237.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.237.0...admin-ui-v0.237.1) (2026-09-02)
 
 
