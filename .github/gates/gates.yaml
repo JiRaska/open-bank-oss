@@ -457,6 +457,7 @@ gates:
   - id: agent-virtual-keys
     name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
     group: gitops
+    min_subjects: 300   # 610 gitops component manifests observed 2026-09-03
     mode: enforced
     selftest: python3 .github/scripts/check-agent-virtual-keys.py --self-test
     selftest_expect: pass
@@ -972,6 +973,7 @@ gates:
   - id: gitops-ref-integrity-guard
     name: "gitops ref-integrity guard (referenced Secret/ConfigMap => declared)"
     group: gitops
+    min_subjects: 400   # 705 gitops manifests observed; 95 with components/ removed
     mode: enforced
     budget_seconds: 30   # 7.3s in CI
     selftest: python3 .github/scripts/check-gitops-secret-refs.py --self-test
@@ -1895,6 +1897,7 @@ gates:
   - id: ai-act-high-risk-inventory-vs-code
     name: "EU AI Act Annex III inventory vs. code (ADR-0142/0216, enforced)"
     group: registry
+    min_subjects: 35   # 66 modules with a Kotlin source root observed
     mode: enforced
     selftest: python3 .github/scripts/check-ai-act-high-risk-inventory.py --self-test
     selftest_expect: pass
@@ -2291,6 +2294,7 @@ gates:
   - id: compliance-matrix
     name: "compliance-page evidence citations (#2370, enforced)"
     group: registry
+    min_subjects: 1000   # 2177 Kotlin sources observed
     mode: enforced
     selftest_inputs: [".github/scripts/check-compliance-matrix.py"]
     selftest: |

@@ -55,6 +55,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 INVENTORY = REPO / "openbank-libs" / "governance" / "ml-systems.yaml"
 
@@ -274,6 +276,14 @@ def main() -> int:
                 "a deployed plane. An AI system absent from the Annex IV inventory is undeclared, "
                 "which is the inventory obligation failing rather than a naming problem.",
             )
+
+    # The module corpus the inference scan walks. Measured 2026-09-03: renaming a service away
+    # left this gate green, and a glob that stops matching reads exactly like a fleet with no
+    # undeclared inference. The floor is a COLLAPSE detector — it catches a broken glob or a
+    # moved source root, not the loss of a single module.
+    gatelib.subjects(sum(1 for d in REPO.glob("openbank-*")
+                         if (d / "src" / "main" / "kotlin").is_dir()),
+                     "modules with a Kotlin source root, scanned for inference")
 
     if failures:
         return 1
