@@ -4689,11 +4689,12 @@ gates:
     run: |
       python3 .github/scripts/check-no-epoch-instant-default.py --root .
 
-  # temporal-worker-switch-naming: six Temporal-worker services, six disable switches, five
-  # under `openbank.<service>.worker.enabled` and lending's under `lending.origination…` — an
-  # underivable name is why the fuzz harness needs a hard-coded name list, and a drifted list is
-  # how a fuzz job reports a failure that never sent a request (2026-08-18 run). Convention and
-  # the one allowlisted exception live in rules.yaml: temporal_worker_switch_naming.
+  # temporal-worker-switch-naming: six Temporal-worker services once carried six invented names
+  # for the same switch — an underivable name is why the fuzz harness needed a hard-coded list,
+  # and a drifted list is how a fuzz job reports a failure that never sent a request
+  # (2026-08-18 run). The one pre-convention name (lending.origination.worker.enabled) was
+  # renamed in the same follow-up; the convention and the (now empty) allowlist live in
+  # rules.yaml: temporal_worker_switch_naming.
   - id: temporal-worker-switch-naming
     name: "Temporal worker disable switches follow openbank.<service>.worker.enabled (enforced)"
     group: kotlin

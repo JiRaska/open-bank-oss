@@ -44,11 +44,13 @@
 # retried past the boot deadline. Four money-path services were once reported as fuzz failures for
 # an absent dependency, which is not a finding about their HTTP surface, and it drowned the one
 # real finding in the same run (consent-service, #5711). Every registrar already has the switch
-# (because @QuarkusTest needs it too); what they do not share is a name for it —
-# openbank.transaction.worker.enabled, openbank.domestic.worker.enabled,
-# openbank.sepa.worker.enabled, openbank.campaign.worker.enabled,
-# openbank.settlement.worker.enabled, and lending's `lending.origination.worker.enabled` (not even
-# under `openbank.`).
+# (because @QuarkusTest needs it too). Since the `temporal-worker-switch-naming` gate the names
+# also follow one convention — `openbank.<service>.worker.enabled` — so this derivation is now
+# uniform rather than a per-service list: openbank.transaction.worker.enabled,
+# openbank.domestic.worker.enabled, openbank.sepa.worker.enabled,
+# openbank.campaign.worker.enabled, openbank.settlement.worker.enabled,
+# openbank.lending.worker.enabled (lending renamed from `lending.origination.worker.enabled`,
+# the one pre-convention name).
 #
 # ── Two passes, both must pass ─────────────────────────────────────────────────────────────────
 # Pass 1 (auth ON) is what this lane has always done: every endpoint behind @RolesAllowed must
