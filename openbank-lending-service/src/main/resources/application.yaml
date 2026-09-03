@@ -163,7 +163,7 @@ openbank:
     # LendingAdapterBindingVerifier refuses to boot if the two ever disagree again.
     #
     # Note this gates only the CLIENT half. OriginationTimersWorkerRegistrar is not build-time
-    # gated (it is switched by lending.origination.worker.enabled), so the deployed pod has been
+    # gated (it is switched by openbank.lending.worker.enabled), so the deployed pod has been
     # polling the task queue all along with nothing ever starting a workflow on it.
     enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
     server-url: ${TEMPORAL_FRONTEND_URL:temporal-frontend.temporal.svc.cluster.local:7233}

@@ -154,7 +154,8 @@
     environment.** The bound no-op logged at `debug` and returned `Uni<Unit>`, the Temporal
     adapter's exact success value, so nothing disagreed. Two details make this a distinct entry
     rather than a footnote to the above. First, the *worker* half is not build-time gated
-    (`lending.origination.worker.enabled`), so the deployed pod registered the timers worker and
+    (switched by `openbank.lending.worker.enabled`; named `lending.origination.worker.enabled`
+    at the time of the incident), so the deployed pod registered the timers worker and
     polled the task queue normally the whole time — every observable that a reviewer would reach
     for (worker started, queue exists, pollers healthy, no errors) was green, and the client that
     starts a workflow was simply not in the image. Second, the no-op here reports a distinct

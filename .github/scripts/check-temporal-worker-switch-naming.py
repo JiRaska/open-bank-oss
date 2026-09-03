@@ -6,10 +6,11 @@ carries a disable switch so `@QuarkusTest` runs (and the API-fuzz harness) can b
 with no Temporal present. But the property name was invented per service:
 `openbank.transaction.worker.enabled`, `openbank.sepa.worker.enabled`, `openbank.campaign…`,
 `openbank.domestic…`, `openbank.settlement…` — and lending's `lending.origination.worker.enabled`,
-not even under `openbank.`. The fuzz harness therefore cannot derive the switch from the service
-name and must hard-code a per-service name list; a name list drifts, and a drifted list means the
-service under test never booted and its fuzz job reported a failure that was never a finding
-(2026-08-18 run: 6 of 7 "failures" never sent a request).
+not even under `openbank.` (since renamed; see below). The fuzz harness therefore could not
+derive the switch from the service name and had to hard-code a per-service name list; a name
+list drifts, and a drifted list means the service under test never booted and its fuzz job
+reported a failure that was never a finding (2026-08-18 run: 6 of 7 "failures" never sent a
+request).
 
 One convention — `openbank.<service>.worker.enabled` — makes the switch derivable from the
 artifact name everywhere it is needed: the fuzz harness, local dev, the DR manifest, runbooks.
@@ -20,10 +21,11 @@ A genuine exception lives in `rules.yaml: temporal_worker_switch_naming.allowlis
 one-line reason; the allowlist fails on a stale entry in either direction, so an exception
 cannot quietly outlive its reason (same idiom as scheduled_methods.runblocking_allowlist).
 
-The one known exception at introduction (2026-09-03) is lending's
-`lending.origination.worker.enabled`, allowlisted with its rename tracked as an issue: renaming
-a live config property is a coordinated change across registrar, application.yaml, tests and
-deployment config, not a drive-by in a gate PR.
+The fleet's one pre-convention name — lending's `lending.origination.worker.enabled` — was
+renamed to `openbank.lending.worker.enabled` in the same follow-up that introduced this guard;
+the allowlist (`rules.yaml: temporal_worker_switch_naming.allowlist`) stays armed, and fails on
+a stale entry in either direction, so the next exception must be named and justified rather than
+absorbed.
 
 ENFORCED: findings are ::error:: annotations and exit 1.
 
