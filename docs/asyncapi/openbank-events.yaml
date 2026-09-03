@@ -1693,6 +1693,12 @@ components:
           type: string
           format: uuid
           description: Optional producer-owned delivery-outcome correlation id.
+        deduplicationKey:
+          type: string
+          format: uuid
+          description: >-
+            Optional producer-owned durable business-fact key. Repeated requests with the same
+            key produce no second notification row or delivery attempt.
         deepLink:
           type: string
           enum: [openbank://home, openbank://savings, openbank://cards, openbank://payments, openbank://products]

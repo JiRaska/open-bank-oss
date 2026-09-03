@@ -180,6 +180,27 @@ class NotificationConsumerIT {
         assertThat(notificationIdFor(partyId)?.version()).isEqualTo(7)
     }
 
+    @Test
+    fun `same durable first-use fact is persisted only once across redelivery`() {
+        val partyId = UUID.randomUUID()
+        val grantId = UUID.randomUUID()
+        val request = NotificationRequest(
+            partyId = partyId,
+            channel = NotificationChannel.PUSH,
+            template = NotificationTemplate.DELEGATION_FIRST_USE,
+            recipient = partyId.toString(),
+            variables = emptyMap(),
+            correlationId = grantId,
+            deduplicationKey = grantId,
+        )
+
+        consumeAndAwait(request)
+        consumeAndAwait(request)
+
+        assertThat(countFor(partyId)).isEqualTo(1L)
+        assertThat(correlationIdFor(partyId)).isEqualTo(grantId)
+    }
+
     /**
      * The redaction must bite at the storage boundary and nowhere earlier: the customer still
      * receives the real OTP, the database never holds it. Asserting both halves in one test is

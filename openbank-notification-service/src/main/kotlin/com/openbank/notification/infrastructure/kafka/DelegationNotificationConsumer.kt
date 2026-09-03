@@ -108,6 +108,10 @@ class DelegationNotificationConsumer @Inject constructor(
             log.debugf("delegation event %s not in notification scope, skipping", eventType.ifBlank { "?" })
             return emptyList()
         }
+        if (eventType == SPEND_CONFIRMED && node.path("sourceService").asText() != DELEGATION_SOURCE_SERVICE) {
+            log.warnf("Dropping SpendConfirmed event with an unexpected source service")
+            return emptyList()
+        }
         val grantId = node.path("aggregateId").asText(null)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         val grantor = node.path("grantorPartyId").asText(null)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         val grantee = node.path("granteePartyId").asText(null)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
@@ -119,7 +123,6 @@ class DelegationNotificationConsumer @Inject constructor(
             )
             return emptyList()
         }
-        val resourceType = node.path("resourceType").asText("")
         val targets = TARGETS_BY_EVENT_TYPE.getValue(eventType)(grantor, grantee)
         return targets.map { partyId ->
             NotificationRequest(
@@ -127,11 +130,16 @@ class DelegationNotificationConsumer @Inject constructor(
                 channel = NotificationChannel.PUSH,
                 template = template,
                 recipient = partyId.toString(),
-                variables = mapOf("resourceType" to resourceType),
+                variables = if (template == NotificationTemplate.DELEGATION_FIRST_USE) {
+                    emptyMap()
+                } else {
+                    mapOf("resourceType" to node.path("resourceType").asText(""))
+                },
                 // The grant id, not a freshly minted one: it is the stable identifier a producer
                 // owns for this business event (ADR-0239 D1), letting a later outcome event be
                 // joined back to the delegation grant that caused it.
                 correlationId = grantId,
+                deduplicationKey = if (template == NotificationTemplate.DELEGATION_FIRST_USE) grantId else null,
             )
         }
     }
@@ -139,6 +147,8 @@ class DelegationNotificationConsumer @Inject constructor(
     private companion object {
         /** Cap on the producer-supplied payload echoed into a poison-pill warning (untrusted input). */
         const val MAX_LOGGED_PAYLOAD_CHARS = 300
+        const val SPEND_CONFIRMED = "SpendConfirmed"
+        const val DELEGATION_SOURCE_SERVICE = "delegation-service"
 
         val TEMPLATE_BY_EVENT_TYPE: Map<String, NotificationTemplate> = mapOf(
             "DelegationOffered" to NotificationTemplate.DELEGATION_OFFERED,
@@ -146,6 +156,7 @@ class DelegationNotificationConsumer @Inject constructor(
             "DelegationDeclined" to NotificationTemplate.DELEGATION_DECLINED,
             "DelegationRevoked" to NotificationTemplate.DELEGATION_REVOKED,
             "DelegationExpired" to NotificationTemplate.DELEGATION_EXPIRED,
+            SPEND_CONFIRMED to NotificationTemplate.DELEGATION_FIRST_USE,
         )
 
         /** Recipient party id(s) per event type, given (grantor, grantee) — see class KDoc. */
@@ -155,6 +166,7 @@ class DelegationNotificationConsumer @Inject constructor(
             "DelegationDeclined" to { grantor, _ -> listOf(grantor) },
             "DelegationRevoked" to { _, grantee -> listOf(grantee) },
             "DelegationExpired" to { grantor, grantee -> listOf(grantor, grantee) },
+            SPEND_CONFIRMED to { grantor, _ -> listOf(grantor) },
         )
     }
 }

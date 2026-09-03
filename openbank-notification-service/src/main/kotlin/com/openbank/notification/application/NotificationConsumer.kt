@@ -58,6 +58,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
+import org.postgresql.util.PSQLException
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -72,6 +73,9 @@ class NotificationConsumer @Inject constructor(
 ) {
 
     companion object {
+        /** Name of V14's partial unique index, retained as a stable duplicate discriminator. */
+        const val NOTIFICATION_DEDUPLICATION_CONSTRAINT = "uq_notifications_deduplication_key"
+
         /**
          * Generic, PII-free push body (ADR-0135 §3, issue #1182). Lock-screen-visible push
          * payloads must never carry the transaction amount, account number, or any PII — the
@@ -317,11 +321,13 @@ class NotificationConsumer @Inject constructor(
             // rendered secret to the delivery adapters, so the customer receives it as usual.
             it.body = TemplateSensitivity.bodyForStorage(req.template, body)
             it.correlationId = req.correlationId
+            it.deduplicationKey = req.deduplicationKey
             it.status = "PENDING"
             it.createdAt = Instant.now(clock)
         }
-        return Panache.withTransaction { notificationRepo.persist(entity) }
-            .chain { _ ->
+        return persistOnce(entity, req.deduplicationKey)
+            .chain { persisted ->
+                if (!persisted) return@chain Uni.createFrom().voidItem()
                 // Consent gate BEFORE the channel dispatch (ADR-0198 D4, issue #2369). Deliberately
                 // NOT a per-channel check: the defect the issue names is precisely that gating lived
                 // inside the channel branches, so PUSH got a (default-true) check and EMAIL got none,
@@ -342,6 +348,28 @@ class NotificationConsumer @Inject constructor(
             // this can neither leak customer data nor break notification dispatch.
             .call { _ -> publishOversight(req) }
     }
+
+    /**
+     * A security event may be redelivered indefinitely. A database uniqueness fact, rather than
+     * Kafka offset timing, is the authority that says its customer notification already exists.
+     */
+    private fun persistOnce(entity: NotificationEntity, deduplicationKey: UUID?): Uni<Boolean> =
+        Panache.withTransaction { notificationRepo.persist(entity) }
+            .replaceWith(true)
+            .onFailure()
+            .recoverWithUni { failure ->
+                if (deduplicationKey != null && failure.isDeduplicationConflict()) {
+                    log.debugf("Skipping duplicate notification fact %s", deduplicationKey)
+                    Uni.createFrom().item(false)
+                } else {
+                    Uni.createFrom().failure(failure)
+                }
+            }
+
+    private fun Throwable.isDeduplicationConflict(): Boolean =
+        generateSequence(this) { it.cause }
+            .filterIsInstance<PSQLException>()
+            .any { it.serverErrorMessage?.constraint == NOTIFICATION_DEDUPLICATION_CONSTRAINT }
 
     private fun publishOversight(req: NotificationRequest): Uni<Void> {
         if (!OversightWebhook.isOversight(req.template)) return Uni.createFrom().voidItem()
@@ -1011,6 +1039,10 @@ class NotificationConsumer @Inject constructor(
                 "A delegated access grant has expired" to
                     "<h2>Grant Expired</h2><p>A delegated access grant for a <b>${vars.v("resourceType")}</b> " +
                     "has reached the end of its validity period and is no longer active.</p>"
+            NotificationTemplate.DELEGATION_FIRST_USE ->
+                "Delegated access was used for a payment" to
+                    "<h2>Delegated Access Used</h2><p>A person you authorised used delegated access " +
+                    "for a confirmed payment. Open the OpenBank app to review your delegated access.</p>"
         }
 }
 

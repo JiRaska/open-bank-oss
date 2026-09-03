@@ -78,6 +78,9 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** A grant's validity window ended on its own; sent to both parties (DelegationExpired). */
     DELEGATION_EXPIRED(setOf("resourceType")),
+
+    /** The grantor's delegated authority was used for a confirmed payment for the first time. */
+    DELEGATION_FIRST_USE(emptySet()),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -94,7 +97,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             KYC_APPROVED, KYC_REJECTED, KYC_DOCUMENT_REQUIRED,
             CONSENT_GRANTED, CONSENT_REVOKED,
             DELEGATION_OFFERED, DELEGATION_ACCEPTED, DELEGATION_DECLINED,
-            DELEGATION_REVOKED, DELEGATION_EXPIRED,
+            DELEGATION_REVOKED, DELEGATION_EXPIRED, DELEGATION_FIRST_USE,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
@@ -136,6 +139,11 @@ data class NotificationRequest(
      * meaningless to the producer, which is the only party that can join it back to its own row.
      */
     val correlationId: UUID? = null,
+    /**
+     * Optional durable idempotency key for a producer-owned business fact. Unlike
+     * [correlationId], a duplicate key deliberately produces no second notification row or send.
+     */
+    val deduplicationKey: UUID? = null,
     /** Optional bank-owned app route for a PUSH tap; never a template variable. */
     val deepLink: String? = null,
     /**
