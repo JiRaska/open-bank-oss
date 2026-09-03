@@ -130,3 +130,17 @@ is the **authentication assurance gate** for payments and consent — defeating 
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+
+- **2026-09-03** — `initiate` refuses `ScaMethod.TOTP` instead of minting a challenge nobody could
+  ever satisfy (#8432). `preferredMethod` on `POST /api/v1/sca/challenges` comes straight off the
+  request body, and TOTP had no delivery transport at all: a challenge was generated, stored, and
+  the code sent nowhere, so whatever it was meant to authorise — a payment, a consent, a card
+  action — could never proceed. `ScaResource` gained one new response class, no new endpoint: a
+  `ScaMethodNotDeliverableMapper` maps the new `ScaMethodNotDeliverableException` to 422, same
+  status family as an already-documented "valid request, cannot proceed" answer (expired
+  challenge). Risk class = **denial of authorisation**, not an authentication bypass —
+  `ScaChallenge.fail` still caps attempts on any challenge that *is* minted, so an undelivered code
+  was never brute-forceable within its life; the defect was availability of the authorisation
+  path, not its integrity. No new trust boundary: the check runs before a challenge exists, on the
+  same authenticated `initiate` call, against a caller-supplied enum the service already validated.
+  Rollback: revert the commit; TOTP goes back to silently minting a dead challenge.
