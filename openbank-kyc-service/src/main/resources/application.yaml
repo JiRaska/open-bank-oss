@@ -146,6 +146,21 @@ mp:
         client.id: kyc-outbox-service-${quarkus.uuid}
         topic: openbank.kyc.events
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Customer-facing KYC outcome notifications (#8432), drained by notification-service off
+      # openbank.notification.requests — the same envelope account-service, campaign-service and
+      # sca-service publish. NOT the outbox above: that channel is single-destination and
+      # OutboxMessage carries no topic, so a notification request cannot ride it without teaching
+      # the shared outbox contract about destinations.
+      #
+      # That topic IS ACL-locked, so this needs an explicit Write grant on the kyc-service
+      # KafkaUser (added in openbank-infra/gitops/components/kyc/kafka-kyc-mtls.yaml). Without it
+      # every emit fails at runtime with TOPIC_AUTHORIZATION_FAILED and no test can see it.
+      notification-requests-out:
+        connector: smallrye-kafka
+        client.id: kyc-service-notif-${quarkus.uuid}
+        topic: openbank.notification.requests
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
 "%dev":
   quarkus:
     log:

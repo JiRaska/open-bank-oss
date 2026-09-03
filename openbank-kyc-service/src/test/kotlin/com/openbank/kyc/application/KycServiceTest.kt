@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.\n// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.\n
 package com.openbank.kyc.application
 
+import com.openbank.kyc.application.port.out.CustomerNotificationPort
 import com.openbank.kyc.application.port.out.KycCaseRepository
 import com.openbank.kyc.application.port.out.PepScreeningStatus
 import com.openbank.kyc.domain.model.CheckStatus
@@ -28,6 +29,7 @@ import java.util.UUID
 class KycServiceTest {
 
     private val repo = mockk<KycCaseRepository>()
+    private val notifications = mockk<CustomerNotificationPort>(relaxed = true)
     private val metrics = mockk<DomainMetrics>(relaxed = true)
     private val clock: Clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
 
@@ -39,6 +41,7 @@ class KycServiceTest {
             it.repo = repo
             it.metrics = metrics
             it.clock = clock
+            it.customerNotifications = notifications
         }
     }
 
@@ -636,4 +639,84 @@ class KycServiceTest {
         performedAt = null,
         createdAt = Instant.now(clock),
     )
+
+    // ── customer outcome notifications (#8432) ───────────────────────────────
+
+    /**
+     * The hole this closes: `KYC_APPROVED` and `KYC_REJECTED` have been declared, rendered and
+     * SECURITY-classified in notification-service since it was written, with **no producer
+     * anywhere in the fleet**. A customer was never told how their own verification ended.
+     */
+    @Test
+    fun `approveCase tells the customer their verification passed`(): Unit = runBlocking {
+        val caseId = UUID.randomUUID()
+        val existing = kycCase(id = caseId, checks = emptyList()).copy(status = KycCaseStatus.UNDER_REVIEW)
+        coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+
+        service.approveCase(caseId, "operator-kyc-1", "All documents verified, identity confirmed")
+
+        coVerify(exactly = 1) { notifications.notifyKycApproved(existing.partyId) }
+        coVerify(exactly = 0) { notifications.notifyKycRejected(any(), any()) }
+    }
+
+    /**
+     * The rejection carries the operator's audit-trail reason, because the template renders it to
+     * the customer — "we could not verify your identity" with no reason is a dead end for someone
+     * who now has to work out what to fix.
+     */
+    @Test
+    fun `rejectCase tells the customer, and passes the reason the template renders`(): Unit = runBlocking {
+        val caseId = UUID.randomUUID()
+        val existing = kycCase(id = caseId, checks = emptyList()).copy(status = KycCaseStatus.UNDER_REVIEW)
+        coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+
+        service.rejectCase(caseId, "operator-kyc-1", "Identity document expired")
+
+        coVerify(exactly = 1) { notifications.notifyKycRejected(existing.partyId, "Identity document expired") }
+        coVerify(exactly = 0) { notifications.notifyKycApproved(any()) }
+    }
+
+    /**
+     * **The load-bearing one.** The verdict is a compliance decision with a four-eyes audit trail
+     * behind it; a broker hiccup must not roll it back, nor turn a completed review into a 500 the
+     * operator will retry into a duplicate. So a failing notification is swallowed and the verdict
+     * still stands — the honest direction to fail, and the reason #8432 calls this path
+     * best-effort rather than durable.
+     */
+    @Test
+    fun `a failing notification does not undo the verdict`(): Unit = runBlocking {
+        val caseId = UUID.randomUUID()
+        val existing = kycCase(id = caseId, checks = emptyList()).copy(status = KycCaseStatus.UNDER_REVIEW)
+        coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+        coEvery { notifications.notifyKycApproved(any()) } throws RuntimeException("broker unreachable")
+
+        val result = service.approveCase(caseId, "operator-kyc-1", "All documents verified, identity confirmed")
+
+        assertThat(result.status).isEqualTo(KycCaseStatus.APPROVED)
+        // And the verdict was still persisted — not merely returned from memory.
+        coVerify(exactly = 1) {
+            repo.update(match<KycCase> { it.status == KycCaseStatus.APPROVED }, any())
+        }
+    }
+
+    /**
+     * The control that stops the notification becoming a side effect of merely *asking*. A case
+     * that is not UNDER_REVIEW cannot be approved, and nobody should be told it was.
+     */
+    @Test
+    fun `a refused transition notifies nobody`(): Unit = runBlocking {
+        val caseId = UUID.randomUUID()
+        val existing = kycCase(id = caseId, checks = emptyList()).copy(status = KycCaseStatus.APPROVED)
+        coEvery { repo.findById(caseId) } returns existing
+
+        assertThatThrownBy {
+            runBlocking { service.approveCase(caseId, "operator-kyc-1", "Trying to approve twice") }
+        }.isInstanceOf(InvalidStateTransitionException::class.java)
+
+        coVerify(exactly = 0) { notifications.notifyKycApproved(any()) }
+        coVerify(exactly = 0) { notifications.notifyKycRejected(any(), any()) }
+    }
 }

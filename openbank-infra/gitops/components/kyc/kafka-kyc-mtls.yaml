@@ -1,8 +1,10 @@
 # Kafka mTLS identity + ACLs for openbank-kyc-service (ADR-0137 #2665 Tier 2c).
 #
 # KYC consumes PARTY_CREATED events from openbank.party.events (group:
-# kyc-service-party) to auto-open KYC cases (ADR-0068), and publishes KYC
-# lifecycle events to openbank.kyc.events (consumed by onboarding-service).
+# kyc-service-party) to auto-open KYC cases (ADR-0068), publishes KYC
+# lifecycle events to openbank.kyc.events (consumed by onboarding-service),
+# and emits customer-facing verdict notifications onto
+# openbank.notification.requests (#8432).
 #
 # Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one
 # principal for all of this service's Kafka traffic. ACLs are only needed for
@@ -57,6 +59,18 @@ spec:
       - resource:
           type: topic
           name: openbank.dlq.kyc.party-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #8432: kyc-service emits KYC_APPROVED / KYC_REJECTED customer notifications onto
+      # openbank.notification.requests (notification-requests-out channel). That topic IS
+      # ACL-locked — account-service, campaign-service and sca-service all carry explicit grants
+      # and notification-service reads it — so `allow.everyone.if.no.acl.found` does NOT apply.
+      # Without this grant every emit fails with TOPIC_AUTHORIZATION_FAILED at runtime, which no
+      # unit test can see; it is the same trap that bit the decoupled-SCA push in #2038.
+      - resource:
+          type: topic
+          name: openbank.notification.requests
           patternType: literal
         operations: [Write, Describe]
         host: "*"

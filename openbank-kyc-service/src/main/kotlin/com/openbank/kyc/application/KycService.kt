@@ -4,6 +4,7 @@
 
 package com.openbank.kyc.application
 
+import com.openbank.kyc.application.port.out.CustomerNotificationPort
 import com.openbank.kyc.application.port.out.KycCaseRepository
 import com.openbank.kyc.application.port.out.PepScreeningStatus
 import com.openbank.kyc.domain.model.CheckStatus
@@ -16,6 +17,7 @@ import com.openbank.kyc.domain.model.RiskLevel
 import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -70,6 +72,8 @@ class KycService {
     companion object {
         /** Minimum reason length enforced by the ČNB four-eyes audit trail mandate (AML Act §8). */
         const val MIN_REASON_LENGTH = 10
+
+        private val LOG: Logger = Logger.getLogger(KycService::class.java)
     }
 
     @Inject lateinit var repo: KycCaseRepository
@@ -77,6 +81,12 @@ class KycService {
     @Inject lateinit var metrics: DomainMetrics
 
     @Inject lateinit var clock: Clock
+
+    /**
+     * Telling the customer how their verification ended (#8432). Best-effort by construction —
+     * see [notifyOutcome] for why a failure here must not undo the verdict.
+     */
+    @Inject lateinit var customerNotifications: CustomerNotificationPort
 
     // A KYC case carries no subject-type dimension yet (no partyType/entityType on KycCase —
     // it only references a partyId). Emit the metric with a single stable, bounded `type` tag so
@@ -366,6 +376,7 @@ class KycService {
         )
         val saved = repo.update(updated, KycEvents.caseApproved(updated, Instant.now(clock)))
         metrics.kycVerdict(caseType, "approved")
+        notifyOutcome("approved") { customerNotifications.notifyKycApproved(saved.partyId) }
         return saved
     }
 
@@ -399,7 +410,31 @@ class KycService {
         )
         val saved = repo.update(updated, KycEvents.caseRejected(updated, Instant.now(clock)))
         metrics.kycVerdict(caseType, "rejected")
+        notifyOutcome("rejected") { customerNotifications.notifyKycRejected(saved.partyId, reason) }
         return saved
+    }
+
+    /**
+     * Emit the customer-facing outcome notification, after the verdict is persisted and never
+     * instead of it.
+     *
+     * **The failure is swallowed on purpose.** The verdict is a compliance decision with a
+     * four-eyes audit trail behind it; a broker hiccup must not roll it back or turn a completed
+     * review into an HTTP 500 the operator will retry. So the customer may, rarely, not be told
+     * about a decision that did happen — the honest direction to fail, and the reason #8432 calls
+     * this path best-effort rather than durable.
+     *
+     * It is logged at WARN rather than silently dropped: "the customer was not told" is an
+     * operational fact someone can act on, and an empty catch would make it unobservable.
+     */
+    private suspend fun notifyOutcome(verdict: String, emit: suspend () -> Unit) {
+        runCatching { emit() }.onFailure { failure ->
+            LOG.warnf(
+                failure,
+                "KYC %s recorded but the customer notification could not be published (#8432)",
+                verdict,
+            )
+        }
     }
 
     /**
