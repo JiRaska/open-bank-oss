@@ -4459,7 +4459,14 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-ruleset-context-parity.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-ruleset-context-parity.py"]
+    # The vocabulary and its sibling reader are inputs too: `is_transient` no longer holds its
+    # own pattern list — it shares `gh-transient-patterns.txt` with `gh-retry.sh`, and this
+    # gate's self-test asserts BOTH readers agree over that file's [cases] corpus. Without
+    # these two paths an edit to either would leave the agreement unfalsified.
+    selftest_inputs:
+      - ".github/scripts/check-ruleset-context-parity.py"
+      - ".github/scripts/gh-transient-patterns.txt"
+      - ".github/scripts/gh-retry.sh"
     # 5 required contexts today (2026-08-21). Not applied to a run that could not READ the
     # ruleset: the gate prints `SUBJECTS=UNRESOLVED` there and run-gates.py skips the floor,
     # because 0 contexts from a rate-limited API means "not measured", not "corpus collapsed".

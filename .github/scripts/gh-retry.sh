@@ -38,12 +38,42 @@
 GH_RETRY_MAX_WAIT_SECONDS="${GH_RETRY_MAX_WAIT_SECONDS:-900}"  # never sleep past 15 min
 GH_RETRY_DEAD_LETTER="${GH_RETRY_DEAD_LETTER:-0}"
 
-# _gh_retry_classify <stderr-file> -> echoes one of: rate_limit | transient | final
+# The shared vocabulary, read by this library AND by
+# .github/scripts/check-ruleset-context-parity.py. Two hand-maintained copies of one question
+# is what this file's own header calls the defect; the measured drift (8 disagreements in 31
+# messages, five missed transients each, in three DIFFERENT sets) is recorded there.
+# ${BASH_SOURCE[0]} and not $0: this file is SOURCED, so $0 is the caller's path.
+GH_RETRY_PATTERNS_FILE="${GH_RETRY_PATTERNS_FILE:-$(dirname "${BASH_SOURCE[0]}")/gh-transient-patterns.txt}"
+
+# _gh_retry_patterns <section> -> the section's patterns as one ERE alternation, empty if the
+# file or the section cannot be read. The caller MUST treat empty as an error and never as
+# "no patterns matched" — see _gh_retry_classify.
+_gh_retry_patterns() {
+  local section="$1"
+  [[ -r "$GH_RETRY_PATTERNS_FILE" ]] || return 1
+  awk -v s="[$section]" '
+    $0 == s { inside = 1; next }
+    /^\[/   { inside = 0 }
+    inside && $0 !~ /^#/ && NF { print }
+  ' "$GH_RETRY_PATTERNS_FILE" | paste -sd'|' -
+}
+
+# _gh_retry_classify <stderr-file> -> rate_limit | transient | final | unloadable
+#
+# `unloadable` is a FOURTH state and not a synonym for `final`. An unreadable vocabulary makes
+# every message match nothing, so folding it into `final` would turn a missing file into
+# "nothing is ever transient" — a control silently doing nothing while reporting a normal
+# answer, the exact shape this repo keeps paying for (the APNs adapter whose skipped() carried
+# success = true; the CNPG archiver that reports success with no bucket). It is loud instead.
 _gh_retry_classify() {
-  local err="$1"
-  if grep -qiE 'rate.?limit|HTTP 403.*(rate|limit)|secondary rate' "$err"; then
+  local err="$1" rl_pat tr_pat
+  rl_pat=$(_gh_retry_patterns rate_limit) || rl_pat=""
+  tr_pat=$(_gh_retry_patterns transient) || tr_pat=""
+  if [[ -z "$rl_pat" || -z "$tr_pat" ]]; then
+    echo unloadable
+  elif grep -qiE "$rl_pat" "$err"; then
     echo rate_limit
-  elif grep -qiE 'HTTP 5[0-9][0-9]|connection (reset|refused|timed? ?out)|error connecting|EOF|TLS handshake|timeout' "$err"; then
+  elif grep -qiE "$tr_pat" "$err"; then
     echo transient
   else
     echo final
@@ -100,6 +130,17 @@ gh_retry() {
       rc=$?
     fi
     class=$(_gh_retry_classify "$err")
+    if [[ "$class" == "unloadable" ]]; then
+      cat "$err" >&2 || true
+      echo "::error::gh_retry: cannot read the transient-pattern vocabulary at" \
+           "'$GH_RETRY_PATTERNS_FILE'. Refusing to classify: with no patterns loaded EVERY" \
+           "failure would look final, so a deleted file would silently disable every retry" \
+           "in the fleet while each call still returned a plausible answer. Restore the file" \
+           "or point GH_RETRY_PATTERNS_FILE at it. (rc 2 = library misconfiguration, which is" \
+           "deliberately NOT the wrapped command's status.)" >&2
+      rm -f "$err"
+      return 2
+    fi
     if [[ "$class" == "final" || $attempt -eq $max ]]; then
       cat "$err" >&2 || true
       if [[ "$class" != "final" ]]; then
@@ -160,6 +201,82 @@ if [[ "${1:-}" == "--self-test" ]]; then
     || { [[ $(cat "$tmp/state") == "2" ]] \
          && echo "self-test ok: exhaustion fails after max attempts" \
          || { echo "SELF-TEST FAIL: exhaustion attempt count"; fails=1; }; }
+
+  # ---- the shared vocabulary, driven over its own falsification corpus ---------------
+  # `_corpus_mismatches <patterns-file>` echoes how many [cases] rows the file misclassifies.
+  # Asserting 0 against the real file is only half a test — a corpus that cannot go non-zero
+  # proves nothing — so the SAME function is then run against a deliberately poisoned copy and
+  # required to be non-zero. That is the negative case: it shows the check can still reject.
+  _corpus_mismatches() {
+    local pf="$1" bad=0 want msg cls got
+    local errf; errf=$(mktemp)
+    while IFS=$'\t' read -r want msg; do
+      [[ -n "$want" ]] || continue
+      printf '%s\n' "$msg" > "$errf"
+      cls=$(GH_RETRY_PATTERNS_FILE="$pf" _gh_retry_classify "$errf")
+      [[ "$cls" == final ]] && got=FINAL || got=TRANSIENT
+      if [[ "$got" != "$want" ]]; then
+        bad=$(( bad + 1 ))
+        [[ "${CORPUS_VERBOSE:-0}" == 1 ]] && echo "  want=$want got=$got ($cls): $msg" >&2
+      fi
+    done < <(awk '/^\[cases\]/ { c = 1; next } /^\[/ { c = 0 } c && $0 !~ /^#/ && NF' "$pf")
+    rm -f "$errf"
+    echo "$bad"
+  }
+
+  real_patterns="$(dirname "${BASH_SOURCE[0]}")/gh-transient-patterns.txt"
+  n_cases=$(awk '/^\[cases\]/ { c = 1; next } /^\[/ { c = 0 } c && $0 !~ /^#/ && NF' "$real_patterns" | wc -l | tr -d ' ')
+  n_final=$(awk '/^\[cases\]/ { c = 1; next } /^\[/ { c = 0 } c && $0 !~ /^#/ && NF' "$real_patterns" | grep -c '^FINAL' || true)
+  # A floor on the corpus itself: the assertions ARE the subjects, so silently deleting the
+  # negatives must not read as a pass. 13 terminal messages today; never fewer than 10.
+  if (( n_cases >= 30 && n_final >= 10 )); then
+    echo "self-test ok: corpus has $n_cases cases, $n_final of them must-stay-FINAL"
+  else
+    echo "SELF-TEST FAIL: corpus shrank ($n_cases cases, $n_final FINAL) — negatives deleted?"; fails=1
+  fi
+
+  CORPUS_VERBOSE=1
+  if [[ "$(_corpus_mismatches "$real_patterns")" == 0 ]]; then
+    echo "self-test ok: every corpus case classifies as documented"
+  else
+    echo "SELF-TEST FAIL: shipped vocabulary misclassifies its own corpus"; fails=1
+  fi
+  CORPUS_VERBOSE=0
+
+  # NEGATIVE CASE 1 — an over-broad pattern must be REJECTED. `not found` in [transient] would
+  # retry a 404 forever, and for the Python reader would degrade a permission denial to a green
+  # UNRESOLVED. If this assertion ever passes with 0 mismatches, the corpus has stopped testing.
+  poisoned="$tmp/poisoned.txt"
+  sed 's/^\[transient\]$/[transient]\nnot found\nnot accessible/' "$real_patterns" > "$poisoned"
+  if [[ "$(_corpus_mismatches "$poisoned")" != 0 ]]; then
+    echo "self-test ok: an over-broad pattern is caught by the corpus (negative case)"
+  else
+    echo "SELF-TEST FAIL: poisoned vocabulary passed — the corpus proves nothing"; fails=1
+  fi
+
+  # NEGATIVE CASE 2 — a pattern DELETED must be caught too. Widening is not the only way to
+  # break this; a narrowed vocabulary silently stops retrying and looks like a clean run.
+  narrowed="$tmp/narrowed.txt"
+  grep -v '^rate.?limit$' "$real_patterns" > "$narrowed"
+  if [[ "$(_corpus_mismatches "$narrowed")" != 0 ]]; then
+    echo "self-test ok: a deleted pattern is caught by the corpus (negative case)"
+  else
+    echo "SELF-TEST FAIL: removing rate.?limit changed nothing — corpus is vacuous"; fails=1
+  fi
+
+  # NEGATIVE CASE 3 — an unreadable vocabulary must be LOUD and must not retry. The failure to
+  # prevent is the silent one: no patterns loaded means nothing ever matches, so a deleted file
+  # would read as "every failure is final" and disable the whole library with a normal-looking
+  # answer at every call site.
+  rm -f "$tmp/state"; STUB_FAILURES=9 STUB_ERROR="HTTP 503 Service Unavailable"
+  ul_err="$tmp/unloadable.err"
+  GH_RETRY_PATTERNS_FILE="$tmp/does-not-exist.txt" gh_retry 3 -- stub >/dev/null 2>"$ul_err"
+  ul_rc=$?
+  if [[ "$ul_rc" == 2 ]] && grep -q '::error::' "$ul_err" && [[ "$(cat "$tmp/state")" == 1 ]]; then
+    echo "self-test ok: an unreadable vocabulary is loud, rc 2, and retries nothing"
+  else
+    echo "SELF-TEST FAIL: unloadable vocabulary rc=$ul_rc attempts=$(cat "$tmp/state" 2>/dev/null) err=$(cat "$ul_err")"; fails=1
+  fi
 
   rm -rf "$tmp"
   [[ $fails == 0 ]] || exit 1
