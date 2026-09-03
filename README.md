@@ -8,6 +8,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/JiRaska/open-bank-oss/badge)](https://scorecard.dev/viewer/?uri=github.com/JiRaska/open-bank-oss)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13505/badge)](https://www.bestpractices.dev/projects/13505)
 [![codecov](https://codecov.io/gh/JiRaska/open-bank-oss/graph/badge.svg)](https://codecov.io/gh/JiRaska/open-bank-oss)
+[![Deploy drift](https://img.shields.io/github/issues-search/JiRaska/open-bank-oss?query=label%3Adeploy-drift%20state%3Aopen&label=deploy%20drift)](https://github.com/JiRaska/open-bank-oss/issues?q=label%3Adeploy-drift+state%3Aopen)
 [![Open in GitHub Codespaces](https://img.shields.io/badge/Codespaces-Open-181717?logo=github)](https://codespaces.new/JiRaska/open-bank-oss)
 [![Platform: Apache 2.0](https://img.shields.io/badge/Platform-Apache_2.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
 [![AI agents: AGPL-3.0 + commercial](https://img.shields.io/badge/AI_agents-AGPL--3.0--only_%2B_commercial-blue.svg)](docs/adr/0136-agent-services-agpl-in-repo-open-core.md)
