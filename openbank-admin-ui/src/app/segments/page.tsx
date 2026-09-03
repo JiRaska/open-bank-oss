@@ -4,15 +4,15 @@
 
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import Link from 'next/link'
+import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Clock3, Plus, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 
 // Read-only by design. ADR-0201 D1: a segment is a versioned artifact defined in code, reviewed and
 // released like anything else — "no free-form SQL from a UI". A marketer picks from this catalogue;
@@ -43,6 +43,10 @@ export default function SegmentsPage() {
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
   const [approvalIntent, setApprovalIntent] = useState<Segment | null>(null)
   const approvalTriggerRef = useRef<HTMLButtonElement | null>(null)
+  // Set only immediately before a successful approval removes the initiating trigger; left null
+  // (idle cancel/Escape) so the dialog's default close-focus falls back to the exact trigger.
+  const approvalCloseFocusOverrideRef = useRef<HTMLElement | null>(null)
+  const audienceWorkspaceRef = useRef<HTMLElement>(null)
   const lifecycleFlight = useSingleFlight()
 
   const loadAudiences = useCallback(async (keepExistingOnFailure = false) => {
@@ -107,8 +111,8 @@ export default function SegmentsPage() {
 
   const closeApprovalReview = () => {
     if (lifecycleFlight.busy) return
+    approvalCloseFocusOverrideRef.current = null
     setApprovalIntent(null)
-    requestAnimationFrame(() => approvalTriggerRef.current?.focus())
   }
 
   const key = (s: Segment) => `${s.name}@${s.version}`
@@ -188,7 +192,12 @@ export default function SegmentsPage() {
   }
 
   return <AuthGuard permission="campaign:view">
-    <div className="space-y-6">
+    <section
+      ref={audienceWorkspaceRef}
+      tabIndex={-1}
+      aria-label={t('Pracovní plocha publik', 'Audience workspace')}
+      className="space-y-6"
+    >
       <PageHeader
         title={t('Publika', 'Audiences')}
         subtitle={t(
@@ -257,7 +266,7 @@ export default function SegmentsPage() {
                     data-use-audience={key(s)}
                   >
                     {t('Použít v kampani', 'Use in campaign')} <ArrowRight className="h-3.5 w-3.5" />
-                  </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => void lifecycle(s, 'submit')} disabled={lifecycleFlight.busy} aria-busy={lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit'} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60">{lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit' ? t('Odesílám…', 'Submitting…') : t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={event => { approvalTriggerRef.current = event.currentTarget; setLifecycleError(null); setApprovalIntent(s) }} disabled={lifecycleFlight.busy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">{t('Zkontrolovat a schválit', 'Review and approve')}</button></Can>}
+                  </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => void lifecycle(s, 'submit')} disabled={lifecycleFlight.busy} aria-busy={lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit'} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60">{lifecycleAction?.key === key(s) && lifecycleAction.action === 'submit' ? t('Odesílám…', 'Submitting…') : t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={event => { approvalTriggerRef.current = event.currentTarget; approvalCloseFocusOverrideRef.current = null; setLifecycleError(null); setApprovalIntent(s) }} disabled={lifecycleFlight.busy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60">{t('Zkontrolovat a schválit', 'Review and approve')}</button></Can>}
                 </div>
                 <p className="mt-3 flex items-center gap-1.5 text-[.68rem] text-slate-400"><Clock3 className="h-3 w-3" />{t('Dosah se mění s aktuálním stavem; verze pravidel zůstává stejná.', 'Reach changes with current state; the rule version stays fixed.')}</p>
               </article>
@@ -269,61 +278,83 @@ export default function SegmentsPage() {
         audience={approvalIntent}
         busy={lifecycleFlight.busy}
         error={lifecycleError}
+        closeFocusOverrideRef={approvalCloseFocusOverrideRef}
+        triggerRef={approvalTriggerRef}
         onCancel={closeApprovalReview}
         onConfirm={async () => {
-          if (await lifecycle(approvalIntent, 'approve')) setApprovalIntent(null)
+          if (await lifecycle(approvalIntent, 'approve')) {
+            // The approve button that opened this dialog is gone once state flips to APPROVED —
+            // land focus on the catalogue landmark instead of the stale trigger.
+            approvalCloseFocusOverrideRef.current = audienceWorkspaceRef.current
+            setApprovalIntent(null)
+          }
         }}
       />}
-    </div>
+    </section>
   </AuthGuard>
 }
 
-function AudienceApprovalDialog({ audience, busy, error, onCancel, onConfirm }: {
+function AudienceApprovalDialog({ audience, busy, error, closeFocusOverrideRef, triggerRef, onCancel, onConfirm }: {
   audience: Segment
   busy: boolean
   error: string | null
+  closeFocusOverrideRef: RefObject<HTMLElement | null>
+  triggerRef: RefObject<HTMLElement | null>
   onCancel: () => void
   onConfirm: () => Promise<void>
 }) {
   const { t } = useLanguage()
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const titleId = `audience-approval-${audience.name}-${audience.version}-title`
-  const impactId = `audience-approval-${audience.name}-${audience.version}-impact`
+  const backRef = useRef<HTMLButtonElement>(null)
 
-  return <div
-    ref={dialogRef}
-    role="alertdialog"
-    aria-modal="true"
-    aria-labelledby={titleId}
-    aria-describedby={impactId}
-    aria-busy={busy}
-    onKeyDown={event => {
-      if (event.key === 'Escape' && !busy) onCancel()
-      trapDialogFocus(event, dialogRef.current)
-    }}
-    className="fixed inset-0 z-[1200] grid place-items-center bg-slate-950/70 p-5"
-  >
-    <div className="w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" style={{ maxHeight: 'calc(100dvh - 40px)' }}>
-      <div className="flex items-start gap-3">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
-        <div>
-          <h2 id={titleId} className="text-lg font-semibold text-slate-950">{t('Schválit publikum', 'Approve audience')}</h2>
-          <p id={impactId} className="mt-1 text-sm leading-6 text-slate-600">{t(
-            'Tato verze se stane použitelnou v kampaních. Schválení samo nic neodešle; souhlas a frekvenční ochrany se znovu ověří při odeslání.',
-            'This version will become available to campaigns. Approval sends nothing by itself; consent and frequency protections are checked again at send time.',
-          )}</p>
-        </div>
-      </div>
-      <dl className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
-        <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Publikum', 'Audience')}</dt><dd className="mt-1 font-semibold text-slate-900">{audience.name} · v{audience.version}</dd></div>
-        <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Autor', 'Maker')}</dt><dd className="mt-1 text-slate-700">{audience.createdBy || t('neuvedeno', 'not provided')}</dd></div>
-        <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Pravidla, která schvalujete', 'Rules you are approving')}</dt><dd><ul className="mt-2 space-y-1.5 text-slate-700">{audience.rules.map(rule => <li key={rule} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />{rule}</li>)}</ul></dd></div>
-      </dl>
-      {error && <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
-      <div className="mt-5 flex justify-end gap-2">
-        <button type="button" autoFocus disabled={busy} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">{t('Zpět ke kontrole', 'Back to review')}</button>
-        <button type="button" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{busy ? t('Schvaluji…', 'Approving…') : t('Potvrdit schválení', 'Confirm approval')}</button>
-      </div>
-    </div>
-  </div>
+  return (
+    <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[1200] bg-slate-950/70" />
+        <Dialog.Content
+          role="alertdialog"
+          aria-busy={busy}
+          className="fixed inset-0 z-[1200] grid place-items-center p-5"
+          onOpenAutoFocus={event => {
+            // The safe action gets initial focus, never the destructive confirm — an operator who
+            // dismisses on reflex (Enter/Space) lands on Back, not on an approval they did not read.
+            event.preventDefault()
+            backRef.current?.focus()
+          }}
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            const override = closeFocusOverrideRef.current
+            const target = override?.isConnected ? override : triggerRef.current
+            target?.focus()
+          }}
+          onEscapeKeyDown={event => {
+            if (busy) event.preventDefault()
+          }}
+          onInteractOutside={event => event.preventDefault()}
+        >
+          <div className="w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" style={{ maxHeight: 'calc(100dvh - 40px)' }}>
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
+              <div>
+                <Dialog.Title className="text-lg font-semibold text-slate-950">{t('Schválit publikum', 'Approve audience')}</Dialog.Title>
+                <Dialog.Description className="mt-1 text-sm leading-6 text-slate-600">{t(
+                  'Tato verze se stane použitelnou v kampaních. Schválení samo nic neodešle; souhlas a frekvenční ochrany se znovu ověří při odeslání.',
+                  'This version will become available to campaigns. Approval sends nothing by itself; consent and frequency protections are checked again at send time.',
+                )}</Dialog.Description>
+              </div>
+            </div>
+            <dl className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Publikum', 'Audience')}</dt><dd className="mt-1 font-semibold text-slate-900">{audience.name} · v{audience.version}</dd></div>
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Autor', 'Maker')}</dt><dd className="mt-1 text-slate-700">{audience.createdBy || t('neuvedeno', 'not provided')}</dd></div>
+              <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Pravidla, která schvalujete', 'Rules you are approving')}</dt><dd><ul className="mt-2 space-y-1.5 text-slate-700">{audience.rules.map(rule => <li key={rule} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />{rule}</li>)}</ul></dd></div>
+            </dl>
+            {error && <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button ref={backRef} type="button" disabled={busy} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">{t('Zpět ke kontrole', 'Back to review')}</button>
+              <button type="button" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{busy ? t('Schvaluji…', 'Approving…') : t('Potvrdit schválení', 'Confirm approval')}</button>
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
 }
