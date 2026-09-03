@@ -725,10 +725,21 @@ def main() -> int:
         if not args.run_id:
             ap.error("--inspect-run needs --run-id")
         try:
-            meta = gh_api(f"repos/{args.repo}/actions/runs/{args.run_id}")[0]
-            attempt = args.attempt or meta.get("run_attempt") or 1
-            # Re-read the run AT THAT ATTEMPT: the top-level object describes the latest one, so
-            # its `conclusion` can disagree with the attempt the event fired for.
+            # The unscoped run object is fetched ONLY to derive the attempt, and the caller
+            # usually knows it: main-red-watch.yml always passes --attempt from
+            # `github.event.workflow_run.run_attempt`. When it does, this call's result was
+            # overwritten on the next line and never read — one dead API request on the
+            # highest-frequency consumer in the estate. Measured 2026-09-03 with a `gh` shim:
+            # 3 requests per --inspect-run, ~129 firings/hour, so ~387 of the 1000/hour
+            # INSTALLATION quota. That quota was exhausted at 08:01 the same morning and took
+            # Trivy's SARIF upload and dependency-review down fleet-wide, including on main.
+            attempt = args.attempt
+            if not attempt:
+                attempt = gh_api(f"repos/{args.repo}/actions/runs/{args.run_id}")[0].get(
+                    "run_attempt") or 1
+            # Read the run AT THAT ATTEMPT: the top-level object describes the LATEST attempt, so
+            # its `conclusion` can disagree with the attempt the event fired for. This one is
+            # load-bearing and stays.
             meta = gh_api(f"repos/{args.repo}/actions/runs/{args.run_id}/attempts/{attempt}")[0]
             jobs = fetch_jobs_scoped(args.repo, args.run_id, attempt)
         except Exception as exc:  # noqa: BLE001 -- any failure here is "could not answer"
