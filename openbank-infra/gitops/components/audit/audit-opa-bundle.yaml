@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: audit-service
     app.kubernetes.io/part-of: audit
   annotations:
-    openbank.tech/policy-checksum: "1803ec97f1dbb79e"
+    openbank.tech/policy-checksum: "ea0d946660414f47"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1060,13 +1060,43 @@ data:
       - openbank-sdd-service                  # issue #1478: SddCollectionDebitConsumer posts a real debit via
                                                # TransactionServiceClient for every authorised direct-debit collection
                                                # (#1027, merged) — moves funds directly, not adjacent to it like
-                                               # sca/consent/vop below. Four-eyes not yet assessed for this service;
-                                               # revisit under issue #938's follow-up sweep.
+                                               # sca/consent/vop below. Threat model:
+                                               # docs/threat-models/openbank-sdd-service.md.
+                                               # four-eyes assessed (#8359): sdd.approve (B2B mandate confirmation —
+                                               # the act that authorises all future debits on a mandate) WIRED via
+                                               # four_eyes.actions below. sdd.authorise assessed, NOT wired: it is
+                                               # the bulk authorisation of inbound collections whose DESIGNED caller
+                                               # is clearing automation (sdd_rest_ext.rego header documents that
+                                               # caller is simply not built yet — the consent.activate "plausibly
+                                               # could" case), so gating it today buys nothing (no caller exists)
+                                               # and plants the exact trap the four_eyes.verbs guardrail describes
+                                               # for the day that caller ships. When it does, the operator
+                                               # authorise-by-hand path gets its OWN distinct action and THAT is
+                                               # gated. sdd.create/update/delete are edge-reachable customer
+                                               # self-service (M2M grant in edge-service-sdd) with effect on FUTURE
+                                               # debits only — ungateable per the guardrail, same shape as
+                                               # standing-order order CRUD. The debit itself is event-driven
+                                               # (SddCollectionDebitConsumer), no HTTP PEP on that path.
       - openbank-interest-service              # issue #1478: capitalize()/write-off post real GL journals
                                                # (LendingJournalFactory-equivalent), and withholding-tax remittance
-                                               # (#999, in progress) will book a cash leg via transaction-service.
-                                               # Four-eyes not yet assessed for this service; revisit under issue
-                                               # #938's follow-up sweep.
+                                               # (#999, merged) books a cash leg via transaction-service.
+                                               # Threat model: docs/threat-models/openbank-interest-service.md.
+                                               # four-eyes assessed (#8359): interest.create (manual accrue,
+                                               # capitalize — posts real GL journals, rate-config create — shapes
+                                               # all future accrual amounts, withholding remittance assemble —
+                                               # triggers the real cash leg) and interest.trigger (manual mass
+                                               # accrual) WIRED via four_eyes.actions below; both are human-only
+                                               # (operator-interest-write excludes service accounts outright AND
+                                               # the interest_rest_ext prohibition vetoes them at the allow head;
+                                               # fleet audit found no M2M writer — agent-service's client is
+                                               # read-only). The daily accrual / monthly capitalization schedulers
+                                               # and the remittance settlement consumer call the use cases
+                                               # IN-PROCESS, so the HTTP-layer gate never touches automation.
+                                               # interest.delete (deactivateRateConfig) NOT wired: it stops future
+                                               # accrual — reduces money movement, standing-order pause precedent.
+                                               # interest.read/list are reads. Runs AUTHZ_ENFORCE=true (flipped in
+                                               # #3695); four-eyes enforcement stays off fleet-wide
+                                               # (authz.four-eyes.enforce, ADR-0155) — wiring sets the flag only.
       - openbank-sca-service                  # four-eyes assessed (issue #938 follow-up), NOT wired: device.enroll and
                                                # scaChallenge.consume are both real-payment/self-service actions with a
                                                # confirmed M2M automated caller (customer-edge) — gating either would brick
@@ -1231,6 +1261,57 @@ data:
                                              # (maker != checker), same mechanism as opsmessage.compose.
                                              # m2m-sanctions-screening uses for the opposite carve-out.
         - party.merge                       # ADR-0179: retire a duplicate identity into a survivor
+                                             # (POST /api/v1/parties/{id}/merge). Gated HERE and not via
+                                             # `verbs` for the same structural reason opsmessage.compose
+                                             # is: party-service is not, and should not become, a
+                                             # money_path_services entry (it moves no value), so the
+                                             # verb clause can never derive a `party` scope and no verb
+                                             # addition could ever reach this action.
+                                             # Why it needs the gate at all: a merge is destructive OF
+                                             # IDENTITY and irreversible in practice — one operator can
+                                             # retire a real customer behind another party id, and every
+                                             # downstream consumer follows `merged_into`. It carried only
+                                             # @RolesAllowed(ROLE_OPERATOR, ROLE_ADMIN) + an audit event,
+                                             # which records who did it but stops nobody.
+                                             # GUARDRAIL check (the one above, applied): confirmed no M2M
+                                             # caller. party-service's own rego states party.merge "has NO
+                                             # in-repo M2M caller today"; the edge M2M identity is granted
+                                             # only {party.consent.update, party:resolve} by the rule that
+                                             # names it (service-edge-party-m2m), and the ADR-0179 sweep
+                                             # counterpart transaction.merge-sweep is already gated by the
+                                             # `sweep` verb — so both halves of the merge flow now pause
+                                             # for a second approver, or neither does.
+        - sdd.approve                       # #8359: confirm a B2B direct-debit mandate
+                                             # (POST /api/v1/sdd/mandates/{id}/confirm) — the SDD B2B control
+                                             # point: a wrongly-confirmed mandate authorises every future
+                                             # collection against the debtor. Exact action, not the `approve`
+                                             # verb: the verb would ALSO flag lending.approve (already
+                                             # maker-checker in-app — an OPA second-approver pause on top
+                                             # would stall the designed checker flow the day enforcement
+                                             # flips) and pull non-money-path dispatch.approve into the
+                                             # four-eyes-verb-grantable gate. GUARDRAIL check: human-only —
+                                             # the edge rule (edge-service-sdd) deliberately excludes
+                                             # sdd.approve ("a bank-side verification act, the edge exposes
+                                             # no route for it"), operator-sdd-write excludes every
+                                             # service-account-* principal, and the role_action_matrix
+                                             # grants no sdd write at all. The money-moving sdd.authorise
+                                             # is deliberately NOT gated — see the money_path_services
+                                             # entry for the reasoning.
+        - interest.create                   # #8359: bundles every operator write on the interest money
+                                             # path — manual accrue, capitalize (posts real GL journals),
+                                             # rate-config create (a mis-set rate moves money at scale on
+                                             # every future accrual — the runtime analogue of vop's
+                                             # max-edit-distance), and withholding remittance assemble
+                                             # (triggers the real cash leg to the finanční úřad via the
+                                             # settlement consumer). GUARDRAIL check: human-only, twice
+                                             # over — operator-interest-write excludes service-account-*
+                                             # and the interest_rest_ext prohibition vetoes the write set
+                                             # for ANY service account at the allow head; fleet audit found
+                                             # no M2M writer (agent-service's InterestServiceClient is
+                                             # read-only). The accrual/capitalization SCHEDULERS call the
+                                             # use cases in-process — they never pass the HTTP PEP, so this
+                                             # gate cannot pause them.
+        - interest.trigger                  # #8359: accrueAll (POST /api/v1/interest/accrue/all) — manual
 
     feature_flags:
       # Disabling any of these via a flag flip is never permitted — they guard SCA (ADR-0021),
