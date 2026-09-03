@@ -5,7 +5,7 @@
 # committed in pacts/, catching exactly the class of bug #370 found as a "bonus" (a stale committed
 # pact missing an interaction the consumer test had already moved past).
 #
-# Consumer pact tests are pure JVM (an embedded mock server, no Testcontainers/Quarkus boot), so
+# Consumer pact tests are pure JVM or PactJS (embedded mock servers, no live infrastructure), so
 # this is cheap enough to run on every PR that touches a contract test or the pacts/ dir itself.
 
 name: Pact drift check
@@ -15,12 +15,25 @@ on:
     paths:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
+      - "openbank-admin-ui/src/test/**/*-pact.contract.test.ts"
+      - "openbank-admin-ui/src/app/api/approvals/pending/**"
+      - "openbank-admin-ui/package.json"
+      - "openbank-admin-ui/package-lock.json"
+      - ".github/scripts/derive-pact-drift-scope.sh"
+      - ".github/scripts/pact-js-contracts.py"
       - ".github/workflows/pact-drift-check.yml"
   push:
     branches: [main]
     paths:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
+      - "openbank-admin-ui/src/test/**/*-pact.contract.test.ts"
+      - "openbank-admin-ui/src/app/api/approvals/pending/**"
+      - "openbank-admin-ui/package.json"
+      - "openbank-admin-ui/package-lock.json"
+      - ".github/scripts/derive-pact-drift-scope.sh"
+      - ".github/scripts/pact-js-contracts.py"
+      - ".github/workflows/pact-drift-check.yml"
 
 permissions:
   contents: read
@@ -62,6 +75,16 @@ jobs:
           java-version: "25"
           distribution: temurin
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+
+      - name: Install Admin UI dependencies for PactJS
+        working-directory: openbank-admin-ui
+        run: npm ci --no-audit --no-fund
+
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
           # READ-ONLY. setup-java's own `cache: gradle` SAVES a whole Gradle-home entry
@@ -87,15 +110,18 @@ jobs:
       # gate was green about having regenerated none of. #2357 added those three by hand; this
       # removes the need to. Three hand-maintenance commits in one week is the argument.
       #
-      # derive-pact-drift-scope.sh discovers every `*PactConsumerTest.kt`, maps it to the pacts/
-      # file its `@Pact(consumer = .., provider = ..)` names, and fails on an orphan pact, an
-      # uncommitted pact, or a module dropped out of scope without declaring what that strands.
+      # derive-pact-drift-scope.sh discovers every `*PactConsumerTest.kt`; its PactJS companion
+      # discovers every `*-pact.contract.test.ts`. Together they map tests to pacts/ outputs and
+      # fail on an orphan pact, an uncommitted pact, or a consumer dropped silently from scope.
       # It is bash-3.2 clean, so it runs (and can be fed a failing case) on a dev machine too.
       - name: Derive the set of modules to regenerate
         run: |
           set -euo pipefail
+          python3 .github/scripts/pact-js-contracts.py --self-test
+          .github/scripts/derive-pact-drift-scope.sh --self-test
           .github/scripts/derive-pact-drift-scope.sh > "${RUNNER_TEMP}/pact-gradle-args.txt"
           .github/scripts/derive-pact-drift-scope.sh --uncovered > "${RUNNER_TEMP}/pact-uncovered.txt"
+          python3 .github/scripts/pact-js-contracts.py --tests > "${RUNNER_TEMP}/pact-js-tests.txt"
 
       # One Gradle invocation, every gated consumer pact test module — each writes to the shared
       # pacts/ dir (systemProperty("pact.rootDir", ...) in the consuming service's
@@ -128,6 +154,33 @@ jobs:
           touch "${RUNNER_TEMP}/pact-regen-marker"
           ./gradlew --continue "${GRADLE_ARGS[@]}"
 
+      # Run the exact files the discovery step derived — not a second glob in package.json that can
+      # drift independently. Running them after the shared marker makes the mtime proof below catch
+      # an accidentally skipped PactJS test exactly as it catches an UP-TO-DATE Gradle task.
+      - name: Regenerate every PactJS consumer pact
+        run: |
+          set -euo pipefail
+          mapfile -t PACT_JS_TESTS < "${RUNNER_TEMP}/pact-js-tests.txt"
+          [ "${#PACT_JS_TESTS[@]}" -gt 0 ] || {
+            echo "::error::PactJS derivation returned an empty test set"
+            exit 1
+          }
+          PACT_JS_TEST_ARGS=()
+          for test in "${PACT_JS_TESTS[@]}"; do
+            case "$test" in
+              openbank-admin-ui/*) PACT_JS_TEST_ARGS+=("${test#openbank-admin-ui/}") ;;
+              *)
+                echo "::error::Derived PactJS test is outside openbank-admin-ui: $test"
+                exit 1
+                ;;
+            esac
+          done
+          printf '  %s\n' "${PACT_JS_TESTS[@]}"
+          (
+            cd openbank-admin-ui
+            npm exec -- vitest run "${PACT_JS_TEST_ARGS[@]}"
+          )
+
       # Belt to --rerun's braces. The diff step cannot tell "regenerated and identical" from
       # "never regenerated" — both look clean. This can: every file under pacts/ must have been
       # rewritten by the step above. It catches the UP-TO-DATE/FROM-CACHE skip if --rerun ever
@@ -149,7 +202,7 @@ jobs:
           if [ -n "$stale" ]; then
             echo "::error::These committed pacts were NOT rewritten by the regeneration step, so the drift check below would pass without having read them:"
             for f in $stale; do echo "::error::  $f"; done
-            echo "::error::The derivation in .github/scripts/derive-pact-drift-scope.sh did not put this consumer's module in scope, or its test task was skipped. Run that script locally to see what it derives."
+            echo "::error::The JVM/PactJS derivation did not put this consumer in scope, or its test task was skipped. Run derive-pact-drift-scope.sh and pact-js-contracts.py locally to inspect the scope."
             exit 1
           fi
           echo "Coverage OK — every committed pact except the declared exclusions was regenerated by this run."
@@ -158,7 +211,7 @@ jobs:
         run: |
           if ! git diff --exit-code -- pacts/; then
             echo "::error::Committed pacts/*.json differ from what the consumer tests generate right now."
-            echo "::error::Regenerate and commit: run the *PactConsumerTest* class for the affected service and commit the updated pacts/<consumer>-<provider>.json in the same PR."
+            echo "::error::Regenerate and commit: run the affected JVM PactConsumerTest or npm --prefix openbank-admin-ui run test:contract, then commit pacts/<consumer>-<provider>.json in the same PR."
             git status --porcelain -- pacts/
             exit 1
           fi

@@ -277,9 +277,17 @@ change_requirements:
     requires:
       - "spec.backup.barmanObjectStore.destinationPath is set, OR the cluster carries
          openbank.io/backup-exempt-reason with a non-empty reason"
-    gate: cnpg-backup-declared
-    enforced: advisory
-    target_enforce_date: "2026-09-15"
+    gate: cnpg-backup-declared-gate
+    # GRADUATED EARLY, 13 days before its 2026-09-15 date, because the same PR made the gate
+    # able to fail at all. It carried `mode: enforced` from the day it was added (#4993) while
+    # invoking its checker without --enforce, so a finding exited 0 and the gate was green by
+    # construction. Leaving this record on `advisory` after fixing that would have reproduced,
+    # in the very PR that reports it, the drift the sibling entry below documents.
+    #
+    # The graduation condition is met and was measured, not assumed: 0 findings across all 61
+    # CNPG Cluster manifests on 2026-09-02, and the gate is falsifiable — stripping the
+    # `backup:` block from a real cluster manifest takes it red.
+    enforced: enforced
     ci_producer: "openbank-infra/scripts/check-cnpg-backup-declared.py"
     # The sibling of db_backup_association, for the case that rule CANNOT see. Its producer
     # scans for clusters that DECLARE a barmanObjectStore and skips the rest (`if not dest:
@@ -538,13 +546,16 @@ change_requirements:
     detect: ["money-path <service> trust-boundary paths in the PR diff"]
     require:
       - "docs/threat-models/<service>.md updated in the SAME PR"   # ADR-0030 D2
-    gate: threat-model-diff
-    enforced: advisory
-    target_enforce_date: "2026-09-15"   # ADR-0144
-    # CI producer is LIVE (advisory): openbank-infra/scripts/check-threat-model-diff.py runs
-    # in the "Validate manifests" job on every PR, right after the coverage gate — diff-scoped
-    # (3-dot against the PR base). Findings are ::warning annotations. Flip to enforced =
-    # pass --enforce to the script in ci.yml (one-line change).
+    gate: threat-model-updated-on-trust-boundary-change
+    enforced: enforced
+    # GRADUATED in #3431, after the #3438 scope fix took the false-positive rate from 7-of-60
+    # to 2-of-60 (both survivors real). This block said `advisory` with a target_enforce_date
+    # of 2026-09-15 and described findings as "::warning annotations" with the flip still to
+    # come — all three were already untrue. The gate runs `mode: enforced` AND passes
+    # --enforce (both are required, #2392), so findings are ::error and fail the build.
+    # Corrected 2026-09-02, found by reading gates.yaml against this file rather than either
+    # alone: nothing cross-checks a rule's `enforced:` against the mode of the gate that
+    # implements it, so this record could drift for as long as it did.
     ci_producer: "openbank-infra/scripts/check-threat-model-diff.py"
   mp_messaging_dotted_keys:
     # SmallRye reactive-messaging config written as a DOTTED key
@@ -1144,7 +1155,23 @@ coverage:
     # 2026-07-07 note above; settlement re-confirmed thin, sanctions was the one that wasn't.)
     # True baselines at rollout (after fixing the KILLED-quote parsing bug): account 49%,
     # transaction 46%, balance 55%, ledger 65%, fx 73%.
-    blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; account/transaction/balance/ledger are below it today (see baselines above)"
+    # Re-measured 2026-09-03 against the last weekly run (33289385445, 2026-08-30). The previous
+    # text named account/transaction/balance/ledger and was wrong in BOTH directions: account
+    # (49 -> 70) and transaction (46 -> 76) have since cleared, while interest, sanctions and
+    # sepa-payment were never named and are below. ledger has gone the wrong way, 65 -> 63.
+    #
+    #     balance   60%  (46/76)      account     70%  (103/146)
+    #     interest  60%  (36/60)      fx          72%  (62/85)
+    #     ledger    63%  (180/283)    domestic    74%  (49/66)
+    #     sanctions 69%  (34/49)      sdd         75%  (46/61)
+    #     sepa-pay  69%  (44/63)      transaction 76%  (80/104)
+    #                                 sepa-instant 77% (35/45)
+    #                                 fraud       89%  (41/46)
+    #
+    # So the flip is blocked by FIVE services, not four, and the two the record has been
+    # pointing at for a month are no longer among them. Read the weekly run before quoting a
+    # number here; these move.
+    blocked_on: "blocking flip requires each service to sustain >=70% mutation kill score on the weekly run; balance 60, interest 60, ledger 63, sanctions 69 and sepa-payment 69 are below it as of run 33289385445 (2026-08-30)"
   dast:
     tool: "OWASP ZAP baseline (zaproxy/action-baseline)"   # ADR-0030 D3
     enforced: advisory                  # report-only first cut; no fail_action, no PR gate
@@ -1502,6 +1529,23 @@ authz_policy:
 # ---------------------------------------------------------------------------------------
 # Scheduled-method invariants (issue #2148, fleet sweep #2187).
 # ---------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------
+# Temporal worker disable-switch naming (audit Top-50 E46). Every service that registers a
+# Temporal worker at StartupEvent carries a switch so tests / the fuzz harness / DR manifests
+# can boot without Temporal. The name MUST be derivable: `openbank.<service>.worker.enabled`.
+# An invented-per-service name forces every consumer to hard-code a drifting name list — the
+# 2026-08-18 fuzz run shipped 6 "failures" that never sent a request, partly on this.
+# Enforced by .github/scripts/check-temporal-worker-switch-naming.py (gate
+# temporal-worker-switch-naming). Allowlist entries fail stale in either direction.
+# ---------------------------------------------------------------------------------------
+temporal_worker_switch_naming:
+  convention: "openbank.<service>.worker.enabled"
+  allowlist: []
+  # The one pre-convention name, lending's `lending.origination.worker.enabled`, was renamed
+  # to `openbank.lending.worker.enabled` in the same audit follow-up that introduced the gate;
+  # the allowlist mechanism stays (and fails stale in either direction) for the next exception
+  # that genuinely cannot be renamed.
+
 scheduled_methods:
   no_runblocking_in_scheduled_body: true
   # Quarkus invokes a plain (non-`suspend`) @Scheduled method on a bare `executor-thread`,
@@ -1962,6 +2006,14 @@ ci_runners:
       image_builds: dind
       ephemeral_per_job: true
       isolation_rationale: "separate low-capped pool so a scan/cron burst cannot starve the merge-required build lane (ARC has no job preemption — dedicated capacity is the only priority lever)"
+    dr:                                # quarterly resilience lanes: dr-restore-verify, chaos drill, attestation evidence (ADR-0277)
+      scale_set: openbank-dr
+      cloud_write_credentials: false    # no IRSA/cloud role on the pod SA at all
+      secrets: none
+      cluster_api: restore_verify_namespaces_only   # Role+RoleBinding in gitops components/platform, Kyverno-pinned
+      ephemeral_per_job: true
+      triggers: [schedule, workflow_dispatch]       # NEVER PR code — excluded from pr_jobs_allowed_pools by construction
+      isolation_rationale: "cluster-reachable lane for DORA restore/chaos evidence; a credentialled lane PR code must never reach (#6458 class, ADR-0277)"
     deploy:                            # ECR push + ArgoCD sync; post-merge only
       scale_set: openbank-deploy
       credentials: irsa                 # pod ServiceAccount IRSA scoped to ECR push + ArgoCD

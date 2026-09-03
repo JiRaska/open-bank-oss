@@ -89,6 +89,30 @@ Symptom: every create returns `RECEIVED`, AML cases with `SCREENING_UNAVAILABLE`
 2. Check Kafka reachability and the dispatcher logs (`DomesticPaymentOutboxDispatcher`).
 3. Inspect `FAILED` rows: `SELECT event_id, last_error, attempt_count FROM domestic_payment_outbox WHERE status='FAILED';` — the publish path is wrapped in a circuit breaker, so a downstream Kafka outage trips it and recovers automatically.
 
+### Delegated-spend activation and recovery
+
+The delegated-spend receiver is intentionally default-off. Activate it only after the
+`openbank.delegation.spend-reservation-state` consumer has rebuilt from `earliest`, its lag is zero,
+and a terminal revision followed by a delayed reserved revision remains terminal in the projection.
+The compacted stream is revision-folded: apply the greatest payload `reservationVersion`, never the
+last record observed.
+
+For the request-fingerprint cutover, quiesce payment creation, drain the configured request timeout
+(`openbank.domestic.resilience.timeout.value-ms`, currently 15 seconds), then switch every writer to
+the healthy new image, and only then reopen creation. Use a blue/green switch, not a mixed-version
+rolling interval: a request already accepted by an old instance and retried against a new one during
+a rolling deploy is exactly the ambiguous-fingerprint case this cutover exists to close, not one it
+can resolve after the fact. An old nullable fingerprint is deliberately a `409
+IDEMPOTENCY_KEY_REUSED`, not a replayable authority. Never tell the caller to retry with a new key
+for an ambiguous request — that mints a second payment for one intent. Inspect payment status and
+require operator reconciliation before deciding whether it already went through.
+
+Enable the finalizer last. It may release only a binding that domestic-payment atomically finalized
+as absent; timeouts and unknown outcomes remain reserved. Its workflow-liveness signal must be
+present while enabled. To roll back, stop new delegated creates, drain/reconcile every reserved
+binding and outbox record, then disable the writer — never reintroduce Redis or an unprovable legacy
+fingerprint as request authority.
+
 ### Illegal status transition (409)
 
 The caller attempted a transition the state machine forbids (see [03 — API](./03-api.md)). Not retryable; fix the caller's target status.

@@ -17,6 +17,11 @@ import java.util.UUID
 
 class DomesticPaymentMapperTest {
 
+    private val initiatedByPartyId = UUID.randomUUID()
+    private val requestFingerprint = "a".repeat(64)
+    private val delegationId = UUID.randomUUID()
+    private val reservationId = UUID.randomUUID()
+
     private fun fullyPopulated() = DomesticPayment(
         id = UUID.randomUUID(),
         idempotencyKey = "idem-key-1",
@@ -45,6 +50,10 @@ class DomesticPaymentMapperTest {
         settledAt = Instant.parse("2026-06-01T11:00:00Z"),
         createdAt = Instant.parse("2026-06-01T09:00:00Z"),
         updatedAt = Instant.parse("2026-06-01T12:00:00Z"),
+        initiatedByPartyId = initiatedByPartyId,
+        requestFingerprint = requestFingerprint,
+        delegationId = delegationId,
+        reservationId = reservationId,
     )
 
     private fun nullOptionals() = DomesticPayment(
@@ -107,6 +116,10 @@ class DomesticPaymentMapperTest {
         assertThat(entity.transferScope).isEqualTo("TECHNICAL_ACCOUNT")
         assertThat(entity.rejectReason).isEqualTo("SANCTIONS_HIT")
         assertThat(entity.amount).isEqualByComparingTo(original.amount)
+        assertThat(entity.initiatedByPartyId).isEqualTo(initiatedByPartyId)
+        assertThat(entity.requestFingerprint).isEqualTo(requestFingerprint)
+        assertThat(entity.delegationId).isEqualTo(delegationId)
+        assertThat(entity.reservationId).isEqualTo(reservationId)
     }
 
     @Test
@@ -116,5 +129,9 @@ class DomesticPaymentMapperTest {
         assertThat(entity.rejectReason).isNull()
         assertThat(entity.submittedAt).isNull()
         assertThat(entity.settledAt).isNull()
+        assertThat(entity.initiatedByPartyId).isNull()
+        assertThat(entity.requestFingerprint).isNull()
+        assertThat(entity.delegationId).isNull()
+        assertThat(entity.reservationId).isNull()
     }
 }

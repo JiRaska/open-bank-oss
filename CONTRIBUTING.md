@@ -167,6 +167,15 @@ issue → fork → branch → commit -s -S → push → PR → review → CI gre
 
 `<scope>` = service name without `openbank-` prefix (e.g. `ledger`, `psd2`, `sepa`).
 
+> **Why admin-ui `e2e/` does not trigger a release** (recorded decision, #8354): release-please
+> releases on commit type × touched path, and `openbank-admin-ui/e2e` sits in `exclude-paths`
+> next to `src/test`. That is deliberate: e2e specs verify the *deployed* system (the browser
+> synthetic lane attests the deployed build), they ship no runtime artifact, and releasing the
+> npm package for a test-only change would cut a version whose bits are identical to the
+> previous one. If an e2e change ever ships a behavioural fix to the harness users run locally,
+> say so in the PR and use a `fix(admin-ui)` commit touching a non-excluded path. Do not
+> "fix" the exclusion without reading this note.
+
 ### Commit messages (Conventional Commits)
 
 ```

@@ -115,11 +115,11 @@ data class Card(
      */
     val isDelegated: Boolean get() = delegationGrantId != null
 
-    fun activate(now: Instant = Instant.EPOCH) = also {
+    fun activate(now: Instant) = also {
         require(status == CardStatus.PENDING) { "Only PENDING cards can be activated, current: $status" }
     }.copy(status = CardStatus.ACTIVE, activatedAt = now, updatedAt = now)
 
-    fun block(reason: String, now: Instant = Instant.EPOCH) = also {
+    fun block(reason: String, now: Instant) = also {
         require(status in setOf(CardStatus.ACTIVE, CardStatus.SUSPENDED)) { "Cannot block card in status $status" }
         require(reason.isNotBlank()) { "Block reason required" }
     }.copy(status = CardStatus.BLOCKED, blockedAt = now, blockedReason = reason, updatedAt = now)
@@ -131,7 +131,7 @@ data class Card(
      * the processor, and this records the outcome so the customer can see it. Only SINGLE_USE
      * reaches it — marking any other card CONSUMED would be a lie about why it stopped working.
      */
-    fun consume(now: Instant = Instant.EPOCH) = also {
+    fun consume(now: Instant) = also {
         require(cardType == CardType.SINGLE_USE) { "Only SINGLE_USE cards can be consumed, this is $cardType" }
         require(status == CardStatus.ACTIVE) { "Only ACTIVE cards can be consumed, current: $status" }
     }.copy(
@@ -144,7 +144,7 @@ data class Card(
      * The card's validity window ran out before it was ever used. EXPIRED rather than CONSUMED:
      * nothing was spent, and the difference is what the customer is told.
      */
-    fun expireUnused(now: Instant = Instant.EPOCH) = also {
+    fun expireUnused(now: Instant) = also {
         require(status in LIVE_STATUSES) { "Cannot expire card in status $status" }
     }.copy(
         status = CardStatus.EXPIRED,
@@ -152,11 +152,11 @@ data class Card(
         updatedAt = now,
     )
 
-    fun suspend(now: Instant = Instant.EPOCH) = also {
+    fun suspend(now: Instant) = also {
         require(status == CardStatus.ACTIVE) { "Only ACTIVE cards can be suspended" }
     }.copy(status = CardStatus.SUSPENDED, updatedAt = now)
 
-    fun resume(now: Instant = Instant.EPOCH) = also {
+    fun resume(now: Instant) = also {
         require(status == CardStatus.SUSPENDED) { "Only SUSPENDED cards can be resumed" }
     }.copy(status = CardStatus.ACTIVE, updatedAt = now)
 
@@ -172,7 +172,7 @@ data class Card(
      * [blockedReason], the aggregate's single "why is this card not usable" note. Cancelling a
      * BLOCKED card with no reason therefore preserves the original block reason.
      */
-    fun cancel(reason: String?, now: Instant = Instant.EPOCH) = also {
+    fun cancel(reason: String?, now: Instant) = also {
         require(status in CANCELLABLE_STATUSES) { "Cannot cancel card in status $status" }
     }.copy(status = CardStatus.CANCELLED, blockedReason = reason ?: blockedReason, updatedAt = now)
 
@@ -180,7 +180,7 @@ data class Card(
      * Customer-set spending limits. Only a live card may be re-limited (a BLOCKED/CANCELLED/EXPIRED
      * card has no spend to cap). Limits are non-negative and daily must not exceed monthly.
      */
-    fun withLimits(dailyMinor: Long, monthlyMinor: Long, now: Instant = Instant.EPOCH) = also {
+    fun withLimits(dailyMinor: Long, monthlyMinor: Long, now: Instant) = also {
         require(status in setOf(CardStatus.ACTIVE, CardStatus.SUSPENDED, CardStatus.PENDING)) {
             "Cannot change limits on a card in status $status"
         }
@@ -192,13 +192,7 @@ data class Card(
      * Customer channel controls (#1): turn contactless / online (e-commerce) / ATM / abroad usage
      * on or off. Only a live card may be re-controlled — a terminal card has no usage to gate.
      */
-    fun withControls(
-        contactless: Boolean,
-        online: Boolean,
-        atm: Boolean,
-        abroad: Boolean,
-        now: Instant = Instant.EPOCH,
-    ) = also {
+    fun withControls(contactless: Boolean, online: Boolean, atm: Boolean, abroad: Boolean, now: Instant) = also {
         require(status in setOf(CardStatus.ACTIVE, CardStatus.SUSPENDED, CardStatus.PENDING)) {
             "Cannot change controls on a card in status $status"
         }

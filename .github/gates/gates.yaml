@@ -457,6 +457,7 @@ gates:
   - id: agent-virtual-keys
     name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
     group: gitops
+    min_subjects: 300   # 610 gitops component manifests observed 2026-09-03
     mode: enforced
     selftest: python3 .github/scripts/check-agent-virtual-keys.py --self-test
     selftest_expect: pass
@@ -972,6 +973,7 @@ gates:
   - id: gitops-ref-integrity-guard
     name: "gitops ref-integrity guard (referenced Secret/ConfigMap => declared)"
     group: gitops
+    min_subjects: 400   # 705 gitops manifests observed; 95 with components/ removed
     mode: enforced
     budget_seconds: 30   # 7.3s in CI
     selftest: python3 .github/scripts/check-gitops-secret-refs.py --self-test
@@ -1095,7 +1097,13 @@ gates:
     selftest: python3 openbank-infra/scripts/check-cnpg-backup-declared.py --self-test
     selftest_expect: pass
     run: |
-      python3 openbank-infra/scripts/check-cnpg-backup-declared.py
+      # --enforce is REQUIRED alongside `mode: enforced`, and neither alone does anything
+      # (#2392, the same trap threat-model-updated-on-trust-boundary-change documents in
+      # place): check-cnpg-backup-declared.py ends `return 1 if args.enforce else 0`, so
+      # without the flag a finding prints ::error and still exits 0 — the runner sees rc=0
+      # and reports a permanently green gate. Measured 2026-09-02: 0 findings today, so this
+      # was latent rather than actively hiding one, which is exactly when it is cheap to fix.
+      python3 openbank-infra/scripts/check-cnpg-backup-declared.py --enforce
 
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
@@ -1889,6 +1897,7 @@ gates:
   - id: ai-act-high-risk-inventory-vs-code
     name: "EU AI Act Annex III inventory vs. code (ADR-0142/0216, enforced)"
     group: registry
+    min_subjects: 35   # 66 modules with a Kotlin source root observed
     mode: enforced
     selftest: python3 .github/scripts/check-ai-act-high-risk-inventory.py --self-test
     selftest_expect: pass
@@ -2285,6 +2294,7 @@ gates:
   - id: compliance-matrix
     name: "compliance-page evidence citations (#2370, enforced)"
     group: registry
+    min_subjects: 1000   # 2177 Kotlin sources observed
     mode: enforced
     selftest_inputs: [".github/scripts/check-compliance-matrix.py"]
     selftest: |
@@ -3724,9 +3734,12 @@ gates:
     name: "threat-model mitigation claims resolve to real code (ADR-0030 D2, enforced)"
     group: security
     mode: enforced
-    min_subjects: 15   # 23 money-path threat models today (2026-08-20)
-    budget_seconds: 90   # 41s over the 23 models on a warm checkout
-    rationale: "A threat model is a set of claims about running code and nothing checked whether any was true, so a mitigation could name a class that does not exist, a stub, or the very state transition whose truthfulness was the risk — and the document read as coverage in all three cases."
+    min_subjects: 23   # 45 threat models today (2026-09-03); the floor catches a COLLAPSE — a
+                       # renamed directory or a changed glob — not drift, so it sits near half.
+                       # It was 15 against a subject set of 23 money-path models; the subject set
+                       # is now every model in docs/threat-models, derived from the directory.
+    budget_seconds: 90   # 22s over the 45 models on a warm checkout (the corpus read dominates)
+    rationale: "A threat model is a set of claims about running code and nothing checked whether any was true, so a mitigation could name a class that does not exist, a stub, or the very state transition whose truthfulness was the risk — and the document read as coverage in all three cases. Widened 2026-09-03 after a sweep found claims of exactly this kind sitting INSIDE files the gate already opened and reported clean: it read STRIDE mitigation columns only (so §3 prose, residual-risk bullets and change-log entries were unread), its subject set was money_path_services (so 22 of 45 models were never opened), and it resolved a citation by substring over every line including comments (so a name whose only occurrence was a KDoc repeating the same false claim counted as existing)."
     review_after: "2027-02-20"
     selftest: python3 .github/scripts/check-threat-model-claims.py --self-test
     selftest_expect: pass
@@ -4667,3 +4680,44 @@ gates:
     run: |
       python3 -m unittest openbank-infra/scripts/check_argocd_sync_integrity_test.py
       python3 .github/scripts/check-argocd-sync-integrity.py --check-wiring
+
+  # Audit Top-50 follow-ups (2026-09-03, docs/audit-2026-09-03-top50.md).
+  # no-epoch-instant-default: an `Instant = Instant.EPOCH` default on a field meaning "when did
+  # this happen" is a lie every test agrees with — isNotNull() passes against 1970-01-01 (#3882),
+  # and the same sentinel seeded an age gauge that fired WorkflowLivenessStale 15 minutes after
+  # every deploy for every daily workflow (#2239 Gap 2, #4208). 58 occurrences baselined at
+  # introduction; the ratchet only tightens, and a baseline entry that disappears fails too, so
+  # the list cannot rot.
+  - id: no-epoch-instant-default
+    name: "no `Instant = Instant.EPOCH` default in production sources (#3882/#4208 class, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A defaulted EPOCH timestamp is invisible to every assertion that discriminates by non-nullity, and fixing it later vacuums every test that discriminated by the defect's magnitude; the convention (caller supplies the time, or Clock injection) is fully decidable."
+    budget_seconds: 15   # 1.5s locally via run-gates.py --only; generous first setting
+    review_after: "2027-03-03"
+    selftest: python3 .github/scripts/check-no-epoch-instant-default.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-no-epoch-instant-default.py"]
+    min_subjects: 94    # 47+47 after aml + card-issuance burn-downs; lower this in each burn-down PR
+    run: |
+      python3 .github/scripts/check-no-epoch-instant-default.py --root .
+
+  # temporal-worker-switch-naming: six Temporal-worker services once carried six invented names
+  # for the same switch — an underivable name is why the fuzz harness needed a hard-coded list,
+  # and a drifted list is how a fuzz job reports a failure that never sent a request
+  # (2026-08-18 run). The one pre-convention name (lending.origination.worker.enabled) was
+  # renamed in the same follow-up; the convention and the (now empty) allowlist live in
+  # rules.yaml: temporal_worker_switch_naming.
+  - id: temporal-worker-switch-naming
+    name: "Temporal worker disable switches follow openbank.<service>.worker.enabled (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A disable switch whose name cannot be derived from the service name forces every consumer (fuzz harness, DR manifests, runbooks) to carry a drifting per-service list; the convention makes it computable."
+    budget_seconds: 10   # 0.5s locally via run-gates.py --only; generous first setting
+    review_after: "2027-03-03"
+    selftest: python3 .github/scripts/check-temporal-worker-switch-naming.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-temporal-worker-switch-naming.py"]
+    min_subjects: 6   # 6 worker.enabled switches today (2026-09-03)
+    run: |
+      python3 .github/scripts/check-temporal-worker-switch-naming.py --root .

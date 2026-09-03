@@ -33,14 +33,31 @@ spec:
           # no account. This is the exact silent data-loss that ran for 3 weeks, now made loud.
           # increase() over 1h: fires while records are still arriving and clears an hour after
           # they stop (the topic offset is monotonic, so a plain `> 0` would latch forever).
+          #
+          # TWO topic names, deliberately (#5752). account-service now dead-letters into the
+          # explicit `openbank.dlq.account.party-events-in`; the implicit
+          # `dead-letter-topic-party-events-in` it used before is still matched because (a) under an
+          # Argo Rollout old and new pods run side by side, so the old name keeps receiving during
+          # the cutover, and (b) whatever was parked there before it stays visible. A regex over
+          # both is what keeps this alert from going quiet by construction on the day the topic is
+          # renamed — the failure mode a rename introduces is an alert that can no longer fire, and
+          # nothing about it looks broken. Drop the old alternative once the topic is confirmed
+          # empty and the ACL is removed from kafka-account-mtls.yaml.
+          #
+          # The dots are NOT backslash-escaped on purpose. This is a YAML literal block scalar, so
+          # a backslash reaches PromQL verbatim, and PromQL's own double-quoted string then applies
+          # Go escape rules — `\.` is not a valid one there, and `\\.` would ask the regex for a
+          # literal backslash. An unescaped `.` matches itself; `=~` is fully anchored, so the only
+          # over-match would be a topic differing from these two in a separator character alone,
+          # and no such topic exists in kafka-dlq-topics.yaml.
           expr: |
-            increase(kafka_topic_partition_current_offset{topic="dead-letter-topic-party-events-in"}[1h]) > 0
+            increase(kafka_topic_partition_current_offset{topic=~"dead-letter-topic-party-events-in|openbank.dlq.account.party-events-in"}[1h]) > 0
           for: 5m
           labels:
             severity: critical
           annotations:
             summary: "Party events are being dead-lettered (account-service)"
-            description: "account-service dead-lettered at least one party event in the last hour — a well-formed event it could not project even after retries. Almost always a downstream dependency is down (sanctions-service, product-catalog, the accounts DB). Inspect `dead-letter-topic-party-events-in`; every record there is a customer action (likely a PARTY_CREATED → no account opened) awaiting replay once the dependency recovers."
+            description: "account-service dead-lettered at least one party event in the last hour — a well-formed event it could not project even after retries. Almost always a downstream dependency is down (sanctions-service, product-catalog, the accounts DB). Inspect `openbank.dlq.account.party-events-in` (and, for anything parked before #5752, `dead-letter-topic-party-events-in`); every record there is a customer action (likely a PARTY_CREATED → no account opened) awaiting replay once the dependency recovers."
         - alert: OnboardingAccountsNotFollowingParties
           # The disparity that names this incident: parties ARE being created but accounts are NOT
           # following. Silent when nothing is happening — no parties created means the left side is

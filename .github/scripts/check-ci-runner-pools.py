@@ -63,9 +63,10 @@ import gatelib  # noqa: E402  (path must be set first)
 
 # Declared in rules.yaml: ci_runners.pools, provisioned by no OpenTofu scale set.
 # Removing an entry requires either provisioning the pool or deleting its declaration.
-KNOWN_UNPROVISIONED = {
-    "openbank-batch": "issue #6458 — declared with an isolation_rationale, provisioned nowhere",
-}
+# Empty since ADR-0277: openbank-batch is provisioned by helm_release.arc_batch
+# (openbank-infra/aws/envs/sandbox-platform/arc-runners.tf). Keep this map — a
+# future declared-but-unprovisioned pool lands here WITH an issue reference.
+KNOWN_UNPROVISIONED: dict[str, str] = {}
 
 SCALE_SET_RE = re.compile(r'runnerScaleSetName\s*=\s*"([^"]+)"')
 PR_EVENTS = {"pull_request", "pull_request_target"}

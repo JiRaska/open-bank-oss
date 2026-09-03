@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: KYC Service API
-  version: 1.7.0
+  version: 1.8.0
   description: Know Your Customer case management — open cases, run checks, approve/reject.
   license:
     name: Apache-2.0
@@ -41,13 +41,11 @@ paths:
             enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
       responses:
         '200':
-          description: List of KYC cases with optional statusFilter echo
+          description: Paginated KYC cases with the applied status filter echoed when present.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/KycCaseResponse'
+                $ref: '#/components/schemas/KycCasePage'
     post:
       tags: [KYC]
       summary: Open a KYC case
@@ -104,6 +102,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KycCaseResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/kyc/cases/{id}/checks/{checkType}:
     put:
@@ -330,8 +330,29 @@ components:
         partyName:
           type: string
 
+    KycCasePage:
+      type: object
+      required: [items, total, page, size, statusFilter]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/KycCaseResponse'
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        page:
+          type: integer
+        size:
+          type: integer
+        statusFilter:
+          type: [string, 'null']
+          enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED, null]
+
     KycCaseResponse:
       type: object
+      required: [id, partyId, status, riskLevel, assignedTo, checks, notes, reviewedBy, reviewedAt, expiresAt, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -339,20 +360,59 @@ components:
         partyId:
           type: string
           format: uuid
-        caseType:
-          type: string
         status:
           type: string
+          enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
         riskLevel:
           type: string
+          enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
+        assignedTo:
+          type: [string, 'null']
         checks:
-          type: object
-          additionalProperties:
-            type: string
+          type: array
+          items:
+            $ref: '#/components/schemas/KycCheckResponse'
+        notes:
+          type: [string, 'null']
+        reviewedBy:
+          type: [string, 'null']
+        reviewedAt:
+          type: [string, 'null']
+          format: date-time
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
         createdAt:
           type: string
           format: date-time
         updatedAt:
+          type: string
+          format: date-time
+
+    KycCheckResponse:
+      type: object
+      required: [id, caseId, checkType, status, result, provider, performedAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        caseId:
+          type: string
+          format: uuid
+        checkType:
+          type: string
+          enum: [IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA]
+        status:
+          type: string
+          enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]
+        result:
+          type: [string, 'null']
+        provider:
+          type: [string, 'null']
+        performedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
           type: string
           format: date-time
 

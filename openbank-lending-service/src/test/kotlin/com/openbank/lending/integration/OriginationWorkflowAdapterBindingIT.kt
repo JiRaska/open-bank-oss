@@ -97,7 +97,7 @@ class InertOriginationWorkflowAdapterBindingIT {
 class TemporalEnabledProfile : QuarkusTestProfile {
     override fun getConfigOverrides(): Map<String, String> = mapOf(
         "openbank.temporal.enabled" to "true",
-        "lending.origination.worker.enabled" to "false",
+        "openbank.lending.worker.enabled" to "false",
     )
 }
 
@@ -105,6 +105,6 @@ class TemporalEnabledProfile : QuarkusTestProfile {
 class TemporalDisabledProfile : QuarkusTestProfile {
     override fun getConfigOverrides(): Map<String, String> = mapOf(
         "openbank.temporal.enabled" to "false",
-        "lending.origination.worker.enabled" to "false",
+        "openbank.lending.worker.enabled" to "false",
     )
 }
