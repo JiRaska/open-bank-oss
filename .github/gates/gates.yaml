@@ -4698,7 +4698,7 @@ gates:
     selftest: python3 .github/scripts/check-no-epoch-instant-default.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-no-epoch-instant-default.py"]
-    min_subjects: 94    # 47+47 after aml + card-issuance burn-downs; lower this in each burn-down PR
+    min_subjects: 80    # 40+40 after aml + card-issuance + fx burn-downs; lower this in each burn-down PR
     run: |
       python3 .github/scripts/check-no-epoch-instant-default.py --root .
 
