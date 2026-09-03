@@ -3066,6 +3066,26 @@ gates:
     run: |
       python3 .github/scripts/check-asvs-l3.py --enforce --baseline .github/asvs-l3-baseline.txt
 
+  # A contract test that asserts only the happy path proves the provider talks back, not
+  # that it refuses the wrong caller (ADR-0279 WS1 #3). Measured 2026-09-03: 104 of 108
+  # Pact test files fleet-wide carry no negative-auth case at all — the provider could
+  # drop authz enforcement and every contract stays green. Deliberately DIFF-SCOPED on
+  # the PR: a new or changed Pact/contract test file must carry a negative case
+  # (401/403/404 or an unauthorized marker); the 104-file debt is a tracked sweep
+  # (--fleet-report), not a PR blocker. ENFORCED.
+  - id: adversarial-contract-test
+    name: "adversarial contract tests — changed Pact/contract test needs a negative case (ADR-0279, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 10   # one git diff + a regex over the touched files
+    when: pull_request
+    needs_base: required
+    selftest: python3 .github/scripts/check-adversarial-contract-tests.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-adversarial-contract-tests.py"]
+    run: |
+      python3 .github/scripts/check-adversarial-contract-tests.py --since "${PR_DIFF_BASE}"
+
   # The cheapest drift proxy from #2314: the spec's declared dev port must equal the
   # service's quarkus.http.port. The 21 mismatches measured on 2026-07-29 were corrected
   # in the same PR that lands this gate, so it enforces from day one with no baseline.
