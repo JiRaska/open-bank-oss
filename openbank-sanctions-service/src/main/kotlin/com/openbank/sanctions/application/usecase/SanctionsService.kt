@@ -35,7 +35,7 @@ class SanctionsService(
         cmd: ScreenEntityCommand,
         targetLists: List<SanctionsListType>,
     ): Pair<SanctionsCheckStatus, List<SanctionsMatch>> {
-        val allNames = listOf(cmd.name) + cmd.aliases
+        val allNames = listOf(cmd.name) + cmd.aliases.filterNotNull()
         val matchMap = mutableMapOf<String, SanctionsEntryMatch>() // key=listType+externalId, keep best
 
         for (name in allNames) {
@@ -78,12 +78,18 @@ class SanctionsService(
     }
 
     override suspend fun screen(cmd: ScreenEntityCommand): SanctionsCheck {
+        // #7867: reject a null JSON array element with a 400 (IllegalArgumentException) before
+        // any dereference turns it into an NPE-driven 500. Jackson does not null-check
+        // collection elements, so `[null]` reaches here despite the Kotlin element type.
+        cmd.aliases.forEachIndexed { index, alias ->
+            requireNotNull(alias) { "aliases[$index] must not be null" }
+        }
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
         val targetLists = resolveTargetLists(cmd)
         val (status, matches) = performScreening(cmd, targetLists)
         val check = SanctionsCheck(
             id = UUID.randomUUID(), idempotencyKey = cmd.idempotencyKey,
-            entityType = cmd.entityType, name = cmd.name, aliases = cmd.aliases,
+            entityType = cmd.entityType, name = cmd.name, aliases = cmd.aliases.filterNotNull(),
             dateOfBirth = cmd.dateOfBirth, nationality = cmd.nationality,
             identifiers = cmd.identifiers, status = status, matches = matches,
             overallScore = matches.maxOfOrNull { it.matchScore } ?: 0.0,
