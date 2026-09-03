@@ -4,6 +4,7 @@
 import React from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import SegmentsPage from '@/app/segments/page'
 import { SessionProvider } from 'next-auth/react'
@@ -89,6 +90,96 @@ describe('audience library', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm approval' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
     expect(decisions).toBe(2)
+  })
+
+  it('moves initial focus to the safe Back action, never the destructive confirm', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        state: 'ok',
+        items: [{ name: 'tenured', version: 3, rules: ['tenure >= 30 days'], state: 'PENDING_APPROVAL', createdBy: 'maker.operator' }],
+      }),
+    })))
+
+    const session = { user: { roles: ['ROLE_OPERATOR'] }, expires: '2099-01-01' }
+    render(React.createElement(SessionProvider, { session }, React.createElement(LanguageProvider, null, React.createElement(SegmentsPage))))
+    await user.click(await screen.findByRole('button', { name: 'Review and approve' }))
+
+    expect(screen.getByRole('alertdialog')).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to review' })).toHaveFocus())
+  })
+
+  it('closes on Escape only while idle and restores focus to the exact trigger', async () => {
+    const user = userEvent.setup()
+    let resolveApprove: ((value: { ok: boolean; json: () => Promise<object> }) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.endsWith('/approve')) return new Promise(resolve => { resolveApprove = resolve })
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          state: 'ok',
+          items: [{ name: 'tenured', version: 3, rules: ['tenure >= 30 days'], state: 'PENDING_APPROVAL', createdBy: 'maker.operator' }],
+        }),
+      })
+    }))
+
+    const session = { user: { roles: ['ROLE_OPERATOR'] }, expires: '2099-01-01' }
+    render(React.createElement(SessionProvider, { session }, React.createElement(LanguageProvider, null, React.createElement(SegmentsPage))))
+    const trigger = await screen.findByRole('button', { name: 'Review and approve' })
+    await user.click(trigger)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to review' })).toHaveFocus())
+
+    // Idle: Escape dismisses and returns focus to the exact control that opened the review.
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    // Re-open, then start an in-flight approval: Escape must not discard it mid-flight.
+    await user.click(trigger)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to review' })).toHaveFocus())
+    await user.click(screen.getByRole('button', { name: 'Confirm approval' }))
+    await waitFor(() => expect(resolveApprove).toBeTruthy())
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('alertdialog')).toBeTruthy()
+
+    act(() => resolveApprove?.({ ok: true, json: async () => ({}) }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  })
+
+  it('restores focus to the audience catalogue when a successful approval removes the trigger', async () => {
+    // The approved audience stays in the catalogue (its state flips to APPROVED, replacing the
+    // "Review and approve" trigger with a "Use in campaign" link) — the catalogue landmark itself
+    // does not unmount, which is what makes it a stable focus target.
+    const user = userEvent.setup()
+    let decisions = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/approve')) {
+        decisions += 1
+        return { ok: true, json: async () => ({}) }
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          state: 'ok',
+          items: [{
+            name: 'tenured', version: 3, rules: ['tenure >= 30 days'], createdBy: 'maker.operator',
+            state: decisions > 0 ? 'APPROVED' : 'PENDING_APPROVAL',
+          }],
+        }),
+      }
+    }))
+
+    const session = { user: { roles: ['ROLE_OPERATOR'] }, expires: '2099-01-01' }
+    render(React.createElement(SessionProvider, { session }, React.createElement(LanguageProvider, null, React.createElement(SegmentsPage))))
+    const trigger = await screen.findByRole('button', { name: 'Review and approve' })
+    await user.click(trigger)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to review' })).toHaveFocus())
+    await user.click(screen.getByRole('button', { name: 'Confirm approval' }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(trigger).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Audience workspace' })).toHaveFocus())
   })
 
   it('reports lifecycle mutation errors locally without replacing the loaded catalogue', async () => {
