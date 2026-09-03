@@ -48,8 +48,32 @@ PSD2 service returns 503 rather than fail-open.
 ## 5. Residual risks / assumptions
 
 - **EBA Register sync lag:** revocations appear in EBA Register before the sync job runs (currently hourly). A revoked TPP can still call within the sync window — accepted risk, same as any real-time registry. Mitigation: emergency revocation via admin-UI propagates immediately.
-- **In-memory role cache TTL:** PSD2 service caches registry responses for a short TTL — a revoked TPP can call within the cache window. TTL is configurable (`openbank.tpp.cache-ttl-seconds`, default 60).
+- **~~In-memory role cache TTL~~ — this residual does not exist.** This entry described PSD2
+  service caching registry responses for a short, configurable TTL
+  (`openbank.tpp.cache-ttl-seconds`, default 60) and named the resulting window as a residual risk.
+  Neither half is real: the property occurs nowhere in the repository except this document, and
+  psd2-service has no registry-response cache at all — `TppRegistryClient` is a plain REST client
+  with no `@CacheResult`, no TTL and no store, so every authorisation check is a live call. The
+  only TTL in psd2's configuration is `idempotency-ttl-seconds`, which belongs to the idempotency
+  store and is unrelated. Kept rather than deleted because the correction runs the *safe* way — the
+  documented risk window is narrower than stated, not wider — and because a future cache would
+  reintroduce exactly this residual, so the reasoning is worth preserving. See the 2026-09-03
+  change-log entry.
 
 ## 6. Change log
+
+- **2026-09-03** — Doc correction, no behavior change: §5 listed an "In-memory role cache TTL"
+  residual risk, asserting that PSD2 service caches registry responses and that the window is tuned
+  by `openbank.tpp.cache-ttl-seconds` (default 60). **Neither the knob nor the cache exists.**
+  `git grep -l -F openbank.tpp.cache-ttl-seconds` returns only this document, and
+  `openbank-psd2-service/src/main/kotlin/com/openbank/psd2/infrastructure/client/TppRegistryClient.kt`
+  contains no caching of any kind — no `@CacheResult`, no TTL, no store — so each authorisation
+  check is a live call to the registry. The only cache-shaped thing in psd2 is the idempotency
+  store (`idempotency-ttl-seconds`), which serves replay protection on consent/payment creation and
+  never holds a TPP role.
+
+  Note which direction this correction runs: the real exposure is **smaller** than the document
+  claimed, not larger, so this is a stale-risk entry rather than a missing control. The EBA Register
+  sync-lag residual immediately above it is unaffected and remains the real revocation-window risk.
 
 - **2026-06-19** — Initial lightweight threat model (ADR-0030 D2).
