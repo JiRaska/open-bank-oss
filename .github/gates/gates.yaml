@@ -4680,6 +4680,7 @@ gates:
     group: kotlin
     mode: enforced
     rationale: "A defaulted EPOCH timestamp is invisible to every assertion that discriminates by non-nullity, and fixing it later vacuums every test that discriminated by the defect's magnitude; the convention (caller supplies the time, or Clock injection) is fully decidable."
+    budget_seconds: 15   # 1.5s locally via run-gates.py --only; generous first setting
     review_after: "2027-03-03"
     selftest: python3 .github/scripts/check-no-epoch-instant-default.py --self-test
     selftest_expect: pass
@@ -4698,6 +4699,7 @@ gates:
     group: kotlin
     mode: enforced
     rationale: "A disable switch whose name cannot be derived from the service name forces every consumer (fuzz harness, DR manifests, runbooks) to carry a drifting per-service list; the convention makes it computable."
+    budget_seconds: 10   # 0.5s locally via run-gates.py --only; generous first setting
     review_after: "2027-03-03"
     selftest: python3 .github/scripts/check-temporal-worker-switch-naming.py --self-test
     selftest_expect: pass
