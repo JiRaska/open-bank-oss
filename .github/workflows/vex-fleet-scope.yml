@@ -1,0 +1,33 @@
+# VEX fleet-scope gate (issues #6988, #7987) — keeps one shared-artifact CVE
+# from costing N hand-maintained statements, and fails the moment a component
+# overlay contradicts the fleet scope. Runs beside the weekly VEX triage and on
+# any change under openbank-libs/governance/vex/.
+name: VEX fleet scope
+
+on:
+  schedule:
+    - cron: "43 6 * * 1"   # weekly Monday 06:43 UTC, ahead of the 07:00 triage
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - openbank-libs/governance/vex/**
+      - .github/scripts/check-vex-fleet-scope.py
+      - .github/workflows/vex-fleet-scope.yml
+
+permissions:
+  contents: read
+
+jobs:
+  fleet-scope:
+    name: Fleet VEX valid, no overlay conflicts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Gate self-test
+        run: python3 .github/scripts/check-vex-fleet-scope.py --self-test
+
+      - name: Enforce fleet scope
+        run: python3 .github/scripts/check-vex-fleet-scope.py
