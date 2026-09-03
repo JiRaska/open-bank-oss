@@ -1095,7 +1095,13 @@ gates:
     selftest: python3 openbank-infra/scripts/check-cnpg-backup-declared.py --self-test
     selftest_expect: pass
     run: |
-      python3 openbank-infra/scripts/check-cnpg-backup-declared.py
+      # --enforce is REQUIRED alongside `mode: enforced`, and neither alone does anything
+      # (#2392, the same trap threat-model-updated-on-trust-boundary-change documents in
+      # place): check-cnpg-backup-declared.py ends `return 1 if args.enforce else 0`, so
+      # without the flag a finding prints ::error and still exits 0 — the runner sees rc=0
+      # and reports a permanently green gate. Measured 2026-09-02: 0 findings today, so this
+      # was latent rather than actively hiding one, which is exactly when it is cheap to fix.
+      python3 openbank-infra/scripts/check-cnpg-backup-declared.py --enforce
 
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
