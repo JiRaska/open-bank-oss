@@ -142,6 +142,15 @@ spec:
           patternType: literal
         operations: [Read]
         host: "*"
+      # #8432: TRANSACTION_FAILED notification requests for a scheme-rejected payment. The topic
+      # already carries ACLs, so without this grant every emit fails at runtime with
+      # TOPIC_AUTHORIZATION_FAILED and no unit test can see it.
+      - resource:
+          type: topic
+          name: openbank.notification.requests
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       - resource:
           type: topic
           name: payment.scheme-accepted
