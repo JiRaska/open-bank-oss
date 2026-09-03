@@ -110,13 +110,21 @@ class CardTest {
 
     @Test fun `withControls is allowed on a suspended card`() {
         val updated = card(status = CardStatus.SUSPENDED)
-            .withControls(contactless = true, online = false, atm = true, abroad = false)
+            .withControls(
+                contactless = true,
+                online = false,
+                atm = true,
+                abroad = false,
+                now = Instant.parse("2026-01-01T10:15:30Z"),
+            )
         assertThat(updated.onlineEnabled).isFalse()
     }
 
     @Test fun `withControls rejects a terminal card`() {
         assertThatThrownBy {
-            card(status = CardStatus.BLOCKED).withControls(true, true, true, true)
+            card(
+                status = CardStatus.BLOCKED,
+            ).withControls(true, true, true, true, Instant.parse("2026-01-01T10:15:30Z"))
         }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Cannot change controls")
@@ -141,11 +149,16 @@ class CardTest {
     @Test fun `cancel is allowed from BLOCKED - a lost card the customer then closes`() {
         val blocked = card(status = CardStatus.BLOCKED)
 
-        assertThat(blocked.cancel(null).status).isEqualTo(CardStatus.CANCELLED)
+        assertThat(blocked.cancel(null, Instant.parse("2026-01-01T10:15:30Z")).status).isEqualTo(CardStatus.CANCELLED)
     }
 
     @Test fun `cancel without a reason keeps the original block reason`() {
-        val lost = card(status = CardStatus.ACTIVE).block("Reported lost").cancel(null)
+        val lost = card(
+            status = CardStatus.ACTIVE,
+        ).block(
+            "Reported lost",
+            Instant.parse("2026-01-01T10:15:30Z"),
+        ).cancel(null, Instant.parse("2026-01-01T10:15:30Z"))
 
         assertThat(lost.status).isEqualTo(CardStatus.CANCELLED)
         assertThat(lost.blockedReason).isEqualTo("Reported lost")
@@ -154,20 +167,33 @@ class CardTest {
     @Test fun `cancel is terminal - a cancelled card can never transition again`() {
         val cancelled = card(status = CardStatus.CANCELLED)
 
-        assertThatThrownBy { cancelled.cancel("again") }
+        assertThatThrownBy { cancelled.cancel("again", Instant.parse("2026-01-01T10:15:30Z")) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Cannot cancel card in status CANCELLED")
-        assertThatThrownBy { cancelled.activate() }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { cancelled.block("fraud") }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { cancelled.suspend() }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { cancelled.resume() }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { cancelled.withLimits(1, 2) }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { cancelled.withControls(true, true, true, true) }
+        assertThatThrownBy {
+            cancelled.activate(Instant.parse("2026-01-01T10:15:30Z"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            cancelled.block("fraud", Instant.parse("2026-01-01T10:15:30Z"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            cancelled.suspend(Instant.parse("2026-01-01T10:15:30Z"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            cancelled.resume(Instant.parse("2026-01-01T10:15:30Z"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            cancelled.withLimits(1, 2, Instant.parse("2026-01-01T10:15:30Z"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { cancelled.withControls(true, true, true, true, Instant.parse("2026-01-01T10:15:30Z")) }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     @Test fun `cancel rejects an expired card`() {
-        assertThatThrownBy { card(status = CardStatus.EXPIRED).cancel("closing") }
+        assertThatThrownBy {
+            card(status = CardStatus.EXPIRED)
+                .cancel("closing", Instant.parse("2026-01-01T10:15:30Z"))
+        }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Cannot cancel card in status EXPIRED")
     }
