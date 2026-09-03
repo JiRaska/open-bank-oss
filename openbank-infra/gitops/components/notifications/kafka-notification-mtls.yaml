@@ -91,6 +91,14 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # #8432: CONSENT_GRANTED / CONSENT_REVOKED (ConsentNotificationConsumer) — a third reader
+      # of the topic campaign-service and audit-service already consume.
+      - resource:
+          type: topic
+          name: openbank.consent.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: group
           name: notification-service
@@ -112,6 +120,12 @@ spec:
       - resource:
           type: group
           name: notification-service-delegation
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: notification-service-consent
           patternType: literal
         operations: [Read]
         host: "*"

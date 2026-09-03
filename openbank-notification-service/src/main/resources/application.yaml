@@ -208,6 +208,19 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.kyc.events.notification.dlq
+      # #8432: CONSENT_GRANTED / CONSENT_REVOKED, previously declared but never produced.
+      # A third reader of a topic consent-service already publishes through its outbox and
+      # campaign-service already consumes (ConsentNotificationConsumer).
+      consent-events-in:
+        connector: smallrye-kafka
+        # client.id / group.id / auto.offset.reset: same dotted-key YAML bug as above —
+        # set via the gitops ConfigMap instead (issue #686). NOTE this channel's offset reset
+        # is `latest`, unlike the other three: it is a NEW consumer group on a topic that has
+        # been live for months, and `earliest` would replay every historical consent as a fresh
+        # push — telling customers a third party had just been granted access they in fact
+        # granted, and often revoked, long ago.
+        topic: openbank.consent.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 # ADR-0155 four-eyes, opted into by opsmessage.compose (ADR-0176 D5). Default false, matching
 # every other four-eyes-wired service (lending, balance, sepa-payment, sepa-instant, account) —
