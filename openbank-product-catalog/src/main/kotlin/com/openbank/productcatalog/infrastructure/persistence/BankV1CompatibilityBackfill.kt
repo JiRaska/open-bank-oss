@@ -98,9 +98,9 @@ class BankV1CompatibilityBackfill(
                 sessions.withTransaction { session ->
                     session.find(ProductEntity::class.java, detached.id).flatMap { entity ->
                         checkNotNull(entity) { "legacy product ${detached.id} disappeared during reconciliation" }
-                        val product = mapper.readValue(
+                        val product = LegacyProductJson.readProduct(
+                            mapper,
                             entity.doc,
-                            com.openbank.productcatalog.domain.Product::class.java,
                         ).copy(id = entity.id.toString(), revision = entity.revision)
                         projector.ensureMapped(
                             session,
