@@ -237,7 +237,7 @@ simply stops existing).
   (default true; `%test` false) so @QuarkusTest boot does not connect to an absent Temporal frontend;
   a test `WorkflowClientTestProducer` backs the CDI `WorkflowClient` with an in-process
   `TestWorkflowEnvironment`. **No new trust boundary or external caller** — the same screening/fraud/
-  scheme/settlement steps now run inside Temporal activities (each already OIDC/mTLS-bounded), with the
+  scheme/settlement steps now run inside Temporal activities (each already OIDC-bounded; mTLS is NOT deployed for service-to-service HTTP — the only PeerAuthentication/DestinationRule in the tree is `openbank-infra/k8s/base/istio.yaml`, which no ArgoCD application applies, #1914. Kafka mTLS is real and separate), with the
   workflow adding durable retries + reverse compensation. The prerequisite that the Temporal path was
   missing shadow fraud scoring was fixed first (#2068). Rollback: revert the commit (the flag +
   in-service flow return). Risk class = **availability/correctness** (durable orchestration replaces a

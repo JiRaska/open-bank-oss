@@ -50,6 +50,25 @@ class SanctionsServiceTest {
     }
 
     @Test
+    fun `screen rejects a null JSON array element with IllegalArgumentException`(): Unit = runBlocking {
+        // #7867: Jackson null-checks constructor parameters but not collection elements, so
+        // `{"aliases": [null]}` arrives as a list holding a null. The guard must reject it
+        // (IllegalArgumentException -> 400) before the first dereference turns it into a 500.
+        var thrown: Throwable? = null
+        try {
+            service.screen(sampleScreenCommand(name = "John Doe", aliases = listOf("JD", null)))
+        } catch (e: IllegalArgumentException) {
+            thrown = e
+        }
+
+        assertThat(thrown)
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("aliases[1]")
+        coVerify(exactly = 0) { repo.findByIdempotencyKey(any()) }
+        coVerify(exactly = 0) { repo.saveWithEvent(any(), any()) }
+    }
+
+    @Test
     fun `screen detects HIT when entry repo returns a high-score match`(): Unit = runBlocking {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
         coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
@@ -276,7 +295,7 @@ class SanctionsServiceTest {
     private fun sampleScreenCommand(
         idempotencyKey: String = "idem-1",
         name: String = "John Doe",
-        aliases: List<String> = emptyList(),
+        aliases: List<String?> = emptyList(),
     ) = ScreenEntityCommand(
         idempotencyKey = idempotencyKey,
         entityType = EntityType.INDIVIDUAL,

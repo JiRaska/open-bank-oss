@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.0...sanctions-service-v0.11.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **psd2,sanctions:** a null JSON array element is a 400, not a 500 ([#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)) ([#8003](https://github.com/JiRaska/open-bank-oss/issues/8003)) ([28eb8a3](https://github.com/JiRaska/open-bank-oss/commit/28eb8a3dee81237b6f07b5bf9e6e0f4dbe4e8f0f))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.10.1...sanctions-service-v0.11.0) (2026-08-24)
 
 
