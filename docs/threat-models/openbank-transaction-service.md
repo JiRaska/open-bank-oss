@@ -294,13 +294,24 @@ what the catalogue may hold.
   **auditability** half is mitigated by `MergeSweepDescriptionTest`, which pins the server-minted
   description's prefix, its merge reference and both party ids in survivor-last order, and asserts
   it names no PII — that string is the only thing distinguishing a merge correction from an ordinary
-  transfer in the trial balance. The **segregation-of-duties** half has no endpoint test: a
-  `TransactionResourceMergeSweepTest` was named here but is in no Kotlin source, and no other test
-  references the sweep endpoint. What gates it today is declarative only —
-  `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` plus `@Authorize(action = "transaction.sweep")` on
-  `TransactionResource.mergeSweep`. `authz.four-eyes.enforce` remains `false`
-  (`AUTHZ_FOUR_EYES_ENFORCE:false`); the verb is inert until that flip, so the four-eyes leg of the
-  segregation-of-duties claim is not enforced in any environment today.
+  transfer in the trial balance. The
+  **segregation-of-duties** half is weaker than this entry claimed, in three separable ways, and
+  only the first is a missing artifact. (1) `TransactionResourceMergeSweepTest`, named here as the
+  mitigation, is in **no** file of any kind — `git grep -n TransactionResourceMergeSweepTest` finds
+  nothing on any path, so the name resolves to nothing rather than to a renamed class. (2) What does
+  cover `mergeSweep` is `TransactionSecurityContractTest`'s sweep-all assertion, which walks every
+  HTTP endpoint on `TransactionResource` by reflection and requires each to be `@RolesAllowed` and
+  never `@PermitAll` — so the endpoint cannot silently become permit-all, and that much of the claim
+  does hold. Its **specific** role set is not pinned, unlike `listTransactions`, `searchTransactions`,
+  `getTransaction` and `initiateTransaction`, which the same class pins by name: widening
+  `mergeSweep` from OPERATOR/ADMIN to any other non-empty role set would pass every test in the
+  module. (3) No test exercises the sweep endpoint over HTTP at all. What gates it today is therefore
+  declarative — `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` plus
+  `@Authorize(action = "transaction.sweep")` on `TransactionResource.mergeSweep` — with the
+  never-permit-all half locked by test and the exact role set not.
+  `authz.four-eyes.enforce` remains `false` (`AUTHZ_FOUR_EYES_ENFORCE:false`); the verb is inert
+  until that flip, so the four-eyes leg of the segregation-of-duties claim is not enforced in any
+  environment today.
 - **2026-08-27** — Transaction-initiation trace contract. `TransactionService` emits the internal
   `transaction.initiate` span only with the terminal transaction status. It deliberately excludes
   amount, account/party identifiers, description, idempotency key and payment metadata. Risk class
