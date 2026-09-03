@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.19.0...domestic-payment-v0.19.1) (2026-09-03)
+
+
+### Security
+
+* **domestic-payment:** bind delegated spend atomically ([#8252](https://github.com/JiRaska/open-bank-oss/issues/8252)) ([c763440](https://github.com/JiRaska/open-bank-oss/commit/c7634401bf8e5cc8690b24015acd537c19def591))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.18.0...domestic-payment-v0.19.0) (2026-08-26)
 
 
