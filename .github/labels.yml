@@ -19,6 +19,9 @@ labels:
   - name: vex-triage
     color: "b60205"
     description: "CVE awaiting a human VEX verdict; the issue's age is the vuln_management SLA clock."
+  - name: kev-listed
+    color: "b60205"
+    description: "CVE on CISA KEV (actively exploited) — critical SLA regardless of CVSS (ADR-0279)."
   - name: "severity:critical"
     color: "b60205"
     description: "vuln_management SLA: 7 days."
@@ -33,6 +36,9 @@ labels:
     description: "vuln_management SLA: 180 days."
 
   # --- Type: what kind of work this is -------------------------------------------------
+  - name: security
+    color: "b60205"
+    description: "Security defect/hardening. Closing by PR requires a regression test (security-regression-test.yml)."
   - name: bug
     color: "d73a4a"
     description: "A defect in shipped behavior."

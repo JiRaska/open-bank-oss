@@ -428,6 +428,45 @@ class CustomerEdgeResource(
      * this edge has an M2M credential. This projection is therefore also the single source for
      * the product eligibility check at [openTermDeposit].
      */
+    /**
+     * The customer-facing product catalogue: what this customer may open today.
+     *
+     * Generalises the projection [listTermDepositOffers] already applies to term deposits, for the
+     * same reason and with the same filters — the operator catalogue holds draft, private,
+     * withdrawn and future-dated products, and none of them may become discoverable merely
+     * because this edge holds an M2M credential.
+     *
+     * **Rates are read, never derived.** A savings product prices by balance tier and a term
+     * deposit by its own fixed term, so this endpoint reports the catalogue's numbers and the
+     * shape they came in. It does not flatten tiers into one "from" rate or interpolate a term
+     * curve: the app would then be quoting a price the bank never set. Where a product carries no
+     * rate at all — a current account — the field is absent rather than zero, because 0 % is a
+     * price and "not priced" is not.
+     *
+     * `type` narrows the list; omitted, every discoverable type comes back.
+     */
+    @GET
+    @Path("/products")
+    @Authorize(action = "customer.products.read")
+    @Blocking
+    fun listProductOffers(@QueryParam("type") type: String?): Response {
+        val customer = customer()
+        val requested = type?.takeIf { it.isNotBlank() }?.uppercase()
+        if (requested != null && requested !in CUSTOMER_PRODUCT_TYPES) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(mapOf("error" to "Unsupported product type"))
+                .build()
+        }
+        val query = requested?.let { "?type=$it&status=ACTIVE" } ?: "?status=ACTIVE"
+        val catalog = upstream.get("$productCatalogUrl/api/v1/products$query", customer.partyId.toString())
+        if (catalog.status != 200) return productCatalogueUnavailable()
+        val products = parseJson(catalog)?.takeIf { it.isArray } ?: return productCatalogueUnavailable()
+        val today = LocalDate.now(clock)
+        val offers = objectMapper.createArrayNode()
+        products.forEach { product -> productOffer(product, today)?.let(offers::add) }
+        return Response.ok(objectMapper.createObjectNode().set<ArrayNode>("items", offers)).build()
+    }
+
     @GET
     @Path("/products/term-deposits")
     @Authorize(action = "customer.products.read")
@@ -4874,6 +4913,60 @@ class CustomerEdgeResource(
         }
     }
 
+    /**
+     * Customer-safe projection of one catalogue product, or null when it is not discoverable.
+     *
+     * Carries only what a customer needs to choose: identity, copy, currency, limits, and the
+     * price IN THE SHAPE THE CATALOGUE PRICES IT — `annualRate` for a term deposit (which has one
+     * fixed rate for one fixed term), `interestTiers` for savings (which prices by balance), and
+     * neither for a current account. Internal fields — version history, eligibility segments,
+     * draft state, operator notes — never cross.
+     */
+    private fun productOffer(product: JsonNode, today: LocalDate): ObjectNode? {
+        if (!isDiscoverableProduct(product) || !isCurrentlyValid(product, today)) return null
+        val type = product.path("type").asText()
+        return objectMapper.createObjectNode().apply {
+            put("id", product.path("id").asText())
+            put("code", product.path("code").asText())
+            put("name", product.path("name").asText())
+            put("type", type)
+            put("currency", product.path("currency").asText())
+            product.get("shortDescription")?.takeIf { !it.isNull }?.let { set<JsonNode>("shortDescription", it) }
+            product.get("description")?.takeIf { !it.isNull }?.let { set<JsonNode>("description", it) }
+            product.get("minBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("minBalance", it) }
+            product.get("maxBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("maxBalance", it) }
+            // The monthly account fee, when the catalogue states one. Zero IS a price here — "no
+            // fee, forever" is the current account's whole pitch — so unlike a rate it is copied
+            // even when it is 0.
+            product.get("fee")?.takeIf { !it.isNull }?.let { set<JsonNode>("fee", it) }
+            // Price, in the catalogue's own shape. Never flattened, never interpolated.
+            product.get("termDepositConfig")?.takeIf { it.isObject }?.let { configuration ->
+                put("annualRate", configuration.path("interestRateAnnual").asDouble())
+                set<JsonNode>("term", configuration)
+            }
+            product.get("savingsConfig")?.takeIf { it.isObject }?.let { configuration ->
+                set<JsonNode>("savings", configuration)
+            }
+            set<JsonNode>("termsAndConditions", product.path("termsAndConditions"))
+        }
+    }
+
+    /**
+     * Discoverability, deliberately identical to [isDiscoverableTermDeposit] apart from the type
+     * gate: ACTIVE, public, identifiable, priced in a currency. A product failing any of these is
+     * invisible rather than greyed out — an offer the customer cannot take is not an offer.
+     */
+    private fun isDiscoverableProduct(product: JsonNode): Boolean =
+        product.path("type").asText() in CUSTOMER_PRODUCT_TYPES &&
+            product.path("status").asText() == "ACTIVE" &&
+            product.path("isPublic").asBoolean(false) &&
+            product.path("id").asText().isNotBlank() &&
+            product.path("currency").asText().isNotBlank()
+
+    private fun productCatalogueUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+        .entity(mapOf("error" to "Product catalogue unavailable"))
+        .build()
+
     private fun isDiscoverableTermDeposit(product: JsonNode): Boolean =
         product.path("type").asText() == "TERM_DEPOSIT" &&
             product.path("status").asText() == "ACTIVE" &&
@@ -4911,6 +5004,17 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+
+        /**
+         * The product types a customer may discover and open from the app.
+         *
+         * An allow-list, not a deny-list: MORTGAGE, CREDIT_CARD, OVERDRAFT and INVESTMENT exist in
+         * the catalogue and are deliberately absent — each needs its own suitability and disclosure
+         * journey, and surfacing one here would let the app offer a regulated product with no path
+         * to take it. A new type becomes customer-visible by being added here, on purpose.
+         */
+        internal val CUSTOMER_PRODUCT_TYPES = setOf("CURRENT", "SAVINGS", "TERM_DEPOSIT")
+
         /**
          * The ADR-0269 credit consents, as the app's field name → the consent-service scope.
          *

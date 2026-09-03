@@ -37,14 +37,14 @@ class ClearingEventPublisherImpl @Inject constructor(
         private const val SOURCE_SERVICE = "clearing-service"
     }
 
-    override fun publishBatchSettled(batch: ClearingBatch): Uni<Void> {
-        val message = OutboxMessage(
-            aggregateId = batch.id,
-            eventType = BATCH_SETTLED_EVENT,
-            payload = batchSettledPayload(batch),
-        )
-        return Panache.withTransaction { outboxRepo.persistInTransaction(message) }
-    }
+    override fun publishBatchSettled(batch: ClearingBatch): Uni<Void> =
+        Panache.withTransaction { outboxRepo.persistInTransaction(batchSettledMessage(batch)) }
+
+    override fun batchSettledMessage(batch: ClearingBatch): OutboxMessage = OutboxMessage(
+        aggregateId = batch.id,
+        eventType = BATCH_SETTLED_EVENT,
+        payload = batchSettledPayload(batch),
+    )
 
     /**
      * The `batch.settled` JSON body, split out from [publishBatchSettled] so it can be asserted
