@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.240.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.239.1...admin-ui-v0.240.0) (2026-09-03)
+
+
+### Features
+
+* **admin-ui:** add supply-chain (SBOM drift) pillar to security excellence ([#8480](https://github.com/JiRaska/open-bank-oss/issues/8480)) ([92b3d14](https://github.com/JiRaska/open-bank-oss/commit/92b3d145107cf9bbbf3ac29b6557f8a8fe4a94dc)), closes [#8386](https://github.com/JiRaska/open-bank-oss/issues/8386)
+
 ## [0.239.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.239.0...admin-ui-v0.239.1) (2026-09-03)
 
 
