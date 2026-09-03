@@ -364,7 +364,7 @@ paths:
               schema: { $ref: '#/components/schemas/DelegationLifecycleApprovalResponse' }
         '403': { description: Self-decision, non-human principal, or missing operator role }
         '404': { description: Mutation capability is disabled, or approval not found }
-        '409': { description: Stale proposal, conflicting terminal decision, or an illegal lifecycle transition }
+        '409': { description: Approval execution unavailable, or conflicting terminal decision — a stale proposal predating the revision-safe lifecycle seam, a grant revision changed since proposal, or an illegal lifecycle transition }
   /api/v1/delegations/check:
     post:
       tags: [Delegations]
