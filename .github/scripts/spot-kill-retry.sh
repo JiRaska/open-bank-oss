@@ -26,7 +26,22 @@
 # RATE LIMIT vs PERMISSION DENIAL
 # On GitHub both are HTTP 403 and are told apart only by the message text (`API rate limit
 # exceeded` / `secondary rate limit` vs `Resource not accessible by integration`). The status
-# code alone therefore cannot classify, which is why `is_transient` matches on text.
+# code alone therefore cannot classify, which is why the classification matches on TEXT.
+#
+# WHERE THE RETRY LIVES NOW (issues #6853, #7976)
+# This script used to carry its own `is_transient` + backoff loop. It was correct about WHICH
+# failures are transient and wrong about WHAT TO DO with a rate limit: three attempts at
+# 15s/30s spend 45 seconds against an installation limit whose window is MINUTES, so the limit
+# is still in force when the last attempt lands. Measured on run 33738356244 (2026-09-03): the
+# job ran 50 seconds, logged `jobs API attempt 1/3, 2/3, 3/3 failed ... API rate limit exceeded
+# for installation (HTTP 403)`, answered `decision=jobs-unreadable` and exited 1 — leaving run
+# 33737873956, a genuine `cancelled` reclaim, stranded at attempt 1 exactly as #6255 had.
+#
+# The loop is therefore `gh_retry` from `.github/scripts/gh-retry.sh`, which waits until the
+# limit actually RESETS (bounded by GH_RETRY_MAX_WAIT_SECONDS) for the rate-limit class and
+# backs off exponentially for the 5xx/connection class. There is now ONE classifier in the
+# fleet rather than one per script — which is the whole reason that library exists, and it had
+# ZERO callers from the day it landed (#8371) until this change.
 #
 # "COULD NOT READ" IS NOT A PASS HERE
 # `.github/CLAUDE.md` records that a gate should render an unreadable corpus as a notice + exit
@@ -55,12 +70,30 @@
 #   RUN_URL            its html_url (for the human-readable notices)
 #   GITHUB_STEP_SUMMARY  optional; the `decide` table is appended here when set
 #   GH_BIN             optional; the `gh` executable (the self-test points it at a stub)
-#   SPOT_KILL_BACKOFF_BASE  optional; seconds multiplier for the backoff (default 15, 0 in tests)
+#   SPOT_KILL_ATTEMPTS      optional; attempts per API call (default 5)
+#   GH_RETRY_MAX_WAIT_SECONDS optional; cap on a single wait (default 600; 0 in tests)
 set -euo pipefail
 
+# shellcheck source=.github/scripts/gh-retry.sh
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/gh-retry.sh"
+
 GH_BIN="${GH_BIN:-gh}"
-BACKOFF_BASE="${SPOT_KILL_BACKOFF_BASE:-15}"
-ATTEMPTS="${SPOT_KILL_ATTEMPTS:-3}"
+# 5, not 3. With reset-aware waiting an attempt costs a wait rather than a fixed 15s, so the
+# question this number answers changed: it is no longer "how many quick retries" but "how many
+# reset windows do we sit through before handing a human the run". Four waits capped at 600s
+# bound the job at ~40 min, which `timeout-minutes` in the workflow backstops.
+ATTEMPTS="${SPOT_KILL_ATTEMPTS:-5}"
+GH_RETRY_MAX_WAIT_SECONDS="${GH_RETRY_MAX_WAIT_SECONDS:-600}"
+# The reset probe inside gh-retry.sh must go through the SAME `gh` this script uses, or the
+# self-test's scripted stub never sees it and its call counter desynchronises.
+GH_RETRY_GH_BIN="${GH_BIN}"
+export GH_RETRY_GH_BIN GH_RETRY_MAX_WAIT_SECONDS
+# `with_retry` is called inside a command substitution — a subshell — so it cannot hand the
+# error text back in a variable. That is why `decision=jobs-unreadable` printed `(last: unknown)`
+# on run 33738356244 while the rate-limit text was right there. A file crosses the subshell.
+RETRY_ERROR_FILE="${RETRY_ERROR_FILE:-$(mktemp)}"
+GH_RETRY_LAST_ERROR_FILE="${RETRY_ERROR_FILE}"
+export GH_RETRY_LAST_ERROR_FILE
 RETRY_LAST_ERROR=""
 
 # `-R` ON EVERY CALL IS LOAD-BEARING (issue #2841/#2898). This runs in a job with no
@@ -69,16 +102,10 @@ RETRY_LAST_ERROR=""
 # #2330 fail 208 times in silence. Do not drop the flag and do not "fix" it with a checkout.
 gh_() { "${GH_BIN}" "$@"; }
 
-# A transient failure is one where trying again can succeed. Matched on TEXT, never on status
-# code — see the header on 403 being both a rate limit and a permission denial.
-is_transient() {
-  case "$1" in
-    *"rate limit"*|*"Rate Limit"*|*"secondary rate"*) return 0 ;;
-    *"HTTP 5"*|*"Server Error"*|*"HTTP 429"*)         return 0 ;;
-    *"connection reset"*|*"EOF"*|*"timeout"*|*"Timeout"*|*"no such host"*|*"TLS handshake"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+# `is_transient` used to live here, a second implementation of the classification `gh-retry.sh`
+# already carried. Two copies of one rule is exactly the drift that library exists to remove, so
+# the classification is now `_gh_retry_classify` and this script keeps only what is SPECIFIC to
+# it: the "already running" answer below.
 
 decide() { # decide <decision> <human sentence>
   echo "spot-kill-auto-retry run=${RUN_ID} conclusion=${CONCLUSION} decision=$1"
@@ -87,40 +114,47 @@ decide() { # decide <decision> <human sentence>
   fi
 }
 
+# One attempt, adapted to what `gh_retry` expects. Two jobs the library cannot do for us:
+#
+#  1. "Already running" is neither transient nor an error — the substance this control exists to
+#     achieve has ALREADY happened (issue #5489, measured on run 32100417490). It has to become a
+#     SUCCESS here, BEFORE gh_retry sees it, because the library would classify that text as
+#     `final` and escalate a run that is in fact being re-run.
+#  2. `gh` writes its error to stderr and this script's callers read it as stdout (the old
+#     wrapper's `2>&1`). gh_retry classifies on STDERR, so merge, then put the text back on
+#     stderr when the call actually failed.
+_attempt() { # _attempt <cmd...>
+  local out rc=0
+  out="$("$@" 2>&1)" || rc=$?
+  if [ "${rc}" -eq 0 ]; then printf '%s' "${out}"; return 0; fi
+  case "${out}" in
+    *"already running"*)
+      echo "target is already running (race with a prior attempt or GitHub's own mechanism) — nothing to do, treating as success" >&2
+      printf '%s' "${out}"; return 0 ;;
+  esac
+  printf '%s\n' "${out}" >&2
+  return "${rc}"
+}
+
 # Retry wrapper shared by BOTH the detection query and the re-run call. Before #6255 only the
-# re-run had one; the asymmetry was the defect, so there is now exactly one implementation and
-# it cannot drift.
+# re-run had one; the asymmetry was the defect. The loop itself is now `gh_retry` (see the
+# header) so the classification cannot drift from the rest of the fleet's automation.
 with_retry() { # with_retry <label> <cmd...>  -> stdout of the successful call
+  local out rc=0
   local label="$1"; shift
-  local out attempt
-  out=""
-  for (( attempt=1; attempt<=ATTEMPTS; attempt++ )); do
-    if out="$("$@" 2>&1)"; then
-      printf '%s' "${out}"
-      if [ "${attempt}" -gt 1 ]; then
-        echo "${label} succeeded on attempt ${attempt}/${ATTEMPTS} after a transient error" >&2
-      fi
-      return 0
-    fi
-    echo "${label} attempt ${attempt}/${ATTEMPTS} failed: ${out}" >&2
-    # "Already running" is neither transient nor an error: the substance this control exists to
-    # achieve has ALREADY happened (issue #5489, measured on run 32100417490). Matched first so
-    # it can fall into neither branch below.
-    case "${out}" in
-      *"already running"*)
-        echo "${label}: target is already running (race with a prior attempt or GitHub's own mechanism) — nothing to do, treating as success" >&2
-        printf '%s' "${out}"; return 0 ;;
-    esac
-    if ! is_transient "${out}"; then
-      echo "::error title=spot-kill auto-retry::Non-transient error from ${label}; not retrying: ${out}" >&2
-      RETRY_LAST_ERROR="${out}"; return 1
-    fi
-    if [ "${attempt}" -lt "${ATTEMPTS}" ]; then
-      sleep $(( attempt * BACKOFF_BASE ))
-    fi
-  done
-  echo "::error title=spot-kill auto-retry::${label} failed ${ATTEMPTS}/${ATTEMPTS} times on ${RUN_URL:-run ${RUN_ID}} (last: ${out}). Needs a manual re-run." >&2
-  RETRY_LAST_ERROR="${out}"; return 1
+  : > "${RETRY_ERROR_FILE}"
+  # stderr — gh_retry's own `attempt N/M` warnings AND the failing call's text — is passed
+  # through to the log; only stdout is the value.
+  out="$(gh_retry "${ATTEMPTS}" -- _attempt "$@")" || rc=$?
+  if [ "${rc}" -ne 0 ]; then
+    # Deliberately NOT "failed ${ATTEMPTS}/${ATTEMPTS} times": gh_retry stops at the first
+    # NON-transient answer, so a permission denial gets here after ONE call. Asserting the
+    # full count would put a number in the log that the run never reached — the `attempt N/M`
+    # warnings gh_retry emits above are the record of what actually happened.
+    echo "::error title=spot-kill auto-retry::${label} failed on ${RUN_URL:-run ${RUN_ID}} (up to ${ATTEMPTS} attempts; a non-transient error stops at the first). Needs a manual re-run." >&2
+    return 1
+  fi
+  printf '%s' "${out}"
 }
 
 # Both branches query attempt 1 explicitly. `/actions/runs/<id>/jobs` returns the LATEST
@@ -157,6 +191,10 @@ main() {
   fi
 
   if ! count="$(with_retry "jobs API" jobs_query "${q}")" || [ -z "${count}" ]; then
+    # The error text comes off the FILE, not the variable: `with_retry` ran inside the command
+    # substitution above, i.e. in a subshell, so any variable it set is already gone. That is
+    # why run 33738356244 printed `(last: unknown)` about a rate limit it had read in full.
+    RETRY_LAST_ERROR="$(tr '\n' ' ' < "${RETRY_ERROR_FILE}" 2>/dev/null | cut -c1-300)"
     # See the header: for THIS control an unreadable corpus is not a pass. Exiting 1 is what
     # routes it to raise-issue, because a reclaimed run that nobody re-runs sits red forever.
     echo "::error title=spot-kill auto-retry::Could not read the jobs of ${RUN_URL:-${RUN_ID}} (last: ${RETRY_LAST_ERROR:-unknown}); NOT re-running. A genuine reclaim here needs a MANUAL re-run." >&2
@@ -255,13 +293,21 @@ FIX
  {"name":"build (party)","conclusion":"success","steps":[{"name":"Gradle build","conclusion":"success"}]}]}
 FIX
 
-  # Assign the VARIABLE, not just the env var: `BACKOFF_BASE` is read from the environment at
-  # script startup, which is before this function runs, so exporting `SPOT_KILL_BACKOFF_BASE`
-  # here changes nothing. Measured: the suite took 196 s of pure `sleep` at the default 15 s
-  # backoff, and every case still passed — a self-test can be right about behaviour and wrong
-  # about what it is exercising, and the only tell was 0% CPU.
-  BACKOFF_BASE=0
+  # Assign the VARIABLE, not just the env var: the cap is read from the environment at script
+  # startup, which is before this function runs, so exporting it here changes nothing. Measured
+  # on the pre-library version: the suite took 196 s of pure `sleep` at the default backoff and
+  # every case still passed — a self-test can be right about behaviour and wrong about what it
+  # is exercising, and the only tell was 0% CPU.
+  #
+  # 0 is also what keeps the suite HERMETIC: at a zero cap `gh_retry` skips its rate-limit reset
+  # probe entirely, so no real `gh api rate_limit` call is issued and the stub's call counter
+  # stays in step with its script.
+  GH_RETRY_MAX_WAIT_SECONDS=0
+  export GH_RETRY_MAX_WAIT_SECONDS
   export GH_BIN="${tmp}/gh"
+  GH_RETRY_GH_BIN="${tmp}/gh"; export GH_RETRY_GH_BIN
+  RETRY_ERROR_FILE="${tmp}/last-error"; GH_RETRY_LAST_ERROR_FILE="${RETRY_ERROR_FILE}"
+  export GH_RETRY_LAST_ERROR_FILE
   export GITHUB_REPOSITORY="owner/repo" RUN_ID=1 RUN_URL="http://x/1"
   unset GITHUB_STEP_SUMMARY || true
 
@@ -299,10 +345,14 @@ FIX
 
   # ── the #6255 regression, in both directions ───────────────────────────────────────────────
   case_ "rate-limited jobs query recovers and still re-runs" cancelled 0 1 "1|${RL}" "1|${RL}" "0|@reclaim" "0|ok"
-  case_ "jobs query rate-limited 3/3 escalates (exit 1)"     cancelled 1 0 "1|${RL}" "1|${RL}" "1|${RL}"
+  case_ "jobs query rate-limited 5/5 escalates (exit 1)"     cancelled 1 0 "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}"
   case_ "jobs query permission-denied escalates immediately" cancelled 1 0 "1|${PERM}"
   # The `failure` branch had the same hole and used to answer exit 0 (green, silent).
-  case_ "rate-limited jobs query on the failure branch escalates" failure 1 0 "1|${RL}" "1|${RL}" "1|${RL}"
+  case_ "rate-limited jobs query on the failure branch escalates" failure 1 0 "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}"
+  # THE #6853/#7976 CASE: an installation rate limit whose window is MINUTES. The limit is
+  # still in force for the first four attempts and has reset by the fifth.
+  case_ "a rate limit outlasting the tight window still re-runs (#6853, #7976)" cancelled 0 1 \
+    "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}" "0|@reclaim" "0|ok"
 
   # ── the failure branch's signature ─────────────────────────────────────────────────────────
   case_ "partial spot-kill (failure) re-runs the failed jobs" failure 0 1 "0|@partial-kill" "0|ok"
@@ -311,8 +361,29 @@ FIX
   # ── the re-run call's own error classes ────────────────────────────────────────────────────
   case_ "rerun 502 then success"           cancelled 0 2 "0|@reclaim" "1|failed to rerun: HTTP 502: Server Error" "0|ok"
   case_ "rerun already-running is success" cancelled 0 1 "0|@reclaim" "1|run 1 cannot be rerun; This workflow is already running"
-  case_ "rerun rate-limited 3/3 escalates" cancelled 1 3 "0|@reclaim" "1|${RL}" "1|${RL}" "1|${RL}"
+  case_ "rerun rate-limited 5/5 escalates" cancelled 1 5 "0|@reclaim" "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}"
   case_ "rerun 404 escalates immediately"  cancelled 1 1 "0|@reclaim" "1|HTTP 404: Not Found"
+
+  # ── the decision line must NAME the failure, not call it "unknown" ─────────────────────────
+  # Run 33738356244 answered `(last: unknown)` while holding the full rate-limit text: the old
+  # `with_retry` assigned RETRY_LAST_ERROR inside a command substitution — a subshell — so the
+  # value never reached `main`. Asserted on the OUTPUT because that is the only place the defect
+  # was ever visible; an exit code cannot see it (the run exited 1 either way, correctly).
+  subjects=$(( subjects + 1 ))
+  export CALL_LOG="${tmp}/calls" STUB_SCRIPT="${tmp}/script"
+  : > "${CALL_LOG}"; : > "${CALL_LOG}.n"
+  printf '%s\n' "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}" "1|${RL}" > "${STUB_SCRIPT}"
+  set +e
+  CONCLUSION=cancelled main > "${tmp}/out" 2>&1
+  set -e
+  if grep -q 'decision=jobs-unreadable' "${tmp}/out" \
+     && grep -q 'rate limit exceeded' "${tmp}/out" \
+     && ! grep -q 'last: unknown' "${tmp}/out"; then
+    echo "PASS  the decision line names the real last error, not 'unknown'"; pass=$(( pass + 1 ))
+  else
+    echo "FAIL  the decision line lost the error text (the subshell bug from run 33738356244)"
+    sed 's/^/        /' "${tmp}/out"; fail=$(( fail + 1 ))
+  fi
 
   rm -rf "${tmp}"
   echo "SUBJECTS=${subjects}"

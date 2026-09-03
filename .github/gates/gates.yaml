@@ -2115,9 +2115,25 @@ gates:
     rationale: "Without it the script's error paths are exercised only when a real spot reclaim coincides with a real API failure — which is how #6255 shipped a detection call with no transient handling at all, stranding a reclaimed run at attempt 1 and telling nobody."
     review_after: "2027-02-23"
     # Subjects are assertions, not files: the floor drops the day someone deletes a case.
-    min_subjects: 12
+    min_subjects: 14
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
+
+  - id: gh-retry-selftest
+    name: "the shared gh transient-retry library classifies and backs off as documented (issues #6853, #7976, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It drives gh_retry against a stub command
+      and asserts the ATTEMPT COUNTS per error class, so its red is reachable by construction;
+      falsified before wiring in (removing the `final` short-circuit reddens case 3).
+    budget_seconds: 30   # no network, no sleeps (the cap is 0 in the harness); ~1s observed
+    rationale: "This library landed in #8371 with ZERO callers and stayed that way — `grep -rl gh-retry.sh .github/` matched only the file itself — while the failure it was written for kept reproducing (run 33738356244, 2026-09-03: `jobs API attempt 1/3, 2/3, 3/3 failed`, `API rate limit exceeded for installation`, `decision=jobs-unreadable`, exit 1, one reclaimed run stranded). A library nothing calls is not a control, and nothing said so."
+    review_after: "2027-03-03"
+    # Subjects are assertions, not files: the floor drops the day someone deletes a case.
+    min_subjects: 4
+    run: |
+      bash .github/scripts/gh-retry.sh --self-test
 
   - id: resolve-tracking-issue-selftest
     name: "a machine-written ledger resolves to exactly one issue, or fails loudly (issue #5266, enforced)"
