@@ -193,6 +193,28 @@ spec:
               the 10-minute progress deadline — canary pods did not become healthy.
               Likely cause: OOMKilled, CrashLoopBackOff, missing secret/configmap, or
               image pull error. Traffic reverted to stable.
+        # The complement the deadline alert cannot see (#3806): all 21 fleet Rollouts
+        # are replicas: 1 with default canary maxSurge, so on a FULL cluster the canary
+        # pod never schedules and the Rollout sits in Progressing indefinitely — never
+        # Degraded (no deadline fires while nothing ever started), never failed, stable
+        # pod serving happily. GitOps says Synced, the service says healthy, and the
+        # new revision simply never rolls. "gitops pin != running image" is that state,
+        # read through the one signal that exposes it.
+        - alert: RolloutStuckProgressing
+          expr: |
+            rollout_phase{phase="Progressing"} == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Rollout {{ $labels.name }} stuck Progressing for 30m in {{ $labels.namespace }}"
+            description: >-
+              {{ $labels.name }} (namespace {{ $labels.namespace }}) has been Progressing
+              for 30 minutes without completing. On this fleet's one-replica canaries the
+              standing cause is capacity: the canary pod cannot schedule on a full
+              nodepool, so the new revision never rolls and nothing else reports it
+              (#3806). Check KarpenterNodePoolAtLimit and the pending canary pod first;
+              the replica-floor decision is ADR material, tracked in #3806.
     - name: openbank.tier1.slo_burn
       rules:
         # Fast burn: budget exhausted in ~2 days → page.
