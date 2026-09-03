@@ -68,7 +68,7 @@ class GdprSubjectAccessViaEdgeIT {
               "nationality": "CZE"
             }
         """.trimIndent()
-        subjectId = Given {
+        val response = Given {
             contentType("application/json")
             header("Idempotency-Key", UUID.randomUUID().toString())
             body(payload)
@@ -76,7 +76,8 @@ class GdprSubjectAccessViaEdgeIT {
             post("/api/v1/parties")
         } Then {
             statusCode(201)
-        }.extract().path<String>("id")
+        }
+        subjectId = response.extract().body().jsonPath().getString("id")
     }
 
     @Test

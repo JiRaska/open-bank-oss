@@ -351,13 +351,19 @@ class PartyResource {
         val isAdmin = securityIdentity.hasRole("ROLE_ADMIN")
         val isDpo = securityIdentity.hasRole("ROLE_DPO")
         val isSelf = jwt?.subject != null && jwt?.subject == partyUseCase.getPartyKeycloakSub(id)
-        val viaEdge = !isAdmin && !isDpo && !isSelf && edgeActsForSubject(partyHeader, id)
-        if (!isAdmin && !isDpo && !isSelf && !viaEdge) return Response.status(Response.Status.FORBIDDEN).build()
+        val byStaffOrSubject = isAdmin || isDpo || isSelf
+        val viaEdge = !byStaffOrSubject && edgeActsForSubject(partyHeader, id)
+        if (!byStaffOrSubject && !viaEdge) return Response.status(Response.Status.FORBIDDEN).build()
         val export = partyUseCase.exportPartyData(id)
         // ADR-0118 / ADR-0086: a subject-access read exposes the full PII set — audit the
         // access itself (Art. 30). Emitted only after a successful fetch; a 404 (party not
         // found) throws before this line, so no SUCCESS event is recorded for a miss.
-        auditGdpr(operation = "party.gdpr-export", partyId = id, gdprArticle = "15", channel = channelOf(isSelf, viaEdge))
+        auditGdpr(
+            operation = "party.gdpr-export",
+            partyId = id,
+            gdprArticle = "15",
+            channel = channelOf(isSelf, viaEdge),
+        )
         return Response.ok(export.toResponse()).build()
     }
 
@@ -380,8 +386,9 @@ class PartyResource {
         val isAdmin = securityIdentity.hasRole("ROLE_ADMIN")
         val isDpo = securityIdentity.hasRole("ROLE_DPO")
         val isSelf = jwt?.subject != null && jwt?.subject == partyUseCase.getPartyKeycloakSub(id)
-        val viaEdge = !isAdmin && !isDpo && !isSelf && edgeActsForSubject(partyHeader, id)
-        if (!isAdmin && !isDpo && !isSelf && !viaEdge) return Response.status(Response.Status.FORBIDDEN).build()
+        val byStaffOrSubject = isAdmin || isDpo || isSelf
+        val viaEdge = !byStaffOrSubject && edgeActsForSubject(partyHeader, id)
+        if (!byStaffOrSubject && !viaEdge) return Response.status(Response.Status.FORBIDDEN).build()
         val export = partyUseCase.exportPartyPortabilityData(id)
         auditGdpr(
             operation = "party.gdpr-portability-export",
