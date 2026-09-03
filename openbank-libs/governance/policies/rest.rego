@@ -413,6 +413,7 @@ four_eyes_required if {
 	startswith(input.action, sprintf("%s.", [scope]))
 	some verb in data.rules.four_eyes.verbs
 	endswith(input.action, sprintf(".%s", [verb]))
+	not four_eyes_exempt
 }
 
 # Feature-flag flip (ADR-0067 / issue #419): flipping a money-path flag is four-eyes-gated.
@@ -431,6 +432,19 @@ four_eyes_required if {
 # collection simply does not fire.
 four_eyes_required if {
 	input.action in data.rules.four_eyes.actions
+	not four_eyes_exempt
+}
+
+# Caller-aware exemption (ADR-0280, issue #8360): four_eyes_required is computed by action name
+# alone, so an action with a verified M2M caller used to be UNGATEABLE without pausing that
+# automation — the sca-service stalemate. data.rules.four_eyes.exemptions maps an exact action
+# name to the principal ids of its verified automation callers; for those identities the flag
+# does not fire, while every other caller (the human ops-console path) is still flagged.
+# Undefined — not an error — for any bundle whose rules.yaml predates the key, and for any
+# action with no entry: membership over an undefined collection does not fire, so `not
+# four_eyes_exempt` holds and the clauses above behave exactly as before.
+four_eyes_exempt if {
+	input.principal.id in data.rules.four_eyes.exemptions[input.action]
 }
 
 # ---------------------------------------------------------------------------------------
