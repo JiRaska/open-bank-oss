@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.0...interest-service-v0.20.1) (2026-09-03)
+
+
+### Security
+
+* **interest:** enforce authorization by default, not by manifest ([#8424](https://github.com/JiRaska/open-bank-oss/issues/8424)) ([faaacfa](https://github.com/JiRaska/open-bank-oss/commit/faaacfaf24945110c0e6e40e01ac48cabbd0c5ca))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.19.0...interest-service-v0.20.0) (2026-09-01)
 
 
