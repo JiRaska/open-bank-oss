@@ -109,7 +109,8 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
 
 **DFD update:** adds `clearing-simulator → sepa-payment /returns → transaction-service /reverse` edge.
 **Risk class:** integrity (money-path reversal) + availability (idempotency).
-**Rollback:** feature flag `openbank.sepa.returns.enabled` (off by default); flag OFF = 404 on `/returns`.
+**Rollback:** revert the `/returns` commits, or revoke `ROLE_API` from the clearing-simulator
+caller. There is **no** feature flag for this endpoint — see the 2026-09-03 change-log entry.
 
 ## 5b. Payment confirmation download (ADR-0248 #3) — STRIDE supplement
 
@@ -263,9 +264,29 @@ simply stops existing).
   OIDC client-credentials for service-to-service authn; fraud-service is internal, cluster-only).
   **DFD update**: added `sepa-payment → fraud-service` edge (see §2). No DB schema change;
   rollback = revert adapter + port commits.
+- **2026-09-03** — Doc correction, no behavior change: §5a and the 2026-06-24 entry both named
+  `openbank.sepa.returns.enabled` as the rollback control for the pacs.004 return path, §5a adding
+  that it is "off by default" and that "flag OFF = 404 on `/returns`". **No such property exists.**
+  It occurs nowhere in the repository except this document
+  (`git grep -l -F openbank.sepa.returns.enabled` returns only this file), and the endpoint reads
+  no config at all: `SepaPaymentResource.handlePaymentReturn` is gated by
+  `@RolesAllowed("ROLE_API", "ROLE_ADMIN")` plus `@Authorize(action = "sepaPayment.handleReturn")`
+  and nothing else. The two real flags in this service are
+  `openbank.sepa.scheme-submission.enabled` and `openbank.sepa.worker.enabled`; neither disables
+  `/returns`.
+
+  This one is not a renamed control, so unlike a wrong class name it changes what an operator can
+  do: the documented rollback was **not executable**, and the stated default was backwards — the
+  path has been on since it shipped, not off. What is actually available is a revert, or revoking
+  `ROLE_API` from the clearing-simulator's client, which is coarser (that role admits other
+  callers) and is why it is worth recording rather than silently swapping in. Adding a real flag is
+  a code change and is deliberately not made here. Everything else the 2026-06-24 entry and §5a say
+  about the trust boundary, the STRIDE rows and the idempotency posture is unaffected.
+
 - **2026-06-24** — ADR-0111 R-transaction return path (pacs.004). New inbound trust boundary:
   `clearing-simulator → sepa-payment /returns → transaction-service /reverse`. STRIDE supplement
-  added in §5a above. **Risk class = integrity + availability**. Rollback = `openbank.sepa.returns.enabled=false`.
+  added in §5a above. **Risk class = integrity + availability**. Rollback = revert, or revoke `ROLE_API` from the
+  clearing-simulator caller (no feature flag exists — see the 2026-09-03 entry).
 - **2026-06-23** — ADR-0104 D3: real ISO 20022 `pacs.008` scheme submission via `clearing-simulator`.
   New outbound trust boundary: `sepa-payment → clearing-simulator` (POST
   `/api/v1/clearing/credit-transfers`, pacs.008 XML; pacs.002 XML response; OIDC client-credentials).
