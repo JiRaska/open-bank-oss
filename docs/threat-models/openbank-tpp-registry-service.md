@@ -42,7 +42,7 @@ PSD2 service returns 503 rather than fail-open.
 | **T**ampering | Alter TPP role (AISP→PISP) in the registry without authorisation | `@RolesAllowed(ROLE_OPERATOR, ROLE_ADMIN)` on write paths; AuditEvent per change; immutable audit trail via outbox |
 | **R**epudiation | Deny authorising a TPP for PISP role | AuditEvent per role grant/revocation with operator identity; change log in the entity |
 | **I**nfo disclosure | Expose list of authorised TPPs to unauthenticated callers | No Ingress resource (internal only); `@RolesAllowed(ROLE_SERVICE, ROLE_OPERATOR, ROLE_ADMIN)` on all endpoints |
-| **D**oS | Flood authorisation lookup to starve PSD2 service | PSD2 service uses circuit breaker (Fault Tolerance, ADR-0035); registry endpoints are read-heavy and cacheable (short-lived in-memory cache); NetworkPolicy restricts callers |
+| **D**oS | Flood authorisation lookup to starve PSD2 service | PSD2 service uses circuit breaker (Fault Tolerance, ADR-0035); registry endpoints are read-heavy — no response cache exists today (§5, #4011), so a future one is the natural mitigation; NetworkPolicy restricts callers |
 | **E**oP | Escalate from AISP to PISP by registry manipulation | Role check is per-path in PSD2 service (`/payments` ⇒ PISP required); registry only stores the declared role — dual check |
 
 ## 5. Residual risks / assumptions
@@ -53,7 +53,7 @@ PSD2 service returns 503 rather than fail-open.
   (`openbank.tpp.cache-ttl-seconds`, default 60) and named the resulting window as a residual risk.
   Neither half is real: the property occurs nowhere in the repository except this document, and
   psd2-service has no registry-response cache at all — `TppRegistryClient` is a plain REST client
-  with no `@CacheResult`, no TTL and no store, so every authorisation check is a live call. The
+  with no `@CacheResult` (#4011), no TTL and no store, so every authorisation check is a live call. The
   only TTL in psd2's configuration is `idempotency-ttl-seconds`, which belongs to the idempotency
   store and is unrelated. Kept rather than deleted because the correction runs the *safe* way — the
   documented risk window is narrower than stated, not wider — and because a future cache would
@@ -67,7 +67,7 @@ PSD2 service returns 503 rather than fail-open.
   by `openbank.tpp.cache-ttl-seconds` (default 60). **Neither the knob nor the cache exists.**
   `git grep -l -F openbank.tpp.cache-ttl-seconds` returns only this document, and
   `openbank-psd2-service/src/main/kotlin/com/openbank/psd2/infrastructure/client/TppRegistryClient.kt`
-  contains no caching of any kind — no `@CacheResult`, no TTL, no store — so each authorisation
+  contains no caching of any kind — no `@CacheResult` (#4011), no TTL, no store — so each authorisation
   check is a live call to the registry. The only cache-shaped thing in psd2 is the idempotency
   store (`idempotency-ttl-seconds`), which serves replay protection on consent/payment creation and
   never holds a TPP role.
