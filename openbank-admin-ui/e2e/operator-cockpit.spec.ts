@@ -27,10 +27,12 @@ test('KYC resolves a customer name before loading that customer’s cases', asyn
   })
   await page.route('**/api/svc/kyc-service/api/v1/kyc/cases**', route => {
     seen.push(route.request().url())
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{
+    // The party-scoped route answers a single KycCaseResponse, not a page — unlike the
+    // collection route, which always answers an array.
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       id: 'case-anna-1', partyId: PARTY_ID, status: 'OPEN', reviewedBy: 'reviewer@openbank.test',
       updatedAt: '2026-08-22T08:00:00Z', checks: [{ checkType: 'IDENTITY', status: 'APPROVED' }],
-    }]) })
+    }) })
   })
 
   await page.goto('/kyc')
