@@ -6,9 +6,9 @@ authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
-tags: [security, testing, observability, compliance, ci]
+tags: [security, testing, observability, compliance]
 summary: "Security Excellence roadmap: extend the defensive stack (scans, gates, signatures) with an offensive testing layer, security-native observability signals, and shared security primitives in openbank-libs-runtime, phased Q4/2026-Q2/2027."
-followup: "Tracking issue #8488 covers CRA; this roadmap is tracked in a new umbrella issue per phase. New third-party tooling (Semgrep, KEV/EPSS feeds, OpenSSF Scorecard action) requires explicit approval before adoption."
+followup: "#8488 — CRA readiness tracking; each workstream files its own umbrella issue when its phase starts, and new tooling (Semgrep, KEV/EPSS, Scorecard) requires explicit approval before adoption."
 ---
 
 # ADR-0279 — Security Excellence roadmap — offensive testing, security observability and shared security primitives
