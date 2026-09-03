@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -194,6 +196,89 @@ def unrecorded_service_testcontainers_resources(root: Path) -> set[str]:
                 and recorded_lifecycles(source) != {"started", "stopped"}):
             resources.add(path.relative_to(root).as_posix())
     return resources
+
+
+def performance_projection_errors(deploy: str) -> list[str]:
+    """Keep performance projection delegated to the executable rerun selector."""
+    errors: list[str] = []
+    completed_pages = (
+        "actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100&page=${page}"
+    )
+    if completed_pages not in deploy:
+        errors.append("performance projection does not paginate the completed workflow-run history")
+    for workflow in ("perf-gate.yml", "perf-baseline.yml"):
+        if f"fetch_run_pages {workflow}" not in deploy:
+            errors.append(f"performance projection does not inspect completed {workflow} runs")
+    run_queries = re.findall(r"actions/workflows/[^\s\"']+/runs\?[^\s\"']+", deploy)
+    if any("status=success" in query for query in run_queries):
+        errors.append("performance projection hides failed attempts behind success-only run selection")
+
+    flow = (
+        "SELECTOR=.github/scripts/select-performance-evidence.py",
+        "fetch_artifact_pages()",
+        "actions/runs/${run_id}/artifacts?per_page=100&page=${page}",
+        'python3 "${SELECTOR}" artifact-page-size',
+        "fetch_run_pages()",
+        completed_pages,
+        'python3 "${SELECTOR}" run-page-size',
+        "fetch_run_pages perf-gate.yml",
+        'python3 "${SELECTOR}" runs "${RUN_ARGS[@]}"',
+        "while read -r candidate candidate_started_at candidate_attempt candidate_event; do",
+        "jobs?filter=latest&per_page=100",
+        'python3 "${SELECTOR}" prepare-job',
+        "actions/jobs/${candidate_prepare_job}/logs",
+        'candidate_scope_args=(--scope-log "${candidate_scope_log}")',
+        'python3 "${SELECTOR}" gate',
+        '--event "${candidate_event}"',
+        "--scope-only",
+        'if [ "${candidate_status}" -eq 3 ]; then',
+        'RUN_ID="${candidate}"',
+        'fetch_artifact_pages "${candidate}"',
+        '"${ARTIFACT_ARGS[@]}"',
+        "break",
+        "fetch_run_pages perf-baseline.yml",
+        'python3 "${SELECTOR}" runs --latest "${RUN_ARGS[@]}"',
+        'read -r BASELINE_RUN_ID BASELINE_STARTED_AT BASELINE_ATTEMPT BASELINE_EVENT <<< "${BASELINE_RUN}"',
+        'fetch_artifact_pages "${BASELINE_RUN_ID}"',
+        'python3 "${SELECTOR}" baseline',
+        '--attempt-start "${BASELINE_STARTED_AT}"',
+        '"${ARTIFACT_ARGS[@]}"',
+    )
+    cursor = 0
+    for needle in flow:
+        found = deploy.find(needle, cursor)
+        if found < 0:
+            errors.append("performance projection bypasses authoritative completed-attempt selection")
+            break
+        cursor = found + len(needle)
+    if "exit 0" in deploy.partition("fetch_run_pages perf-baseline.yml")[0]:
+        errors.append("missing performance-gate evidence can suppress independent baseline staging")
+    unknown_barrier = re.compile(
+        r'Could not prove perf-gate run \$\{candidate\} scope; refusing older evidence\."\s*\n\s*break'
+    )
+    if unknown_barrier.search(deploy) is None:
+        errors.append("unknown perf-gate scope can fall through to older green evidence")
+
+    return errors
+
+
+def performance_selector_self_test_error(selector_path: Path) -> str | None:
+    if not selector_path.is_file():
+        return "performance evidence selector is missing"
+    try:
+        result = subprocess.run(
+            [sys.executable, str(selector_path.resolve()), "--self-test"],
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"performance evidence selector self-test could not run: {exc}"
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        return f"performance evidence selector self-test failed: {detail or result.returncode}"
+    return None
 
 
 def check(root: Path) -> list[str]:
@@ -444,6 +529,14 @@ def check(root: Path) -> list[str]:
         errors.append("mutation projection does not select the latest completed attempt regardless of verdict")
     if "pitest.yml/runs?branch=main&status=success" in deploy:
         errors.append("mutation projection hides failed attempts behind an older successful workflow")
+    performance_stage = deploy.partition("Stage performance evidence from latest complete k6 run")[2].partition(
+        "Collect production-readiness scorecard"
+    )[0]
+    performance_selector_path = root / ".github/scripts/select-performance-evidence.py"
+    errors.extend(performance_projection_errors(performance_stage))
+    selector_self_test_error = performance_selector_self_test_error(performance_selector_path)
+    if selector_self_test_error:
+        errors.append(selector_self_test_error)
     perf_gate = text(root / ".github/workflows/perf-gate.yml")
     perf_baseline = text(root / ".github/workflows/perf-baseline.yml")
     pinned_k6 = "ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79"
@@ -695,6 +788,84 @@ def self_test() -> int:
             if not capability_register_errors(root):
                 print(f"self-test failed: {label} was accepted")
                 return 1
+        valid_performance_projection = """
+SELECTOR=.github/scripts/select-performance-evidence.py
+fetch_artifact_pages()
+actions/runs/${run_id}/artifacts?per_page=100&page=${page}
+python3 "${SELECTOR}" artifact-page-size
+fetch_run_pages()
+actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100&page=${page}
+python3 "${SELECTOR}" run-page-size
+fetch_run_pages perf-gate.yml
+python3 "${SELECTOR}" runs "${RUN_ARGS[@]}"
+while read -r candidate candidate_started_at candidate_attempt candidate_event; do
+jobs?filter=latest&per_page=100
+python3 "${SELECTOR}" prepare-job
+actions/jobs/${candidate_prepare_job}/logs
+candidate_scope_args=(--scope-log "${candidate_scope_log}")
+python3 "${SELECTOR}" gate
+--event "${candidate_event}"
+--scope-only
+if [ "${candidate_status}" -eq 3 ]; then
+echo "::warning::Could not prove perf-gate run ${candidate} scope; refusing older evidence."
+break
+RUN_ID="${candidate}"
+fetch_artifact_pages "${candidate}"
+"${ARTIFACT_ARGS[@]}"
+break
+fetch_run_pages perf-baseline.yml
+python3 "${SELECTOR}" runs --latest "${RUN_ARGS[@]}"
+read -r BASELINE_RUN_ID BASELINE_STARTED_AT BASELINE_ATTEMPT BASELINE_EVENT <<< "${BASELINE_RUN}"
+fetch_artifact_pages "${BASELINE_RUN_ID}"
+python3 "${SELECTOR}" baseline
+--attempt-start "${BASELINE_STARTED_AT}"
+"${ARTIFACT_ARGS[@]}"
+"""
+        if performance_projection_errors(valid_performance_projection):
+            print("self-test failed: valid completed performance projection was rejected")
+            return 1
+        broken_performance_projections = {
+            "success-only run selection": valid_performance_projection.replace(
+                "status=completed", "status=success"
+            ),
+            "run history under-fetches reruns": valid_performance_projection.replace(
+                "status=completed&per_page=100", "status=completed&per_page=20"
+            ),
+            "gate suppresses independent baseline": valid_performance_projection.replace(
+                "fetch_run_pages perf-baseline.yml", "exit 0\nfetch_run_pages perf-baseline.yml"
+            ),
+            "gate bypasses latest-view jobs": valid_performance_projection.replace(
+                "jobs?filter=latest&per_page=100", "jobs?per_page=100"
+            ),
+            "gate skips positive override proof": valid_performance_projection.replace(
+                'candidate_scope_args=(--scope-log "${candidate_scope_log}")', "candidate_scope_args=()"
+            ),
+            "gate drops workflow event context": valid_performance_projection.replace(
+                '--event "${candidate_event}"', ""
+            ),
+            "artifacts do not paginate": valid_performance_projection.replace(
+                "actions/runs/${run_id}/artifacts?per_page=100&page=${page}",
+                "actions/runs/${run_id}/artifacts?per_page=100",
+            ),
+            "workflow runs do not paginate": valid_performance_projection.replace(
+                "status=completed&per_page=100&page=${page}",
+                "status=completed&per_page=100",
+            ),
+            "unknown scope scans older green": valid_performance_projection.replace(
+                'Could not prove perf-gate run ${candidate} scope; refusing older evidence."\nbreak',
+                'Could not prove perf-gate run ${candidate} scope; refusing older evidence."\ncontinue',
+            ),
+        }
+        for label, candidate in broken_performance_projections.items():
+            if not performance_projection_errors(candidate):
+                print(f"self-test failed: {label} was accepted")
+                return 1
+    selector_error = performance_selector_self_test_error(
+        Path(__file__).resolve().with_name("select-performance-evidence.py")
+    )
+    if selector_error:
+        print(f"self-test failed: {selector_error}")
+        return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0
 
