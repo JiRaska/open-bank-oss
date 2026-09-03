@@ -19,7 +19,7 @@
   "openbank-devops-agent": "0.8.0",
   "openbank-dispute-service": "0.10.0",
   "openbank-docs-truth-agent": "0.6.0",
-  "openbank-document-service": "0.14.1",
+  "openbank-document-service": "0.14.2",
   "openbank-domestic-payment": "0.19.1",
   "openbank-engagement-service": "0.14.0",
   "openbank-finops-agent": "0.6.2",
