@@ -58,6 +58,16 @@ We follow [coordinated disclosure](https://en.wikipedia.org/wiki/Coordinated_vul
 
 Reporters are credited in release notes and the security advisory unless anonymity is requested.
 
+## Cyber Resilience Act (EU) 2024/2847 Readiness
+
+OpenBank is open-source software in beta and is **not yet placed on the market** as a product with digital elements, so CRA manufacturer duties do not yet bind us. We nevertheless track readiness deliberately — see [ADR-0278](docs/adr/0278-cyber-resilience-act-readiness-secure-sdlc-sbom-and-vulnerability-reporting-duties.md) — and this policy already provides the CRA-shaped surface:
+
+- **Single point of contact for vulnerabilities** (Art. 11, Annex I): the channels above (GitHub Security Advisories, security@open-bank.tech, `security.txt`) are the single intake.
+- **Coordinated vulnerability disclosure** (Art. 11): the Coordinated Disclosure section above is the policy; we accept reports, remediate, and disclose on an agreed timeline.
+- **Vulnerability handling across the SDLC** (Annex I Part I): dependency scanning, secret scanning, CodeQL, SBOM generation per release (Syft/CycloneDX), and signed commits — see "What Security Controls Are in Place" below.
+- **Incident and actively-exploited-vulnerability reporting** (Art. 14): the operational procedure lives in [runbook 0017](docs/runbooks/0017-cra-article-14-reporting.md) (24 h early warning / 72 h notification to the designated CSIRT and ENISA once applicable), rehearsed per [runbook 0018](docs/runbooks/0018-cra-art14-tabletop-exercise.md).
+- **Support period** (Art. 13(8)): during the beta phase the supported window is `main` plus the latest tagged release (see Supported Versions above). A formal support period of at least five years from first market placement — or for the expected product lifetime, whichever the CRA requires for our classification — will be declared before the first production-ready release, and this section will be updated to state it.
+
 ## Out of Scope
 
 The following are explicitly out of scope for this project:
