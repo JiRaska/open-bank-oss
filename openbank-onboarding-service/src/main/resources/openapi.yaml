@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Onboarding Service API
-  version: 1.0.1
+  version: 1.1.0
   description: >-
     Read-model projection of the onboarding funnel (ADR-0068). Aggregates events from
     party-service, kyc-service and sca-service into a denormalised view for operator
@@ -49,7 +49,6 @@ paths:
             enum:
               - REGISTERED
               - KYC_OPEN
-              - KYC_DOCUMENTS_REQUIRED
               - KYC_UNDER_REVIEW
               - SCA_PENDING
               - ACTIVE
@@ -106,7 +105,6 @@ paths:
                 example:
                   REGISTERED: 12
                   KYC_OPEN: 45
-                  KYC_DOCUMENTS_REQUIRED: 8
                   KYC_UNDER_REVIEW: 23
                   SCA_PENDING: 6
                   ACTIVE: 301
@@ -148,14 +146,14 @@ components:
         kycStatus:
           type: string
           nullable: true
-          enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
+          enum: [OPEN, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
         scaEnrolled:
           type: boolean
         deviceCount:
           type: integer
         funnelStage:
           type: string
-          enum: [REGISTERED, KYC_OPEN, KYC_DOCUMENTS_REQUIRED, KYC_UNDER_REVIEW, SCA_PENDING, ACTIVE, BLOCKED]
+          enum: [REGISTERED, KYC_OPEN, KYC_UNDER_REVIEW, SCA_PENDING, ACTIVE, BLOCKED]
         blockedReason:
           type: string
           nullable: true

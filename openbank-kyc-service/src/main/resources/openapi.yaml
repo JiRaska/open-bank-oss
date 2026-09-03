@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: KYC Service API
-  version: 1.8.0
+  version: 1.9.0
   description: Know Your Customer case management — open cases, run checks, approve/reject.
   license:
     name: Apache-2.0
@@ -38,7 +38,7 @@ paths:
           description: Filter by KYC case status. When omitted all cases are returned.
           schema:
             type: string
-            enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
+            enum: [OPEN, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
       responses:
         '200':
           description: Paginated KYC cases with the applied status filter echoed when present.
@@ -348,7 +348,7 @@ components:
           type: integer
         statusFilter:
           type: [string, 'null']
-          enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED, null]
+          enum: [OPEN, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED, null]
 
     KycCaseResponse:
       type: object
@@ -362,7 +362,7 @@ components:
           format: uuid
         status:
           type: string
-          enum: [OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
+          enum: [OPEN, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
         riskLevel:
           type: string
           enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
