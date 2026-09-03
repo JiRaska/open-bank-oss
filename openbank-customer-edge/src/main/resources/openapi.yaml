@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.47.0
+  version: 1.48.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3798,6 +3798,16 @@ components:
         nickname:
           type: string
           nullable: true
+        sharedWithMe:
+          type: boolean
+          default: false
+          description: >-
+            True for an account GET /accounts APPENDS because an ACTIVE delegation grant covers it,
+            not because the caller owns it (ADR-0232 D6). The edge sets it on every shared entry
+            and never on an owned one, so absent means "mine" — that asymmetry is the whole point,
+            and a client that cannot see the flag presents someone else's account as the customer's
+            own. Served since #4021; published here because it was not, and a field the edge sends
+            but does not declare is one no client can rely on.
         incentiveReservation:
           allOf:
             - {$ref: '#/components/schemas/IncentiveReservation'}
