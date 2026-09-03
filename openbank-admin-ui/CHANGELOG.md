@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.237.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.237.2...admin-ui-v0.237.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* **admin-ui:** make audience approval dialog focus-safe ([#8324](https://github.com/JiRaska/open-bank-oss/issues/8324)) ([d260477](https://github.com/JiRaska/open-bank-oss/commit/d260477e6f744d24890524b4157afaa5a8200622)), closes [#8298](https://github.com/JiRaska/open-bank-oss/issues/8298)
+
 ## [0.237.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.237.1...admin-ui-v0.237.2) (2026-09-03)
 
 
