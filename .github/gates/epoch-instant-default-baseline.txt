@@ -14,5 +14,3 @@ openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persi
 openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/YearCloseEntity.kt::var computedAt: Instant = Instant.EPOCH#1
 openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/YearCloseEntity.kt::var createdAt: Instant = Instant.EPOCH#1
 openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/YearCloseEntity.kt::var updatedAt: Instant = Instant.EPOCH#1
-openbank-transaction-service/src/main/kotlin/com/openbank/transaction/infrastructure/persistence/entity/MerchantCatalogEntity.kt::var updatedAt: Instant = Instant.EPOCH#1
-openbank-transaction-service/src/main/kotlin/com/openbank/transaction/infrastructure/persistence/entity/TransactionEntity.kt::var initiatedAt: Instant = Instant.EPOCH#1
