@@ -366,10 +366,9 @@ class NotificationConsumer @Inject constructor(
                 }
             }
 
-    private fun Throwable.isDeduplicationConflict(): Boolean =
-        generateSequence(this) { it.cause }
-            .filterIsInstance<PSQLException>()
-            .any { it.serverErrorMessage?.constraint == NOTIFICATION_DEDUPLICATION_CONSTRAINT }
+    private fun Throwable.isDeduplicationConflict(): Boolean = generateSequence(this) { it.cause }
+        .filterIsInstance<PSQLException>()
+        .any { it.serverErrorMessage?.constraint == NOTIFICATION_DEDUPLICATION_CONSTRAINT }
 
     private fun publishOversight(req: NotificationRequest): Uni<Void> {
         if (!OversightWebhook.isOversight(req.template)) return Uni.createFrom().voidItem()
