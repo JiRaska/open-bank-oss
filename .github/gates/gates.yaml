@@ -4717,7 +4717,8 @@ gates:
     selftest: python3 .github/scripts/check-no-epoch-instant-default.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-no-epoch-instant-default.py"]
-    min_subjects: 40    # 20+20 after fx + document + libs-domain + account + sanctions + product-catalog burn-downs; lower this in each burn-down PR
+    # No min_subjects: the burn-down completed 2026-09-03 with zero occurrences and an empty
+    # baseline, and a floor of 0 states nothing while a positive one can never be met again.
     run: |
       python3 .github/scripts/check-no-epoch-instant-default.py --root .
 
