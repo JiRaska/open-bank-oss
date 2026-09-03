@@ -26,9 +26,14 @@ rules:
     resources: ["namespaces"]
     verbs: ["create", "get", "list", "delete"]
   # Everything the restore+verify flow manages INSIDE the throwaway namespace.
+  # NOTE: no "secrets" and no service write — Trivy KSV-0041/KSV-0056. The
+  # restore templates need neither (OIDC/Kafka off; CNPG creds via Pod Identity).
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "configmaps", "secrets", "persistentvolumeclaims"]
+    resources: ["pods", "pods/log", "configmaps", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
     verbs: ["get", "list", "watch", "create", "delete"]
