@@ -1076,3 +1076,126 @@ resource "kubernetes_service_account" "arc_build_runner" {
     }
   }
 }
+
+# ---------------------------------------------------------------------------
+# batch scale set — runs-on: openbank-batch (ADR-0277, issue #6458).
+#
+# rules.yaml: ci_runners.pools.batch declared this pool from the start — a
+# low-capped lane so a scan/cron burst cannot starve the merge-required build
+# lane — and the OpenTofu simply never created it: a job targeting
+# openbank-batch queued FOREVER, and "no runner has taken this yet" was
+# indistinguishable from "no runner will ever exist" (#6458). Weekly lanes
+# (api-fuzz, perf-gate) already route here, so this change turns declared
+# capacity into real capacity. Trust level identical to build (no cloud-write
+# creds, no secrets): reuses the openbank-build-runner SA.
+# ---------------------------------------------------------------------------
+resource "helm_release" "arc_batch" {
+  count            = var.arc_runner_enabled ? 1 : 0
+  name             = "openbank-batch"
+  namespace        = kubernetes_namespace.arc_runners[0].metadata[0].name
+  create_namespace = false
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = var.arc_controller_version
+  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners, kubernetes_config_map.dind_mirror_certs]
+
+  values = [yamlencode({
+    githubConfigUrl    = var.github_config_url
+    githubConfigSecret = "arc-github-app"
+    runnerScaleSetName = "openbank-batch"
+    minRunners         = 0 # weekly lanes only; idle cost must be $0 (ADR-0053)
+    maxRunners         = var.arc_batch_max_runners
+    template = {
+      metadata = { annotations = local.runner_pod_annotations }
+      spec = {
+        serviceAccountName = kubernetes_service_account.arc_build_runner[0].metadata[0].name
+        priorityClassName  = "openbank-ci"
+        nodeSelector       = local.runner_node_selector
+        tolerations        = local.runner_tolerations
+        affinity           = local.runner_affinity
+        initContainers     = [local.dind_init_container, local.aio_sysctl_init_container, local.gradle_home_init_container, local.jdk_toolcache_preload_init_container]
+        containers = [
+          {
+            name         = "runner"
+            image        = local.runner_image
+            command      = local.runner_command
+            env          = local.runner_docker_env
+            volumeMounts = local.runner_docker_volume_mounts
+            resources = {
+              requests = { cpu = "2", memory = "4Gi", "ephemeral-storage" = "16Gi" }
+              limits   = { memory = "8Gi" }
+            }
+          },
+          local.dind_container,
+        ]
+        volumes = local.dind_volumes
+      }
+    }
+  })]
+}
+
+# ---------------------------------------------------------------------------
+# dr scale set — runs-on: openbank-dr (ADR-0277). The resilience lane:
+# dr-restore-verify (#8347, #4757), the money-path chaos drill (#4755) and the
+# attestation evidence jobs (#2365) need a runner that may TALK to the cluster
+# — and until this scale set existed, eleven issues sat blocked on that fact.
+#
+# Trust posture: scheduled-workflow-only by convention enforced in
+# rules.yaml (pr_jobs_allowed_pools excludes it, so PR code can never schedule
+# here). The pod SA is openbank-dr with NO IRSA/cloud role; its cluster
+# permissions come from a Role+RoleBinding scoped to the restore/verify
+# namespaces, living in gitops (components/platform/dr-runner-rbac.yaml) so
+# RBAC drift is ArgoCD-visible, and pinned by the Kyverno policy beside it.
+# minRunners=0: this lane exists to run quarterly; idle spend is $0.
+# ---------------------------------------------------------------------------
+resource "kubernetes_service_account" "arc_dr" {
+  count = var.arc_runner_enabled ? 1 : 0
+  metadata {
+    name      = "openbank-dr"
+    namespace = kubernetes_namespace.arc_runners[0].metadata[0].name
+    # Deliberately NO eks.amazonaws.com/role-arn: the DR lane has no cloud
+    # permissions. Restore/verify evidence is gathered with kubectl against
+    # in-cluster APIs; the S3 backup reads go through the CNPG/backup tooling's
+    # own identities, not the runner's.
+  }
+}
+
+resource "helm_release" "arc_dr" {
+  count            = var.arc_runner_enabled ? 1 : 0
+  name             = "openbank-dr"
+  namespace        = kubernetes_namespace.arc_runners[0].metadata[0].name
+  create_namespace = false
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = var.arc_controller_version
+  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners, kubernetes_service_account.arc_dr]
+
+  values = [yamlencode({
+    githubConfigUrl    = var.github_config_url
+    githubConfigSecret = "arc-github-app"
+    runnerScaleSetName = "openbank-dr"
+    minRunners         = 0
+    maxRunners         = var.arc_dr_max_runners
+    template = {
+      metadata = { annotations = local.runner_pod_annotations }
+      spec = {
+        serviceAccountName = kubernetes_service_account.arc_dr[0].metadata[0].name
+        priorityClassName  = "openbank-ci"
+        nodeSelector       = local.runner_node_selector
+        tolerations        = local.runner_tolerations
+        affinity           = local.runner_affinity
+        # No dind, no gradle caches: DR/chaos lanes run kubectl + shell, not builds.
+        containers = [
+          {
+            name  = "runner"
+            image = local.runner_image
+            resources = {
+              requests = { cpu = "1", memory = "1Gi", "ephemeral-storage" = "4Gi" }
+              limits   = { memory = "2Gi" }
+            }
+          },
+        ]
+      }
+    }
+  })]
+}

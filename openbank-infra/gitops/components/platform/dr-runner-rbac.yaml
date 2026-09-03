@@ -1,0 +1,89 @@
+# RBAC for the openbank-dr runner lane (ADR-0277; #8347, #4757, #4755, #2365).
+#
+# The openbank-dr scale set (arc-runners.tf) runs scheduled resilience lanes:
+# dr-restore-verify and the chaos drill. Its pod ServiceAccount carries NO cloud
+# role (no IRSA) — everything it does is in-cluster: create a throwaway
+# dr-verify-<run-id> namespace, restore a CNPG backup into it, run read-only
+# checks, tear it down.
+#
+# Least-privilege notes, honestly stated: Kubernetes RBAC cannot scope a
+# ClusterRole to a namespace NAME PREFIX, so namespace create/delete is
+# cluster-wide on paper. The compensating control is the Kyverno policy below:
+# the openbank-dr SA may be used ONLY by pods in arc-runners carrying the ARC
+# runner labels, and dr-restore-verify's own teardown plus the
+# dr-verify-namespace-reaper alert bound the lifetime of what it creates.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openbank-dr
+  labels:
+    app.kubernetes.io/part-of: openbank-ci
+rules:
+  # Throwaway verify namespaces: create, read, delete. The name pattern is
+  # enforced by convention in dr-restore-verify.yml (dr-verify-$RUN_ID) and by
+  # the Kyverno policy's namespace-name check below.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list", "delete"]
+  # Everything the restore+verify flow manages INSIDE the throwaway namespace.
+  # NOTE: no "secrets" and no service write — Trivy KSV-0041/KSV-0056. The
+  # restore templates need neither (OIDC/Kafka off; CNPG creds via Pod Identity).
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # CNPG: read the source clusters/backups (to pick the restore point) and
+  # manage the recovery cluster in the verify namespace.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters", "backups", "scheduledbackups"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openbank-dr
+  labels:
+    app.kubernetes.io/part-of: openbank-ci
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openbank-dr
+subjects:
+  - kind: ServiceAccount
+    name: openbank-dr
+    namespace: arc-runners
+---
+# Kyverno: the openbank-dr SA may ONLY be used by GitHub ARC runner pods in the
+# arc-runners namespace — never by an application workload, and a dr-verify
+# namespace name is mandatory on anything it creates. This is the control that
+# keeps the ClusterRole above from being a general-purpose backdoor.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: openbank-dr-sa-pin
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: deny-openbank-dr-sa-outside-arc
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      exclude:
+        any:
+          - resources:
+              namespaces: ["arc-runners"]
+      validate:
+        message: "openbank-dr SA must not be used outside the arc-runners namespace (ADR-0277)."
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.serviceAccountName || '' }}"
+                operator: Equals
+                value: openbank-dr
