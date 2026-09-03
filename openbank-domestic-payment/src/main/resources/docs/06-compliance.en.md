@@ -101,7 +101,7 @@ Every mutation emits a domain event (`domestic.payment.created`, `domestic.payme
 - ✅ AuthN: Keycloak OIDC, RS256 JWT
 - ✅ AuthZ: `@RolesAllowed` + `@Authorize` OPA policy on status transition (ADR-0034, advisory by default — `AUTHZ_ENFORCE`)
 - ✅ Sanctions screening: synchronous, fail-closed (ADR-0032)
-- ✅ Idempotency: required on create (Redis + DB unique key)
+- ✅ Idempotency: required on create; DB-atomic request/actor fingerprint + unique key
 - ✅ Transactional outbox: payment row + event commit atomically
 - ✅ Security headers: CSP, HSTS, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy
 - ✅ Resilience: circuit breaker / retry / timeout on outbound calls and the outbox publish

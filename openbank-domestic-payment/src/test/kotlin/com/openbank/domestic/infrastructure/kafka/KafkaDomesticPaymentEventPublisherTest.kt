@@ -39,6 +39,9 @@ class KafkaDomesticPaymentEventPublisherTest {
         status: DomesticPaymentStatus = DomesticPaymentStatus.VALIDATED,
         rejectReason: DomesticRejectReason? = null,
         rejectDetail: String? = null,
+        initiatedByPartyId: UUID? = null,
+        delegationId: UUID? = null,
+        reservationId: UUID? = null,
     ) = DomesticPayment(
         id = UUID.randomUUID(),
         idempotencyKey = "idem-kafka",
@@ -67,6 +70,9 @@ class KafkaDomesticPaymentEventPublisherTest {
         settledAt = null,
         createdAt = Instant.parse("2026-06-01T09:00:00Z"),
         updatedAt = Instant.parse("2026-06-01T09:00:00Z"),
+        initiatedByPartyId = initiatedByPartyId,
+        delegationId = delegationId,
+        reservationId = reservationId,
     )
 
     private fun entry(payload: String = "{\"event\":\"x\"}") = OutboxEntry(
@@ -143,6 +149,54 @@ class KafkaDomesticPaymentEventPublisherTest {
 
         assertThat(node.get("eventType").asText()).isEqualTo("DOMESTIC_PAYMENT_STATUS_CHANGED")
         assertThat(node.get("sourceService").asText()).isEqualTo("domestic-payment")
+    }
+
+    @Test
+    fun `statusChangedPayload serializes the durable delegated spend binding`() {
+        val initiator = UUID.randomUUID()
+        val delegation = UUID.randomUUID()
+        val reservation = UUID.randomUUID()
+        val previous = payment(
+            status = DomesticPaymentStatus.VALIDATED,
+            initiatedByPartyId = initiator,
+            delegationId = delegation,
+            reservationId = reservation,
+        )
+        val current = previous.copy(status = DomesticPaymentStatus.SENT_TO_CLEARING)
+        val publisher = KafkaDomesticPaymentEventPublisher(
+            mockk<MutinyEmitter<String>>(),
+            objectMapper,
+            Clock.systemUTC(),
+        )
+
+        val node = objectMapper.readTree(publisher.statusChangedPayload(previous, current))
+
+        assertThat(node.path("initiatedByPartyId").asText()).isEqualTo(initiator.toString())
+        assertThat(node.path("delegationId").asText()).isEqualTo(delegation.toString())
+        assertThat(node.path("reservationId").asText()).isEqualTo(reservation.toString())
+    }
+
+    @Test
+    fun `finalized absent payload carries the immutable tuple and never the raw idempotency key`() {
+        val binding = com.openbank.domestic.contract.DelegatedSpendFinalizedAbsentPactFixture.binding()
+        val publisher = KafkaDomesticPaymentEventPublisher(
+            mockk<MutinyEmitter<String>>(),
+            objectMapper,
+            Clock.systemUTC(),
+        )
+
+        val payload = publisher.delegatedSpendFinalizedAbsentPayload(binding)
+        val node = objectMapper.readTree(payload)
+
+        assertThat(node.path("eventType").asText()).isEqualTo("DELEGATED_SPEND_FINALIZED_ABSENT")
+        assertThat(node.path("sourceService").asText()).isEqualTo("domestic-payment")
+        assertThat(node.path("version").asLong()).isEqualTo(1)
+        assertThat(node.path("reservationId").asText()).isEqualTo(binding.snapshot.reservationId.toString())
+        assertThat(node.path("idempotencyKeyHash").asText()).isEqualTo(
+            "d5fcf99c283a194aff198754caa138862271e9f046af15e706ee317058ba9aad",
+        )
+        assertThat(node.has("idempotencyKey")).isFalse()
+        assertThat(payload).doesNotContain("payment-42")
     }
 
     @Test

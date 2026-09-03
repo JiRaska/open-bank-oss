@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.239.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.238.0...admin-ui-v0.239.0) (2026-09-03)
+
+
+### Features
+
+* **admin-ui:** monitor /security/excellence in the browser synthetic ([#8427](https://github.com/JiRaska/open-bank-oss/issues/8427)) ([f4ba461](https://github.com/JiRaska/open-bank-oss/commit/f4ba461de1f6ca1419594f5636cf2cb7c9791575)), closes [#8386](https://github.com/JiRaska/open-bank-oss/issues/8386)
+
+## [0.238.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.237.3...admin-ui-v0.238.0) (2026-09-03)
+
+
+### Features
+
+* **admin-ui:** security excellence hub — consolidated ecosystem-wide security view ([#8387](https://github.com/JiRaska/open-bank-oss/issues/8387)) ([eb3763d](https://github.com/JiRaska/open-bank-oss/commit/eb3763d25a417998086f4971c0164cd29f5b4af6))
+
 ## [0.237.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.237.2...admin-ui-v0.237.3) (2026-09-03)
 
 

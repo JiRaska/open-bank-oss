@@ -40,6 +40,12 @@ class DomesticPaymentStrandedGaugeTest {
         override suspend fun oldestCreatedAt(status: DomesticPaymentStatus): Instant? = oldest[status]
 
         override suspend fun save(payment: DomesticPayment, outboxMessage: OutboxMessage) = error("unused")
+        override suspend fun saveDelegated(
+            payment: DomesticPayment,
+            outboxMessage: OutboxMessage,
+            boundAt: Instant,
+            debitOwnerPartyId: UUID,
+        ) = error("unused")
         override suspend fun findById(paymentId: UUID) = error("unused")
         override suspend fun findByIdempotencyKey(idempotencyKey: String) = error("unused")
         override suspend fun list(status: DomesticPaymentStatus?, debtorAccountId: UUID?, limit: Int, offset: Int) =
