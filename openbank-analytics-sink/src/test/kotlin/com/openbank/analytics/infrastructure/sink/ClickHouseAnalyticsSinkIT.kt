@@ -120,6 +120,7 @@ class ClickHouseAnalyticsSinkIT {
             actorId = "operator-7",
             actorType = "ROLE_OPERATOR",
             traceId = "trace-abc",
+            ingestedAt = Instant.now(),
             payload = mapOf("currencyCode" to "CZK", "status" to "ACTIVE"),
         )
 
@@ -150,6 +151,7 @@ class ClickHouseAnalyticsSinkIT {
             occurredAt = Instant.parse("2026-05-30T11:00:00.000Z"),
             sourceService = "openbank-party-service",
             schemaVersion = 1,
+            ingestedAt = Instant.now(),
         )
 
         // Same event delivered twice (Kafka at-least-once). ReplacingMergeTree keyed by
@@ -259,6 +261,7 @@ class ClickHouseAnalyticsSinkIT {
         occurredAt = Instant.now(),
         sourceService = "openbank-engagement-service",
         schemaVersion = 1,
+        ingestedAt = Instant.now(),
         payload = payload,
     )
 }
