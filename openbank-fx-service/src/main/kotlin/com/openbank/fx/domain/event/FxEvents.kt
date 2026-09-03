@@ -31,7 +31,7 @@ data class FxRatePublished(
     val rateId: UUID,
     val pair: String,
     val midRate: BigDecimal,
-    override val occurredAt: Instant = Instant.EPOCH,
+    override val occurredAt: Instant,
 ) : FxEvent()
 data class FxConversionExecuted(
     val conversionId: UUID,
@@ -41,5 +41,5 @@ data class FxConversionExecuted(
     val fromAmount: Long,
     val toAmount: Long,
     val rate: BigDecimal,
-    override val occurredAt: Instant = Instant.EPOCH,
+    override val occurredAt: Instant,
 ) : FxEvent()
