@@ -61,5 +61,5 @@ class DocumentEntity {
     var retainUntil: LocalDate? = null
 
     @field:Column(name = "created_at")
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 }

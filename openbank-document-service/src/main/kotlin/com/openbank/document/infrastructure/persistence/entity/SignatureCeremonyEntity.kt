@@ -43,5 +43,5 @@ class SignatureCeremonyEntity {
     var signatureLevel: SignatureLevel = SignatureLevel.ADVANCED
 
     @field:Column(name = "created_at")
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 }

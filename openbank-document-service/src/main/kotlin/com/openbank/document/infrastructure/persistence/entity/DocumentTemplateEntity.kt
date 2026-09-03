@@ -45,7 +45,7 @@ class DocumentTemplateEntity {
     var classification: String = "restricted"
 
     @field:Column(name = "created_at")
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @field:Column(name = "created_by")
     var createdBy: String = "system"
