@@ -1,6 +1,6 @@
 {
   "openbank-account-service": "0.27.2",
-  "openbank-admin-ui": "0.240.0",
+  "openbank-admin-ui": "0.240.1",
   "openbank-agent-service": "1.25.1",
   "openbank-aml-service": "0.10.1",
   "openbank-anacredit-service": "0.9.4",
@@ -19,7 +19,7 @@
   "openbank-devops-agent": "0.8.0",
   "openbank-dispute-service": "0.10.0",
   "openbank-docs-truth-agent": "0.6.0",
-  "openbank-document-service": "0.14.1",
+  "openbank-document-service": "0.14.2",
   "openbank-domestic-payment": "0.19.1",
   "openbank-engagement-service": "0.14.0",
   "openbank-finops-agent": "0.6.2",
