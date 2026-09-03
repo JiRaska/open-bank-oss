@@ -33,6 +33,9 @@ labels:
     description: "vuln_management SLA: 180 days."
 
   # --- Type: what kind of work this is -------------------------------------------------
+  - name: security
+    color: "b60205"
+    description: "Security defect/hardening. Closing by PR requires a regression test (security-regression-test.yml)."
   - name: bug
     color: "d73a4a"
     description: "A defect in shipped behavior."

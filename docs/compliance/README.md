@@ -9,6 +9,7 @@ deploying OpenBank as a real bank requires your own licensing, compliance, and l
 | [`finos-ccc-mapping.md`](./finos-ccc-mapping.md) | Mapping of platform controls to FINOS Common Cloud Controls (CCC) + AI Governance Framework (AIGF). |
 | [`eu-ai-act.md`](./eu-ai-act.md) | EU AI Act control mapping (tracked separately, issue #1918). |
 | [`cra-conformity-assessment.md`](./cra-conformity-assessment.md) | Cyber Resilience Act product classification (default category) and the conformity-assessment path (ADR-0278, issue #8488). |
+| [`security-slo.md`](./security-slo.md) | Security SLOs: measurable targets (CVE MTTR, signed-SBOM coverage, honey dwell time) with computable sources (ADR-0279, issue #8590). |
 
 See also: [`docs/bcp/`](../bcp/) (BCP / DORA / incident response), the ADR set under
 [`docs/adr/`](../adr/), and the authoritative CI-enforced ruleset
