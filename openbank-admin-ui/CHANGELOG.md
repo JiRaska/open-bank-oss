@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.240.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.240.0...admin-ui-v0.240.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **admin-ui:** give the Interest console its own interest:view permission ([#8500](https://github.com/JiRaska/open-bank-oss/issues/8500)) ([97ebfe2](https://github.com/JiRaska/open-bank-oss/commit/97ebfe2bac1fba8491bfec4458d9e154480935b4)), closes [#7788](https://github.com/JiRaska/open-bank-oss/issues/7788)
+
 ## [0.240.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.239.1...admin-ui-v0.240.0) (2026-09-03)
 
 
