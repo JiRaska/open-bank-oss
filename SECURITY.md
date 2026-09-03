@@ -12,6 +12,26 @@ Only the `main` branch and the latest tagged release receive security fixes duri
 | latest tag | ✅     |
 | anything else | ❌  |
 
+### Support period and end-of-support (per released component)
+
+OpenBank releases **per component** (each `openbank-*` service and the admin UI has its
+own `version.txt` and its own tag, `<component>-v<version>`), so support is declared per
+component, not per platform:
+
+- **Beta phase (all components at 0.x):** a component release is supported for
+  **12 months from its release date, or 90 days after the release that supersedes it,
+  whichever is later**. Security fixes land on `main` and are delivered by the next
+  tag of that component; during beta we do not maintain parallel patch branches.
+- **From the first production-ready (1.x) release of a component:** the support period
+  extends to **5 years from that release's date**, aligned with the CRA default
+  (Regulation (EU) 2024/2847, Art. 13(8)) — with free security updates for the whole
+  period.
+- **End-of-support is data, not prose:** every release carries its evidence bundle
+  (`.evidence.json`, see the CRA section below); the end-of-support date of a release
+  is derived mechanically from the two rules above against its release date, and the
+  formal EOS field will be added to the evidence bundle before the first 1.x release
+  (tracked in #8488).
+
 ## Reporting a Vulnerability
 
 **DO NOT** open a public GitHub issue for security vulnerabilities.
@@ -66,7 +86,7 @@ OpenBank is open-source software in beta and is **not yet placed on the market**
 - **Coordinated vulnerability disclosure** (Art. 11): the Coordinated Disclosure section above is the policy; we accept reports, remediate, and disclose on an agreed timeline.
 - **Vulnerability handling across the SDLC** (Annex I Part I): dependency scanning, secret scanning, CodeQL, cosign-signed CycloneDX SBOM attached to every GitHub Release, and signed commits — see "What Security Controls Are in Place" below.
 - **Incident and actively-exploited-vulnerability reporting** (Art. 14): the operational procedure lives in [runbook 0017](docs/runbooks/0017-cra-article-14-reporting.md) (24 h early warning / 72 h notification to the designated CSIRT and ENISA once applicable), rehearsed per [runbook 0018](docs/runbooks/0018-cra-art14-tabletop-exercise.md).
-- **Support period** (Art. 13(8)): during the beta phase the supported window is `main` plus the latest tagged release (see Supported Versions above). A formal support period of at least five years from first market placement — or for the expected product lifetime, whichever the CRA requires for our classification — will be declared before the first production-ready release, and this section will be updated to state it.
+- **Support period** (Art. 13(8)): declared per component in "Support period and end-of-support" above — 12 months / 90-days-after-superseded during beta, extended to the CRA ≥ 5-year default from each component's first production-ready (1.x) release.
 
 ## Out of Scope
 
