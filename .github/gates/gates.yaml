@@ -4529,6 +4529,25 @@ gates:
     run: |
       python3 .github/scripts/check-vex-range-reasoning.py --enforce
 
+  - id: vex-resolved-version-current
+    name: "a VEX statement's asserted resolved version is still the version the build resolves (#7987, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: >-
+      49 of 56 overlays asserted opentelemetry-api was 1.60.1 and the fix blocked on #1446
+      months after the platform bump landed and 1.62.0 was resolved — a public,
+      machine-readable "we are exposed" statement that the dependency graph no longer
+      supported, reported by nothing. check-vex-range-reasoning verifies a claim is ANCHORED;
+      this verifies it is still TRUE against gradle/verification-metadata.xml.
+    review_after: "2027-03-03"
+    selftest: python3 .github/scripts/check-vex-resolved-version.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-vex-resolved-version.py"]
+    min_subjects: 40   # 49 citations today (2026-09-03), all 49 baselined against #7987
+    budget_seconds: 20  # ~0.2s locally over the 56 overlays
+    run: |
+      python3 .github/scripts/check-vex-resolved-version.py
+
   # ADR-0254. incluster-hostname-resolution shipped advisory with a "these six findings are
   # all benign" note; three were live (settlement-service and onboarding-service dialling
   # hostnames that resolve in no namespace). The note was never re-checked. Every mode:
@@ -4698,7 +4717,7 @@ gates:
     selftest: python3 .github/scripts/check-no-epoch-instant-default.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-no-epoch-instant-default.py"]
-    min_subjects: 94    # 47+47 after aml + card-issuance burn-downs; lower this in each burn-down PR
+    min_subjects: 40    # 20+20 after fx + document + libs-domain + account + sanctions + product-catalog burn-downs; lower this in each burn-down PR
     run: |
       python3 .github/scripts/check-no-epoch-instant-default.py --root .
 
