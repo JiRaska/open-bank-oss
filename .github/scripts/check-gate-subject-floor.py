@@ -104,6 +104,14 @@ NO_CORPUS = {
     # "did not look" stay distinguishable in the log. This is the shape to copy for any future
     # entry here that prints nothing at all about what it looked at.
     "openapi-version-not-taken",
+
+    # FORBIDDEN-PATTERN gate whose TARGET state is an empty finding set. Its subjects are
+    # `Instant = Instant.EPOCH` occurrences plus the baseline entries excusing them; the burn-down
+    # completed 2026-09-03 (#8357), so zero is not the collapse case but the goal. A floor of 0
+    # states nothing (the manifest validator rejects it) and any positive floor can never be met
+    # again. It prints SUBJECTS= including zero, so "clean" and "did not look" stay
+    # distinguishable in the log — the same shape as openapi-version-not-taken above.
+    "no-epoch-instant-default",
 }
 
 # Gates that examine a real corpus and do not yet report how much of it they found. This list
