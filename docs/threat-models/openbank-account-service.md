@@ -521,6 +521,27 @@ not change any existing request's outcome until explicitly flipped.
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+- **2026-09-03** — **The sanctions gate's two refusals stopped reporting as server faults, and the
+  matched name stayed out of the response.** Neither `AccountScreeningUnavailableException` (the
+  ADR-0032 §C fail-closed path) nor `AccountOpeningBlockedByScreeningException` (HIT/REVIEW) had a
+  JAX-RS mapper, so both fell through to libs-runtime's `GenericExceptionMapper` and answered
+  **500 INTERNAL_ERROR** on `POST /api/v1/accounts` — an availability failure and a compliance
+  refusal, both told to the caller as "the server broke". Now 503 `SCREENING_UNAVAILABLE` (with
+  `Retry-After`; the gate fails closed strictly before any write, and the endpoint requires an
+  Idempotency-Key, so a replay is a retry and not a second open) and 422 `ACCOUNT_OPENING_BLOCKED`.
+  **Risk class = information disclosure**, and the disclosure is one this change *prevents* rather
+  than one it found. `AccountOpeningBlockedByScreeningException`'s message embeds `matched: <name>`
+  — the sanctions-list name the screen hit. The smallest available fix, and the one its sibling
+  `ProductNotEligibleException` documents, is to extend `IllegalStateException` and inherit the
+  libs-runtime 422; that mapper returns `exception.message` verbatim, so it would have published
+  the matched name to every caller who can provoke the refusal. Today's 500 does not leak it
+  (`GenericExceptionMapper` never echoes a message), so this is a hazard introduced by the obvious
+  fix, not a live exposure. The mapper is therefore service-local with a fixed body, the matched
+  name is confined to a WARN log line (the only record of it — a blocked open persists no row),
+  and `AccountOpeningScreeningStatusIT` asserts the served body does not contain it, so a later
+  re-parenting cannot reintroduce it silently. The refusal is also no longer distinguishable by
+  *shape* from the product-eligibility 422 beyond its `code`. No new endpoint, no authorization
+  change, no persisted data. Rollback: revert; the mappers are response-shaping only.
 ## Delegation lifecycle ordering
 
 The local enforcement projection accepts authority-opening events only with a positive,

@@ -529,16 +529,31 @@ class AccountUpdateConflictException(message: String, cause: Throwable? = null) 
  */
 class AccountNotEmptyException(message: String) : RuntimeException(message)
 
+/**
+ * A sanctions HIT or REVIEW refused the open (ADR-0032 §C). Mapped to 422 by the service-local
+ * `AccountOpeningBlockedByScreeningExceptionMapper`.
+ *
+ * **The message must never be echoed to a caller** — it embeds the sanctions-list name the screen
+ * matched. That is why this stays a bare [RuntimeException] with its own mapper instead of
+ * extending [IllegalStateException] the way [ProductNotEligibleException] does: the libs-runtime
+ * `IllegalStateExceptionMapper` returns `exception.message` verbatim, so re-parenting this type
+ * would silently publish the matched name. `AccountOpeningScreeningStatusIT` asserts the served
+ * body does not contain it.
+ */
 class AccountOpeningBlockedByScreeningException(partyId: UUID, matchedName: String?) :
     RuntimeException("Account opening blocked by sanctions screening for party $partyId (matched: $matchedName)")
 
 /**
  * Issue #668: account opening refused because product-catalog confirmed the product doesn't
  * exist, or exists but isn't ACTIVE. Never thrown when product-catalog is merely unreachable —
- * that fails open (see [ProductCatalogPort]). Extends [IllegalStateException] deliberately (not
- * a bare [RuntimeException] like [AccountOpeningBlockedByScreeningException]) so it resolves to
- * the libs-runtime `IllegalStateExceptionMapper` (422 BUSINESS_RULE_VIOLATION) instead of falling
- * through to the generic 500 mapper.
+ * that fails open (see [ProductCatalogPort]). Extends [IllegalStateException] deliberately so it
+ * resolves to the libs-runtime `IllegalStateExceptionMapper` (422 BUSINESS_RULE_VIOLATION) instead
+ * of falling through to the generic 500 mapper.
+ *
+ * Safe here, and not the pattern to copy for every refusal: that mapper echoes `exception.message`
+ * to the caller, and this one names a product id the caller just sent. Its sibling
+ * [AccountOpeningBlockedByScreeningException] reaches the same 422 the other way round, because
+ * its message may not be echoed.
  */
 class ProductNotEligibleException(productId: UUID, reason: String) :
     IllegalStateException("Cannot open account against product $productId: $reason")
