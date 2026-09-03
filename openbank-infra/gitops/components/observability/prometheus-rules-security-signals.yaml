@@ -1,0 +1,73 @@
+# Security-signal metric alerting (ADR-0279 WS2 — security observability).
+#
+# THE GAP THIS CLOSES. Authorization decisions were a silent control: services decided
+# allow/deny on every request and nothing aggregated the answer. An attacker working through
+# endpoint enumeration produces a rising deny ratio that no liveness, workflow or Falco rule
+# can see. SecurityTelemetry (openbank-libs-runtime com.openbank.libs.security, #8554) now
+# emits `openbank.security.authz.decisions` on every service with micrometer, and this rule
+# watches the SHAPE of that series, not its existence.
+#
+# WHY A RATIO, NOT A THRESHOLD. An absolute deny count cannot distinguish "attacker probing"
+# from "Tuesday": traffic growth moves it, a misconfigured client moves it, and the estate's
+# documented failure mode is alerts tuned to a magnitude that later legitimately changes
+# (WorkflowLivenessStale / FalcoAgentSilent lessons). The DENY SHARE of decisions is what an
+# enumeration attack moves and normal business does not; the floor on total rate keeps the
+# ratio from judging a service with three requests an hour.
+#
+# METRIC EMITTED-BY-CODE. openbank.security.authz.decisions is emitted by
+# openbank-libs-runtime/src/main/kotlin/com/openbank/libs/security/SecurityTelemetry.kt —
+# the name lives there as a constant (AUTHZ_DECISIONS) so this rule and the emitter cannot
+# drift apart (#5733). The alert-metric-emitted gate enforces it.
+#
+# SEVERITY. `warning` per the estate convention (a new rule that pages is a regression even
+# when it is correct). Promotion criterion: flip to `critical` once the rule has fired on a
+# real anomaly or a purple-team drill (runbook 0018) has proven the end-to-end path.
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-security-signal-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.security-signals
+      rules:
+        # Deny share of authorization decisions above 30% for 15m, on services with enough
+        # traffic for the share to mean something (> 0.05 decisions/s ≈ 180/h). Normal
+        # operation is overwhelmingly allow (authenticated staff doing their jobs); a
+        # sustained deny-heavy mix on a busy service is enumeration, a broken client
+        # hammering with stale credentials, or a delegation misconfiguration — all three
+        # worth a human's eyes, none of them pageable.
+        - alert: AuthzDenyRatioElevated
+          expr: |
+            (
+              sum by (namespace, service) (
+                rate(openbank_security_authz_decisions_total{decision="deny"}[10m])
+              )
+              /
+              sum by (namespace, service) (
+                rate(openbank_security_authz_decisions_total[10m])
+              )
+            ) > 0.3
+            and
+            sum by (namespace, service) (
+              rate(openbank_security_authz_decisions_total[10m])
+            ) > 0.05
+          for: 15m
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "Authz deny share on {{ $labels.service }}: {{ $value | humanizePercentage }} for 15m"
+            description: >-
+              More than 30% of authorization decisions on this service have been denies for
+              15 minutes at meaningful traffic. First look at the reason tag — Loki:
+              {namespace="{{ $labels.namespace }}"} | json | ... the deny reason code is on
+              the metric (openbank_security_authz_decisions_total{decision="deny"}) and on
+              the span attributes openbank.authz.decision / openbank.authz.reason in Tempo.
+              A single dominant reason like "delegation-expired" is usually a broken client;
+              a spread of reasons across endpoints is enumeration — correlate with
+              HoneyEndpointHit and Falco events in the same window before deciding.
