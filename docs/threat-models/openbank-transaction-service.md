@@ -266,10 +266,14 @@ what the catalogue may hold.
   defect (§4) that had to be fixed before any payment rail settles through the engine. (2) **Dual-write
   removed:** the saga drops `balanceCoverPort.debit/credit` (and the compensation refund); booked balance
   is the ledger projection's sole mover, the cover hold released by the projection. Risk class =
-  **integrity** (money direction + single booked source of truth), mitigated by `PaymentJournalFactoryTest`,
-  `PaymentSagaOrchestratorTest`, and — as written at the time — a `PaymentSagaLedgerIT` that was
-  never committed (noted 2026-08-20; left in place because a change log records what was claimed
-  on the day, and correcting it silently would erase the evidence that it was). Coupled
+  **integrity** (money direction + single booked source of truth), mitigated by `PaymentJournalFactoryTest`
+  (real, still present) and — as written at the time — two classes that are not in the tree:
+  `PaymentSagaOrchestratorTest` and a `PaymentSagaLedgerIT` that was never committed (the IT noted
+  2026-08-20, the orchestrator test noted 2026-09-03; both left in place because a change log
+  records what was claimed on the day, and correcting them silently would erase the evidence that
+  they were). `PaymentSagaOrchestratorTest` went away with its subject: ADR-0120 Phase 5 made
+  Temporal the sole orchestrator and removed `PaymentSagaOrchestrator` itself, so the surviving
+  coverage of that path is `PaymentWorkflowImplTest`. Coupled
   balance-service change:
   `openbank.balance.projection.enabled=true`.
 - **2026-05-30** — K7/ADR-0018: role-gated the previously `@PermitAll` read endpoints; raw-string
