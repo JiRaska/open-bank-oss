@@ -124,3 +124,21 @@ pitest {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+tasks.withType<Test> {
+    // Gradle's default test-JVM heap is 512m. fx-service already boots Quarkus under four distinct
+    // test configurations in one forked JVM (boot smoke, NUL-byte rejection, outbox claim, CNB
+    // scheduler); FxOutboxAtomicityIT (#8353) adds a fifth, because a class that switches
+    // `openbank.outbox.dispatch-enabled` off is a different config and so forces its OWN boot.
+    // Measured on this branch: without the bump the suite dies with `java.lang.OutOfMemoryError:
+    // Java heap space` inside the Gradle test executor after 116 of 160 tests, and the JUnit XML
+    // then reports **zero failures** — the run simply stops, which reads as a pass to anything
+    // counting failures. With it, 162/162.
+    //
+    // Same override, same reason, as openbank-account-service and openbank-lending-service.
+    // Deliberately per-module: nothing measures test heap anywhere, so a fleet default would be an
+    // unmeasured ratchet across ~50 modules to fix one. This is the third module to need it — if a
+    // fourth appears, that is the signal to raise it in build-logic and count Quarkus boots per
+    // module instead of paying for them one build file at a time.
+    maxHeapSize = "2g"
+}
