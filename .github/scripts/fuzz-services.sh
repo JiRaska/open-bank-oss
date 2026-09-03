@@ -389,6 +389,26 @@ for svc in $SERVICES; do
       blocked="$(grep -aoE 'Authentication failed: [0-9]+ operation' "fuzz-reports/${svc}-fuzz${logsuffix}.log" | grep -oE '[0-9]+' | head -1 || true)"
       echo "==> [${svc}] ${label}: ${sel:-Selected: ?} auth-blocked=${blocked:-0}"
 
+      # Machine-readable exercised-surface record (#5769): the number a pentest
+      # attestation's `ops:` field cites. Logs age out with retention; this JSON
+      # is the durable artifact check-readiness-attestations.py's R8 refers to.
+      # exercised = selected - auth-blocked: operations that only ever answered
+      # 401/403 tested NO handler logic and must not inflate the count.
+      local sel_n
+      sel_n="$(printf '%s' "${sel}" | grep -oE 'Selected: [0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+      cat > "fuzz-reports/${svc}-ops${logsuffix}.json" <<OPSJSON
+{
+  "service": "${svc}",
+  "lane": "${label}",
+  "selected": ${sel_n:-0},
+  "auth_blocked": ${blocked:-0},
+  "exercised": $(( ${sel_n:-0} - ${blocked:-0} )),
+  "max_examples": "${MAX_EXAMPLES}",
+  "run": "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-?}/actions/runs/${GITHUB_RUN_ID:-?}",
+  "date": "$(date -u +%F)"
+}
+OPSJSON
+
       # A pass that drove ZERO operations tested nothing, and its green reads exactly like a
       # finding-free run — the 2026-08-18 run reported 7 failures of 23 where six had never
       # sent a request, and the job list rendered both kinds identically. Fail LOUDLY, worded

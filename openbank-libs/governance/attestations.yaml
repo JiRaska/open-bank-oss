@@ -19,6 +19,13 @@
 #   <service>:
 #     <key>: { date: YYYY-MM-DD, ttl_days: N, by: <kdo>, ref: <PR/runbook> }
 #
+# Pentest atestace vydaná CI lanou (`by: ci-*`) NESÍ navíc `ops: N` — počet
+# skutečně otestovaných operací z běhu (Selected minus auth-blocked; lane ho od
+# #5769 zapisuje strojově do fuzz-reports/<svc>-ops*.json). Pod prahem
+# (5 operací) patří místo toho `not_fuzzable: "<důvod>"` — jinak zelená lane,
+# která otestovala jednu operaci, obnovuje atestaci donekonečna, aniž by
+# cokoli testovala (#5769). Gate `readiness-attestation-format` to vynucuje.
+#
 # <service> je KRÁTKÉ jméno (`consent`, ne `consent-service`) — collector hledá pod
 # `openbank-<service>-service`. Špatné jméno = atestace neplatí pro nic a nikde to
 # nekřičí; přesně tak byla `consent-service:` mrtvá od svého vzniku (#2365).
