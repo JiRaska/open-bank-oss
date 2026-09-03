@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.48.0
+  version: 1.49.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -4244,6 +4244,33 @@ components:
         variables:
           type: array
           items: {type: string}
+          description: >-
+            The presentation variable KEYS a catalogue item declares. Names, never values — copy
+            for a catalogue item lives in the app, which is what keeps this a typed server decision
+            rather than remote UI markup.
+        values:
+          type: object
+          additionalProperties: {type: string}
+          description: >-
+            Resolved values, present ONLY for a trusted campaign assignment; a catalogue item
+            declares keys and sends no values. A client that cannot see this renders a campaign
+            banner with its variables unfilled.
+        deepLink:
+          type: string
+          nullable: true
+          description: >-
+            Where a tap should go, as a closed `openbank://` app route. engagement-service enforces
+            the SCHEME only (`CampaignBannerPlacement` requires the `openbank://` prefix); it does
+            not constrain the destination, so a client must resolve this through its own allowlist
+            of known routes and ignore anything it does not recognise. Absent for content with no
+            tap target.
+        interactionRef:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Opaque reference tying this content to a campaign send. Copy it back verbatim on the
+            engagement event so attribution can be resolved server-side; the app never interprets it.
 
     EngagementSurfaceEvent:
       type: object

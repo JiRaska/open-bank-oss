@@ -3,10 +3,9 @@
 openapi: 3.1.0
 info:
   title: Domestic Payment Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.4 -> 1.5): additive
-  # only — GET /domestic-payments/approvals (the checker's queue, issue #5679) plus two additive
-  # fields on ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.5.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
+  # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
+  version: 1.6.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -27,6 +26,12 @@ paths:
     post:
       tags: [Domestic Payments]
       summary: Create a domestic payment
+      description: >-
+        Idempotency is authoritative in Postgres, atomically with the payment and its outbox event.
+        An exact retry by the same authenticated actor returns the existing payment with
+        X-Idempotency-Replayed=true. Reusing the key for a different normalized payment command,
+        actor scope, delegation or reservation is refused with 409 IDEMPOTENCY_KEY_REUSED. A
+        pre-upgrade row without a durable request fingerprint also fails closed with that response.
       operationId: createDomesticPayment
       parameters:
         - name: Idempotency-Key
@@ -42,11 +47,23 @@ paths:
               $ref: '#/components/schemas/CreateDomesticPaymentRequest'
       responses:
         '201':
-          description: Payment created
+          description: Payment created, or the durable result of an exact request replay
+          headers:
+            X-Idempotency-Replayed:
+              description: Present and true only when this response replays an existing payment.
+              schema:
+                type: string
+                enum: ['true']
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DomesticPaymentResponse'
+        '409':
+          description: Idempotency-Key is already bound to a different or unverifiable legacy request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/IdempotencyConflictResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
     get:
@@ -334,6 +351,27 @@ components:
         code:
           type: string
         message:
+          type: string
+
+    IdempotencyConflictResponse:
+      type: object
+      required: [type, title, status, detail, code, error]
+      properties:
+        type:
+          type: string
+          enum: ['urn:openbank:error:idempotency-key-reused']
+        title:
+          type: string
+          enum: [Idempotency key reused]
+        status:
+          type: integer
+          enum: [409]
+        detail:
+          type: string
+        code:
+          type: string
+          enum: [IDEMPOTENCY_KEY_REUSED]
+        error:
           type: string
 
     ApprovalResponse:

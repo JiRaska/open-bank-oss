@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,7 @@ SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
 INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
 DIAGNOSTIC_KINDS = {"playwright-report"}
 MAX_FUTURE_SKEW = timedelta(minutes=5)
+JSON_SAFE_INTEGER_MAX = 2**53 - 1
 # Shared resources write their readiness-aware lifecycle directly while the CI
 # Docker event stream sees the same container at daemon start/stop time. Keep
 # one observation when the two sources describe that same lifecycle, without
@@ -127,12 +129,26 @@ def validate_envelope(envelope: dict) -> None:
             raise ValueError("synthetic evidence variant is invalid")
     for item in envelope.get("testCases", []):
         required_case_fields = {"fingerprint", "kind", "classname", "name", "state", "durationMs"}
-        if set(item) - (required_case_fields | {"testDefinitionPath"}) or not required_case_fields.issubset(item):
+        retry_fields = {"retryFlaky", "failedAttemptCount", "failedAttemptDurationMs"}
+        if set(item) - (required_case_fields | {"testDefinitionPath"} | retry_fields) or not required_case_fields.issubset(item):
             raise ValueError("test case fields are invalid")
         if (not re.fullmatch(r"[0-9a-f]{24}", item["fingerprint"]) or item["kind"] not in SUITE_KINDS
                 or item["state"] not in {"passed", "failed", "skipped"}
                 or not item["classname"] or not item["name"] or item["durationMs"] < 0):
             raise ValueError("test case values are invalid")
+        present_retry_fields = retry_fields.intersection(item)
+        if present_retry_fields and present_retry_fields != retry_fields:
+            raise ValueError("retry-flaky test case metadata must be complete")
+        if present_retry_fields:
+            failed_attempt_count = item["failedAttemptCount"]
+            failed_attempt_duration = item["failedAttemptDurationMs"]
+            if (item["retryFlaky"] is not True or item["state"] != "passed"
+                    or not isinstance(failed_attempt_count, int) or isinstance(failed_attempt_count, bool)
+                    or failed_attempt_count < 1 or failed_attempt_count > JSON_SAFE_INTEGER_MAX
+                    or not isinstance(failed_attempt_duration, int) or isinstance(failed_attempt_duration, bool)
+                    or failed_attempt_duration < 0 or failed_attempt_duration > JSON_SAFE_INTEGER_MAX
+                    or failed_attempt_duration > item["durationMs"]):
+                raise ValueError("retry-flaky test case metadata is invalid")
         path = item.get("testDefinitionPath")
         if (path is not None and (
                 not re.fullmatch(r"src/test/(?:kotlin|java)/[A-Za-z0-9_./-]+\.(?:kt|java)", path)
@@ -283,6 +299,32 @@ def source_declared_kind(service: Path, classname: str) -> str | None:
     return "integration" if re.search(r"@Quarkus(?:Integration)?Test\b", source) else None
 
 
+def junit_duration_ms(value: str | None, *, required: bool = False) -> int | None:
+    """Parse a non-negative finite JUnit duration without converting invalid evidence to zero."""
+    if value is None:
+        return None if required else 0
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    milliseconds = seconds * 1000
+    if not math.isfinite(milliseconds) or milliseconds > JSON_SAFE_INTEGER_MAX:
+        return None
+    return round(milliseconds)
+
+
+def safe_sum_duration_ms(values: list[int | None]) -> int | None:
+    """Sum parsed durations only while their aggregate remains JSON/JavaScript-safe."""
+    total = 0
+    for value in values:
+        if value is None or value < 0 or value > JSON_SAFE_INTEGER_MAX - total:
+            return None
+        total += value
+    return total
+
+
 def test_cases(component: str, service: Path) -> list[dict]:
     """Emit secret-free observations with stable identity and verified test-source provenance."""
     result = []
@@ -297,11 +339,39 @@ def test_cases(component: str, service: Path) -> list[dict]:
             state = "skipped" if case.find("skipped") is not None else "failed" if (
                 case.find("failure") is not None or case.find("error") is not None
             ) else "passed"
+            # Playwright's JUnit `includeRetries` format nests prior failed attempts under an
+            # eventually passing testcase, and later terminal failures under a failed testcase.
+            # Read only the element kind and numeric duration:
+            # message/type, stackTrace, stdout/stderr and attachments can contain fixtures,
+            # endpoints or tokens and never enter canonical evidence.
+            retry_failures = [
+                child for child in case
+                if child.tag in {"flakyFailure", "flakyError"}
+            ] if state == "passed" else []
+            terminal_reruns = [
+                child for child in case
+                if child.tag in {"rerunFailure", "rerunError"}
+            ] if state == "failed" else []
+            nested_attempts = retry_failures or terminal_reruns
+            nested_durations = [junit_duration_ms(child.attrib.get("time"), required=True) for child in nested_attempts]
+            nested_duration_ms = safe_sum_duration_ms(nested_durations)
+            testcase_duration_ms = junit_duration_ms(case.attrib.get("time"))
+            testcase_duration_valid = testcase_duration_ms is not None
+            base_duration_ms = testcase_duration_ms if testcase_duration_ms is not None else 0
+            total_duration_ms = safe_sum_duration_ms([testcase_duration_ms, nested_duration_ms])
             item = {
                 "fingerprint": hashlib.sha256(identity.encode()).hexdigest()[:24],
                 "kind": kind, "classname": classname, "name": definition, "state": state,
-                "durationMs": max(0, round(float(case.attrib.get("time", 0)) * 1000)),
+                # The testcase attribute is the final pass or first terminal failure. Add valid
+                # nested attempts so duration remains the total cost of this observation.
+                "durationMs": total_duration_ms if total_duration_ms is not None else base_duration_ms,
             }
+            if retry_failures and testcase_duration_valid and nested_duration_ms is not None and total_duration_ms is not None:
+                item.update({
+                    "retryFlaky": True,
+                    "failedAttemptCount": len(retry_failures),
+                    "failedAttemptDurationMs": nested_duration_ms,
+                })
             source_path = test_definition_path(service, classname)
             if source_path is not None:
                 item["testDefinitionPath"] = source_path
@@ -699,9 +769,15 @@ def main() -> None:
                           '<system-out>OPENBANK_TRACE_CONTRACT_V1:failed-contract\n'
                           'OPENBANK_TRACE_CONTRACT_V1:customer supplied trace id</system-out>'
                           '</testsuite></testsuites>'),
-                ("e2e", '<testsuites name="playwright" tests="1" failures="0" errors="0" skipped="0" time="2">'
-                        '<testsuite name="nav" tests="1" failures="0" errors="0" skipped="0" time="2">'
-                        '<testcase classname="nav.spec.ts" name="loads" time="2"/>'
+                ("e2e", '<testsuites name="playwright" tests="1" failures="0" errors="0" skipped="0" time="3.25">'
+                        '<testsuite name="nav" tests="1" failures="0" errors="0" skipped="0" time="3.25">'
+                        '<testcase classname="nav.spec.ts" name="loads" time="2">'
+                        '<flakyFailure message="customer fixture leaked" type="FAILURE" time="0.75">'
+                        '<stackTrace>PRIVATE_STACK_TOKEN</stackTrace><system-out>PRIVATE_STDOUT_TOKEN</system-out>'
+                        '</flakyFailure>'
+                        '<flakyError message="internal endpoint leaked" type="ERROR" time="0.5">'
+                        '<stackTrace>PRIVATE_ERROR_TOKEN</stackTrace><system-err>PRIVATE_STDERR_TOKEN</system-err>'
+                        '</flakyError></testcase>'
                         '<system-out>OPENBANK_TRACE_CONTRACT_V1:public-edge</system-out>'
                         '</testsuite></testsuites>'),
             ):
@@ -717,9 +793,73 @@ def main() -> None:
             assert set(discovered) == {"unit", "e2e"}, discovered
             assert (discovered["unit"]["discovered"], discovered["unit"]["failed"]) == (2, 1), discovered
             assert discovered["unit"]["state"] == "failed" and discovered["e2e"]["state"] == "passed"
+            assert discovered["e2e"]["durationMs"] == 3250
             cases = test_cases("openbank-admin-ui", service)
             assert len(cases) == 3
             assert {item.get("testDefinitionPath") for item in cases} == {"src/test/kotlin/com/openbank/GuardTest.kt", None}
+            retry_flaky = next(item for item in cases if item["kind"] == "e2e")
+            assert retry_flaky == {
+                "fingerprint": retry_flaky["fingerprint"],
+                "kind": "e2e",
+                "classname": "nav.spec.ts",
+                "name": "loads",
+                "state": "passed",
+                "durationMs": 3250,
+                "retryFlaky": True,
+                "failedAttemptCount": 2,
+                "failedAttemptDurationMs": 1250,
+            }
+            serialized_retry_flaky = json.dumps(retry_flaky)
+            assert all(secret not in serialized_retry_flaky for secret in (
+                "customer fixture leaked", "internal endpoint leaked", "PRIVATE_STACK_TOKEN",
+                "PRIVATE_STDOUT_TOKEN", "PRIVATE_ERROR_TOKEN", "PRIVATE_STDERR_TOKEN",
+            ))
+            retry_edge_service = service / "retry-edge-cases"
+            retry_edge_report = retry_edge_service / "build/test-results/e2e/playwright.xml"
+            retry_edge_report.parent.mkdir(parents=True)
+            retry_edge_report.write_text(
+                '<testsuite name="retry edges" tests="7" failures="1" errors="0" skipped="0" time="3.1">'
+                '<testcase classname="terminal.spec.ts" name="exhausts retries" time="0.5">'
+                '<failure message="PRIVATE_FIRST_FAILURE"><stackTrace>PRIVATE_FIRST_STACK</stackTrace></failure>'
+                '<rerunFailure message="PRIVATE_RERUN_FAILURE" time="0.7"><stackTrace>PRIVATE_RERUN_STACK</stackTrace></rerunFailure>'
+                '<rerunError message="PRIVATE_RERUN_ERROR" time="0.3"><system-err>PRIVATE_RERUN_STDERR</system-err></rerunError>'
+                '</testcase>'
+                '<testcase classname="malformed.spec.ts" name="rejects NaN retry time" time="0.4">'
+                '<flakyFailure message="PRIVATE_NAN_FAILURE" time="NaN"/></testcase>'
+                '<testcase classname="malformed.spec.ts" name="rejects negative retry time" time="0.4">'
+                '<flakyError message="PRIVATE_NEGATIVE_ERROR" time="-0.2"/></testcase>'
+                '<testcase classname="malformed.spec.ts" name="rejects malformed retry time" time="0.4">'
+                '<flakyFailure message="PRIVATE_VALID_FAILURE" time="0.1"/>'
+                '<flakyError message="PRIVATE_GARBAGE_ERROR" time="garbage"/></testcase>'
+                '<testcase classname="malformed.spec.ts" name="rejects overflowing retry time" time="0.4">'
+                '<flakyFailure message="PRIVATE_OVERFLOW_FAILURE" time="1e308"/></testcase>'
+                '<testcase classname="aggregate.spec.ts" name="rejects total retry duration overflow" time="5000000000000">'
+                '<flakyFailure message="PRIVATE_TOTAL_OVERFLOW" time="5000000000000"/></testcase>'
+                '<testcase classname="aggregate.spec.ts" name="rejects failed attempt duration overflow" time="0.4">'
+                '<flakyFailure message="PRIVATE_SUM_OVERFLOW_ONE" time="5000000000000"/>'
+                '<flakyError message="PRIVATE_SUM_OVERFLOW_TWO" time="5000000000000"/></testcase>'
+                '</testsuite>'
+            )
+            retry_edge_cases = test_cases("openbank-admin-ui", retry_edge_service)
+            terminal_failure = next(item for item in retry_edge_cases if item["name"] == "exhausts retries")
+            assert terminal_failure["state"] == "failed" and terminal_failure["durationMs"] == 1500
+            assert "retryFlaky" not in terminal_failure
+            malformed_retry_cases = [item for item in retry_edge_cases if item["classname"] == "malformed.spec.ts"]
+            assert len(malformed_retry_cases) == 4
+            assert all(item["state"] == "passed" and item["durationMs"] == 400 for item in malformed_retry_cases)
+            assert all("retryFlaky" not in item for item in malformed_retry_cases)
+            aggregate_retry_cases = {item["name"]: item for item in retry_edge_cases if item["classname"] == "aggregate.spec.ts"}
+            assert aggregate_retry_cases["rejects total retry duration overflow"]["durationMs"] == 5_000_000_000_000_000
+            assert aggregate_retry_cases["rejects failed attempt duration overflow"]["durationMs"] == 400
+            assert all("retryFlaky" not in item for item in aggregate_retry_cases.values())
+            serialized_retry_edges = json.dumps(retry_edge_cases)
+            assert all(secret not in serialized_retry_edges for secret in (
+                "PRIVATE_FIRST_FAILURE", "PRIVATE_FIRST_STACK", "PRIVATE_RERUN_FAILURE",
+                "PRIVATE_RERUN_STACK", "PRIVATE_RERUN_ERROR", "PRIVATE_RERUN_STDERR",
+                "PRIVATE_NAN_FAILURE", "PRIVATE_NEGATIVE_ERROR", "PRIVATE_VALID_FAILURE",
+                "PRIVATE_GARBAGE_ERROR", "PRIVATE_OVERFLOW_FAILURE", "PRIVATE_TOTAL_OVERFLOW",
+                "PRIVATE_SUM_OVERFLOW_ONE", "PRIVATE_SUM_OVERFLOW_TWO",
+            ))
             suite_rows = list(discovered.values())
             failing_fingerprint = next(item["fingerprint"] for item in cases if item["state"] == "failed")
             no_candidates = escaped_failure_recall(suite_rows, cases, [], full_suite_complete=True)
@@ -922,6 +1062,37 @@ def main() -> None:
                 "testCases": [],
                 "testImpact": {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown", "selectionState": "unavailable"},
             }
+            retry_envelope = json.loads(json.dumps(valid))
+            retry_envelope["testCases"] = [retry_flaky]
+            validate_envelope(retry_envelope)
+            rejected_retry_cases = []
+            missing_retry_duration = dict(retry_flaky)
+            del missing_retry_duration["failedAttemptDurationMs"]
+            rejected_retry_cases.append(missing_retry_duration)
+            for field, value in (
+                ("retryFlaky", False),
+                ("failedAttemptCount", 0),
+                ("failedAttemptCount", True),
+                ("failedAttemptCount", JSON_SAFE_INTEGER_MAX + 1),
+                ("failedAttemptDurationMs", -1),
+                ("failedAttemptDurationMs", retry_flaky["durationMs"] + 1),
+                ("state", "failed"),
+            ):
+                rejected_retry_cases.append({**retry_flaky, field: value})
+            rejected_retry_cases.append({
+                **retry_flaky,
+                "durationMs": JSON_SAFE_INTEGER_MAX + 1,
+                "failedAttemptDurationMs": JSON_SAFE_INTEGER_MAX + 1,
+            })
+            for rejected_case in rejected_retry_cases:
+                rejected_retry_envelope = json.loads(json.dumps(valid))
+                rejected_retry_envelope["testCases"] = [rejected_case]
+                try:
+                    validate_envelope(rejected_retry_envelope)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"invalid retry-flaky metadata was accepted: {rejected_case}")
             traversal = {**valid, "testCases": [{
                 "fingerprint": "0123456789abcdef01234567", "kind": "integration",
                 "classname": "com.openbank.GuardTest", "name": "guards", "state": "passed",
