@@ -19,6 +19,12 @@ labels:
   - name: vex-triage
     color: "b60205"
     description: "CVE awaiting a human VEX verdict; the issue's age is the vuln_management SLA clock."
+  - name: kev-listed
+    color: "b60205"
+    description: "CVE on CISA KEV (actively exploited) — critical SLA regardless of CVSS (ADR-0279)."
+  - name: credential-inventory
+    color: "5319e7"
+    description: "Standing long-lived credential inventory issue (ADR-0279 #18), bot-maintained."
   - name: "severity:critical"
     color: "b60205"
     description: "vuln_management SLA: 7 days."
@@ -136,3 +142,6 @@ labels:
   - name: dependencies
     color: "0366d6"
     description: "Dependency update. Applied automatically by dependabot."
+  - name: deps-freshness
+    color: "0e8a16"
+    description: "Standing dependency-freshness report issue (ADR-0279 #15), bot-maintained."

@@ -63,6 +63,10 @@
         "description": "Read-only access to audit trail (SOX/DORA evidence)"
       },
       {
+        "name": "ROLE_DPO",
+        "description": "Data Protection Officer — GDPR Art. 15/20 export endpoints (ADR-0204); no write actions"
+      },
+      {
         "name": "ROLE_SUPERVISOR",
         "description": "Approves limit overrides, large payments, board-level escalations"
       },
