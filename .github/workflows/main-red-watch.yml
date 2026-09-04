@@ -55,6 +55,9 @@ on:
       - "Dependency submission"
       - "Gradle wrapper validation"
       - "Release Please"
+      # ADR-0279 #16/#20: the Semgrep IaC lane is a security gate; its red on main is a
+      # container/manifest regression and must not stay silent.
+      - "Semgrep IaC security"
       # Pushes to main unconditionally (issue #4240). Its red is meaningful in a way worth
       # naming: it means the watch could NOT read the ruleset bypass log — a permission-shaped
       # absence, not "nothing was bypassed". Exactly the state that must not stay silent.
