@@ -47,7 +47,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: billing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-billing-service:sandbox-82c73001
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-billing-service:sandbox-100cb18d
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
