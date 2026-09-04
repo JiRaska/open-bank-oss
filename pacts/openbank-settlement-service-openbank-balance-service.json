@@ -1,0 +1,156 @@
+{
+  "consumer": {
+    "name": "openbank-settlement-service"
+  },
+  "interactions": [
+    {
+      "description": "POST the payee leg of a settlement as a CZK credit",
+      "providerStates": [
+        {
+          "name": "a CZK balance exists for the settlement payee account"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 750.00,
+          "currency": "CZK",
+          "description": "Settlement Credit 5e771e33-0000-4000-8000-000000005e77",
+          "referenceId": "settlement-credit-5e771e33-0000-4000-8000-000000005e77"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/5e771e33-0000-4000-8000-00000000c1e1/credit"
+      },
+      "response": {
+        "body": {
+          "accountId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "availableAmount": 9250.0,
+          "bookedAmount": 9250.0,
+          "currency": "CZK"
+        },
+        "generators": {
+          "body": {
+            "$.accountId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.accountId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.availableAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.bookedAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST the payer leg of a settlement as a CZK debit",
+      "providerStates": [
+        {
+          "name": "a CZK balance exists for the settlement payer account"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 750.00,
+          "currency": "CZK",
+          "description": "Settlement Debit 5e771e33-0000-4000-8000-000000005e77",
+          "referenceId": "settlement-debit-5e771e33-0000-4000-8000-000000005e77"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/5e771e33-0000-4000-8000-00000000d1b1/debit"
+      },
+      "response": {
+        "body": {
+          "accountId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "availableAmount": 9250.0,
+          "bookedAmount": 9250.0,
+          "currency": "CZK"
+        },
+        "generators": {
+          "body": {
+            "$.accountId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.accountId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.availableAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.bookedAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-balance-service"
+  }
+}

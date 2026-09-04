@@ -86,11 +86,24 @@ class BalanceServiceWireMockResource : QuarkusTestResourceLifecycleManager {
             stubLedgerHasNoJournal()
         }
 
-        /** Both movement verbs succeed, echoing a balance back. */
+        /**
+         * Both movement verbs succeed, echoing a balance back.
+         *
+         * The body is balance-service's REAL response shape — its `Balance` aggregate, serialized
+         * (`availableAmount`/`bookedAmount`). It used to read `availableBalance`/`currentBalance`,
+         * names balance-service has never emitted, matching settlement's equally invented
+         * `BalanceResponse`. Both were wrong together, so this stub — written precisely so an
+         * actual HTTP request leaves the process (#6037) — agreed with the defect and every
+         * assertion here stayed green while the real call would have failed to deserialize
+         * (#8345). Pinned now by `SettlementBalanceMovementPactConsumerTest` and replayed against
+         * the running provider, which is the only thing that can keep a hand-written stub honest.
+         */
         fun stubMovementsAccepted() {
             val body = """
                 {"accountId":"00000000-0000-0000-0000-000000000001","currency":"CZK",
-                 "availableBalance":0.00,"currentBalance":0.00}
+                 "availableAmount":0.00,"bookedAmount":0.00,"reservedAmount":0.00,
+                 "pendingAmount":0.00,"arrangedOverdraftLimit":0.00,
+                 "updatedAt":"2026-01-15T10:00:00Z"}
             """.trimIndent()
             server.stubFor(post(urlPathMatching(CREDIT_PATH)).willReturn(okJson(body)))
             server.stubFor(post(urlPathMatching(DEBIT_PATH)).willReturn(okJson(body)))

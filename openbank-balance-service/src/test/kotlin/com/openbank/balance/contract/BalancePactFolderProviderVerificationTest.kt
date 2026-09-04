@@ -83,6 +83,12 @@ class BalancePactFolderProviderVerificationTest {
         // Batch A: account-service getBalances / getBalance / initialize
         private val LIST_ACCOUNT_ID = UUID.fromString("d4d4d4d4-d4d4-d4d4-d4d4-d4d4d4d4d4d4")
         private val SINGLE_ACCOUNT_ID = UUID.fromString("d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5")
+
+        // #8345: settlement-service debit (payer leg) + credit (payee leg). Distinct account ids
+        // from every state above — the seeds share one Testcontainer database, so a reused
+        // (accountId, currency) would collide on `balances_account_id_currency_key`.
+        private val SETTLEMENT_PAYER_ACCOUNT_ID = UUID.fromString("5e771e33-0000-4000-8000-00000000d1b1")
+        private val SETTLEMENT_PAYEE_ACCOUNT_ID = UUID.fromString("5e771e33-0000-4000-8000-00000000c1e1")
     }
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -285,5 +291,56 @@ class BalancePactFolderProviderVerificationTest {
         // Intentionally empty — a fresh Testcontainer DB satisfies it by construction. Declared so
         // the state is an explicit part of the contract; pact-jvm passes silently over an unhandled
         // state name, which is how the missing states in #468 stayed invisible.
+    }
+
+    // --- #8345: settlement-service money movements ---
+
+    /**
+     * Funds the payer leg of a settlement. 10 000.00 CZK against a 750.00 movement, deliberately
+     * far above it: `Balance.applyDebit` refuses a debit past the overdraft floor with 422, and a
+     * balance equal to the amount would leave the interaction one rounding decision away from
+     * failing for a reason that has nothing to do with the contract.
+     *
+     * The seed is find-then-update (see [seedBalance]) because the movement is APPLIED by the
+     * verification — a second pass over the same pact would otherwise start from an already
+     * debited balance. balance-service is separately idempotent on `referenceId`, so a replay of
+     * the same interaction is not double-applied either; the reset is what keeps the *first* pass
+     * of each run identical.
+     */
+    @State("a CZK balance exists for the settlement payer account")
+    fun stateSettlementPayerBalanceExists() = runOnVertxContext {
+        seedBalance(
+            Balance(
+                id = UUID.randomUUID(),
+                accountId = SETTLEMENT_PAYER_ACCOUNT_ID,
+                currency = "CZK",
+                bookedAmount = BigDecimal("10000.00"),
+                availableAmount = BigDecimal("10000.00"),
+                reservedAmount = BigDecimal.ZERO,
+                pendingAmount = BigDecimal.ZERO,
+                updatedAt = OffsetDateTime.now(),
+                version = 0L,
+            ),
+        )
+        Unit
+    }
+
+    /** Receives the payee leg of the same settlement. Same reset rationale as the payer state. */
+    @State("a CZK balance exists for the settlement payee account")
+    fun stateSettlementPayeeBalanceExists() = runOnVertxContext {
+        seedBalance(
+            Balance(
+                id = UUID.randomUUID(),
+                accountId = SETTLEMENT_PAYEE_ACCOUNT_ID,
+                currency = "CZK",
+                bookedAmount = BigDecimal("8500.00"),
+                availableAmount = BigDecimal("8500.00"),
+                reservedAmount = BigDecimal.ZERO,
+                pendingAmount = BigDecimal.ZERO,
+                updatedAt = OffsetDateTime.now(),
+                version = 0L,
+            ),
+        )
+        Unit
     }
 }
