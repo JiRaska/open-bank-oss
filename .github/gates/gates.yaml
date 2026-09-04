@@ -561,6 +561,26 @@ gates:
         exit 1
       fi
 
+  # The coverage KPI behind the drift gate (ADR-0279 WS2 #17): drift proves committed ==
+  # generated; this proves how much of the fleet is selected by ANY ingress policy at all.
+  # On the VPC CNI there is no audit mode (runbook 0010) — a pod no policy selects is fully
+  # reachable, so the coverage ratio IS the segmentation posture. Ratchet shape: a component
+  # with no generated policy must be baselined with a reason, and a paid-off baseline entry
+  # fails until removed. Measured at introduction 2026-09-04: 59/73 components (81%).
+  - id: netpol-coverage-kpi
+    name: "NetworkPolicy coverage KPI — generator ingress policy present per component (ADR-0279 #17, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 5   # one directory walk
+    min_subjects: 35   # 73 components measured 2026-09-04; half, so the fleet can shrink without a red
+    rationale: "The CNI has no audit mode, so an unselected pod is silently reachable; the coverage ratio is the only segmentation signal available pre-enforcement and must never regress while #2691 stages the rollout."
+    review_after: "2027-03-04"
+    selftest: python3 .github/scripts/check-netpol-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-netpol-coverage.py"]
+    run: |
+      python3 .github/scripts/check-netpol-coverage.py --root . --enforce
+
   # The drift gate above proves the committed policies match what the generator
   # DERIVES. It cannot say anything about what the generator cannot SEE: a
   # cross-namespace URL that lives only in a Kotlin @ConfigProperty default or a
@@ -3066,6 +3086,28 @@ gates:
     run: |
       python3 .github/scripts/check-asvs-l3.py --enforce --baseline .github/asvs-l3-baseline.txt
 
+  # A contract test that asserts only the happy path proves the provider talks back, not
+  # that it refuses the wrong caller (ADR-0279 WS1 #3). Measured 2026-09-03: 104 of 108
+  # Pact test files fleet-wide carry no negative-auth case at all — the provider could
+  # drop authz enforcement and every contract stays green. Deliberately DIFF-SCOPED on
+  # the PR: a new or changed Pact/contract test file must carry a negative case
+  # (401/403/404 or an unauthorized marker); the 104-file debt is a tracked sweep
+  # (--fleet-report), not a PR blocker. ENFORCED.
+  - id: adversarial-contract-test
+    name: "adversarial contract tests — changed Pact/contract test needs a negative case (ADR-0279, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 10   # one git diff + a regex over the touched files
+    rationale: "A happy-path-only contract test cannot catch a provider that stops enforcing authz — 126 of 132 fleet contract tests measured 2026-09-3 had no negative case; this ratchets the convention on every touched file while the debt sweep runs under #8590."
+    review_after: "2027-03-04"
+    when: pull_request
+    needs_base: required
+    selftest: python3 .github/scripts/check-adversarial-contract-tests.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-adversarial-contract-tests.py"]
+    run: |
+      python3 .github/scripts/check-adversarial-contract-tests.py --since "${PR_DIFF_BASE}"
+
   # The cheapest drift proxy from #2314: the spec's declared dev port must equal the
   # service's quarkus.http.port. The 21 mismatches measured on 2026-07-29 were corrected
   # in the same PR that lands this gate, so it enforces from day one with no baseline.
@@ -3737,6 +3779,28 @@ gates:
       # same diff. Generated churn (policy-checksum restamps, image tags) does not
       # count; see hunk_moves_boundary and the gate's --self-test.
       python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}" --enforce
+
+  # ADR-0279 WS4 #26: the PR template's Security checklist is the per-PR security
+  # control, and a checkbox nobody has to tick gets read never. This gate spends the
+  # pause only where a mistake moves money: when the diff touches a money_path_services
+  # directory (the one list from rules.yaml), the PR body must KEEP its
+  # '## Security checklist' section with every box ticked — deleting the section is a
+  # finding, same as leaving it blank, or the fix would be "delete the question".
+  # The boxes' truthfulness is the reviewer's; the control here is the pause itself.
+  - id: security-checklist-money-path
+    name: "money-path PR must tick the Security checklist (ADR-0279 #26, enforced)"
+    group: security
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    budget_seconds: 5   # one git diff + a regex over the PR body
+    rationale: "The security checklist is the fleet's per-PR control and unticked boxes were free; on money-path code the six lines written for exactly that case must be answered, not carried."
+    review_after: "2027-03-04"
+    selftest: python3 .github/scripts/check-security-checklist.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md"]
+    run: |
+      python3 .github/scripts/check-security-checklist.py --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
 
   # ADR-0030 D2, third half (#6037, PR #6048): the coverage gate proves a threat model EXISTS
   # and the diff gate proves it is TOUCHED when a trust boundary moves. Neither reads a single

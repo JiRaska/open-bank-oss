@@ -61,7 +61,13 @@ rules_real := {
 			"transitionStatus", "recall", "settle", "disburse", "send", "credit", "debit",
 			"collateralRegister", "convert", "grant", "revoke", "clear",
 		],
-		"actions": ["opsmessage.compose", "party.merge", "campaign.activate"],
+		"actions": ["opsmessage.compose", "party.merge", "campaign.activate", "device.enroll", "scaChallenge.consume"],
+		# ADR-0280 / #8360: caller-aware exemptions — the verified M2M identities that
+		# must keep flowing while the human path pauses for a second approver.
+		"exemptions": {
+			"device.enroll": ["service-account-openbank-edge"],
+			"scaChallenge.consume": ["service-account-openbank-edge", "service-account-openbank-services"],
+		},
 	},
 	"feature_flags": {
 		"prohibited_flag_combinations": [
@@ -1114,6 +1120,80 @@ test_four_eyes_not_required_when_actions_key_absent if {
 	not rest.four_eyes_required with input as {"action": "opsmessage.compose"}
 		with data.rules as {"four_eyes": {"verbs": []}}
 }
+
+# ---------------------------------------------------------------------------------------
+# ADR-0280 / #8360 — caller-aware four-eyes exemptions. device.enroll and
+# scaChallenge.consume are in four_eyes.actions with their verified M2M callers exempt, so
+# the HUMAN ops-console path pauses while SCA automation keeps flowing. These tests are the
+# falsification: dropping the exemption map, or exempting the wrong identity, turns one of
+# them red.
+# ---------------------------------------------------------------------------------------
+
+# The human operator path IS flagged — this is the whole point of the wiring.
+test_four_eyes_required_for_device_enroll_human if {
+	rest.four_eyes_required with input as {
+		"action": "device.enroll",
+		"principal": {"type": "HUMAN", "id": "operator-1", "roles": ["ROLE_OPERATOR"]},
+	}
+		with data.rules as rules_real
+}
+
+# The verified automation caller is NOT flagged.
+test_four_eyes_exempt_edge_device_enroll if {
+	not rest.four_eyes_required with input as {
+		"action": "device.enroll",
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]},
+	}
+		with data.rules as rules_real
+}
+
+# Exemptions are PER-ACTION: the shared backend client may consume challenges (delegation /
+# document ceremonies) but must never inherit the edge's enrollment exemption.
+test_four_eyes_not_exempt_shared_client_device_enroll if {
+	rest.four_eyes_required with input as {
+		"action": "device.enroll",
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+	}
+		with data.rules as rules_real
+}
+
+# scaChallenge.consume: both ceremony callers exempt, a human operator is not.
+test_four_eyes_exempt_shared_client_consume if {
+	not rest.four_eyes_required with input as {
+		"action": "scaChallenge.consume",
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+	}
+		with data.rules as rules_real
+}
+
+test_four_eyes_required_for_consume_human if {
+	rest.four_eyes_required with input as {
+		"action": "scaChallenge.consume",
+		"principal": {"type": "HUMAN", "id": "operator-1", "roles": ["ROLE_OPERATOR"]},
+	}
+		with data.rules as rules_real
+}
+
+# An actions-listed action with NO exemptions entry flags every caller, service accounts
+# included — the pre-ADR-0280 behaviour is the default.
+test_four_eyes_actions_entry_without_exemptions_flags_all if {
+	rest.four_eyes_required with input as {
+		"action": "party.merge",
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+	}
+		with data.rules as rules_real
+}
+
+# A bundle whose rules.yaml predates the exemptions key behaves exactly as before (undefined
+# collection does not fire) — additive change, no flag-day across the fleet.
+test_four_eyes_exemptions_key_absent_is_backward_compatible if {
+	rest.four_eyes_required with input as {
+		"action": "opsmessage.compose",
+		"principal": {"type": "HUMAN", "id": "operator-1", "roles": ["ROLE_OPERATOR"]},
+	}
+		with data.rules as {"four_eyes": {"verbs": [], "actions": ["opsmessage.compose"]}}
+}
+
 
 # ---------------------------------------------------------------------------------------
 # The shared M2M identity may never reach a WRITE through a role-only operator reason
