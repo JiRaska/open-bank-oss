@@ -430,6 +430,21 @@ a stub (T-T2/T-D2).
 
 ## 8. Change log
 
+- **2026-09-03** — Doc correction, no behavior change: the ADR-0181 phase-2 entry said
+  "`propose_payment` / `StubProposalPort` were deliberately left untouched". `StubProposalPort` no
+  longer exists — `git grep -n "class StubProposalPort" -- '*.kt'` returns nothing, and the four
+  remaining mentions in Kotlin are KDoc prose referring to it in the past tense. It was replaced by
+  `UnwiredProposalPort`
+  (`openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/read/UnwiredProposalPort.kt`),
+  whose own KDoc opens "This replaces `StubProposalPort`".
+
+  So the *word* that went stale is "untouched": the port was in fact replaced. **The conclusion the
+  entry draws is unaffected** — `propose_payment` still does not reach a real payment path, T-E4 is
+  still open on the same terms, and §7's argument about `money_path_services` is unchanged. This is
+  a naming correction inside a historical entry, not a change in posture; it is recorded rather than
+  silently edited because "left untouched" is the kind of phrase a later reader would rely on when
+  deciding whether the proposal path had been revisited.
+
 - **2026-07-25 (ADR-0181 phase 1, issue #1922)** — First model. Written against the shipped phase-1
   code (PR #2104 service, #2134/#2136 deploy, #2142 OPA sidecar), not against ADR-0181's intent.
   Records that the endpoint is unauthenticated with a constant principal, that the read/proposal
@@ -452,8 +467,10 @@ a stub (T-T2/T-D2).
   consent-intersection check in `RealAccountReadPort` (#2262, T-I2 closed, T-T2 narrowed), the M2M
   client-credentials bearer landed (#2278), and the placeholder identity + stub read ports were
   atomically removed/replaced as the CDI default (#2316, T-E2 now live and mitigated by the landing
-  sequence). `propose_payment` / `StubProposalPort` were deliberately left untouched — T-E4 and §7's
-  conclusion are unchanged. Confirmed unchanged: `rest.rego`'s `agent-charter-allows` bridge still
+  sequence). `propose_payment` was deliberately left untouched — T-E4 and §7's
+  conclusion are unchanged. (The port named here as `StubProposalPort` has since been replaced
+  by `UnwiredProposalPort`, which says so in its own KDoc; the tool's behaviour and this
+  entry's conclusion are unaffected — see the 2026-09-03 entry.) Confirmed unchanged: `rest.rego`'s `agent-charter-allows` bridge still
   drops `attributes`, so the consent id still never reaches the policy plane (§3); every real caller
   still authenticates through one M2M client, so T-S1/T-E3's charter-granularity gap remains open.
   T-I3 and T-D1 move from latent-behind-the-stub to live-exploitable, since the tools now return real

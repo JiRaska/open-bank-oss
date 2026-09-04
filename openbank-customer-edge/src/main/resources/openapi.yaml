@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.47.0
+  version: 1.50.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -53,6 +53,60 @@ tags:
   - name: Complaints
 
 paths:
+  /products:
+    get:
+      tags: [Products]
+      summary: The product catalogue this customer may open from
+      description: >-
+        Generalises the term-deposit projection to the whole customer-facing catalogue, with the
+        same filters and for the same reason: the operator catalogue holds draft, private,
+        withdrawn and future-dated products, and none of them may become discoverable merely
+        because the edge holds an M2M credential.
+
+
+        Types are allow-listed to CURRENT, SAVINGS and TERM_DEPOSIT. MORTGAGE, CREDIT_CARD,
+        OVERDRAFT and INVESTMENT exist in the catalogue and are deliberately absent — each needs
+        its own suitability and disclosure journey, and surfacing one here would let the app offer
+        a regulated product with no path to take it.
+
+
+        Rates are reported in the shape the catalogue prices them and are never derived: a term
+        deposit carries `annualRate` plus its own fixed `term`, savings carries `savings` with its
+        balance tiers, and a current account carries neither. A product with no rate omits the
+        field rather than sending zero — 0 % is a price, "not priced" is not. `fee` IS sent at
+        zero, because "no fee, forever" is a current account's whole pitch.
+
+
+        A catalogue outage answers 503, never an empty list: an empty list reads as "we offer
+        nothing", which is a claim about the bank.
+      operationId: listProductOffers
+      security:
+        - customerOidc: [products:read]
+      parameters:
+        - name: type
+          in: query
+          required: false
+          description: Narrows the list. Rejected with 400 when outside the allow-list.
+          schema:
+            type: string
+            enum: [CURRENT, SAVINGS, TERM_DEPOSIT]
+      responses:
+        '200':
+          description: Discoverable product offers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProductOffer'
+        '400':
+          description: Unsupported product type
+        '503':
+          description: Product catalogue unavailable
+
   /products/term-deposits:
     get:
       tags: [Term deposits]
@@ -282,6 +336,56 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/AccessLogEntry'
+
+  /privacy/gdpr-export:
+    get:
+      tags: [Privacy]
+      summary: The caller's own GDPR Art. 15 subject-access export
+      description: >
+        The full PII set the bank holds for the caller, aggregated by party-service across
+        party, KYC and card records (ADR-0118 §6). Party-scoped by the caller's own token —
+        there is no path or query parameter, so a customer can only ever export their own
+        record. Distinct from /privacy/portability-export: Art. 15 is the right of ACCESS and
+        reaches data held under every lawful basis, including Art. 6(1)(c) legal-obligation
+        KYC/AML fields that Art. 20 must exclude.
+      operationId: gdprExport
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's Art. 15 export, as returned by party-service
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '502':
+          description: party-service is unreachable
+
+  /privacy/portability-export:
+    get:
+      tags: [Privacy]
+      summary: The caller's own GDPR Art. 20 data-portability export
+      description: >
+        The portable subset only — data the caller provided under consent (Art. 6(1)(a)) or
+        contract (Art. 6(1)(b)), plus account and transaction history with counterparty IBANs
+        redacted to their bank-code prefix per Art. 20(4). KYC/AML due-diligence, risk ratings,
+        PEP flags and sanctions state are excluded by construction, and Art. 20(2) direct
+        controller-to-controller transmission is not offered (ADR-0204 D1/D2/D4). Party-scoped
+        by the caller's own token, like /privacy/gdpr-export.
+      operationId: portabilityExport
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's Art. 20 export, as returned by party-service
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '502':
+          description: party-service is unreachable
 
   /directory/lookup:
     post:
@@ -3798,6 +3902,16 @@ components:
         nickname:
           type: string
           nullable: true
+        sharedWithMe:
+          type: boolean
+          default: false
+          description: >-
+            True for an account GET /accounts APPENDS because an ACTIVE delegation grant covers it,
+            not because the caller owns it (ADR-0232 D6). The edge sets it on every shared entry
+            and never on an owned one, so absent means "mine" — that asymmetry is the whole point,
+            and a client that cannot see the flag presents someone else's account as the customer's
+            own. Served since #4021; published here because it was not, and a field the edge sends
+            but does not declare is one no client can rely on.
         incentiveReservation:
           allOf:
             - {$ref: '#/components/schemas/IncentiveReservation'}
@@ -4234,6 +4348,33 @@ components:
         variables:
           type: array
           items: {type: string}
+          description: >-
+            The presentation variable KEYS a catalogue item declares. Names, never values — copy
+            for a catalogue item lives in the app, which is what keeps this a typed server decision
+            rather than remote UI markup.
+        values:
+          type: object
+          additionalProperties: {type: string}
+          description: >-
+            Resolved values, present ONLY for a trusted campaign assignment; a catalogue item
+            declares keys and sends no values. A client that cannot see this renders a campaign
+            banner with its variables unfilled.
+        deepLink:
+          type: string
+          nullable: true
+          description: >-
+            Where a tap should go, as a closed `openbank://` app route. engagement-service enforces
+            the SCHEME only (`CampaignBannerPlacement` requires the `openbank://` prefix); it does
+            not constrain the destination, so a client must resolve this through its own allowlist
+            of known routes and ignore anything it does not recognise. Absent for content with no
+            tap target.
+        interactionRef:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Opaque reference tying this content to a campaign send. Copy it back verbatim on the
+            engagement event so attribution can be resolved server-side; the app never interprets it.
 
     EngagementSurfaceEvent:
       type: object
@@ -4573,6 +4714,55 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TermDepositOffer'
+
+    ProductOffer:
+      type: object
+      description: >-
+        One discoverable product. Carries only what a customer needs in order to choose, priced in
+        the shape the catalogue prices it. Internal fields — version history, eligibility segments,
+        draft state — never cross this boundary.
+      required: [id, code, name, type, currency]
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+          description: Semantic product code, e.g. SAVINGS_STANDARD (ADR-0105).
+        name:
+          type: string
+        type:
+          type: string
+          enum: [CURRENT, SAVINGS, TERM_DEPOSIT]
+        currency:
+          type: string
+        shortDescription:
+          type: string
+        description:
+          type: string
+        minBalance:
+          type: number
+        maxBalance:
+          type: number
+        fee:
+          type: number
+          description: Monthly account fee as the catalogue states it. Sent even when zero.
+        annualRate:
+          type: number
+          description: >-
+            Term deposits only — one fixed rate for one fixed term. Absent for every other type;
+            absence means "not priced here", not 0 %.
+        term:
+          type: object
+          description: The term deposit's own TermDepositConfig, verbatim.
+        savings:
+          type: object
+          description: >-
+            Savings only — the SavingsConfig with its balance tiers, verbatim. Not flattened into
+            a single "from" rate: that would quote a price the bank never set for this balance.
+        termsAndConditions:
+          type: array
+          items:
+            type: object
 
     TermDepositOffer:
       type: object

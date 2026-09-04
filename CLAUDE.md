@@ -376,10 +376,9 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   settlement had therefore NEVER been fuzzed; and six services register a Temporal worker at
   `StartupEvent`, so with no Temporal present transaction-service failed to boot outright while
   lending, sepa-payment and domestic-payment retried past the deadline. Every registrar carries a
-  disable switch but under a DIFFERENT name each (`openbank.transaction.worker.enabled`,
-  `openbank.sepa.worker.enabled`, … and lending's `lending.origination.worker.enabled`, not even
-  under `openbank.`), so the harness derives the property from each registrar's own
-  `@ConfigProperty` rather than listing six names. This matters beyond the lane: the `pentest`
+  disable switch, and since the `temporal-worker-switch-naming` gate (2026-09) all of them follow
+  one convention — `openbank.<service>.worker.enabled` — so the harness derives the property from
+  each registrar's own `@ConfigProperty` rather than listing names. This matters beyond the lane: the `pentest`
   attestation is earned by this workflow with its run URL as `ref`, so while a service could not be
   fuzzed, C7=Bank-grade was blocked on an event that could not happen for it.
 

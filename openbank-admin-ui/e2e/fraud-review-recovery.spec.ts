@@ -39,7 +39,7 @@ test('retains the bounded fraud evidence snapshot when refresh fails', async ({ 
 
   await page.goto('/fraud')
 
-  await expect(page.getByText('125,000 CZK')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('125,000 CZK', { exact: true })).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('fraud-rules-2026.08')).toBeVisible()
   await expect(page.getByText('91', { exact: true })).toBeVisible()
 
@@ -47,7 +47,7 @@ test('retains the bounded fraud evidence snapshot when refresh fails', async ({ 
   await page.getByRole('button', { name: /Obnovit frontu podvodů|Refresh fraud queue/ }).click()
 
   await expect(page.getByText(/Zobrazen je poslední úspěšný snapshot|Showing the last successful snapshot/)).toBeVisible()
-  await expect(page.getByText('125,000 CZK')).toBeVisible()
+  await expect(page.getByText('125,000 CZK', { exact: true })).toBeVisible()
   await expect(page.getByText('fraud-rules-2026.08')).toBeVisible()
   await expect(page.getByText(/Fronta je prázdná|Queue is empty/)).toHaveCount(0)
 })

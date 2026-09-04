@@ -101,7 +101,7 @@ Každá mutace emituje doménovou událost (`domestic.payment.created`, `domesti
 - ✅ AuthN: Keycloak OIDC, RS256 JWT
 - ✅ AuthZ: `@RolesAllowed` + `@Authorize` OPA politika při přechodu stavu (ADR-0034, defaultně advisory — `AUTHZ_ENFORCE`)
 - ✅ Sankční screening: synchronní, fail-closed (ADR-0032)
-- ✅ Idempotence: povinná při založení (Redis + DB unique klíč)
+- ✅ Idempotence: povinná při založení; DB-atomický otisk požadavku/aktéra + unikátní klíč
 - ✅ Transakční outbox: řádek platby + událost commitnou atomicky
 - ✅ Security hlavičky: CSP, HSTS, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy
 - ✅ Resilience: circuit breaker / retry / timeout na odchozích voláních a publikaci outboxu

@@ -29,7 +29,7 @@ class AccountingDayEntity : PanacheEntityBase {
     var status: String = "OPEN"
 
     @Column(name = "opened_at", nullable = false)
-    var openedAt: Instant = Instant.EPOCH
+    var openedAt: Instant = Instant.now()
 
     @Column(name = "opened_by", nullable = false)
     var openedBy: String = ""
@@ -57,8 +57,8 @@ class AccountingDayEntity : PanacheEntityBase {
     var version: Long = 0L
 
     @Column(name = "created_at", nullable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @Column(name = "updated_at", nullable = false)
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 }

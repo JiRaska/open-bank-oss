@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { CheckCircle2, Clock, RefreshCw, ShieldCheck, ScrollText, AlertTriangle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
@@ -73,6 +74,12 @@ export default function CompliancePacksPage() {
   const [review, setReview] = useState<{ proposal: PackActivationView; approve: boolean } | null>(null)
   const reviewCancelRef = useRef<HTMLButtonElement>(null)
   const reviewConfirmRef = useRef<HTMLButtonElement>(null)
+  const detailTriggerRef = useRef<HTMLElement | null>(null)
+
+  const openDetail = (pack: PackActivationView, event: React.MouseEvent<HTMLElement>) => {
+    detailTriggerRef.current = event.currentTarget
+    setDetail(pack)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -253,7 +260,7 @@ export default function CompliancePacksPage() {
                 <td style={cell}>{p.effectiveFrom}</td>
                 <td style={{ ...cell, fontSize: 11 }}>
                   <span className="mono">{p.contentHash.slice(0, 16)}…</span>{' '}
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetail(p)}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={event => openDetail(p, event)}>
                     {t('Zobrazit detail', 'View details')}
                   </button>
                 </td>
@@ -291,7 +298,7 @@ export default function CompliancePacksPage() {
               <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
                 {t('Navrhl', 'Proposed by')}: {p.proposedBy} · <span className="mono">{p.contentHash.slice(0, 16)}…</span>
               </div>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetail(p)} style={{ marginTop: 6 }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={event => openDetail(p, event)} style={{ marginTop: 6 }}>
                 {t('Zobrazit detail', 'View details')}
               </button>
             </div>
@@ -383,9 +390,19 @@ export default function CompliancePacksPage() {
         </div>
       )}
 
-      {detail && <div onClick={() => setDetail(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <div onClick={e => e.stopPropagation()} className="card" style={{ width: 'min(820px, 100%)', maxHeight: '88vh', overflow: 'auto', padding: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><h2 style={{ margin: 0 }}>{detail.jurisdiction} / {detail.productType} · v{detail.packVersion}</h2><div className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{detail.contentHash}</div></div><button type="button" className="btn btn-secondary" onClick={() => setDetail(null)}>{t('Zavřít', 'Close')}</button></div>
+      <Dialog.Root open={detail !== null} onOpenChange={open => { if (!open) setDetail(null) }}>
+      {detail && <Dialog.Portal>
+        <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)' }} />
+        <Dialog.Content
+          className="card"
+          aria-modal="true"
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            if (detailTriggerRef.current?.isConnected) detailTriggerRef.current.focus()
+          }}
+          style={{ position: 'fixed', zIndex: 1001, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'calc(100% - 48px)', maxWidth: 820, maxHeight: '88vh', overflow: 'auto', padding: 20 }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><Dialog.Title style={{ margin: 0 }}>{detail.jurisdiction} / {detail.productType} · v{detail.packVersion}</Dialog.Title><Dialog.Description className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{detail.contentHash}</Dialog.Description></div><Dialog.Close asChild><button type="button" className="btn btn-secondary">{t('Zavřít', 'Close')}</button></Dialog.Close></div>
           <dl style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '8px 12px', fontSize: 12, margin: '18px 0' }}>
             <dt>{t('Navrhl', 'Proposed by')}</dt><dd>{detail.proposedBy || '—'} · {detail.proposedAt || '—'}</dd>
             <dt>{t('Rozhodl', 'Decided by')}</dt><dd>{detail.decidedBy || '—'} · {detail.decidedAt || '—'}</dd>
@@ -393,8 +410,9 @@ export default function CompliancePacksPage() {
           </dl>
           <h3 className="section-title">{t('Přesný obsah packu', 'Exact pack content')}</h3>
           <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 11 }}>{JSON.stringify(detail.pack, null, 2)}</pre>
-        </div>
-      </div>}
+        </Dialog.Content>
+      </Dialog.Portal>}
+      </Dialog.Root>
 
       <Can permission="lending:compliance:propose">
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

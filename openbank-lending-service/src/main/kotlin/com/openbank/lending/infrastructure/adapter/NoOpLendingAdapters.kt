@@ -21,6 +21,7 @@ import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.origination.OriginationState
+import io.quarkus.runtime.Startup
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Default
@@ -80,6 +81,8 @@ class NoOpCollateralValuationPort : CollateralValuationPort {
 @ApplicationScoped
 @Default
 class ConservativeRiskParameterSource : RiskParameterSource {
+    private val log = Logger.getLogger(ConservativeRiskParameterSource::class.java)
+
     /** Deliberately conservative flat PD/LGD until a real risk model is bound (ADR-0028 D4). */
     override fun parametersFor(loan: Loan, exposureAtDefault: Money): Uni<EclInputs> = Uni.createFrom().item(
         EclInputs(
@@ -87,8 +90,36 @@ class ConservativeRiskParameterSource : RiskParameterSource {
             pdLifetime = RiskParameterSource.DEFAULT_PD_LIFETIME,
             lgd = RiskParameterSource.DEFAULT_LGD,
             exposureAtDefault = exposureAtDefault,
+            modelVersion = MODEL_VERSION,
         ),
     )
+
+    /**
+     * Boot-time audit (issue #8364): which risk-parameter model this pod provisions with. `@Startup`
+     * forces eager init — an `@ApplicationScoped` bean is lazy, so without this the line would only
+     * appear on the first provisioning call, which for a monthly cycle can be never.
+     */
+    @Startup
+    fun logBoundModel() {
+        log.infof(
+            "IFRS 9 risk-parameter model bound: %s (PD12M=%s, PDLT=%s, LGD=%s) — conservative placeholder, " +
+                "not production-grade regulatory capital (ADR-0028 D4)",
+            MODEL_VERSION,
+            RiskParameterSource.DEFAULT_PD_12M,
+            RiskParameterSource.DEFAULT_PD_LIFETIME,
+            RiskParameterSource.DEFAULT_LGD,
+        )
+    }
+
+    companion object {
+        /**
+         * The version stamped onto every ECL this source produces (issue #8364). CONVENTION: any PR
+         * that changes the DEFAULT_* constants above bumps this string in the same commit — that is
+         * what makes a parameter change a reviewed event with a visible before/after in every
+         * persisted provisioning record (`loan_provisioning.model_version`), not a silent edit.
+         */
+        const val MODEL_VERSION = "noop-flat-v1"
+    }
 }
 
 @ApplicationScoped

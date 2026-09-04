@@ -117,14 +117,24 @@ class CustomerEdgeCreditConsentTest {
         newResource(upstream).putCreditConsents("{}")
         // Offers were on and the body did not mention them, so they are revoked. A partial-patch
         // reading would have left them on, which is the difference between a switch and a suggestion.
-        verify(exactly = 1) { upstream.delete(match { it.contains("/api/v1/consents/") }, party.toString(), any()) }
+        // granteeId is asserted, not just presence of the path: OPA's resource.id for
+        // consent.revoke binds to it (#granteeId), so an omitted granteeId 403s upstream exactly
+        // like an omitted OPA rule would — a `contains("/api/v1/consents/")` match alone passed
+        // this test while that was still broken (found live 2026-09-03).
+        verify(exactly = 1) {
+            upstream.delete(
+                match { it.contains("/api/v1/consents/") && it.contains("granteeId=openbank") },
+                party.toString(),
+                any(),
+            )
+        }
     }
 
     @Test
     fun `turning a granted switch off revokes it and grants nothing`() {
         val upstream = upstreamReturning(consentList("CREDIT_OFFERS"))
         newResource(upstream).putCreditConsents("""{"offers":false,"profileUse":false,"aiAgent":false}""")
-        verify(exactly = 1) { upstream.delete(any(), party.toString(), any()) }
+        verify(exactly = 1) { upstream.delete(match { it.contains("granteeId=openbank") }, party.toString(), any()) }
         verify(exactly = 0) { upstream.post(any(), any(), any()) }
     }
 
