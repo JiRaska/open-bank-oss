@@ -405,7 +405,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-0a9615e2
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-100cb18d
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -466,6 +466,12 @@ spec:
               value: http://sanctions-service.sanctions.svc:8123
             - name: AML_SERVICE_URL
               value: http://aml-service.aml.svc:8117
+            # #8505: the AML case adapter resolves debtorAccountId → owning party via
+            # account-service (the SEPA port of domestic's #3274). Without this the @ConfigProperty
+            # default already points at the in-cluster Service, but the explicit edge matches every
+            # other URL here and survives a rename of the default.
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
             # Fraud scoring in SHADOW mode (ADR-0084 §4.1, issue #4221). This Rollout carried no
             # FRAUD_SERVICE_URL, so SepaPaymentActivitiesImpl's rest-client fell back to
             # application.yaml's `http://localhost:8133` — nothing listens there, the adapter is
