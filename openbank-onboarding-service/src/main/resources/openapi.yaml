@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Onboarding Service API
-  version: 1.0.1
+  version: 1.1.0
   description: >-
     Read-model projection of the onboarding funnel (ADR-0068). Aggregates events from
     party-service, kyc-service and sca-service into a denormalised view for operator
@@ -61,6 +61,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OnboardingRecordPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /api/v1/onboarding/records/{partyId}:
     get:
@@ -120,6 +122,13 @@ components:
       bearerFormat: JWT
 
   responses:
+    BadRequest:
+      description: Invalid request parameter
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
     NotFound:
       description: Not found
       content:
