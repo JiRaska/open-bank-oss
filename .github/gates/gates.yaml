@@ -3780,6 +3780,28 @@ gates:
       # count; see hunk_moves_boundary and the gate's --self-test.
       python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}" --enforce
 
+  # ADR-0279 WS4 #26: the PR template's Security checklist is the per-PR security
+  # control, and a checkbox nobody has to tick gets read never. This gate spends the
+  # pause only where a mistake moves money: when the diff touches a money_path_services
+  # directory (the one list from rules.yaml), the PR body must KEEP its
+  # '## Security checklist' section with every box ticked — deleting the section is a
+  # finding, same as leaving it blank, or the fix would be "delete the question".
+  # The boxes' truthfulness is the reviewer's; the control here is the pause itself.
+  - id: security-checklist-money-path
+    name: "money-path PR must tick the Security checklist (ADR-0279 #26, enforced)"
+    group: security
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    budget_seconds: 5   # one git diff + a regex over the PR body
+    rationale: "The security checklist is the fleet's per-PR control and unticked boxes were free; on money-path code the six lines written for exactly that case must be answered, not carried."
+    review_after: "2027-03-04"
+    selftest: python3 .github/scripts/check-security-checklist.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md"]
+    run: |
+      python3 .github/scripts/check-security-checklist.py --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
+
   # ADR-0030 D2, third half (#6037, PR #6048): the coverage gate proves a threat model EXISTS
   # and the diff gate proves it is TOUCHED when a trust boundary moves. Neither reads a single
   # CLAIM, so a model can be present, current, freshly edited — and false. Settlement's R2
