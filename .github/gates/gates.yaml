@@ -2483,6 +2483,7 @@ gates:
     name: "class-level @Path is not stolen by a top-level function (#3371, enforced)"
     group: kotlin
     mode: enforced
+    budget_seconds: 15   # whole-corpus Kotlin scan, measured well under 1s locally
     rationale: >-
       Kotlin binds an annotation to the next declaration, so a top-level function placed
       between @Path and its class steals the annotation; RESTEasy then never registers the
