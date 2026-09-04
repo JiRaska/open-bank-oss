@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.16.0
+  version: 1.17.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -611,7 +611,12 @@ paths:
           required: false
           schema: { type: string, format: date }
       responses:
-        '200': { description: IFRS 9 snapshot }
+        '200':
+          description: IFRS 9 snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvisioningSnapshot'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
@@ -863,6 +868,32 @@ components:
         makerId: { type: string, nullable: true, description: Principal that created the request }
         createdAt: { type: string, format: date-time, nullable: true }
         decidedBy: { type: string, nullable: true }
+    ProvisioningSnapshot:
+      type: object
+      required: [loanId, asOf, outstandingBalance, daysPastDue, bucket, stage, horizon, expectedCreditLoss, modelVersion]
+      properties:
+        loanId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        outstandingBalance:
+          $ref: '#/components/schemas/Money'
+        daysPastDue: { type: integer }
+        bucket:
+          type: string
+          enum: [CURRENT, DPD_1_30, DPD_31_60, DPD_61_90, DPD_90_PLUS]
+        stage:
+          type: string
+          enum: [STAGE_1, STAGE_2, STAGE_3]
+        horizon:
+          type: string
+          enum: [TWELVE_MONTH, LIFETIME]
+        expectedCreditLoss:
+          $ref: '#/components/schemas/Money'
+        modelVersion:
+          type: string
+          description: >-
+            The risk-parameter model version that produced this ECL figure (issue #8364) — the
+            audit trail from a provision back to the exact PD/LGD parameter set. A change to the
+            underlying parameters always ships with a new version string.
     Money:
       type: object
       required: [amount, currency]
