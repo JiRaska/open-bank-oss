@@ -1247,7 +1247,17 @@ class CustomerEdgeResource(
     private fun revokeHeldConsent(partyId: UUID, consentId: String?) {
         if (consentId.isNullOrBlank()) return
         val body = objectMapper.createObjectNode().put("reason", "Revoked by customer").toString()
-        upstream.delete("$consentServiceUrl/api/v1/consents/$consentId?partyId=$partyId", partyId.toString(), body)
+        // granteeId is REQUIRED here, not optional: ConsentResource.revoke binds OPA's
+        // resource.id to it (`#granteeId`, issue #2911 — binding it to the consent UUID instead
+        // made every M2M revoke unconditionally 403). Omitting it left resource.id null, which
+        // service-consent-m2m-credit's `input.resource.id == "openbank"` comparison can never
+        // satisfy — so turning a credit consent switch OFF 403'd exactly like turning it on did
+        // before this fix, just one call further into the flow.
+        upstream.delete(
+            "$consentServiceUrl/api/v1/consents/$consentId?partyId=$partyId&granteeId=$BANK_GRANTEE",
+            partyId.toString(),
+            body,
+        )
     }
 
     private fun projectConsent(c: com.fasterxml.jackson.databind.JsonNode): ObjectNode {

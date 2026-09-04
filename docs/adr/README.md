@@ -285,7 +285,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0274](0274-authenticated-admin-ui-browser-rum.md) | Authenticated Admin UI browser RUM | Accepted | Partial | testing,observability,admin-ui,privacy-gdpr | — |
 | [0277](0277-cluster-capable-runner.md) | Cluster-capable runner: provision the declared batch scale set and a DR lane | Proposed | Planned | ci,gitops,finops,resilience | — |
 | [0278](0278-cyber-resilience-act-readiness-secure-sdlc-sbom-and-vulnerability-reporting-duties.md) | Cyber Resilience Act readiness — secure SDLC, SBOM and vulnerability-reporting duties | Proposed | Planned | security,compliance,supply-chain,ci | — |
-| [0279](0279-security-excellence-roadmap-offensive-testing-security-observability.md) | Security Excellence roadmap — offensive testing, security observability and shared security primitives | Proposed | Planned | security,testing,observability,compliance | — |
+| [0279](0279-security-excellence-roadmap-offensive-testing-security-observability.md) | Security Excellence roadmap — offensive testing, security observability and shared security primitives | Proposed | Partial | security,testing,observability,compliance | — |
 | [0280](0280-four-eyes-service-account-exemptions-for-automated-sca-callers.md) | Four-eyes service-account exemptions for automated SCA callers | Proposed | Shipped | security,authz,sca,governance | — |
 
 ## By tag
