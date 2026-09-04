@@ -55,7 +55,7 @@ graph TB
     subgraph security[security/]
       PiiMask
       Roles
-      BootstrapVerifier
+      BV["BootstrapVerifier — není dodáno"]
       BearerHeaders[BearerTokenClientHeadersFactory]
     end
     subgraph audit[audit/]
@@ -212,7 +212,7 @@ Audit-grade security primitives — viz [ADR 0017](../../docs/adr/0017-secrets-v
 | `SecurityContextExtensions.kt` | Kotlin extensions: `securityContext.currentUserId`, `actorName`, `actorType`, `requireAnyRole(...)` |
 | `ServiceTokenProvider.kt` | Port pro S2S Bearer tokens; doporučená prod impl: `quarkus-oidc-client-reactive-filter` |
 | `BearerTokenClientHeadersFactory.kt` | `@RegisterClientHeaders(…)` — automatická Bearer + correlation injection do REST clients |
-| `BootstrapVerifier.kt` | Startup `@Observes StartupEvent` — fail-fast pokud config v prod profile obsahuje dev placeholders |
+| `BootstrapVerifier.kt` — ⬜ **soubor neexistuje** | **Nic.** Startup fail-fast guard proti dev placeholderům, který předepisuje ADR-0017, nebyl nikdy napsán (`git grep BootstrapVerifier -- '*.kt'` vrací 0) — uvádí to i delivery note téže ADR. Secrets dnes drží ESO/OpenBao `secretKeyRef` injektáž (ADR-0007), bez jakékoli boot-time kontroly (#8426) |
 
 ### `util/`
 | Soubor | Účel |
@@ -247,10 +247,10 @@ sequenceDiagram
   Libs->>SvcCfg: needs IdempotencyStore?
   SvcCfg-->>ArC: @Produces fun idempotencyStore(...): IdempotencyStore
   ArC-->>Quarkus: container ready
-  Quarkus->>Libs: BootstrapVerifier.onStart(StartupEvent)
-  alt prod profile & dev placeholders found
-    Libs-->>Quarkus: throw IllegalStateException, fail-fast
-  else clean config
-    Libs-->>Quarkus: log "0 placeholders found"
-  end
+  Note over Quarkus,Libs: Žádný BootstrapVerifier krok se nekoná — třída neexistuje
 ```
+
+Diagram dříve uváděl `BootstrapVerifier.onStart(StartupEvent)` jako poslední krok startupu. Ten krok se
+nikdy nekonal: v `openbank-libs` žádný `BootstrapVerifier` není a nikdy nebyl. Startup končí tím, že je
+kontejner připraven — nic v libs nekontroluje, zda config v prod profilu obsahuje dev placeholdery.
+Tu vlastnost dnes drží ESO/OpenBao `secretKeyRef` injektáž mimo tuto knihovnu (ADR-0007, #8426).

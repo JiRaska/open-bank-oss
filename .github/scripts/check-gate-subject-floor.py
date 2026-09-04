@@ -104,6 +104,14 @@ NO_CORPUS = {
     # "did not look" stay distinguishable in the log. This is the shape to copy for any future
     # entry here that prints nothing at all about what it looked at.
     "openapi-version-not-taken",
+
+    # FORBIDDEN-PATTERN gate whose TARGET state is an empty finding set. Its subjects are
+    # `Instant = Instant.EPOCH` occurrences plus the baseline entries excusing them; the burn-down
+    # completed 2026-09-03 (#8357), so zero is not the collapse case but the goal. A floor of 0
+    # states nothing (the manifest validator rejects it) and any positive floor can never be met
+    # again. It prints SUBJECTS= including zero, so "clean" and "did not look" stay
+    # distinguishable in the log — the same shape as openapi-version-not-taken above.
+    "no-epoch-instant-default",
 }
 
 # Gates that examine a real corpus and do not yet report how much of it they found. This list
@@ -112,6 +120,10 @@ DEBT_MARKER = "debt — no SUBJECTS= count yet (baselined 2026-08-09, #4339)"
 DEBT = {
     "accounting-clock-gate": DEBT_MARKER,
     "admin-ui-version-sync-guard": DEBT_MARKER,
+    # Diff-scoped like its siblings api-contract-gate / db-migration-gate: the corpus is
+    # "contract test files this PR touched", which is legitimately empty on most PRs —
+    # a floor would fail every PR that touches no contract test.
+    "adversarial-contract-test": DEBT_MARKER,
     "adr-partial-followup": DEBT_MARKER,
     "adr-registry-integrity-check": DEBT_MARKER,
     "advisory-gate-registration": DEBT_MARKER,
@@ -124,6 +136,8 @@ DEBT = {
     "compliance-page-evidence": DEBT_MARKER,
     "configproperty-kotlin-defaults": DEBT_MARKER,
     "critical-alert-egress": DEBT_MARKER,
+    # Diff-scoped: the corpus is "yaml files this PR ADDS", legitimately empty on most PRs.
+    "credential-deadline-ratchet": DEBT_MARKER,
     "db-backup-association-gate": DEBT_MARKER,
     "db-migration-gate": DEBT_MARKER,
     "deploy-drift-declaration": DEBT_MARKER,
@@ -187,6 +201,9 @@ DEBT = {
     "scheduler-cron-syntax": DEBT_MARKER,
     "scheduler-liveness-adoption": DEBT_MARKER,
     "schema-compat-gate": DEBT_MARKER,
+    # Diff-scoped like adversarial-contract-test: the corpus is "files this PR touched",
+    # legitimately empty on a PR that never nears money-path.
+    "security-checklist-money-path": DEBT_MARKER,
     "service-runbook-drift": DEBT_MARKER,
     "single-replica-rollout-strategy": DEBT_MARKER,
     "slo-registry-consistency": DEBT_MARKER,

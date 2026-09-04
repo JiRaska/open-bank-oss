@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.12.0
+  version: 1.14.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -62,6 +62,23 @@ paths:
                 enum: ['true']
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+          description: >
+            Well-formed request refused by policy — e.g. product not eligible
+            (BUSINESS_RULE_VIOLATION) or sanctions screening refused the opening
+            (ACCOUNT_OPENING_BLOCKED). The screening-refusal body deliberately names
+            neither the matched name nor the party (#8512).
+        '503':
+          description: >
+            Sanctions screening temporarily unavailable; the opening gate fails
+            closed (ADR-0032 §C). Safe to retry after the Retry-After interval.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     get:
       tags: [Accounts]
       summary: List accounts for a party
@@ -726,6 +743,16 @@ paths:
                 $ref: '#/components/schemas/AuthorizationResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >
+            No such authorization on this account. Returned both when the authorization id does
+            not exist and when it exists on a DIFFERENT account, with an identical body, so the
+            endpoint cannot be used to probe which authorization ids exist (#5913). Before this
+            was documented the same two cases answered 500.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /api/v1/accounts/{accountId}/pockets:
     get:

@@ -70,3 +70,10 @@ data:
     mp.messaging.incoming.delegation-events-in.client.id=notification-service-delegation-${quarkus.uuid}
     mp.messaging.incoming.delegation-events-in.group.id=notification-service-delegation
     mp.messaging.incoming.delegation-events-in.auto.offset.reset=earliest
+    # #8432 (phase 2 of #8547): KYC outcome notifications. Same dotted-key constraint (issue
+    # #686) as above — these keys can only live in a properties source. Phase 1 shipped the
+    # connector + consumer in the image (deployed as sandbox-c754eabb or later), so naming the
+    # channel here no longer risks the SRMSG00071 boot failure the parity gate guards.
+    mp.messaging.incoming.kyc-events-in.client.id=notification-service-kyc-${quarkus.uuid}
+    mp.messaging.incoming.kyc-events-in.group.id=notification-service-kyc
+    mp.messaging.incoming.kyc-events-in.auto.offset.reset=earliest

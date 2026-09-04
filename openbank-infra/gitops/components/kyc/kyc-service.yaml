@@ -48,7 +48,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-kyc-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a10ac4b220dcc91c"
+        openbank.tech/policy-checksum: "dcfba5823c818e5d"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -59,7 +59,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kyc-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyc-service:sandbox-0c3cd13c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyc-service:sandbox-55674d32
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

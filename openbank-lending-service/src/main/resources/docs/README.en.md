@@ -14,6 +14,7 @@ This documentation is published directly by the service at the management endpoi
 | [04 — Data](./04-data.md) | Data, analytics, DBA | Schema, migrations, retention, PII fields |
 | [05 — Operations](./05-operations.md) | DevOps, SRE, release engineers | Build, deploy, runbooks, SLO |
 | [06 — Compliance](./06-compliance.md) | Compliance, audit, GRC | DORA, GDPR, AML, IFRS 9, EBA mapping |
+| [07 — Risk-Model Calibration](./07-risk-model-calibration.md) | Credit risk, model risk, audit | PD/LGD provenance, versioning, calibration replay, honest limits |
 
 ## TL;DR
 
