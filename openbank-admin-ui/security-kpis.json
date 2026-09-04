@@ -1,0 +1,23 @@
+{
+  "generatedAt": "2026-09-04T21:27:12.016555+00:00",
+  "netpol": {
+    "available": true,
+    "covered": 59,
+    "total": 73,
+    "coveragePct": 81,
+    "gateGreen": true
+  },
+  "freshness": {
+    "available": false,
+    "reason": "skipped"
+  },
+  "credentials": {
+    "available": true,
+    "totalSecrets": 165,
+    "staticSecrets": 158,
+    "withDeadline": 0,
+    "overdue": 0,
+    "undeclared": 158,
+    "overdueFound": false
+  }
+}
