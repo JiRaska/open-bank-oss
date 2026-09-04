@@ -226,6 +226,7 @@ class LendingMapperTest {
             stage = Ifrs9Stage.STAGE_2,
             expectedCreditLoss = eur("221.08"),
             createdAt = createdAt,
+            modelVersion = "test-model-v1",
         )
 
         val entity = mapper.toEntity(record)

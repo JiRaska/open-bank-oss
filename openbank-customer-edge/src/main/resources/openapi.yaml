@@ -337,6 +337,56 @@ paths:
                 items:
                   $ref: '#/components/schemas/AccessLogEntry'
 
+  /privacy/gdpr-export:
+    get:
+      tags: [Privacy]
+      summary: The caller's own GDPR Art. 15 subject-access export
+      description: >
+        The full PII set the bank holds for the caller, aggregated by party-service across
+        party, KYC and card records (ADR-0118 §6). Party-scoped by the caller's own token —
+        there is no path or query parameter, so a customer can only ever export their own
+        record. Distinct from /privacy/portability-export: Art. 15 is the right of ACCESS and
+        reaches data held under every lawful basis, including Art. 6(1)(c) legal-obligation
+        KYC/AML fields that Art. 20 must exclude.
+      operationId: gdprExport
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's Art. 15 export, as returned by party-service
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '502':
+          description: party-service is unreachable
+
+  /privacy/portability-export:
+    get:
+      tags: [Privacy]
+      summary: The caller's own GDPR Art. 20 data-portability export
+      description: >
+        The portable subset only — data the caller provided under consent (Art. 6(1)(a)) or
+        contract (Art. 6(1)(b)), plus account and transaction history with counterparty IBANs
+        redacted to their bank-code prefix per Art. 20(4). KYC/AML due-diligence, risk ratings,
+        PEP flags and sanctions state are excluded by construction, and Art. 20(2) direct
+        controller-to-controller transmission is not offered (ADR-0204 D1/D2/D4). Party-scoped
+        by the caller's own token, like /privacy/gdpr-export.
+      operationId: portabilityExport
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's Art. 20 export, as returned by party-service
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '502':
+          description: party-service is unreachable
+
   /directory/lookup:
     post:
       tags: [Directory]

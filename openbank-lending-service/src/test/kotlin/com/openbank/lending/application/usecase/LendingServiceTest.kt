@@ -920,6 +920,7 @@ class LendingServiceTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         // No collateral registered: LGD must stay the flat, unadjusted placeholder (no regression).
@@ -992,6 +993,7 @@ class LendingServiceTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         // Real estate, declared 15000.00, 20% haircut -> haircut-adjusted cover = 12000.00.
@@ -1040,6 +1042,7 @@ class LendingServiceTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         // Vehicle, declared 5000.00, 40% haircut -> haircut-adjusted cover = 3000.00.
@@ -1089,6 +1092,7 @@ class LendingServiceTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         // Vehicle 5000.00 @ 40% haircut = 3000.00, plus cash deposit 2000.00 @ 0% haircut = 2000.00.
@@ -1142,6 +1146,7 @@ class LendingServiceTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         // Massively over-collateralized: 100000.00 cash, zero haircut, far exceeds the 12000.00 exposure.
@@ -1190,6 +1195,7 @@ class LendingServiceTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         // Fully-covering collateral, but still PENDING (maker registered it, no checker decided yet):
@@ -1246,6 +1252,7 @@ class LendingServiceTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(
@@ -1300,6 +1307,7 @@ class LendingServiceTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         // APPROVED vehicle (3000.00 cover) + a PENDING real-estate item that would fully cover the
@@ -1480,6 +1488,7 @@ class LendingServiceTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         // No collateral registered on these loans: LGD stays the flat placeholder (no regression).
@@ -1529,6 +1538,7 @@ class LendingServiceTest {
             stage = Ifrs9Stage.STAGE_1,
             expectedCreditLoss = eur("108.00"),
             createdAt = fixedNow,
+            modelVersion = "test-model-v1",
         )
         val postings = mutableListOf<LedgerPosting>()
         every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
@@ -1564,6 +1574,7 @@ class LendingServiceTest {
             stage = Ifrs9Stage.STAGE_1,
             expectedCreditLoss = eur("216.00"),
             createdAt = fixedNow,
+            modelVersion = "test-model-v1",
         )
         val postings = mutableListOf<LedgerPosting>()
         every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
@@ -1598,6 +1609,7 @@ class LendingServiceTest {
             stage = Ifrs9Stage.STAGE_1,
             expectedCreditLoss = eur("108.00"),
             createdAt = fixedNow,
+            modelVersion = "test-model-v1",
         )
         every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
@@ -1631,8 +1643,7 @@ class LendingServiceTest {
             disbursedAt = fixedNow,
             createdAt = fixedNow,
         )
-        // Unpaid installment due 2026-06-30; assessed 40 days later => DPD 40 > the 30-day SICR
-        // threshold => Stage 2, whereas the prior period's record was Stage 1.
+        // Due 2026-06-30, assessed 40 days later => DPD 40 > 30-day SICR threshold => Stage 2 (prior: Stage 1).
         val schedule = listOf(
             LoanInstallment(
                 loanId = loanId,
@@ -1656,6 +1667,7 @@ class LendingServiceTest {
             stage = Ifrs9Stage.STAGE_1,
             expectedCreditLoss = eur("108.00"),
             createdAt = fixedNow,
+            modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
         every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
@@ -1669,17 +1681,15 @@ class LendingServiceTest {
 
         service.runProvisioningCycle("2026-07", asOf, 500).await().indefinitely()
 
-        val stageChangedEvents = emitted.filter { it.eventType == "loan.stage_changed" }
-        assertThat(stageChangedEvents).hasSize(1)
-        val payload = stageChangedEvents.single().payload
+        // single{} asserts exactly one stage_changed event was emitted.
+        val payload = emitted.single { it.eventType == "loan.stage_changed" }.payload
         assertThat(payload).contains(""""loanId":"${loanId.value}"""")
         assertThat(payload).contains(""""previousStage":"STAGE_1"""")
         assertThat(payload).contains(""""newStage":"STAGE_2"""")
         assertThat(payload).contains(""""daysPastDue":40""")
-        // The reason this event is consumable outside lending at all: ADR-0220 D1's
-        // vulnerable-customer exclusion needs to know WHOSE loan moved stage. A consumer holding
-        // only a loanId would have to call back into this service on the app-open hot path, so a
-        // silently dropped partyId turns the arrears feed back into something nobody can use.
+        // ADR-0220 D1's vulnerable-customer exclusion needs WHOSE loan moved stage: without a
+        // partyId a consumer must call back on the app-open hot path, so a dropped partyId makes
+        // the arrears feed unusable.
         assertThat(payload)
             .describedAs("adverse-state consumers key on partyId; without it this event is unusable to them")
             .contains(""""partyId":"${loan.partyId}"""")
@@ -1699,6 +1709,7 @@ class LendingServiceTest {
             stage = Ifrs9Stage.STAGE_1,
             expectedCreditLoss = eur("108.00"),
             createdAt = fixedNow,
+            modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
         every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
@@ -1749,6 +1760,7 @@ class LendingServiceTest {
             stage = Ifrs9Stage.STAGE_1,
             expectedCreditLoss = eur("108.00"),
             createdAt = fixedNow,
+            modelVersion = "test-model-v1",
         )
         every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
         every { provisioning.findByLoanAndPeriod(loanId, "2026-06") } returns Uni.createFrom().item(already)
@@ -1900,6 +1912,7 @@ class LendingServiceTest {
             stage = Ifrs9Stage.STAGE_1,
             expectedCreditLoss = eur("108.00"),
             createdAt = fixedNow,
+            modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
         every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
@@ -2061,6 +2074,7 @@ class LendingServiceTest {
             stage = Ifrs9Stage.STAGE_1,
             expectedCreditLoss = eur("108.00"),
             createdAt = fixedNow,
+            modelVersion = "test-model-v1",
         )
         val emitted = mutableListOf<LendingOutboxMessage>()
         every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))

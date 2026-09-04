@@ -1,7 +1,8 @@
 # Kafka mTLS identity + cert projection for balance-service (ADR-0137, #2665 Tier 1).
 #
 # balance-service is both a producer and a consumer:
-#   Produces: openbank.balance.events (two channels: balance-events-out + balance-outbox-out)
+#   Produces: openbank.balance.events (one channel: balance-outbox-out — the direct
+#             balance-events-out emitter was retired in #8510; one topic, one atomic writer)
 #   Consumes: openbank.ledger.journal.posted (group: openbank-balance-service, ADR-0039 Phase D)
 #             openbank.accounts.account.created (group: openbank-balance-service, ADR-0267 §3)
 #

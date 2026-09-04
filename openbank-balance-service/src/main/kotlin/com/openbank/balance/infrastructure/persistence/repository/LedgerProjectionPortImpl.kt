@@ -4,16 +4,23 @@
 
 package com.openbank.balance.infrastructure.persistence.repository
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.balance.application.port.out.BalanceOutboxRepository
 import com.openbank.balance.application.port.out.LedgerProjectionPort
 import com.openbank.balance.domain.model.Balance
+import com.openbank.balance.domain.model.BalanceEvent
+import com.openbank.balance.domain.model.BalanceEventType
 import com.openbank.balance.infrastructure.persistence.entity.BalanceEntity
 import com.openbank.balance.infrastructure.persistence.entity.LedgerProjectionEventEntity
 import com.openbank.balance.infrastructure.persistence.entity.LedgerProjectionEventId
+import com.openbank.libs.domain.event.EventActor
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -27,12 +34,25 @@ class LedgerProjectionEventPanacheRepo : PanacheRepositoryBase<LedgerProjectionE
 class LedgerProjectionPortImpl(
     private val dedupRepo: LedgerProjectionEventPanacheRepo,
     private val balanceRepo: BalancePanacheRepo,
+    private val outboxRepo: BalanceOutboxRepository,
+    private val mapper: ObjectMapper,
     private val clock: Clock,
 ) : LedgerProjectionPort {
 
-    // Dedup-marker write and balance mutation share ONE transaction: either both land or neither
-    // does, so a crash can never leave a marker without its balance movement (or vice versa). A
-    // redelivery then sees the marker and is skipped (returns null) — booked is applied exactly once.
+    @Inject
+    constructor(
+        dedupRepo: LedgerProjectionEventPanacheRepo,
+        balanceRepo: BalancePanacheRepo,
+        outboxRepo: BalanceOutboxRepository,
+        mapper: ObjectMapper,
+    ) : this(dedupRepo, balanceRepo, outboxRepo, mapper, Clock.systemUTC())
+
+    // Dedup-marker write, balance mutation AND the BALANCE_UPDATED outbox row share ONE
+    // transaction: either all land or none does (#8510 — before it, the event went out through a
+    // bare emitter after this transaction committed, so a crash between the commit and the emit
+    // lost the event with no record, and an emit before a rollback announced a movement that never
+    // happened). A redelivery then sees the marker and is skipped (returns null) — booked is
+    // applied exactly once and announced exactly once.
     override suspend fun applyBookedDelta(
         journalEntryId: UUID,
         accountId: UUID,
@@ -40,6 +60,7 @@ class LedgerProjectionPortImpl(
         delta: BigDecimal,
         transactionId: UUID,
         entryDate: LocalDate,
+        actorId: String,
     ): Balance? = Panache.withTransaction {
         dedupRepo.findById(LedgerProjectionEventId(journalEntryId, accountId, currency))
             .flatMap { existing ->
@@ -57,6 +78,25 @@ class LedgerProjectionPortImpl(
                     }
                     dedupRepo.persist(marker)
                         .flatMap { applyToBalance(accountId, currency, delta) }
+                        .flatMap { applied ->
+                            val event = BalanceEvent(
+                                // UUIDv7 (ADR-0106): a durable, index-ordered event id.
+                                eventId = Ids.newId(),
+                                eventType = BalanceEventType.BALANCE_UPDATED,
+                                accountId = accountId,
+                                currency = currency,
+                                amount = delta,
+                                bookedAmount = applied.bookedAmount,
+                                availableAmount = applied.availableAmount,
+                                reservedAmount = applied.reservedAmount,
+                                occurredAt = OffsetDateTime.now(clock),
+                                actorId = actorId,
+                                actorType = EventActor.TYPE_SYSTEM,
+                                sourceService = "balance-service",
+                            )
+                            outboxRepo.persistInTransaction(event.toOutboxMessage(mapper))
+                                .map { applied }
+                        }
                 }
             }
     }.awaitSuspending()
