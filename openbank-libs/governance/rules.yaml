@@ -377,8 +377,8 @@ change_requirements:
     ci_producer: ".github/scripts/check-event-consumer-liveness.py"
     # #996 triage findings, classified LEGITIMATE_NO_CONSUMER (not the #889 failure class):
     allowlist:
-      - topic: "openbank.psd2.events"
-        reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
+      # openbank.psd2.events left the allowlist in #8510: the producer itself was deleted
+      # (the psd2_outbox apparatus had zero writers), so there is no topic left to exempt.
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "proposal-events"
