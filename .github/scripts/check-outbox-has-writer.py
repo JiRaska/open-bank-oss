@@ -80,7 +80,14 @@ BASELINE = {
     # through party_outbox in the state-change transaction and the direct KafkaPartyEventPublisher
     # is gone. Removing an entry from this list is the definition of done for that service.
     "openbank-pid-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
-    "openbank-psd2-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
+    # openbank-psd2-service is no longer a violation (#8510): the dead outbox apparatus was
+    # deleted entirely (port/dispatcher/gauge/repository/entity/publisher, the psd2_outbox
+    # table + sequence via V5, the psd2-events-out channel and the openbank.psd2.events
+    # KafkaTopic CR) — the audit-service/#5126 disposition, since no consumer of
+    # openbank.psd2.events exists anywhere in the fleet and no domain event of its own was
+    # ever identified. Its baseline reason was also wrong on one half: it claimed
+    # `dispatch-enabled` was absent (defaulting to false); it was set to true.
+
     # openbank-tpp-registry-service was wired instead of deleted (#4007): TPP_REGISTERED and
     # TPP_BLACKLISTED now go through tpp_outbox in the same transaction as the tpp_entries row
     # (TppRepositoryImpl.save/update, which take the event as a REQUIRED parameter so there is no

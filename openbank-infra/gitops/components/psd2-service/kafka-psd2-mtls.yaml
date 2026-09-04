@@ -1,7 +1,8 @@
 # Kafka mTLS identity + ACLs for openbank-psd2-service (ADR-0137 #2665 Tier 2c).
 #
-# PSD2 publishes outbox events to openbank.psd2.events (consent/AIS/PIS lifecycle);
-# no locked-down ACL topics are consumed, so no consumer-group ACL is needed —
+# The service publishes nothing since #8510 (the psd2_outbox apparatus had zero writers
+# and was deleted, together with the openbank.psd2.events KafkaTopic CR); no locked-down
+# ACL topics are consumed, so no consumer-group ACL is needed —
 # the KafkaUser exists purely to establish the mTLS client identity (TLS:9093).
 #
 # Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one
