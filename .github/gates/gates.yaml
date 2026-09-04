@@ -2504,6 +2504,32 @@ gates:
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
+  # The body-entity arm of the same null-safety class (#7867): Jackson null-checks a data
+  # class's constructor parameters but NOT the ELEMENTS of a collection, so a request DTO's
+  # `List<X>` accepts `[null]` and NPEs at the first dereference — 500 where a 400 belongs.
+  # 23 occurrences are fixed (nullable elements + guards, red-first tests); what remains
+  # reachable is baselined in the script with per-entry reasons (already-correct-400 via a
+  # contains-based guard, or latent stored-wholesale). A NEW occurrence fails; a baseline entry
+  # that no longer occurs is reported too. The self-test pins the must-NOT-flag half (outbound
+  # REST-client interfaces, nullable elements, unreachable DTOs). ENFORCED.
+  - id: null-array-element-ratchet
+    name: "null JSON array element in a request DTO is a 400, not a 500 (issue #7867, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      Jackson null-checks constructor parameters but not collection ELEMENTS, so `[null]`
+      deserialises into a List holding null and NPEs at the first dereference — 500 where a 400
+      belongs. 23 occurrences spread under a green jaxrs-param gate; all fixed with red-first
+      tests, and this ratchet keeps the class from returning.
+    review_after: "2027-03-03"
+    budget_seconds: 40   # ~4s locally over 183 subjects; headroom for runner variance
+    min_subjects: 90   # 183 measured 2026-09-03; half, so the fleet can shrink without a red
+    selftest: python3 .github/scripts/check-null-array-element.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-null-array-element.py"]
+    run: |
+      python3 .github/scripts/check-null-array-element.py --root .
+
   # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
   # a service whose OutboxDispatcher actually gates on this flag silently
   # never dispatches if it's left at its false default — no error,
@@ -4529,6 +4555,25 @@ gates:
     run: |
       python3 .github/scripts/check-vex-range-reasoning.py --enforce
 
+  - id: vex-resolved-version-current
+    name: "a VEX statement's asserted resolved version is still the version the build resolves (#7987, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: >-
+      49 of 56 overlays asserted opentelemetry-api was 1.60.1 and the fix blocked on #1446
+      months after the platform bump landed and 1.62.0 was resolved — a public,
+      machine-readable "we are exposed" statement that the dependency graph no longer
+      supported, reported by nothing. check-vex-range-reasoning verifies a claim is ANCHORED;
+      this verifies it is still TRUE against gradle/verification-metadata.xml.
+    review_after: "2027-03-03"
+    selftest: python3 .github/scripts/check-vex-resolved-version.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-vex-resolved-version.py"]
+    min_subjects: 40   # 49 citations today (2026-09-03), all 49 baselined against #7987
+    budget_seconds: 20  # ~0.2s locally over the 56 overlays
+    run: |
+      python3 .github/scripts/check-vex-resolved-version.py
+
   # ADR-0254. incluster-hostname-resolution shipped advisory with a "these six findings are
   # all benign" note; three were live (settlement-service and onboarding-service dialling
   # hostnames that resolve in no namespace). The note was never re-checked. Every mode:
@@ -4698,7 +4743,8 @@ gates:
     selftest: python3 .github/scripts/check-no-epoch-instant-default.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-no-epoch-instant-default.py"]
-    min_subjects: 80    # 40+40 after aml + card-issuance + fx burn-downs; lower this in each burn-down PR
+    # No min_subjects: the burn-down completed 2026-09-03 with zero occurrences and an empty
+    # baseline, and a floor of 0 states nothing while a positive one can never be met again.
     run: |
       python3 .github/scripts/check-no-epoch-instant-default.py --root .
 

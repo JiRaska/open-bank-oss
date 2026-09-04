@@ -256,6 +256,20 @@ class DisputeService(
      * where that lookup is exactly what the ADR-0220 eligibility snapshot exists to avoid. Paired
      * with the existing `dispute.resolved`, the two bracket the window during which a customer is
      * in dispute, so a consumer can both apply and lift the exclusion.
+     *
+     * `occurredAt` is the OPENING instant — `dispute.createdAt`, the same value `openedAt` already
+     * carries — converted with `.toInstant()` (#8352). Two separate points, and the second is the
+     * one a rename alone would have missed:
+     *  - `openedAt` is not a spelling `AuditConsumer.eventTime` accepts. It reads `occurredAt` and
+     *    only `occurredAt`, so every `dispute.opened` row in the ten-year audit trail recorded the
+     *    consumer's ingest clock as the moment a customer disputed a payment.
+     *  - `createdAt` is an `OffsetDateTime`, and this file's two sibling builders both spell
+     *    `.toInstant()` for that reason. `openedAt` is left exactly as it was — additive, no
+     *    existing field changes name, place or form.
+     *
+     * Why this one builder was missed by the #3914/#3926 sweep that patched its two siblings:
+     * `dispute.opened` was introduced by #4087, which merged about three hours BEFORE that sweep
+     * did — so the sweep's branch, cut earlier, could not see the sibling it was about to acquire.
      */
     private fun openedOutboxMessage(dispute: Dispute): OutboxMessage = OutboxMessage(
         aggregateId = dispute.id,
@@ -263,7 +277,9 @@ class DisputeService(
         payload = """{"eventType":"dispute.opened","disputeId":"${dispute.id}",""" +
             """"reference":"${dispute.reference}","partyId":"${dispute.partyId}",""" +
             """"disputeType":"${dispute.disputeType}","status":"${dispute.status}",""" +
-            """"openedAt":"${dispute.createdAt}","sourceService":"$SOURCE_SERVICE"}""",
+            """"openedAt":"${dispute.createdAt}",""" +
+            """"occurredAt":"${dispute.createdAt.toInstant()}",""" +
+            """"sourceService":"$SOURCE_SERVICE"}""",
         createdAt = Instant.now(clock),
     )
 

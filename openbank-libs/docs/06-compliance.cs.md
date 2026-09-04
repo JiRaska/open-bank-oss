@@ -8,7 +8,7 @@ openbank-libs **není compliance hraniční kontrolou**, ale **kanálem pro impl
 |---|---|---|---|
 | `BuildInfo` + `ServiceInfoResource` | DORA | Art. 8 (asset register) | Per-service runtime tech stack (Kotlin/Quarkus/JDK verze) je machine-readable přes `/api/v1/info` |
 | `BuildInfo` + per-service SBOM | DORA | Art. 28 (ICT third-party register) | CycloneDX SBOM per service v `build/reports/bom.json`, CI artefakty + admin UI download |
-| `BootstrapVerifier` | DORA, NIS2 | DORA Art. 9 (ICT security controls), NIS2 čl. 21 | Fail-fast guard proti dev-default secrets v prod (closes K1 z audit 2026-05-28) |
+| `BootstrapVerifier` — ⬜ **není dodáno** | DORA, NIS2 | DORA Art. 9 (ICT security controls), NIS2 čl. 21 | **Nic — třída neexistuje.** V `openbank-libs` není žádný `BootstrapVerifier` (`git grep BootstrapVerifier -- '*.kt'` vrací 0); fail-fast guard proti dev placeholderům, který předepisuje ADR-0017, nebyl nikdy zapojen — uvádí to i delivery note téže ADR. K1 je místo toho mitigováno ESO/OpenBao env-var indirekcí (ADR-0007): nasazené manifesty berou credentials přes `secretKeyRef`, takže dev placeholder se dnes do prod nedostává — ale žádný boot-time guard to nekontroluje (#8426) |
 | `PiiMasking` (`PiiMask`) | GDPR | Art. 25 (privacy by design), Art. 32 (security of processing) | Single audit-grade implementation, PCI-DSS compliant card masking (first 4 + last 4). Maskování aplikuje **explicitně** volající — deklarativní anotace neexistuje a neexistuje ani serializační filtr, který by ji ctil (#4011) |
 | `AuditEvent` + `AuditEventPublisher` | GDPR, DORA | GDPR Art. 30 (Records of Processing), DORA Art. 17 (incident reconstruction 24h) | Canonical envelope (actor, op, resource, ts, ip, result, traceId), pluggable publisher |
 | `Roles` (canonical constants) | PSD2, CNB | PSD2 RTS § technický standard, CNB vyhláška 163/2014 § přístupová oprávnění | Eliminuje string-typo bezpečnostní díry, audit ví, jaké role existují |
@@ -35,7 +35,7 @@ graph LR
   end
 
   subgraph LibsContrib["openbank-libs contribution"]
-    BV[BootstrapVerifier]
+    BV["BootstrapVerifier — není dodáno"]
     Roles[Roles canonical enum]
     PiiMask[PiiMask deterministic masking]
     AuditEvent[AuditEvent envelope]
@@ -60,7 +60,7 @@ graph LR
   K7 --> OPA
   K7 --> AuditEvent
 
-  style BV fill:#e8f5e9
+  style BV fill:#ffcdd2
   style PiiMask fill:#e8f5e9
   style Roles fill:#e8f5e9
   style AuditEvent fill:#e8f5e9
@@ -70,6 +70,10 @@ graph LR
   style NetPol fill:#fff9c4
   style OPA fill:#fff9c4
 ```
+
+Legenda: zelená = dodáno v libs · žlutá = uzavřeno mimo libs · červená = **předepsáno, ale nikdy nedodáno**.
+`BootstrapVerifier` je jediný červený uzel. K1 dnes drží pouze injektáž secrets přes ESO/OpenBao — žádný
+boot-time guard za tím není, takže hrana `K1 --> BV` zaznamenává záměr, ne kontrolu (#8426).
 
 ## Skóre regulací před / po libs
 

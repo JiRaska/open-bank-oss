@@ -3,12 +3,13 @@
 # secret is projected into `notifications` via ExternalSecret (kafka-messaging-certs
 # ClusterSecretStore). The cluster-CA truststore is shared and also projected.
 #
-# ACLs: notification-service reads from three topics using three separate consumer
-# groups, and writes to four — one real producer surface (ADR-0239 D2 delivery outcomes) plus one
-# SmallRye dead-letter topic per incoming channel. It is not a general producer. (An earlier
-# version of this comment said the outcomes grant was "the whole of its producer surface"; two DLQ
-# grants below already contradicted it, and #8346 adds the third. A comment asserting current
-# configuration goes stale exactly like one asserting current remote state.)
+# ACLs: notification-service reads from four topics using four separate consumer
+# groups, and writes to five — one real producer surface (ADR-0239 D2 delivery outcomes) plus one
+# SmallRye dead-letter topic per incoming channel (four DLQ grants, one per consumer). It is not a
+# general producer. (An earlier version of this comment said the outcomes grant was "the whole of
+# its producer surface"; the DLQ grants below already contradicted it, and #8346 adds the fourth.
+# A comment asserting current configuration goes stale exactly like one asserting current remote
+# state.)
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
@@ -48,6 +49,23 @@ spec:
           name: openbank.party.events
           patternType: literal
         operations: [Read, Describe]
+        host: "*"
+      # #8432: KYC outcome notifications (KycNotificationConsumer) — a further consumer of the
+      # topic kyc-service already publishes via its transactional outbox.
+      - resource:
+          type: topic
+          name: openbank.kyc.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # #8432: SmallRye dead-letter topic for the kyc-events-in channel (failure-strategy:
+      # dead-letter-queue, set in application.yaml in nested form). Without Write here the DLQ
+      # send itself fails and the consumer wedges on the very failure it was meant to park.
+      - resource:
+          type: topic
+          name: openbank.kyc.events.notification.dlq
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
       # ADR-0232 delegated-access lifecycle notifications (DelegationNotificationConsumer) — a
       # second consumer of the topic account-service and audit-service already read.
@@ -99,6 +117,12 @@ spec:
       - resource:
           type: group
           name: notification-service-party
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: notification-service-kyc
           patternType: literal
         operations: [Read]
         host: "*"

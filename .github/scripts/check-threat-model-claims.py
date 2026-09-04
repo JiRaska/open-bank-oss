@@ -164,11 +164,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'previous repository contract, replaced by `upsertAll`; only the port KDoc names it',
     'openbank-security-scanner|1. Scope & purpose|openbank.security.scan.event':
         'topic named in CHANGELOGs only; no producer, consumer, contract or KafkaTopic CR',
-    # Retargeted 2026-09-03: #8418 merged and rewrote §5 to say the test is per-service, so the
-    # claim no longer parses there. It survives in the change log, which necessarily names the
-    # thing it is recording the absence of — a phantom by construction, not a defect.
-    'openbank-security-scanner|6. Change log|SecurityContractTest':
-        'no fleet-wide class; nine per-service variants cover 8 of 61 modules (#8418 corrected §5)',
     'openbank-sepa-instant|6. Change log|SctInstOutboxBacklogGaugeTest':
         'test for the outbox dropped by `V4__drop_sct_inst_outbox.sql` (#5126); no such class',
     'openbank-sepa-instant|6. Change log|KafkaSctInstOutboxEventPublisher':
@@ -205,8 +200,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-swift-service|6. Change log|swift_rest_ext.rego':
         "file does not exist; swift's ext policy is embedded in its bundle generator",
-    'openbank-tpp-registry-service|5. Residual risks / assumptions|openbank.tpp.cache-ttl-seconds':
-        'open PR #8417 — neither the knob nor the cache psd2 was said to keep exists',
     'openbank-transaction-service|5. Residual risks / assumptions|PaymentSagaOrchestrator':
         'retired for Temporal (ADR-0120 Phase 5); survives only in KDoc that says it was removed',
     'openbank-transaction-service|6. Change log|PaymentSagaOrchestrator':
