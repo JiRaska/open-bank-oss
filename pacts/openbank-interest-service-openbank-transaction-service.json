@@ -1,0 +1,76 @@
+{
+  "consumer": {
+    "name": "openbank-interest-service"
+  },
+  "interactions": [
+    {
+      "description": "POST the withholding-tax remittance as a DOMESTIC one-off debit",
+      "providerStates": [
+        {
+          "name": "a valid source account exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 18450.00,
+          "currencyCode": "CZK",
+          "description": "Withholding tax remittance 2026-01 / FU_PRAHA",
+          "idempotencyKey": "interest-withholding-7c1f0a2e-1111-4222-8333-444444444444",
+          "instructionType": "ONE_OFF",
+          "rail": "DOMESTIC",
+          "sourceAccountId": "cccccccc-1111-4222-8333-444444444444",
+          "type": "DEBIT",
+          "valueDate": "2026-02-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "instructionType": "ONE_OFF",
+          "rail": "DOMESTIC",
+          "status": "COMPLETED"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-transaction-service"
+  }
+}
