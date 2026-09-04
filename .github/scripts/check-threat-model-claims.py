@@ -200,8 +200,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-swift-service|6. Change log|swift_rest_ext.rego':
         "file does not exist; swift's ext policy is embedded in its bundle generator",
-    'openbank-tpp-registry-service|5. Residual risks / assumptions|openbank.tpp.cache-ttl-seconds':
-        'open PR #8417 — neither the knob nor the cache psd2 was said to keep exists',
     'openbank-transaction-service|5. Residual risks / assumptions|PaymentSagaOrchestrator':
         'retired for Temporal (ADR-0120 Phase 5); survives only in KDoc that says it was removed',
     'openbank-transaction-service|6. Change log|PaymentSagaOrchestrator':

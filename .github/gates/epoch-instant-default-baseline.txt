@@ -1,23 +1,3 @@
 # Baseline for check-no-epoch-instant-default.py — the occurrences present when the
 # gate was introduced (2026-09-03, audit Top-50 B-gates). Format: path::line-text#n.
 # Ratchet: new occurrences fail; remove an entry in the same PR that fixes it.
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/AccountingDayEntity.kt::var createdAt: Instant = Instant.EPOCH#1
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/AccountingDayEntity.kt::var openedAt: Instant = Instant.EPOCH#1
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/AccountingDayEntity.kt::var updatedAt: Instant = Instant.EPOCH#1
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/ClosedPeriodEntity.kt::var computedAt: Instant = Instant.EPOCH#1
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/ClosedPeriodEntity.kt::var createdAt: Instant = Instant.EPOCH#1
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/ClosedPeriodEntity.kt::var updatedAt: Instant = Instant.EPOCH#1
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/JournalEntities.kt::var createdAt: Instant = Instant.EPOCH#1
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/JournalEntities.kt::var createdAt: Instant = Instant.EPOCH#2
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/JournalEntities.kt::var createdAt: Instant = Instant.EPOCH#3
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/TieOutRunEntity.kt::var runAt: Instant = Instant.EPOCH#1
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/YearCloseEntity.kt::var computedAt: Instant = Instant.EPOCH#1
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/YearCloseEntity.kt::var createdAt: Instant = Instant.EPOCH#1
-openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/entity/YearCloseEntity.kt::var updatedAt: Instant = Instant.EPOCH#1
-openbank-standing-order-service/src/main/kotlin/com/openbank/standingorder/infrastructure/persistence/entity/StandingOrderEntity.kt::var createdAt: Instant = Instant.EPOCH#1
-openbank-standing-order-service/src/main/kotlin/com/openbank/standingorder/infrastructure/persistence/entity/StandingOrderEntity.kt::var updatedAt: Instant = Instant.EPOCH#1
-openbank-swift-service/src/main/kotlin/com/openbank/swift/infrastructure/persistence/entity/SwiftMessageEntity.kt::var createdAt: Instant = Instant.EPOCH#1
-openbank-swift-service/src/main/kotlin/com/openbank/swift/infrastructure/persistence/entity/SwiftMessageEntity.kt::var updatedAt: Instant = Instant.EPOCH#1
-openbank-tax-reporting-service/src/main/kotlin/com/openbank/tax/infrastructure/persistence/Persistence.kt::var observedAt: Instant = Instant.EPOCH#1
-openbank-transaction-service/src/main/kotlin/com/openbank/transaction/infrastructure/persistence/entity/MerchantCatalogEntity.kt::var updatedAt: Instant = Instant.EPOCH#1
-openbank-transaction-service/src/main/kotlin/com/openbank/transaction/infrastructure/persistence/entity/TransactionEntity.kt::var initiatedAt: Instant = Instant.EPOCH#1
