@@ -130,6 +130,38 @@ class SwiftSettlementPactConsumerTest {
         )
         .toPact()
 
+    /**
+     * ADR-0279 #3: a contract test that only pins the success path stays green when the provider
+     * stops enforcing authz on this route. swift-service's M2M token can be missing, expired or
+     * revoked independently of the request body being otherwise identical to [settlementDebit] —
+     * this pins that transaction-service still answers 401 (not a silent 201) when it is.
+     */
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun rejectsWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("POST the MT103 settlement debit with a missing or expired token")
+        .path(EXPECTED_TRANSACTIONS_PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(mapper.writeValueAsString(settlementDebit))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "rejectsWithMissingToken")
+    fun `rejects the settlement debit with 401 when the caller has no valid identity`(mockServer: MockServer) {
+        assertClientPathMatchesContract()
+
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(mapper.writeValueAsString(settlementDebit))
+            .post(clientDerivedTransactionsPath())
+            .then()
+            .statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "mt103SettlementPact")
     fun `a settled MT103 is booked and its id binds into SettlementOutcome`(mockServer: MockServer) {
