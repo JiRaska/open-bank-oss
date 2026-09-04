@@ -105,6 +105,17 @@ class TransactionPactProviderVerificationTest {
      * interaction — it proves the listing route exists on the BASE path with `accountId` as a query
      * parameter. A 404 would prove nothing, since Quarkus answers 404 for an absent route too.
      */
+    @State("a valid borrower account exists")
+    fun stateValidBorrowerAccountExists() {
+        // lending-service's BorrowerCreditPactConsumerTest (#8345): the loan disbursement CREDIT,
+        // which carries targetAccountId and NO sourceAccountId — hence a state of its own rather
+        // than reusing "a valid source account exists", which would be false about this payload.
+        // Intentionally empty, for the same reason as the state above: initiateTransaction does not
+        // require the account to pre-exist in this test's Postgres, only that the id parses as a
+        // UUID. Declared rather than left implicit because pact-jvm passes SILENTLY over an
+        // unhandled state name, which is how #468's missing states stayed invisible.
+    }
+
     @State("transaction-service is reachable and holds no transactions for the pact account")
     fun stateNoTransactionsForPactAccount() {
         // Intentionally empty — a fresh Testcontainer DB satisfies it by construction. Declared so

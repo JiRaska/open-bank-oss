@@ -61,7 +61,9 @@ import java.util.UUID
  *
  * ## Both interaction kinds, one class
  *
- * Six pacts, five HTTP and one message, so the target is chosen per interaction in
+ * The committed pacts are a mix of HTTP and asynchronous-message interactions — today one message
+ * pact (fraud-service's `transaction.initiated`) and HTTP for the rest — so the target is chosen
+ * per interaction rather than once for the class, in
  * [configureTarget] exactly as in the broker twin: a [MessageTestTarget] for the fraud-service
  * `transaction.initiated` contract, an [HttpTestTarget] for the rest. The [MessageTestTarget] is
  * package-scoped on purpose — a classpath-wide ClassGraph scan throws on the JDK 25 toolchain.
@@ -116,6 +118,17 @@ class TransactionPactFolderProviderVerificationTest {
         // Shared by domestic-payment, sepa-payment and sepa-instant. No setup needed:
         // initiateTransaction does not require the account to pre-exist in this test's Postgres,
         // only that sourceAccountId parses as a UUID.
+    }
+
+    @State("a valid borrower account exists")
+    fun stateValidBorrowerAccountExists() {
+        // lending-service's BorrowerCreditPactConsumerTest (#8345): the loan disbursement CREDIT,
+        // which carries targetAccountId and NO sourceAccountId — hence a state of its own rather
+        // than reusing "a valid source account exists", which would be false about this payload.
+        // Intentionally empty, for the same reason as the state above: initiateTransaction does not
+        // require the account to pre-exist in this test's Postgres, only that the id parses as a
+        // UUID. Declared rather than left implicit because pact-jvm passes SILENTLY over an
+        // unhandled state name, which is how #468's missing states stayed invisible.
     }
 
     @State("transaction-service is reachable and holds no transactions for the pact account")
