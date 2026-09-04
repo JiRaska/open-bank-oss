@@ -77,6 +77,8 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
 | D2 | Scheduled refresh | **DoS** — the fix in this PR made the scheduled path call the real importer for the first time; a bug here could make every due list re-import on every 60s tick instead of once per cron slot | `isDueForScheduledRefresh()` compares `lastUpdatedAt` against the current minute — a list is only due once per matching cron slot; covered by unit tests (`SanctionsListServiceTest`) | Verify in a live sandbox before relying on it — no integration/Testcontainers run against a real external network signal was possible in this sandboxed session (see PR notes) |
 | E1 | Roles | **Elevation** — a viewer/service role obtains operator-only mutation (registry update, manual refresh) | Distinct `@RolesAllowed` tiers per endpoint; `listAll`/`getById` allow `ROLE_SERVICE` (read-only, for KYC/payment callers), `update`/`refresh`/`refreshAll` require `ROLE_OPERATOR`/`ROLE_ADMIN` | OPA enforce still advisory fleet-wide — *open*, same as fraud-service E1 |
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — reuses the shared `openbank-services` Keycloak confidential client, same pattern as the rest of the fleet | Secret Vault-projected; confidential client; role-gated endpoints | Shared-credential blast radius accepted for sandbox only; dedicated per-service Vault path is prod hardening — *open* |
+| T4 | `SANCTIONS_LIST_CHANGED` event | **Tampering / silent loss** — a refresh that changed content but whose outbox write fails would leave the fleet's existing-customer base un-re-screened, recreating the exact "list changed after onboarding" gap the event exists to close, with no error surfaced | `publishChangeEvent` fails the refresh **loudly** (exception propagates out of `refresh()`), so a persist failure reads as a failed refresh, not a clean one; outbox dispatcher retries with the fleet-standard failure policy (ADR-0050); a content-identical refresh emits nothing by design (empty diff → no row), so the trigger cannot fire on a no-op re-import | A refresh whose diff-detection itself is wrong (e.g. a canonicalization bug making a real edit hash-identical) still emits nothing — mitigated by the per-column `IS DISTINCT` comparison being the source of truth, not a hand-rolled hash |
+| T5 | `SANCTIONS_LIST_CHANGE_STORM` guard (ADR-0256 D1) | **DoS (self-inflicted) / availability of the screening function** — an upstream schema reformat rewrites every row and is indistinguishable, entry by entry, from "the whole list changed", so an unguarded diff would raise `SANCTIONS_LIST_CHANGED` and re-screen the entire customer book off a formatting change | Above a configured share of the list (`openbank.sanctions.list-change.storm-threshold-share`, default 0.5) the re-screening trigger is **withheld** and a distinct `SANCTIONS_LIST_CHANGE_STORM` event is raised instead, carrying counts only; a consumer cannot mistake it for the trigger because the event type differs. Logged at ERROR. A list's first import (no baseline) is exempt, or a newly configured list could never raise its first trigger | **The guard trades one failure for another, deliberately:** a genuinely large legitimate change — a regime action touching more than half a list — is withheld and goes un-re-screened until an operator acts on the storm event. That is the accepted trade (a false mass re-screening is unrecoverable; a withheld one is visible and re-drivable), but it makes the storm event **operationally load-bearing**: if nobody watches it, a real bulk sanctions action is silently deferred |
 
 ## 4. Key invariants (must never regress)
 
@@ -157,6 +159,33 @@ distinguishes from noise. The only signal available anywhere was `listPending()`
 and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 ## 7. Change log
+
+- **2026-08-11** — **New outbound event: `SANCTIONS_LIST_CHANGED` published through the existing
+  `openbank.sanctions.screening.event` outbox topic** (ADR-0256 D1 follow-up, draft). Every list
+  refresh now computes a content-level diff — which `external_id`s were inserted/updated (from the
+  `upsertAll` `IS DISTINCT` WHERE-guard's `RETURNING`) and which were deactivated
+  (`deactivateMissing`'s `RETURNING`) — and publishes it as an outbox row **only when the diff is
+  non-empty**. The consumer (kyc-service, not yet wired) re-screens only the affected customers,
+  closing the "screened at onboarding, list changed after" gap. Risk class = **information
+  disclosure** (the event carries list-entry identifiers — public source-feed data, no customer
+  PII) and **repudiation-positive** (the diff is now a recorded, replayable fact, strengthening
+  R1's audit trail). A new failure mode is introduced and must be watched: a refresh that *did*
+  change content but whose outbox persist fails raises no event — `publishChangeEvent` therefore
+  fails the refresh loudly rather than swallowing (see §3 T4). No DB schema change: the diff is
+  derived from the existing content-aware upsert, not a new stored hash column. Rollback: revert;
+  the event is additive and no consumer subscribes yet.
+
+- **2026-08-15 (ADR-0256 D1 storm guard)** — The producer above gains the second half of D1's
+  firing condition, which the first cut omitted: a diff exceeding a configured share of the list
+  (default 0.5) **withholds** `SANCTIONS_LIST_CHANGED` and raises `SANCTIONS_LIST_CHANGE_STORM`
+  instead. D1 requires this because an upstream reformat is entry-for-entry indistinguishable from
+  a total content change, and the trigger's whole purpose is that it means something. New risk row
+  T5 records both the mitigation and the residual it creates — a withheld trigger is a real change
+  going un-re-screened until an operator acts, so the storm event is load-bearing rather than
+  informational. A list's first import is exempt (no baseline ⇒ undefined share) or a newly
+  configured list could never raise its first trigger. No schema change, no API change; the new
+  event is additive and no consumer subscribes yet. Rollback: revert — which restores the
+  unguarded trigger, i.e. the gap.
 
 - **2026-07-07** — Verified the sanctions/PEP feed registry (`sanctions_lists`, Flyway V3/V7/V8) was
   already populated with real, live source URLs (OFAC Treasury `sdn.xml`; EU/UN/HM Treasury via

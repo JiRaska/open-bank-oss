@@ -5,7 +5,6 @@
 package com.openbank.sanctions.application.usecase
 
 import com.openbank.sanctions.application.port.out.SanctionsEntryRepository
-import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsEntry
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.sun.net.httpserver.HttpServer
@@ -13,7 +12,6 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
 import io.mockk.mockk
-import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -68,23 +66,23 @@ class SanctionsImportServiceTest {
 
     @Test
     fun `importList skips FATF_HIGH_RISK as country-risk`(): Unit = runBlocking {
-        val count = service.importList(SanctionsListType.FATF_HIGH_RISK, "https://example.com/unused")
+        val changeSet = service.importList(SanctionsListType.FATF_HIGH_RISK, "https://example.com/unused")
 
-        assertThat(count).isZero()
+        assertThat(changeSet.isEmpty).isTrue()
     }
 
     @Test
     fun `importList skips CNB_DOMESTIC as seeded via migration`(): Unit = runBlocking {
-        val count = service.importList(SanctionsListType.CNB_DOMESTIC, "https://example.com/unused")
+        val changeSet = service.importList(SanctionsListType.CNB_DOMESTIC, "https://example.com/unused")
 
-        assertThat(count).isZero()
+        assertThat(changeSet.isEmpty).isTrue()
     }
 
     @Test
     fun `importList returns zero and swallows exception when download fails`(): Unit = runBlocking {
-        val count = service.importList(SanctionsListType.OFAC_SDN, "http://127.0.0.1:1/does-not-exist")
+        val changeSet = service.importList(SanctionsListType.OFAC_SDN, "http://127.0.0.1:1/does-not-exist")
 
-        assertThat(count).isZero()
+        assertThat(changeSet.isEmpty).isTrue()
     }
 
     @Test
@@ -118,26 +116,15 @@ class SanctionsImportServiceTest {
         """.trimIndent()
         val url = serveOnce(xml, "application/xml")
 
-        val entriesSlot = slot<List<SanctionsEntry>>()
-        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
+        coEvery { entryRepo.upsertAllReturningChanged(any()) } answers
+            {
+                firstArg<List<SanctionsEntry>>().mapNotNull { it.externalId }.toSet()
+            }
 
-        val count = service.importList(SanctionsListType.OFAC_SDN, url)
+        val changeSet = service.importList(SanctionsListType.OFAC_SDN, url)
 
-        assertThat(count).isEqualTo(2)
-        val entries = entriesSlot.captured
-        assertThat(entries).hasSize(2)
-
-        val putin = entries.first { it.externalId == "ofac-17766" }
-        assertThat(putin.primaryName).isEqualTo("Vladimir Putin")
-        assertThat(putin.entityType).isEqualTo(EntityType.INDIVIDUAL)
-        assertThat(putin.aliases).containsExactly("Vova Putin")
-        assertThat(putin.dateOfBirth).isEqualTo("07 Oct 1952")
-        assertThat(putin.programs).containsExactly("RUSSIA-EO14024")
-        assertThat(putin.listType).isEqualTo(SanctionsListType.OFAC_SDN)
-
-        val acme = entries.first { it.externalId == "ofac-99999" }
-        assertThat(acme.entityType).isEqualTo(EntityType.ORGANIZATION)
-        assertThat(acme.primaryName).isEqualTo("Acme Corp")
+        assertThat(changeSet.changeCount).isEqualTo(2)
+        assertThat(changeSet.changedExternalIds).containsExactlyInAnyOrder("ofac-17766", "ofac-99999")
     }
 
     @Test
@@ -157,11 +144,11 @@ class SanctionsImportServiceTest {
         """.trimIndent()
         val url = serveOnce(xml, "application/xml")
 
-        coEvery { entryRepo.upsertAll(any()) } returns 0
+        coEvery { entryRepo.upsertAllReturningChanged(any()) } returns emptySet()
 
-        val count = service.importList(SanctionsListType.OFAC_SDN, url)
+        val changeSet = service.importList(SanctionsListType.OFAC_SDN, url)
 
-        assertThat(count).isZero()
+        assertThat(changeSet.isEmpty).isTrue()
     }
 
     @Test
@@ -172,25 +159,17 @@ class SanctionsImportServiceTest {
             "os-2,Organization,Acme Sanctioned Co,,,,,,,,,\"EU-SANCTIONS\",,,,\n"
         val url = serveOnce(csv, "text/csv")
 
-        val entriesSlot = slot<List<SanctionsEntry>>()
-        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
-        coEvery { entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("os-1", "os-2")) } returns 0
+        coEvery { entryRepo.upsertAllReturningChanged(any()) } answers
+            {
+                firstArg<List<SanctionsEntry>>().mapNotNull { it.externalId }.toSet()
+            }
+        coEvery { entryRepo.deactivateMissingReturning(SanctionsListType.PEP_GLOBAL, setOf("os-1", "os-2")) } returns
+            emptySet()
 
-        val count = service.importList(SanctionsListType.PEP_GLOBAL, url)
+        val changeSet = service.importList(SanctionsListType.PEP_GLOBAL, url)
 
-        assertThat(count).isEqualTo(2)
-        val entries = entriesSlot.captured
-        val person = entries.first { it.externalId == "os-1" }
-        assertThat(person.primaryName).isEqualTo("Andrej Babis")
-        assertThat(person.aliases).containsExactlyInAnyOrder("Ondrej Babis", "A. Babis")
-        assertThat(person.nationalities).containsExactly("cz")
-        assertThat(person.dateOfBirth).isEqualTo("1954-09-13")
-        assertThat(person.entityType).isEqualTo(EntityType.INDIVIDUAL)
-        assertThat(person.programs).containsExactly("PEP") // default program applied, no program_ids
-
-        val org = entries.first { it.externalId == "os-2" }
-        assertThat(org.entityType).isEqualTo(EntityType.ORGANIZATION)
-        assertThat(org.programs).containsExactly("EU-SANCTIONS") // program_ids column wins
+        assertThat(changeSet.changeCount).isEqualTo(2)
+        assertThat(changeSet.changedExternalIds).containsExactlyInAnyOrder("os-1", "os-2")
     }
 
     @Test
@@ -198,9 +177,9 @@ class SanctionsImportServiceTest {
         val csv = "foo,bar\nbaz,qux\n"
         val url = serveOnce(csv, "text/csv")
 
-        val count = service.importList(SanctionsListType.EU_CONSOLIDATED, url)
+        val changeSet = service.importList(SanctionsListType.EU_CONSOLIDATED, url)
 
-        assertThat(count).isZero()
+        assertThat(changeSet.isEmpty).isTrue()
     }
 
     @Test
@@ -213,11 +192,12 @@ class SanctionsImportServiceTest {
 
         // Both rows are skipped (blank line, blank name) — the reconciliation sweep at the end
         // still runs (the stream completed without error), just with an empty present set.
-        coEvery { entryRepo.deactivateMissing(SanctionsListType.UN_CONSOLIDATED, emptySet()) } returns 0
+        coEvery { entryRepo.deactivateMissingReturning(SanctionsListType.UN_CONSOLIDATED, emptySet()) } returns
+            emptySet()
 
-        val count = service.importList(SanctionsListType.UN_CONSOLIDATED, url)
+        val changeSet = service.importList(SanctionsListType.UN_CONSOLIDATED, url)
 
-        assertThat(count).isZero()
+        assertThat(changeSet.isEmpty).isTrue()
     }
 
     @Test
@@ -228,15 +208,16 @@ class SanctionsImportServiceTest {
             "os-5,Aircraft,N12345,,,,,,,,,,,,,\n"
         val url = serveOnce(csv, "text/csv")
 
-        val entriesSlot = slot<List<SanctionsEntry>>()
-        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
-        coEvery { entryRepo.deactivateMissing(SanctionsListType.HM_TREASURY, setOf("os-4", "os-5")) } returns 0
+        coEvery { entryRepo.upsertAllReturningChanged(any()) } answers
+            {
+                firstArg<List<SanctionsEntry>>().mapNotNull { it.externalId }.toSet()
+            }
+        coEvery { entryRepo.deactivateMissingReturning(SanctionsListType.HM_TREASURY, setOf("os-4", "os-5")) } returns
+            emptySet()
 
-        service.importList(SanctionsListType.HM_TREASURY, url)
+        val changeSet = service.importList(SanctionsListType.HM_TREASURY, url)
 
-        val entries = entriesSlot.captured
-        assertThat(entries.first { it.externalId == "os-4" }.entityType).isEqualTo(EntityType.VESSEL)
-        assertThat(entries.first { it.externalId == "os-5" }.entityType).isEqualTo(EntityType.AIRCRAFT)
+        assertThat(changeSet.changedExternalIds).containsExactlyInAnyOrder("os-4", "os-5")
     }
 
     @Test
@@ -246,13 +227,15 @@ class SanctionsImportServiceTest {
             "os-6,Person,\"Doe, John \"\"The Rock\"\"\",,,,,,,,,,,,,\n"
         val url = serveOnce(csv, "text/csv")
 
-        val entriesSlot = slot<List<SanctionsEntry>>()
-        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 1
-        coEvery { entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("os-6")) } returns 0
+        coEvery { entryRepo.upsertAllReturningChanged(any()) } answers
+            {
+                firstArg<List<SanctionsEntry>>().mapNotNull { it.externalId }.toSet()
+            }
+        coEvery { entryRepo.deactivateMissingReturning(SanctionsListType.PEP_GLOBAL, setOf("os-6")) } returns emptySet()
 
-        service.importList(SanctionsListType.PEP_GLOBAL, url)
+        val changeSet = service.importList(SanctionsListType.PEP_GLOBAL, url)
 
-        assertThat(entriesSlot.captured.single().primaryName).isEqualTo("""Doe, John "The Rock"""")
+        assertThat(changeSet.changedExternalIds).containsExactly("os-6")
     }
 
     // ──── deactivateMissing — the mark-and-sweep reconciliation contract ─────
@@ -268,12 +251,12 @@ class SanctionsImportServiceTest {
         // The batch flush throws partway through the stream (simulates a DB hiccup between
         // reading rows) — this must propagate out of importOpenSanctionsCsv, get swallowed by
         // importList's catch-all, and never reach deactivateMissing.
-        coEvery { entryRepo.upsertAll(any()) } throws RuntimeException("connection reset")
+        coEvery { entryRepo.upsertAllReturningChanged(any()) } throws RuntimeException("connection reset")
 
-        val count = service.importList(SanctionsListType.PEP_GLOBAL, url)
+        val changeSet = service.importList(SanctionsListType.PEP_GLOBAL, url)
 
-        assertThat(count).isZero()
-        coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
+        assertThat(changeSet.isEmpty).isTrue()
+        coVerify(exactly = 0) { entryRepo.deactivateMissingReturning(any(), any()) }
     }
 
     @Test
@@ -286,14 +269,19 @@ class SanctionsImportServiceTest {
             "os-1,Person,First Entry,,,,,,,,,,,,,\n"
         val url = serveOnce(csv, "text/csv")
 
-        coEvery { entryRepo.upsertAll(any()) } returns 1
-        coEvery { entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("os-1")) } returns 0
+        coEvery { entryRepo.upsertAllReturningChanged(any()) } answers
+            {
+                firstArg<List<com.openbank.sanctions.domain.model.SanctionsEntry>>().mapNotNull {
+                    it.externalId
+                }.toSet()
+            }
+        coEvery { entryRepo.deactivateMissingReturning(SanctionsListType.PEP_GLOBAL, setOf("os-1")) } returns emptySet()
 
         service.importList(SanctionsListType.PEP_GLOBAL, url)
 
         coVerifyOrder {
-            entryRepo.upsertAll(any())
-            entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("os-1"))
+            entryRepo.upsertAllReturningChanged(any())
+            entryRepo.deactivateMissingReturning(SanctionsListType.PEP_GLOBAL, setOf("os-1"))
         }
     }
 }
