@@ -39,7 +39,7 @@ class ClosedPeriodEntity : PanacheEntityBase {
     var evidenceState: String = "NONE"
 
     @Column(name = "computed_at", nullable = false)
-    var computedAt: Instant = Instant.EPOCH
+    var computedAt: Instant = Instant.now()
 
     @Column(name = "total_debits", nullable = false)
     var totalDebits: BigDecimal = BigDecimal.ZERO
@@ -65,8 +65,8 @@ class ClosedPeriodEntity : PanacheEntityBase {
     var frozenAt: Instant? = null
 
     @Column(name = "created_at", nullable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @Column(name = "updated_at", nullable = false)
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 }
