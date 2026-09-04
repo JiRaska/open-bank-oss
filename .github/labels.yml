@@ -139,3 +139,6 @@ labels:
   - name: dependencies
     color: "0366d6"
     description: "Dependency update. Applied automatically by dependabot."
+  - name: deps-freshness
+    color: "0e8a16"
+    description: "Standing dependency-freshness report issue (ADR-0279 #15), bot-maintained."
