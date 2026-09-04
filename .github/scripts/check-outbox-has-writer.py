@@ -65,7 +65,14 @@ BASELINE = {
     # openbank-audit-service is no longer a violation: the dead outbox apparatus was deleted
     # entirely (#5126) rather than wired, since no consumer need for an outbound audit-service
     # event was ever identified. The service no longer ships a dispatcher at all.
-    "openbank-balance-service": "#4007 — publishes via the direct KafkaBalanceEventPublisher instead",
+    # openbank-balance-service was wired instead of deleted (#8510): the write side now exists —
+    # HoldRepository.saveWithEvent/releaseWithEvent, BalanceMovementPortImpl and
+    # LedgerProjectionPortImpl write the outbox row in the SAME transaction as the state change,
+    # the direct KafkaBalanceEventPublisher is retired, and OutboxBalanceEventPublisher covers the
+    # announcement-only value-date roll. Its baseline reason was the #4007 mis-bin: the count had
+    # included the port DECLARATION of persistInTransaction, not a call. Proven by
+    # BalanceOutboxWriteIT — a real-DB IT, because a mocked repository cannot tell whether an
+    # outbox row was written.
     # openbank-billing-service was never a violation (#4007): it writes billing.fee.post-intent.v1
     # from BillingAssessmentRepositoryImpl by constructing BillingOutboxEntity() inside the same
     # sf.withTransaction as the assessment, which is a correct atomic outbox write this gate could
