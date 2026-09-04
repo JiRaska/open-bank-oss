@@ -354,6 +354,9 @@ class LoanProvisioningEntity : PanacheEntityBase() {
 
     @Column(name = "created_at")
     var createdAt: OffsetDateTime = OffsetDateTime.MIN
+
+    @Column(name = "model_version")
+    var modelVersion: String = ""
 }
 
 @Entity

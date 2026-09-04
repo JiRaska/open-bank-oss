@@ -149,6 +149,7 @@ class ValueDateRollIT {
             delta = BigDecimal(amount),
             transactionId = UUID.randomUUID(),
             entryDate = entryDate,
+            actorId = com.openbank.balance.domain.model.BalanceEventActors.LEDGER_PROJECTION,
         )
     }
 

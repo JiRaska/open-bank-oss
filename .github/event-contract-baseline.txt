@@ -26,7 +26,6 @@ openbank-lending-service:openbank.lending.events
 openbank-party-service:openbank.party.events
 openbank-pid-service:openbank.pid.events
 openbank-pid-service:party.events
-openbank-psd2-service:openbank.psd2.events
 openbank-sanctions-service:openbank.sanctions.screening.event
 openbank-sca-service:openbank.notification.requests
 openbank-sca-service:openbank.sca.events
