@@ -350,7 +350,9 @@ simply stops existing).
   Mitigations already in the code: the call is bearer-authenticated per request; every failure path
   is caught and returns `null`, so a lookup outage degrades the case record rather than blocking the
   payment; and a 404 is deliberately not logged as a warning, so a missing account is not treated as
-  an error. Residual: `null` is indistinguishable between "no such account" and "lookup failed", so
-  a sustained outage silently reintroduces cases without a party id — the exact condition #8505
-  exists to fix. Rollback: revert; the adapter's previous behaviour was to store the account id in
-  `partyId`.
+  an error. Correction to an earlier draft of this entry: the fallback is **not silent** — the
+  adapter logs `aml.case.party_unresolved` with the payment and account ids before opening the case
+  with the account id in `party_id`, so rows carrying the old shape are identifiable rather than
+  indistinguishable. Residual: `null` still does not distinguish "no such account" from "lookup
+  failed" at the *data* level, and the case row itself carries no marker of which branch produced
+  it. Rollback: revert; the adapter's previous behaviour was to store the account id in `partyId`.
