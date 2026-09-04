@@ -119,6 +119,33 @@ class PartyResourceAuditTest {
     }
 
     @Test
+    fun `exportPartyGdpr admits a DPO caller and audits the access`(): Unit = runBlocking {
+        // #8495: ROLE_DPO is now a real realm role, so pin the branch the other way than the
+        // fixture above — a caller holding ONLY ROLE_DPO (no ROLE_ADMIN, no self-JWT) must be
+        // admitted. Before the role was defined in the realm this branch was unreachable and
+        // the suite stayed green precisely because nothing could hold it.
+        val events = mutableListOf<AuditEvent>()
+        val res = resource(events).apply {
+            securityIdentity = mockk<io.quarkus.security.identity.SecurityIdentity>().also {
+                every { it.hasRole("ROLE_ADMIN") } returns false
+                every { it.hasRole("ROLE_DPO") } returns true
+            }
+        }
+        coEvery { res.partyUseCase.getPartyKeycloakSub(partyId) } returns "somebody-else"
+        coEvery { res.partyUseCase.exportPartyData(partyId) } returns
+            PartyGdprExport(sampleParty(), emptyList(), now)
+
+        val response = res.exportPartyGdpr(partyId)
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(events).singleElement().satisfies({ e ->
+            assertThat(e.operation).isEqualTo("party.gdpr-export")
+            assertThat(e.result).isEqualTo(AuditResult.SUCCESS)
+            assertThat(e.payload["gdpr_article"]).isEqualTo("15")
+        })
+    }
+
+    @Test
     fun `exportPartyGdpr does not emit an audit event when the subject fetch fails`(): Unit = runBlocking {
         val events = mutableListOf<AuditEvent>()
         val res = resource(events)

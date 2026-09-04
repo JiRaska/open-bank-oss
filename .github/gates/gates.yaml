@@ -3992,10 +3992,10 @@ gates:
   # a test written from the annotation matches the annotation and passes against a resource
   # that 403s in production — exactly how finrep's stayed green.
   - id: rolesallowed-realm-parity
-    name: "@RolesAllowed ⇒ realm parity (issue #2404, enforced)"
+    name: "@RolesAllowed + hasRole ⇒ realm parity (issues #2404, #8495, enforced)"
     group: security
     mode: enforced
-    min_subjects: 200   # 419 @RolesAllowed sites today (2026-08-09)
+    min_subjects: 200   # 491 role-reference sites today (2026-09-04): 419 @RolesAllowed + hasRole probes (#8495)
     selftest: python3 .github/scripts/check-roles-allowed-realm.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-roles-allowed-realm.py"]
