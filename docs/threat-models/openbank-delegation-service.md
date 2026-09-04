@@ -20,6 +20,15 @@ is now stated in the row rather than implied away.
   projection trusts this service's event stream.
 - SCA ceremony integrity (grant + acceptance).
 
+## Lifecycle approval execution
+
+Bank-side lifecycle proposals bind to the exact `lifecycleRevision` observed by the maker. An
+approval is executed only while the proposal row and referenced grant are locked, the observed
+revision still matches, and the status transition remains legal. The grant CAS, lifecycle outbox
+event and immutable `EXECUTED` evidence commit in one transaction. A stale or pre-revision legacy
+proposal remains readable evidence but is never executed. Mutation endpoints remain default-off
+and require a human operator plus OPA; client applications do not receive a bank-side override.
+
 ## Trust boundaries
 
 1. Customer edge → REST API (OIDC JWT, coarse `ROLE_API` + OPA sidecar per ADR-0034).

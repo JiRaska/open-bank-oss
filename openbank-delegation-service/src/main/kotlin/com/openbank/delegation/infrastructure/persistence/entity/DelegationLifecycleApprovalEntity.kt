@@ -45,6 +45,9 @@ class DelegationLifecycleApprovalEntity : PanacheEntityBase() {
     @Column(name = "proposed_at", nullable = false, updatable = false)
     lateinit var proposedAt: OffsetDateTime
 
+    @Column(name = "expected_lifecycle_revision", updatable = false)
+    var expectedLifecycleRevision: Long? = null
+
     @Enumerated(EnumType.STRING)
     @Column(name = "state", nullable = false, length = 16)
     lateinit var state: ProposalState
@@ -67,6 +70,7 @@ class DelegationLifecycleApprovalEntity : PanacheEntityBase() {
         requestKey = requestKey,
         proposedBy = proposedBy,
         proposedAt = proposedAt.toInstant(),
+        expectedLifecycleRevision = expectedLifecycleRevision,
         state = state,
         decidedBy = decidedBy,
         decidedAt = decidedAt?.toInstant(),

@@ -12,12 +12,17 @@ import com.openbank.delegation.application.port.out.DelegationLifecycleApprovalR
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.LifecycleApprovalCreateOutcome
 import com.openbank.delegation.application.port.out.LifecycleApprovalDecision
+import com.openbank.delegation.domain.event.DelegationReinstated
+import com.openbank.delegation.domain.event.DelegationRevoked
+import com.openbank.delegation.domain.event.DelegationSuspended
+import com.openbank.delegation.domain.event.EventMoney
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationLifecycleAction
 import com.openbank.delegation.domain.model.DelegationLifecycleApproval
 import com.openbank.delegation.domain.model.DelegationLifecycleOperation
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
+import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.governance.ProposalState
 import jakarta.enterprise.context.ApplicationScoped
@@ -33,10 +38,9 @@ class DelegationLifecycleApprovalConflict(message: String) : RuntimeException(me
 /**
  * Durable maker-checker workflow for bank-side delegation lifecycle actions.
  *
- * The mutation REST edge is default-off. Proposal and rejection evidence are durable and
- * idempotent. Approval execution is intentionally fail-closed in this current-main slice: it must
- * first be stacked on the lifecycle revision/CAS seam so no operator path can overwrite a newer
- * grant transition or emit an unstamped event.
+ * The mutation REST edge is default-off. Proposal and decision evidence are durable and
+ * idempotent. Execution verifies the proposal's observed lifecycle revision while the grant is
+ * locked, then hands a transition plus its event to the repository's single transaction.
  */
 @ApplicationScoped
 class DelegationLifecycleApprovalService(
@@ -71,6 +75,7 @@ class DelegationLifecycleApprovalService(
             requestKey = requestKey,
             proposedBy = actor,
             proposedAt = clock.instant(),
+            expectedLifecycleRevision = grant.lifecycleRevision,
         )
         return when (val outcome = approvals.create(candidate)) {
             is LifecycleApprovalCreateOutcome.Created -> outcome.approval
@@ -93,7 +98,7 @@ class DelegationLifecycleApprovalService(
         }
         val at = clock.instant()
 
-        return approvals.decideAtomically(command.approvalId) { approval ->
+        return approvals.decideAtomically(command.approvalId) { approval, lockedGrant ->
             if (checker == approval.proposedBy) {
                 throw SelfApprovalNotAllowedException(approval.proposedBy)
             }
@@ -107,8 +112,28 @@ class DelegationLifecycleApprovalService(
                 }
             } else {
                 if (command.approve) {
-                    throw DelegationLifecycleApprovalConflict(
-                        "Lifecycle approval execution is unavailable until revision-safe execution is deployed",
+                    val grant = requireNotNull(lockedGrant) {
+                        "Lifecycle approval ${approval.id} references a missing delegation"
+                    }
+                    val expectedRevision = approval.expectedLifecycleRevision
+                        ?: throw DelegationLifecycleApprovalConflict(
+                            "Lifecycle approval ${approval.id} predates revision-safe execution and cannot be approved",
+                        )
+                    if (grant.lifecycleRevision != expectedRevision) {
+                        throw DelegationLifecycleApprovalConflict(
+                            "Lifecycle approval ${approval.id} is stale; delegation revision changed from $expectedRevision",
+                        )
+                    }
+                    requireActionCanStart(approval.action, grant)
+                    val executedAt = clock.instant()
+                    val transitioned = transition(approval.action, grant, executedAt)
+                    val executed = approval.withProposal(
+                        approval.toProposal().approve(checker, at, reason).markExecuted(executedAt),
+                    )
+                    LifecycleApprovalDecision.Executed(
+                        executed,
+                        transitioned,
+                        lifecycleEvent(approval.action, transitioned, executedAt),
                     )
                 } else {
                     val rejected = approval.withProposal(approval.toProposal().reject(checker, at, reason))
@@ -169,6 +194,46 @@ class DelegationLifecycleApprovalService(
                 "${action.operation} cannot be proposed for delegation ${grant.id} in state ${grant.status}",
             )
         }
+    }
+
+    private fun transition(
+        action: DelegationLifecycleAction,
+        grant: DelegationGrant,
+        at: java.time.Instant,
+    ): DelegationGrant = when (action.operation) {
+        DelegationLifecycleOperation.SUSPEND -> grant.suspend(action.reason, at.atOffset(java.time.ZoneOffset.UTC))
+        DelegationLifecycleOperation.REINSTATE -> grant.reinstate(at.atOffset(java.time.ZoneOffset.UTC))
+        DelegationLifecycleOperation.REVOKE -> grant.revoke(
+            grant.grantorPartyId,
+            action.reason,
+            at.atOffset(java.time.ZoneOffset.UTC),
+        )
+    }
+
+    private fun lifecycleEvent(
+        action: DelegationLifecycleAction,
+        grant: DelegationGrant,
+        at: java.time.Instant,
+    ): DomainEvent = when (action.operation) {
+        DelegationLifecycleOperation.SUSPEND -> DelegationSuspended(
+            aggregateId = grant.id, lifecycleRevision = grant.lifecycleRevision,
+            grantorPartyId = grant.grantorPartyId, granteePartyId = grant.granteePartyId,
+            resourceType = grant.resourceType, resourceId = grant.resourceId,
+            capabilities = grant.capabilities, reason = action.reason, occurredAt = at,
+        )
+        DelegationLifecycleOperation.REINSTATE -> DelegationReinstated(
+            aggregateId = grant.id, lifecycleRevision = grant.lifecycleRevision,
+            grantorPartyId = grant.grantorPartyId, granteePartyId = grant.granteePartyId,
+            resourceType = grant.resourceType, resourceId = grant.resourceId,
+            capabilities = grant.capabilities, validFrom = grant.validFrom,
+            validTo = grant.validTo, perTransactionLimit = EventMoney.from(grant.perTransactionLimit), occurredAt = at,
+        )
+        DelegationLifecycleOperation.REVOKE -> DelegationRevoked(
+            aggregateId = grant.id, lifecycleRevision = grant.lifecycleRevision,
+            grantorPartyId = grant.grantorPartyId, granteePartyId = grant.granteePartyId,
+            resourceType = grant.resourceType, resourceId = grant.resourceId,
+            capabilities = grant.capabilities, reason = action.reason, occurredAt = at,
+        )
     }
 
     private companion object {
