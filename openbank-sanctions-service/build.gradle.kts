@@ -49,6 +49,9 @@ dependencies {
     // POST /api/v1/sanctions/screen. @TestSecurity supplies the operator role Pact replays with.
     testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security)
+    // #8699: the partial-screen defect is only observable as an HTTP status, so the test has
+    // to drive the real endpoint. Test-only, and the fleet-standard REST client here.
+    testImplementation(libs.rest.assured.kotlin)
 }
 
 // Pact: replay the committed git-pact contracts (ADR-0063) and forward broker config when CI
