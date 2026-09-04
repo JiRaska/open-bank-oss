@@ -74,6 +74,52 @@ def changed_files(base: str) -> list[str]:
     return [line for line in out.splitlines() if line.strip()]
 
 
+def strip_comments(src: str) -> str:
+    """Remove Kotlin block and line comments, preserving string literals.
+
+    Why this exists: a KDoc INSIDE a constructor parameter list contains commas, and
+    split_params splits on top-level commas. Measured 2026-09-04 on
+    AccountEvents.kt::AccountCreatedEvent — 9 declared properties, the parser captured 8, and
+    split_params produced 15 fragments instead of 9 because the KDoc above the last parameter
+    was diced into pieces. The final fragment read
+    `* the same spelling ... */ val sourceService: String`, which PARAM_RE cannot match, so
+    `sourceService` was invisible to the gate — and REMOVING it therefore produced NO finding,
+    which is the one thing this gate exists to catch.
+
+    Fleet-wide that was 15 properties across 4 files, every one of them the `sourceService`
+    field on money-path account/transaction events.
+
+    Kotlin block comments NEST, so the scanner counts depth rather than searching for the
+    first `*/` (this repo has been burnt by that before).
+    """
+    out: list[str] = []
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        if ch == '"':
+            if src.startswith('\"\"\"', i):
+                end = src.find('\"\"\"', i + 3)
+                end = n if end == -1 else end + 3
+            else:
+                end = i + 1
+                while end < n and src[end] != '"':
+                    end += 2 if src[end] == "\\" else 1
+                end = min(end + 1, n)
+            out.append(src[i:end]); i = end; continue
+        if src.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if src.startswith("/*", j): depth += 1; j += 2; continue
+                if src.startswith("*/", j): depth -= 1; j += 2; continue
+                j += 1
+            out.append(" "); i = j; continue
+        if src.startswith("//", i):
+            j = src.find("\n", i)
+            out.append(" "); i = n if j == -1 else j; continue
+        out.append(ch); i += 1
+    return "".join(out)
+
+
 def split_params(paramlist: str) -> list[str]:
     """Split a Kotlin parameter list on top-level commas (generics/parens/brace aware).
 
@@ -130,7 +176,7 @@ def parse_events(text: str) -> dict[str, dict]:
             elif text[i] == ")":
                 depth -= 1
             i += 1
-        paramlist = text[m.end(): i - 1]
+        paramlist = strip_comments(text[m.end(): i - 1])
         # an event class is `data class X(...) : Iface?, DomainEvent(...) { ... }` — the marker
         # must appear in the supertype list, i.e. between the ctor's closing paren and the class
         # body's opening brace. Search that whole span (not a fixed 80-char window) so a class
