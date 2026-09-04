@@ -3,12 +3,10 @@ package com.openbank.balance.application.usecase
 
 import com.openbank.balance.application.port.`in`.InitializeBalanceCommand
 import com.openbank.balance.application.port.`in`.PlaceHoldCommand
-import com.openbank.balance.application.port.out.BalanceEventPublisher
 import com.openbank.balance.application.port.out.BalanceMovementPort
 import com.openbank.balance.application.port.out.BalanceRepository
 import com.openbank.balance.application.port.out.HoldRepository
 import com.openbank.balance.domain.model.Balance
-import com.openbank.balance.domain.model.BalanceHold
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -25,14 +23,13 @@ class BalanceServiceClockTest {
 
     private val balanceRepo: BalanceRepository = mockk()
     private val holdRepo: HoldRepository = mockk()
-    private val eventPublisher: BalanceEventPublisher = mockk(relaxed = true)
     private val movementPort: BalanceMovementPort = mockk()
 
     @Test
     fun `initializeBalance stamps updatedAt from injected clock`(): Unit = runBlocking {
         val fixedInstant = Instant.parse("2024-01-15T10:00:00Z")
         val fixedClock = Clock.fixed(fixedInstant, ZoneOffset.UTC)
-        val service = BalanceService(balanceRepo, holdRepo, eventPublisher, movementPort, fixedClock)
+        val service = BalanceService(balanceRepo, holdRepo, movementPort, fixedClock)
 
         val accountId = UUID.randomUUID()
         coEvery { balanceRepo.findByAccountIdAndCurrency(accountId, "CZK") } returns null
@@ -55,7 +52,7 @@ class BalanceServiceClockTest {
     fun `placeHold stamps hold timestamps from injected clock`(): Unit = runBlocking {
         val fixedInstant = Instant.parse("2024-06-01T12:00:00Z")
         val fixedClock = Clock.fixed(fixedInstant, ZoneOffset.UTC)
-        val service = BalanceService(balanceRepo, holdRepo, eventPublisher, movementPort, fixedClock)
+        val service = BalanceService(balanceRepo, holdRepo, movementPort, fixedClock)
 
         val accountId = UUID.randomUUID()
         val balance = Balance(
@@ -64,17 +61,12 @@ class BalanceServiceClockTest {
             reservedAmount = BigDecimal.ZERO, pendingAmount = BigDecimal.ZERO,
             updatedAt = OffsetDateTime.now(fixedClock), version = 1,
         )
-        val expectedHold = BalanceHold(
-            id = UUID.randomUUID(), accountId = accountId, amount = BigDecimal("100"),
-            currency = "CZK", reason = "test", referenceId = "ref1",
-            expiresAt = null, createdAt = OffsetDateTime.now(fixedClock), releasedAt = null,
-        )
         coEvery { balanceRepo.findByAccountIdAndCurrency(accountId, "CZK") } returns balance
         // The cover decision reads the not-yet-effective credit tail (#1745); nothing is booked
         // forward here, so the value-date basis is a no-op and this test's subject is unaffected.
         coEvery { balanceRepo.sumNotYetEffectiveCredit(any(), any(), any()) } returns BigDecimal.ZERO
-        coEvery { balanceRepo.update(any()) } answers { firstArg() }
-        coEvery { holdRepo.save(any()) } returns expectedHold
+        // #8510: the reservation + hold + event go through ONE transactional repository method.
+        coEvery { holdRepo.saveWithEvent(any(), any(), any()) } answers { firstArg() }
 
         val result = service.placeHold(
             PlaceHoldCommand(accountId, BigDecimal("100"), "CZK", "test", "ref1", null),
