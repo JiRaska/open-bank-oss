@@ -199,6 +199,9 @@ DEBT = {
     "scheduler-cron-syntax": DEBT_MARKER,
     "scheduler-liveness-adoption": DEBT_MARKER,
     "schema-compat-gate": DEBT_MARKER,
+    # Diff-scoped like adversarial-contract-test: the corpus is "files this PR touched",
+    # legitimately empty on a PR that never nears money-path.
+    "security-checklist-money-path": DEBT_MARKER,
     "service-runbook-drift": DEBT_MARKER,
     "single-replica-rollout-strategy": DEBT_MARKER,
     "slo-registry-consistency": DEBT_MARKER,
