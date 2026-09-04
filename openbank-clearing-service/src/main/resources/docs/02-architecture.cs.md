@@ -89,7 +89,7 @@ com.openbank.clearing/
 
 - `submit(...)` — vytvoří `ClearingItem` (status PENDING) s placeholder batch id `00000000-…`; skutečná dávka se přiřadí při cyklu. Anotováno `@Retry(maxRetries = 3)`.
 - `triggerClearingCycle(rail)` — `@Timeout(30000)`. Načte až 1000 pending položek pro rail; pokud žádné nejsou, zapíše prázdnou SETTLED dávku; jinak vytvoří IN_CLEARING `ClearingBatch` (NET settlement), sečte `totalDebit`, připne všechny položky (status IN_CLEARING).
-- `settleBatch(batchId)` — načte dávku, nastaví status SETTLED + `settledAt`, uloží, poté zavolá `eventPublisher.publishBatchSettled`.
+- `settleBatch(batchId)` — načte dávku, nastaví status SETTLED + `settledAt` a zavolá `batchRepo.settleWithEvent(batch, items, message)`, které commitne dávku, její položky i outbox řádek v JEDNÉ transakci (#8621). Publisher slouží jen k SESTAVENÍ zprávy (`batchSettledMessage`), nikoli k publikaci — skládání update/saveAll/publish zde dávalo každému vlastní transakci, takže pád po commitu dávky ve stavu SETTLED událost trvale ztratil.
 - read cesty — `getBatch`, `listBatches`, `getItem`, `listItemsByBatch`, `listItemsByPayment`, `getPositions`.
 
 ## Outbox tok
@@ -113,7 +113,7 @@ sequenceDiagram
 
 **Resilience:** `publishWithResilience` je obalen `@Bulkhead(1)`, `@CircuitBreaker(threshold 10, ratio 0.5, delay 5s)`, `@Retry(2, delay 200, jitter 100)`, `@Timeout(3000)`. Scheduler polyká výjimky, aby nikdy nespadl; selhané řádky se označí FAILED pro retry. Životní cyklus outbox statusu: `PENDING → SENT | FAILED`.
 
-> **Pozn. (aktuální stav):** `ClearingEventPublisherImpl.publishBatchSettled` / `publishItemCleared` jsou stuby vracející `voidItem()` — produkční cesta je transakční outbox vyprazdňovaný `ClearingOutboxDispatcher` do `clearing-events-out`. Přímé inline publikování je zdokumentovaný stub, nikoli aktivní cesta emise.
+> **Pozn. (aktuální stav):** `ClearingEventPublisherImpl.publishBatchSettled` a `publishItemCleared` NEJSOU stuby — každý zapisuje outbox řádek přes `Panache.withTransaction { outboxRepo.persistInTransaction(...) }` (řádky 41 a 85). Produkční cesta je transakční outbox vyprazdňovaný `ClearingOutboxDispatcher` do `clearing-events-out`. `publishBatchSettled` už navíc není na cestě settle vůbec — `settleWithEvent` zapisuje outbox řádek uvnitř transakce dávky — a `publishItemCleared` nemá produkčního volajícího, takže jeho vlastní transakce je latentní past, ne živá vada.
 
 ## Komponenty z `openbank-libs`
 
