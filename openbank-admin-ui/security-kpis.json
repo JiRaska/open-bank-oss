@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-04T21:27:12.016555+00:00",
+  "generatedAt": "2026-09-04T22:08:37.992078+00:00",
   "netpol": {
     "available": true,
     "covered": 59,
@@ -8,8 +8,10 @@
     "gateGreen": true
   },
   "freshness": {
-    "available": false,
-    "reason": "skipped"
+    "available": true,
+    "fleetScore": 67,
+    "scoredModules": 12,
+    "unknownModules": 15
   },
   "credentials": {
     "available": true,
