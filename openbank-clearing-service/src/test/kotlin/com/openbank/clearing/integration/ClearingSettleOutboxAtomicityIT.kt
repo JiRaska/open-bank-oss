@@ -17,6 +17,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
+import java.sql.Connection
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -28,10 +29,16 @@ import javax.sql.DataSource
  * assertion the fleet already had, while still being able to lose
  * `openbank.clearing.batch.settled` on a crash between commits.
  *
- * Measured on unmodified origin/main before the fix: batch xmin = 750, outbox xmin = 752 —
- * three distinct transactions. After the fix (the settle chain wrapped in one ambient
- * `Panache.withTransaction`, which every `@WithTransaction` repo method and the publisher's own
- * `Panache.withTransaction` JOIN), both rows carry the same xmin.
+ * Measured against the pre-fix three-call composition: batch xmin = 750, outbox xmin = 752 —
+ * three distinct transactions. After the fix (`ClearingBatchRepository.settleWithEvent`, one
+ * `@WithTransaction` boundary owned by the repository) all THREE row kinds carry the same xmin.
+ *
+ * The item rows are asserted too, and that is not belt-and-braces. Measured: with the items
+ * moved back into their own transaction while batch and outbox stayed together, a batch-vs-outbox
+ * assertion alone stays GREEN — so it cannot see a batch that commits SETTLED while its items
+ * commit separately, which is its own defect (a settled batch whose items are not settled, the
+ * inconsistency `reconcileBatch` exists to report). The oracle covers every row the settle
+ * writes, so the whole three-way property is pinned rather than two thirds of it.
  *
  * The dispatcher is OFF for this test ([OutboxRepositoryIsolationProfile]): its UPDATE would
  * rewrite the outbox row's xmin and destroy the evidence. The flow is driven through real HTTP
@@ -97,27 +104,77 @@ class ClearingSettleOutboxAtomicityIT {
     }
 
     /**
+     * The known-negative for the oracle above. Every assertion in this class is of the form
+     * "these rows agree"; such an assertion also passes when there are no rows to disagree —
+     * so without this test a settle that wrote NOTHING would read exactly like an atomic one.
+     * An id that was never settled must therefore return no row of any of the three kinds,
+     * which is what makes the green above a statement about rows that actually exist.
+     */
+    @Test
+    fun `the xmin oracle returns no rows for a batch that was never settled`() {
+        val neverWritten = UUID.randomUUID().toString()
+        dataSource.connection.use { conn ->
+            assertThat(xmins(conn, "SELECT xmin FROM clearing_batches WHERE id = '$neverWritten'"))
+                .describedAs("a batch id that was never written must have no batch row")
+                .isEmpty()
+            assertThat(xmins(conn, "SELECT xmin FROM clearing_items WHERE batch_id = '$neverWritten'"))
+                .describedAs("a batch id that was never written must have no item rows")
+                .isEmpty()
+            assertThat(
+                xmins(
+                    conn,
+                    "SELECT xmin FROM clearing_outbox WHERE aggregate_id = '$neverWritten' " +
+                        "AND event_type = 'openbank.clearing.batch.settled'",
+                ),
+            ).describedAs("a batch id that was never written must have no outbox row").isEmpty()
+        }
+    }
+
+    /**
      * The oracle (#8496): Postgres stamps each row version with `xmin`, the id of the writing
-     * transaction — so "the batch row and its outbox row were written by the SAME transaction"
-     * is read from the database, never inferred from both rows merely existing.
+     * transaction — so "the batch row, its item rows and its outbox row were written by the SAME
+     * transaction" is read from the database, never inferred from the rows merely existing.
      */
     private fun assertSameWriterTransaction(batchId: String) {
         dataSource.connection.use { conn ->
-            val batchXmin = conn.createStatement().executeQuery(
-                "SELECT xmin FROM clearing_batches WHERE id = '$batchId'",
-            ).apply { assertThat(next()).isTrue() }.getLong(1)
-            val outboxXmin = conn.createStatement().executeQuery(
+            val batchXmins = xmins(conn, "SELECT xmin FROM clearing_batches WHERE id = '$batchId'")
+            // Each list is asserted non-empty before it is compared: "they all agree" is
+            // vacuously true of an empty set, so an unwritten row would otherwise read as atomic.
+            assertThat(batchXmins).describedAs("no settled batch row for %s", batchId).hasSize(1)
+            val batchXmin = batchXmins.single()
+
+            val itemXmins = xmins(conn, "SELECT xmin FROM clearing_items WHERE batch_id = '$batchId'")
+            assertThat(itemXmins).describedAs("no item rows for batch %s", batchId).isNotEmpty()
+
+            val outboxXmins = xmins(
+                conn,
                 "SELECT xmin FROM clearing_outbox WHERE aggregate_id = '$batchId' " +
                     "AND event_type = 'openbank.clearing.batch.settled'",
-            ).apply { assertThat(next()).isTrue() }.getLong(1)
-            assertThat(outboxXmin)
+            )
+            assertThat(outboxXmins).describedAs("no settled outbox row for batch %s", batchId).hasSize(1)
+
+            assertThat(outboxXmins.single())
                 .describedAs(
                     "batch row xmin (%d) and outbox row xmin (%d) differ — the state change and " +
                         "its event committed in DIFFERENT transactions (#8509)",
                     batchXmin,
-                    outboxXmin,
+                    outboxXmins.single(),
                 )
                 .isEqualTo(batchXmin)
+
+            assertThat(itemXmins.distinct())
+                .describedAs(
+                    "batch row xmin (%d) and item row xmins (%s) differ — the batch committed " +
+                        "SETTLED in a different transaction from its items (#8509)",
+                    batchXmin,
+                    itemXmins.distinct(),
+                )
+                .containsExactly(batchXmin)
         }
+    }
+
+    /** Every `xmin` the query returns, so an EMPTY result is visible instead of being skipped. */
+    private fun xmins(conn: Connection, sql: String): List<Long> = conn.createStatement().executeQuery(sql).use { rs ->
+        buildList { while (rs.next()) add(rs.getLong(1)) }
     }
 }
