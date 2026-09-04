@@ -561,6 +561,26 @@ gates:
         exit 1
       fi
 
+  # The coverage KPI behind the drift gate (ADR-0279 WS2 #17): drift proves committed ==
+  # generated; this proves how much of the fleet is selected by ANY ingress policy at all.
+  # On the VPC CNI there is no audit mode (runbook 0010) — a pod no policy selects is fully
+  # reachable, so the coverage ratio IS the segmentation posture. Ratchet shape: a component
+  # with no generated policy must be baselined with a reason, and a paid-off baseline entry
+  # fails until removed. Measured at introduction 2026-09-04: 59/73 components (81%).
+  - id: netpol-coverage-kpi
+    name: "NetworkPolicy coverage KPI — generator ingress policy present per component (ADR-0279 #17, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 5   # one directory walk
+    min_subjects: 35   # 73 components measured 2026-09-04; half, so the fleet can shrink without a red
+    rationale: "The CNI has no audit mode, so an unselected pod is silently reachable; the coverage ratio is the only segmentation signal available pre-enforcement and must never regress while #2691 stages the rollout."
+    review_after: "2027-03-04"
+    selftest: python3 .github/scripts/check-netpol-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-netpol-coverage.py"]
+    run: |
+      python3 .github/scripts/check-netpol-coverage.py --root . --enforce
+
   # The drift gate above proves the committed policies match what the generator
   # DERIVES. It cannot say anything about what the generator cannot SEE: a
   # cross-namespace URL that lives only in a Kotlin @ConfigProperty default or a
