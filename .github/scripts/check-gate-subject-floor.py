@@ -136,6 +136,8 @@ DEBT = {
     "compliance-page-evidence": DEBT_MARKER,
     "configproperty-kotlin-defaults": DEBT_MARKER,
     "critical-alert-egress": DEBT_MARKER,
+    # Diff-scoped: the corpus is "yaml files this PR ADDS", legitimately empty on most PRs.
+    "credential-deadline-ratchet": DEBT_MARKER,
     "db-backup-association-gate": DEBT_MARKER,
     "db-migration-gate": DEBT_MARKER,
     "deploy-drift-declaration": DEBT_MARKER,

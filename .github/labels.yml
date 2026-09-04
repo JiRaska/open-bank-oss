@@ -22,6 +22,9 @@ labels:
   - name: kev-listed
     color: "b60205"
     description: "CVE on CISA KEV (actively exploited) — critical SLA regardless of CVSS (ADR-0279)."
+  - name: credential-inventory
+    color: "5319e7"
+    description: "Standing long-lived credential inventory issue (ADR-0279 #18), bot-maintained."
   - name: "severity:critical"
     color: "b60205"
     description: "vuln_management SLA: 7 days."
