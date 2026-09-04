@@ -3078,6 +3078,8 @@ gates:
     group: security
     mode: enforced
     budget_seconds: 10   # one git diff + a regex over the touched files
+    rationale: "A happy-path-only contract test cannot catch a provider that stops enforcing authz — 126 of 132 fleet contract tests measured 2026-09-3 had no negative case; this ratchets the convention on every touched file while the debt sweep runs under #8590."
+    review_after: "2027-03-04"
     when: pull_request
     needs_base: required
     selftest: python3 .github/scripts/check-adversarial-contract-tests.py --self-test
