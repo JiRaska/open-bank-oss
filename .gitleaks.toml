@@ -176,4 +176,11 @@ regexes = [
   # (--log-opts=--all) trips on the comment form in a since-superseded commit
   # (df37ca6f, openbank-libs/governance/agents.yaml:121).
   '''llama-3\.3-70b-versatile\.?''',
+  # EU Financial Sanctions Files (FSF) consolidated-list endpoint
+  # (webgate.ec.europa.eu/fsd/fsf/public/files/...) — the `token=` query param is the
+  # European Commission's own fixed public access token for this dataset (base64
+  # decodes to "token-2017"), unrelated to any OpenBank credential and not something
+  # that rotates. It is meant for public consumption; publishing it is how the feed
+  # is fetched at all. Trips the default generic-api-key rule on the `token=` shape.
+  '''dG9rZW4tMjAxNw''',
 ]

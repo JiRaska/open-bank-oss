@@ -92,9 +92,6 @@ KNOWN_GAPS: dict[str, str] = {
         "#6035 - found by check-audit-money-path-subscription.py and named in no issue before it; "
         "nothing has yet reviewed whether this stream belongs in the audit trail."
     ),
-    "openbank-psd2-service": (
-        "#6035 - as standing-order above: surfaced by the subscription check, not yet reviewed."
-    ),
     # --- producers of topics audit-service does not subscribe to ---
     # Not money-path and not audited today, so no `audit_entries` row is being attributed by
     # derivation right now. They are baselined rather than excluded because a topic entering the

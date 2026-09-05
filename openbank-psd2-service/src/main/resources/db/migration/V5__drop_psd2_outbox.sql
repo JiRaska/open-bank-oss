@@ -1,0 +1,33 @@
+-- #8510: drops the psd2_outbox table. The transactional-outbox apparatus
+-- (Psd2OutboxPort/Dispatcher/BacklogGauge/RepositoryImpl/Entity + KafkaPsd2OutboxEventPublisher)
+-- had zero writers anywhere in the service — no OutboxMessage(...) was ever constructed — and no
+-- consumer of the openbank.psd2.events topic exists anywhere in the fleet. Mirrors audit-service's
+-- V16 (#5223) and sepa-instant's analogous removal (#1364 / #5222).
+--
+-- Also drops psd2_outbox_seq (created by V2 for PanacheEntity id allocation on the now-deleted
+-- entity) — V1/V2 are already-applied migrations and must not be edited (checksum rule), so the
+-- cleanup happens here instead.
+--
+-- Rollback:
+-- CREATE TABLE psd2_outbox (
+--     id BIGSERIAL PRIMARY KEY,
+--     event_id UUID NOT NULL UNIQUE,
+--     aggregate_id UUID NOT NULL,
+--     event_type VARCHAR(128) NOT NULL,
+--     payload TEXT NOT NULL,
+--     status VARCHAR(16) NOT NULL,
+--     attempt_count INTEGER NOT NULL DEFAULT 0,
+--     sent_at TIMESTAMPTZ,
+--     last_error TEXT,
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--     claimed_at TIMESTAMPTZ,
+--     synthetic BOOLEAN NOT NULL DEFAULT FALSE
+-- );
+-- CREATE INDEX idx_psd2_outbox_status_created_at ON psd2_outbox(status, created_at ASC);
+-- CREATE INDEX idx_psd2_outbox_aggregate_id ON psd2_outbox(aggregate_id);
+-- CREATE SEQUENCE IF NOT EXISTS psd2_outbox_seq INCREMENT BY 50;
+-- (recreates the table as of V4; the table was always empty by construction, so no data
+-- restoration is needed.)
+DROP TABLE IF EXISTS psd2_outbox;
+DROP SEQUENCE IF EXISTS psd2_outbox_seq;

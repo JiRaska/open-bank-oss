@@ -100,6 +100,10 @@ class ClearingSettleOutboxAtomicityIT {
      * The oracle (#8496): Postgres stamps each row version with `xmin`, the id of the writing
      * transaction — so "the batch row and its outbox row were written by the SAME transaction"
      * is read from the database, never inferred from both rows merely existing.
+     *
+     * ADR-0281 widens the assertion to the second outbox row: the `net_settlement.post` command
+     * must share the same xmin — a SETTLED batch whose settlement-leg intent committed in a
+     * different transaction could lose it on a crash between the two commits.
      */
     private fun assertSameWriterTransaction(batchId: String) {
         dataSource.connection.use { conn ->
@@ -116,6 +120,18 @@ class ClearingSettleOutboxAtomicityIT {
                         "its event committed in DIFFERENT transactions (#8509)",
                     batchXmin,
                     outboxXmin,
+                )
+                .isEqualTo(batchXmin)
+            val netSettlementXmin = conn.createStatement().executeQuery(
+                "SELECT xmin FROM clearing_outbox WHERE aggregate_id = '$batchId' " +
+                    "AND event_type = 'openbank.clearing.net_settlement.post'",
+            ).apply { assertThat(next()).isTrue() }.getLong(1)
+            assertThat(netSettlementXmin)
+                .describedAs(
+                    "batch row xmin (%d) and net_settlement.post command xmin (%d) differ — the " +
+                        "settlement-leg intent did not commit with the state change (ADR-0281)",
+                    batchXmin,
+                    netSettlementXmin,
                 )
                 .isEqualTo(batchXmin)
         }

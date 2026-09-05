@@ -113,6 +113,16 @@ This repository enforces:
 - Pre-commit hooks blocking common secret patterns.
 - No `.env` files, private keys, certificates, or PII in repository (enforced by `.gitignore` + `.gitleaks.toml`).
 
+### Maintainer Authentication Hardening (ADR-0279 #19)
+
+The repository's strongest control is only as strong as the weakest maintainer login, so maintainer-facing authentication is held to a higher bar than the code:
+
+- **Phishing-resistant MFA required.** Maintainers and org admins authenticate with WebAuthn/passkeys (hardware security keys) as the primary second factor. TOTP is an accepted fallback only during onboarding; SMS is never acceptable.
+- **Two keys per maintainer.** Every maintainer registers a primary and a backup hardware key, so a lost key is a rotation event, not an account-recovery event. Recovery codes are stored offline.
+- **Privileged actions re-authenticate.** Releases (release-please merge), ruleset changes, and Security Advisory publication are performed in a fresh, recently-authenticated session — a stolen long-lived cookie must not be enough to ship code to `main`.
+- **Quarterly attestation.** The maintainer list, key registrations, and org admin roster are reviewed quarterly against HR/engagement records; departed maintainers lose access the same day (recorded in the review notes).
+- **Signed commits are identity, not formality.** The GPG/SSH signing requirement above exists so that a compromised GitHub session alone cannot forge a maintainer's authorship; treat unsigned commits on `main` as an incident signal.
+
 ## Hardening Guidance for Deployers
 
 If you are deploying OpenBank in any non-development environment, **you are responsible for**:
