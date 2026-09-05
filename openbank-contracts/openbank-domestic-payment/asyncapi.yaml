@@ -42,6 +42,11 @@ channels:
         $ref: '#/components/messages/DOMESTIC_PAYMENT_STATUS_CHANGED'
       DELEGATED_SPEND_FINALIZED_ABSENT:
         $ref: '#/components/messages/DELEGATED_SPEND_FINALIZED_ABSENT'
+  notificationRequests:
+    address: openbank.notification.requests
+    description: >-
+      Existing notification-service delivery command (see openbank-campaign-service/asyncapi.yaml),
+      emitted here for a rejected domestic payment via KafkaNotificationSendAdapter (#8352).
 
 operations:
   publishDomesticPaymentEvents:
