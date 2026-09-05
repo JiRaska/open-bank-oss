@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.application.usecase
 
+import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
@@ -160,7 +161,8 @@ class SanctionsListServiceTest {
     fun `refresh uses importer count when import succeeds`(): Unit = runBlocking {
         val list = sampleList(listType = "OFAC_SDN", sourceUrl = "https://example.com/sdn.xml")
         coEvery { repo.findByListType("OFAC_SDN") } returns list
-        coEvery { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") } returns 42
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") } returns
+            ListImportResult.imported(42)
         coEvery { repo.markUpdated("OFAC_SDN", 42) } returns list.copy(lastEntryCount = 42)
 
         val result = service.refresh("OFAC_SDN")
@@ -173,7 +175,8 @@ class SanctionsListServiceTest {
     fun `refresh falls back to stored count when importer returns zero`(): Unit = runBlocking {
         val list = sampleList(listType = "FATF_HIGH_RISK", lastEntryCount = 7)
         coEvery { repo.findByListType("FATF_HIGH_RISK") } returns list
-        coEvery { importer.importList(SanctionsListType.FATF_HIGH_RISK, any()) } returns 0
+        coEvery { importer.importList(SanctionsListType.FATF_HIGH_RISK, any()) } returns
+            ListImportResult.skippedNotEntityBased("FATF is country-risk")
         coEvery { repo.markUpdated("FATF_HIGH_RISK", 7) } returns list
 
         service.refresh("FATF_HIGH_RISK")
@@ -185,7 +188,8 @@ class SanctionsListServiceTest {
     fun `refresh falls back to zero when stored count is null and importer returns zero`(): Unit = runBlocking {
         val list = sampleList(listType = "CNB_DOMESTIC", lastEntryCount = null)
         coEvery { repo.findByListType("CNB_DOMESTIC") } returns list
-        coEvery { importer.importList(SanctionsListType.CNB_DOMESTIC, any()) } returns 0
+        coEvery { importer.importList(SanctionsListType.CNB_DOMESTIC, any()) } returns
+            ListImportResult.skippedNotEntityBased("CNB has no feed")
         coEvery { repo.markUpdated("CNB_DOMESTIC", 0) } returns list
 
         service.refresh("CNB_DOMESTIC")
@@ -209,7 +213,7 @@ class SanctionsListServiceTest {
     fun `refresh throws IllegalStateException when markUpdated fails to persist`(): Unit = runBlocking {
         val list = sampleList(listType = "OFAC_SDN")
         coEvery { repo.findByListType("OFAC_SDN") } returns list
-        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns 5
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns ListImportResult.imported(5)
         coEvery { repo.markUpdated("OFAC_SDN", 5) } returns null
 
         assertThatThrownBy {
@@ -226,7 +230,7 @@ class SanctionsListServiceTest {
         val disabled = sampleList(listType = "FATF_HIGH_RISK", enabled = false)
         coEvery { repo.listSanctionsLists() } returns listOf(enabled, disabled)
         coEvery { repo.findByListType("OFAC_SDN") } returns enabled
-        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns 1
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns ListImportResult.imported(1)
         coEvery { repo.markUpdated("OFAC_SDN", 1) } returns enabled.copy(lastEntryCount = 1)
 
         val result = service.refreshAll()
@@ -273,7 +277,8 @@ class SanctionsListServiceTest {
         )
         coEvery { repo.listSanctionsLists() } returns listOf(due)
         coEvery { repo.findByListType("OFAC_SDN") } returns due
-        coEvery { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") } returns 123
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") } returns
+            ListImportResult.imported(123)
         coEvery { repo.markUpdated("OFAC_SDN", 123) } returns due.copy(lastEntryCount = 123)
 
         service.scheduledRefresh()
@@ -291,7 +296,7 @@ class SanctionsListServiceTest {
         coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } throws
             IllegalStateException("boom")
         coEvery { repo.findByListType("EU_CONSOLIDATED") } returns healthy
-        coEvery { importer.importList(SanctionsListType.EU_CONSOLIDATED, any()) } returns 5
+        coEvery { importer.importList(SanctionsListType.EU_CONSOLIDATED, any()) } returns ListImportResult.imported(5)
         coEvery { repo.markUpdated("EU_CONSOLIDATED", 5) } returns healthy.copy(lastEntryCount = 5)
 
         service.scheduledRefresh()
@@ -345,7 +350,7 @@ class SanctionsListServiceTest {
                 coEvery { repo.findByListType("OFAC_SDN") } returns due
                 coEvery {
                     importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml")
-                } returns 7
+                } returns ListImportResult.imported(7)
                 coEvery { repo.markUpdated("OFAC_SDN", 7) } returns due.copy(lastEntryCount = 7)
 
                 service.scheduledRefresh()
@@ -372,7 +377,7 @@ class SanctionsListServiceTest {
                 coEvery { repo.findByListType("OFAC_SDN") } returns due
                 coEvery {
                     importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml")
-                } returns 7
+                } returns ListImportResult.imported(7)
                 coEvery { repo.markUpdated("OFAC_SDN", 7) } returns due.copy(lastEntryCount = 7)
 
                 service.scheduledRefresh()

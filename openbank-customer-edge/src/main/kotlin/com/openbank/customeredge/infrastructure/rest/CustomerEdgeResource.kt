@@ -1104,6 +1104,63 @@ class CustomerEdgeResource(
         )
     }
 
+    /**
+     * GDPR Art. 15 — right of access. The subject's full PII set, aggregated by party-service
+     * across party, kyc and card-issuance (ADR-0118).
+     *
+     * ## Why this route exists
+     *
+     * party-service has implemented both exports since ADR-0118/ADR-0204 and they were reachable by
+     * nobody: the handler accepts ROLE_ADMIN, ROLE_DPO, or the subject's own JWT, and this edge
+     * forwards none of the three. It validates the customer token in the `openbank-customers` realm
+     * and calls upstream with its OWN client_credentials token from the operator realm, so
+     * party-service saw `sub = service-account-openbank-edge` with ROLE_OPERATOR — not admin, not
+     * DPO, not the subject — and answered 403 to every request a data subject could make. There was
+     * also no route here to make one with: 136 `@Path` declarations and none for either export
+     * (#8421). ADR-0204 D6 left "who gets a button for it" open rather than deciding against it.
+     *
+     * ## Scoping
+     *
+     * Party-scoped by the JWT party — never a client-supplied id — so a customer only ever exports
+     * their own record (no IDOR), the same shape as `/profile` and `/privacy/access-log`.
+     * party-service independently requires that `X-Customer-Party-Id` name the same party as the
+     * path, so a header alone cannot widen the read.
+     *
+     * A distinct action from `customer.portabilityExport.read` below because Art. 15 and Art. 20 are
+     * distinct rights with different output obligations (ADR-0204: Art. 20 excludes Art. 6(1)(c)
+     * legal-obligation data and adds transaction history) — party-service audits them under
+     * different `gdprArticle` codes for exactly that reason, and collapsing them here would undo it.
+     */
+    @GET
+    @Path("/privacy/gdpr-export")
+    @Authorize(action = "customer.gdprExport.read", resource = "")
+    @Blocking
+    fun gdprExport(): Response {
+        val customer = customer()
+        return upstream.get(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/gdpr-export",
+            customer.partyId.toString(),
+        )
+    }
+
+    /**
+     * GDPR Art. 20 — right to data portability. The consent/contract-basis subset only, with
+     * counterparty IBANs redacted per Art. 20(4); Art. 20(2) direct controller-to-controller
+     * transmission is explicitly not offered (ADR-0204 D1/D2/D4). Same scoping and same trust
+     * boundary as [gdprExport].
+     */
+    @GET
+    @Path("/privacy/portability-export")
+    @Authorize(action = "customer.portabilityExport.read", resource = "")
+    @Blocking
+    fun portabilityExport(): Response {
+        val customer = customer()
+        return upstream.get(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/gdpr-portability-export",
+            customer.partyId.toString(),
+        )
+    }
+
     /** The third-party / agent data-access consents granted by the caller. */
     @GET
     @Path("/consents")
