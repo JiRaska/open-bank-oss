@@ -74,6 +74,13 @@ import java.util.UUID
  * its own issue rather than half-built.
  */
 @ApplicationScoped
+@Suppress(
+    // The count is inflated by small, named private steps (recordOpened / eligibility / refuse /
+    // refuseOpen / bankStatusFor / outboxMessage). Splitting the class would put one flow — open,
+    // file evidence, refresh — across two files for a metric, and a reader following a chargeback
+    // would have to follow it across both.
+    "TooManyFunctions",
+)
 class CardDisputeService(
     private val disputes: DisputePort,
     private val cases: CardDisputeCaseRepository,
@@ -116,45 +123,7 @@ class CardDisputeService(
                 command.currencyCode,
             )
         ) {
-            is SchemeResult.Answered -> {
-                val now = Instant.now(clock)
-                val case = CardDisputeCase(
-                    // UUIDv7 (ADR-0106) — a durable, indexed primary key.
-                    id = Ids.newId(),
-                    authorizationId = authorization.id,
-                    cardId = authorization.cardId,
-                    networkCaseId = answer.value.networkCaseId,
-                    reasonCode = answer.value.reasonCode,
-                    amountMinorUnits = answer.value.amountMinorUnits,
-                    currencyCode = answer.value.currencyCode,
-                    status = DisputeStatus.OPEN,
-                    scheme = answer.scheme,
-                    schemeStatus = answer.value.status,
-                    respondByDate = answer.value.respondByDate,
-                    evidenceReference = null,
-                    openedAt = now,
-                    updatedAt = now,
-                )
-                val event = CardDisputeOpened(
-                    disputeId = case.id,
-                    authorizationId = case.authorizationId,
-                    cardId = case.cardId,
-                    networkCaseId = case.networkCaseId,
-                    reasonCode = case.reasonCode,
-                    amountMinorUnits = case.amountMinorUnits,
-                    currencyCode = case.currencyCode,
-                    respondByDate = case.respondByDate,
-                    scheme = case.scheme.name,
-                    occurredAt = now,
-                )
-                val saved = cases.save(
-                    case,
-                    outboxMessage(case.id, CardDisputeOpened.EVENT_TYPE, event),
-                    command.idempotencyKey,
-                )
-                metrics.disputeOpened(answer.scheme.name, null)
-                DisputeOutcome.Accepted(saved)
-            }
+            is SchemeResult.Answered -> recordOpened(authorization, answer, command.idempotencyKey)
 
             is SchemeResult.Unanswered -> {
                 val reason = refusalFor(answer.failure)
@@ -169,6 +138,53 @@ class CardDisputeService(
                 DisputeOutcome.Refused(reason, answer.detail)
             }
         }
+    }
+
+    /**
+     * Writes the case the network just opened, with its event, in one transaction.
+     *
+     * Split out of [open] for length only — the flow reads the same, and the fields all come from
+     * the scheme's answer rather than from the request: the network's case id, its reason code, its
+     * amount and its deadline are what the case IS.
+     */
+    private suspend fun recordOpened(
+        authorization: CardAuthorization,
+        answer: SchemeResult.Answered<SchemeDispute>,
+        idempotencyKey: String,
+    ): DisputeOutcome {
+        val now = Instant.now(clock)
+        val case = CardDisputeCase(
+            // UUIDv7 (ADR-0106) — a durable, indexed primary key.
+            id = Ids.newId(),
+            authorizationId = authorization.id,
+            cardId = authorization.cardId,
+            networkCaseId = answer.value.networkCaseId,
+            reasonCode = answer.value.reasonCode,
+            amountMinorUnits = answer.value.amountMinorUnits,
+            currencyCode = answer.value.currencyCode,
+            status = DisputeStatus.OPEN,
+            scheme = answer.scheme,
+            schemeStatus = answer.value.status,
+            respondByDate = answer.value.respondByDate,
+            evidenceReference = null,
+            openedAt = now,
+            updatedAt = now,
+        )
+        val event = CardDisputeOpened(
+            disputeId = case.id,
+            authorizationId = case.authorizationId,
+            cardId = case.cardId,
+            networkCaseId = case.networkCaseId,
+            reasonCode = case.reasonCode,
+            amountMinorUnits = case.amountMinorUnits,
+            currencyCode = case.currencyCode,
+            respondByDate = case.respondByDate,
+            scheme = case.scheme.name,
+            occurredAt = now,
+        )
+        val saved = cases.save(case, outboxMessage(case.id, CardDisputeOpened.EVENT_TYPE, event), idempotencyKey)
+        metrics.disputeOpened(answer.scheme.name, null)
+        return DisputeOutcome.Accepted(saved)
     }
 
     override suspend fun submitEvidence(command: SubmitEvidenceCommand): DisputeOutcome {
@@ -300,8 +316,7 @@ class CardDisputeService(
         return null
     }
 
-    private fun refuse(reason: DisputeRefusal, detail: String?): DisputeOutcome =
-        DisputeOutcome.Refused(reason, detail)
+    private fun refuse(reason: DisputeRefusal, detail: String?): DisputeOutcome = DisputeOutcome.Refused(reason, detail)
 
     /**
      * A refusal on the OPEN path, counted before it is returned.
