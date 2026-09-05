@@ -590,15 +590,18 @@ change_requirements:
     require:
       - "a role-only write rule is named operator-<domain>-write, or pins its caller with input.principal.id"
     gate: role-only-write-rule-naming
-    enforced: advisory
-    target_enforce_date: "2026-10-31"   # ADR-0144
-    blocked_on: "8 role-only WRITE rules do not follow the naming convention and are baselined in
-      the script, so nothing will ever propose adding them to shared_m2m_write_prohibition.reasons.
-      The count was 18 in the first revision; re-deriving it empirically (rather than by hand) found
-      10 of those were not reachable by the shared identity at all — they bar service-accounts
-      outright, gate on a role that account does not hold, or are reads. Graduating needs each of
-      the remaining 8 renamed and its real callers confirmed; AUTHZ_ENFORCE is true on most of these
-      services, so registering one without that is a money-path outage, not a test failure."
+    # GRADUATED with a baseline, caught by the mirror direction of check-advisory-gate-registration
+    # (#7941): the gate has run `mode: enforced` while this rule still read advisory with a stale
+    # target date — the permanent-advisory defect ADR-0144 exists to prevent, with a fleet-wide
+    # graduation-check outage armed on the date (#7897).
+    enforced: enforce
+    enforced_since: "2026-09-05"
+    # The enforcement carries a baseline: 8 role-only WRITE rules predate the naming convention and
+    # are baselined in the script (the count was 18 in the first revision; re-deriving empirically
+    # found 10 unreachable by the shared identity — they bar service-accounts outright, gate on a
+    # role it does not hold, or are reads). NEW violations fail; the 8 shrink as each is renamed and
+    # its real callers confirmed — AUTHZ_ENFORCE is true on most of these services, so renaming one
+    # without that confirmation is a money-path outage, not a test failure.
     ci_producer: ".github/scripts/check-operator-write-naming.py"
   new_service_with_outbox:
     # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
