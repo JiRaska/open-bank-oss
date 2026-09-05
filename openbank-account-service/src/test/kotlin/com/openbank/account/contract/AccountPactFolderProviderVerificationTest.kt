@@ -277,4 +277,17 @@ class AccountPactFolderProviderVerificationTest {
         )
         Unit
     }
+
+    /**
+     * The negative state: deliberately seeds NOTHING.
+     *
+     * The vop pact asks for an IBAN this provider does not know, and the point of that interaction
+     * is that the route answers 404 rather than a 200 carrying nulls — a distinction VoP's caller
+     * cannot make afterwards, because "we hold no name for this IBAN" is itself a valid answer. A
+     * handler that seeded anything would destroy the case it exists to pin.
+     */
+    @State("no account exists for the unknown IBAN")
+    fun noAccountForUnknownIban() {
+        // Intentionally empty.
+    }
 }

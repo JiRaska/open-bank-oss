@@ -4,24 +4,6 @@
   },
   "interactions": [
     {
-      "description": "GET the party whose name VoP compares against, with no caller identity",
-      "providerStates": [
-        {
-          "name": "a party exists with both a legal name and a trading name"
-        }
-      ],
-      "request": {
-        "headers": {
-          "Accept": "application/json"
-        },
-        "method": "GET",
-        "path": "/api/v1/parties/b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9"
-      },
-      "response": {
-        "status": 401
-      }
-    },
-    {
       "description": "GET the party whose name VoP compares the payer-supplied name against",
       "providerStates": [
         {
@@ -64,6 +46,24 @@
           }
         },
         "status": 200
+      }
+    },
+    {
+      "description": "GET a party id party-service does not know",
+      "providerStates": [
+        {
+          "name": "no party exists with the unknown id"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/parties/0d0d0d0d-1e1e-4f4f-8a8a-2b2b2b2b2b2b"
+      },
+      "response": {
+        "status": 404
       }
     }
   ],

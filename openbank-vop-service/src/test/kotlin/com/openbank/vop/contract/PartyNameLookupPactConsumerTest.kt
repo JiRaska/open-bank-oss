@@ -102,28 +102,40 @@ class PartyNameLookupPactConsumerTest {
         assertThat(summary.tradingName).isNotBlank()
     }
 
+    /**
+     * The negative case, and why it is a **404 rather than a 401** — the same reason as hop 1.
+     *
+     * `PartyPactFolderProviderVerificationTest` is a `@QuarkusTest` whose requests are
+     * authenticated by construction, so a 401 interaction can never be satisfied by the replay: it
+     * answered 200 and the provider verification has been red on `main` since this pact was
+     * committed, unseen because path-scoped CI does not rebuild party-service when only `pacts/`
+     * changes (#8552).
+     *
+     * A 404 is the refusal this hop can assert, and the one VoP's behaviour actually turns on: an
+     * unknown party id must be "we hold no name", not a 200 carrying nulls.
+     */
     @Pact(consumer = CONSUMER, provider = PROVIDER)
-    fun rejectsWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("a party exists with both a legal name and a trading name")
-        .uponReceiving("GET the party whose name VoP compares against, with no caller identity")
-        .path(EXPECTED_PARTY_PATH)
+    fun rejectsUnknownParty(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no party exists with the unknown id")
+        .uponReceiving("GET a party id party-service does not know")
+        .path(UNKNOWN_PARTY_PATH)
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
-        .status(401)
+        .status(404)
         .toPact()
 
     @Test
-    @PactTestFor(pactMethod = "rejectsWithMissingToken")
-    fun `rejects the party lookup with 401 when the caller has no valid identity`(mockServer: MockServer) {
+    @PactTestFor(pactMethod = "rejectsUnknownParty")
+    fun `answers 404 for a party id party-service does not know`(mockServer: MockServer) {
         assertClientPathMatchesContract()
 
         given()
             .baseUri(mockServer.getUrl())
             .accept("application/json")
-            .get(clientDerivedPartyPath())
+            .get(clientDerivedPathFor(UNKNOWN_PARTY_ID))
             .then()
-            .statusCode(401)
+            .statusCode(404)
     }
 
     /**
@@ -153,13 +165,19 @@ class PartyNameLookupPactConsumerTest {
          */
         const val EXPECTED_PARTY_PATH = "/api/v1/parties/$PACT_PARTY_ID"
 
-        fun clientDerivedPartyPath(): String {
+        /** A well-formed UUID no provider state seeds, so the route genuinely answers 404. */
+        const val UNKNOWN_PARTY_ID = "0d0d0d0d-1e1e-4f4f-8a8a-2b2b2b2b2b2b"
+        const val UNKNOWN_PARTY_PATH = "/api/v1/parties/$UNKNOWN_PARTY_ID"
+
+        fun clientDerivedPartyPath(): String = clientDerivedPathFor(PACT_PARTY_ID)
+
+        fun clientDerivedPathFor(partyId: String): String {
             val base = PartyServiceClient::class.java.getAnnotation(Path::class.java).value
             val method = PartyServiceClient::class.java.methods
                 .single { it.name == "getParty" }
                 .getAnnotation(Path::class.java)
                 .value
-            return (base + method).replace("{id}", PACT_PARTY_ID)
+            return (base + method).replace("{id}", partyId)
         }
     }
 }
