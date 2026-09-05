@@ -41,9 +41,10 @@ between them. Measured on `main` on 2026-09-05:
   half is unbuilt. Next-best-action (ADR-0201 D5) has no code.
 - **Product catalog** (ADR-0257, ADR-0259): the specification / offering / revision kernel carries
   `EligibilityRule`s in the pack schemas, and the legacy `EligibilitySegment` is six coarse values
-  (`RETAIL`, `STUDENT`, `SENIOR`, `BUSINESS`, `PREMIUM`, `ALL`). `WaiverEvaluator` and
-  `InterestTier` in `openbank-libs-domain` already express conditional fee relief and tiered rates.
-  Nothing produces a per-party variant of a product.
+  (`RETAIL`, `STUDENT`, `SENIOR`, `BUSINESS`, `PREMIUM`, `ALL`). Conditional relief and tiering
+  already have homes: `WaiverEvaluator` in `openbank-libs-domain`, and `InterestTier`/`CardTier` as
+  product-catalog domain types (`Product.kt`) that `openbank-interest-service` reads through
+  `CatalogInterestProfile`. Nothing produces a per-party variant of a product.
 
 Loyalty, catalog, campaigns and Customer 360 are four islands that tell each other nothing about
 the customer. The bank knows how a customer behaves and cannot act on it, and the only reward it can
@@ -92,8 +93,9 @@ credit utilisation, overdraft, or any product whose eligibility ADR-0142 decides
 A `BenefitCatalog` entry names a benefit, its Lístek price, its validity window and the engine that
 delivers it. The first engines are the ones that already exist: a fee waiver via a new
 `WaiveCondition` in `openbank-libs-domain` evaluated by `openbank-billing-service` (ADR-0143); a
-temporary interest bonus tier via `InterestTier` in `openbank-interest-service`; a card tier unlock
-via `CardTier` (ADR-0194); one FX conversion at the reference rate with no margin
+temporary interest bonus expressed as an `InterestTier` on the catalog product and read by
+`openbank-interest-service` through `CatalogInterestProfile`; a `CardTier` unlock (ADR-0194); one FX
+conversion at the reference rate with no margin
 (`openbank-fx-service`); and early access to a newly published catalog offering. Redemption is a
 reservation then a commit or release, keyed by an idempotency token, the same semantics ADR-0266
 gives promo codes. A benefit is a catalogue entry reviewed in a pull request — never free text, never
