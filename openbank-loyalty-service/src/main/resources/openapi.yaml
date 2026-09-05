@@ -1,0 +1,192 @@
+openapi: 3.0.3
+info:
+  title: OpenBank Loyalty Service
+  description: >-
+    The Lístek ledger (ADR-0282). Lístky are a closed-loop unit of bank obligation: earned for
+    financial-health achievements, redeemable only against the reviewed benefit catalogue, never
+    transferable between parties, never priced in any currency and never convertible to money.
+  version: 1.0.0
+paths:
+  /api/v1/loyalty/parties/{partyId}:
+    get:
+      summary: A party's Lístek balance, entitlement to date and full ledger history
+      description: >-
+        The same source the app's tree and Customer 360's Lípa panel render, so the customer and
+        the operator cannot be shown different facts (ADR-0282 D8).
+      parameters:
+        - {name: partyId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Summary
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LeafSummary"}
+        "401": {description: Unauthenticated}
+        "403": {description: Not permitted for this party}
+  /api/v1/loyalty/benefits:
+    get:
+      summary: The reviewed benefit catalogue
+      description: >-
+        Prices are in Lístky. There is deliberately no currency or monetary amount in this
+        response — a benefit has no fiat price (ADR-0282 D1).
+      responses:
+        "200":
+          description: Catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Benefit"}
+  /api/v1/loyalty/parties/{partyId}/earn:
+    post:
+      summary: Record an achievement and mint Lístky for it
+      description: >-
+        Three outcomes, and CAPPED is neither an error nor an award. It means the annual cap
+        (ADR-0220 D3 rule 4) refused this award; nothing was written. A caller must be able to
+        tell it from a grant, so it never shares a status code meaning with one.
+      parameters:
+        - {name: partyId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EarnRequest"}
+      responses:
+        "201":
+          description: Awarded — a new lot exists
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EarnResult"}
+        "200":
+          description: >-
+            ALREADY_AWARDED (a redelivered event, nothing written) or CAPPED (the annual cap
+            refused the award, nothing written)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EarnResult"}
+        "400": {description: Unknown earn source}
+  /api/v1/loyalty/parties/{partyId}/redeem:
+    post:
+      summary: Burn Lístky for a catalogue benefit
+      description: >-
+        GRANTED means the benefit is owed and published for its delivering engine. It does NOT
+        mean the engine has applied it — no field in this response asserts delivery.
+      parameters:
+        - {name: partyId, in: path, required: true, schema: {type: string, format: uuid}}
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: A retry with the same key resolves to the grant it already made.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RedeemRequest"}
+      responses:
+        "201":
+          description: Granted — Lístky burned, benefit owed
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GrantResult"}
+        "200":
+          description: ALREADY_GRANTED — a previous request with this key already did this
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GrantResult"}
+        "400": {description: Unknown benefit, or a missing or blank Idempotency-Key}
+        "409":
+          description: INSUFFICIENT_LEAVES — nothing was burned
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/InsufficientLeaves"}
+components:
+  schemas:
+    LeafSummary:
+      type: object
+      properties:
+        partyId: {type: string, format: uuid}
+        balance: {type: integer, description: Unspent, unexpired Lístky}
+        earnedThisYear: {type: integer}
+        earnedTotal: {type: integer}
+        nextExpiry:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the oldest still-spendable lot expires; null when nothing is spendable.
+        history:
+          type: array
+          items: {$ref: "#/components/schemas/LedgerEntry"}
+    LedgerEntry:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        type: {type: string, enum: [EARN, BURN, EXPIRE, REVERSE]}
+        leaves: {type: integer}
+        remainingLeaves: {type: integer}
+        earnSourceId: {type: string, nullable: true}
+        benefitId: {type: string, nullable: true}
+        ruleVersion: {type: string}
+        occurredAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time, nullable: true}
+    Benefit:
+      type: object
+      properties:
+        id: {type: string}
+        engine: {type: string, enum: [FEE_WAIVER, INTEREST_BONUS, FX_REFERENCE_RATE]}
+        priceLeaves: {type: integer}
+        validityDays: {type: integer}
+        description: {type: string}
+    EarnRequest:
+      type: object
+      required: [earnSourceId, correlationEventId]
+      properties:
+        earnSourceId:
+          type: string
+          enum:
+            - SAVINGS_RATE_SUSTAINED
+            - EMERGENCY_BUFFER_REACHED
+            - ON_TIME_REPAYMENT
+            - SAVINGS_GOAL_REACHED
+            - CURRENCY_DIVERSIFICATION
+            - EDUCATIONAL_CONTENT_COMPLETION
+            - LOGIN_STREAK
+            - TENURE_ANNIVERSARY
+            - FEEDBACK_GIVEN
+            - QUALIFIED_REFERRAL
+        correlationEventId:
+          type: string
+          format: uuid
+          description: >-
+            The durable domain event that evidences the achievement. It is the idempotency key of
+            the earn — the same event redelivered replays instead of awarding again.
+    EarnResult:
+      type: object
+      properties:
+        outcome: {type: string, enum: [AWARDED, ALREADY_AWARDED, CAPPED]}
+        entry: {$ref: "#/components/schemas/LedgerEntry"}
+        requestedLeaves: {type: integer, description: CAPPED only}
+        remainingLeaves: {type: integer, description: CAPPED only — the annual headroom that was left}
+    RedeemRequest:
+      type: object
+      required: [benefitId]
+      properties:
+        benefitId: {type: string}
+    GrantResult:
+      type: object
+      properties:
+        outcome: {type: string, enum: [GRANTED, ALREADY_GRANTED]}
+        grantId: {type: string, format: uuid}
+        benefitId: {type: string}
+        grantStatus:
+          type: string
+          enum: [RESERVED, GRANTED, RELEASED, REVERSED]
+          description: >-
+            GRANTED means owed and published, never applied. The delivering engine reports
+            application; nothing here is a receipt.
+    InsufficientLeaves:
+      type: object
+      properties:
+        outcome: {type: string, enum: [INSUFFICIENT_LEAVES]}
+        requiredLeaves: {type: integer}
+        availableLeaves: {type: integer}
