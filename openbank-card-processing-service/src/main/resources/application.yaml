@@ -221,6 +221,13 @@ openbank:
       # failure rather than falling back here, so an unconfigured integration can never look like a
       # working one.
       bin-lookup: ${CARD_SCHEME_BIN_LOOKUP:simulator}
+      # Tokenisation and disputes take the same three names, and the vendor ones deliberately have
+      # NO adapter behind them: VTS/MDES and VROL/Mastercom are contract-only, with no free sandbox
+      # to build or verify against. Selecting one answers NOT_BOUND naming the contract, which puts
+      # the gap at the call site rather than only in a document — an adapter written from
+      # documentation nobody here can open would be unexecutable code that is green in every test.
+      tokenisation: ${CARD_SCHEME_TOKENISATION:simulator}
+      dispute: ${CARD_SCHEME_DISPUTE:simulator}
       visa:
         # Absent from this file on purpose, like every other credential: supplied as an environment
         # variable from OpenBao. An empty value means this environment has no Visa credential, and
