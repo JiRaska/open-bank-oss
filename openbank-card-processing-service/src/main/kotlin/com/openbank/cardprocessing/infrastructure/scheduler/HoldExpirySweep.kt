@@ -64,6 +64,13 @@ class HoldExpirySweep(
         identity = "card-processing-hold-expiry",
     )
     suspend fun sweep() {
+        // best-effort: this is a periodic sweep, not an event handler, and it holds no cursor. The
+        // query selects holds by STATE — approved or partially cleared, past their expiry instant —
+        // so a tick that fails re-selects exactly the same rows fifteen minutes later and loses
+        // nothing. Letting the exception escape would kill the schedule outright, which is the one
+        // outcome that does lose the work.
+        // observed-by: the liveness gauge registered above stops being refreshed on this path, so a
+        // sweep that keeps failing surfaces as WorkflowLivenessStale rather than as silence.
         val released = runCatching { useCase.releaseExpiredHolds(batchSize) }
             .onSuccess { liveness?.recordSuccess() }
             .onFailure { log.error("card hold expiry sweep failed", it) }
