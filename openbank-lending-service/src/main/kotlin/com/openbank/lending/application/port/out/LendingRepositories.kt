@@ -6,6 +6,7 @@ package com.openbank.lending.application.port.out
 
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
+import com.openbank.lending.domain.model.DecisionOutcomeSummary
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
@@ -33,6 +34,12 @@ interface LoanApplicationRepository {
      * pages to add up rows would be the same wrong answer, slower.
      */
     fun summariseByState(): Uni<List<ApplicationStateSummary>>
+
+    /** Applications the ADR-0213 engine has evaluated (`decidedEngineAt` set), newest evaluation first. */
+    fun findEvaluated(limit: Int): Uni<List<LoanApplication>>
+
+    /** Book-wide engine outcome × price-band totals, grouped in the database (credit-risk console). */
+    fun summariseDecisions(): Uni<List<DecisionOutcomeSummary>>
 
     /**
      * Blind write of the decision fields. Correct only where the caller is not deciding anything
@@ -71,6 +78,9 @@ interface LoanRepository {
     /** Per-status totals across the whole loan book (issue #3294). See the note on
      *  [LoanApplicationRepository.summariseByState]. */
     fun summariseByState(): Uni<List<LoanStateSummary>>
+
+    /** Every loan regardless of status, newest disbursement first. Capped by the caller. */
+    fun findRecent(limit: Int): Uni<List<Loan>>
 }
 
 interface InstallmentRepository {
@@ -113,4 +123,7 @@ interface ProvisioningRepository {
     fun findByLoanAndPeriod(loanId: LoanId, period: String): Uni<LoanProvisioningRecord?>
 
     fun save(record: LoanProvisioningRecord): Uni<LoanProvisioningRecord>
+
+    /** The latest persisted record per loan — one row per loan that has ever been assessed. */
+    fun findLatestPerLoan(): Uni<List<LoanProvisioningRecord>>
 }

@@ -11,6 +11,7 @@ import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
+import com.openbank.lending.domain.model.DecisionOutcomeSummary
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
@@ -79,6 +80,29 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             Array<Any?>::class.java,
         ).resultList
     }.map { rows -> foldApplicationSummaries(rows) }
+
+    @WithSession
+    override fun findEvaluated(limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->
+        s.createQuery(
+            "FROM LoanApplicationEntity WHERE decidedEngineAt IS NOT NULL ORDER BY decidedEngineAt DESC, id ASC",
+            LoanApplicationEntity::class.java,
+        ).setMaxResults(limit).resultList
+    }.map { it.map(mapper::toDomain) }
+
+    @WithSession
+    override fun summariseDecisions(): Uni<List<DecisionOutcomeSummary>> = sf.withSession { s ->
+        s.createQuery(
+            """
+            SELECT a.decisionOutcome, a.decisionPriceBand, count(a)
+            FROM LoanApplicationEntity a
+            WHERE a.decisionOutcome IS NOT NULL
+            GROUP BY a.decisionOutcome, a.decisionPriceBand
+            """.trimIndent(),
+            Array<Any?>::class.java,
+        ).resultList
+    }.map { rows ->
+        rows.map { r -> DecisionOutcomeSummary(r[0] as String, r[1] as? String, (r[2] as Number).toLong()) }
+    }
 
     private fun mapStatusFilter(status: String): OriginationState =
         OriginationState.entries.firstOrNull { it.name == status }
@@ -201,6 +225,12 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
             Array<Any?>::class.java,
         ).resultList
     }.map { rows -> foldLoanSummaries(rows) }
+
+    @WithSession override fun findRecent(limit: Int): Uni<List<Loan>> = sf.withSession { s ->
+        s.createQuery("FROM LoanEntity ORDER BY disbursedAt DESC, id ASC", LoanEntity::class.java)
+            .setMaxResults(limit)
+            .resultList
+    }.map { it.map(mapper::toDomain) }
 
     @WithSession override fun findActive(limit: Int): Uni<List<Loan>> = sf.withSession { s ->
         s.createQuery(
@@ -330,6 +360,17 @@ class ProvisioningRepositoryImpl @Inject constructor(
             .setMaxResults(1)
             .resultList
     }.map { it.firstOrNull()?.let(mapper::toDomain) }
+
+    @WithSession override fun findLatestPerLoan(): Uni<List<LoanProvisioningRecord>> = sf.withSession { s ->
+        s.createQuery(
+            """
+                FROM LoanProvisioningEntity p
+                WHERE p.period = (SELECT max(q.period) FROM LoanProvisioningEntity q WHERE q.loanId = p.loanId)
+                ORDER BY p.loanId ASC
+            """.trimIndent(),
+            LoanProvisioningEntity::class.java,
+        ).resultList
+    }.map { it.map(mapper::toDomain) }
 
     @WithSession override fun findByLoanAndPeriod(loanId: LoanId, period: String): Uni<LoanProvisioningRecord?> =
         sf.withSession { s ->
