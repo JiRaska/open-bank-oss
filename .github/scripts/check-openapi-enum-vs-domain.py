@@ -168,16 +168,6 @@ BASELINE: dict[str, str] = {
     "openbank-pid-service:INDIVIDUAL,LEGAL_ENTITY,SOLE_TRADER":
         "#5962 — CreatePartyRequest.partyType: spec-only INDIVIDUAL, inside a request schema "
         "whose properties do not match the DTO at all; needs a schema fix first.",
-    # This one is a MIS-PAIRING, kept baselined deliberately. The values are
-    # `UpdateKycRequest.kycStatus`, and pid's `UpdateKycRequest` has no `kycStatus` property at
-    # all — it is (kycLevel: KycLevel, amlRiskScore: AmlRiskScore, pepFlag, sanctionsFlag). With
-    # no real counterpart to pair with, the matcher settled on the openid4vp
-    # `PresentationExchangeStore.Status { PENDING, COMPLETED, EXPIRED }` on the strength of two
-    # coincidental values. The defect is a whole fictional request schema, not an enum drift, so
-    # reconciling the enum alone would polish a document that still describes nothing.
-    "openbank-pid-service:EXPIRED,PENDING,REJECTED,VERIFIED":
-        "#5962 — UpdateKycRequest.kycStatus: the property does not exist; needs a schema fix, "
-        "not an enum fix. The `Status` pairing is coincidental.",
     "openbank-sepa-payment:COMPLETED,PROCESSING,RECALLED,REJECTED":
         "#5962 — SepaPaymentStatus: spec-only RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
     "openbank-sepa-payment:COMPLETED,PENDING,PROCESSING,RECALLED,REJECTED":
