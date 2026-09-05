@@ -139,6 +139,16 @@ class StandingOrderTransferPactConsumerTest {
     }
 
     /**
+     * The negative half of this contract is pinned PROVIDER-side (ADR-0279 #3):
+     * `TransactionPactFolderProviderVerificationTest` asserts that a caller carrying only
+     * ROLE_VIEWER is refused with 403 before `POST /api/v1/transactions` reaches the handler.
+     * A recorded 401/403 interaction cannot live in THIS pact: the provider replay runs under
+     * `@TestSecurity`, whose test identity authenticates every replayed request as
+     * pact-verifier/ROLE_OPERATOR, so a refusal expectation could never verify — it would be a
+     * contract asserting a shape the replay structurally cannot produce.
+     */
+
+    /**
      * The path the real client would call, recomputed from [TransactionServiceClient]'s own
      * annotations, must equal the literal this pact promises transaction-service.
      */

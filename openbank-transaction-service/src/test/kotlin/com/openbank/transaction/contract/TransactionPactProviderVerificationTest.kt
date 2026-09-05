@@ -47,6 +47,10 @@ import java.util.UUID
  * Boots Quarkus so the HTTP target hits the live `POST /api/v1/transactions`; `@TestSecurity`
  * matches the endpoint's `@RolesAllowed(Roles.OPERATOR)`. Message interactions need no endpoint —
  * the [PactVerifyProvider] method returns the wire JSON the provider would emit.
+ *
+ * The negative contract (an authenticated caller without ROLE_OPERATOR must answer 403) is pinned
+ * in the git-pact twin `TransactionPactFolderProviderVerificationTest`, which runs on every PR;
+ * this class is `pactbroker.url`-gated and would skip exactly where that pin is needed (ADR-0279 #3).
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
