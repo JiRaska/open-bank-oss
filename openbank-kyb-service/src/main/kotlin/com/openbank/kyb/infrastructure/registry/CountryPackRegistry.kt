@@ -58,7 +58,7 @@ class CountryPackRegistry(private val mapper: ObjectMapper) {
         country = n.path("country").asText().uppercase(),
         version = n.path("version").asInt(1),
         effectiveFrom = LocalDate.parse(n.path("effectiveFrom").asText()),
-        displayName = n.path("displayName").fields().asSequence().associate { (k, v) -> k to v.asText() },
+        displayName = n.path("displayName").properties().associate { (k, v) -> k to v.asText() },
         schemes = n.path("schemes").map { IdentifierScheme.valueOf(it.asText()) },
         registry = n.path("registry").let {
             RegistryDescriptor(
@@ -80,16 +80,14 @@ class CountryPackRegistry(private val mapper: ObjectMapper) {
             )
         },
         representationRuleParser = n.path("representationRuleParser").takeIf { it.isTextual }?.asText(),
-        legalForms = n.path("legalForms").fields().asSequence().associate { (k, v) ->
-            k to
-                LegalFormClass.valueOf(v.asText())
+        legalForms = n.path("legalForms").properties().associate { (k, v) ->
+            k to LegalFormClass.valueOf(v.asText())
         },
-        legalFormLabels = n.path("legalFormLabels").fields().asSequence().associate { (k, v) ->
-            k to v.fields().asSequence().associate { (lang, label) -> lang to label.asText() }
+        legalFormLabels = n.path("legalFormLabels").properties().associate { (k, v) ->
+            k to v.properties().associate { (lang, label) -> lang to label.asText() }
         },
-        requiredEvidence = n.path("requiredEvidence").fields().asSequence().associate { (k, v) ->
-            LegalFormClass.valueOf(k) to
-                v.map { it.asText() }
+        requiredEvidence = n.path("requiredEvidence").properties().associate { (k, v) ->
+            LegalFormClass.valueOf(k) to v.map { it.asText() }
         },
         amlLegalBasis = n.path("amlLegalBasis").takeIf { it.isTextual }?.asText(),
     )
