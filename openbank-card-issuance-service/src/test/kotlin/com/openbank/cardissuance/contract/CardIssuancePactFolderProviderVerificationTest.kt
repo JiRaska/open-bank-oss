@@ -149,5 +149,4 @@ class CardIssuancePactFolderProviderVerificationTest {
     fun stateNoSuchCard() {
         // Nothing to seed. See the KDoc.
     }
-
 }

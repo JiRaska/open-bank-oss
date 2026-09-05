@@ -186,9 +186,7 @@ class CardIssuanceAuthorizationPactConsumerTest {
      */
     @Test
     @PactTestFor(pactMethod = "cardNotFoundPact")
-    fun `an unknown card id is refused with 404, the branch the adapter maps to null`(
-        mockServer: MockServer,
-    ) {
+    fun `an unknown card id is refused with 404, the branch the adapter maps to null`(mockServer: MockServer) {
         given()
             .baseUri(mockServer.getUrl())
             .accept("application/json")
