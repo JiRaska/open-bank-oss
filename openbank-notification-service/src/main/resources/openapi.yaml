@@ -536,8 +536,8 @@ components:
         body:
           type: string
           description: |
-            The rendered message body. For secret-bearing templates (OTP_CODE,
-            PASSWORD_RESET) this is a redaction placeholder, never the delivered
+            The rendered message body. For secret-bearing templates (OTP_CODE)
+            this is a redaction placeholder, never the delivered
             secret — the secret is sent to the customer but never stored.
         status:
           $ref: '#/components/schemas/NotificationStatus'
