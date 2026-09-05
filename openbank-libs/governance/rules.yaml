@@ -3167,6 +3167,7 @@ shared_m2m_matrix_write_grants:
     - interest.trigger
     - kyb.case.reject
     - kyb.case.review.resolve
+    - kyb.lookup
     - ledger.create
     - ledger.replay
     - ledger.reverse

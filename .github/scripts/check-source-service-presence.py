@@ -101,7 +101,6 @@ KNOWN_GAPS: dict[str, str] = {
     "openbank-campaign-service": "#5256 - producer of openbank.campaign.banner.placements.",
     "openbank-engagement-service": "#5256 - producer of openbank.engagement.events.",
     "openbank-incentive-service": "#5256 - producer of openbank.incentive.events.",
-    "openbank-kyb-service": "ADR-0284 - producer of openbank.kyb.events; sourceService is inside every envelope (KybEvents.lifecycle).",
     "openbank-notification-service": "#5256 - producer of openbank.notification.outcomes.v1.",
     "openbank-pid-service": "#5256 - producer of openbank.pid.events.",
     "openbank-tpp-registry-service": "#5256 - producer of openbank.tpp.registry.event.",

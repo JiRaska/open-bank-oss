@@ -8,7 +8,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: [openbank-app]
 tags: [onboarding, kyc, authz, mobile-app]
-summary: "Legal entities onboard from a country-pack identifier verified against a public register; representation mandates link humans to entities, the edge switches profiles via X-Acting-For (fail-closed), Temporal owns the case timers, and the owner graph feeds loyalty, 360, catalog and campaigns."
+summary: "Legal entities onboard from a country-pack identifier verified against a public register; representation mandates link humans to entities, the edge switches profiles fail-closed, and the owner graph feeds loyalty, 360 and campaigns."
 ---
 
 # ADR-0284 — Legal-entity onboarding, representation mandates and profile switching (KYB)
