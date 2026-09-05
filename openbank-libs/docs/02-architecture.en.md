@@ -55,7 +55,7 @@ graph TB
     subgraph security[security/]
       PiiMask
       Roles
-      BootstrapVerifier
+      BV["BootstrapVerifier — not shipped"]
       BearerHeaders[BearerTokenClientHeadersFactory]
     end
     subgraph audit[audit/]
@@ -212,7 +212,7 @@ Audit-grade security primitives — see [ADR 0017](../../docs/adr/0017-secrets-v
 | `SecurityContextExtensions.kt` | Kotlin extensions: `securityContext.currentUserId`, `actorName`, `actorType`, `requireAnyRole(...)` |
 | `ServiceTokenProvider.kt` | Port for S2S Bearer tokens; recommended prod impl: `quarkus-oidc-client-reactive-filter` |
 | `BearerTokenClientHeadersFactory.kt` | `@RegisterClientHeaders(…)` — automatic Bearer + correlation injection into REST clients |
-| `BootstrapVerifier.kt` | Startup `@Observes StartupEvent` — fail-fast when config in the prod profile contains dev placeholders |
+| `BootstrapVerifier.kt` — ⬜ **the file does not exist** | **Nothing.** The startup fail-fast guard against dev placeholders that ADR-0017 prescribes was never written (`git grep BootstrapVerifier -- '*.kt'` returns 0), as that ADR's own delivery note records. Secrets are held today by ESO/OpenBao `secretKeyRef` injection (ADR-0007), with no boot-time check at all (#8426) |
 
 ### `util/`
 | File | Purpose |
@@ -247,10 +247,10 @@ sequenceDiagram
   Libs->>SvcCfg: needs IdempotencyStore?
   SvcCfg-->>ArC: @Produces fun idempotencyStore(...): IdempotencyStore
   ArC-->>Quarkus: container ready
-  Quarkus->>Libs: BootstrapVerifier.onStart(StartupEvent)
-  alt prod profile & dev placeholders found
-    Libs-->>Quarkus: throw IllegalStateException, fail-fast
-  else clean config
-    Libs-->>Quarkus: log "0 placeholders found"
-  end
+  Note over Quarkus,Libs: No BootstrapVerifier step happens — the class does not exist
 ```
+
+This diagram used to show `BootstrapVerifier.onStart(StartupEvent)` as the last startup step. That step
+never happened: there is no `BootstrapVerifier` in `openbank-libs` and there never was. Startup ends when
+the container is ready — nothing in libs checks whether the prod-profile config contains dev placeholders.
+That property is held today by ESO/OpenBao `secretKeyRef` injection outside this library (ADR-0007, #8426).

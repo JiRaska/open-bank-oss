@@ -306,12 +306,23 @@ class AuditConsumer {
      * second silent path, and a silent path is exactly how the gap below survived unnoticed.
      *
      * Two ways to have no event time, both previously invisible:
-     *  - the key is absent. 7 of the 21 consumed topics are in this state today (clearing,
+     *  - the key is absent. The old code substituted `Instant.now(clock)` and the row then
+     *    asserted, indistinguishably from a real one, that the operation happened when the consumer
+     *    got round to it. Under consumer lag or a replay that is arbitrarily wrong, and it is the
+     *    GDPR Art. 30 "when" dimension and DORA Art. 17 evidence.
+     *
+     *    **This paragraph used to name the topics in that state, and the list went stale within
+     *    hours of being written** (#8352). It said "7 of the 21 consumed topics — clearing,
      *    dispute, statement, sanctions, six of lending's payloads, sepa-payment's Temporal path,
-     *    and document-service which names it `at`). The old code substituted `Instant.now(clock)`
-     *    and the row then asserted, indistinguishably from a real one, that the operation happened
-     *    when the consumer got round to it. Under consumer lag or a replay that is arbitrarily
-     *    wrong, and it is the GDPR Art. 30 "when" dimension and DORA Art. 17 evidence.
+     *    and document-service which names it `at`", and by the time anyone read it the #3914/#3926
+     *    sweep had fixed every one of those except a `dispute.opened` builder that had landed three
+     *    hours earlier and so was invisible to that sweep's branch. Meanwhile the subscription grew
+     *    from 21 topics to 27 and the list could not know. A comment naming other services' current
+     *    payload shapes is a claim with a shelf life and nothing re-checks it — the same trap this
+     *    repo already records for comments asserting current CONFIGURATION. So this one now names
+     *    the MECHANISM only. What the state is today is answered by things that cannot go stale:
+     *    `openbank.audit.event.time.missing{source_service}` as a series, `occurred_at_source` per
+     *    row, and the per-topic disposition in `openbank-audit-service/CLAUDE.md`.
      *  - the key is present but unparseable. That threw out of the constructor into consume()'s
      *    catch, so the WHOLE audit entry was dropped — one malformed field lost the record of the
      *    operation entirely. It is now an INGEST-sourced row: a degraded entry beats no entry.

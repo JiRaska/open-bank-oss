@@ -117,11 +117,8 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     outgoing:
-      balance-events-out:
-        connector: smallrye-kafka
-        client.id: balance-service-${quarkus.uuid}
-        topic: openbank.balance.events
-        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # #8510: the direct `balance-events-out` channel is gone with its emitter — two publishers
+      # on one topic would race, and only the outbox one can be atomic with the state change.
       balance-outbox-out:
         connector: smallrye-kafka
         client.id: balance-outbox-service-${quarkus.uuid}
