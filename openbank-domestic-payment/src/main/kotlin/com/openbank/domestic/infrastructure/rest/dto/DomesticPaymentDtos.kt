@@ -40,6 +40,7 @@ data class CreateDomesticPaymentRequest(
     fun toCommand(
         idempotencyKey: String,
         actorId: UUID? = null,
+        actorScope: String? = null,
         synthetic: Boolean = false,
     ): CreateDomesticPaymentCommand = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
@@ -61,6 +62,7 @@ data class CreateDomesticPaymentRequest(
         statementLabel = statementLabel,
         endToEndId = endToEndId,
         actorId = actorId,
+        actorScope = actorScope,
         synthetic = synthetic,
     )
 }

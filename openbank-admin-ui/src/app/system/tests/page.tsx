@@ -12,7 +12,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { aggregateEvidenceState } from '@/lib/test-intelligence-state'
 import { filterTestCases, type TestTriageFilter } from '@/lib/test-intelligence-triage'
 import type {
-  ComponentTestPosture, EvidenceKind, EvidenceState, TestIntelligenceReport,
+  ComponentTestPosture, EvidenceKind, EvidenceState, TestCaseHistory, TestIntelligenceReport,
 } from '@/lib/types/test-intelligence'
 import {
   TestIntelligenceFlow, testIntelligenceCollectionUnavailable,
@@ -38,6 +38,11 @@ function evidenceTone(state: EvidenceState): Tone {
 
 function StateBadge({ state }: { state: EvidenceState }) {
   return <SharedStatusBadge status={state} tone={evidenceTone(state)} label={state} withDot />
+}
+
+function TestCaseStateBadge({ state }: { state: TestCaseHistory['state'] }) {
+  if (state === 'flaky') return <SharedStatusBadge status="flaky" tone="warning" label="flaky" withDot />
+  return <StateBadge state={state === 'stable' ? 'passed' : state === 'failing' ? 'failed' : 'skipped'} />
 }
 
 function Stat({ label, value, tone }: { label: string; value: number | string; tone?: Tone }) {
@@ -264,7 +269,7 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
       <Stat label="Failed runtime" value={`${Math.round(wasted / 1000)} s`} tone={wasted ? 'warning' : undefined} />
     </div>
     <div style={{ padding: 12, border: '1px solid color-mix(in srgb, #16a34a 35%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12 }}>
-      {t('Test je označen jako flaky až po úspěšném i neúspěšném pozorování stejného commitu. Vlastnictví vychází z CODEOWNERS. Triage nikdy nemění deterministický verdikt CI ani nepřeskakuje peněžní kontroly.', 'A test is marked flaky only after pass and fail observations on the same commit. Ownership comes from CODEOWNERS. Triage never changes the deterministic CI verdict or skips money-path controls.')}
+      {t('Test je označen jako flaky po neúspěšném Playwright pokusu následovaném úspěšným retry ve stejném běhu nebo po úspěšném i neúspěšném pozorování stejného commitu. Vlastnictví vychází z CODEOWNERS. Triage nikdy nemění deterministický verdikt CI ani nepřeskakuje peněžní kontroly.', 'A test is marked flaky after a failed Playwright attempt followed by a passing retry in the same run, or after pass and fail observations on the same commit. Ownership comes from CODEOWNERS. Triage never changes the deterministic CI verdict or skips money-path controls.')}
     </div>
     {impact && <div aria-label={t('Stav mapování test impactu', 'Test impact mapping state')} style={{ padding: 12, border: '1px solid color-mix(in srgb, #64748b 42%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12, background: 'var(--surface-2)' }}>
       <strong>{t('Test impact selection: shadow only', 'Test impact selection: shadow only')}</strong><span style={{ marginLeft: 8 }}><StateBadge state="unknown" /></span><div style={{ marginTop: 5 }}>{impact.detail}</div><div style={{ marginTop: 5, color: 'var(--text-tertiary)' }}>{t('Cesta k testu není mapa závislostí do produkce. AI ji nesmí domýšlet ani vybírat povinné gate.', 'A test source path is not a production dependency map. AI must not infer it or select a required gate.')}</div>
@@ -282,8 +287,8 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
     <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
       <thead><tr>{['State', 'Test definition', 'Test source', 'Component', 'Kind', 'Owner', 'Runs', 'Failure rate', 'Avg duration', 'Failed runtime', 'Fingerprint'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
       <tbody>{visibleTests.map(item => <tr key={item.fingerprint}>
-        <td style={tdStyle}><StateBadge state={item.state === 'stable' ? 'passed' : item.state === 'failing' ? 'failed' : item.state === 'skipped' ? 'skipped' : 'stale'} /></td>
-        <td style={{ ...tdStyle, minWidth: 230 }}><strong>{item.name}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div>{item.sameCommitTransitions > 0 && <div style={{ color: '#d97706', fontSize: 10, marginTop: 3 }}>{item.sameCommitTransitions} same-commit pass/fail transition(s)</div>}</td>
+        <td style={tdStyle}><TestCaseStateBadge state={item.state} /></td>
+        <td style={{ ...tdStyle, minWidth: 230 }}><strong>{item.name}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div>{item.retryFlaky && item.failedAttemptCount !== undefined && item.failedAttemptDurationMs !== undefined && <div style={{ color: '#d97706', fontSize: 10, marginTop: 3 }}><div>{t(`${item.failedAttemptCount} neúspěšných retry pokusů · ${item.failedAttemptDurationMs} ms`, `${item.failedAttemptCount} failed retry attempt(s) · ${item.failedAttemptDurationMs} ms`)}</div>{item.retryRun && <a href={item.retryRun.url} target="_blank" rel="noreferrer" style={{ color: '#d97706', fontWeight: 650 }}>{item.retryRun.workflow} · {item.retryRun.id} / {item.retryRun.attempt} · {item.retryRun.commit.slice(0, 7)}</a>}</div>}{item.sameCommitTransitions > 0 && <div style={{ color: '#d97706', fontSize: 10, marginTop: 3 }}>{item.sameCommitTransitions} same-commit pass/fail transition(s)</div>}</td>
         <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10, maxWidth: 260, overflowWrap: 'anywhere' }}>{item.testDefinitionPath ?? 'not reported'}</td>
         <td style={tdStyle}>{item.component}</td><td style={tdStyle}>{item.kind}</td><td style={tdStyle}>{item.owner}</td><td style={tdStyle}>{item.observations}</td>
         <td style={tdStyle}>{item.failureRate === null ? '—' : `${item.failureRate}%`}</td><td style={tdStyle}>{item.averageDurationMs} ms</td><td style={tdStyle}>{item.wastedDurationMs} ms</td>

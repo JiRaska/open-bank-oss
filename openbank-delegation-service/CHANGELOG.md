@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.2...delegation-service-v0.13.3) (2026-09-03)
+
+
+### Security
+
+* **delegation:** enforce authorization by default, not by manifest ([#8425](https://github.com/JiRaska/open-bank-oss/issues/8425)) ([aae8b58](https://github.com/JiRaska/open-bank-oss/commit/aae8b588418c01bd60d1fbcc6c1ebe6c0e55124e))
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.1...delegation-service-v0.13.2) (2026-09-02)
 
 

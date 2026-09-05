@@ -196,3 +196,19 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
   interceptor case in #3349 (an approval for resource A must not unlock resource B).
   Risk class = **elevation of privilege** (narrowed). Rollback: revert to `resource = ""`, which
   restores the over-broad grant — the two tests would go red first.
+- **2026-09-04** — Issue #8362: first-party EU consolidated-list adapter + import outcomes.
+  The EU list import switches its default source from the OpenSanctions-normalised CSV mirror
+  (migration V7's workaround for a then-redirecting endpoint) to the official EU FSF XML feed,
+  SAX-streamed (`EuFsfSaxParser`, ~25 MB, O(1) memory per entity); `opensanctions` stays
+  selectable for rollback and `seed` keeps the Flyway sample entries as an explicitly
+  NON-PRODUCTION local-dev fallback (`%dev` profile). The threat this closes is silent
+  staleness masquerading as health: the import previously returned a bare count where `0`
+  meant failed, skipped AND legitimately-empty at once, so a feed that had been failing for
+  weeks read identically to a working one (#4348 shape). Every import attempt now resolves to
+  a named `ListImportOutcome` (`imported` | `empty_feed` | `failed_kept_existing` |
+  `skipped_not_entity_based` | `seed_fallback_non_production`) and increments
+  `openbank.sanctions.list.imports{list_type,outcome}` — alert on the absence of
+  `outcome=imported`, never on an error rate. The durability contract is unchanged:
+  deactivateMissing runs only after a fully-consumed stream, so a mid-stream failure keeps the
+  previously stored entries (#1432). No endpoint, authz or DB schema change; rollback = revert
+  the commit or set `SANCTIONS_EU_SOURCE=opensanctions`.

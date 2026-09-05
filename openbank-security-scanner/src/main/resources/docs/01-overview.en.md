@@ -46,9 +46,9 @@
 | Trigger an on-demand full scan | `POST /api/v1/security/scan` | — (no event; report is REST-only) |
 | Get the latest platform report | `GET /api/v1/security/report` | — |
 | Get results for a specific service | `GET /api/v1/security/services/{name}` | — |
-| Report a new ICT incident | `POST /api/v1/ict-incidents` | `IctIncidentReported` |
-| Update incident status | `PATCH /api/v1/ict-incidents/{id}/status` | `IctIncidentUpdated` |
-| Mark incident as reported to regulator | `POST /api/v1/ict-incidents/{id}/regulatory-report` | `IctIncidentRegulatoryReported` |
+| Report a new ICT incident | `POST /api/v1/ict-incidents` | `ICT_INCIDENT_REPORTED` |
+| Update incident status | `PATCH /api/v1/ict-incidents/{id}/status` | `ICT_INCIDENT_STATUS_CHANGED` |
+| Mark incident as reported to regulator | `POST /api/v1/ict-incidents/{id}/regulatory-report` | `ICT_INCIDENT_REPORTED_TO_REGULATOR` |
 
 ## Scan checks per service
 

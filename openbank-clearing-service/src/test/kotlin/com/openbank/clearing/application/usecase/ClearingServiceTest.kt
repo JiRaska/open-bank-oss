@@ -13,6 +13,7 @@ import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.clearing.domain.model.PaymentRail
 import com.openbank.clearing.domain.model.SubmitPaymentRequest
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
@@ -90,26 +91,33 @@ class ClearingServiceTest {
             clearingItem(batchId = batchId, status = ClearingStatus.IN_CLEARING),
         )
         val updatedSlot: CapturingSlot<ClearingBatch> = slot()
+        val itemsSlot: CapturingSlot<List<ClearingItem>> = slot()
         val savedBatch = batch.copy(
             status = ClearingStatus.SETTLED,
             settledAt = OffsetDateTime.parse("2026-01-20T10:15:30Z"),
             updatedAt = OffsetDateTime.parse("2026-01-20T10:15:31Z"),
         )
 
-        val settledItems = items.map { it.copy(status = ClearingStatus.SETTLED) }
         every { batchRepo.findById(batchId) } returns Uni.createFrom().item(batch)
-        every { batchRepo.update(capture(updatedSlot)) } returns Uni.createFrom().item(savedBatch)
         every { itemRepo.findByBatchId(batchId) } returns Uni.createFrom().item(items)
-        every { itemRepo.saveAll(any()) } returns Uni.createFrom().item(settledItems)
-        every { eventPublisher.publishBatchSettled(savedBatch) } returns Uni.createFrom().voidItem()
+        every { eventPublisher.batchSettledMessage(any()) } returns mockk()
+        every { eventPublisher.netSettlementPostMessage(any()) } returns mockk()
+        val eventsSlot: CapturingSlot<List<OutboxMessage>> = slot()
+        every {
+            batchRepo.settleWithEvents(capture(updatedSlot), capture(itemsSlot), capture(eventsSlot))
+        } returns Uni.createFrom().item(savedBatch)
 
         val result = service.settleBatch(batchId).await().indefinitely()
 
         assertThat(result).isEqualTo(savedBatch)
         assertThat(updatedSlot.captured.status).isEqualTo(ClearingStatus.SETTLED)
         assertThat(updatedSlot.captured.settledAt).isNotNull()
-        verify { itemRepo.saveAll(match { it.all { i -> i.status == ClearingStatus.SETTLED } }) }
-        verify { eventPublisher.publishBatchSettled(savedBatch) }
+        assertThat(itemsSlot.captured).allSatisfy { assertThat(it.status).isEqualTo(ClearingStatus.SETTLED) }
+        // ADR-0281: the batch.settled event AND the net_settlement.post command commit together.
+        assertThat(eventsSlot.captured).hasSize(2)
+        verify { eventPublisher.batchSettledMessage(any()) }
+        verify { eventPublisher.netSettlementPostMessage(any()) }
+        verify { batchRepo.settleWithEvents(any(), any(), any()) }
     }
 
     @Test
@@ -121,8 +129,8 @@ class ClearingServiceTest {
         assertThatThrownBy { service.settleBatch(batchId).await().indefinitely() }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessage("Batch not found: $batchId")
-        verify(exactly = 0) { batchRepo.update(any()) }
-        verify(exactly = 0) { eventPublisher.publishBatchSettled(any()) }
+        verify(exactly = 0) { batchRepo.settleWithEvents(any(), any(), any()) }
+        verify(exactly = 0) { eventPublisher.batchSettledMessage(any()) }
     }
 
     @Test

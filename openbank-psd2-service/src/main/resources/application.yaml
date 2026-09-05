@@ -118,13 +118,10 @@ quarkus:
     # health/metrics on the main port in tests — RestAssured targets a single port
     management:
       enabled: false
-    # Unlike sibling services (account/card-issuance/document/aml), this service has no
-    # unconditional `flyway.migrate-at-start: true` in the main config above — the GitOps
-    # manifest injects QUARKUS_FLYWAY_MIGRATE_AT_START=true instead (psd2-service.yaml), so
-    # production migrates fine. But @QuarkusTest never sees that env var, so without this the
-    # Testcontainers Postgres from PostgresRedisTestResource never gets migrated and every IT
-    # touching psd2_outbox fails with "relation does not exist" (found while adding
-    # Psd2OutboxClaimIT, #1201).
+    # Testcontainers Postgres from PostgresRedisTestResource never gets migrated without this
+    # (@QuarkusTest never sees the GitOps-injected QUARKUS_FLYWAY_MIGRATE_AT_START=true) and
+    # every IT fails with "relation does not exist" (found while adding Psd2OutboxClaimIT,
+    # #1201; the outbox itself was later deleted in #8510).
     flyway:
       migrate-at-start: true
 
@@ -163,10 +160,6 @@ openbank:
     time: "${BUILD_TIME:unknown}"
   git:
     commit: "${GIT_COMMIT:unknown}"
-  outbox:
-    poll-interval: 5s
-    initial-delay: 5s
-    dispatch-enabled: true
 
 mp:
   messaging:
@@ -179,10 +172,6 @@ mp:
         ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
-    outgoing:
-      psd2-events-out:
-        connector: smallrye-kafka
-        client.id: psd2-service-${quarkus.uuid}
-        topic: openbank.psd2.events
-        value.serializer: org.apache.kafka.common.serialization.StringSerializer
-        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+    # No outgoing channels: the psd2-events-out emitter was deleted with the dead outbox
+    # apparatus in #8510 — nothing in the service ever constructed an OutboxMessage, and no
+    # consumer of openbank.psd2.events exists anywhere in the fleet.

@@ -119,3 +119,18 @@ not change any existing request's outcome until explicitly flipped.
   `clearingBatch.approval.read` action with no `rules.yaml` change — unlike balance-service
   (#5690), which needed a `role_action_matrix` entry because its authz shape is matrix-based
   rather than prefix-based.
+- **2026-09-04** — ADR-0281 net-settlement ledger leg (issue #8361). `settleBatch` now commits a
+  second outbox row (`openbank.clearing.net_settlement.post`) atomically with the batch flip, and
+  `NetSettlementPostingConsumer` posts the balanced DEBIT cash-clearing / CREDIT scheme-settlement
+  journal to ledger-service with idempotency key `clearing-net-settlement-{batchId}`. New trust
+  boundary crossed: clearing-service -> ledger-service `POST /api/v1/journals` (OidcC client-
+  credentials, SyntheticTaint header filter) — journal content is server-derived from the settled
+  batch row, not caller input, so the injection surface is the batch's own validated amounts.
+  Failure mode by design: retry with backoff, then DLQ
+  `openbank.dlq.clearing-service.clearing-net-settlement-in` (nested-YAML topic + KafkaTopic CR +
+  KafkaUser Write ACL in the same change — a rethrow without any of the three wedges the channel,
+  #5745). A DLQ record means "batch SETTLED, journal not booked" — reconciliation alert, manual
+  re-drive; the ledger idempotency key makes replay collapse onto the one journal. Reversal of a
+  settled batch stays a manual reversing journal (documented limit, ADR-0281). No DB schema change
+  in clearing-service; ledger gains V26 seed accounts (additive). Rollback: revert the commit —
+  unsettled batches post nothing; already-committed outbox rows drain or dead-letter harmlessly.

@@ -109,7 +109,8 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
 
 **DFD update:** adds `clearing-simulator → sepa-payment /returns → transaction-service /reverse` edge.
 **Risk class:** integrity (money-path reversal) + availability (idempotency).
-**Rollback:** feature flag `openbank.sepa.returns.enabled` (off by default); flag OFF = 404 on `/returns`.
+**Rollback:** revert the `/returns` commits, or revoke `ROLE_API` from the clearing-simulator
+caller. There is **no** feature flag for this endpoint — see the 2026-09-03 change-log entry.
 
 ## 5b. Payment confirmation download (ADR-0248 #3) — STRIDE supplement
 
@@ -236,7 +237,7 @@ simply stops existing).
   (default true; `%test` false) so @QuarkusTest boot does not connect to an absent Temporal frontend;
   a test `WorkflowClientTestProducer` backs the CDI `WorkflowClient` with an in-process
   `TestWorkflowEnvironment`. **No new trust boundary or external caller** — the same screening/fraud/
-  scheme/settlement steps now run inside Temporal activities (each already OIDC/mTLS-bounded), with the
+  scheme/settlement steps now run inside Temporal activities (each already OIDC-bounded; mTLS is NOT deployed for service-to-service HTTP — the only PeerAuthentication/DestinationRule in the tree is `openbank-infra/k8s/base/istio.yaml`, which no ArgoCD application applies, #1914. Kafka mTLS is real and separate), with the
   workflow adding durable retries + reverse compensation. The prerequisite that the Temporal path was
   missing shadow fraud scoring was fixed first (#2068). Rollback: revert the commit (the flag +
   in-service flow return). Risk class = **availability/correctness** (durable orchestration replaces a
@@ -263,9 +264,29 @@ simply stops existing).
   OIDC client-credentials for service-to-service authn; fraud-service is internal, cluster-only).
   **DFD update**: added `sepa-payment → fraud-service` edge (see §2). No DB schema change;
   rollback = revert adapter + port commits.
+- **2026-09-03** — Doc correction, no behavior change: §5a and the 2026-06-24 entry both named
+  `openbank.sepa.returns.enabled` as the rollback control for the pacs.004 return path, §5a adding
+  that it is "off by default" and that "flag OFF = 404 on `/returns`". **No such property exists.**
+  It occurs nowhere in the repository except this document
+  (`git grep -l -F openbank.sepa.returns.enabled` returns only this file), and the endpoint reads
+  no config at all: `SepaPaymentResource.handlePaymentReturn` is gated by
+  `@RolesAllowed("ROLE_API", "ROLE_ADMIN")` plus `@Authorize(action = "sepaPayment.handleReturn")`
+  and nothing else. The two real flags in this service are
+  `openbank.sepa.scheme-submission.enabled` and `openbank.sepa.worker.enabled`; neither disables
+  `/returns`.
+
+  This one is not a renamed control, so unlike a wrong class name it changes what an operator can
+  do: the documented rollback was **not executable**, and the stated default was backwards — the
+  path has been on since it shipped, not off. What is actually available is a revert, or revoking
+  `ROLE_API` from the clearing-simulator's client, which is coarser (that role admits other
+  callers) and is why it is worth recording rather than silently swapping in. Adding a real flag is
+  a code change and is deliberately not made here. Everything else the 2026-06-24 entry and §5a say
+  about the trust boundary, the STRIDE rows and the idempotency posture is unaffected.
+
 - **2026-06-24** — ADR-0111 R-transaction return path (pacs.004). New inbound trust boundary:
   `clearing-simulator → sepa-payment /returns → transaction-service /reverse`. STRIDE supplement
-  added in §5a above. **Risk class = integrity + availability**. Rollback = `openbank.sepa.returns.enabled=false`.
+  added in §5a above. **Risk class = integrity + availability**. Rollback = revert, or revoke `ROLE_API` from the
+  clearing-simulator caller (no feature flag exists — see the 2026-09-03 entry).
 - **2026-06-23** — ADR-0104 D3: real ISO 20022 `pacs.008` scheme submission via `clearing-simulator`.
   New outbound trust boundary: `sepa-payment → clearing-simulator` (POST
   `/api/v1/clearing/credit-transfers`, pacs.008 XML; pacs.002 XML response; OIDC client-credentials).
@@ -319,3 +340,19 @@ simply stops existing).
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+
+- **2026-09-03** — **New outbound trust edge: `account-service` party lookup.** Added
+  `AccountServiceClient.getById` (`GET /api/v1/accounts/{accountId}`) and wired `AmlCaseAdapter` to
+  call it with an OIDC client-credentials token, so an AML case opened from a SEPA payment carries
+  the debtor's *party* id rather than an account id — the SEPA rail's port of the domestic rail's
+  #3274 fix (#8505). Risk class = **information disclosure** (account→party linkage now crosses a
+  service boundary) and **availability** (a second synchronous dependency on the AML-case path).
+  Mitigations already in the code: the call is bearer-authenticated per request; every failure path
+  is caught and returns `null`, so a lookup outage degrades the case record rather than blocking the
+  payment; and a 404 is deliberately not logged as a warning, so a missing account is not treated as
+  an error. Correction to an earlier draft of this entry: the fallback is **not silent** — the
+  adapter logs `aml.case.party_unresolved` with the payment and account ids before opening the case
+  with the account id in `party_id`, so rows carrying the old shape are identifiable rather than
+  indistinguishable. Residual: `null` still does not distinguish "no such account" from "lookup
+  failed" at the *data* level, and the case row itself carries no marker of which branch produced
+  it. Rollback: revert; the adapter's previous behaviour was to store the account id in `partyId`.
