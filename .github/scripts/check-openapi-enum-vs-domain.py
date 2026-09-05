@@ -178,10 +178,6 @@ BASELINE: dict[str, str] = {
     "openbank-pid-service:EXPIRED,PENDING,REJECTED,VERIFIED":
         "#5962 — UpdateKycRequest.kycStatus: the property does not exist; needs a schema fix, "
         "not an enum fix. The `Status` pairing is coincidental.",
-    "openbank-sepa-payment:COMPLETED,PROCESSING,RECALLED,REJECTED":
-        "#5962 — SepaPaymentStatus: spec-only RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
-    "openbank-sepa-payment:COMPLETED,PENDING,PROCESSING,RECALLED,REJECTED":
-        "#5962 — SepaPaymentStatus: spec-only PENDING/RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
         "#5962 — CloseFailureReason: undeclared NOT_VIABLE",
 }
