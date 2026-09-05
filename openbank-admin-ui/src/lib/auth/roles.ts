@@ -244,7 +244,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['pid:view', ['/pid']],
   ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
-  ['transactions:view', ['/transactions']],
+  ['transactions:view', ['/transactions', '/merchants']],
   ['payment-rails:view', ['/swift', '/clearing']],
   ['accounts:create', ['/accounts/new']],
   ['accounts:view', ['/accounts', '/ledger', '/day-end']],
