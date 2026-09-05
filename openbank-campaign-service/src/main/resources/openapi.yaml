@@ -1037,12 +1037,20 @@ components:
         notConfirmedStepOrder: { type: integer, minimum: 0 }
     CreateCampaignRequest:
       type: object
-      required: [name, goal, productKind, segmentName, segmentVersion, steps]
+      required: [name, goal, segmentName, segmentVersion, steps]
       properties:
         name: { type: string }
         goal: { type: string }
         productKind:
-          $ref: '#/components/schemas/CampaignProductKind'
+          allOf: [{ $ref: '#/components/schemas/CampaignProductKind' }]
+          default: NONE
+          description: >-
+            Absent means NONE. Not required on the wire, because making an existing request
+            property mandatory is a breaking change (api-contract gate, ADR-0048 D5) and this is
+            not worth moving an operator API to /api/v2 over. The omission is safe in the only
+            direction that matters: an unstated kind is NOT credit, so a client that never heard
+            of this field cannot create a campaign that delivers credit marketing. The maker-facing
+            requirement lives where a human can answer it — admin-ui offers no pre-selection.
         segmentName: { type: string }
         segmentVersion: { type: integer, minimum: 1 }
         steps:

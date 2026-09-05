@@ -1303,15 +1303,23 @@ class CampaignRestContractIT {
     }
 
     /**
-     * ADR-0269 rule 1 on the wire: the mandatory product kind has to be MANDATORY, not merely
-     * declared. Without this test the field is non-null in Kotlin and still absent-able over HTTP
-     * if anything ever gives it a default — and a body that omits it would then be accepted as
-     * "not credit", which is the exact silent answer the field exists to prevent.
+     * ADR-0269 rule 1 on the wire: an omitted product kind is NONE, and NONE is not credit.
+     *
+     * This started as the opposite test — that an omitted kind is REFUSED — and the api-contract
+     * gate rejected that design: a newly required request property is breaking and would demand
+     * /api/v2. What is pinned instead is the property that actually protects the customer, and it
+     * is the stronger half anyway: a client that never heard of this field cannot produce a
+     * campaign that delivers credit marketing. The failure direction is "no credit campaign", not
+     * "credit campaign to someone who never asked".
+     *
+     * The requirement that a HUMAN state it is enforced in admin-ui, which offers no
+     * pre-selection — a UI guard, pinned by its own test, not by this one.
      */
     @Test
-    fun `a create body that omits the product kind is refused, never defaulted to non-credit`() {
+    fun `a create body that omits the product kind is a non-credit campaign, never an unstated one`() {
         val body = """
-            {"name":"it-no-kind","goal":"must fail","segmentName":"actives","segmentVersion":1,
+            {"name":"it-no-kind-${UUID.randomUUID()}","goal":"absent kind reads as non-credit",
+             "segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},
                        "delaySeconds":0}]}
@@ -1323,7 +1331,8 @@ class CampaignRestContractIT {
         } When {
             post("/api/v1/campaigns")
         } Then {
-            statusCode(400)
+            statusCode(201)
+            body("productKind", org.hamcrest.Matchers.equalTo("NONE"))
         }
     }
 

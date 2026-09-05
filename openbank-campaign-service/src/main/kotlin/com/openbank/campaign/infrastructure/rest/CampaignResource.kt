@@ -35,12 +35,19 @@ data class CreateCampaignRequest(
     val name: String,
     val goal: String,
     /**
-     * ADR-0269 rule 1, and mandatory on the wire: no Kotlin default, so Jackson's null check on the
-     * constructor parameter rejects a body that omits it rather than quietly inventing NONE.
-     * "Not a credit campaign" has to be said, because the step gate cannot tell an omission from a
-     * denial.
+     * ADR-0269 rule 1. Defaults to NONE when absent.
+     *
+     * I first made this mandatory on the wire, and the api-contract gate was right to refuse it: a
+     * newly required request property is a breaking change and would demand /api/v2 for an
+     * operator API, which is out of proportion to the change.
+     *
+     * The default is safe in the direction that matters. An unstated kind is NOT credit, so a
+     * client that has never heard of this field cannot create a campaign that delivers credit
+     * marketing — the failure mode is "no credit campaign", never "credit campaign to someone who
+     * did not consent". The requirement that a HUMAN state it belongs where a human is: admin-ui
+     * offers no pre-selection and refuses to submit without one.
      */
-    val productKind: CampaignProductKind,
+    val productKind: CampaignProductKind = CampaignProductKind.NONE,
     val segmentName: String,
     val segmentVersion: Int,
     /**
