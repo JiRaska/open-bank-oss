@@ -233,14 +233,34 @@ def collect_fuzz() -> dict:
             headers={"Authorization": f"Bearer {token}",
                      "Accept": "application/vnd.github+json"})
         # Cross-host redirect must not carry the GitHub token — see _no_auth_redirect_opener.
-        blob = _no_auth_redirect_opener().open(req, timeout=30).read()
+        try:
+            blob = _no_auth_redirect_opener().open(req, timeout=30).read()
+        except Exception as urllib_exc:
+            # Fallback for tokens/edges where the stripped-redirect dance still fails
+            # (observed with the workflow GITHUB_TOKEN on run 33972808389): the `gh` CLI is
+            # preinstalled on the runner and handles the 302 correctly. `gh api …/zip` writes
+            # the archive bytes to stdout.
+            import shutil
+            import subprocess
+            ghbin = shutil.which("gh")
+            if not ghbin:
+                raise
+            out = subprocess.run(
+                [ghbin, "api", f"repos/{repo}/actions/artifacts/{artifacts[0]['id']}/zip"],
+                capture_output=True, timeout=60,
+                env={**os.environ, "GH_TOKEN": token}, check=False)
+            if out.returncode != 0 or not out.stdout:
+                raise urllib_exc
+            blob = out.stdout
         cov = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("fuzz-coverage.json"))
         return {"available": True, "inScope": cov["inScope"], "tested": cov["tested"],
                 "coveragePct": cov["coveragePct"], "totalExercised": cov["totalExercised"],
                 "excludedCount": len(cov.get("excluded", [])),
                 "run": cov.get("run", ""), "runDate": cov.get("generatedAt", "")[:10]}
     except Exception as exc:  # network/API degradation must not kill the other collectors
-        return {"available": False, "reason": f"fuzz artifact fetch failed: {exc.__class__.__name__}"}
+        import urllib.error
+        detail = f"HTTP {exc.code}" if isinstance(exc, urllib.error.HTTPError) else exc.__class__.__name__
+        return {"available": False, "reason": f"fuzz artifact fetch failed: {detail}"}
 def self_test() -> int:
     bad = 0
     # The parse regexes must survive the real scripts' output shape — pin them on the
