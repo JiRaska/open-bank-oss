@@ -369,8 +369,14 @@ components:
 
     SandboxPurchaseRequest:
       type: object
-      required: [cardId, amountMinorUnits, currencyCode, channel]
+      required: [idempotencyKey, cardId, amountMinorUnits, currencyCode, channel]
       properties:
+        idempotencyKey:
+          type: string
+          description: |
+            The acquirer's own message reference, and the key a replay is deduplicated on. Required
+            in the body rather than as a header because that is the shape of a scheme message; the
+            two idioms are equivalent to the money-path idempotency gate.
         cardId:
           type: string
           format: uuid
@@ -388,9 +394,6 @@ components:
           type: string
           nullable: true
         merchantCountry:
-          type: string
-          nullable: true
-        networkReference:
           type: string
           nullable: true
         clearImmediately:

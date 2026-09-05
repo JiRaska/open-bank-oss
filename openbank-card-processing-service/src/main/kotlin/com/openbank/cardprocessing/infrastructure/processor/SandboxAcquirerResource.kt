@@ -67,7 +67,11 @@ class SandboxAcquirerResource(
     @Operation(summary = "Sandbox: present a purchase (authorisation, then optional clearing)")
     suspend fun purchase(request: SandboxPurchaseRequest): Response {
         if (!enabled) return Response.status(Response.Status.NOT_FOUND).build()
-        val reference = request.networkReference ?: "sandbox-${UUID.randomUUID()}"
+        // The caller's key IS the network reference here: a real acquirer identifies its own
+        // message, and a replay of that message must not take a second hold. Required in the body
+        // rather than as a header because that is what a scheme message looks like — the two
+        // idioms are equivalent to the coverage gate, and this one matches the domain.
+        val reference = request.idempotencyKey
         val authorization = useCase.authorize(
             AuthorizationCommand(
                 cardId = request.cardId,
@@ -98,6 +102,8 @@ class SandboxAcquirerResource(
 }
 
 data class SandboxPurchaseRequest(
+    /** The acquirer's own message reference. Required: a replayed purchase must not double-hold. */
+    val idempotencyKey: String,
     val cardId: UUID,
     val amountMinorUnits: Long,
     val currencyCode: String,
@@ -105,7 +111,6 @@ data class SandboxPurchaseRequest(
     val mcc: String? = null,
     val merchantName: String? = null,
     val merchantCountry: String? = null,
-    val networkReference: String? = null,
     val clearImmediately: Boolean = true,
     /** A partial presentment, as a fuel or hospitality merchant would send. Defaults to the full amount. */
     val clearingAmountMinorUnits: Long? = null,
