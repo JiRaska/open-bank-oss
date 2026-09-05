@@ -73,18 +73,19 @@ test_edge_may_revoke if {
 	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.revoke"}
 }
 
-# ADR-0249 D3 — the edge creates the reservation, but domestic-payment's authenticated event
-# stream is the only authority that may settle a domestic reservation.
+# ADR-0249 D3 — the spend-reservation trio. Enumerated one by one rather than in a loop so a
+# failure names WHICH action regressed: they are three separate lines in the rule, and a partial
+# edit is the likely mistake.
 test_edge_may_reserve if {
 	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.reserve"}
 }
 
-test_edge_may_not_confirm_reservation if {
-	count(allowed_reasons) == 0 with input as {"principal": edge, "action": "delegation.reserve.confirm"}
+test_edge_may_confirm_reservation if {
+	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.reserve.confirm"}
 }
 
-test_edge_may_not_release_reservation if {
-	count(allowed_reasons) == 0 with input as {"principal": edge, "action": "delegation.reserve.release"}
+test_edge_may_release_reservation if {
+	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.reserve.release"}
 }
 
 # The reservation actions must not become reachable by the shared backend identity: it holds
