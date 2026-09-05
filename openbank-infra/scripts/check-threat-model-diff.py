@@ -292,6 +292,30 @@ def gitops_hit(
         return None
     rel = f"openbank-infra/gitops/components/{comp}/{fname}"
     if fname == "network-policies.yaml":
+        # A NetworkPolicy is a boundary by construction, so ANY change to this service's own
+        # policy counts — there is no hunk filter here, unlike the Deployment branch below.
+        #
+        # What there IS, is the shared-file problem: one `network-policies.yaml` holds a policy per
+        # service in the namespace, and the generator rewrites it whenever a service is added. So
+        # adding card-processing's policy made this gate demand a threat-model update from
+        # sepa-payment and domestic-payment, neither of whose documents changed by a byte
+        # (#8809). Narrow to the documents whose own `metadata.name` names this service and ask
+        # whether THOSE changed.
+        #
+        # This stays correct in the direction that matters: a rule added to sepa-payment's own
+        # policy to admit a new caller changes sepa-payment's document, so it is still a finding
+        # for sepa-payment. Only a neighbour's untouched policy stops being one.
+        #
+        # It does NOT make the attribution exact, and must not be read as if it did. `gitops_tokens`
+        # is deliberately loose — openbank-domestic-payment carries the token `payment`, which
+        # matches a document named `sepa-payment-...` — so a change to one payments service's policy
+        # still reports for its same-token neighbours. Measured: sabotaging a port in sepa-payment's
+        # own policy flags both sepa-payment and domestic-payment. That over-reporting is the safe
+        # direction and is left alone here; what this narrowing removes is the case where NO document
+        # naming the service changed at all.
+        own_diff = own_document_diff(service, rel, base, head)
+        if own_diff is not None and not own_diff.strip():
+            return None
         return f"{rel} (ingress/egress)"
     path = REPO / rel
     if path.is_file():
