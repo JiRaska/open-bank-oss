@@ -203,9 +203,6 @@ mp:
         #   openbank.standing-orders.order.event  --
         #     openbank-standing-order-service/src/main/resources/application.yaml ->
         #     standing-order-events-out (components/payments/kafka-topic.yaml).
-        #   openbank.psd2.events                  --
-        #     openbank-psd2-service/src/main/resources/application.yaml -> psd2-events-out
-        #     (components/psd2-service/kafka-topic.yaml).
         # All three publish through the standard outbox relay (`OutboxKafkaHeaders.headersFor`),
         # so each record carries the `ce-type` header AuditConsumer reads for event_type; none
         # sets a "sourceService" body field, so they resolve AttributionSource.TOPIC through
@@ -219,7 +216,7 @@ mp:
         # three topics added above carry `retention.ms: 604800000` (7 days) in their KafkaTopic
         # CRs, so the backfill is bounded at one week of history per topic -- a one-time
         # first-subscribe load spike worth knowing about, not an unbounded replay.
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.delegation.spend-reservation-state,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed,openbank.billing.fee.event,openbank.standing-orders.order.event,openbank.psd2.events
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.delegation.spend-reservation-state,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed,openbank.billing.fee.event,openbank.standing-orders.order.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:
