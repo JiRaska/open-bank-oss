@@ -159,6 +159,20 @@ class KycCasePageApiContractTest {
             .contains("null")
     }
 
+    // ------------------------------------------------------------------------------ negative auth
+
+    @Test
+    fun `rejects the case-page request with 401 when the caller has no valid identity`() {
+        // No @TestSecurity identity at all: `@RolesAllowed` on `KycResource.listCases` must answer
+        // 401 before the handler — and before this test's own contract assertions — ever run.
+        // `authz.enforce=false` in ContractHarness only disables the advisory `@Authorize`
+        // interceptor; it does not touch this outer RBAC gate (see KycSecurityTest).
+        given()
+            .get(CASES_PATH)
+            .then()
+            .statusCode(401)
+    }
+
     // ------------------------------------------------------------------- the window that was served
 
     @Test
