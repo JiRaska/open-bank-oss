@@ -102,6 +102,14 @@ class PartyNameLookupPactConsumerTest {
         assertThat(summary.tradingName).isNotBlank()
     }
 
+    // NO 401-without-identity pact interaction is recorded here, deliberately: the provider-side
+    // replay boots with a TestAuthMechanism that authenticates EVERY replayed request as
+    // pact-verifier/ROLE_OPERATOR, so a recorded 401/403 expectation can never pass provider
+    // replay — it would be a permanently red interaction (same failure class as the account-side
+    // hop, #8552). The negative case is covered where it can actually run: party-service's own
+    // resource authz test asserts an anonymous lookup answers 401. The consumer-side behaviour
+    // (no token, expect rejection) stays a client property, not a wire contract.
+
     /**
      * The negative case, and why it is a **404 rather than a 401** — the same reason as hop 1.
      *
