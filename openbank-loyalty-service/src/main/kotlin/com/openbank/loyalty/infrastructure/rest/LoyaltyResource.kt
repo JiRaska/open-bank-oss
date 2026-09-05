@@ -5,9 +5,12 @@
 package com.openbank.loyalty.infrastructure.rest
 
 import com.openbank.loyalty.application.usecase.EarnLeavesUseCase
+import com.openbank.loyalty.application.usecase.ProvisioningSummaryUseCase
 import com.openbank.loyalty.application.usecase.ReadLeafSummaryUseCase
 import com.openbank.loyalty.application.usecase.RedeemBenefitUseCase
+import com.openbank.loyalty.domain.AnnualCap
 import com.openbank.loyalty.domain.BenefitCatalog
+import com.openbank.loyalty.domain.EarnCatalog
 import com.openbank.loyalty.domain.EarnOutcome
 import com.openbank.loyalty.domain.LeafEarnSource
 import com.openbank.loyalty.domain.LeafLedgerEntry
@@ -44,6 +47,7 @@ class LoyaltyResource(
     private val earn: EarnLeavesUseCase,
     private val redeem: RedeemBenefitUseCase,
     private val summary: ReadLeafSummaryUseCase,
+    private val provisioning: ProvisioningSummaryUseCase,
 ) {
 
     @GET
@@ -74,6 +78,38 @@ class LoyaltyResource(
                 "priceLeaves" to it.price.value,
                 "validityDays" to it.validity.toDays(),
                 "description" to it.description,
+            )
+        },
+    ).build()
+
+    @GET
+    @Path("/provisioning")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
+    suspend fun provisioning(): Response {
+        val s = provisioning.summarise()
+        return Response.ok(
+            mapOf(
+                "at" to s.at.toString(),
+                // The obligation, in Lístky. Deliberately not converted to any currency here: this
+                // service does not price a Lístek, and the recognition policy that does belongs to
+                // finance and to openbank-billing-service, which owns the journal (ADR-0282 D5).
+                "outstandingLeaves" to s.outstandingLeaves,
+                "annualCapPerParty" to AnnualCap.PER_PARTY_PER_YEAR.value,
+                "ruleVersion" to EarnCatalog.RULE_VERSION,
+            ),
+        ).build()
+    }
+
+    @GET
+    @Path("/earn-sources")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API", "ROLE_ADMIN")
+    fun earnSources(): Response = Response.ok(
+        LeafEarnSource.ALL.map { source ->
+            val rule = EarnCatalog.ruleFor(source)
+            mapOf(
+                "id" to source.id,
+                "leaves" to rule.leaves.value,
+                "validityDays" to rule.validity.toDays(),
             )
         },
     ).build()

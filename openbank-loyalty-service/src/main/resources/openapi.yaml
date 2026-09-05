@@ -37,6 +37,33 @@ paths:
               schema:
                 type: array
                 items: {$ref: "#/components/schemas/Benefit"}
+  /api/v1/loyalty/provisioning:
+    get:
+      summary: The outstanding Lístek obligation, for the IFRS 15 provision
+      description: >-
+        Counts unspent, unexpired Lístky across every party. Reported in Lístky and in no currency:
+        this service does not price a Lístek, and openbank-billing-service owns the journal that
+        recognises the obligation (ADR-0282 D5).
+      responses:
+        "200":
+          description: Summary
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProvisioningSummary"}
+  /api/v1/loyalty/earn-sources:
+    get:
+      summary: The reviewed earn catalogue
+      description: >-
+        Declaring a source here is not a claim that a producer exists for it. What is wired is
+        answered by this service's consumers, never by the catalogue.
+      responses:
+        "200":
+          description: Catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/EarnSource"}
   /api/v1/loyalty/parties/{partyId}/earn:
     post:
       summary: Record an achievement and mint Lístky for it
@@ -129,6 +156,19 @@ components:
         ruleVersion: {type: string}
         occurredAt: {type: string, format: date-time}
         expiresAt: {type: string, format: date-time, nullable: true}
+    ProvisioningSummary:
+      type: object
+      properties:
+        at: {type: string, format: date-time}
+        outstandingLeaves: {type: integer, format: int64}
+        annualCapPerParty: {type: integer}
+        ruleVersion: {type: string}
+    EarnSource:
+      type: object
+      properties:
+        id: {type: string}
+        leaves: {type: integer}
+        validityDays: {type: integer}
     Benefit:
       type: object
       properties:
