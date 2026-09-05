@@ -2480,6 +2480,47 @@ gates:
   # #2187 ledger tie-out + FX revaluation, fx ČNB ingestion, billing cycle) — none had ever
   # run. It is a gate rather than a doc because the natural test cannot fail: calling the
   # method directly supplies the context the scheduler does not. ENFORCED.
+  # #5256/#5902. `source_service` is the column every audit and analytics query groups by, so a
+  # producer whose self-reported spelling disagrees with the fleet convention (module directory
+  # minus `openbank-`) splits itself off from audit-service's TopicAttribution fallback, which uses
+  # the module name. When such a producer later gains EVENT-sourced attribution its rows change
+  # spelling MID-STREAM and the group-by reports two producers where there is one — which is what
+  # PR #5399 did to lending's six upgraded event types on 2026-08-18.
+  #
+  # It is a gate rather than a doc because the natural probe cannot see it: `grep -c sourceService
+  # src/main` is non-zero for all 21 producers — it matches the field being MENTIONED (KDoc, a data
+  # class property, a consumer reading it back), never the value emitted — and that probe reported
+  # full conformance while lending disagreed at nine write sites. This check resolves the value at
+  # each write site through all four fleet idioms, follows a `const val` within the module, and
+  # refuses to guess an ambiguous one.
+  #
+  # min_subjects is inside the script as well as here, on purpose: the first draft of the regex
+  # could not see `val sourceService: String = SOURCE_SERVICE` and enumerated 17 of 21 producers
+  # while printing a confident OK. Only the floor turned that into a visible number.
+  #
+  # lending is a DECLARED EXCEPTION, not debt (#5902 decided: keep "lending"). The rows it already
+  # wrote are unrewritable by anyone — audit_entries is append-only at the DB and `source_service`
+  # is chain-hashed — so a rename could only add a fourth boundary on top of a split that can never
+  # be repaired. The boundary is documented in openbank-lending-service/CLAUDE.md instead. The
+  # baseline entry pins the (module, value) pair, so lending drifting to a third spelling still
+  # fails. ENFORCED.
+  - id: source-service-convention
+    name: "sourceService == module directory name (issues #5256/#5902, enforced)"
+    group: kotlin
+    mode: enforced
+    min_subjects: 20
+    rationale: >-
+      `source_service` is the column every audit and analytics query groups by, so a producer
+      whose self-reported spelling disagrees with the module name splits itself off from
+      audit-service's topic fallback — and the natural probe cannot see it, because
+      `grep -c sourceService` matches the field being mentioned, never the value emitted
+      (#5256, #5902).
+    review_after: 2027-02-20
+    selftest: python3 .github/scripts/check-source-service-convention.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-source-service-convention.py --root .
+
   - id: no-runblocking-in-a-scheduled-body
     name: "no runBlocking in a @Scheduled body (rules.yaml: scheduled_methods, enforced)"
     group: kotlin
