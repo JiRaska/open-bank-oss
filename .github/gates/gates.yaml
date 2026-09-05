@@ -107,7 +107,9 @@ gates:
     mode: enforced
     rationale: "A synthetic marker forwarded over REST but replaced by a false default at the asynchronous event boundary makes test activity indistinguishable from real banking activity; both schema and writer mapping must survive together."
     review_after: "2027-08-25"
-    min_subjects: 20
+    # 32 shared PanacheOutboxEntity implementations on 2026-09-03 (#4348). The floor moved 20 -> 30
+    # with the corpus glob: at 20 a third of the fleet could vanish from scope and still read green.
+    min_subjects: 30
     selftest: python3 .github/scripts/check-synthetic-outbox-taint.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-synthetic-outbox-taint.py"]
