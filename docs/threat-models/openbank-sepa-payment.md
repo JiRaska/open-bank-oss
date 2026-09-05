@@ -340,3 +340,19 @@ simply stops existing).
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+
+- **2026-09-03** — **New outbound trust edge: `account-service` party lookup.** Added
+  `AccountServiceClient.getById` (`GET /api/v1/accounts/{accountId}`) and wired `AmlCaseAdapter` to
+  call it with an OIDC client-credentials token, so an AML case opened from a SEPA payment carries
+  the debtor's *party* id rather than an account id — the SEPA rail's port of the domestic rail's
+  #3274 fix (#8505). Risk class = **information disclosure** (account→party linkage now crosses a
+  service boundary) and **availability** (a second synchronous dependency on the AML-case path).
+  Mitigations already in the code: the call is bearer-authenticated per request; every failure path
+  is caught and returns `null`, so a lookup outage degrades the case record rather than blocking the
+  payment; and a 404 is deliberately not logged as a warning, so a missing account is not treated as
+  an error. Correction to an earlier draft of this entry: the fallback is **not silent** — the
+  adapter logs `aml.case.party_unresolved` with the payment and account ids before opening the case
+  with the account id in `party_id`, so rows carrying the old shape are identifiable rather than
+  indistinguishable. Residual: `null` still does not distinguish "no such account" from "lookup
+  failed" at the *data* level, and the case row itself carries no marker of which branch produced
+  it. Rollback: revert; the adapter's previous behaviour was to store the account id in `partyId`.

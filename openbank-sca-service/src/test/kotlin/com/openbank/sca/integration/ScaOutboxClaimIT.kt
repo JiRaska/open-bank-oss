@@ -45,8 +45,9 @@ class ScaOutboxClaimIT {
         onEventLoop { Panache.withTransaction { repository.deleteAll() }.awaitSuspending() }
     }
 
-    // ScaOutboxRepositoryImpl.save(message) manages its own Panache.withTransaction internally
-    // -- unlike sibling services' persistInTransaction, do NOT wrap this in an extra transaction.
+    // persistInTransaction opens NO transaction of its own (#8679) -- that is what lets the
+    // enrolled device and its event commit together -- so the seed supplies one here, exactly as
+    // document-service's and fx-service's claim ITs do.
     private fun seedPending(count: Int): List<OutboxMessage> {
         val messages = (1..count).map {
             OutboxMessage(
@@ -56,7 +57,9 @@ class ScaOutboxClaimIT {
                 createdAt = Instant.now(),
             )
         }
-        messages.forEach { msg -> onEventLoop { repository.save(msg) } }
+        messages.forEach { msg ->
+            onEventLoop { Panache.withTransaction { repository.persistInTransaction(msg) }.awaitSuspending() }
+        }
         return messages
     }
 

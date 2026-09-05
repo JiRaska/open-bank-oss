@@ -397,7 +397,9 @@ _probe_selftest() {
   # --- probe_zombie_runs ------------------------------------------------------------------
   # These were "network-bound, unexercised" until 2026-09-03, and that gap let the probe ship
   # broken: it passed jq's `--arg` to `gh api --jq`, which rejects it, and `2>/dev/null` turned the
-  # error into an empty page. It reported ZERO wedged runs while 177 existed.
+  # error into an empty page. It reported ZERO wedged runs while 177 existed. `gh` is a shell
+  # function here, so the whole thing is hermetic — no network, no fixtures on disk.
+
   # `gh` is a shell function here, so this is hermetic — no network, no fixtures on disk. The stub
   # parses argv properly rather than doing string surgery on "$*": a first attempt sliced the filter
   # out of the joined arguments, mangled it, and jq exited 3 on every call. That mattered less for
@@ -416,6 +418,7 @@ _probe_selftest() {
     case "$url" in
       */actions/runs/1/jobs*) body='{"jobs":[{"status":"completed"},{"status":"completed"}]}' ;;
       */actions/runs/3/jobs*) body='{"jobs":[{"status":"completed"},{"status":"in_progress"}]}' ;;
+
       # A run whose jobs list is EMPTY satisfies `all(.jobs[]; ...)` vacuously — jq's `all` over an
       # empty array is true — so without the `(.jobs|length) > 0` guard this would be reported
       # wedged. The guard was written but never falsified until this fixture existed.
@@ -425,6 +428,7 @@ _probe_selftest() {
         {"id":2,"created_at":"2099-01-01T00:00:00Z","name":"fresh"},
         {"id":3,"created_at":"2026-08-09T10:00:00Z","name":"old-but-live"},
         {"id":4,"created_at":"2026-08-09T10:00:00Z","name":"old-no-jobs"}]}' ;;
+
       *) body='{"workflow_runs":[]}' ;;
     esac
     printf '%s' "$body" | jq -r "$filter"
@@ -440,8 +444,10 @@ _probe_selftest() {
     # healthy, and subtracting it would understate real load.
     _check "probe_zombie_runs excludes an old run with a job still in flight" \
       "$(printf '%s' "$zr" | grep -q 'old-but-live' && echo 0 || echo 1)"
+
     _check "probe_zombie_runs excludes an old run whose jobs list is empty (vacuous-all guard)" \
       "$(printf '%s' "$zr" | grep -q 'old-no-jobs' && echo 0 || echo 1)"
+
   else
     echo "  [note] probe_zombie_runs fixture cases need jq and were NOT run"
   fi
@@ -452,6 +458,7 @@ _probe_selftest() {
   _check "probe_zombie_runs FAILS loudly when gh errors (never reads as a clean census)" \
     "$([ "$?" -ne 0 ] && echo 1 || echo 0)"
   unset -f gh
+
 
   # The PAGE call and the PER-RUN JOBS call are two separate `gh` invocations, and fixing only the
   # first leaves the second able to fail silently — it drops the run from the census, which is the
@@ -480,6 +487,7 @@ _probe_selftest() {
       "$([ "$?" -ne 0 ] && echo 1 || echo 0)"
     unset -f gh
   fi
+
 
   # probe_pr_failing_checks remains network-bound with no hermetic fixture: its subject is a live
   # PR's check rollup. Declared rather than silently skipped — an unexercised probe is a third

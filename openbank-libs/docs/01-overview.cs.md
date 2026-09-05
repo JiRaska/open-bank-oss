@@ -24,7 +24,7 @@ Audit napočítal **~4 500 řádků duplikovaného Kotlinu** a několik regulato
 | Per-service `BigDecimal + String` páry pro peníze | `Money` value object s `CurrencyCode` (ISO 4217), `add/subtract/multiply` operacemi |
 | Žádný unifikovaný audit log | `AuditEvent` envelope s GDPR Art. 30 poli + `AuditEventPublisher` port |
 | Service-to-service volání bez `Authorization` header | `BearerTokenClientHeadersFactory` automatická injekce + correlation ID propagace |
-| Hardcoded `CHANGE_ME_LOCAL_DEV_ONLY` v prod profilu (K1) | `BootstrapVerifier` fail-fast při startupu |
+| Hardcoded `CHANGE_ME_LOCAL_DEV_ONLY` v prod profilu (K1) | ⬜ **Není dodáno.** `BootstrapVerifier` v libs neexistuje (`git grep BootstrapVerifier -- '*.kt'` vrací 0) — uvádí to i delivery note ADR-0017. K1 dnes drží injektáž secrets přes ESO/OpenBao (ADR-0007): nasazené manifesty berou credentials přes `secretKeyRef` a žádný dev placeholder v nich není, ale žádný startup guard to nekontroluje (#8426) |
 | Žádný runtime přehled o tech stacku | `BuildInfo` singleton → `/api/v1/info` ukazuje Kotlin/Quarkus/JDK verze, LTS flag, support date |
 
 ## Klíčové schopnosti (per balíček)
@@ -52,7 +52,7 @@ mindmap
     security
       PiiMask deterministic masking
       Roles canonical enum
-      BootstrapVerifier
+      BootstrapVerifier NENI DODANO
       BearerTokenClientHeadersFactory
     util
       BuildInfo runtime stack
@@ -87,7 +87,7 @@ Když vznikne nový OpenBank service `openbank-foo-service`:
 |---|---|---|
 | F1 — house cleaning | ✅ done | Unified dep declaration, Jandex plugin, smazaný InfoResource/Redis duplicates |
 | F2 — domain primitives | ✅ done | Outbox, typesafe IDs, common exception mappers |
-| F3 — security foundation | ✅ done | PiiMask, Roles, AuditEvent, S2S auth, BootstrapVerifier |
+| F3 — security foundation | ⚠️ partial | PiiMask, Roles, AuditEvent, S2S auth. `BootstrapVerifier` byl do F3 naplánován a nikdy nedodán (#8426) |
 | F4 — convention plugin | planned | `build-logic/openbank.quarkus-service` Gradle convention plugin |
 | F5 — Quarkus platform extension | planned | Baseline `application.yaml` jako Quarkus extension |
 
