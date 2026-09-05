@@ -32,6 +32,45 @@
 # these are quarantines, and they are invisible to the event-consumer-liveness gate (which reads
 # declared `outgoing:` channels; the connector's DLQ producer is not one).
 ---
+# openbank-account-service :: channel `delegation-events-in`
+# #5752: account-service and card-issuance-service both consume `delegation-events-in`, so both
+# were dead-lettering into the single implicit `dead-letter-topic-delegation-events-in`. This
+# names account-service's half. The old topic and its Write ACL are RETAINED so an existing
+# backlog stays drainable.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.account.delegation-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-account-service :: channel `party-events-in`
+# #5752. `party-events-in` is declared by eight services; account-service was the last one still
+# on the implicit `dead-letter-topic-party-events-in`. The AccountPartyEventDeadLettered alert in
+# prometheus-rules-onboarding.yaml matches BOTH names for the length of the rollout — under an
+# Argo Rollout old and new pods run side by side, and the old topic still holds whatever was
+# parked before the cutover.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.account.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-agent-service :: channel `oversight-events`
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -437,6 +476,36 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-fraud-service :: channel `transaction-signal`
+# #5745 requirement 5, the one part of the four this channel was missing. The other three have
+# been in place since before #5745: `failure-strategy: dead-letter-queue` in the service's
+# application.yaml, an EXPLICIT topic name in components/fraud-service/fraud-service-msg-override.yaml
+# (a .properties source, because `dead-letter-queue.topic` is a dotted leaf key that SmallRye's YAML
+# source would quote and the connector would never read — #686), and a matching [Write, Describe]
+# ACL in components/fraud-service/kafka-fraud-mtls.yaml. No CR existed for the name anywhere, and
+# this cluster does not auto-create topics, so the DLQ send itself would have failed and wedged
+# TransactionSignalConsumer on the very failure the DLQ exists to park (#5715 made it rethrow).
+#
+# NAME: this is the one entry in this file NOT of the form openbank.dlq.<service>.<channel>. The
+# name below is the one already configured and already granted in the ACL; renaming it would be a
+# three-place change to a live channel for cosmetics, so the CR is made to match the configuration
+# rather than the configuration to match the CR. It is not the implicit SmallRye default either
+# (`dead-letter-topic-transaction-signal`), so the collision the naming convention exists to prevent
+# does not apply — `transaction-signal` is declared by this service alone.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.transactions.transaction.initiated.fraud.dlq
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-interest-service :: channel `interest-withholding-remitted-in`
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -607,6 +676,21 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: openbank.dlq.domestic-payment.delegated-spend-reservation-state-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-clearing-service :: channel `clearing-net-settlement-in` (ADR-0281)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.clearing-service.clearing-net-settlement-in
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster

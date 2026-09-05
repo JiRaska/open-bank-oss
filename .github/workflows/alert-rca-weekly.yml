@@ -1,0 +1,184 @@
+# Weekly critical-alert RCA review (ADR-0241 D3), the companion to the daily
+# standing-critical digest (#5469 / standing-critical-digest.yml).
+#
+# It replays the observation envelopes the daily digest archived over the last 7
+# days into an append-only ledger, renders the RCA log, and applies the
+# rate-of-recurrence guard.
+#
+# It deliberately does NOT publish an MTTR figure. ADR-0241 D1 targets P90 <= 4 h,
+# and the only source reachable from a workflow (Alertmanager /api/v2/alerts, an
+# ACTIVE-alert endpoint polled once a day) dates a resolution to +/- 24 h.
+# Prometheus retains 12 h with no long-term store, so its ALERTS series cannot
+# cover the review window either. alert-rca-ledger.py enforces this: it refuses
+# to emit a P90 whose granularity is coarser than half the target. See #5869.
+name: Weekly critical-alert RCA review
+
+on:
+  schedule:
+    # ADR-0241 D3: Mondays at 10:00 UTC.
+    - cron: "0 10 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: alert-rca-weekly
+  cancel-in-progress: false
+
+jobs:
+  review:
+    name: Fold observations, render RCA log, apply recurrence guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Run the guards against the cases they MUST reject before trusting them
+      # against real data. A guard proven only by what it prints is not proven.
+      - name: Self-test the RCA ledger and its guards
+        run: python3 .github/scripts/alert-rca-ledger.py --self-test
+
+      - name: Download the last 7 days of digest observations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p observations
+          since="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          # Only SUCCESSFUL digest runs produced an observation; a fail-closed run
+          # wrote no envelope, and treating its absence as "no alerts" would close
+          # every open record. Filter on conclusion, never on run existence.
+          runs="$(gh run list --workflow standing-critical-digest.yml \
+                    --status success --limit 30 \
+                    --json databaseId,createdAt \
+                    --jq "[.[] | select(.createdAt >= \"$since\")] | .[].databaseId")"
+          count=0
+          for id in $runs; do
+            if gh run download "$id" --dir "observations/$id" 2>/dev/null; then
+              count=$((count + 1))
+            fi
+          done
+          echo "downloaded $count observation run(s) since $since"
+          echo "OBSERVATION_COUNT=$count" >> "$GITHUB_ENV"
+
+      - name: Fold observations into the ledger and render the RCA log
+        run: |
+          set -euo pipefail
+          month="$(date -u +%Y-%m)"
+          mkdir -p docs/runbooks/alert-rca
+          # `find -print0 | xargs -0` so a path never word-splits, and the script
+          # sorts the envelopes by observedAt itself.
+          mapfile -t envelopes < <(find observations -name 'alert-observation.json' -type f | sort)
+          observe_args=()
+          if [ "${#envelopes[@]}" -gt 0 ]; then
+            observe_args=(--observe "${envelopes[@]}")
+          fi
+          # With zero envelopes the ledger is rendered UNCHANGED — the run must not
+          # fold an empty observation, which observe() would read as "every open
+          # critical resolved this morning".
+          # Exit 2 means "no observation covered this window" — the producer is down
+          # and this review measured nothing. That must NOT abort the step: the RCA
+          # document recording the gap is exactly the evidence worth publishing. So
+          # capture the code, keep going, and fail the JOB at the end (below).
+          rc=0
+          python3 .github/scripts/alert-rca-ledger.py \
+            --ledger docs/runbooks/alert-rca/ledger.jsonl \
+            "${observe_args[@]}" \
+            --granularity-seconds 86400 \
+            --source alertmanager-daily-poll \
+            --rca-output "docs/runbooks/alert-rca/${month}.md" \
+            --recurrence-output recurrences.json || rc=$?
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+            echo "::error::alert-rca-ledger.py failed with exit $rc"; exit "$rc"
+          fi
+          echo "LEDGER_EXIT=$rc" >> "$GITHUB_ENV"
+          cat recurrences.json
+
+      - name: Open a follow-up issue for each recurring critical alert
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # ADR-0241 D3: 3 fires in 14 days is a reliability defect and must have a
+          # follow-up issue BEFORE the next review. Deduplicated by title so a
+          # still-recurring alert does not open a fresh issue every Monday.
+          python3 - <<'PY' > wanted.txt
+          import json
+          for item in json.load(open('recurrences.json')):
+              print(f"Recurring critical alert: {item['alertname']}\t{item['count']}\t{','.join(item['services'])}\t{item['firstSeen']}\t{item['lastSeen']}")
+          PY
+          existing="$(gh issue list --state open --limit 200 --json title --jq '.[].title')"
+          while IFS=$'\t' read -r title count services first last; do
+            [ -n "$title" ] || continue
+            if printf '%s\n' "$existing" | grep -Fxq "$title"; then
+              echo "already open: $title"; continue
+            fi
+            {
+              echo "\`$title\` fired **$count** times in the last 14 days on: $services"
+              echo
+              echo "- First seen: $first"
+              echo "- Last seen: $last"
+              echo
+              echo "Per ADR-0241 D3 the rate-of-recurrence guard treats this as a reliability"
+              echo "defect, not an alerting nuisance. Resolve the underlying condition or"
+              echo "reclassify the severity before the next weekly review."
+              echo
+              echo "Opened automatically by \`.github/workflows/alert-rca-weekly.yml\`. Refs ADR-0241."
+            } > issue-body.md
+            gh issue create --title "$title" --body-file issue-body.md
+          done < wanted.txt
+
+      - name: Publish the ledger and RCA log
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/runbooks/alert-rca; then
+            echo "no ledger or RCA change to publish"; exit 0
+          fi
+          branch="chore/alert-rca-$(date -u +%Y%m%d)-${{ github.run_id }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          # Explicit path only — never `git add -A` in a workflow workspace that
+          # also holds downloaded artifacts.
+          git add docs/runbooks/alert-rca
+          {
+            echo "chore(governance): weekly critical-alert RCA log"
+            echo
+            echo "Folds ${OBSERVATION_COUNT} daily standing-critical observation(s) into the"
+            echo "append-only ledger and renders the weekly RCA review (ADR-0241 D3)."
+            echo
+            echo "MTTR is not reported; see .github/scripts/alert-rca-ledger.py. Refs #5869"
+          } > commit-msg.txt
+          git commit -s -F commit-msg.txt
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore(governance): weekly critical-alert RCA log" \
+            --body-file "docs/runbooks/alert-rca/$(date -u +%Y-%m).md"
+
+      # A control that reports healthy because it structurally cannot report anything
+      # else is the defect this whole workflow exists to prevent, so the run must go
+      # RED when it measured nothing — after the evidence is published, never instead
+      # of it. Placed before the upload so the artifact still attaches (`always()`).
+      - name: Fail the review when no observation covered the window
+        if: env.LEDGER_EXIT == '2'
+        run: |
+          echo "::error title=Weekly RCA review measured nothing::No standing-critical" \
+               "observation envelope covered the last 7 days. The daily digest archives" \
+               "an envelope even on a zero-alert day, so this is NOT a quiet week - the" \
+               "producer did not run. See docs/runbooks/alert-rca/ and issue #5869."
+          exit 1
+
+      - name: Upload the RCA review artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: alert-rca-review-${{ github.run_id }}
+          path: |
+            docs/runbooks/alert-rca
+            recurrences.json
+          retention-days: 90

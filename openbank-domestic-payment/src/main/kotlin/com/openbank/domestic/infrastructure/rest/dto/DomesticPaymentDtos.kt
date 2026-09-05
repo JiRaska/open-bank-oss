@@ -41,8 +41,6 @@ data class CreateDomesticPaymentRequest(
         idempotencyKey: String,
         actorId: UUID? = null,
         actorScope: String? = null,
-        delegationId: UUID? = null,
-        reservationId: UUID? = null,
         synthetic: Boolean = false,
     ): CreateDomesticPaymentCommand = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
@@ -65,8 +63,6 @@ data class CreateDomesticPaymentRequest(
         endToEndId = endToEndId,
         actorId = actorId,
         actorScope = actorScope,
-        delegationId = delegationId,
-        reservationId = reservationId,
         synthetic = synthetic,
     )
 }

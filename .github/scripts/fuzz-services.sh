@@ -44,11 +44,13 @@
 # retried past the boot deadline. Four money-path services were once reported as fuzz failures for
 # an absent dependency, which is not a finding about their HTTP surface, and it drowned the one
 # real finding in the same run (consent-service, #5711). Every registrar already has the switch
-# (because @QuarkusTest needs it too); what they do not share is a name for it —
-# openbank.transaction.worker.enabled, openbank.domestic.worker.enabled,
-# openbank.sepa.worker.enabled, openbank.campaign.worker.enabled,
-# openbank.settlement.worker.enabled, and lending's `lending.origination.worker.enabled` (not even
-# under `openbank.`).
+# (because @QuarkusTest needs it too). Since the `temporal-worker-switch-naming` gate the names
+# also follow one convention — `openbank.<service>.worker.enabled` — so this derivation is now
+# uniform rather than a per-service list: openbank.transaction.worker.enabled,
+# openbank.domestic.worker.enabled, openbank.sepa.worker.enabled,
+# openbank.campaign.worker.enabled, openbank.settlement.worker.enabled,
+# openbank.lending.worker.enabled (lending renamed from `lending.origination.worker.enabled`,
+# the one pre-convention name).
 #
 # ── Two passes, both must pass ─────────────────────────────────────────────────────────────────
 # Pass 1 (auth ON) is what this lane has always done: every endpoint behind @RolesAllowed must
@@ -386,6 +388,37 @@ for svc in $SERVICES; do
       sel="$(grep -aoE 'Selected: [0-9]+/[0-9]+' "fuzz-reports/${svc}-fuzz${logsuffix}.log" | head -1 || true)"
       blocked="$(grep -aoE 'Authentication failed: [0-9]+ operation' "fuzz-reports/${svc}-fuzz${logsuffix}.log" | grep -oE '[0-9]+' | head -1 || true)"
       echo "==> [${svc}] ${label}: ${sel:-Selected: ?} auth-blocked=${blocked:-0}"
+
+      # Machine-readable exercised-surface record (#5769): the number a pentest
+      # attestation's `ops:` field cites. Logs age out with retention; this JSON
+      # is the durable artifact check-readiness-attestations.py's R8 refers to.
+      # exercised = selected - auth-blocked: operations that only ever answered
+      # 401/403 tested NO handler logic and must not inflate the count.
+      local sel_n
+      sel_n="$(printf '%s' "${sel}" | grep -oE 'Selected: [0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+      cat > "fuzz-reports/${svc}-ops${logsuffix}.json" <<OPSJSON
+{
+  "service": "${svc}",
+  "lane": "${label}",
+  "selected": ${sel_n:-0},
+  "auth_blocked": ${blocked:-0},
+  "exercised": $(( ${sel_n:-0} - ${blocked:-0} )),
+  "max_examples": "${MAX_EXAMPLES}",
+  "run": "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-?}/actions/runs/${GITHUB_RUN_ID:-?}",
+  "date": "$(date -u +%F)"
+}
+OPSJSON
+
+      # A pass that drove ZERO operations tested nothing, and its green reads exactly like a
+      # finding-free run — the 2026-08-18 run reported 7 failures of 23 where six had never
+      # sent a request, and the job list rendered both kinds identically. Fail LOUDLY, worded
+      # as a harness error so triage does not read it as an HTTP-surface finding.
+      local selected_n
+      selected_n="$(printf '%s' "${sel}" | grep -oE 'Selected: [0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+      if [ -z "${selected_n}" ] || [ "${selected_n}" -eq 0 ]; then
+        echo "::error::[${svc}] ${label}: HARNESS ERROR — schemathesis drove ${selected_n:-no} operations (Selected: ${sel:-?}). The service likely never booted or its OpenAPI was unreachable; this pass is not evidence about the HTTP surface."
+        OVERALL=1
+      fi
 
       # A census of causes, printed next to the count (triage aid, not a verdict — see header).
       local census

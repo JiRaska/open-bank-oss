@@ -38,7 +38,9 @@ docker compose up -d account-service
 | `KEYCLOAK_URL` | `http://localhost:8080` | OIDC issuer |
 | `QUARKUS_LOG_LEVEL` | `INFO` | per-package: `com.openbank.account=DEBUG` |
 
-`BootstrapVerifier` from `openbank-libs` fails to start when run with `QUARKUS_PROFILE=prod` and it detects dev placeholders in secrets — addressed by ADR 0017 (Vault).
+⬜ **This does not happen.** There is no `BootstrapVerifier` in `openbank-libs` (`git grep BootstrapVerifier -- '*.kt'` returns 0) — ADR-0017 prescribes one and its own delivery note records that it was never shipped. Startup is therefore not aborted on a dev placeholder in the prod profile, because nothing checks for one.
+
+What actually holds the property: the deployed manifest `openbank-infra/gitops/components/accounts/account-service.yaml` takes credentials through `secretKeyRef` from ESO/OpenBao (ADR-0007) and carries no `CHANGE_ME` or `_local_dev_only` literal. That is a configuration property, not a boot-time control — a deployment with a bad value is not refused, it simply fails to reach the database (#8426).
 
 ## Health checks
 

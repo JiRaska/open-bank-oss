@@ -134,18 +134,6 @@ class DomesticPaymentService(
         }
 
         val snapshot = binding.snapshot
-        // The workload adapter supplies these three values from identity-validated headers.
-        // They are still checked here, at the authority boundary, before any account lookup,
-        // fingerprinting, persistence or workflow start.  This makes a compromised/buggy edge
-        // unable to borrow a reservation belonging to another delegate or grant.
-        if (command.reservationId != reservationId ||
-            command.delegationId != snapshot.delegationId ||
-            command.actorId != snapshot.granteePartyId
-        ) {
-            return DelegatedDomesticPaymentResult.ReservationMismatch(
-                "Delegated payment headers do not match the reserved delegation tuple",
-            )
-        }
         val normalizedCommand = DomesticPaymentRequestFingerprint.normalize(command)
         val debtorIban = CzechDomesticIban.fromAccountNumber(
             accountNumber = normalizedCommand.debtorAccountNumber,

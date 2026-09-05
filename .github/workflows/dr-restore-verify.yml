@@ -17,6 +17,9 @@
 name: DR restore verify
 
 on:
+  schedule:
+    # Quarterly: 14th of Jan/Apr/Jul/Oct, 03:23 UTC (bcp-policy.md cadence, #8347).
+    - cron: "23 3 14 1,4,7,10 *"
   workflow_dispatch:
     inputs:
       fiscal_year:
@@ -29,9 +32,10 @@ permissions:
 jobs:
   restore-verify:
     name: Restore ledger-db and verify integrity
-    # WIRING: change to the deploy-pool self-hosted label once it exists (kubectl + IRSA).
-    # Until then this runs on a hosted runner and self-skips at the gate below.
-    runs-on: ubuntu-latest
+    # openbank-dr (ADR-0277, #8388): scheduled-only lane, no IRSA, ClusterRole
+    # openbank-dr (gitops components/platform/dr-runner-rbac.yaml) covers exactly
+    # the verbs below. The gate step stays: it now verifies the RBAC live.
+    runs-on: openbank-dr
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,8 +51,9 @@ jobs:
       - name: Gate on cluster access
         run: |
           set -euo pipefail
-          if command -v kubectl >/dev/null 2>&1 && kubectl auth can-i create namespace >/dev/null 2>&1; then
-            echo "::notice::Cluster access confirmed — proceeding with the restore."
+          if command -v kubectl >/dev/null 2>&1 && kubectl auth can-i create namespace >/dev/null 2>&1 \
+             && kubectl auth can-i get rollouts.argoproj.io -n ledger >/dev/null 2>&1; then
+            echo "::notice::Cluster access confirmed (namespaces + ledger rollouts) — proceeding with the restore."
             exit 0
           fi
           echo "::error::NOT A DR DRILL: no cluster access (kubectl/IRSA) on this runner, so nothing was restored and nothing was verified. This workflow needs a deploy-pool self-hosted runner that does not exist yet, and its restore step is still a WIRING-INCOMPLETE stub. See docs/bcp/automated-dr-restore.md; do not record this run as DR evidence."
@@ -71,10 +76,10 @@ jobs:
           kubectl create namespace "$NS"
           RESTORE_START=$(date -u +%s)
 
-          # Manifest templates: openbank-infra/gitops/dr-restore-templates/ (#4757). The
-          # remaining wiring item is the runner label above (`runs-on: ubuntu-latest`
-          # never reaches this far — the gate step exits first), which is an
-          # infrastructure-provisioning decision, not something this step can supply.
+          # Manifest templates: openbank-infra/gitops/dr-restore-templates/ (#4757).
+          # The runner wiring that this comment used to name as the remaining item
+          # landed in #8388 (ADR-0277): this job runs on openbank-dr, and the gate
+          # step above proves the RBAC live on every run.
           TEMPLATES="openbank-infra/gitops/dr-restore-templates"
           IMAGE="$(kubectl get rollout ledger-service -n ledger \
             -o jsonpath='{.spec.template.spec.containers[0].image}')"

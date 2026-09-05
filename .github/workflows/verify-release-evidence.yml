@@ -49,18 +49,38 @@ jobs:
       - name: Resolve tag
         env:
           REQUESTED: ${{ inputs.tag }}
+          # Grace window (issue #6729): a scheduled run must not verify a JUST-CUT
+          # release. Evidence assets (SBOM/SLSA/cosign signatures) attach
+          # asynchronously after the release object exists — measured 2026-08-24:
+          # admin-ui-v0.189.3 had ZERO assets at +4m35s and nine minutes later. The
+          # Monday 08:00 cron racing a release-please cut then red-gates a
+          # regulator-facing control on a release whose evidence simply has not
+          # landed yet. A release older than the window that STILL has no assets is
+          # a real finding and still fails below.
+          GRACE_MINUTES: 120
         run: |
           set -euo pipefail
           tag="${REQUESTED:-}"
-          if [ -z "$tag" ]; then
+          if [ -n "$tag" ]; then
+            # An explicitly requested tag is verified exactly as asked — the operator
+            # owns the timing then.
+            echo "::notice::explicit tag requested; grace window does not apply"
+          else
             tag="$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" \
-              | jq -r '.tag_name // empty')"
-          fi
-          if [ -z "$tag" ]; then
-            echo "::error::could not resolve a release tag to verify (no input, and the repo reported no latest release)"
-            exit 1
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=20" \
+              | jq -r --argjson grace "${GRACE_MINUTES}" '
+                  (now - ($grace * 60)) as $cutoff
+                  | [ .[] | select(.draft | not)
+                      | select((.created_at | fromdateiso8601) < $cutoff) ]
+                  | (sort_by(.created_at) | reverse | .[0].tag_name) // empty')"
+            if [ -z "$tag" ]; then
+              # Every recent release is inside the grace window. That is a scheduling
+              # coincidence, not an evidence failure — say so and pass; next week's
+              # cron verifies them once they are outside it.
+              echo "::notice::all recent releases are younger than the ${GRACE_MINUTES}m grace window (#6729); nothing verified this run, nothing claimed either"
+              exit 0
+            fi
           fi
           echo "TAG=${tag}" >> "$GITHUB_ENV"
           echo "::notice::verifying evidence bundle for ${tag}"

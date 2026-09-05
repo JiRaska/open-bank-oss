@@ -3,7 +3,7 @@
 # secret is projected into `notifications` via ExternalSecret (kafka-messaging-certs
 # ClusterSecretStore). The cluster-CA truststore is shared and also projected.
 #
-# ACLs: notification-service reads from three topics using three separate consumer
+# ACLs: notification-service reads from four topics using four separate consumer
 # groups, and — since ADR-0239 D2 — WRITES delivery outcomes onto one topic. That
 # Write grant is the whole of its producer surface; it is not a general producer.
 ---
@@ -46,6 +46,23 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # #8432: KYC outcome notifications (KycNotificationConsumer) — a further consumer of the
+      # topic kyc-service already publishes via its transactional outbox.
+      - resource:
+          type: topic
+          name: openbank.kyc.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # #8432: SmallRye dead-letter topic for the kyc-events-in channel (failure-strategy:
+      # dead-letter-queue, set in application.yaml in nested form). Without Write here the DLQ
+      # send itself fails and the consumer wedges on the very failure it was meant to park.
+      - resource:
+          type: topic
+          name: openbank.kyc.events.notification.dlq
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       # ADR-0232 delegated-access lifecycle notifications (DelegationNotificationConsumer) — a
       # second consumer of the topic account-service and audit-service already read.
       - resource:
@@ -74,6 +91,22 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # #8432: CONSENT_GRANTED / CONSENT_REVOKED (ConsentNotificationConsumer) — a third reader
+      # of the topic campaign-service and audit-service already consume.
+      - resource:
+          type: topic
+          name: openbank.consent.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # #8432: without Write here the DLQ send itself fails and the consumer wedges on the very
+      # failure it was meant to park — the same lockout class as the two DLQ grants above.
+      - resource:
+          type: topic
+          name: openbank.consent.events.notification.dlq
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       - resource:
           type: group
           name: notification-service
@@ -88,7 +121,19 @@ spec:
         host: "*"
       - resource:
           type: group
+          name: notification-service-kyc
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
           name: notification-service-delegation
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: notification-service-consent
           patternType: literal
         operations: [Read]
         host: "*"

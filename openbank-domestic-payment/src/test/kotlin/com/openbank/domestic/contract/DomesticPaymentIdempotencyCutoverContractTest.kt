@@ -11,7 +11,9 @@ import java.io.File
 class DomesticPaymentIdempotencyCutoverContractTest {
     private val application = File("src/main/resources/application.yaml").readText()
     private val rollout = File("../openbank-infra/gitops/components/payments/payments-services.yaml").readText()
-    private val runbook = File("../docs/runbooks/svc-domestic-payment.md").readText()
+
+    // The runbook is generated; the service-owned operations source is where durable controls live.
+    private val operations = File("src/main/resources/docs/05-operations.en.md").readText()
 
     @Test
     fun `no compatibility flag can make a null fingerprint authoritative`() {
@@ -21,7 +23,7 @@ class DomesticPaymentIdempotencyCutoverContractTest {
 
     @Test
     fun `runbook requires a drained blue-green switch and reconciliation for legacy ambiguity`() {
-        val prose = runbook.replace(Regex("\\s+"), " ")
+        val prose = operations.replace(Regex("\\s+"), " ")
         assertThat(prose).contains(
             "Use a blue/green switch, not a mixed-version rolling interval",
             "currently 15 seconds",

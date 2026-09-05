@@ -27,7 +27,6 @@ import com.openbank.sca.application.port.out.OtpStore
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
-import com.openbank.sca.application.port.out.ScaOutboxRepository
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.DeviceDecisionType
 import com.openbank.sca.domain.model.DynamicLinkingData
@@ -43,6 +42,34 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
+
+/**
+ * A caller asked for an SCA method this deployment cannot deliver (#8432).
+ *
+ * Today that is only [ScaMethod.TOTP]: `initiate` generated a code and stored it, and then sent it
+ * absolutely nowhere — there is no transport for it. The challenge that came back could never be
+ * satisfied by the customer, so whatever it was authorising (a payment, a consent, a card action)
+ * simply could not proceed. Refusing the request is the honest answer; silently minting a dead
+ * challenge is not.
+ *
+ * This is NOT an authentication bypass and was never one: `ScaChallenge.fail` caps attempts, so an
+ * undelivered code could not be brute-forced within the challenge's life. It is a
+ * denial-of-authorisation path, reachable by anyone who can call `initiate`, because
+ * `preferredMethod` was taken from the request verbatim.
+ */
+class ScaMethodNotDeliverableException(method: ScaMethod) :
+    RuntimeException("SCA method $method cannot be delivered by this deployment")
+
+/**
+ * SCA methods this deployment has no transport for.
+ *
+ * `TOTP` is the whole of it. `PUSH_NOTIFICATION` and `BIOMETRIC` reach the customer's enrolled
+ * device through notification-service; there is no SMS transport in the fleet, and delivering a
+ * one-time code by push to the very device making the request is not a second factor. Adding real
+ * OTP delivery is a security decision, not a wiring job (#8432) — until it is made, the method
+ * stays refused rather than half-working.
+ */
+private val UNDELIVERABLE_METHODS = setOf(ScaMethod.TOTP)
 
 class ScaChallengeNotFoundException(id: UUID) : RuntimeException("SCA challenge not found: $id")
 class ScaChallengeExpiredException(id: UUID) : RuntimeException("SCA challenge expired: $id")
@@ -75,7 +102,6 @@ class ScaService(
     private val enrolledDeviceRepository: EnrolledDeviceRepository,
     private val decisionStore: ScaDecisionStore,
     private val assertionVerifier: DeviceAssertionVerifier,
-    private val outboxRepository: ScaOutboxRepository,
     private val objectMapper: ObjectMapper,
     private val metrics: DomainMetrics,
     @ConfigProperty(name = "openbank.sca.idempotency-ttl-seconds", defaultValue = "300")
@@ -99,7 +125,6 @@ class ScaService(
         enrolledDeviceRepository: EnrolledDeviceRepository,
         decisionStore: ScaDecisionStore,
         assertionVerifier: DeviceAssertionVerifier,
-        outboxRepository: ScaOutboxRepository,
         objectMapper: ObjectMapper,
         metrics: DomainMetrics,
         @ConfigProperty(name = "openbank.sca.idempotency-ttl-seconds", defaultValue = "300")
@@ -113,7 +138,6 @@ class ScaService(
         enrolledDeviceRepository,
         decisionStore,
         assertionVerifier,
-        outboxRepository,
         objectMapper,
         metrics,
         idempotencyTtlSeconds,
@@ -122,7 +146,11 @@ class ScaService(
 
     override suspend fun initiate(command: InitiateScaCommand): ScaChallenge {
         val now = OffsetDateTime.now(clock)
+        // `preferredMethod` comes straight off the request body, so the caller — not this service —
+        // chose it. Refuse anything with no delivery path before a challenge exists, rather than
+        // saving one nobody can ever complete (#8432).
         val method = command.preferredMethod ?: ScaMethod.PUSH_NOTIFICATION
+        if (method in UNDELIVERABLE_METHODS) throw ScaMethodNotDeliverableException(method)
         val ttlSeconds = 300L
         val idempotencyKey = buildIdempotencyKey(command, method)
 
@@ -245,14 +273,45 @@ class ScaService(
             throw CredentialAlreadyEnrolledException(command.credentialId)
         }
         val now = OffsetDateTime.now(clock)
-        val device = try {
-            enrolledDeviceRepository.save(
-                EnrolledDevice(
-                    partyId = command.partyId,
-                    credentialId = command.credentialId,
-                    publicKeySpkiB64 = command.publicKeySpkiB64,
-                    algorithm = command.algorithm,
-                    createdAt = now,
+        val device = EnrolledDevice(
+            partyId = command.partyId,
+            credentialId = command.credentialId,
+            publicKeySpkiB64 = command.publicKeySpkiB64,
+            algorithm = command.algorithm,
+            createdAt = now,
+        )
+        // The device row and its DEVICE_ENROLLED event commit in ONE transaction (#8679). They
+        // used to be two — `enrolledDeviceRepository.save(...)` followed by
+        // `outboxRepository.save(...)`, each opening its own `Panache.withTransaction`, measured
+        // as xmin 751 vs 752 — so a crash in between enrolled the device and lost the event with
+        // nothing to retry it. This is sca's only outbox write.
+        return try {
+            enrolledDeviceRepository.saveWithOutbox(
+                device,
+                OutboxMessage(
+                    aggregateId = device.partyId,
+                    eventType = DEVICE_ENROLLED_EVENT_TYPE,
+                    payload = objectMapper.writeValueAsString(
+                        mapOf(
+                            // The discriminator MUST be in the payload body, not only in the outbox
+                            // column: every consumer of these topics receives the serialized payload
+                            // alone and switches on `eventType`. party-service and kyc-service both
+                            // embed it (PartyEvent.kt, KycEvent.kt); this publisher did not, so
+                            // onboarding-service's `parseScaEvent` read "" and fell to `else -> null`,
+                            // discarding the message on the quiet path (`?: return`, no log, no error).
+                            // Result: DEVICE_ENROLLED had never once been projected — 15 events
+                            // published and SENT, and every onboarding_records row still read
+                            // sca_enrolled=false / device_count=0, with 11 parties genuinely enrolled
+                            // (measured on the sandbox 2026-08-13, issue #4353).
+                            "eventType" to DEVICE_ENROLLED_EVENT_TYPE,
+                            "deviceId" to device.id.toString(),
+                            "partyId" to device.partyId.toString(),
+                            "credentialId" to device.credentialId,
+                            "algorithm" to device.algorithm.name,
+                            "occurredAt" to device.createdAt.toString(),
+                            "sourceService" to SOURCE_SERVICE,
+                        ),
+                    ),
                 ),
             )
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
@@ -260,34 +319,6 @@ class ScaService(
             if (e.causedByUniqueViolation()) throw CredentialAlreadyEnrolledException(command.credentialId)
             throw e
         }
-        outboxRepository.save(
-            OutboxMessage(
-                aggregateId = device.partyId,
-                eventType = DEVICE_ENROLLED_EVENT_TYPE,
-                payload = objectMapper.writeValueAsString(
-                    mapOf(
-                        // The discriminator MUST be in the payload body, not only in the outbox
-                        // column: every consumer of these topics receives the serialized payload
-                        // alone and switches on `eventType`. party-service and kyc-service both
-                        // embed it (PartyEvent.kt, KycEvent.kt); this publisher did not, so
-                        // onboarding-service's `parseScaEvent` read "" and fell to `else -> null`,
-                        // discarding the message on the quiet path (`?: return`, no log, no error).
-                        // Result: DEVICE_ENROLLED had never once been projected — 15 events
-                        // published and SENT, and every onboarding_records row still read
-                        // sca_enrolled=false / device_count=0, with 11 parties genuinely enrolled
-                        // (measured on the sandbox 2026-08-13, issue #4353).
-                        "eventType" to DEVICE_ENROLLED_EVENT_TYPE,
-                        "deviceId" to device.id.toString(),
-                        "partyId" to device.partyId.toString(),
-                        "credentialId" to device.credentialId,
-                        "algorithm" to device.algorithm.name,
-                        "occurredAt" to device.createdAt.toString(),
-                        "sourceService" to SOURCE_SERVICE,
-                    ),
-                ),
-            ),
-        )
-        return device
     }
 
     override suspend fun listDevices(query: ListDevicesQuery): List<EnrolledDevice> =

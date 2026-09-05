@@ -1674,4 +1674,156 @@ class CustomerEdgeResourceTest {
         assertThat(urlSlot.captured).contains("from=")
         assertThat(urlSlot.captured).contains("to=")
     }
+
+    // ── customer product catalogue (/products) ────────────────────────────────
+    // Every case here is a product the OPERATOR catalogue legitimately holds and the
+    // CUSTOMER must never see. The endpoint's whole job is that gap, so its tests are
+    // the negative ones.
+
+    private fun catalogueProduct(
+        id: UUID,
+        type: String = "SAVINGS",
+        status: String = "ACTIVE",
+        public: Boolean = true,
+        extra: String = "",
+    ): String = """{
+        "id":"$id", "code":"${type}_STANDARD", "name":"Product $type", "type":"$type",
+        "currency":"CZK", "status":"$status", "isPublic":$public, "fee":0.0,
+        "versionHistory":[{"version":"0.9.0"}], "eligibilitySegments":["ALL"]$extra
+    }"""
+
+    private fun offersFrom(upstream: UpstreamClient, party: UUID): com.fasterxml.jackson.databind.JsonNode {
+        val response = resourceFor(upstream, party).listProductOffers(null)
+        assertThat(response.status).isEqualTo(200)
+        return ObjectMapper().readTree(ObjectMapper().writeValueAsString(response.entity)).path("items")
+    }
+
+    @Test
+    fun `a draft product is not discoverable`() {
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns
+            Response.ok("[${catalogueProduct(UUID.randomUUID(), status = "DRAFT")}]").build()
+        assertThat(offersFrom(upstream, party)).isEmpty()
+    }
+
+    @Test
+    fun `a private product is not discoverable`() {
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns
+            Response.ok("[${catalogueProduct(UUID.randomUUID(), public = false)}]").build()
+        assertThat(offersFrom(upstream, party)).isEmpty()
+    }
+
+    @Test
+    fun `a withdrawn product is not discoverable`() {
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok(
+            "[${catalogueProduct(UUID.randomUUID(), extra = ""","validTo":"2020-01-01"""")}]",
+        ).build()
+        assertThat(offersFrom(upstream, party)).isEmpty()
+    }
+
+    @Test
+    fun `a future-dated product is not discoverable`() {
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok(
+            "[${catalogueProduct(UUID.randomUUID(), extra = ""","validFrom":"2999-01-01"""")}]",
+        ).build()
+        assertThat(offersFrom(upstream, party)).isEmpty()
+    }
+
+    @Test
+    fun `a regulated type outside the allow-list is not discoverable`() {
+        // MORTGAGE and CREDIT_CARD exist in the catalogue and each needs its own suitability
+        // journey. Surfacing one here would let the app offer it with no path to take it.
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok(
+            "[${catalogueProduct(UUID.randomUUID(), type = "MORTGAGE")}," +
+                "${catalogueProduct(UUID.randomUUID(), type = "CREDIT_CARD")}]",
+        ).build()
+        assertThat(offersFrom(upstream, party)).isEmpty()
+    }
+
+    @Test
+    fun `internal fields never cross the boundary`() {
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns
+            Response.ok("[${catalogueProduct(UUID.randomUUID())}]").build()
+        val offer = offersFrom(upstream, party).first()
+        assertThat(offer.has("versionHistory")).isFalse()
+        assertThat(offer.has("eligibilitySegments")).isFalse()
+        assertThat(offer.has("status")).isFalse()
+        assertThat(offer.has("isPublic")).isFalse()
+    }
+
+    @Test
+    fun `a term deposit reports its own fixed rate and term`() {
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok(
+            "[${catalogueProduct(
+                UUID.randomUUID(),
+                type = "TERM_DEPOSIT",
+                extra = ""","termDepositConfig":{"termMonths":12,"interestRateAnnual":4.8}""",
+            )}]",
+        ).build()
+        val offer = offersFrom(upstream, party).first()
+        assertThat(offer.path("annualRate").asDouble()).isEqualTo(4.8)
+        assertThat(offer.path("term").path("termMonths").asInt()).isEqualTo(12)
+    }
+
+    @Test
+    fun `savings keeps its tiers rather than being flattened to one rate`() {
+        // Savings prices by balance tier. Collapsing that into a single "from" number would be
+        // the app quoting a rate the bank never set for the customer's actual balance.
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok(
+            "[${catalogueProduct(
+                UUID.randomUUID(),
+                extra = ""","savingsConfig":{"interestTiers":[{"upTo":100000,"rateAnnual":3.5}]}""",
+            )}]",
+        ).build()
+        val offer = offersFrom(upstream, party).first()
+        assertThat(offer.path("savings").path("interestTiers")).hasSize(1)
+        assertThat(offer.has("annualRate")).isFalse()
+    }
+
+    @Test
+    fun `a current account carries no rate at all`() {
+        // Absent, not zero: 0 % is a price, "not priced" is not.
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns
+            Response.ok("[${catalogueProduct(UUID.randomUUID(), type = "CURRENT")}]").build()
+        val offer = offersFrom(upstream, party).first()
+        assertThat(offer.has("annualRate")).isFalse()
+        assertThat(offer.has("savings")).isFalse()
+        // The monthly fee IS copied even at zero — "no fee, forever" is the product's pitch.
+        assertThat(offer.path("fee").asDouble()).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `an unknown type is refused rather than silently listing everything`() {
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val response = resourceFor(upstream, party).listProductOffers("MORTGAGE")
+        assertThat(response.status).isEqualTo(400)
+        verify(exactly = 0) { upstream.get(any(), any()) }
+    }
+
+    @Test
+    fun `a catalogue outage is a 503, never an empty catalogue`() {
+        // An empty list reads as "we offer nothing", which is a claim about the bank.
+        val party = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.status(500).build()
+        assertThat(resourceFor(upstream, party).listProductOffers(null).status).isEqualTo(503)
+    }
 }

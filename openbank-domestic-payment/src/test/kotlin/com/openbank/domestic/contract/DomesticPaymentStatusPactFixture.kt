@@ -18,7 +18,11 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
 
-internal object DomesticPaymentStatusPactFixture {
+// Not `internal`: `providerPactTest` (build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts) is a
+// separate Kotlin compilation from `test` that pulls this file's directory in by source-set
+// inclusion, not by depending on test's compiled output — `internal` here is invisible from
+// *ProviderVerificationTest.kt even though both sit under src/test/kotlin (issue #4414).
+object DomesticPaymentStatusPactFixture {
     const val PROVIDER_STATE = "a delegated domestic payment has changed status"
     const val INTERACTION = "a delegated domestic payment status changed event"
 

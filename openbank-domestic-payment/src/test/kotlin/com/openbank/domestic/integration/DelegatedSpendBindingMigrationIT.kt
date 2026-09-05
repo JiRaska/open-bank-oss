@@ -287,10 +287,10 @@ class DelegatedSpendBindingMigrationIT {
         connection.prepareStatement(
             """
             INSERT INTO domestic_payments (
-                payment_id, idempotency_key, status, debtor_account_id, debtor_account_number,
+                id, payment_id, idempotency_key, status, debtor_account_id, debtor_account_number,
                 debtor_bank_code, debtor_name, creditor_account_number, creditor_bank_code,
                 creditor_name, amount, currency, priority, end_to_end_id, created_at, updated_at
-            ) VALUES (?, ?, 'RECEIVED', ?, '1234567890', '0800', 'Owner binding control',
+            ) VALUES (nextval('domestic_payments_seq'), ?, ?, 'RECEIVED', ?, '1234567890', '0800', 'Owner binding control',
                 '0987654321', '2010', 'Migration test payee', 10.00, 'CZK', 'STANDARD', ?, NOW(), NOW())
             """.trimIndent(),
         ).use { statement ->
@@ -314,11 +314,11 @@ class DelegatedSpendBindingMigrationIT {
         connection.prepareStatement(
             """
             INSERT INTO domestic_payments (
-                payment_id, idempotency_key, status, debtor_account_id, debtor_account_number,
+                id, payment_id, idempotency_key, status, debtor_account_id, debtor_account_number,
                 debtor_bank_code, debtor_name, creditor_account_number, creditor_bank_code,
                 creditor_name, amount, currency, priority, end_to_end_id, created_at, updated_at,
                 initiated_by_party_id, delegation_id, reservation_id
-            ) VALUES (?, ?, 'RECEIVED', ?, '1234567890', '0800', 'Delegation binding test',
+            ) VALUES (nextval('domestic_payments_seq'), ?, ?, 'RECEIVED', ?, '1234567890', '0800', 'Delegation binding test',
                 '0987654321', '2010', 'Migration test payee', ?, 'CZK', 'STANDARD', ?, NOW(), NOW(),
                 ?, ?, ?)
             """.trimIndent(),

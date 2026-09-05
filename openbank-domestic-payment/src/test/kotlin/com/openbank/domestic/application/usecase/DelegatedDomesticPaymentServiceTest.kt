@@ -7,6 +7,7 @@ package com.openbank.domestic.application.usecase
 import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.application.port.`in`.DelegatedDomesticPaymentResult
 import com.openbank.domestic.application.port.out.AccountLookupPort
+import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
 import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepository
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
@@ -14,12 +15,15 @@ import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DelegatedSpendReservationState
+import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
+import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import io.temporal.client.WorkflowClient
 import kotlinx.coroutines.runBlocking
@@ -60,17 +64,18 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `missing local projection returns the future 425 semantic without touching payment storage`() = runBlocking {
-        coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns null
+    fun `missing local projection returns the future 425 semantic without touching payment storage`(): Unit =
+        runBlocking {
+            coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns null
 
-        val result = service.createDelegatedPayment(RESERVATION_ID, command())
+            val result = service.createDelegatedPayment(RESERVATION_ID, command())
 
-        assertThat(result).isEqualTo(DelegatedDomesticPaymentResult.ReservationProjectionPending)
-        coVerify(exactly = 0) { paymentRepository.saveDelegated(any(), any(), any(), any()) }
-    }
+            assertThat(result).isEqualTo(DelegatedDomesticPaymentResult.ReservationProjectionPending)
+            coVerify(exactly = 0) { paymentRepository.saveDelegated(any(), any(), any(), any()) }
+        }
 
     @Test
-    fun `permanent absence tombstone returns the future 410 semantic`() = runBlocking {
+    fun `permanent absence tombstone returns the future 410 semantic`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.FINALIZED_ABSENT,
         )
@@ -82,7 +87,7 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `debtor coordinates resolving to another account fail closed without creation`() = runBlocking {
+    fun `debtor coordinates resolving to another account fail closed without creation`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.PENDING,
         )
@@ -98,7 +103,7 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `reserved account owned by another party fails closed without creation`() = runBlocking {
+    fun `reserved account owned by another party fails closed without creation`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.PENDING,
         )
@@ -113,7 +118,7 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `unavailable account authority is retryable and has no creation side effects`() = runBlocking {
+    fun `unavailable account authority is retryable and has no creation side effects`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.PENDING,
         )
@@ -127,7 +132,7 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `unavailable account owner authority is retryable and has no creation side effects`() = runBlocking {
+    fun `unavailable account owner authority is retryable and has no creation side effects`(): Unit = runBlocking {
         coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns binding(
             DelegatedSpendBindingState.PENDING,
         )
@@ -140,32 +145,49 @@ class DelegatedDomesticPaymentServiceTest {
     }
 
     @Test
-    fun `mismatched workload tuple fails closed before account lookup or payment creation`() = runBlocking {
-        val projected = binding(DelegatedSpendBindingState.PENDING)
-        coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns projected
-        val maliciousDelegation = UUID.randomUUID()
-        val maliciousReservation = UUID.randomUUID()
-        val maliciousActor = UUID.randomUUID()
-        val maliciousAccount = UUID.randomUUID()
+    fun `projection supplies trusted tuple and debit owner even when command attempts to override it`(): Unit =
+        runBlocking {
+            val projected = binding(DelegatedSpendBindingState.PENDING)
+            val capturedPayment = slot<DomesticPayment>()
+            val capturedDebitOwner = slot<UUID>()
+            coEvery { bindingRepository.findByReservationId(RESERVATION_ID) } returns projected
+            coEvery {
+                paymentRepository.saveDelegated(
+                    capture(capturedPayment),
+                    any(),
+                    any(),
+                    capture(capturedDebitOwner),
+                )
+            } answers {
+                val candidate = capturedPayment.captured
+                DelegatedPaymentSaveOutcome.Replayed(candidate.copy(id = UUID.randomUUID()))
+            }
+            val maliciousDelegation = UUID.randomUUID()
+            val maliciousReservation = UUID.randomUUID()
+            val maliciousActor = UUID.randomUUID()
+            val maliciousAccount = UUID.randomUUID()
 
-        val result = service.createDelegatedPayment(
-            RESERVATION_ID,
-            command().copy(
-                actorId = maliciousActor,
-                actorScope = "attacker-controlled",
-                delegationId = maliciousDelegation,
-                reservationId = maliciousReservation,
-                debtorAccountId = maliciousAccount,
-            ),
-        )
+            val result = service.createDelegatedPayment(
+                RESERVATION_ID,
+                command().copy(
+                    actorId = maliciousActor,
+                    actorScope = "attacker-controlled",
+                    delegationId = maliciousDelegation,
+                    reservationId = maliciousReservation,
+                    debtorAccountId = maliciousAccount,
+                ),
+            )
 
-        assertThat(result).isInstanceOfSatisfying(DelegatedDomesticPaymentResult.ReservationMismatch::class.java) {
-            assertThat(it.reason).contains("headers")
+            assertThat(result).isInstanceOf(DelegatedDomesticPaymentResult.Accepted::class.java)
+            assertThat(capturedPayment.captured.initiatedByPartyId).isEqualTo(GRANTEE_ID)
+            assertThat(capturedPayment.captured.delegationId).isEqualTo(DELEGATION_ID)
+            assertThat(capturedPayment.captured.reservationId).isEqualTo(RESERVATION_ID)
+            assertThat(capturedPayment.captured.debtorAccountId).isEqualTo(ACCOUNT_ID)
+            assertThat(capturedDebitOwner.captured).isEqualTo(GRANTOR_ID)
+            assertThat(capturedPayment.captured.transferScope).isEqualTo(DomesticTransferScope.INTERNAL_CLIENT)
+            coVerify(exactly = 1) { accountLookup.findAccountIdByIban(DEBTOR_IBAN) }
+            coVerify(exactly = 1) { accountLookup.findPartyByAccountId(ACCOUNT_ID) }
         }
-        coVerify(exactly = 0) { accountLookup.findAccountIdByIban(any()) }
-        coVerify(exactly = 0) { accountLookup.findPartyByAccountId(any()) }
-        assertNoCreationSideEffects()
-    }
 
     private fun assertNoCreationSideEffects() {
         coVerify(exactly = 0) { paymentRepository.findByIdempotencyKey(any()) }
@@ -191,9 +213,6 @@ class DelegatedDomesticPaymentServiceTest {
         priority = DomesticPaymentPriority.STANDARD,
         statementLabel = null,
         endToEndId = "DOM-DELEGATED-TEST",
-        actorId = GRANTEE_ID,
-        delegationId = DELEGATION_ID,
-        reservationId = RESERVATION_ID,
     )
 
     private fun binding(state: DelegatedSpendBindingState) = DelegatedSpendBinding(

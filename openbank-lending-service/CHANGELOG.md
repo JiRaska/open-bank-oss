@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.1...lending-service-v0.32.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **lending:** rename worker switch to openbank.lending.worker.enabled ([#8374](https://github.com/JiRaska/open-bank-oss/issues/8374)) ([1bd8471](https://github.com/JiRaska/open-bank-oss/commit/1bd84712836abf92ba0d73e41f3fab163028a690))
+
 ## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.0...lending-service-v0.32.1) (2026-09-01)
 
 

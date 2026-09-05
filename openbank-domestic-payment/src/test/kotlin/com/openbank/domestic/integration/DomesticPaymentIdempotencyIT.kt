@@ -202,11 +202,11 @@ class DomesticPaymentIdempotencyIT {
             connection.prepareStatement(
                 """
                 INSERT INTO domestic_payments (
-                    payment_id, idempotency_key, status, debtor_account_id, debtor_account_number,
+                    id, payment_id, idempotency_key, status, debtor_account_id, debtor_account_number,
                     debtor_bank_code, debtor_name, creditor_account_number, creditor_bank_code,
                     creditor_name, amount, currency, priority, transfer_scope, end_to_end_id,
                     created_at, updated_at, request_fingerprint
-                ) VALUES (?, ?, 'RECEIVED', ?, '1234567890', '0800', 'Alice Example',
+                ) VALUES (nextval('domestic_payments_seq'), ?, ?, 'RECEIVED', ?, '1234567890', '0800', 'Alice Example',
                     '9876543210', '0100', 'Brno Utility', 10.00, 'CZK', 'STANDARD', 'EXTERNAL',
                     'E2E-IDEMPOTENCY-IT', NOW(), NOW(), NULL)
                 """.trimIndent(),

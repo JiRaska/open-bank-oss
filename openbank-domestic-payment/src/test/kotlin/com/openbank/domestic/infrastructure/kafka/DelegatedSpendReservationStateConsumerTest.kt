@@ -23,7 +23,7 @@ class DelegatedSpendReservationStateConsumerTest {
     private val consumer = DelegatedSpendReservationStateConsumer(ObjectMapper().registerKotlinModule(), useCase)
 
     @Test
-    fun `terminal revision applies even when producer clocks make its times appear earlier`() = runBlocking {
+    fun `terminal revision applies even when producer clocks make its times appear earlier`(): Unit = runBlocking {
         coEvery { useCase.apply(any()) } returns ReservationProjectionApplyResult.APPLIED
 
         consumer.consume(
@@ -50,7 +50,7 @@ class DelegatedSpendReservationStateConsumerTest {
     }
 
     @Test
-    fun `producer offset and legacy nanoseconds are canonicalized to microsecond instants`() = runBlocking {
+    fun `producer offset and legacy nanoseconds are canonicalized to microsecond instants`(): Unit = runBlocking {
         coEvery { useCase.apply(any()) } returns ReservationProjectionApplyResult.APPLIED
 
         consumer.consume(

@@ -39,12 +39,19 @@ test('keeps quick search truthful through an outage and retry', async ({ page })
     })
   })
 
-  const sessionReady = page.waitForResponse(response =>
-    response.url().endsWith('/api/auth/session') && response.ok(),
-  )
   await page.goto('/dashboard')
-  await sessionReady
-  await page.keyboard.press('Control+K')
+  // A session response can beat Header's passive-effect listener. Missed probes have no
+  // side effect; the first cancelled event is handled and toggles the palette exactly once.
+  await expect.poll(() => page.evaluate(() => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'k',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  })).toBe(true)
 
   const dialog = page.getByRole('dialog', { name: /Rychlé hledání|Quick search/ })
   const input = dialog.getByRole('textbox')

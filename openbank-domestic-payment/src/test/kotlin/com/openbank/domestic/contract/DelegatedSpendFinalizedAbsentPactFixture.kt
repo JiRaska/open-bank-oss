@@ -16,7 +16,11 @@ import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
-internal object DelegatedSpendFinalizedAbsentPactFixture {
+// Not `internal`: `providerPactTest` (build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts) is a
+// separate Kotlin compilation from `test` that pulls this file's directory in by source-set
+// inclusion, not by depending on test's compiled output — `internal` here is invisible from
+// *ProviderVerificationTest.kt even though both sit under src/test/kotlin (issue #4414).
+object DelegatedSpendFinalizedAbsentPactFixture {
     const val PROVIDER_STATE = "a delegated spend reservation is pending without a domestic payment"
     const val INTERACTION = "a delegated spend reservation finalized absent event"
 
@@ -44,7 +48,7 @@ internal object DelegatedSpendFinalizedAbsentPactFixture {
             reservationVersion = DelegatedSpendReservationSnapshot.RESERVED_VERSION,
             schemaVersion = DelegatedSpendReservationSnapshot.SCHEMA_VERSION,
             aggregateType = DelegatedSpendReservationSnapshot.AGGREGATE_TYPE,
-            sourceService = DelegatedSpendReservationSnapshot.SOURCE_SERVICE,
+            sourceService = DelegatedSpendReservationSnapshot.EXPECTED_SOURCE_SERVICE,
             createdAt = Instant.parse("2026-09-01T12:00:00Z"),
             settledAt = null,
             occurredAt = Instant.parse("2026-09-01T12:00:00Z"),

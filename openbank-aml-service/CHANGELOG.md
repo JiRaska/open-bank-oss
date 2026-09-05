@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.0...aml-service-v0.10.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **aml:** toCreatedEvent requires the caller's clock, not an EPOCH default ([#8379](https://github.com/JiRaska/open-bank-oss/issues/8379)) ([01a46e8](https://github.com/JiRaska/open-bank-oss/commit/01a46e8543284b489a59be634a231ca45f786bd7)), closes [#8357](https://github.com/JiRaska/open-bank-oss/issues/8357)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.9.2...aml-service-v0.10.0) (2026-08-24)
 
 

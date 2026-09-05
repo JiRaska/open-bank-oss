@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.9.0...clearing-service-v0.9.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **clearing:** settle commits batch, items and outbox row in one transaction ([#8509](https://github.com/JiRaska/open-bank-oss/issues/8509)) ([#8621](https://github.com/JiRaska/open-bank-oss/issues/8621)) ([bae4b49](https://github.com/JiRaska/open-bank-oss/commit/bae4b498a37b78ab1f6ee38f49c8e967a6bd2547))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.8.1...clearing-service-v0.9.0) (2026-08-24)
 
 

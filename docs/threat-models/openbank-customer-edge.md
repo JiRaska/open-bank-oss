@@ -174,6 +174,33 @@ Trust boundaries:
   configured principal — see §9 of the `openbank-lending-service` threat model for why the role gate
   cannot be that control.
 
+- **2026-09-03** — **A delegated payment reserves against the grant's cumulative ceilings before it
+  moves** (ADR-0249 D3). `POST /customer/v1/domestic-payments` now calls
+  `POST /api/v1/delegations/{id}/reservations` on delegation-service before initiating, confirming
+  on acceptance and releasing on every failure branch. Risk class = **elevation of privilege**: the
+  per-transaction ceiling account-service already checked cannot see a second concurrent payment, so
+  before this two requests could each pass a check that neither passes together. Properties this
+  rests on: (a) reserve-then-confirm, never count-after — a RESERVED row consumes headroom while the
+  payment is in flight; (b) a reservation that cannot be ESTABLISHED at all is a refusal, so an
+  unreachable delegation-service stops the payment rather than waving it through; (c) the
+  reservation carries the PAYMENT's idempotency key, so a rail replay takes the headroom once, and
+  when the caller supplied no key each attempt reserves separately — over-counting a retry rather
+  than under-counting a ceiling; (d) release runs on the SCA-refused and rail-refused branches, a
+  leaked reservation being a ceiling that silently shrinks; (e) an owner paying from their own
+  account reserves nothing, having no grant to count against. Named limit, stated rather than
+  implied: "confirmed" means the rail ACCEPTED the instruction, not that it settled in clearing, so
+  a payment accepted and later failed in clearing leaves the headroom consumed — over-counting, the
+  safe direction for a ceiling. The refusal answers `code: DELEGATED_SPEND_LIMIT_EXCEEDED` and does
+  not echo remaining headroom; the classified 409 stays in the audit trail.
+  In the same change `POST /customer/v1/delegations` stopped refusing `dailyLimit`/`monthlyLimit`.
+  That refusal existed because nothing counted cumulative spend, and once something did it became a
+  deadlock rather than a control: delegation-service REQUIRES a cumulative ceiling on any grant
+  carrying `ACCOUNT_INITIATE_PAYMENT` (ADR-0249 D5), so a payment-capable grant could not be created
+  through the customer channel at all — and `POST /customer/v1/cards/delegated`, which requires such
+  a grant to exist, was unreachable as a result. Rollback: revert the `reserveDelegatedSpend` call
+  site and restore `rejectUnenforcedCeilings`; the route returns to per-transaction ceilings only,
+  and payment-capable grants become unconstructible again.
+
 - **2026-08-03** — **A delegate can pay from a shared account** (ADR-0232 D3/D5, issue #2990
   AC9/AC10). `POST /customer/v1/domestic-payments` previously 403'd any account the JWT party did
   not own; it now falls back to account-service's

@@ -24,8 +24,9 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * **A legacy-only delegate cannot initiate a domestic payment, even if its response grows
- * complete-looking grant fields** (issue #2993, ADR-0232 D1/D3/D5).
+ * **A legacy-only delegate cannot initiate a domestic payment, and the ONLY reason is that
+ * account-service omits `grantorPartyId` from the `LEGACY_AUTHORIZATION` arm** (issue #2993,
+ * ADR-0232 D1/D3/D5).
  *
  * ### The property, stated exactly
  *
@@ -34,15 +35,24 @@ import java.util.concurrent.atomic.AtomicInteger
  * the money path: nothing back-fills that store, nothing writes through to it, nothing reconciles
  * it, and a revocation in delegation-service does not close a legacy row.
  *
- * It is not one because `resolveDebitAuthority` requires the complete authority tuple:
- * `authorized=true`, `outcome=DELEGATED`, a UUID `delegationId`, and a UUID `grantorPartyId`.
- * The outcome discriminator is load-bearing: a tidy response-shape convergence must not turn the
- * un-reconciled legacy store into authority to reserve headroom or reach a payment rail.
+ * It is not one — because `resolveDebitAuthority` refuses on
+ * `decision?.authorized != true || grantor == null`, and the legacy arm carries no grantor. The
+ * refusal is **incidental**: the edge needs a grantor id to re-fetch the account as its owner
+ * (account-service's `X-Customer-Party-Id` guard is an ownership guard and 404s a delegate). Nobody
+ * decided the legacy store must not carry a debit. That decision is simply absent, and until this
+ * test existed so was any check of it.
  *
  * ### What a maintainer must not do
  *
- * `the widening control` below supplies both UUID fields and proves that
- * `LEGACY_AUTHORIZATION` still refuses before spend reservation and domestic-payment.
+ * Making the two arms agree by **widening** — always emitting `grantorPartyId`, since it is the
+ * account owner either way — is a one-line, correct-looking change that silently puts an
+ * un-reconciled store on the money path. `theWideningControl` below measures exactly that: the
+ * same request, with the field present, succeeds and reaches the payment rail. That test is the
+ * evidence, not a warning in a comment.
+ *
+ * The drift between the arms is the safer state. Converge them by narrowing (stop answering
+ * `authorized: true` for the legacy arm) or after the ADR-0232 D1 dual-run exists — never by
+ * adding the field.
  *
  * ### Why this drives the real route
  *
@@ -91,7 +101,6 @@ class LegacyDelegationArmRefusedIT {
             body(org.hamcrest.Matchers.containsString("does not belong to caller"))
         }
 
-        assertThat(StubUpstreams.hits(RESERVATIONS_PATH)).isZero()
         assertThat(StubUpstreams.hits(PAYMENTS_PATH))
             .describedAs("a legacy-only delegate must not reach the payment rail")
             .isZero()
@@ -102,8 +111,7 @@ class LegacyDelegationArmRefusedIT {
     /**
      * Without this the test above passes against a harness that 403s everything — a broken stub, a
      * missing SCA consume, a route that is not served. It proves the fixture can produce a
-     * successful delegated payment, including the required reservation hop, so the 403 above is
-     * attributable to the authority discriminator rather than a broken fixture.
+     * successful delegated payment, so the 403 above is attributable to the missing grantor.
      */
     @Test
     fun `control - a delegated grant with a grantor reaches the payment rail`() {
@@ -120,16 +128,23 @@ class LegacyDelegationArmRefusedIT {
             statusCode(201)
         }
 
-        assertThat(StubUpstreams.hits(RESERVATIONS_PATH)).isEqualTo(1)
         assertThat(StubUpstreams.hits(PAYMENTS_PATH)).isEqualTo(1)
     }
 
     /**
-     * A complete-looking legacy response is still not delegation evidence. This is the regression
-     * that prevents a response-shape tidy-up from bypassing the outcome discriminator.
+     * The measurement behind this whole file: the legacy arm's verdict, unchanged, with
+     * `grantorPartyId` added — i.e. the tidy-up a maintainer would reach for to make the two arms
+     * agree. The payment **succeeds**.
+     *
+     * Read it as the cost of that one line, not as desired behaviour: `outcome` is still
+     * `LEGACY_AUTHORIZATION`, so this is the un-reconciled store moving money. It is also what
+     * falsifies the two tests above — they distinguish the arms by the field, not by luck.
+     *
+     * If a change makes this assertion fail, the widening has already happened somewhere else and
+     * the first test in this class is the one to trust.
      */
     @Test
-    fun `the widening control - a legacy arm carrying ids still cannot reserve or move money`() {
+    fun `the widening control - a legacy arm carrying a grantor would move money`() {
         stubDecision(WIDENED_LEGACY_ARM)
 
         Given {
@@ -140,13 +155,12 @@ class LegacyDelegationArmRefusedIT {
         } When {
             post("/customer/v1/domestic-payments")
         } Then {
-            statusCode(403)
+            statusCode(201)
         }
 
-        assertThat(StubUpstreams.hits(RESERVATIONS_PATH)).isZero()
         assertThat(StubUpstreams.hits(PAYMENTS_PATH))
-            .describedAs("only an explicit DELEGATED outcome may reach the payment rail")
-            .isZero()
+            .describedAs("the absent grantorPartyId is the ONLY thing refusing the legacy arm today")
+            .isEqualTo(1)
     }
 
     // ── fixtures ───────────────────────────────────────────────────────────────────────────
@@ -168,15 +182,15 @@ class LegacyDelegationArmRefusedIT {
         StubUpstreams.stub("/api/v1/parties/$GRANTOR_PARTY") { 200 to """{"legalName":"Grantor Name"}""" }
         StubUpstreams.stub("/api/v1/parties/$DELEGATE_PARTY") { 200 to """{"legalName":"Delegate Name"}""" }
         StubUpstreams.stub("/api/v1/sca/challenges/$SCA_ID/consume") { 200 to """{"status":"CONSUMED"}""" }
-        StubUpstreams.stub(RESERVATIONS_PATH) {
-            201 to
-                """
-                    {"reservationId":"$RESERVATION_ID","delegationId":"$GRANT_ID",
-                     "amount":{"amount":1500.00,"currency":"CZK"},"state":"RESERVED",
-                     "createdAt":"2026-09-01T12:00:00Z","settledAt":null}
-                """.trimIndent()
-        }
         StubUpstreams.stub(PAYMENTS_PATH) { 201 to """{"id":"$PAYMENT_ID","status":"RECEIVED"}""" }
+        // ADR-0249 D3: the delegated path reserves cumulative headroom before it pays, and a
+        // reservation it cannot establish is a refusal. Without these three the control below
+        // 403s for the right reason but the wrong subject.
+        StubUpstreams.stub("/api/v1/delegations/$GRANT_ID/reservations") {
+            201 to """{"reservationId":"$RESERVATION_ID","delegationId":"$GRANT_ID"}"""
+        }
+        StubUpstreams.stub("/api/v1/delegations/$GRANT_ID/reservations/$RESERVATION_ID/confirm") { 200 to "{}" }
+        StubUpstreams.stub("/api/v1/delegations/$GRANT_ID/reservations/$RESERVATION_ID/release") { 200 to "{}" }
     }
 
     private fun stubDecision(body: String) =
@@ -222,10 +236,12 @@ class LegacyDelegationArmRefusedIT {
                 "openbank.upstream.token-url" to base,
                 "openbank.edge.account-service-url" to base,
                 "openbank.edge.domestic-payment-service-url" to base,
-                "openbank.edge.delegation-service-url" to base,
-                "openbank.delegation.spend-reservations-enabled" to "true",
                 "openbank.edge.sca-service-url" to base,
                 "openbank.edge.party-service-url" to base,
+                // The delegated path reserves against delegation-service before paying (ADR-0249
+                // D3); without this the reservation cannot be established and every delegated
+                // payment here 403s.
+                "openbank.edge.delegation-service-url" to base,
             )
         }
 
@@ -264,11 +280,10 @@ class LegacyDelegationArmRefusedIT {
     private companion object {
         const val ACCOUNT_PATH = "/api/v1/accounts/$ACCOUNT_ID"
         const val PAYMENTS_PATH = "/api/v1/domestic-payments"
-        const val RESERVATIONS_PATH = "/api/v1/delegations/$GRANT_ID/reservations"
         const val OWNER_IBAN = "CZ6508000000192000145399"
         const val SCA_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         const val PAYMENT_ID = "99999999-8888-7777-6666-555555555555"
-        const val RESERVATION_ID = "99999999-8888-4777-8666-555555555554"
+        const val RESERVATION_ID = "11111111-2222-3333-4444-555555555555"
 
         /** What account-service answers today for an un-reconciled legacy row. No grantor. */
         const val LEGACY_ARM = """{"authorized":true,"outcome":"LEGACY_AUTHORIZATION"}"""
@@ -279,8 +294,7 @@ class LegacyDelegationArmRefusedIT {
 
         /** The one-line tidy-up this file exists to prevent. Not a supported response shape. */
         const val WIDENED_LEGACY_ARM =
-            """{"authorized":true,"outcome":"LEGACY_AUTHORIZATION","delegationId":"$GRANT_ID",""" +
-                """"grantorPartyId":"$GRANTOR_PARTY"}"""
+            """{"authorized":true,"outcome":"LEGACY_AUTHORIZATION","grantorPartyId":"$GRANTOR_PARTY"}"""
     }
 }
 
