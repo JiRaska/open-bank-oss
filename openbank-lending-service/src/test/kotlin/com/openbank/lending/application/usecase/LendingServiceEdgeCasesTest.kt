@@ -466,6 +466,7 @@ class LendingServiceEdgeCasesTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = eur("12000.00"),
+                modelVersion = "test-model-v1",
             ),
         )
         every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())
@@ -493,6 +494,7 @@ class LendingServiceEdgeCasesTest {
                 pdLifetime = BigDecimal("0.20"),
                 lgd = BigDecimal("0.45"),
                 exposureAtDefault = Money.zero("EUR"),
+                modelVersion = "test-model-v1",
             ),
         )
         every { collateral.findByLoan(loanId) } returns Uni.createFrom().item(emptyList())

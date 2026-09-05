@@ -15,6 +15,17 @@ make two independently verifiable commitments:
 This deliberately scopes itself to the shared Panache outbox.  Agent audit rows and other bespoke
 tables are not instances of that contract, and treating their similarly named tables as evidence
 would turn an unrelated persistence mechanism into a false pass.
+
+The corpus is derived from the ``PanacheOutboxEntity`` declarations themselves, over every
+``openbank-*`` module.  It used to be globbed as ``openbank-*-service``, which is a naming
+convention rather than the contract: ``openbank-sepa-payment``,
+``openbank-domestic-payment`` and ``openbank-case-coordinator-agent`` each extend
+``PanacheOutboxEntity`` without carrying the ``-service`` suffix, and two of the three are
+money-path payment initiators.  Measured 2026-09-03 (#4348): deleting the taint migration *and*
+replacing the writer with ``synthetic = false`` in ``openbank-sepa-payment`` left this gate at
+``SUBJECTS=29`` and exit 0, while its own ``service_findings()`` reported both defects for that
+module.  A module-name glob is exactly the hand-shaped scope that reads as passing when it is
+short.
 """
 
 from __future__ import annotations
@@ -98,7 +109,9 @@ def service_findings(service: pathlib.Path) -> tuple[list[str], int]:
 def check(root: pathlib.Path) -> tuple[list[str], int]:
     findings: list[str] = []
     subjects = 0
-    for service in sorted(root.glob("openbank-*-service")):
+    for service in sorted(root.glob("openbank-*")):
+        if not service.is_dir():
+            continue
         service_findings_result, entity_count = service_findings(service)
         findings.extend(service_findings_result)
         subjects += entity_count
@@ -113,12 +126,12 @@ def write(root: pathlib.Path, rel: str, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def fixture(migration: str, writer: str) -> tuple[list[str], int]:
+def fixture(migration: str, writer: str, module: str = "openbank-demo-service") -> tuple[list[str], int]:
     with tempfile.TemporaryDirectory() as temp:
         root = pathlib.Path(temp)
-        write(root, "openbank-demo-service/src/main/kotlin/Outbox.kt", "class DemoOutboxEntity : PanacheOutboxEntity()\n" + writer)
+        write(root, f"{module}/src/main/kotlin/Outbox.kt", "class DemoOutboxEntity : PanacheOutboxEntity()\n" + writer)
         if migration:
-            write(root, "openbank-demo-service/src/main/resources/db/migration/V1__synthetic_outbox_taint.sql", migration)
+            write(root, f"{module}/src/main/resources/db/migration/V1__synthetic_outbox_taint.sql", migration)
         return check(root)
 
 
@@ -135,7 +148,28 @@ def self_test() -> int:
         "string mapping does not count": (valid_migration, "fun map(message: OutboxMessage) { val description = \"synthetic = message.synthetic\"; synthetic = false }", True),
         "empty shared-outbox corpus fails closed": ("", "class AgentAuditOutbox { }", True),
     }
+    # The corpus must follow PanacheOutboxEntity, not the "-service" naming convention. Both
+    # polarities are asserted: a module without the suffix must be reachable (red when broken) and
+    # must not be flagged when correct — otherwise widening the glob would only move the blind spot.
+    suffixless = {
+        "module without -service suffix is in scope when broken": (
+            "",
+            "fun OutboxMessage.toEntity() { synthetic = synthetic }",
+            True,
+            "openbank-demo-payment",
+        ),
+        "module without -service suffix is not flagged when correct": (
+            valid_migration,
+            "fun OutboxMessage.toEntity() { synthetic = synthetic }",
+            False,
+            "openbank-demo-payment",
+        ),
+    }
     failures: list[str] = []
+    for label, (migration, writer, expect_finding, module) in suffixless.items():
+        findings, subjects = fixture(migration, writer, module)
+        if bool(findings) != expect_finding or subjects != 1:
+            failures.append(f"{label}: expected finding={expect_finding} subjects=1, got {findings} subjects={subjects}")
     for label, (migration, writer, expect_finding) in cases.items():
         if label == "empty shared-outbox corpus fails closed":
             with tempfile.TemporaryDirectory() as temp:
@@ -152,7 +186,8 @@ def self_test() -> int:
         for failure in failures:
             print(f"::error::check-synthetic-outbox-taint self-test: {failure}")
         return 1
-    print(f"check-synthetic-outbox-taint self-test: {len(cases)}/{len(cases)} passed")
+    total = len(cases) + len(suffixless)
+    print(f"check-synthetic-outbox-taint self-test: {total}/{total} passed")
     return 0
 
 

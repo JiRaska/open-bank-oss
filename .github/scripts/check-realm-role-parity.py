@@ -147,7 +147,7 @@ def annotation_roles(root: pathlib.Path) -> dict:
     spec.loader.exec_module(mod)
     consts = mod.role_constants(root)
     sites = {}
-    for rel, line, names, _dead in mod.scan(root, set(), consts):
+    for rel, line, names, _dead, _form in mod.scan(root, set(), consts):
         for n in names:
             sites.setdefault(n, []).append(f"{rel}:{line}")
     return sites
