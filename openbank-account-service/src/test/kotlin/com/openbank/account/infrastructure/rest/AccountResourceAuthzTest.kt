@@ -47,7 +47,7 @@ class AccountResourceAuthzTest {
         // request as pact-verifier/ROLE_OPERATOR — so the negative case lives HERE, where an
         // anonymous request genuinely carries no identity.
         Given { this } When {
-            get("/api/v1/accounts/iban/123456789/0800")
+            get("/api/v1/accounts/iban/CZ6508000000192000145399")
         } Then {
             statusCode(401)
         }
