@@ -121,9 +121,15 @@ def collect_mttr() -> dict:
     """
     import os
     import statistics
+    import urllib.error
     import urllib.request
 
-    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    # GITHUB_TOKEN has no permission class for the dependabot-alerts API and gets a flat 403;
+    # the workflow passes the elevated METADATA_REFRESH_PAT (when the secret exists) via
+    # MTTR_GH_TOKEN. With neither, stay unavailable with a reason that names the cause —
+    # never invent a number.
+    token = (os.environ.get("MTTR_GH_TOKEN") or os.environ.get("GH_TOKEN")
+             or os.environ.get("GITHUB_TOKEN"))
     repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
     if not token:
         return {"available": False, "reason": "no GH token"}
@@ -150,8 +156,39 @@ def collect_mttr() -> dict:
                 "medianFixDays": round(statistics.median(fixed_days), 1) if fixed_days else None,
                 "openCount": len(open_crit),
                 "oldestOpenDays": round(max(open_crit)) if open_crit else 0}
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            return {"available": False,
+                    "reason": "dependabot alerts API answered 403 — the token lacks access "
+                              "(GITHUB_TOKEN can never read it; set a security-scoped "
+                              "METADATA_REFRESH_PAT)"}
+        return {"available": False, "reason": f"dependabot fetch failed: HTTP {exc.code}"}
     except Exception as exc:  # API degradation must not kill the other collectors
         return {"available": False, "reason": f"dependabot fetch failed: {exc.__class__.__name__}"}
+
+
+def _no_auth_redirect_opener():
+    """An urllib opener that DROPS the Authorization header on a cross-host redirect.
+
+    `archive_download_url` 302s to a signed Azure blob URL. urllib's default redirect re-sends
+    every original header — including `Authorization: Bearer <github-token>` — to the new host,
+    and Azure answers 401 "Server failed to authenticate the request". Measured live against
+    artifact 9967002015 (2026-09-05): the same URL and token download fine via `gh api` and fail
+    with 401 via default urllib. The fuzz collector's first refresh (run 33964441963) therefore
+    reported "fuzz artifact fetch failed: HTTPError" with the artifact sitting right there.
+    """
+    import urllib.parse
+    import urllib.request
+
+    class _NoAuthRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001 - stdlib signature
+            new = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if new is not None and \
+                    urllib.parse.urlparse(newurl).netloc != urllib.parse.urlparse(req.full_url).netloc:
+                new.remove_header("Authorization")
+            return new
+
+    return urllib.request.build_opener(_NoAuthRedirect)
 
 
 def collect_fuzz() -> dict:
@@ -195,14 +232,35 @@ def collect_fuzz() -> dict:
             artifacts[0]["archive_download_url"],
             headers={"Authorization": f"Bearer {token}",
                      "Accept": "application/vnd.github+json"})
-        blob = urllib.request.urlopen(req, timeout=30).read()
+        # Cross-host redirect must not carry the GitHub token — see _no_auth_redirect_opener.
+        try:
+            blob = _no_auth_redirect_opener().open(req, timeout=30).read()
+        except Exception as urllib_exc:
+            # Fallback for tokens/edges where the stripped-redirect dance still fails
+            # (observed with the workflow GITHUB_TOKEN on run 33972808389): the `gh` CLI is
+            # preinstalled on the runner and handles the 302 correctly. `gh api …/zip` writes
+            # the archive bytes to stdout.
+            import shutil
+            import subprocess
+            ghbin = shutil.which("gh")
+            if not ghbin:
+                raise
+            out = subprocess.run(
+                [ghbin, "api", f"repos/{repo}/actions/artifacts/{artifacts[0]['id']}/zip"],
+                capture_output=True, timeout=60,
+                env={**os.environ, "GH_TOKEN": token}, check=False)
+            if out.returncode != 0 or not out.stdout:
+                raise urllib_exc
+            blob = out.stdout
         cov = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("fuzz-coverage.json"))
         return {"available": True, "inScope": cov["inScope"], "tested": cov["tested"],
                 "coveragePct": cov["coveragePct"], "totalExercised": cov["totalExercised"],
                 "excludedCount": len(cov.get("excluded", [])),
                 "run": cov.get("run", ""), "runDate": cov.get("generatedAt", "")[:10]}
     except Exception as exc:  # network/API degradation must not kill the other collectors
-        return {"available": False, "reason": f"fuzz artifact fetch failed: {exc.__class__.__name__}"}
+        import urllib.error
+        detail = f"HTTP {exc.code}" if isinstance(exc, urllib.error.HTTPError) else exc.__class__.__name__
+        return {"available": False, "reason": f"fuzz artifact fetch failed: {detail}"}
 def self_test() -> int:
     bad = 0
     # The parse regexes must survive the real scripts' output shape — pin them on the
@@ -217,6 +275,21 @@ def self_test() -> int:
                   r"(\d+) with deadline, (\d+) overdue, (\d+) undeclared", cred_line)
     if not m or m.group(2) != "158":
         print("self-test FAIL: credential regex"); bad += 1
+    # The fuzz collector's artifact download 302s cross-host to Azure; the opener MUST drop
+    # Authorization there (a forwarded Bearer gets a 401) and KEEP it for api.github.com.
+    import urllib.request
+    opener = _no_auth_redirect_opener()
+    handler = next(h for h in opener.handlers
+                   if isinstance(h, urllib.request.HTTPRedirectHandler))
+    src = urllib.request.Request("https://api.github.com/x/artifacts/1/zip",
+                                 headers={"Authorization": "Bearer t"})
+    cross = handler.redirect_request(src, None, 302, "", {},
+                                     "https://objects.githubusercontent.com/blob")
+    if cross is None or cross.has_header("Authorization"):
+        print("self-test FAIL: Authorization leaks across the artifact redirect"); bad += 1
+    same = handler.redirect_request(src, None, 302, "", {}, "https://api.github.com/x/other")
+    if same is None or not same.has_header("Authorization"):
+        print("self-test FAIL: Authorization dropped on a same-host redirect"); bad += 1
     print("security-kpis self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0
 

@@ -45,7 +45,7 @@ Each migration file carries an inline **rollback note** (e.g. V6: `DROP TABLE de
 
 #### Secret-bearing templates
 
-`OTP_CODE` and `PASSWORD_RESET` render an authentication secret into the message body. The
+`OTP_CODE` renders an authentication secret into the message body. The
 secret is delivered to the customer but **never persisted**: `NotificationConsumer` stores
 `TemplateSensitivity.REDACTED_BODY` in its place, and `NotificationResource` redacts again on
 read (two independent controls, the ADR-0059 D3 shape). V9 cleared the rows written before this.
@@ -93,7 +93,7 @@ Unique `(platform, token)` → re-registration upserts; index `(party_id, status
 | Field | Classification | Control |
 |---|---|---|
 | `notifications.recipient` | direct PII (email / phone) | masked in logs (PiiMask); not exposed in oversight signals |
-| `notifications.body` / `subject` | possible PII | secret-bearing templates (OTP_CODE, PASSWORD_RESET) are delivered but never stored — redacted on write and again on read; no template egresses to oversight |
+| `notifications.body` / `subject` | possible PII | secret-bearing templates (OTP_CODE) are delivered but never stored — redacted on write and again on read; no template egresses to oversight |
 | `notifications.party_id`, `device_tokens.party_id` | pseudonymous identifier | links to party-service |
 | `device_tokens.token` | PII-adjacent provider token | write-only over REST, masked in logs |
 | `dispatch_control_log.actor` / `dispatch_resume_proposal.*_by` | operator identity | audit-logged, internal only |
