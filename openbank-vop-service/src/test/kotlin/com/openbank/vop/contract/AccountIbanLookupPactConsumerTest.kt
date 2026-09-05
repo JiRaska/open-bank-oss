@@ -124,28 +124,43 @@ class AccountIbanLookupPactConsumerTest {
         assertThat(summary.status).isEqualTo("ACTIVE")
     }
 
+    /**
+     * The negative case, and why it is a **404 rather than a 401**.
+     *
+     * A 401 here could never pass the provider replay. `AccountPactFolderProviderVerificationTest`
+     * is a `@QuarkusTest` whose requests are authenticated by construction, so the provider answers
+     * 200 to the very request this pact says must be refused — measured on `main` as
+     * `expected status of 401 but was 200`, red since the pact was committed and invisible because
+     * path-scoped CI does not rebuild account-service when only `pacts/` changes (#8552).
+     *
+     * "Not found" is the negative this hop can actually assert, and it is the one that matters to
+     * the caller: `AccountHolderNameLookupAdapter` turns an unknown IBAN into NO_DATA, a *valid*
+     * Verification of Payee answer, so a route that started answering 200-with-nulls instead of 404
+     * would be indistinguishable from a real "we hold no name for this IBAN" in every log and
+     * metric. Pinning the 404 is what stops that.
+     */
     @Pact(consumer = CONSUMER, provider = PROVIDER)
-    fun rejectsWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("an account owned by a known party exists")
-        .uponReceiving("GET the account behind the payee IBAN, with no caller identity")
-        .path(EXPECTED_ACCOUNT_PATH)
+    fun rejectsUnknownIban(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no account exists for the unknown IBAN")
+        .uponReceiving("GET the account behind an IBAN account-service does not know")
+        .path(UNKNOWN_ACCOUNT_PATH)
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
-        .status(401)
+        .status(404)
         .toPact()
 
     @Test
-    @PactTestFor(pactMethod = "rejectsWithMissingToken")
-    fun `rejects the account-by-iban lookup with 401 when the caller has no valid identity`(mockServer: MockServer) {
+    @PactTestFor(pactMethod = "rejectsUnknownIban")
+    fun `answers 404 for an IBAN account-service does not know`(mockServer: MockServer) {
         assertClientPathMatchesContract()
 
         given()
             .baseUri(mockServer.getUrl())
             .accept("application/json")
-            .get(clientDerivedAccountPath())
+            .get(clientDerivedPathFor(UNKNOWN_IBAN))
             .then()
-            .statusCode(401)
+            .statusCode(404)
     }
 
     /**
@@ -184,13 +199,28 @@ class AccountIbanLookupPactConsumerTest {
          */
         const val EXPECTED_ACCOUNT_PATH = "/api/v1/accounts/iban/$PACT_IBAN"
 
-        fun clientDerivedAccountPath(): String {
+        /**
+         * A valid IBAN — correct mod-97 check digits — that no provider state seeds, so the route
+         * genuinely answers 404.
+         *
+         * Deliberately NOT a malformed string, and the difference is measurable rather than
+         * theoretical: the first draft of this constant had wrong check digits and the provider
+         * replay answered **400, not 404**, because validation rejects it long before the lookup.
+         * A malformed IBAN tests the validator; this one tests the lookup, and only the second is
+         * the case VoP's caller depends on.
+         */
+        const val UNKNOWN_IBAN = "CZ7155000000001234567890"
+        const val UNKNOWN_ACCOUNT_PATH = "/api/v1/accounts/iban/$UNKNOWN_IBAN"
+
+        fun clientDerivedAccountPath(): String = clientDerivedPathFor(PACT_IBAN)
+
+        fun clientDerivedPathFor(iban: String): String {
             val base = AccountServiceClient::class.java.getAnnotation(Path::class.java).value
             val method = AccountServiceClient::class.java.methods
                 .single { it.name == "getAccountByIban" }
                 .getAnnotation(Path::class.java)
                 .value
-            return (base + method).replace("{iban}", PACT_IBAN)
+            return (base + method).replace("{iban}", iban)
         }
     }
 }

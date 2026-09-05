@@ -290,4 +290,14 @@ class PartyEventPactProviderVerificationTest {
         /** Must equal `PartyNameLookupPactConsumerTest.PACT_PARTY_ID` (openbank-vop-service). */
         private val VOP_NAME_PARTY_ID = UUID.fromString("b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9")
     }
+
+    /**
+     * The negative state: deliberately seeds NOTHING — see the account-service twin. An unknown
+     * party id must answer 404, not a 200 with empty names, which VoP would read as a real "no
+     * name held" for the payee.
+     */
+    @State("no party exists with the unknown id")
+    fun noPartyWithUnknownId() {
+        // Intentionally empty.
+    }
 }
