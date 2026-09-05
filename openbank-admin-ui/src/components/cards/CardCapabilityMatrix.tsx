@@ -74,6 +74,13 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
 
   const sandboxCount = registry.capabilities.filter(c => sandboxReadyNetworks(c).length > 0).length
   const portedCount = registry.capabilities.filter(c => c.port !== null).length
+  // DERIVED, never asserted. A binding named after a network is a vendor adapter; `simulator` is
+  // the in-repo one. The paragraph below used to state in prose that every binding was the
+  // simulator — true when written, stale the moment the first vendor adapter landed. A sentence
+  // about the data, sitting next to the data, that nothing kept in step with it.
+  const vendorBound = registry.capabilities.filter(c =>
+    c.bindings.some(b => registry.networks.some(n => n.id === b)),
+  )
 
   return (
     <div className="space-y-6">
@@ -105,7 +112,16 @@ export function CardCapabilityMatrix({ registry }: { registry: CardCapabilityReg
           {t(
             `Port má ${portedCount} z ${registry.capabilities.length} schopností; ${sandboxCount} má alespoň jednu síť s volným sandboxem, kde lze adaptér postavit a vyzkoušet bez obchodní smlouvy.`,
             `${portedCount} of ${registry.capabilities.length} capabilities have a port; ${sandboxCount} have at least one network with a free sandbox, which is where an adapter can be built and exercised without a commercial agreement.`,
-          )}
+          )}{' '}
+          {vendorBound.length > 0
+            ? t(
+                `Adaptér dodavatele existuje pro: ${vendorBound.map(c => c.label).join(', ')}. Adaptér bez nastavených přihlašovacích údajů vrací NOT_BOUND a žádné volání neprovede — což je jiný fakt než nedostupná síť, a tyto dva se nikdy neslučují.`,
+                `A vendor adapter exists for: ${vendorBound.map(c => c.label).join(', ')}. An adapter with no credential configured reports NOT_BOUND and makes no call — a different fact from a network being unreachable, and the two are never merged.`,
+              )
+            : t(
+                'Každá dnešní implementace je vestavěný simulátor.',
+                'Every binding today is the in-repo simulator.',
+              )}
         </p>
       </div>
 
