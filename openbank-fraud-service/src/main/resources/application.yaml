@@ -46,6 +46,22 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+
+  # ADR-0140 online feature store: FeatureStoreConfig @Produces an OnlineFeatureStore from
+  # ReactiveRedisDataSource. Quarkus DEACTIVATES that synthetic bean at build time when neither
+  # `quarkus.redis.hosts` nor `hosts-provider-name` is set, and boot then dies with
+  # `InactiveBeanException: Bean is not active` — not a config warning, a hard start failure.
+  # It was reaching this service from two places OUTSIDE this file and nowhere inside it: the
+  # gitops env (`QUARKUS_REDIS_HOSTS`) and PostgresRedisTestResource's Testcontainers override.
+  # Every environment that worked supplied it out-of-band, so nothing that reads this repo could
+  # tell the service needs Redis at all — which is exactly how the api-fuzz harness, whose Redis
+  # provisioning is derived from this file, ran fraud-service twice without it and never sent a
+  # single request (run 33720692606). The expression form keeps the deployed value authoritative:
+  # QUARKUS_REDIS_HOSTS still wins, and the fallback is the fleet default the other 30 services
+  # declare literally.
+  redis:
+    hosts: ${QUARKUS_REDIS_HOSTS:redis://localhost:6379}
+
   shutdown:
     timeout: 30S
   log:

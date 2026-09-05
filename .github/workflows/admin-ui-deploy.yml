@@ -495,6 +495,12 @@ jobs:
           set -u
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
+          # Measured 2026-09-04: only 54 non-expired main-branch `test-intelligence-run-*`
+          # artifacts exist repo-wide, so this cap does not bind and lowering it saves ~4
+          # requests, not ~50. Left at 100 deliberately. What those 54 buy is the number
+          # that matters and it is not this one: 21 components across 10 CI runs spanning
+          # 0.6 HOURS, median 2 envelopes per component — a snapshot, not the per-test-case
+          # history it feeds. The binding constraint is artifact retention (see #8690).
           MAX_ENVELOPES=100
           # The workflow-runs endpoint is dominated by deploy-only Services CI runs, which
           # produce no per-service envelope.  Even a 100-run scan can therefore find zero

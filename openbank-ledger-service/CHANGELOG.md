@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.27.0...ledger-service-v1.27.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **ledger:** entity timestamp defaults EPOCH -&gt; Instant.now() — burn-down complete ([#8465](https://github.com/JiRaska/open-bank-oss/issues/8465)) ([2ad36b6](https://github.com/JiRaska/open-bank-oss/commit/2ad36b67e9973e482e8d36aa47a231e11c774106))
+
 ## [1.27.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.26.2...ledger-service-v1.27.0) (2026-09-01)
 
 

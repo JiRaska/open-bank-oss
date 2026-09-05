@@ -8,6 +8,7 @@ import com.openbank.clearing.application.port.out.*
 import com.openbank.clearing.domain.model.*
 import com.openbank.clearing.infrastructure.persistence.entity.*
 import com.openbank.clearing.infrastructure.persistence.mapper.ClearingMapper
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.common.WithSession
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.smallrye.mutiny.Multi
@@ -24,6 +25,7 @@ import java.util.UUID
 class ClearingBatchRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,
     private val mapper: ClearingMapper,
+    private val outboxRepo: ClearingOutboxRepository,
 ) : ClearingBatchRepository {
 
     @WithTransaction
@@ -72,6 +74,50 @@ class ClearingBatchRepositoryImpl @Inject constructor(
                 e.totalCredit = batch.totalCredit
                 e.netPosition = batch.netPosition
                 s.persist(e).map { mapper.toDomain(e) }
+            }
+        }
+    }
+
+    /**
+     * #8509: the batch update, the item flips and the outbox rows in ONE `sf.withTransaction`.
+     * `outboxRepo.persistInTransaction` is a Panache persist, which joins the reactive session
+     * bound to this Vert.x context — so all the writes commit or roll back together. The item
+     * merges are `transformToUniAndConcatenate` (one operation at a time per session), mirroring
+     * `ClearingItemRepositoryImpl.saveAll`, and `merge` rather than `persist` for the same reason
+     * documented there: the items are already persisted, re-attached as detached copies.
+     * ADR-0281 widened `event` to `events` (the `batch.settled` event + the `net_settlement.post`
+     * command) — both rows commit with the state change, so a SETTLED batch always has its
+     * settlement-leg intent durable.
+     */
+    @WithTransaction
+    override fun settleWithEvents(
+        batch: ClearingBatch,
+        items: List<ClearingItem>,
+        events: List<OutboxMessage>,
+    ): Uni<ClearingBatch> = sf.withTransaction { s ->
+        s.find(ClearingBatchEntity::class.java, batch.id).flatMap { e ->
+            if (e == null) {
+                Uni.createFrom().failure(IllegalArgumentException("Batch not found"))
+            } else {
+                e.status = batch.status
+                e.settledAt = batch.settledAt
+                e.updatedAt = batch.updatedAt
+                e.itemCount = batch.itemCount
+                e.totalDebit = batch.totalDebit
+                e.totalCredit = batch.totalCredit
+                e.netPosition = batch.netPosition
+                s.persist(e)
+                    .flatMap {
+                        Multi.createFrom().iterable(items.map(mapper::toEntity))
+                            .onItem().transformToUniAndConcatenate { s.merge(it) }
+                            .collect().asList()
+                    }
+                    .flatMap {
+                        Multi.createFrom().iterable(events)
+                            .onItem().transformToUniAndConcatenate { outboxRepo.persistInTransaction(it) }
+                            .collect().asList()
+                    }
+                    .map { mapper.toDomain(e) }
             }
         }
     }
