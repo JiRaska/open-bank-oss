@@ -83,6 +83,11 @@ BASELINE_UNCOVERED = {
     "docs-truth-agent": "deepseek-ai/DeepSeek-V3.2",
     "authz-policy-auditor": "deepseek-ai/DeepSeek-V3.2",
     "flaky-test-hunter": "deepseek-ai/DeepSeek-V3.2",
+    # 2026-09-05, ADR-0283 phase 4 (#8812). The charter ships `enabled: false` because no card
+    # bulletin feed is wired yet, so nothing authenticates as this id and CharterRegistry is never
+    # asked for its model. The application.yaml entry belongs in the PR that wires the feed and
+    # flips `enabled` — adding it now would declare a runtime binding for an agent that cannot run.
+    "card-scheme-bulletin-agent": "deepseek-ai/DeepSeek-V3.2",
 }
 
 
