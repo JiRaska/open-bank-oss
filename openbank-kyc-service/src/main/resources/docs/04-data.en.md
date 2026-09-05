@@ -15,7 +15,7 @@ PostgreSQL 16, database **`openbank_kyc`** (reactive PG client + JDBC for Flyway
 | `id` | BIGSERIAL PK | internal id; sequence `kyc_cases_seq` (V4) |
 | `case_id` | UUID UNIQUE | business id (the aggregate `KycCase.id`) |
 | `party_id` | UUID | the party under review — see PII below |
-| `status` | VARCHAR(30) | OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW / APPROVED / REJECTED / EXPIRED |
+| `status` | VARCHAR(30) | OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW / APPROVED / REJECTED / EXPIRED — DOCUMENTS_REQUIRED is unreachable (#8535) |
 | `risk_level` | VARCHAR(20) | LOW / MEDIUM / HIGH / VERY_HIGH |
 | `assigned_to` | VARCHAR(100) | reviewer assignment |
 | `checks_json` | TEXT | serialized list of `KycCheck` |
