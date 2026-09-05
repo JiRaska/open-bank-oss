@@ -170,8 +170,10 @@ bank's, not the customer's.
    explanation surface, opt-out of personalisation.
 4. **Háj and Les**, partner benefits behind the same catalogue, NBA in shadow per ADR-0201 D7.
 
-Each phase is its own implementation issue; a phase that touches a money-path service (billing,
-interest, fx, ledger) carries the ADR-0030 threat-model obligation and two approvals.
+Each phase is its own implementation issue — #8792 (data), #8793 (loyalty-service and the ledger),
+#8794 (micro-segments, overlays, transparency), #8795 (Háj, Les, NBA in shadow). A phase that
+touches a money-path service (billing, interest, fx, ledger) carries the ADR-0030 threat-model
+obligation and two approvals.
 
 ## Alternatives considered
 
