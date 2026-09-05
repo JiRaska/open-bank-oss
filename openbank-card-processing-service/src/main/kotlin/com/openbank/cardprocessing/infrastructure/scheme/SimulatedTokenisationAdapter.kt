@@ -11,10 +11,10 @@ import com.openbank.libs.domain.cards.scheme.SchemeFailure
 import com.openbank.libs.domain.cards.scheme.SchemeResult
 import com.openbank.libs.domain.cards.scheme.TokenRequestor
 import com.openbank.libs.domain.cards.scheme.TokenisationPort
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.LocalDate
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -47,7 +47,11 @@ class SimulatedTokenisationAdapter(private val clock: Clock) : TokenisationPort 
             return SchemeResult.Unanswered(SchemeFailure.MALFORMED, CardScheme.SIMULATOR, "cardReference is blank")
         }
         val token = NetworkToken(
-            tokenReference = "sim-tok-${UUID.randomUUID()}",
+            // Ids.randomId(), not a bare UUID.randomUUID(): ADR-0106 wants the INTENT visible at
+            // the call site, and this is the random half — an opaque reference nothing indexes or
+            // sorts by, standing in for a handle the network would mint. `Ids.newId()` (UUIDv7) is
+            // for durable, indexed keys, which a simulated token reference is not.
+            tokenReference = "sim-tok-${Ids.randomId()}",
             last4 = SIMULATED_LAST4,
             status = NetworkTokenStatus.ACTIVE,
             expiry = LocalDate.now(clock).plusYears(TOKEN_VALIDITY_YEARS),

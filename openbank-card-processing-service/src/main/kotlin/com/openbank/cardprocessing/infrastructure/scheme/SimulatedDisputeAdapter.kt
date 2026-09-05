@@ -10,10 +10,10 @@ import com.openbank.libs.domain.cards.scheme.DisputePort
 import com.openbank.libs.domain.cards.scheme.SchemeDispute
 import com.openbank.libs.domain.cards.scheme.SchemeFailure
 import com.openbank.libs.domain.cards.scheme.SchemeResult
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.LocalDate
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -62,7 +62,9 @@ class SimulatedDisputeAdapter(private val clock: Clock) : DisputePort {
             )
         }
         val dispute = SchemeDispute(
-            networkCaseId = "sim-case-${UUID.randomUUID()}",
+            // Ids.randomId() — see SimulatedTokenisationAdapter: an opaque reference, not an
+            // indexed key, and ADR-0106 asks for the choice to be legible rather than incidental.
+            networkCaseId = "sim-case-${Ids.randomId()}",
             // Carried through, never mapped: the code vocabulary belongs to the network.
             reasonCode = reasonCode,
             amountMinorUnits = amountMinorUnits,
