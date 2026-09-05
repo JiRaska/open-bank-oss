@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.19 -> 1.20): additive
   # only — GET /api/v1/parties/approvals exposes the existing maker-checker queue and
   # ApprovalResponse gains makerId/createdAt so the checker can understand age and provenance.
-  version: 1.20.0
+  version: 1.21.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -558,13 +558,31 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/partyId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: >-
+            Set by customer-edge from the data subject's own validated JWT (ADR-0065). When the
+            caller IS the customer-edge service account and this header names the SAME party as
+            the path, the request is a subject-initiated exercise of the right and is permitted;
+            the edge cannot read any party other than the one whose token it validated. Ignored
+            for a ROLE_ADMIN / ROLE_DPO / self-JWT caller.
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
-          description: GDPR Art. 15 subject-access export (ROLE_ADMIN only)
+          description: >-
+            GDPR Art. 15 subject-access export (ROLE_ADMIN / ROLE_DPO / subject self, or
+            customer-edge acting for the subject named in X-Customer-Party-Id)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GdprExport'
+        '403':
+          description: >-
+            The caller is neither ROLE_ADMIN, ROLE_DPO, the subject itself, nor the customer-edge
+            principal presenting a matching X-Customer-Party-Id.
         '404':
           $ref: '#/components/responses/NotFound'
         '502':
@@ -593,13 +611,31 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/partyId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: >-
+            Set by customer-edge from the data subject's own validated JWT (ADR-0065). When the
+            caller IS the customer-edge service account and this header names the SAME party as
+            the path, the request is a subject-initiated exercise of the right and is permitted;
+            the edge cannot read any party other than the one whose token it validated. Ignored
+            for a ROLE_ADMIN / ROLE_DPO / self-JWT caller.
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
-          description: GDPR Art. 20 portability export (ROLE_ADMIN / ROLE_DPO / subject self)
+          description: >-
+            GDPR Art. 20 portability export (ROLE_ADMIN / ROLE_DPO / subject self, or
+            customer-edge acting for the subject named in X-Customer-Party-Id)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/GdprExport'
+        '403':
+          description: >-
+            The caller is neither ROLE_ADMIN, ROLE_DPO, the subject itself, nor the customer-edge
+            principal presenting a matching X-Customer-Party-Id.
         '404':
           $ref: '#/components/responses/NotFound'
         '502':

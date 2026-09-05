@@ -377,8 +377,8 @@ change_requirements:
     ci_producer: ".github/scripts/check-event-consumer-liveness.py"
     # #996 triage findings, classified LEGITIMATE_NO_CONSUMER (not the #889 failure class):
     allowlist:
-      - topic: "openbank.psd2.events"
-        reason: "psd2-service docs consistently describe this as audit-trail + external TPP-webhook delivery, not an intra-fleet reaction — no OpenBank service is meant to consume it."
+      # openbank.psd2.events left the allowlist in #8510: the producer itself was deleted
+      # (the psd2_outbox apparatus had zero writers), so there is no topic left to exempt.
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "proposal-events"
@@ -884,7 +884,9 @@ money_path_services:
 #
 # Targets are REFERENCE defaults, not calibrated against real production incident or
 # traffic history — this is a reference implementation with no live customer traffic (same
-# honesty disclosure as the openbank-lending-service PD/LGD placeholders). Revisit once the
+# honesty disclosure as the openbank-lending-service PD/LGD placeholders — those are now
+# governed by the calibration process in openbank-lending-service docs
+# 07-risk-model-calibration, issue #8364). Revisit once the
 # load-benchmark / DR-drill scope of issue #669 produces real numbers.
 slo:
   availability_target: "99.9"           # percent of non-error requests, uniform fleet-wide

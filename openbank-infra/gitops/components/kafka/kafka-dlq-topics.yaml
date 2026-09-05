@@ -656,24 +656,8 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
-# openbank-notification-service :: channel `delegation-events-in`
-# #8346 (tail of #5745). Not a rename and not a migration: this channel had NO dead-letter wiring
-# at all, so nothing is parked anywhere to strand. It is the third writer of `delegation-events-in`
-# after account-service (already on `openbank.dlq.account.delegation-events-in`, #5752) and
-# card-issuance-service (still on the implicit `dead-letter-topic-delegation-events-in`), which is
-# why the name is explicit from the first day rather than left to SmallRye's channel-derived
-# default. Named in openbank-notification-service/src/main/resources/application.yaml (nested
-# form, issue #686); Write granted in components/notifications/kafka-notification-mtls.yaml.
+# openbank-clearing-service :: channel `clearing-net-settlement-in` (ADR-0281)
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
-  name: openbank.dlq.notification.delegation-events-in
-  namespace: messaging
-  labels:
-    strimzi.io/cluster: openbank-cluster
-spec:
-  partitions: 1
-  replicas: 1
-  config:
-    retention.ms: 2592000000
-    cleanup.policy: delete
+  name: openbank.dlq.clearing-service.clearing-net-settlement-in
