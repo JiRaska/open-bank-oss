@@ -7,7 +7,12 @@
 #   cardprocessing.authorize — an acquirer presents an authorisation
 #   cardprocessing.clear     — an acquirer presents a clearing
 #   cardprocessing.reverse   — an acquirer releases the remaining hold
-#   cardprocessing.read      — read one authorisation, or a card's authorisations
+#   cardprocessing.read      — read one authorisation, a card's authorisations, a token list or a
+#                              dispute case
+#
+# Actions gated (CardTokenResource, CardDisputeResource — ADR-0283 phase 3):
+#   cardprocessing.token     — provision a network token, or change its state
+#   cardprocessing.dispute   — open a chargeback case, file evidence, refresh its status
 #
 # Actions gated (SandboxAcquirerResource):
 #   cardprocessing.simulate  — drive a purchase through the sandbox acquirer
@@ -69,4 +74,20 @@ allowed_reasons contains "admin-card-processing-simulate" if {
 	input.principal.type == "HUMAN"
 	"ROLE_ADMIN" in input.principal.roles
 	input.action == "cardprocessing.simulate"
+}
+
+# The token and dispute desks. A SEPARATE reason from the money path above, even though the grant
+# is identical today: these are console actions performed by a person, the money-path ones are
+# scheme traffic performed by an adapter, and one reason covering both would make the two
+# impossible to narrow independently. `check-operator-write-naming.py` sees this name, so the
+# shared openbank-services service-account's reach into it stays visible to the GHSA-58jq-9hq3-66jr
+# sweep rather than hiding behind a name that sweep cannot match.
+#
+# Reading a token list or a case is `cardprocessing.read`, already granted above and one role
+# wider: a support agent answering "why did my watch stop paying?" needs to see, not to act.
+allowed_reasons contains "operator-card-lifecycle-write" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action in {"cardprocessing.token", "cardprocessing.dispute"}
 }

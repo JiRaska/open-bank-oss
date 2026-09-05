@@ -4,7 +4,7 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Card Processing Service — card money-path events
-  version: 1.0.0
+  version: 1.1.0
   description: |
     What the card money path publishes (ADR-0283 phase 1, #8809): an authorisation decision, the
     clearing presentments against it, and the release of a hold nobody presented against.
@@ -38,9 +38,10 @@ channels:
       Consumers: audit-service (evidentiary trail; the topic is in its incoming list and its
       KafkaUser Read ACL, without which the subscription is ACL-denied as a silent retry loop).
 
-      Partitioning key: the authorisation id, so an authorisation, its clearings and its release stay
-      ordered relative to each other. A random key would let a consumer see a clearing before the
-      authorisation it belongs to.
+      Partitioning key: the aggregate id — the authorisation id for the money-path messages, and the
+      token registration or dispute case id for the lifecycle ones (ADR-0283 phase 3). Each aggregate
+      is ordered against itself, which is what a consumer needs; a random key would let a clearing
+      arrive before the authorisation it belongs to, or a token deletion before its provisioning.
 
       Retention: 7 days (`retention.ms: 604800000`), cleanup policy delete — matching the sibling
       payments topics. The durable record is the database row under a 7-year accounting retention;
@@ -54,6 +55,16 @@ channels:
         $ref: '#/components/messages/cardCleared'
       cardHoldReleased:
         $ref: '#/components/messages/cardHoldReleased'
+      cardTokenProvisioned:
+        $ref: '#/components/messages/cardTokenProvisioned'
+      cardTokenStatusChanged:
+        $ref: '#/components/messages/cardTokenStatusChanged'
+      cardDisputeOpened:
+        $ref: '#/components/messages/cardDisputeOpened'
+      cardDisputeEvidenceSubmitted:
+        $ref: '#/components/messages/cardDisputeEvidenceSubmitted'
+      cardDisputeStatusChanged:
+        $ref: '#/components/messages/cardDisputeStatusChanged'
 operations:
   publishCardProcessingEvents:
     action: send
@@ -81,6 +92,31 @@ components:
       title: A hold was released without the money moving
       payload:
         $ref: '#/components/schemas/cardHoldReleased'
+    cardTokenProvisioned:
+      name: card.token.provisioned.v1
+      title: A network token was provisioned for a card
+      payload:
+        $ref: '#/components/schemas/cardTokenProvisioned'
+    cardTokenStatusChanged:
+      name: card.token.status_changed.v1
+      title: A network token was suspended, resumed or deleted
+      payload:
+        $ref: '#/components/schemas/cardTokenStatusChanged'
+    cardDisputeOpened:
+      name: card.dispute.opened.v1
+      title: A chargeback case was opened with the network
+      payload:
+        $ref: '#/components/schemas/cardDisputeOpened'
+    cardDisputeEvidenceSubmitted:
+      name: card.dispute.evidence_submitted.v1
+      title: Evidence was filed against an open case
+      payload:
+        $ref: '#/components/schemas/cardDisputeEvidenceSubmitted'
+    cardDisputeStatusChanged:
+      name: card.dispute.status_changed.v1
+      title: A dispute moved, in both vocabularies
+      payload:
+        $ref: '#/components/schemas/cardDisputeStatusChanged'
   schemas:
     presentmentChannel:
       type: string
@@ -171,5 +207,97 @@ components:
           description: |
             Operationally different and deliberately not one value: a rising EXPIRY share means
             acquirers are not presenting, a rising REVERSAL share means they are cancelling.
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, enum: [card-processing-service] }
+    cardScheme:
+      type: string
+      description: Which adapter answered — not which brand the card carries. SIMULATOR is a real value.
+      enum: [VISA, MASTERCARD, SIMULATOR]
+    networkTokenStatus:
+      type: string
+      enum: [ACTIVE, SUSPENDED, DELETED]
+    cardTokenProvisioned:
+      type: object
+      required: [registrationId, cardId, tokenReference, requestorId, requestorLabel, scheme, status, occurredAt, sourceService]
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+          description: This bank's mirror row. The network owns the token; this id is ours.
+        cardId: { type: string, format: uuid }
+        tokenReference:
+          type: string
+          description: The network's opaque handle. Never a PAN and never derived from one.
+        requestorId: { type: string }
+        requestorLabel: { type: string }
+        scheme: { $ref: '#/components/schemas/cardScheme' }
+        status: { $ref: '#/components/schemas/networkTokenStatus' }
+        expiry: { type: string, format: date, nullable: true }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, enum: [card-processing-service] }
+    cardTokenStatusChanged:
+      type: object
+      required: [registrationId, cardId, tokenReference, previousStatus, status, scheme, occurredAt, sourceService]
+      properties:
+        registrationId: { type: string, format: uuid }
+        cardId: { type: string, format: uuid }
+        tokenReference: { type: string }
+        previousStatus:
+          $ref: '#/components/schemas/networkTokenStatus'
+        status: { $ref: '#/components/schemas/networkTokenStatus' }
+        scheme: { $ref: '#/components/schemas/cardScheme' }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, enum: [card-processing-service] }
+    cardDisputeOpened:
+      type: object
+      required: [disputeId, authorizationId, cardId, networkCaseId, reasonCode, amountMinorUnits, currencyCode, scheme, occurredAt, sourceService]
+      properties:
+        disputeId: { type: string, format: uuid }
+        authorizationId: { type: string, format: uuid }
+        cardId: { type: string, format: uuid }
+        networkCaseId:
+          type: string
+          description: Assigned by the network. No case exists here without one.
+        reasonCode:
+          type: string
+          description: The scheme's own code, verbatim. Never translated into a bank vocabulary.
+        amountMinorUnits: { type: integer, format: int64 }
+        currencyCode: { type: string, minLength: 3, maxLength: 3 }
+        respondByDate:
+          type: string
+          format: date
+          nullable: true
+          description: The network's deadline, carried so a consumer need not re-derive it.
+        scheme: { $ref: '#/components/schemas/cardScheme' }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, enum: [card-processing-service] }
+    cardDisputeEvidenceSubmitted:
+      type: object
+      required: [disputeId, authorizationId, cardId, networkCaseId, documentReference, occurredAt, sourceService]
+      properties:
+        disputeId: { type: string, format: uuid }
+        authorizationId: { type: string, format: uuid }
+        cardId: { type: string, format: uuid }
+        networkCaseId: { type: string }
+        documentReference:
+          type: string
+          description: A handle for the evidence. The document itself never travels on this topic.
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, enum: [card-processing-service] }
+    cardDisputeStatusChanged:
+      type: object
+      required: [disputeId, authorizationId, cardId, networkCaseId, previousStatus, status, schemeStatus, occurredAt, sourceService]
+      properties:
+        disputeId: { type: string, format: uuid }
+        authorizationId: { type: string, format: uuid }
+        cardId: { type: string, format: uuid }
+        networkCaseId: { type: string }
+        previousStatus: { type: string, enum: [OPEN, EVIDENCE_SUBMITTED, WON, LOST, WITHDRAWN] }
+        status: { type: string, enum: [OPEN, EVIDENCE_SUBMITTED, WON, LOST, WITHDRAWN] }
+        schemeStatus:
+          type: string
+          description: |
+            The network's own status string, verbatim and unmapped. A scheme value this bank does
+            not recognise leaves `status` where it was rather than being guessed into it.
         occurredAt: { type: string, format: date-time }
         sourceService: { type: string, enum: [card-processing-service] }
