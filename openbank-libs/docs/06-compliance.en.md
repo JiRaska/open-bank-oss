@@ -8,7 +8,7 @@ openbank-libs is **not a compliance boundary control**, but **a channel for impl
 |---|---|---|---|
 | `BuildInfo` + `ServiceInfoResource` | DORA | Art. 8 (asset register) | Per-service runtime tech stack (Kotlin/Quarkus/JDK versions) is machine-readable via `/api/v1/info` |
 | `BuildInfo` + per-service SBOM | DORA | Art. 28 (ICT third-party register) | CycloneDX SBOM per service in `build/reports/bom.json`, CI artifacts + admin UI download |
-| `BootstrapVerifier` | DORA, NIS2 | DORA Art. 9 (ICT security controls), NIS2 Art. 21 | Fail-fast guard against dev-default secrets in prod (closes K1 from the 2026-05-28 audit) |
+| `BootstrapVerifier` — ⬜ **not shipped** | DORA, NIS2 | DORA Art. 9 (ICT security controls), NIS2 Art. 21 | **Nothing — the class does not exist.** There is no `BootstrapVerifier` anywhere in `openbank-libs` (`git grep BootstrapVerifier -- '*.kt'` returns 0); the fail-fast placeholder guard ADR-0017 prescribes was never wired, as that ADR's own delivery note records. K1 is mitigated instead by ESO/OpenBao env-var indirection (ADR-0007): deployed manifests take credentials through `secretKeyRef`, so no dev placeholder reaches prod today — but no boot-time guard checks that (#8426) |
 | `PiiMasking` (`PiiMask`) | GDPR | Art. 25 (privacy by design), Art. 32 (security of processing) | Single audit-grade implementation, PCI-DSS compliant card masking (first 4 + last 4). Applied **explicitly** by the caller — there is no declarative masking annotation, and no serialization filter that would honour one (#4011) |
 | `AuditEvent` + `AuditEventPublisher` | GDPR, DORA | GDPR Art. 30 (Records of Processing), DORA Art. 17 (incident reconstruction 24 h) | Canonical envelope (actor, op, resource, ts, ip, result, traceId), pluggable publisher |
 | `Roles` (canonical constants) | PSD2, CNB | PSD2 RTS § technical standard, CNB decree 163/2014 § access permissions | Eliminates string-typo security holes; audit knows which roles exist |
@@ -35,7 +35,7 @@ graph LR
   end
 
   subgraph LibsContrib["openbank-libs contribution"]
-    BV[BootstrapVerifier]
+    BV["BootstrapVerifier — not shipped"]
     Roles[Roles canonical enum]
     PiiMask[PiiMask deterministic masking]
     AuditEvent[AuditEvent envelope]
@@ -60,7 +60,7 @@ graph LR
   K7 --> OPA
   K7 --> AuditEvent
 
-  style BV fill:#e8f5e9
+  style BV fill:#ffcdd2
   style PiiMask fill:#e8f5e9
   style Roles fill:#e8f5e9
   style AuditEvent fill:#e8f5e9
@@ -70,6 +70,10 @@ graph LR
   style NetPol fill:#fff9c4
   style OPA fill:#fff9c4
 ```
+
+Legend: green = delivered in libs · yellow = closed outside libs · red = **prescribed but never delivered**.
+`BootstrapVerifier` is the only red node. K1 is held today by ESO/OpenBao secret injection alone — there is no
+boot-time guard behind it, so the `K1 --> BV` edge records an intent, not a control (#8426).
 
 ## Regulatory score before / after libs
 

@@ -106,7 +106,7 @@ caller for every production service's API and management ports within the cluste
 
 - **2026-09-03** — Doc correction, no behavior change: §5.2 credited its mitigation to "the
   security-contract test (`SecurityContractTest`)" enforcing that "**every** JAX-RS endpoint is
-  annotated", and called it "the primary defence". No class named `SecurityContractTest` exists —
+  annotated", and called it "the primary defence". `SecurityContractTest` does not exist as a class —
   `git grep -nE 'class SecurityContractTest\b' -- '*.kt'` returns nothing — and the name is not a
   rename of one thing but a family label for nine per-service variants. Measured against the tree:
   61 modules declare a JAX-RS resource, 8 of them carry such a test. security-scanner is not one of
