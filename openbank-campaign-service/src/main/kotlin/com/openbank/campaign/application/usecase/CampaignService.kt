@@ -17,6 +17,7 @@ import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -89,6 +90,7 @@ class CampaignService @Inject constructor(
         segmentRef: SegmentRef,
         steps: List<CampaignStep>,
         createdBy: String,
+        productKind: CampaignProductKind,
         stopCondition: StopCondition? = null,
         conversionRule: String? = null,
         holdoutPercent: Int = 0,
@@ -103,6 +105,7 @@ class CampaignService @Inject constructor(
             id = Ids.newId(),
             name = name,
             goal = goal,
+            productKind = productKind,
             segmentRef = resolvedSegment,
             steps = steps.sortedBy { it.order },
             stopCondition = stopCondition,
@@ -155,6 +158,9 @@ class CampaignService @Inject constructor(
             segmentRef = source.segmentRef,
             steps = source.steps,
             createdBy = createdBy,
+            // Carried, never defaulted: a duplicated credit campaign that silently became NONE
+            // would be a credit journey the step gate no longer recognises as one.
+            productKind = source.productKind,
             stopCondition = source.stopCondition,
             conversionRule = source.conversionRule,
             holdoutPercent = source.holdoutPercent,

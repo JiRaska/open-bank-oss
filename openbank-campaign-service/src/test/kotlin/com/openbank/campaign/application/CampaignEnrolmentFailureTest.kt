@@ -15,6 +15,7 @@ import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.application.usecase.EnrolmentOutcome
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -66,6 +67,7 @@ class CampaignEnrolmentFailureTest {
         id = campaignId,
         name = "winback",
         goal = "reactivate dormant parties",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("dormant-parties", 1),
         steps = listOf(
             CampaignStep(
