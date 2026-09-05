@@ -335,13 +335,29 @@ change_requirements:
     gate: schema-compat
     enforced: advisory
     target_enforce_date: "2026-09-15"   # ADR-0144
-    # GRADUATION EVIDENCE, measured 2026-09-05. Replayed check-event-schema-compat.py over the
-    # REAL population — the 20 commits in 90 days touching a file that contains `DomainEvent(`,
-    # found with `git grep -l`, not by path name — and the gate was demonstrably exercised:
-    # 59 event-class property-set changes across DelegationEvents, ConsentEvents and others.
-    # It flagged none, correctly: every delta was an ADDED field, which is backward compatible.
-    # False positives on real history: 0 of 20. Same evidence shape #3438 used before
-    # graduating threat-model-diff.
+    # GRADUATION EVIDENCE, CORRECTED 2026-09-05 by a second-agent replay. The first pass
+    # recorded "0 findings on 20 commits"; both numbers were wrong and the verdict inverted.
+    # Replaying TODAY'S checker as an imported module over the REAL population — the 22 commits
+    # in 90 days touching a file that contains `DomainEvent(`, found with `git grep -l`, not by
+    # path name — gives 60 property-set deltas and **40 findings** across 5 commits, every one
+    # of the "added as non-nullable T with no default, breaking on REPLAY" class:
+    #   fc33a87176 (#2662, explicit DomainEvent.occurredAt)          27
+    #   da16beed4a (#8232, delegation monotonic lifecycle)            8
+    #   f75fe6d3af (#3411, delegation validity window)                3
+    #   069039649b (#2923, ConsentRevoked.scopes)                     1
+    #   d6e95d78a7 (#2709, YearCloseAttestedEvent.occurredAt)         1
+    # Under --enforce those five commits would have been RED. So this rule is NOT ready to
+    # graduate on 2026-09-15 on evidence; a ruling is needed first on whether an added
+    # non-nullable field is a real replay break here (it is, for a consumer replaying the
+    # topic from the beginning) or whether the outbox always writes fresh, in which case the
+    # check is too strict and the checker changes, not the date.
+    #
+    # HOW THE ZERO HAPPENED, because the failure mode is reusable: the advisory path exits 0
+    # and emits its findings as `::warning::`, so any measurement that reads the exit code, or
+    # greps a checked-out commit where `.github/scripts/check-event-schema-compat.py` did not
+    # yet exist, sees a clean 0. The second agent reproduced that false-clean before catching
+    # it. Replay a checker by importing TODAY'S copy and feeding it `git show c^:path` /
+    # `git show c:path` — never by running the script as it existed at the commit.
     #
     # Two caveats worth carrying, because the first four attempts at this measurement all
     # produced clean-looking numbers that meant nothing:
@@ -602,11 +618,15 @@ change_requirements:
     # measurement. What is NOT established here is how many of the 171 are genuine defects
     # rather than the accepted set; that needs a ruling on the Kafka semantics and is the real
     # work behind this date.
-    blocked_on: "graduating would fail the build on 171 occurrences (measured 2026-09-05) that the
-      ENFORCED sibling kafka-dotted-key-ratchet deliberately baselines (11 entries, 0 new, #2945);
-      this advisory gate has no baseline. #3928 and #3931, which the previous note sequenced on,
-      are both closed. The action is to retire this duplicate, not to flip it — how many of the 171
-      are genuine defects rather than the accepted set is unsettled."
+    blocked_on: "graduating would fail the build on 175 occurrences (re-measured 2026-09-05;
+      an earlier note said 171, which was wrong). Only 24 of the 175 are even in the enforced
+      sibling's watch set — kafka-dotted-key-ratchet reads group.id and auto.offset.reset,
+      incoming only — and 11 of those it baselines (#2945). The remaining ~151 are
+      value.deserializer / value.serializer / key.serializer / client.id / bootstrap.servers
+      keys the enforced gate has never looked at: UNASSESSED, not deliberately accepted, so the
+      earlier note's attribution overstated that gate's decision by an order of magnitude.
+      #3928 and #3931, which the previous note sequenced on, are both closed. The action is
+      still to retire this duplicate rather than flip it, but the ~151 need a ruling first."
     # Registered here as part of issue #2392: this gate ran advisory with no rules.yaml rule at
     # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
     # itself gated by .github/scripts/check-advisory-gate-registration.py.
