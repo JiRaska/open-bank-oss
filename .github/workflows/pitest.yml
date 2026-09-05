@@ -206,12 +206,19 @@ jobs:
             exit 1
           fi
           TOTAL=$(grep -o '<mutation ' "$XML" | wc -l | tr -d ' ')
-          KILLED=$(grep -oE "status=['\"]KILLED['\"]" "$XML" | wc -l | tr -d ' ')
+          # PIT's own mutation score — the one the Gradle threshold enforces — counts
+          # TIMED_OUT mutants as detected (a hanging mutant is a caught mutant). Counting
+          # only KILLED here undercounted CI by 4 points (59% vs PIT's 63%) and failed a
+          # green Gradle step (run 33929681493).
+          KILLED=$(grep -oE "status=['\"](KILLED|TIMED_OUT)['\"]" "$XML" | wc -l | tr -d ' ')
           if [ "$TOTAL" -eq "0" ]; then
             echo "::error::No mutations generated for the authz package — check targetClasses in pitest-authz.init.gradle"
             exit 1
           fi
-          SCORE=$(( KILLED * 100 / TOTAL ))
+          # Round-half-up, matching PIT's displayed percentage: floor division of the
+          # 2026-09-05 baseline (109/174) gives 62% and would fail a lane PIT itself
+          # scored 63% — the floor this job enforces.
+          SCORE=$(( (KILLED * 100 + TOTAL / 2) / TOTAL ))
           echo "Mutation score: ${SCORE}% (${KILLED}/${TOTAL} killed)"
           if [ "$SCORE" -lt "63" ]; then
             echo "::error::Mutation score ${SCORE}% is below the 63% enforced threshold for the authz decision path"
