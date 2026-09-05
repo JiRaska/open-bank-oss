@@ -23,8 +23,9 @@ obrazovky, které zůstávají autoritativním zdrojem detailu.
 | Segmentace sítě | `/api/security/kpis` → `netpol` (gate `netpol-coverage-kpi`, ADR-0279 #17) | tato stránka |
 | Čerstvost závislostí | `/api/security/kpis` → `freshness` (`deps-freshness.yml`, ADR-0279 #15) | tato stránka |
 | Dlouhožijící credentials | `/api/security/kpis` → `credentials` (`credential-inventory.yml`, ADR-0279 #18) | tato stránka |
+| DAST pokrytí | `/api/security/kpis` → `fuzz` (`api-fuzz.yml` aggregate → `fuzz-coverage` artifact, ADR-0279 #2) | tato stránka |
 
-## KPI snapshot — kde se berou tři nové domény
+## KPI snapshot — kde se berou čtyři nové domény
 
 `/api/security/kpis` servíruje `openbank-admin-ui/security-kpis.json`, CI-generovaný
 snapshot z workflow `security-kpis.yml` (weekly pátek 09:23 UTC, refresh PR při změně),
@@ -32,7 +33,14 @@ který přepočítává čísla **ze stejných gate skriptů** (`check-netpol-co
 `deps-freshness.py`, `credential-inventory.py`) — nikdy z reimplementace, aby se
 konzole a gaty nemohly rozejít. Soubor se vpeče do image buildu (`COPY
 openbank-admin-ui/ ./`); chybějící soubor = `not_deployed`, nikdy falešné OK.
-Každý kolektor degraduje nezávisle — jedna nedostupná doména neshodí ostatní dvě.
+Každý kolektor degraduje nezávisle — jedna nedostupná doména neshodí ostatní tři.
+
+Doména **DAST pokrytí** se nepočítá ze skriptu, ale z artefaktu `fuzz-coverage`
+posledního dokončeného běhu `api-fuzz.yml` (nightly 04:17 UTC od ADR-0279 #2):
+agregační job slepí per-service exercised-surface záznamy (`*-ops.json`) se scope
+záznamem z prepare kroku. Služba v job listu se NIKDY nepočítá jako otestovaná —
+počítá se jen ta se skutečným záznamem `selected > 0`; leg, který zkolaboval před
+fuzzingem, figuruje jako `no-evidence`. Excluded služby nesou důvod, ne ticho.
 
 ## Jak číst skóre
 

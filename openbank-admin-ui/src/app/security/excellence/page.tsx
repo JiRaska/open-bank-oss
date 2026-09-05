@@ -24,7 +24,7 @@ import Link from 'next/link'
 import {
   Shield, ScanLine, AlertTriangle, ShieldAlert, AlertOctagon, ClipboardCheck,
   ScrollText, Fingerprint, RefreshCw, ArrowRight, Scale, Package,
-  Network, TrendingUp, KeyRound,
+  Network, TrendingUp, KeyRound, Bug,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -231,6 +231,7 @@ interface KpisSnapshot {
   netpol?: { available?: boolean; coveragePct?: number; covered?: number; total?: number }
   freshness?: { available?: boolean; fleetScore?: number; unknownModules?: number }
   credentials?: { available?: boolean; staticSecrets?: number; withDeadline?: number; overdue?: number }
+  fuzz?: { available?: boolean; inScope?: number; tested?: number; coveragePct?: number; totalExercised?: number; excludedCount?: number; runDate?: string }
 }
 
 async function fetchKpis(): Promise<KpisSnapshot | null> {
@@ -282,6 +283,20 @@ async function fetchCredentials(): Promise<Patch> {
   }
 }
 
+async function fetchFuzz(): Promise<Patch> {
+  // DAST coverage (ADR-0279 #2): podíl in-scope služeb, které poslední api-fuzz běh
+  // skutečně profuzzoval (exercised-surface záznam), ne jen zobrazil v job listu.
+  const snap = await fetchKpis()
+  const z = snap?.fuzz
+  if (!z?.available || z.coveragePct == null) return unavailable('not_deployed')
+  return {
+    status: z.coveragePct < 100 ? 'degraded' : 'ok',
+    score: z.coveragePct,
+    metricCs: `${z.tested}/${z.inScope} služeb profuzzováno · ${z.totalExercised} operací${z.excludedCount ? ` · ${z.excludedCount} vyjmuto` : ''}${z.runDate ? ` · ${z.runDate}` : ''}`,
+    metricEn: `${z.tested}/${z.inScope} services fuzzed · ${z.totalExercised} ops${z.excludedCount ? ` · ${z.excludedCount} excluded` : ''}${z.runDate ? ` · ${z.runDate}` : ''}`,
+  }
+}
+
 // ── Stránka ──────────────────────────────────────────────────────────────────
 
 const DOMAIN_DEFS: Array<Omit<Domain, 'status'>> = [
@@ -321,6 +336,9 @@ const DOMAIN_DEFS: Array<Omit<Domain, 'status'>> = [
   { id: 'credentials', icon: KeyRound,     href: '/security/excellence',
     nameCs: 'Dlouhožijící credentials', nameEn: 'Long-lived Credentials',
     descCs: 'Statické ExternalSecrets s rotačním deadlinem', descEn: 'Static ExternalSecrets carrying a rotation deadline' },
+  { id: 'fuzz', icon: Bug,                 href: '/security/excellence',
+    nameCs: 'DAST pokrytí', nameEn: 'DAST Coverage',
+    descCs: 'Schemathesis nightly — skutečně profuzzované služby, ne job list', descEn: 'Schemathesis nightly — services actually fuzzed, not the job list' },
 ]
 
 export default function SecurityExcellencePage() {
@@ -336,7 +354,7 @@ export default function SecurityExcellencePage() {
       posture: fetchPosture, incidents: fetchIncidents, fraud: fetchFraud, aml: fetchAml,
       sanctions: fetchSanctions, approvals: fetchApprovals, audit: fetchAudit, identity: fetchIdentity,
       sbom: fetchSbom, segmentation: fetchSegmentation, freshness: fetchFreshness,
-      credentials: fetchCredentials,
+      credentials: fetchCredentials, fuzz: fetchFuzz,
     }
     // Fan-out paralelně; každá doména se doplní jakmile odpoví (progressive render).
     await Promise.all(Object.entries(fetchers).map(async ([id, fn]) => {
