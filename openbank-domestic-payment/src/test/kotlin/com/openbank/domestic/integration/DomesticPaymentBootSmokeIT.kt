@@ -25,8 +25,9 @@ import org.junit.jupiter.api.Test
  * wiring, config and migrations survive a real boot. Mirrors clearing/interest/sdd's per-job
  * Testcontainers IT (issue #578).
  *
- * The lone `@Channel("events-out")` Kafka emitter is swapped to the in-memory connector so no
- * broker is needed and the readiness probe carries no Kafka health check.
+ * Both Kafka emitters (`@Channel("events-out")` and `@Channel("notification-requests-out")`) are
+ * swapped to the in-memory connector so no broker is needed and the readiness probe carries no
+ * Kafka health check.
  */
 @QuarkusTest
 @QuarkusTestResource(DomesticPaymentBootSmokeIT.InMemoryKafkaResource::class)
@@ -34,7 +35,8 @@ import org.junit.jupiter.api.Test
 class DomesticPaymentBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory("events-out")
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchOutgoingChannelsToInMemory("events-out", "notification-requests-out")
 
         override fun stop() = InMemoryConnector.clear()
     }

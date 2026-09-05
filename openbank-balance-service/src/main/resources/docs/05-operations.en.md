@@ -32,7 +32,7 @@ docker compose -f openbank-infra/docker-compose.yml up -d balance-service
 | `OPENBANK_BALANCE_LOW_THRESHOLD_EUR` | `100.00` | triggers `balance.low.v1` |
 | `OPENBANK_HOLDS_EXPIRY_INTERVAL` | `5m` | expired-holds scan |
 
-`BootstrapVerifier` fails startup in prod when it detects dev placeholders.
+⬜ **This does not happen.** No `BootstrapVerifier` exists (`git grep BootstrapVerifier -- '*.kt'` returns 0; ADR-0017 prescribes one and its own delivery note records it was never shipped), so the `CHANGE_ME_LOCAL_DEV_ONLY` above does not abort startup in prod. In the deployment, `balance-service.yaml` takes credentials through `secretKeyRef` from ESO/OpenBao (ADR-0007) and carries no placeholder — the property is held by configuration, not by a boot-time control (#8426).
 
 ## SLO
 

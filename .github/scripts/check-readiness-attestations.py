@@ -115,7 +115,6 @@ CI_BY_RE = re.compile(r"^ci-")
 # (or leaves the file) is reported so the exemption cannot rot into permanence.
 PENTEST_OPS_DEBT: dict[str, str] = {
     "ledger.pentest": "predates R8 (#5769): ci-zap-baseline run 32173390301; add ops from the run artifact on next renewal",
-    "consent.pentest": "predates R8 (#5769): ci-schemathesis run 30340495749 measured 13/13 exercised — add ops: 13 on next renewal",
 }
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")

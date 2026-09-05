@@ -12,7 +12,7 @@ Toto je **money-path služba** (`rules.yaml: money_path_services`): každá změ
 | **AnaCredit (Reg. (EU) 2016/867)** | Granulární reporting úvěrů a zajištění | kategorie ochrany `collateral_type`; atributy úvěr/party/expozice uchovány |
 | **AMLD** (Boj proti praní špinavých peněz) | Podezřelá úvěrová aktivita, auditovatelnost odpisů | každá peněžní událost + rozhodnutí emituje doménovou událost do audit pipeline; AML hold může prodloužit retenci |
 | **GDPR** | `party_id` je pseudonymní reference; identity operátorů jsou osobní údaj | žádné jméno klienta/IBAN/rodné číslo neukládáno; 7letá retence záznamů překrývá výmaz |
-| **DORA** (Reg. (EU) 2022/2554) | Provozní odolnost | health probes, BootstrapVerifier, fault-tolerant volání ledgeru, audit události, SLO, runbooky |
+| **DORA** (Reg. (EU) 2022/2554) | Provozní odolnost | health probes, fault-tolerant volání ledgeru, audit události, SLO, runbooky. `BootstrapVerifier` byl uveden zde a neexistuje (#8426) — secrets drží injektáž přes ESO/OpenBao `secretKeyRef` (ADR-0007) |
 | **NIS2** | Bezpečnost sítí a informací | mTLS in-cluster, bezpečnostní hlavičky, JSON audit logging |
 | **ČNB uchovávání úvěrových záznamů** | Retence úvěrové smlouvy | 7letá retenční politika (`governance.yaml`) |
 
@@ -162,6 +162,6 @@ Každá stavotvorná operace (disburse, accrue, write-off) emituje doménovou ud
 - Validace vstupu (kladná částka, term ≥ 1, sazba ≥ 0, haircut `[0,1]`).
 - Idempotentní účetní zápisy (reference = idempotency key ledgeru) a idempotentní akruální průchod.
 - Bezpečnostní hlavičky (HSTS, CSP, X-Frame-Options, nosniff); TLS terminace na bráně, mTLS in-cluster.
-- Tajemství: BootstrapVerifier blokuje dev placeholdery v prod.
+- ⬜ Tajemství: **`BootstrapVerifier` neexistuje** — na dev placeholder v prod profilu nespadne start ničemu. Credentials přicházejí přes `secretKeyRef` z ESO/OpenBao v `lending-service.yaml` (ADR-0007); je to vlastnost konfigurace, ne kontrola v aplikaci (#8426).
 - Odolnost: fault-tolerant volání ledgeru (`LedgerCallGuard`), ohraničené REST timeouty.
 - ⚠️ `RiskParameterSource` / `CreditBureauPort` aktuálně používají konzervativní no-op výchozí hodnoty — reálný PD model a integrace registru jsou sledované roadmapové položky, ne regrese kontroly.
