@@ -178,16 +178,12 @@ BASELINE: dict[str, str] = {
     "openbank-pid-service:EXPIRED,PENDING,REJECTED,VERIFIED":
         "#5962 — UpdateKycRequest.kycStatus: the property does not exist; needs a schema fix, "
         "not an enum fix. The `Status` pairing is coincidental.",
-    "openbank-sanctions-service:CNB_DOMESTIC,EU_CONSOLIDATED,FATF_HIGH_RISK,HM_TREASURY,OFAC_SDN,UN_CONSOLIDATED":
-        "#5962 — SanctionsListType: undeclared PEP_GLOBAL",
     "openbank-sepa-payment:COMPLETED,PROCESSING,RECALLED,REJECTED":
         "#5962 — SepaPaymentStatus: spec-only RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
     "openbank-sepa-payment:COMPLETED,PENDING,PROCESSING,RECALLED,REJECTED":
         "#5962 — SepaPaymentStatus: spec-only PENDING/RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
         "#5962 — CloseFailureReason: undeclared NOT_VIABLE",
-    "openbank-swift-service:ACKNOWLEDGED,FAILED,PENDING,REJECTED,SENT,VALIDATED":
-        "#5962 — SwiftStatus: undeclared COMPLETED",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")

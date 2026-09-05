@@ -1080,10 +1080,6 @@ class NotificationConsumer @Inject constructor(
                     "<h2>KYC Rejected</h2><p>We could not verify your identity. Reason: ${vars.v(
                         "reason",
                     )}. Please contact support.</p>"
-            NotificationTemplate.KYC_DOCUMENT_REQUIRED ->
-                "We need a document from you" to
-                    "<h2>Document Required</h2><p>To finish verifying your identity we need your " +
-                    "<b>${vars.v("documentType")}</b>. You can upload it in the OpenBank app.</p>"
             NotificationTemplate.CONSENT_GRANTED ->
                 "Access to your account data was granted" to
                     "<h2>Consent Granted</h2><p>You granted access to your account data " +

@@ -31,7 +31,10 @@ class NotificationModelTest {
 
     @Test
     fun `NotificationTemplate has all expected templates`() {
-        assertThat(NotificationTemplate.values()).hasSize(24)
+        // 22 since #8535 removed KYC_DOCUMENT_REQUIRED: nothing could produce it, because
+        // kyc-service had no transition into DOCUMENTS_REQUIRED and no concept of a document type.
+        // +1 for DELEGATION_FIRST_USE (this branch) = 23.
+        assertThat(NotificationTemplate.values()).hasSize(23)
         assertThat(NotificationTemplate.values()).contains(
             NotificationTemplate.ACCOUNT_OPENED,
             NotificationTemplate.OTP_CODE,
@@ -127,7 +130,6 @@ class NotificationModelTest {
         ).containsExactlyInAnyOrder(
             NotificationTemplate.ACCOUNT_FROZEN,
             NotificationTemplate.KYC_REJECTED,
-            NotificationTemplate.KYC_DOCUMENT_REQUIRED,
             NotificationTemplate.TRANSACTION_FAILED,
             NotificationTemplate.DELEGATION_FIRST_USE,
         )

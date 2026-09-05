@@ -47,7 +47,7 @@ export default function SwiftPage() {
   )
 
   return (
-    <AuthGuard permission="payments:view">
+    <AuthGuard permission="payment-rails:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <PageHeader
           breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('SWIFT', 'SWIFT')}</span></div>}
