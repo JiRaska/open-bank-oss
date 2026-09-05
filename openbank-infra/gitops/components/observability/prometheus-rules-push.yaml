@@ -100,13 +100,13 @@ spec:
             (
               (
                 sum by (template) (increase(openbank_notification_push_fanouts_total{
-                  devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
+                  devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|TRANSACTION_FAILED"
                 }[15m]))
                 or on (template) (
                   sum by (template) (openbank_notification_push_fanouts_total{
-                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
+                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|TRANSACTION_FAILED"
                   }) unless on (template) sum by (template) (openbank_notification_push_fanouts_total{
-                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
+                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|TRANSACTION_FAILED"
                   } offset 15m)
                 )
               )
@@ -120,7 +120,7 @@ spec:
                   )
                 ) or on (template) (
                   sum by (template) (openbank_notification_push_fanouts_total{
-                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|KYC_DOCUMENT_REQUIRED|TRANSACTION_FAILED"
+                    devices_bucket="0", template=~"ACCOUNT_FROZEN|KYC_REJECTED|TRANSACTION_FAILED"
                   }) * 0
                 )
               )
