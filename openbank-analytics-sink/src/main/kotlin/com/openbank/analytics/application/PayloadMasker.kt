@@ -41,6 +41,12 @@ object PayloadMasker {
         "fullname" to MaskStrategy.NAME,
         "firstname" to MaskStrategy.NAME,
         "lastname" to MaskStrategy.NAME,
+        // ADR-0284 business onboarding. `signerName` is a named human. `legalName` is a company
+        // name for every legal form EXCEPT a sole trader, where it is that person's own name —
+        // and the field name cannot tell the two apart, so it is masked in both cases. The
+        // identifier (IČO/CRN/LEI) is not masked, so a company stays joinable in the warehouse.
+        "signername" to MaskStrategy.NAME,
+        "legalname" to MaskStrategy.NAME,
         "nationalid" to MaskStrategy.NATIONAL_ID,
         "birthnumber" to MaskStrategy.NATIONAL_ID,
         "rodnecislo" to MaskStrategy.NATIONAL_ID,
