@@ -24,7 +24,7 @@ import Link from 'next/link'
 import {
   Shield, ScanLine, AlertTriangle, ShieldAlert, AlertOctagon, ClipboardCheck,
   ScrollText, Fingerprint, RefreshCw, ArrowRight, Scale, Package,
-  Network, TrendingUp, KeyRound, Bug,
+  Network, TrendingUp, KeyRound, Bug, FileClock, Timer,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -232,6 +232,8 @@ interface KpisSnapshot {
   freshness?: { available?: boolean; fleetScore?: number; unknownModules?: number }
   credentials?: { available?: boolean; staticSecrets?: number; withDeadline?: number; overdue?: number }
   fuzz?: { available?: boolean; inScope?: number; tested?: number; coveragePct?: number; totalExercised?: number; excludedCount?: number; runDate?: string }
+  threatModels?: { available?: boolean; moneyPathTotal?: number; withModel?: number; staleCount?: number; oldestDays?: number }
+  mttr?: { available?: boolean; fixedCount?: number; medianFixDays?: number | null; openCount?: number; oldestOpenDays?: number }
 }
 
 async function fetchKpis(): Promise<KpisSnapshot | null> {
@@ -297,6 +299,43 @@ async function fetchFuzz(): Promise<Patch> {
   }
 }
 
+
+async function fetchThreatModels(): Promise<Patch> {
+  // Threat-model stáří (ADR-0279 #23): money-path služba bez modelu je critical
+  // (governance pravidlo), model > 90 dní bez změny je stale — prose, které nikdo
+  // nepřepočítal proti kódu.
+  const snap = await fetchKpis()
+  const m = snap?.threatModels
+  if (!m?.available || m.moneyPathTotal == null) return unavailable('not_deployed')
+  const pct = Math.round(100 * (m.withModel ?? 0) / m.moneyPathTotal)
+  const missing = (m.withModel ?? 0) < m.moneyPathTotal
+  return {
+    status: missing ? 'critical' : (m.staleCount ?? 0) > 0 ? 'degraded' : 'ok',
+    score: pct,
+    metricCs: `${m.withModel}/${m.moneyPathTotal} money-path s modelem · nejstarší ${m.oldestDays} d${m.staleCount ? ` · ${m.staleCount} zastaralých` : ''}`,
+    metricEn: `${m.withModel}/${m.moneyPathTotal} money-path with a model · oldest ${m.oldestDays}d${m.staleCount ? ` · ${m.staleCount} stale` : ''}`,
+  }
+}
+
+async function fetchMttr(): Promise<Patch> {
+  // CVE remediation (SLO S1 proxy přes Dependabot alerts, critical+high): otevřená
+  // kritická zranitelnost > 14 dní je critical postoj; median fix čas se ukáže,
+  // jakmile historie existuje.
+  const snap = await fetchKpis()
+  const v = snap?.mttr
+  if (!v?.available) return unavailable('not_deployed')
+  const open = v.openCount ?? 0
+  const oldest = v.oldestOpenDays ?? 0
+  const median = v.medianFixDays != null ? `median fix ${v.medianFixDays} d` : 'zatím bez fix dat'
+  const medianEn = v.medianFixDays != null ? `median fix ${v.medianFixDays}d` : 'no fix history yet'
+  return {
+    status: open > 0 ? (oldest > 14 ? 'critical' : 'degraded') : 'ok',
+    score: open > 0 ? Math.max(0, 100 - oldest) : 100,
+    metricCs: `${open} otevřených krit/vysokých${open ? ` · nejstarší ${oldest} d` : ''} · ${median}`,
+    metricEn: `${open} open crit/high${open ? ` · oldest ${oldest}d` : ''} · ${medianEn}`,
+  }
+}
+
 // ── Stránka ──────────────────────────────────────────────────────────────────
 
 const DOMAIN_DEFS: Array<Omit<Domain, 'status'>> = [
@@ -339,6 +378,12 @@ const DOMAIN_DEFS: Array<Omit<Domain, 'status'>> = [
   { id: 'fuzz', icon: Bug,                 href: '/security/excellence',
     nameCs: 'DAST pokrytí', nameEn: 'DAST Coverage',
     descCs: 'Schemathesis nightly — skutečně profuzzované služby, ne job list', descEn: 'Schemathesis nightly — services actually fuzzed, not the job list' },
+  { id: 'threatmodels', icon: FileClock,   href: '/security/excellence',
+    nameCs: 'Čerstvost threat modelů', nameEn: 'Threat-model Freshness',
+    descCs: 'Money-path pokrytí a stáří modelů — stale model je prose, ne kontrola', descEn: 'Money-path coverage and model age — a stale model is prose, not a control' },
+  { id: 'mttr', icon: Timer,               href: '/security/excellence',
+    nameCs: 'CVE remediation', nameEn: 'CVE Remediation',
+    descCs: 'SLO S1 proxy: otevřené kritické zranitelnosti a median čas opravy', descEn: 'SLO S1 proxy: open critical vulns and median time to fix' },
 ]
 
 export default function SecurityExcellencePage() {
@@ -355,6 +400,7 @@ export default function SecurityExcellencePage() {
       sanctions: fetchSanctions, approvals: fetchApprovals, audit: fetchAudit, identity: fetchIdentity,
       sbom: fetchSbom, segmentation: fetchSegmentation, freshness: fetchFreshness,
       credentials: fetchCredentials, fuzz: fetchFuzz,
+      threatmodels: fetchThreatModels, mttr: fetchMttr,
     }
     // Fan-out paralelně; každá doména se doplní jakmile odpoví (progressive render).
     await Promise.all(Object.entries(fetchers).map(async ([id, fn]) => {

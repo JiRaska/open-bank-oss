@@ -73,6 +73,87 @@ def collect_credentials() -> dict:
             "overdueFound": rc != 0}
 
 
+def collect_threat_models() -> dict:
+    """Threat-model freshness over money-path services (ADR-0279 #23 hub signal).
+
+    Age = days since the model's last git change (the publisher checks out with
+    fetch-depth: 0, so the history is real). A model untouched for > 90 days counts as
+    stale — the fleet rule is that a trust-boundary change must touch it (gate
+    threat-model-updated-on-trust-boundary-change), and a year-old money-path model is
+    prose nobody has re-derived from the code.
+    """
+    # rules.yaml money_path_services is a flat dash list under one top-level key — BUT the
+    # entries carry multi-line trailing comments (issue #1478 assessments), so capture up to
+    # the next top-level key and take only `  - ` lines. A two-regex parse avoids a PyYAML
+    # install in the publisher job (and the hash-pinning Scorecard would demand of it).
+    raw = Path("openbank-libs/governance/rules.yaml").read_text()
+    block = re.search(r"^money_path_services:\n(.*?)(?=^\S)", raw, re.M | re.S)
+    if not block:
+        return {"available": False, "reason": "money_path_services block unparsable"}
+    money = re.findall(r"^  - (\S+)", block.group(1), re.M)
+    now = dt.datetime.now(dt.timezone.utc).timestamp()
+    ages, missing = [], []
+    for svc in money:
+        f = Path("docs/threat-models") / f"{svc}.md"
+        if not f.is_file():
+            missing.append(svc)
+            continue
+        rc, out = run_json(["git", "log", "-1", "--format=%ct", "--", str(f)])
+        if rc != 0 or not out.strip():
+            missing.append(svc)
+            continue
+        ages.append((svc, int((now - int(out.strip())) / 86400)))
+    if not ages and missing:
+        return {"available": False, "reason": "no money-path threat model resolved"}
+    stale = sum(1 for _, a in ages if a > 90)
+    return {"available": True, "moneyPathTotal": len(money),
+            "withModel": len(ages), "missing": missing,
+            "staleCount": stale, "oldestDays": max((a for _, a in ages), default=0)}
+
+
+def collect_mttr() -> dict:
+    """Vulnerability remediation time from Dependabot alerts (SLO S1 proxy, ADR-0279 #23).
+
+    The release-SBOM diff the SLO table names as S1's final source is not wired yet; the
+    Dependabot alert stream is the computable proxy that exists TODAY: fixed alerts carry
+    created_at→fixed_at, open Critical/High carry age. Median, never a mean — one quarter-
+    old alert must not hide behind fifty same-day fixes.
+    """
+    import os
+    import statistics
+    import urllib.request
+
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
+    if not token:
+        return {"available": False, "reason": "no GH token"}
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{repo}/dependabot/alerts?per_page=100&state=all",
+            headers={"Authorization": f"Bearer {token}",
+                     "Accept": "application/vnd.github+json"})
+        alerts = json.loads(urllib.request.urlopen(req, timeout=30).read())
+        now = dt.datetime.now(dt.timezone.utc)
+        fixed_days, open_crit = [], []
+        for a in alerts:
+            sev = (a.get("security_advisory") or {}).get("severity", "")
+            if sev not in ("critical", "high"):
+                continue
+            created = dt.datetime.fromisoformat(a["created_at"].replace("Z", "+00:00"))
+            if a.get("state") == "fixed" and a.get("fixed_at"):
+                fixed = dt.datetime.fromisoformat(a["fixed_at"].replace("Z", "+00:00"))
+                fixed_days.append((fixed - created).total_seconds() / 86400)
+            elif a.get("state") == "open":
+                open_crit.append((now - created).total_seconds() / 86400)
+        return {"available": True, "severityScope": "critical+high",
+                "fixedCount": len(fixed_days),
+                "medianFixDays": round(statistics.median(fixed_days), 1) if fixed_days else None,
+                "openCount": len(open_crit),
+                "oldestOpenDays": round(max(open_crit)) if open_crit else 0}
+    except Exception as exc:  # API degradation must not kill the other collectors
+        return {"available": False, "reason": f"dependabot fetch failed: {exc.__class__.__name__}"}
+
+
 def collect_fuzz() -> dict:
     """DAST coverage from the latest api-fuzz run's fuzz-coverage artifact (ADR-0279 #2).
 
@@ -160,12 +241,15 @@ def main() -> int:
             "freshness": freshness,
             "credentials": collect_credentials(),
             "fuzz": collect_fuzz(),
+            "threatModels": collect_threat_models(),
+            "mttr": collect_mttr(),
         }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(snapshot, indent=2) + "\n")
-    avail = sum(1 for k in ("netpol", "freshness", "credentials", "fuzz") if snapshot[k]["available"])
-    print(f"security-kpis: {avail}/4 collectors available -> {out}")
+    avail = sum(1 for k in ("netpol", "freshness", "credentials", "fuzz",
+                            "threatModels", "mttr") if snapshot[k]["available"])
+    print(f"security-kpis: {avail}/6 collectors available -> {out}")
     return 0
 
 
