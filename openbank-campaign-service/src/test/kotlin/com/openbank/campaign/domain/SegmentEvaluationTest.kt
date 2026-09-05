@@ -115,21 +115,57 @@ class SegmentEvaluationTest {
     }
 
     /**
-     * The two rules whose data does not exist anywhere in analytics are rejected where the segment is
-     * DEFINED. Rendering them into SQL that ClickHouse refuses is what made #2891 look like an empty
+     * A rule whose data does not exist anywhere in analytics is rejected where the segment is
+     * DEFINED. Rendering it into SQL that ClickHouse refuses is what made #2891 look like an empty
      * cohort instead of a broken query.
+     *
+     * `HasAccount` used to be in this list and no longer is (#8792): the reason it carried was
+     * already stale when it was written. Consent is still genuinely absent from the layer.
      */
     @Test
-    fun `rules whose data the analytics layer does not carry are rejected at construction`() {
-        val noAccountLink = assertThrows<IllegalArgumentException> {
-            Segment("has-account", 1, listOf(SegmentRule.HasAccount))
-        }
-        assertTrue(noAccountLink.message!!.contains("partyId"), "actual: ${noAccountLink.message}")
-
+    fun `a rule whose data the analytics layer does not carry is rejected at construction`() {
         val noConsentEvents = assertThrows<IllegalArgumentException> {
             Segment("consented", 1, listOf(SegmentRule.HasActiveConsentScope("MARKETING_COMMS_EMAIL")))
         }
         assertTrue(noConsentEvents.message!!.contains("consent events"), "actual: ${noConsentEvents.message}")
+    }
+
+    @Test
+    fun `HasAccount is constructible now that the party link exists in the layer`() {
+        val segment = Segment("has-account", 1, listOf(SegmentRule.HasAccount))
+        val (where, params) = segment.toWhereClause()
+        assertTrue(where.contains("JSONExtractString(payload, 'partyId')"), "actual: $where")
+        // No bind values: the rule carries no caller-supplied value, so there is nothing to
+        // parameterise and nothing that could become SQL.
+        assertTrue(params.isEmpty(), "actual: $params")
+    }
+
+    /**
+     * The load-bearing property of this rule, and the one worth a test of its own.
+     *
+     * Silver keeps only the LATEST event per aggregate, and of the four account events only
+     * `AccountCreatedEvent` carries `partyId`. So an account that has ever changed status has a
+     * silver row without the link, and a silver-based subquery would omit exactly the parties with
+     * the most account activity — while a fail-closed evaluator renders that as "did not match",
+     * which is indistinguishable from a correct answer. Reading bronze is what avoids it.
+     */
+    @Test
+    fun `HasAccount resolves the party link from bronze, never from the latest-state view`() {
+        val (where, _) = Segment("has-account", 1, listOf(SegmentRule.HasAccount)).toWhereClause()
+        assertTrue(where.contains("openbank_analytics.bronze_events"), "actual: $where")
+        assertFalse(where.contains("silver_current_state"), "reads the latest-state view — actual: $where")
+    }
+
+    /**
+     * An ACCOUNT row whose payload has no `partyId` must not contribute an empty string to the
+     * IN-list: `aggregate_id IN ('')` matches nothing, but it also costs nothing to exclude, and
+     * leaving it in makes the query's intent unreadable. Every account event other than
+     * `AccountCreated` produces exactly such a row.
+     */
+    @Test
+    fun `HasAccount excludes account rows that carry no party link`() {
+        val (where, _) = Segment("has-account", 1, listOf(SegmentRule.HasAccount)).toWhereClause()
+        assertTrue(where.contains("JSONExtractString(payload, 'partyId') != ''"), "actual: $where")
     }
 
     @Test
