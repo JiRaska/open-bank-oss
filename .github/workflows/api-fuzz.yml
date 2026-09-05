@@ -213,14 +213,14 @@ jobs:
         run: python3 .github/scripts/fuzz-coverage-aggregate.py --self-test
 
       - name: Download all fuzz reports
-        uses: actions/download-artifact@9dbf31a64cf2a9f7b784a4c24c203321ddd843e0 # v7.0.1
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           pattern: api-fuzz-reports-*
           path: fuzz-artifacts
           merge-multiple: true
 
       - name: Download the derived scope
-        uses: actions/download-artifact@9dbf31a64cf2a9f7b784a4c24c203321ddd843e0 # v7.0.1
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: fuzz-scope
           path: fuzz-scope-dir
