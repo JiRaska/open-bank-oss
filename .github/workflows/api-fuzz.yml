@@ -28,11 +28,14 @@
 # reports itself instead of consuming the budget of everything after it in the list, which the
 # shared `OVERALL=1` used to hide.
 #
-# Batch lane (openbank-batch): weekly + manual, never a PR gate (ADR-0053).
+# Batch lane (openbank-batch): nightly + manual, never a PR gate (ADR-0053). Nightly since
+# ADR-0279 #2 — a weekly cadence meant a money-path endpoint regression could sit unfuzzed
+# for three days; hosted runners on a public repo make the nightly pass free.
 name: API fuzz
 
 on:
   schedule:
+    - cron: "17 4 * * *"   # nightly 04:17 UTC (ADR-0279 #2)
     - cron: "30 5 * * 2"   # weekly Tue 05:30 UTC — after the Monday dep bumps
     - cron: "30 5 * * 4"   # weekly Thu 05:30 UTC
   workflow_dispatch:
@@ -112,7 +115,18 @@ jobs:
           print(f"fuzzing {len(keep)} service(s); {len(skipped)} excluded")
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write("services=" + json.dumps(keep) + "\n")
+          # Durable scope record for the aggregate step: the job list alone is NOT
+          # evidence of what was in scope (#2) — keep and skipped-with-reason both.
+          with open("fuzz-scope.json", "w") as fh:
+              json.dump({"keep": keep, "skipped": skipped}, fh, indent=2)
           PY
+
+      - name: Upload derived scope
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-scope
+          path: fuzz-scope.json
+          retention-days: 30
 
   fuzz:
     name: "schemathesis (${{ matrix.service }})"
@@ -178,3 +192,51 @@ jobs:
           name: api-fuzz-reports-${{ matrix.service }}
           path: fuzz-reports/
           retention-days: 30
+
+  # ADR-0279 #2: merge the per-service exercised-surface records into ONE fuzz-coverage.json
+  # (uploaded as the `fuzz-coverage` artifact). The security-kpis snapshot publisher reads
+  # the latest run's artifact into the excellence console, so "what did DAST actually test"
+  # is a durable number, not a job list. if: always() — a failed leg is exactly what this
+  # record must capture (as no-evidence), so the aggregate runs on red runs too.
+  aggregate:
+    name: fuzz coverage record
+    needs: [prepare, fuzz]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test the aggregator
+        run: python3 .github/scripts/fuzz-coverage-aggregate.py --self-test
+
+      - name: Download all fuzz reports
+        uses: actions/download-artifact@9dbf31a64cf2a9f7b784a4c24c203321ddd843e0 # v7.0.1
+        with:
+          pattern: api-fuzz-reports-*
+          path: fuzz-artifacts
+          merge-multiple: true
+
+      - name: Download the derived scope
+        uses: actions/download-artifact@9dbf31a64cf2a9f7b784a4c24c203321ddd843e0 # v7.0.1
+        with:
+          name: fuzz-scope
+          path: fuzz-scope-dir
+
+      - name: Build fuzz-coverage.json
+        run: |
+          python3 .github/scripts/fuzz-coverage-aggregate.py \
+            --artifacts fuzz-artifacts \
+            --scope fuzz-scope-dir/fuzz-scope.json \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --out fuzz-coverage.json
+
+      - name: Upload fuzz-coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-coverage
+          path: fuzz-coverage.json
+          retention-days: 90   # the KPI publisher reads the latest run's artifact; 90d
+                               # covers a long stretch of red fuzz runs without losing it

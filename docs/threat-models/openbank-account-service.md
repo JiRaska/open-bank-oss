@@ -51,6 +51,7 @@ that is balance-service).
 | **I**nfo disclosure | IBAN / account enumeration via `/iban/{iban}` | AuthZ on lookup; rate limiting at gateway; no PII in IBAN response beyond need |
 | **I**nfo disclosure / **IDOR** | Customer reads another party's account/balance via a guessed id (reads are gated by role, not ownership; the edge calls with a ROLE_OPERATOR M2M token) | Primary control is at the customer-edge (resolves ownership before proxying, finding A1). **Defense-in-depth here:** when a call carries `X-Customer-Party-Id` the read must belong to that party, else 404 (no existence oracle) — catches an edge bug/new route that forwards the header but skips its own check. Operator/service reads (no header) unaffected. |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-customer inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): `openbank.accounts.created` tagged only by `product_type` (closed `AccountType` enum) + `currency`; `openbank.accounts.closed` adds a `reason` **normalized to a closed set** (`customer_request`/`regulatory`/`fraud`/`inactivity`/`unspecified`/`other`) — the operator-supplied free-text reason never becomes a label; outbox-backlog gauge tagged only by `service`. Never an account id, IBAN, party id, or balance. Counters increment only after the commit + publish. `/q/metrics` is cluster-internal |
+| **I**nfo disclosure | Authorization-id enumeration via the revoke route: `DELETE /api/v1/accounts/{accountId}/authorizations/{authorizationId}` distinguishing "this id exists on another account" from "this id does not exist" | `AuthorizationNotFoundExceptionMapper` and `AuthorizationNotOnAccountExceptionMapper` both answer 404 with a byte-identical `AUTHORIZATION_NOT_FOUND` body, so an operator scoped to one account gets no existence oracle over ids on accounts they do not hold. The distinction is kept in a WARN log, not on the wire. Same posture as the `X-Customer-Party-Id` row above. |
 | **D**oS | Mass open/close churn | Gateway rate limits; outbox decouples event load |
 | **E**oP | Viewer escalates to freeze/close | Distinct roles; OPA enforce; deny-by-default |
 | **S**poofing / **E**oP (M2M) | Compromise of the `oidc-client` secret → mint a ROLE_OPERATOR token → inject arbitrary transactions via transaction-service `POST /api/v1/transactions` | Secret held only in a K8s Secret (ExternalSecret from Vault), never in image/git; rotatable; least-privilege client (`openbank-services`); welcome-bonus call is **flag-gated default-OFF** and **sandbox-only**. Residual: transaction-service does not currently distinguish caller identity beyond the role — accepted residual risk in sandbox (see §5) |
@@ -94,6 +95,37 @@ not change any existing request's outcome until explicitly flipped.
   it is a strict improvement over the prior state of no guard at all.
 
 ## 6. Change log
+
+- **2026-09-04** — **Inbound REST error surface on account opening**, no new route, caller, edge
+  or privilege. Two sanctions-screening outcomes rendered 500 INTERNAL_ERROR through the generic
+  mapper: an unreachable screening service (the gate fails closed, ADR-0032 §C) and a policy
+  refusal (HIT/REVIEW). They now answer 503 with `Retry-After: 30` and 422 respectively, via two
+  dedicated mappers in `ExceptionMappers.kt`; the routine policy refusal also stops logging at
+  ERROR with a full stack (WARN, no stack), so it no longer consumes this money-path service's
+  5xx error budget. **Security-relevant half — the disclosure the naive fix would have shipped:**
+  re-parenting `AccountOpeningBlockedByScreeningException` to `IllegalStateException` would have
+  fixed the status and put the matched sanctions name plus partyId into the response body
+  (libs-runtime's 422 mapper echoes `exception.message`), handing the caller a sanctions-list
+  oracle. The mapper bodies are fixed strings naming neither; a unit test asserts the matched
+  name and partyId appear nowhere in the body, and that a refusal with a match is
+  indistinguishable from one without. RBAC, OPA and the screening call itself are untouched.
+  **Risk class:** availability/observability plus disclosure hardening; no money mutation and no
+  new principal. Rollback: delete the two mappers and both types fall back to the generic 500
+  mapper. (#8512)
+
+- **2026-09-03** — **Inbound REST error surface on the authorization routes**, no new route, caller,
+  edge or privilege. Revoking an authorization that does not exist answered 500 INTERNAL_ERROR; it now
+  answers 404, via two service-local mappers (`AuthorizationNotFoundExceptionMapper`,
+  `AuthorizationNotOnAccountExceptionMapper`) added to the existing
+  `com.openbank.account.infrastructure.rest.ExceptionMappers` file. RBAC, OPA action
+  (`account.authorize`) and the revoke logic are untouched — only the status and body of an
+  already-refused request change. **Security-relevant half:** the cross-account case
+  (`AuthorizationNotOnAccountException`) previously leaked through the generic 500 and now returns a
+  body byte-identical to the unknown-id case, closing an authorization-id existence oracle for an
+  operator scoped to a different account; a unit test asserts the two bodies match field for field.
+  **Risk class:** availability/observability (a client fault stops consuming this money-path service's
+  5xx error budget) plus the enumeration hardening above; no money mutation and no new principal.
+  Rollback: delete the two mappers and both types fall back to the generic 500 mapper. (#5913)
 
 - **2026-08-27** — **New tightly scoped inbound diagnostic edge:** the sandbox's
   `journey-product-catalog-read` k6 CronJob may make one read-only request to
@@ -521,3 +553,10 @@ not change any existing request's outcome until explicitly flipped.
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+## Delegation lifecycle ordering
+
+The local enforcement projection accepts authority-opening events only with a positive,
+monotonically increasing `lifecycleRevision`. A revisionless close remains accepted and installs a
+permanent legacy tombstone; a revisionless activate/reinstate is ignored. This deliberately favors
+temporary unavailability during a consumer-first rolling upgrade over resurrecting revoked access.
+Recovery from a legacy tombstone is a newly issued grant, never replaying the same grant id.

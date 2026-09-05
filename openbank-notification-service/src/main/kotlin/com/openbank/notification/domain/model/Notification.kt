@@ -76,6 +76,15 @@ enum class NotificationTemplate(val variables: Set<String>) {
     /** The grantor revoked an active grant; the grantee's access ends now (DelegationRevoked). */
     DELEGATION_REVOKED(setOf("resourceType")),
 
+    /** The bank temporarily removed delegated authority (DelegationSuspended). */
+    DELEGATION_SUSPENDED(setOf("resourceType")),
+
+    /** The bank restored previously suspended delegated authority (DelegationReinstated). */
+    DELEGATION_REINSTATED(setOf("resourceType")),
+
+    /** The grantee gave up delegated authority (DelegationRenounced). */
+    DELEGATION_RENOUNCED(setOf("resourceType")),
+
     /** A grant's validity window ended on its own; sent to both parties (DelegationExpired). */
     DELEGATION_EXPIRED(setOf("resourceType")),
     ;
@@ -115,6 +124,9 @@ enum class NotificationTemplate(val variables: Set<String>) {
             DELEGATION_ACCEPTED,
             DELEGATION_DECLINED,
             DELEGATION_REVOKED,
+            DELEGATION_SUSPENDED,
+            DELEGATION_REINSTATED,
+            DELEGATION_RENOUNCED,
             DELEGATION_EXPIRED,
             -> null
         }
@@ -130,7 +142,8 @@ enum class NotificationTemplate(val variables: Set<String>) {
             KYC_APPROVED, KYC_REJECTED, KYC_DOCUMENT_REQUIRED,
             CONSENT_GRANTED, CONSENT_REVOKED,
             DELEGATION_OFFERED, DELEGATION_ACCEPTED, DELEGATION_DECLINED,
-            DELEGATION_REVOKED, DELEGATION_EXPIRED,
+            DELEGATION_REVOKED, DELEGATION_SUSPENDED, DELEGATION_REINSTATED,
+            DELEGATION_RENOUNCED, DELEGATION_EXPIRED,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
@@ -184,6 +197,8 @@ data class NotificationRequest(
 
 /** Closed allow-list for navigation metadata sent through FCM/APNs. */
 object MobileDeepLink {
+    private const val DELEGATION_DETAIL_PREFIX = "openbank://delegations/"
+
     private val allowed = setOf(
         "openbank://home",
         "openbank://savings",
@@ -192,5 +207,11 @@ object MobileDeepLink {
         "openbank://products",
     )
 
-    fun isAllowed(value: String?): Boolean = value == null || value in allowed
+    fun isAllowed(value: String?): Boolean = value == null || value in allowed || isCanonicalDelegationDetail(value)
+
+    private fun isCanonicalDelegationDetail(value: String): Boolean {
+        if (!value.startsWith(DELEGATION_DETAIL_PREFIX)) return false
+        val id = value.removePrefix(DELEGATION_DETAIL_PREFIX)
+        return runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
+    }
 }

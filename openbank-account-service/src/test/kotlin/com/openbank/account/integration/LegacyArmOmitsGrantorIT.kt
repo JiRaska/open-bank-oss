@@ -231,6 +231,7 @@ class LegacyArmOmitsGrantorIT {
         """
         {
           "eventType": "DelegationActivated",
+          "lifecycleRevision": 1,
           "aggregateId": "$grantId",
           "grantorPartyId": "$ownerParty",
           "granteePartyId": "$delegateParty",

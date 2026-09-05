@@ -87,8 +87,9 @@
     z-index: 30;
     inset: 0 auto 0 0;
     transform: translateX(-102%);
-    transition: transform .2s ease;
+    visibility: hidden;
+    transition: transform .2s ease, visibility 0s linear .2s;
     box-shadow: 16px 0 38px rgba(15, 23, 42, .24);
   }
-  .mobileOpen { transform: translateX(0); }
+  .mobileOpen { visibility: visible; transform: translateX(0); transition-delay: 0s; }
 }

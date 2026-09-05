@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.1...document-service-v0.14.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **document:** createdAt defaults to now(), never Instant.EPOCH ([#8357](https://github.com/JiRaska/open-bank-oss/issues/8357)) ([#8504](https://github.com/JiRaska/open-bank-oss/issues/8504)) ([5d875d4](https://github.com/JiRaska/open-bank-oss/commit/5d875d48d4379faa543ec44e6985e01d4cf208a4))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.0...document-service-v0.14.1) (2026-09-01)
 
 

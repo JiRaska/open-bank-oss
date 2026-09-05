@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.application.port.out
 
+import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -23,6 +24,17 @@ interface DomesticPaymentRepository {
 
     /** Persist a new payment together with its domain-event outbox message, atomically. */
     suspend fun save(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment
+
+    /**
+     * Lock and consume a local PENDING reservation projection while inserting the payment and its
+     * created-event outbox row in the same transaction. This is the create-vs-finalizer arbiter.
+     */
+    suspend fun saveDelegated(
+        payment: DomesticPayment,
+        outboxMessage: OutboxMessage,
+        boundAt: Instant,
+        debitOwnerPartyId: UUID,
+    ): DelegatedPaymentSaveOutcome
 
     suspend fun findById(paymentId: UUID): DomesticPayment?
 
@@ -112,4 +124,14 @@ interface DomesticPaymentEventPublisher {
     fun paymentCreatedPayload(payment: DomesticPayment): String
 
     fun statusChangedPayload(previous: DomesticPayment, current: DomesticPayment): String
+
+    fun delegatedSpendFinalizedAbsentPayload(binding: DelegatedSpendBinding): String
+}
+
+sealed interface DelegatedPaymentSaveOutcome {
+    data class Created(val payment: DomesticPayment) : DelegatedPaymentSaveOutcome
+    data class Replayed(val payment: DomesticPayment) : DelegatedPaymentSaveOutcome
+    data object ProjectionMissing : DelegatedPaymentSaveOutcome
+    data object FinalizedAbsent : DelegatedPaymentSaveOutcome
+    data class TupleMismatch(val reason: String) : DelegatedPaymentSaveOutcome
 }

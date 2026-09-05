@@ -17,6 +17,21 @@ export const ATTR_APP_VERSION = 'app.version'
 export const ATTR_DEVICE_MODEL = 'device.model'
 export const ATTR_OS_TYPE = 'os.type'
 export const ATTR_OS_VERSION = 'os.version'
+export const ATTR_WEB_VITAL_NAME = 'web_vital.name'
+export const ATTR_WEB_VITAL_VALUE = 'web_vital.value'
+export const ATTR_WEB_VITAL_DELTA = 'web_vital.delta'
+export const ATTR_WEB_VITAL_RATING = 'web_vital.rating'
+export const ATTR_WEB_VITAL_UNIT = 'web_vital.unit'
+
+const CORE_WEB_VITAL_NAMES = new Set(['CLS', 'INP', 'LCP'])
+const WEB_VITAL_RATINGS = new Set(['good', 'needs-improvement', 'poor'])
+
+export interface CoreWebVitalInput {
+  name: string
+  value: number
+  delta: number
+  rating: string
+}
 
 /** Conservative redaction: screen names must never contain operator, customer or case identifiers. */
 export function looksLikeIdentifier(segment: string): boolean {
@@ -99,6 +114,27 @@ export function recordScreenView(pathname: string, tracer: Tracer = rumTracer())
   const screen = toScreenName(pathname)
   const span = tracer.startSpan(`screen.${screen}`, {
     attributes: { [ATTR_SCREEN_NAME]: screen, [ATTR_HTTP_ROUTE]: screen },
+  })
+  context.with(trace.setSpan(context.active(), span), () => span.end())
+}
+
+/** Emits only the three stable Core Web Vitals and deliberately drops IDs and attribution entries. */
+export function recordWebVital(metric: CoreWebVitalInput, pathname: string, tracer: Tracer = rumTracer()): void {
+  if (!CORE_WEB_VITAL_NAMES.has(metric.name) || !WEB_VITAL_RATINGS.has(metric.rating)) return
+  if (!Number.isFinite(metric.value) || !Number.isFinite(metric.delta) || metric.value < 0 || metric.delta < 0) return
+
+  const screen = toScreenName(pathname)
+  const unit = metric.name === 'CLS' ? '1' : 'ms'
+  const span = tracer.startSpan(`web-vital.${metric.name.toLowerCase()}`, {
+    attributes: {
+      [ATTR_WEB_VITAL_NAME]: metric.name,
+      [ATTR_WEB_VITAL_VALUE]: metric.value,
+      [ATTR_WEB_VITAL_DELTA]: metric.delta,
+      [ATTR_WEB_VITAL_RATING]: metric.rating,
+      [ATTR_WEB_VITAL_UNIT]: unit,
+      [ATTR_SCREEN_NAME]: screen,
+      [ATTR_HTTP_ROUTE]: screen,
+    },
   })
   context.with(trace.setSpan(context.active(), span), () => span.end())
 }

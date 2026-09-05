@@ -63,6 +63,11 @@ test.describe('SCT Inst payee verification', () => {
     await page.getByRole('button', { name: /Verify|Ověřit/ }).click()
     await expect(page.getByText(/MATCH —/)).toBeVisible()
     await page.getByRole('button', { name: /Send instant|Odeslat okamžitě/ }).click()
+    const review = page.getByRole('alertdialog', { name: /Review payment order|Zkontrolovat platební příkaz/ })
+    await expect(review).toContainText('MATCH')
+    await expect(review).toContainText('Verified Supplier GmbH')
+    expect(paymentRequests).toBe(0)
+    await page.getByRole('button', { name: /Confirm and submit|Potvrdit a odeslat/ }).click()
 
     await expect(page.getByText(/SCT Inst payment created|SCT Inst platba vytvořena/)).toBeVisible()
     expect(paymentRequests).toBe(1)

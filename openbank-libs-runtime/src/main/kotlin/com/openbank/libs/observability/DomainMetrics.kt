@@ -261,6 +261,23 @@ class DomainMetrics {
         counter("openbank.aml.hits", "severity", severity)
     }
 
+    /**
+     * Increment once per sanctions-list import attempt, whatever the outcome.
+     *
+     * The `outcome` tag is the point (the #4348 rule — a skipped, failed or seed-fallback import
+     * must never read as a working one): `imported` means the feed was fetched and its entries
+     * upserted; every other value means the stored list was left untouched and names WHY
+     * (`empty_feed` | `failed_kept_existing` | `skipped_not_entity_based` |
+     * `seed_fallback_non_production`). Alert on the absence of `outcome=imported`, not on an
+     * error rate — a list silently running on months-old seeds emits no error.
+     *
+     * @param listType  a `SanctionsListType` name (e.g. `EU_CONSOLIDATED`)
+     * @param outcome   a `ListImportOutcome` name, lower-cased
+     */
+    fun sanctionsListImport(listType: String, outcome: String) {
+        counter("openbank.sanctions.list.imports", "list_type", listType, "outcome", outcome)
+    }
+
     // ── Authorization (ADR-0034 D5) ───────────────────────────────────────────
 
     /**

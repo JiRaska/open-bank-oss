@@ -38,7 +38,7 @@ test('keeps clearing and settlement evidence visible after a failed refresh', as
   await page.goto('/clearing')
 
   await expect(page.getByText('CLR-2026-0042')).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByText('125,000.50')).toBeVisible()
+  await expect(page.getByText('125,000.50', { exact: true })).toBeVisible()
   await expect(page.getByText('PROCESSING', { exact: true })).toBeVisible()
 
   unavailable = true
@@ -46,7 +46,7 @@ test('keeps clearing and settlement evidence visible after a failed refresh', as
 
   await expect(page.getByText(/Zobrazen je poslední úspěšný snapshot|Showing the last successful snapshot/)).toBeVisible({ timeout: 25_000 })
   await expect(page.getByText('CLR-2026-0042')).toBeVisible()
-  await expect(page.getByText('125,000.50')).toBeVisible()
+  await expect(page.getByText('125,000.50', { exact: true })).toBeVisible()
   await expect(page.getByText('PROCESSING', { exact: true })).toBeVisible()
   await expect(page.getByText(/zatím žádné clearing dávky|no clearing batches yet/)).toHaveCount(0)
 })

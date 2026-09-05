@@ -24,6 +24,23 @@ function finrepResponse(templateId: string) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Regulatory report preview', () => {
+  it('opens as a labelled modal and restores the trigger after Escape', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 502 })))
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    const finrepCard = screen.getByText('CNB — Finanční výkazy (FINREP)').closest('.card')
+    const trigger = within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' })
+    fireEvent.click(trigger)
+
+    const dialog = await screen.findByRole('dialog', { name: /Export preview.*FINREP/i })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    expect(screen.getByRole('button', { name: 'Close export preview' })).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+  })
+
   it('does not offer a fake export preview for catalogue-only reports', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

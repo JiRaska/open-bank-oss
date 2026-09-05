@@ -115,7 +115,16 @@ opa:
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
-  enforce: "${AUTHZ_ENFORCE:false}"
+  # Enforcing by DEFAULT (#3679). interest-service is money-path — it posts real GL
+  # journals (#1478) — and while this read `${AUTHZ_ENFORCE:false}` enforcement was a
+  # property of one gitops manifest rather than of the service: the deployed Rollout sets
+  # the variable to "true", so the cluster was correct, but a new cluster, a local run or
+  # an ad-hoc container silently ran ADVISORY — every @Authorize decision evaluated,
+  # every deny logged, every request allowed through. Fail-safe belongs in the default,
+  # not in whichever manifest remembers the variable. Every action this service gates
+  # (interest.create/.trigger/.delete/.read/.list) was confirmed grantable against the
+  # deployed bundle before this flip, so no endpoint 403s as a result of it.
+  enforce: "${AUTHZ_ENFORCE:true}"
 
 "%dev":
   quarkus:
@@ -149,6 +158,12 @@ authz:
     # dispatchScheduledBatch() explicitly and never races the assertions.
     scheduler:
       enabled: false
+  # OPA is not present in CI integration tests — keep advisory so @Authorize methods proceed
+  # instead of 503ing on the absent sidecar (the interceptor fails CLOSED on an unreachable
+  # PDP, by design). Scoped and explicit, which is the point: the fleet default above is now
+  # enforce, and this is the one environment that opts out. Same shape as aml/pid/party.
+  authz:
+    enforce: "false"
 # ADR-0033 §D — the GL accounts the capitalization split posts against (InterestLedgerConfig).
 # Defaults are the stable `a0000000-…` rows seeded by the ledger's
 # V17__interest_capitalization_accounts.sql; operators repoint them at the real chart per

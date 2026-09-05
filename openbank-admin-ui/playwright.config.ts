@@ -24,7 +24,12 @@ export default defineConfig({
   reporter: process.env.CI ? [
     ['github'],
     ['html', { open: 'never' }],
-    ['junit', { outputFile: process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? 'build/test-results/e2e/playwright.xml' }],
+    ['junit', {
+      outputFile: process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? 'build/test-results/e2e/playwright.xml',
+      // Preserve failed attempts when a retry passes. The collector retains only bounded
+      // counts/durations from these entries; suite and testcase verdicts remain passed.
+      includeRetries: true,
+    }],
   ] : 'list',
 
   use: {

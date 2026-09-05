@@ -107,6 +107,15 @@ data class DelegationGrant(
     val validFrom: OffsetDateTime,
     val validTo: OffsetDateTime?,
     val status: DelegationStatus = DelegationStatus.OFFERED,
+    /**
+     * Monotonic ordering token for this aggregate's lifecycle events.
+     *
+     * Revision zero is the OFFERED state. Every status transition increments exactly once; the
+     * database trigger is authoritative so an older rolling-deployment writer cannot bypass the
+     * invariant. Consumers use this value instead of arrival time, which is not an ordering
+     * guarantee once an outbox row is retried or a partition is replayed.
+     */
+    val lifecycleRevision: Long = 0,
     val grantScaSessionId: UUID? = null,
     val acceptScaSessionId: UUID? = null,
     val note: String? = null,
@@ -134,6 +143,7 @@ data class DelegationGrant(
             "N_OF_M approval policy requires requiredApprovals >= 2"
         }
         require(validTo == null || validTo.isAfter(validFrom)) { "validTo must be after validFrom" }
+        require(lifecycleRevision >= 0) { "lifecycleRevision must not be negative" }
     }
 
     fun isActiveOn(now: OffsetDateTime): Boolean = status == DelegationStatus.ACTIVE &&
@@ -192,6 +202,7 @@ data class DelegationGrant(
         check(status == DelegationStatus.OFFERED) { "only an OFFERED grant can be accepted (is $status)" }
         return copy(
             status = DelegationStatus.ACTIVE,
+            lifecycleRevision = nextLifecycleRevision(),
             acceptScaSessionId = scaSessionId,
             updatedAt = now,
         )
@@ -199,7 +210,12 @@ data class DelegationGrant(
 
     fun decline(now: OffsetDateTime): DelegationGrant {
         check(status == DelegationStatus.OFFERED) { "only an OFFERED grant can be declined (is $status)" }
-        return copy(status = DelegationStatus.DECLINED, updatedAt = now, closedAt = now)
+        return copy(
+            status = DelegationStatus.DECLINED,
+            lifecycleRevision = nextLifecycleRevision(),
+            updatedAt = now,
+            closedAt = now,
+        )
     }
 
     fun revoke(by: UUID, reason: String, now: OffsetDateTime): DelegationGrant {
@@ -212,6 +228,7 @@ data class DelegationGrant(
         }
         return copy(
             status = DelegationStatus.REVOKED,
+            lifecycleRevision = nextLifecycleRevision(),
             updatedAt = now,
             closedAt = now,
             closedBy = by,
@@ -223,23 +240,45 @@ data class DelegationGrant(
         check(status == DelegationStatus.ACTIVE || status == DelegationStatus.SUSPENDED) {
             "only an ACTIVE/SUSPENDED grant can be renounced (is $status)"
         }
-        return copy(status = DelegationStatus.RENOUNCED, updatedAt = now, closedAt = now)
+        return copy(
+            status = DelegationStatus.RENOUNCED,
+            lifecycleRevision = nextLifecycleRevision(),
+            updatedAt = now,
+            closedAt = now,
+        )
     }
 
     fun suspend(reason: String, now: OffsetDateTime): DelegationGrant {
         check(status == DelegationStatus.ACTIVE) { "only an ACTIVE grant can be suspended (is $status)" }
-        return copy(status = DelegationStatus.SUSPENDED, updatedAt = now, closedReason = reason)
+        return copy(
+            status = DelegationStatus.SUSPENDED,
+            lifecycleRevision = nextLifecycleRevision(),
+            updatedAt = now,
+            closedReason = reason,
+        )
     }
 
     fun reinstate(now: OffsetDateTime): DelegationGrant {
         check(status == DelegationStatus.SUSPENDED) { "only a SUSPENDED grant can be reinstated (is $status)" }
-        return copy(status = DelegationStatus.ACTIVE, updatedAt = now, closedReason = null)
+        return copy(
+            status = DelegationStatus.ACTIVE,
+            lifecycleRevision = nextLifecycleRevision(),
+            updatedAt = now,
+            closedReason = null,
+        )
     }
 
     fun expire(now: OffsetDateTime): DelegationGrant {
         check(status == DelegationStatus.ACTIVE) { "only an ACTIVE grant can expire (is $status)" }
-        return copy(status = DelegationStatus.EXPIRED, updatedAt = now, closedAt = now)
+        return copy(
+            status = DelegationStatus.EXPIRED,
+            lifecycleRevision = nextLifecycleRevision(),
+            updatedAt = now,
+            closedAt = now,
+        )
     }
+
+    private fun nextLifecycleRevision(): Long = Math.addExact(lifecycleRevision, 1)
 
     companion object {
         val OBJECT_RESOURCE_TYPES = setOf(

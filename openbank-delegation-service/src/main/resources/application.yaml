@@ -4,6 +4,10 @@ quarkus:
 
   http:
     port: 8126
+    # Full-suite Quarkus profiles restart the application in one test worker. A fixed default
+    # test port can still be held by the preceding profile during that hand-off, so let Quarkus
+    # allocate an available port and propagate it to RestAssured.
+    test-port: 0
     cors:
       ~: true
       origins: "http://localhost:3000"
@@ -146,6 +150,15 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Full immutable reservation snapshots on a dedicated compacted bootstrap stream.
+      spend-reservation-state-out:
+        connector: smallrye-kafka
+        client.id: delegation-service-spend-state-${quarkus.uuid}
+        topic: openbank.delegation.spend-reservation-state
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%dev":
   quarkus:
@@ -170,10 +183,20 @@ mp:
     # the test JVM try to reach a Keycloak that is not there. Same as party-service's test profile.
     oidc-client:
       enabled: false
+  # OPA is not present in CI integration tests — keep advisory so @Authorize methods proceed
+  # instead of 503ing on the absent sidecar (the interceptor fails CLOSED on an unreachable
+  # PDP, by design; SpendReservationConcurrencyIT and SpendReservationStateOutboxIT drive the
+  # authorized reservation endpoints). Scoped and explicit, which is the point: the fleet
+  # default above is now enforce, and this is the one environment that opts out.
+  authz:
+    enforce: "false"
 
 openbank:
   delegation:
     idempotency-ttl-seconds: 86400
+    # New domestic reservations fail closed until the downstream binding consumer is deployed.
+    # Existing neutral reservations and exact replays retain their established behavior.
+    spend-reservation-state-events-enabled: false
     # Config expression, not a literal in the annotation: DelegationExpirationSweepIT shrinks it
     # so a test can observe a REAL scheduler dispatch. A test that calls the method directly
     # cannot see the defect this sweep had — the direct call supplies the Vert.x context the
@@ -192,12 +215,30 @@ openbank:
   git:
     commit: "${GIT_COMMIT:unknown}"
 
-# OPA sidecar (ADR-0034). Advisory mode by default.
+# OPA sidecar (ADR-0034). ENFORCING by default since #3679 — see the authz block below.
 opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
-  enforce: "${AUTHZ_ENFORCE:false}"
+  # Enforcing by DEFAULT (#3679). delegation-service is money-path — it mints the
+  # capabilities that let one party spend another's money — and while this read
+  # `${AUTHZ_ENFORCE:false}` enforcement was a property of one gitops manifest rather than
+  # of the service: the deployed Rollout sets the variable to "true", so the cluster was
+  # correct, but a new cluster, a local run or an ad-hoc container silently ran ADVISORY —
+  # every @Authorize decision evaluated, every deny logged, every request allowed through.
+  # Fail-safe belongs in the default, not in whichever manifest remembers the variable.
+  # All 14 actions this service gates were confirmed grantable against the deployed bundle
+  # before this flip, so no endpoint 403s as a result of it.
+  enforce: "${AUTHZ_ENFORCE:true}"
+  # Four-eyes stays OFF, deliberately and separately from the flip above. `delegation.revoke`
+  # and `delegation.reserve.release` DO evaluate four_eyes_required=true against the deployed
+  # bundle (both end in a `rules.yaml: four_eyes.verbs` verb, and this service is money-path),
+  # but no ApprovalStore bean is wired here, and AuthorizeInterceptor treats that as
+  # "no_approval_store": it logs an error and PROCEEDS (ADR-0155 D3 keeps it a no-op rather
+  # than failing closed). Flipping this today would gate nothing while looking like it did.
+  # Wire an ApprovalStore first, then flip — and note that `delegation.reserve.release` is a
+  # routine customer action that matches the `release` verb, so it needs a deliberate
+  # decision rather than inheriting the money-path default.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"

@@ -4,7 +4,7 @@
 
 'use client'
 import Link from 'next/link'
-import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint, FileSignature, Radar } from 'lucide-react'
+import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint, FileSignature, Radar, Scale } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
@@ -181,6 +181,17 @@ const sections: {
     ],
     badge: 'Governance',
     color: '#0891b2',
+  },
+  {
+    href: '/security/excellence',
+    icon: <Scale size={22} />,
+    title: ['Security Excellence', 'Security Excellence'],
+    desc: [
+      'Jediný souhrnný pohled na bezpečnost ekosystému: skóre excelence nad 8 doménami (posture, DORA incidenty, fraud, AML, sankce, maker-checker, audit, identita) — runbook docs/runbooks/0016',
+      'A single ecosystem-wide security view: excellence score over 8 domains (posture, DORA incidents, fraud, AML, sanctions, maker-checker, audit, identity) — runbook docs/runbooks/0016',
+    ],
+    badge: 'LIVE',
+    color: '#059669',
   },
 ]
 

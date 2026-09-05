@@ -95,6 +95,7 @@ class CardDelegationEventMessagePactConsumerTest {
             newJsonBody { o ->
                 o.stringValue("eventType", "DelegationActivated")
                 o.uuid("aggregateId")
+                o.integerType("lifecycleRevision", 1)
                 o.uuid("grantorPartyId")
                 o.uuid("granteePartyId")
                 o.stringValue("resourceType", "CARD")
@@ -112,6 +113,7 @@ class CardDelegationEventMessagePactConsumerTest {
 
         assertThat(node.path("eventType").asText()).isEqualTo("DelegationActivated")
         assertThat(UUID.fromString(node.path("aggregateId").asText())).isNotNull()
+        assertThat(node.path("lifecycleRevision").asLong()).isEqualTo(1)
         assertThat(UUID.fromString(node.path("grantorPartyId").asText())).isNotNull()
         assertThat(UUID.fromString(node.path("granteePartyId").asText())).isNotNull()
         assertThat(node.path("resourceType").asText()).isEqualTo("CARD")
@@ -131,6 +133,7 @@ class CardDelegationEventMessagePactConsumerTest {
             newJsonBody { o ->
                 o.stringValue("eventType", "DelegationRevoked")
                 o.uuid("aggregateId")
+                o.integerType("lifecycleRevision", 2)
                 o.uuid("grantorPartyId")
                 o.uuid("granteePartyId")
                 o.stringValue("resourceType", "CARD")
@@ -146,6 +149,7 @@ class CardDelegationEventMessagePactConsumerTest {
         val node = objectMapper.readTree(messages.first().contentsAsBytes())
 
         assertThat(node.path("eventType").asText()).isEqualTo("DelegationRevoked")
+        assertThat(node.path("lifecycleRevision").asLong()).isEqualTo(2)
         assertThat(UUID.fromString(node.path("aggregateId").asText())).isNotNull()
         assertThat(node.path("resourceType").asText()).isEqualTo("CARD")
     }

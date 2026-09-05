@@ -31,7 +31,7 @@ class NotificationModelTest {
 
     @Test
     fun `NotificationTemplate has all expected templates`() {
-        assertThat(NotificationTemplate.values()).hasSize(20)
+        assertThat(NotificationTemplate.values()).hasSize(23)
         assertThat(NotificationTemplate.values()).contains(
             NotificationTemplate.ACCOUNT_OPENED,
             NotificationTemplate.OTP_CODE,
@@ -42,6 +42,9 @@ class NotificationModelTest {
             NotificationTemplate.DELEGATION_ACCEPTED,
             NotificationTemplate.DELEGATION_DECLINED,
             NotificationTemplate.DELEGATION_REVOKED,
+            NotificationTemplate.DELEGATION_SUSPENDED,
+            NotificationTemplate.DELEGATION_REINSTATED,
+            NotificationTemplate.DELEGATION_RENOUNCED,
             NotificationTemplate.DELEGATION_EXPIRED,
         )
         // SCA_APPROVAL is SECURITY so the #2 push-preference gate never suppresses it.
@@ -56,6 +59,9 @@ class NotificationModelTest {
                 NotificationTemplate.DELEGATION_ACCEPTED,
                 NotificationTemplate.DELEGATION_DECLINED,
                 NotificationTemplate.DELEGATION_REVOKED,
+                NotificationTemplate.DELEGATION_SUSPENDED,
+                NotificationTemplate.DELEGATION_REINSTATED,
+                NotificationTemplate.DELEGATION_RENOUNCED,
                 NotificationTemplate.DELEGATION_EXPIRED,
             ),
         ).allSatisfy { assertThat(it.category).isEqualTo(NotificationCategory.SECURITY) }
@@ -102,6 +108,14 @@ class NotificationModelTest {
         assertThat(MobileDeepLink.isAllowed("openbank://savings")).isTrue()
         assertThat(MobileDeepLink.isAllowed("https://example.invalid/redirect")).isFalse()
         assertThat(MobileDeepLink.isAllowed("openbank://savings?next=https://evil.invalid")).isFalse()
+        assertThat(MobileDeepLink.isAllowed("openbank://delegations/123e4567-e89b-42d3-a456-426614174000")).isTrue()
+        assertThat(MobileDeepLink.isAllowed("openbank://delegations/01995e74-19c7-7d79-9b22-63076d7fd321")).isTrue()
+        assertThat(MobileDeepLink.isAllowed("openbank://delegations/not-a-uuid")).isFalse()
+        assertThat(
+            MobileDeepLink.isAllowed(
+                "openbank://delegations/123e4567-e89b-42d3-a456-426614174000?next=https://evil.invalid",
+            ),
+        ).isFalse()
     }
 
     @Test

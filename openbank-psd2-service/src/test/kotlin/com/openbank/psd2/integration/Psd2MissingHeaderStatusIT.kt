@@ -35,7 +35,6 @@ import org.junit.jupiter.api.Test
  */
 @QuarkusTest
 @TestProfile(Psd2MissingHeaderStatusIT.AuthzOffProfile::class)
-@QuarkusTestResource(Psd2BootSmokeIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(com.openbank.psd2.it.PostgresRedisTestResource::class)
 class Psd2MissingHeaderStatusIT {
 

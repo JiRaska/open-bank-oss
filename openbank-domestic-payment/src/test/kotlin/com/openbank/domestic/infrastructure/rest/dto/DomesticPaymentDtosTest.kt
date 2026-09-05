@@ -85,6 +85,20 @@ class DomesticPaymentDtosTest {
     }
 
     @Test
+    fun `toCommand carries the authenticated actor scope for idempotency binding`() {
+        val actorId = UUID.randomUUID()
+
+        val command = createRequest().toCommand(
+            idempotencyKey = "idem-actor",
+            actorId = actorId,
+            actorScope = "https://issuer.example\u001f$actorId",
+        )
+
+        assertThat(command.actorId).isEqualTo(actorId)
+        assertThat(command.actorScope).isEqualTo("https://issuer.example\u001f$actorId")
+    }
+
+    @Test
     fun `transition request toCommand parses target status and reject reason`() {
         val paymentId = UUID.randomUUID()
         val request = TransitionDomesticPaymentStatusRequest(

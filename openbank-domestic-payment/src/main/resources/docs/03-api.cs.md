@@ -30,9 +30,9 @@ Idempotency-Key: <klientem-generovaný-unikátní-klíč>
 ```
 
 Pravidla:
-- Prázdný klíč je odmítnut (`400`, "Idempotency-Key header is required").
-- Již viděný klíč → vrací se cachovaná odpověď s hlavičkou `X-Idempotency-Replayed: true` (`IdempotencyStore` nad Redisem).
-- Navíc repository deduplikuje podle `idempotency_key` (UNIQUE) — založení s již použitým klíčem vrátí existující platbu místo vytvoření duplikátu.
+- Prázdný klíč nebo klíč delší než 128 znaků je odmítnut (`400`).
+- Postgres atomicky sváže klíč s SHA-256 normalizovaného příkazu a identity aktéra, spolu s platbou a outbox událostí.
+- Přesný replay vrátí trvalou platbu s `X-Idempotency-Replayed: true`; změněný požadavek nebo starší řádek bez ověřitelného otisku vrátí `409 IDEMPOTENCY_KEY_REUSED` (`application/problem+json`). Redis není autoritou pro založení platby. U neověřitelného staršího řádku neopakujte požadavek s novým klíčem: první pokus mohl být uložen, takže výsledek musí určit lookup stavu platby / operátorská rekonciliace.
 
 ## Klíčové endpointy
 

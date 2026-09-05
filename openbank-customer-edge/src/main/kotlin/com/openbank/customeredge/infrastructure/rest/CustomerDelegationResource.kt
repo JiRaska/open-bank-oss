@@ -150,6 +150,28 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     }
 
     /**
+     * Validate the complete draft before the app starts SCA. The authoritative service repeats
+     * every check during [offer], so preview creates no authority and cannot be used as a stale
+     * authorization decision. The edge still derives the grantor from the customer token.
+     */
+    @POST
+    @Path("/preview")
+    @Blocking
+    fun preview(body: String?): Response {
+        val partyId = partyId()
+        val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
+            ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
+        val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
+        if (declared != null && declared != partyId) {
+            return refuse(Response.Status.FORBIDDEN, "grantorPartyId must be the authenticated party")
+        }
+        node.put(FIELD_GRANTOR, partyId)
+        rejectUnenforcedCeilings(node)?.let { return it }
+        node.remove(FIELD_GRANT_SCA_SESSION)
+        return upstream.post("$delegationServiceUrl$UPSTREAM/preview", partyId, json.writeValueAsString(node))
+    }
+
+    /**
      * Offer a grant over one of the caller's own resources (SCA-bound, purpose `DELEGATION_GRANT`).
      *
      * `grantorPartyId` is FORCED to the token's party. A body naming a different grantor is
@@ -176,22 +198,25 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         val partyId = partyId()
         val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
             ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
-        val unenforced = UNENFORCED_CEILING_FIELDS.filter { !node.get(it).let { v -> v == null || v.isNull } }
-        if (unenforced.isNotEmpty()) {
-            return refuse(
-                Response.Status.BAD_REQUEST,
-                "${unenforced.joinToString(" and ")} cannot be accepted: this platform enforces only " +
-                    "perTransactionLimit. No service counts cumulative spend against a grant, so a ceiling " +
-                    "set here would never be applied to any payment. Omit the field (ADR-0232 D1/D6).",
-                CODE_CUMULATIVE_LIMIT_UNSUPPORTED,
-            )
-        }
+        rejectUnenforcedCeilings(node)?.let { return it }
         val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
         if (declared != null && declared != partyId) {
             return refuse(Response.Status.FORBIDDEN, "grantorPartyId must be the authenticated party")
         }
         node.put(FIELD_GRANTOR, partyId)
         return upstream.post("$delegationServiceUrl$UPSTREAM", partyId, json.writeValueAsString(node))
+    }
+
+    private fun rejectUnenforcedCeilings(node: ObjectNode): Response? {
+        val unenforced = UNENFORCED_CEILING_FIELDS.filter { !node.get(it).let { v -> v == null || v.isNull } }
+        if (unenforced.isEmpty()) return null
+        return refuse(
+            Response.Status.BAD_REQUEST,
+            "${unenforced.joinToString(" and ")} cannot be accepted: this platform enforces only " +
+                "perTransactionLimit. No service counts cumulative spend against a grant, so a ceiling " +
+                "set here would never be applied to any payment. Omit the field (ADR-0232 D1/D6).",
+            CODE_CUMULATIVE_LIMIT_UNSUPPORTED,
+        )
     }
 
     /**
@@ -261,6 +286,7 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     private companion object {
         const val UPSTREAM = "/api/v1/delegations"
         const val FIELD_GRANTOR = "grantorPartyId"
+        const val FIELD_GRANT_SCA_SESSION = "grantScaSessionId"
         const val DEFAULT_REASON = "Revoked by grantor"
         const val CODE_CUMULATIVE_LIMIT_UNSUPPORTED = "CUMULATIVE_LIMIT_UNSUPPORTED"
 
