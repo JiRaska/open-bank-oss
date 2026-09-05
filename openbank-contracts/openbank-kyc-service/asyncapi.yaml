@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+asyncapi: 3.0.0
+info:
+  title: OpenBank KYC Service — lifecycle events and customer notification commands
+  version: 1.0.0
+  description: |
+    Everything openbank-kyc-service puts on the wire.
+
+    Two channels with deliberately different durability guarantees, and the difference is the
+    point rather than an oversight:
+
+      * `openbank.kyc.events` is the durable one. Lifecycle events are written to `kyc_outbox`
+        inside the same transaction as the state change (#4007) and relayed from there, so a
+        crash between the verdict and the publish cannot lose the event.
+      * `openbank.notification.requests` is best-effort. The customer-facing outcome notification
+        is emitted by a direct emitter AFTER the verdict has been persisted, and a failure to
+        publish is logged and swallowed — a broker hiccup must never roll back a compliance
+        decision that carries a four-eyes audit trail behind it (#8432).
+
+    A durable version of the second would need the shared outbox contract to learn destinations
+    first: `OutboxMessage` carries no topic, so `kyc-outbox-out` is single-destination and a
+    notification request cannot ride it as things stand.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+defaultContentType: application/json
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: mTLS Kafka; kyc-service publishes with its dedicated KafkaUser (ADR-0137).
+channels:
+  kycEvents:
+    address: openbank.kyc.events
+    description: |
+      KYC case lifecycle, relayed from `kyc_outbox` by `KafkaKycOutboxEventPublisher`
+      (`kyc-outbox-out`). Consumed by onboarding-service's `OnboardingEventConsumer`, party-service's
+      `KycAmlEventConsumer` and audit-service's `AuditConsumer`. Keyed by KYC case id, so all
+      transitions of one case stay ordered on a single partition. `eventType` is the discriminator
+      and is load-bearing for those consumers.
+  notificationRequests:
+    address: openbank.notification.requests
+    description: |
+      Customer-facing verdict notifications emitted by `KafkaCustomerNotificationPublisher`
+      (`notification-requests-out`), drained by notification-service's `NotificationConsumer`.
+      This service is a producer only; the envelope is owned by notification-service
+      (`NotificationRequest`) and shared with account-service, campaign-service and sca-service.
+      Keyed by party id, so one customer's notifications keep their order on a single partition.
+
+      Only the two OUTCOME templates are emitted here. `KYC_DOCUMENT_REQUIRED` is declared by
+      notification-service but deliberately has no producer: there is no transition to fire it from
+      and nowhere for the customer to put a document, so a push asking for something that cannot be
+      supplied would be worse than the silence it replaces (#8432, ADR-0256 still `proposed`).
+components:
+  schemas:
+    kycLifecycleEvent:
+      type: object
+      description: Flat envelope built by `KycEvents.lifecycle`; field names and order are unchanged since #4007.
+      required: [eventType, kycCaseId, partyId, status, riskLevel, occurredAt, actorId, actorType, sourceService]
+      properties:
+        eventType:
+          type: string
+          enum: [KYC_CASE_OPENED, KYC_CASE_STATUS_CHANGED, KYC_CASE_APPROVED, KYC_CASE_REJECTED]
+        kycCaseId: { type: string, format: uuid, description: Aggregate id and the record key. }
+        partyId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, UNDER_REVIEW, APPROVED, REJECTED] }
+        riskLevel: { type: string, enum: [LOW, MEDIUM, HIGH] }
+        occurredAt: { type: string, format: date-time }
+        actorId:
+          type: string
+          description: |
+            The reviewer who caused the transition, taken from the authenticated security context
+            and never from a request body (ČNB AML/KYC §8 four-eyes mandate, ADR-0068). `kyc-service`
+            for a system-caused transition.
+        actorType: { type: string, enum: [HUMAN, SYSTEM] }
+        sourceService:
+          type: string
+          const: kyc-service
+          description: Producer attribution read by `AuditConsumer.resolveSourceService` (#3994/#5256).
+    kycOutcomeNotificationRequest:
+      type: object
+      description: |
+        notification-service's `NotificationRequest` as this service emits it. `correlationId`,
+        `deepLink` and `interactionRef` are supported by the consumer but not sent by kyc-service:
+        this path is best-effort and has nothing to correlate back to.
+      required: [partyId, channel, template, recipient, variables]
+      properties:
+        partyId: { type: string, format: uuid, description: The party whose verification was decided; also the record key. }
+        channel: { type: string, const: PUSH }
+        template:
+          type: string
+          enum: [KYC_APPROVED, KYC_REJECTED]
+          description: |
+            Both are category SECURITY in notification-service, so a customer cannot mute them.
+            `KYC_REJECTED` falls back to EMAIL when the party has no registered device.
+        recipient:
+          type: string
+          format: uuid
+          description: |
+            The party id. Informational for PUSH — delivery is by registered device token — and the
+            convention every producer on this topic follows; `NotificationConsumer.resolveEmailRecipient`
+            looks the address up from party-service when a fallback needs one.
+        variables:
+          type: object
+          additionalProperties: { type: string }
+          description: |
+            CLOSED per template, and enforced by the consumer: `NotificationTemplate.unknownVariables`
+            REJECTS and acks a request carrying any undeclared key, so a typo here is silent
+            non-delivery rather than an error. `KYC_APPROVED` declares none and must be sent `{}`;
+            `KYC_REJECTED` declares exactly `reason`.

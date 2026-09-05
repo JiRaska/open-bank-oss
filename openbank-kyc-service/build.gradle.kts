@@ -56,6 +56,12 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // #8432: KycOutcomeNotificationWireIT swaps `notification-requests-out` for an in-memory sink
+    // so the test can read what is ACTUALLY put on the wire. A mocked CustomerNotificationPort
+    // proves only that KycService called a port; it cannot see an unresolvable @Channel emitter,
+    // nor a payload notification-service would reject. Same dependency account-service and
+    // campaign-service already carry for this channel.
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Shared, secret-free lifecycle evidence collected into the Test Intelligence envelope in CI.
     testImplementation(project(":openbank-libs-testing"))
 }

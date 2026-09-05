@@ -20,7 +20,6 @@ openbank-dispute-service:openbank.dispute.events
 openbank-document-service:openbank.documents.document.event
 openbank-fx-service:openbank.fx.conversion.completed
 openbank-interest-service:openbank.interest.accrual.event
-openbank-kyc-service:openbank.kyc.events
 openbank-ledger-service:openbank.ledger.journal.posted
 openbank-lending-service:openbank.lending.events
 openbank-party-service:openbank.party.events
