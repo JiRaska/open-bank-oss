@@ -2519,6 +2519,10 @@ gates:
     group: registry
     mode: enforced
     budget_seconds: 20   # ~0.2s locally; the ceiling covers a cold interpreter on a busy runner
+    # 9 capabilities today. The floor is what stops a renamed registry key turning the drift
+    # check into a green no-op: a matrix rendered from zero capabilities matches a committed file
+    # rendered from zero capabilities, and both are wrong in the same way.
+    min_subjects: 5
     review_after: "2027-09-05"
     rationale: "The matrix is the artifact a bank reads to choose a network per product; the registry is what the code and the Card Center bind to. A hand-editable copy of derived data drifts silently and the reader cannot tell which one is current."
     selftest: python3 .github/scripts/gen-card-capability-matrix.py --self-test
