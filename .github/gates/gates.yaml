@@ -200,20 +200,24 @@ gates:
   # it deliberately does not check REACHABILITY — a script invoked from a workflow that
   # never runs still counts as wired. Registering here is what puts them on a PR lane.
   - id: alert-rca-ledger-guards
+    budget_seconds: 15   # one script self-test run
     selftest_exempt: "is-a-test-suite — the run: IS alert-rca-ledger.py --self-test"
     name: "alert-RCA ledger guards (MTTR granularity, recurrence, observation coverage)"
     group: lint
     mode: enforced
+    budget_seconds: 30   # 4.1s measured locally under load; a self-test only, no tree walk
     rationale: "The MTTR granularity refusal and the recurrence guard are the only things stopping ADR-0241 D1/D3 from publishing a number nobody measured, and the coverage outcome is what stops an empty week reporting as a clean one. They were wired only inside a scheduled workflow that has never once succeeded, so they had never run on any lane. Recheck for removal when a durable alert open/close feed exists (#5869) and the MTTR half is no longer a refusal."
     review_after: "2027-02-21"
     run: |
       python3 .github/scripts/alert-rca-ledger.py --self-test
 
   - id: standing-critical-digest-guards
+    budget_seconds: 15   # one script self-test run
     selftest_exempt: "is-a-test-suite — the run: IS standing-critical-digest.py --self-test"
     name: "standing-critical digest guards (severity filter, observation envelope)"
     group: lint
     mode: enforced
+    budget_seconds: 30   # 4.2s measured locally under load; a self-test only, no tree walk
     rationale: "The digest's severity filter and observation envelope are the producer half of the same control; if the envelope shape drifts, the weekly review silently folds nothing and reports a clean week. Same lane gap as its consumer above. Recheck when the digest stops being the ledger's only observation source."
     review_after: "2027-02-21"
     run: |
@@ -1919,12 +1923,14 @@ gates:
   # 2026-08-20: a money-path prefix, an added `PUT /pulls/{n}/merge`, and a deleted bound each make
   # it exit 1; removing either half of `evaluate` makes the self-test go red.
   - id: agent-bounded-write-surface
+    budget_seconds: 20   # rules.yaml + agent charter scan
     min_subjects: 20   # the money_path_services entries the bound is checked against; 23 today
                         # (2026-08-20). A gate that resolves an empty list would pass everything,
                         # so the floor moves with the list rather than tracking it exactly.
     name: "agent bounded GitHub write surface (ADR-0031 D9 phase 3, enforced)"
     group: registry
     mode: enforced
+    budget_seconds: 30   # 5.0s measured locally under load over the charter set
     rationale: "flaky-test-hunter is the only agent with a real GitHub write path; its non-money-path confinement and its inability to merge or approve held only because a human read a Kotlin constant, and money_path_services grows over time."
     review_after: "2027-02-20"
     selftest: python3 .github/scripts/check-agent-bounded-write-surface.py --self-test
@@ -2563,9 +2569,11 @@ gates:
   # baseline entry pins the (module, value) pair, so lending drifting to a third spelling still
   # fails. ENFORCED.
   - id: source-service-convention
+    budget_seconds: 30   # whole-fleet Kotlin scan
     name: "sourceService == module directory name (issues #5256/#5902, enforced)"
     group: kotlin
     mode: enforced
+    budget_seconds: 60   # 14.1s measured locally under load; walks every module src/main
     min_subjects: 20
     rationale: >-
       `source_service` is the column every audit and analytics query groups by, so a producer
@@ -2897,6 +2905,32 @@ gates:
       python3 .github/scripts/check-libs-annotations-implemented.py .
 
   # ==== api ===================================================================
+
+  # Issue #8351 (ROADMAP M2): "idempotency coverage" had no measured inventory — which
+  # mutating endpoints require an idempotency key existed nowhere as data. This gate parses
+  # every released service's openapi.yaml, classifies each mutating operation
+  # (required-header / required-body — both fleet idioms plus the Berlin Group X-Request-ID —
+  # / optional / absent), prints the full inventory, and enforces the hard rule on the one
+  # class where a retry double-books: money-path (rules.yaml) POST. Today's 94 uncovered
+  # money-path POSTs are shrink-only baselined with per-class reasons; a NEW uncovered one
+  # fails. Writing the gate caught real drift on day one: psd2's v2 PIS spec declared an
+  # X-Idempotency-Key the code never reads (#8772).
+  - id: idempotency-coverage-money-path
+    name: "money-path POST endpoints declare a required idempotency key (#8351, enforced)"
+    group: api
+    mode: enforced
+    budget_seconds: 20   # 52 OpenAPI parses via gatelib cache, measured ~2s
+    rationale: >-
+      A duplicate POST on a money-path endpoint is a double debit; without a ratchet, a new
+      endpoint ships without an idempotency key and nothing objects. The gate also prints the
+      fleet-wide inventory the M2 exit criterion asks for.
+    review_after: 2027-03-05
+    min_subjects: 40   # 52 released services with a spec today (2026-09-05); some slack
+    selftest: python3 .github/scripts/check-idempotency-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-idempotency-coverage.py"]
+    run: |
+      python3 .github/scripts/check-idempotency-coverage.py
 
   # The verification reconciler (.github/scripts/pact-reconcile-verifications.py)
   # dispatches verify-provider.yml with the PACTICIPANT NAME as its `service` input,
@@ -4788,9 +4822,11 @@ gates:
   # live admin actor is reported undeclared, and with its bypass_mode pinned to `always`
   # both directions report — red both ways, green only on the shipped declaration.
   - id: ruleset-bypass-actors
+    budget_seconds: 20   # one GitHub API read + compare
     name: "who may bypass main-protection is pinned, and widening it fails a PR (Refs #4828, enforced)"
     group: lint
     mode: enforced
+    budget_seconds: 60   # network-bound: one GitHub rulesets API read, so this covers a slow API, not local work
     rationale: >
       The bypass surface of main-protection is a repository SETTING, not a file: it is edited
       in the Settings UI, produces no diff and no red check, and is observable only by asking
