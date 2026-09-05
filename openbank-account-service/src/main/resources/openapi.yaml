@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.14.0
+  version: 1.15.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -475,7 +475,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED, EXPIRED]
       responses:
         '200':
           description: Proposals
