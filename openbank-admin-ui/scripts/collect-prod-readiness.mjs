@@ -457,7 +457,11 @@ function scoreC5Backup(short) {
   const hasBackup = cnpg.some(f => readText(f).includes('barmanObjectStore'))
   if (!hasBackup) return { score: 1, evidence: 'cluster present, NO backup' }
   const s = attestFresh(short, 'restore_drill') ? 3 : 2
-  return { score: s, evidence: 'backup configured' + (s === 3 ? ' + drill' : '') }
+  // Name the artefact, not just the fact. `+ drill` alone is what let a money-path 3 rest on
+  // a citation nobody had opened -- it pointed at a PostgreSQL major-upgrade runbook (#5673).
+  // Printing the ref puts the thing a reader must check on the page that scores it.
+  const ref = s === 3 ? ATT[short]?.restore_drill?.ref : null
+  return { score: s, evidence: 'backup configured' + (ref ? ` + drill (${ref})` : '') }
 }
 
 function scoreC6Dr(short) {

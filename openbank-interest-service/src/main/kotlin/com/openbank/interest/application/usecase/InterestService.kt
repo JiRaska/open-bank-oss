@@ -463,7 +463,25 @@ class InterestService(
         )
     }
 
-    /** Builds the versioned `interest.withholding.recorded` outbox event (ADR-0033 §F). */
+    /**
+     * Builds the versioned `interest.withholding.recorded` outbox event (ADR-0033 §F).
+     *
+     * `occurredAt` is [WithholdingTax.createdAt] — the instant this withholding was decided and
+     * recorded, stamped from the injected clock in the very transaction this event announces
+     * (#8352). Two things about it are worth stating rather than leaving to a reader:
+     *
+     *  - It was already in hand and simply not projected. The payload's only temporal fields are
+     *    `periodFrom`/`periodTo`, which are `LocalDate` ACCRUAL-PERIOD bounds, not an instant —
+     *    so `AuditConsumer.eventTime` (which reads `occurredAt` and only `occurredAt`) found no
+     *    event time and every audit row for a withholding decision recorded the audit consumer's
+     *    ingest clock as the moment tax was withheld from a customer.
+     *  - `.toInstant()` is load-bearing, not tidiness: `createdAt` is an `OffsetDateTime`, and
+     *    while `Instant.parse` does accept a non-`Z` offset, the ISO-8601 form this service's
+     *    `BANK_TIME`-zoned clock would render is not the one the rest of the fleet puts on the
+     *    wire. Normalise once here rather than rely on the consumer's tolerance.
+     *
+     * Additive: every existing field keeps its name, place and form.
+     */
     private fun withholdingRecordedEvent(cap: InterestCapitalization, withholding: WithholdingTax): OutboxMessage {
         val payload = "{\"schemaVersion\":1," +
             "\"capitalizationId\":\"${cap.id}\",\"withholdingId\":\"${withholding.id}\"," +
@@ -472,7 +490,8 @@ class InterestService(
             "\"currency\":\"${cap.currency}\",\"grossAmount\":\"${cap.grossAmount}\"," +
             "\"taxableBase\":\"${withholding.taxableBase}\",\"rate\":\"${withholding.rate}\"," +
             "\"taxAmount\":\"${withholding.taxAmount}\",\"netAmount\":\"${cap.netAmount}\"," +
-            "\"treatment\":\"${withholding.treatment}\",\"status\":\"${withholding.status}\"}"
+            "\"treatment\":\"${withholding.treatment}\",\"status\":\"${withholding.status}\"," +
+            "\"occurredAt\":\"${withholding.createdAt.toInstant()}\"}"
         return OutboxMessage(
             eventId = UUID.randomUUID(),
             aggregateId = cap.id,

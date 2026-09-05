@@ -16,6 +16,14 @@ import org.junit.jupiter.api.Test
 class FlakyTestResourceRoutingIT {
 
     @Test
+    @TestSecurity(user = "viewer", roles = ["ROLE_VIEWER"])
+    fun `findings read is served from the reactive Vertx context`() {
+        given()
+            .`when`().get("/api/v1/flaky-test-hunter/findings")
+            .then().statusCode(200)
+    }
+
+    @Test
     fun `async trigger is a served route that rejects an anonymous caller`() {
         given()
             .`when`().post("/api/v1/flaky-test-hunter/check/trigger-async")
@@ -28,5 +36,22 @@ class FlakyTestResourceRoutingIT {
         given()
             .`when`().post("/api/v1/flaky-test-hunter/check/trigger-async")
             .then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `async trigger rejects an invalid idempotency key before workflow admission`() {
+        given()
+            .header("Idempotency-Key", "unbounded-operator-key")
+            .`when`().post("/api/v1/flaky-test-hunter/check/trigger-async-idempotent")
+            .then().statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `idempotent async trigger rejects a missing header before workflow admission`() {
+        given()
+            .`when`().post("/api/v1/flaky-test-hunter/check/trigger-async-idempotent")
+            .then().statusCode(400)
     }
 }

@@ -13,18 +13,12 @@ import { useServiceResource } from '@/lib/services/useServiceResource'
 import { stashRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
+import { StatusBadge } from '@/components/ui'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 interface SwiftMessage {
   id: string; messageType: string; senderBic: string; receiverBic: string
   amount: number; currency: string; status: string; createdAt: string; reference: string
-}
-
-const STATUS_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  SENT:       { bg: 'var(--success-bg)',  text: 'var(--success-text)',  border: 'var(--success-border)' },
-  PENDING:    { bg: 'var(--warning-bg)',  text: 'var(--warning-text)',  border: 'var(--warning-border)' },
-  FAILED:     { bg: 'var(--danger-bg)',   text: 'var(--danger-text)',   border: 'var(--danger-border)' },
-  PROCESSING: { bg: 'var(--info-bg)',     text: 'var(--info-text)',     border: 'var(--info-border)' },
 }
 
 export default function SwiftPage() {
@@ -33,11 +27,17 @@ export default function SwiftPage() {
   const numberLocale = dateLocale
   const router = useRouter()
   const [search, setSearch] = useState('')
-  const { data, loading, unavailable, waking } = useServiceResource<SwiftMessage[]>(
+  const [lastSuccessfulAt, setLastSuccessfulAt] = useState<Date | null>(null)
+  const { data, loading, unavailable, waking, reload } = useServiceResource<SwiftMessage[]>(
     svcUrl('swift-service', '/api/v1/swift/messages'),
-    { select: (raw) => (Array.isArray(raw) ? (raw as SwiftMessage[]) : ((raw as { messages?: SwiftMessage[] }).messages ?? [])) },
+    { select: (raw) => {
+      setLastSuccessfulAt(new Date())
+      return Array.isArray(raw) ? (raw as SwiftMessage[]) : ((raw as { messages?: SwiftMessage[] }).messages ?? [])
+    } },
   )
   const messages = data ?? []
+  const hasSnapshot = data !== null
+  const showingRetainedSnapshot = unavailable !== null && hasSnapshot
 
   const filtered = messages.filter(m =>
     m.senderBic?.toLowerCase().includes(search.toLowerCase()) ||
@@ -47,7 +47,7 @@ export default function SwiftPage() {
   )
 
   return (
-    <AuthGuard>
+    <AuthGuard permission="payment-rails:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <PageHeader
           breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('SWIFT', 'SWIFT')}</span></div>}
@@ -70,10 +70,26 @@ export default function SwiftPage() {
             <span role="status" style={{ padding: '5px 9px', borderRadius: '6px', border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontSize: '11px', fontWeight: 600 }}>
               {t('Odeslání zprávy není připojeno', 'Message submission is not connected')}
             </span>
+            <button type="button" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit SWIFT zprávy', 'Refresh SWIFT messages')} className="btn btn-secondary btn-sm">
+              <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+            </button>
           </div>}
         />
 
-        <div className="grid-4" style={{ marginBottom: '24px' }}>
+        {showingRetainedSnapshot && <div role="status" aria-live="polite" style={{ marginBottom: 20 }}>
+          <DataUnavailable kind={unavailable.kind} service={t('SWIFT-service', 'SWIFT-service')} feature={t('Aktualizace SWIFT zpráv', 'SWIFT message refresh')} lang={language} dense />
+          <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+            {t('Zobrazen je poslední úspěšný snapshot', 'Showing the last successful snapshot')}
+            {lastSuccessfulAt ? ` (${lastSuccessfulAt.toLocaleString(dateLocale)})` : ''}.
+            {' '}{t('Stav zpráv se od té doby mohl změnit.', 'Message status may have changed since then.')}
+          </p>
+        </div>}
+
+        {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {t('Aktualizuji SWIFT zprávy; poslední snapshot zůstává dostupný.', 'Refreshing SWIFT messages; the last snapshot remains available.')}
+        </p>}
+
+        {hasSnapshot && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
             { label: t('Zpráv celkem', 'Total messages'), value: messages.length, icon: <Globe size={16} />, color: 'var(--accent)' },
             { label: t('Odesláno', 'Sent'), value: messages.filter(m => m.status === 'SENT').length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
@@ -87,7 +103,7 @@ export default function SwiftPage() {
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
             </div>
           ))}
-        </div>
+        </div>}
 
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -98,11 +114,11 @@ export default function SwiftPage() {
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
           </div>
-          {loading ? (
-            <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-              <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
+          {loading && !hasSnapshot ? (
+            <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+              <RefreshCw size={20} aria-hidden="true" className="animate-spin" style={{ marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
-          ) : unavailable ? (
+          ) : unavailable && !hasSnapshot ? (
             <DataUnavailable kind={unavailable.kind} service={t('SWIFT-service', 'SWIFT-service')} feature={t('SWIFT zprávy', 'SWIFT messages')} lang={language} />
           ) : filtered.length === 0 ? (
             <DataUnavailable kind="no_data" feature={t('SWIFT zprávy', 'SWIFT messages')} lang={language}
@@ -118,7 +134,6 @@ export default function SwiftPage() {
                 <th aria-label={t('Detail', 'Detail')} style={{ width: '36px' }} />
               </tr></thead>
               <tbody>{filtered.map(m => {
-                const sc = STATUS_COLORS[m.status] ?? STATUS_COLORS.PENDING
                 return (
                   <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
                     tabIndex={0}
@@ -135,10 +150,7 @@ export default function SwiftPage() {
                       {m.amount?.toLocaleString(numberLocale, { minimumFractionDigits: 2 })} {m.currency}
                     </td>
                     <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{m.reference}</td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-                        background: sc.bg, color: sc.text, border: `1px solid ${sc.border}` }}>{m.status}</span>
-                    </td>
+                    <td style={{ padding: '12px 16px' }}><StatusBadge status={m.status} tone={m.status === 'PROCESSING' ? 'info' : undefined} /></td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString(dateLocale) : '—'}</td>
                     <td style={{ padding: '12px 8px', textAlign: 'right' }}><ChevronRight size={14} style={{ color: 'var(--text-tertiary)' }} /></td>
                   </tr>

@@ -61,6 +61,15 @@ describe('evaluateExportReadiness', () => {
     expect(verdict).toEqual({ ok: false, reason: 'data_gaps', templateIds: ['C_01.00'] })
   })
 
+  it('shows live values for review but blocks exporting them as a sealed return', () => {
+    const verdict = evaluateExportReadiness({
+      status: 'ready',
+      evidence: 'LIVE_PREVIEW',
+      templates: [{ templateId: 'F01.01', cells: [cell()], isBalanced: true, hasDataGaps: false }],
+    })
+    expect(verdict).toEqual({ ok: false, reason: 'provisional_data', templateIds: ['F01.01'] })
+  })
+
   it('blocks as INCOMPLETE on the derived hasDataGaps flag alone', () => {
     const verdict = evaluateExportReadiness({
       status: 'ready',

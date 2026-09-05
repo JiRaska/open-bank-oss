@@ -44,11 +44,13 @@
 # retried past the boot deadline. Four money-path services were once reported as fuzz failures for
 # an absent dependency, which is not a finding about their HTTP surface, and it drowned the one
 # real finding in the same run (consent-service, #5711). Every registrar already has the switch
-# (because @QuarkusTest needs it too); what they do not share is a name for it —
-# openbank.transaction.worker.enabled, openbank.domestic.worker.enabled,
-# openbank.sepa.worker.enabled, openbank.campaign.worker.enabled,
-# openbank.settlement.worker.enabled, and lending's `lending.origination.worker.enabled` (not even
-# under `openbank.`).
+# (because @QuarkusTest needs it too). Since the `temporal-worker-switch-naming` gate the names
+# also follow one convention — `openbank.<service>.worker.enabled` — so this derivation is now
+# uniform rather than a per-service list: openbank.transaction.worker.enabled,
+# openbank.domestic.worker.enabled, openbank.sepa.worker.enabled,
+# openbank.campaign.worker.enabled, openbank.settlement.worker.enabled,
+# openbank.lending.worker.enabled (lending renamed from `lending.origination.worker.enabled`,
+# the one pre-convention name).
 #
 # ── Two passes, both must pass ─────────────────────────────────────────────────────────────────
 # Pass 1 (auth ON) is what this lane has always done: every endpoint behind @RolesAllowed must
@@ -87,6 +89,25 @@
 # What pass 2 does NOT test is authorization by design; that property is pass 1's job, which is why
 # both run and both must pass rather than one replacing the other.
 #
+# ── Dev services OFF ──────────────────────────────────────────────────────────────────────────
+# Quarkus dev mode starts a container for anything it believes unconfigured, and on a cold hosted
+# runner the PULL is what blows the readiness window. That is the whole of #6492: every scheduled
+# run from 2026-08-04 to 2026-08-20 failed, 5-11 jobs each, in a different combination every time
+# — and not one of those jobs had failed. They had not finished. Run 32336553304's sca-service was
+# mid-`Extracting 583.8MB/638.7MB` of docker.io/grafana/otel-lgtm at the second the 180s loop gave
+# up, having pulled testcontainers/ryuk and apache/kafka-native first. None of the three is
+# reachable from the fuzzed HTTP surface. The shifting failure set was never a signal about any
+# service; it was which jobs happened to lose the race to Docker Hub that morning.
+#
+# Everything this lane needs is provisioned explicitly above (postgres, redis) and already
+# suppresses its own dev service by config — the boot log says so per component ("Not starting Dev
+# Services for default datasource as it has explicit configuration"). What was left was an
+# observability stack and a Kafka broker, pulled on every one of ~26 jobs, for nothing.
+#
+# The identical fix landed on the AUTHENTICATED lane on 2026-08-14 (#4703, api-fuzz-authenticated.yml)
+# and was never carried across to this one; the two lanes had drifted for eighteen days with the
+# unauthenticated one — the surface reachable without a credential — reporting nothing at all.
+#
 # ── The exception census ───────────────────────────────────────────────────────────────────────
 # schemathesis reports "Server error: N" with a generic INTERNAL_ERROR body, so the count alone
 # cannot distinguish a defect from a dependency this job does not run — three different
@@ -117,6 +138,90 @@
 # 32503175988 printed `Selected: 19/19` for dispute-service and no census at all, while its
 # artifact held 53 ERROR lines).
 set -uo pipefail
+
+# ── Boot-failure classification (see "Dev services OFF" above) ─────────────────────────────────
+# Extracted so it can be exercised directly: `fuzz-services.sh --self-test` feeds it one log that
+# MUST be called a crash and one that MUST NOT be, and checks what it prints. A diagnostic nobody
+# has run against a known-positive is decoration.
+classify_boot_failure () {
+  local svc="$1" label="$2" BOOTLOG="$3" waited="$4"
+  local CRASH
+  CRASH="$(grep -aE 'Failed to start (application|quarkus)|FATAL: |BUILD FAILED' "${BOOTLOG}" 2>/dev/null | head -3 || true)"
+  if [ -n "${CRASH}" ]; then
+    echo "::error::[${svc}] CRASHED during boot (${label}) — the application failed to start; this is a finding about the service, not the harness"
+    printf '%s\n' "${CRASH}"
+    # The cause chain, not the last 50 lines: a boot log's tail is whatever it happened to be
+    # doing, which for years was docker-pull progress.
+    grep -aE 'Caused by:' "${BOOTLOG}" 2>/dev/null | head -5 || true
+  else
+    echo "::error::[${svc}] DID NOT FINISH booting within ${waited}s (${label}) — no terminal failure in the log: this is a TIMEOUT, not a crash, and nothing here is a finding about the service"
+    # Name the environmental cause when the log shows one. An unfinished image pull is the
+    # documented shape (#6492: docker.io/grafana/otel-lgtm, 638 MB, still extracting at the
+    # second the loop gave up) and dev services are now off, so seeing this again means the
+    # switch stopped working rather than that a service is slow.
+    local PULLING
+    PULLING="$(grep -a 'Pulling docker image' "${BOOTLOG}" 2>/dev/null | tail -3 || true)"
+    if [ -n "${PULLING}" ]; then
+      echo "::warning::[${svc}] the boot was pulling container images — dev services should be OFF in this job:"
+      printf '%s\n' "${PULLING}"
+    fi
+    echo "      last lines of the boot log, image-pull progress stripped:"
+    grep -av 'http-outgoing\|PullImageResultCallback\|ProgressDetail' "${BOOTLOG}" 2>/dev/null \
+      | tail -15 | sed 's/^/      /' || true
+  fi
+}
+
+
+# ── Falsifiability harness ────────────────────────────────────────────────────────────────────
+# Two negative controls, because the fix is a CLASSIFICATION and a green run cannot show that a
+# classification is right. Control 1 is a real crash (settlement-service's Flyway
+# password-authentication chain, run 32289597634) and MUST be called a crash with its cause named.
+# Control 2 is a real timeout (sca-service mid-pull of grafana/otel-lgtm, run 32336553304) and
+# MUST NOT be called a crash — that misattribution is what #6492 was. Control 3 asserts the
+# quarkusDev command line still carries the dev-services switch, since the classifier being
+# correct about a pull is worth nothing if the pull is still happening.
+if [ "${1:-}" = "--self-test" ]; then
+  ST_TMP="$(mktemp -d)"; ST_RC=0
+  cat > "${ST_TMP}/crash.log" <<'EOF'
+05:51:56 ERROR [io.qu.ru.Application] Failed to start application: java.lang.RuntimeException: Failed to start quarkus
+Caused by: org.flywaydb.core.internal.exception.sqlExceptions.FlywaySqlUnableToConnectToDbException: Unable to obtain connection from database: FATAL: password authentication failed for user "openbank_settlement"
+Caused by: org.postgresql.util.PSQLException: FATAL: password authentication failed for user "openbank_settlement"
+EOF
+  cat > "${ST_TMP}/timeout.log" <<'EOF'
+05:49:09 INFO  [tc.do.io.24.0] Pulling docker image: docker.io/grafana/otel-lgtm:0.24.0. Please be patient; this may take some time but only needs to be done once.
+05:49:26 DEBUG [co.gi.do.ap.co.PullImageResultCallback] ResponseItem(stream=null, status=Extracting, progressDetail=ResponseItem.ProgressDetail(current=583794688,total=638658233))
+EOF
+  out1="$(classify_boot_failure svc-crash "authz ON" "${ST_TMP}/crash.log" 180 2>&1)"
+  case "${out1}" in
+    *"CRASHED during boot"*) ;;
+    *) echo "SELF-TEST FAIL 1: a real crash was not classified as a crash"; ST_RC=1 ;;
+  esac
+  case "${out1}" in
+    *"password authentication failed"*) ;;
+    *) echo "SELF-TEST FAIL 1b: the crash cause was not printed"; ST_RC=1 ;;
+  esac
+  out2="$(classify_boot_failure svc-timeout "authz OFF" "${ST_TMP}/timeout.log" 180 2>&1)"
+  case "${out2}" in
+    *"CRASHED"*) echo "SELF-TEST FAIL 2: an unfinished image pull was reported as a crash"; ST_RC=1 ;;
+  esac
+  case "${out2}" in
+    *"DID NOT FINISH"*"TIMEOUT, not a crash"*) ;;
+    *) echo "SELF-TEST FAIL 2b: a timeout was not named as one"; ST_RC=1 ;;
+  esac
+  case "${out2}" in
+    *"dev services should be OFF"*) ;;
+    *) echo "SELF-TEST FAIL 2c: the image pull was not named as the environmental cause"; ST_RC=1 ;;
+  esac
+  # Anchored to the CONTINUED command-line form, not the bare string: the string also occurs in
+  # this file's header and in this very check, so an unanchored grep matches itself and the
+  # control can never fail. (It could not, until it was falsified — measured, not assumed.)
+  if ! grep -qE '^[[:space:]]+-Dquarkus\.devservices\.enabled=false \\$' "$0"; then
+    echo "SELF-TEST FAIL 3: quarkusDev no longer disables dev services"; ST_RC=1
+  fi
+  rm -rf "${ST_TMP}"
+  [ "${ST_RC}" = 0 ] && echo "self-test OK (3 controls)" || echo "self-test FAILED"
+  exit "${ST_RC}"
+fi
 
 mkdir -p fuzz-reports
 OVERALL=0
@@ -231,6 +336,7 @@ for svc in $SERVICES; do
       -Dquarkus.datasource.username="${DBUSER}" \
       -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
       "${WORKER_FLAGS[@]}" "$@" \
+      -Dquarkus.devservices.enabled=false \
       -Dquarkus.console.basic=true \
       --console=plain --quiet \
       > "fuzz-reports/${svc}-boot${logsuffix}.log" 2>&1 &
@@ -251,8 +357,13 @@ for svc in $SERVICES; do
     done
 
     if [ "$UP" != "1" ]; then
-      echo "::error::[${svc}] failed to boot (${label}) — see ${svc}-boot${logsuffix}.log artifact"
-      tail -50 "fuzz-reports/${svc}-boot${logsuffix}.log" || true
+      # "failed to boot" is TWO states with opposite fixes, and printing one message for both is
+      # how this lane spent eighteen days reporting a broken harness (#6492). A CRASH leaves a
+      # terminal failure in the boot log and needs a code or config fix; a TIMEOUT leaves a JVM
+      # still working — its log ends mid-progress, its ERROR grep prints nothing, and the fix is
+      # time or one less container. Classify from the LOG, never from $DEV_PID (see the wait
+      # comment above for why the PID is not a liveness proxy).
+      classify_boot_failure "${svc}" "${label}" "fuzz-reports/${svc}-boot${logsuffix}.log" "${WAITED}"
       OVERALL=1
     else
       echo "==> [${svc}] answered after ${WAITED}s (${label}); fuzzing http://localhost:${PORT}"
@@ -277,6 +388,37 @@ for svc in $SERVICES; do
       sel="$(grep -aoE 'Selected: [0-9]+/[0-9]+' "fuzz-reports/${svc}-fuzz${logsuffix}.log" | head -1 || true)"
       blocked="$(grep -aoE 'Authentication failed: [0-9]+ operation' "fuzz-reports/${svc}-fuzz${logsuffix}.log" | grep -oE '[0-9]+' | head -1 || true)"
       echo "==> [${svc}] ${label}: ${sel:-Selected: ?} auth-blocked=${blocked:-0}"
+
+      # Machine-readable exercised-surface record (#5769): the number a pentest
+      # attestation's `ops:` field cites. Logs age out with retention; this JSON
+      # is the durable artifact check-readiness-attestations.py's R8 refers to.
+      # exercised = selected - auth-blocked: operations that only ever answered
+      # 401/403 tested NO handler logic and must not inflate the count.
+      local sel_n
+      sel_n="$(printf '%s' "${sel}" | grep -oE 'Selected: [0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+      cat > "fuzz-reports/${svc}-ops${logsuffix}.json" <<OPSJSON
+{
+  "service": "${svc}",
+  "lane": "${label}",
+  "selected": ${sel_n:-0},
+  "auth_blocked": ${blocked:-0},
+  "exercised": $(( ${sel_n:-0} - ${blocked:-0} )),
+  "max_examples": "${MAX_EXAMPLES}",
+  "run": "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-?}/actions/runs/${GITHUB_RUN_ID:-?}",
+  "date": "$(date -u +%F)"
+}
+OPSJSON
+
+      # A pass that drove ZERO operations tested nothing, and its green reads exactly like a
+      # finding-free run — the 2026-08-18 run reported 7 failures of 23 where six had never
+      # sent a request, and the job list rendered both kinds identically. Fail LOUDLY, worded
+      # as a harness error so triage does not read it as an HTTP-surface finding.
+      local selected_n
+      selected_n="$(printf '%s' "${sel}" | grep -oE 'Selected: [0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+      if [ -z "${selected_n}" ] || [ "${selected_n}" -eq 0 ]; then
+        echo "::error::[${svc}] ${label}: HARNESS ERROR — schemathesis drove ${selected_n:-no} operations (Selected: ${sel:-?}). The service likely never booted or its OpenAPI was unreachable; this pass is not evidence about the HTTP surface."
+        OVERALL=1
+      fi
 
       # A census of causes, printed next to the count (triage aid, not a verdict — see header).
       local census

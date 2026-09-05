@@ -210,9 +210,16 @@ class SettlementReversalIT {
             .isEqualTo("REVERSAL_FAILED")
     }
 
+    /**
+     * The proof for issue #6410, against a real Postgres and a real HTTP ledger lookup.
+     *
+     * Case 1 of 3: the ledger CONFIRMS a journal for this settlement, so the GL carries the
+     * posting and owes a manual correcting entry.
+     */
     @Test
-    fun `reverseBookToLedger fails loudly and marks the GL entry as needing manual correction`() {
+    fun `a confirmed GL journal fails loudly and marks the entry as needing manual correction`() {
         val (id, _, _) = seedSettlement("BOOKED")
+        BalanceServiceWireMockResource.stubLedgerHasJournal(id)
 
         // The failure reaches the caller unwrapped through the Vert.x-context bridge, so Temporal
         // sees the ApplicationFailure itself and honours its non-retryable flag.
@@ -224,14 +231,55 @@ class SettlementReversalIT {
 
         assertThat(readStatus(id)).isEqualTo("LEDGER_REVERSAL_UNSUPPORTED")
         // It must not silently pretend to have reversed anything, and it must not call balance.
-        assertThat(
-            BalanceServiceWireMockResource.server.findAll(
-                com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor(
-                    com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching(
-                        "/api/v1/balances/.*",
-                    ),
-                ),
-            ),
-        ).isEmpty()
+        assertThat(balanceRequests()).isEmpty()
     }
+
+    /**
+     * Case 2 of 3, and the one the old unconditional behaviour got wrong on every ordinary ledger
+     * failure: the ledger holds NOTHING for this settlement, so the booking never posted, there is
+     * no GL obligation, and the compensation must not manufacture one.
+     *
+     * A real HTTP `200 []` is what establishes it — not a mocked port, which cannot distinguish
+     * "asked the ledger and it said no" from "assumed".
+     */
+    @Test
+    fun `an empty ledger records LEDGER_NOT_POSTED and does not fail the compensation`() {
+        val (id, _, _) = seedSettlement("CREDITED")
+        BalanceServiceWireMockResource.stubLedgerHasNoJournal()
+
+        activities.reverseBookToLedger(id)
+
+        assertThat(readStatus(id))
+            .`as`("nothing was posted, so summoning an accountant would be a false alarm")
+            .isEqualTo("LEDGER_NOT_POSTED")
+        assertThat(balanceRequests()).isEmpty()
+    }
+
+    /**
+     * Case 3 of 3: the ledger could not answer. "We could not check" is a third fact, and rounding
+     * it to either neighbour is a claim nobody established — a clean GL nobody verified, or a
+     * standing posting that may not exist. Retryable, because an unreachable ledger is the one
+     * failure here that a retry can genuinely resolve.
+     */
+    @Test
+    fun `an unavailable ledger records LEDGER_STATE_UNKNOWN and stays retryable`() {
+        val (id, _, _) = seedSettlement("CREDITED")
+        BalanceServiceWireMockResource.stubLedgerLookupUnavailable()
+
+        assertThatThrownBy { activities.reverseBookToLedger(id) }
+            .isInstanceOfSatisfying(ApplicationFailure::class.java) { failure ->
+                assertThat(failure.isNonRetryable).isFalse()
+                assertThat(failure.type).isEqualTo("LedgerStateUnknown")
+            }
+
+        assertThat(readStatus(id))
+            .`as`("a 5xx from the ledger is not a clean general ledger")
+            .isEqualTo("LEDGER_STATE_UNKNOWN")
+    }
+
+    private fun balanceRequests() = BalanceServiceWireMockResource.server.findAll(
+        com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor(
+            com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching("/api/v1/balances/.*"),
+        ),
+    )
 }

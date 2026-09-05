@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.15.0
+  version: 1.17.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -91,7 +91,7 @@ paths:
       summary: The caller's own credit applications as customer-readable journeys (customer-edge only)
       description: >-
         ADR-0269 rule 3. Scoped to the party in X-Customer-Party-Id; carries no rate, instalment or
-        APRC — that is ADR-0269 rule 4 and arrives separately. Only the configured customer-edge principal may
+        APRC — that is ADR-0269 rule 4, served by /quotes below. Only the configured customer-edge principal may
         call it.
       parameters:
         - name: X-Customer-Party-Id
@@ -125,6 +125,67 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: No such application for this caller }
+
+  /api/v1/lending/intake/financial-health:
+    get:
+      tags: [Lending]
+      operationId: getCustomerFinancialHealth
+      summary: The caller's four-pillar financial health (customer-edge only, no score)
+      description: >-
+        ADR-0269 rule 5. Assembled here because the pillars need the credit profile, the loan book
+        and (later) balances, all of which this service already reaches. The judgement itself is a
+        pure function in libs; this route only fetches. Any pillar may answer UNKNOWN, and one
+        unavailable upstream greys out one pillar rather than the whole view.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The four pillars
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/lending/intake/quotes:
+    post:
+      tags: [Lending]
+      operationId: quoteCustomerCredit
+      summary: Indicative, non-binding price for a requested amount and term (customer-edge only)
+      description: >-
+        ADR-0269 rule 4 — the only place an instalment or an APRC may come from. Nothing is
+        persisted: an indicative price with an id would be one lookup away from being treated as a
+        binding offer. Price, currency and bounds are lending-side configuration; the body carries
+        only the amount and term. Refused 409 with a reason code when the ADR-0269 rule-2 distress
+        floor suppresses pricing — never a 200 with empty numbers, which a client renders as zero.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerQuoteRequest'
+      responses:
+        '200':
+          description: The indicative quote (binding is always false)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerQuote'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Pricing suppressed by the distress floor; body carries the reason code
 
   /api/v1/lending/applications/{id}:
     get:
@@ -550,7 +611,12 @@ paths:
           required: false
           schema: { type: string, format: date }
       responses:
-        '200': { description: IFRS 9 snapshot }
+        '200':
+          description: IFRS 9 snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvisioningSnapshot'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
@@ -802,6 +868,32 @@ components:
         makerId: { type: string, nullable: true, description: Principal that created the request }
         createdAt: { type: string, format: date-time, nullable: true }
         decidedBy: { type: string, nullable: true }
+    ProvisioningSnapshot:
+      type: object
+      required: [loanId, asOf, outstandingBalance, daysPastDue, bucket, stage, horizon, expectedCreditLoss, modelVersion]
+      properties:
+        loanId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        outstandingBalance:
+          $ref: '#/components/schemas/Money'
+        daysPastDue: { type: integer }
+        bucket:
+          type: string
+          enum: [CURRENT, DPD_1_30, DPD_31_60, DPD_61_90, DPD_90_PLUS]
+        stage:
+          type: string
+          enum: [STAGE_1, STAGE_2, STAGE_3]
+        horizon:
+          type: string
+          enum: [TWELVE_MONTH, LIFETIME]
+        expectedCreditLoss:
+          $ref: '#/components/schemas/Money'
+        modelVersion:
+          type: string
+          description: >-
+            The risk-parameter model version that produced this ECL figure (issue #8364) — the
+            audit trail from a provision back to the exact PD/LGD parameter set. A change to the
+            underlying parameters always ships with a new version string.
     Money:
       type: object
       required: [amount, currency]
@@ -845,6 +937,43 @@ components:
         principal:
           type: array
           items: { $ref: '#/components/schemas/MoneyTotal' }
+    CustomerQuoteRequest:
+      type: object
+      required: [amount, termMonths]
+      description: >-
+        The same two fields the intake accepts, and for the same reason: a customer may choose how
+        much and how long, never at what price.
+      properties:
+        amount: { type: string, description: Decimal in the product's configured currency }
+        termMonths: { type: integer, minimum: 1 }
+
+    CustomerQuote:
+      type: object
+      required: [amount, currency, termMonths, nominalAnnualRatePercent, monthlyPayment,
+                 totalPayable, totalCostOfCredit, validUntil, binding]
+      description: >-
+        An indicative price. Structurally distinct from a binding offer: no id, no accept path.
+      properties:
+        amount: { type: string }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        termMonths: { type: integer }
+        nominalAnnualRatePercent: { type: string }
+        monthlyPayment: { type: string }
+        totalPayable: { type: string }
+        totalCostOfCredit: { type: string }
+        aprcPercent:
+          type: string
+          nullable: true
+          description: >-
+            RPSN/APRC. NULL means "could not be computed" and must be rendered as an absent figure —
+            never as 0%, which reads to a customer as free credit.
+        validUntil: { type: string, format: date-time }
+        binding:
+          type: boolean
+          description: >-
+            Always false. Present so a client never has to infer it; an unwritten assumption is the
+            kind that gets forgotten.
+
     CustomerIntakeRequest:
       type: object
       required: [amount, termMonths]

@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -16,6 +16,7 @@ import { stashRow } from '@/lib/services/rowHandoff'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { hasPermission } from '@/lib/auth/roles'
 import { PageHeader, StatusBadge } from '@/components/ui'
+import { useSingleFlight, useIdempotencyKey, wasSkipped } from '@/lib/mutations/singleFlight'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
 // routes — never NEXT_PUBLIC_ localhost URLs, which leaked the internal port map into the
@@ -264,16 +265,40 @@ function PaymentsContent() {
 
   const [showCreate, setShowCreate] = useState<'payment-type' | 'domestic-form' | 'sepa-form' | null>(null)
   const [creating, setCreating] = useState(false)
+  // Two distinct defects, two mechanisms (see src/lib/mutations/singleFlight.ts):
+  //  - `flight` rejects a second submit in the SAME tick, before `disabled={creating}`
+  //    has rendered. Without it two clicks booked two payments.
+  //  - `idem` holds ONE Idempotency-Key per payload, so a retry after a lost or failed
+  //    response REPLAYS the original attempt. The payment services genuinely honour the
+  //    key (Redis IdempotencyStore + UNIQUE idempotency_key + a pre-insert lookup) — a
+  //    freshly minted UUID per submit, which is what this page used to send, threw that
+  //    protection away at the only layer that could use it.
+  const flight = useSingleFlight()
+  const domesticIdem = useIdempotencyKey()
+  const sepaIdem = useIdempotencyKey()
   const [createError, setCreateError] = useState<string | null>(null)
   const [createSuccess, setCreateSuccess] = useState<string | null>(null)
   const [domesticForm, setDomesticForm] = useState<DomesticFormData>(emptyDomestic(false))
   const [sepaForm, setSepaForm] = useState<SepaFormData>(emptySepa(false))
+  const [paymentReview, setPaymentReview] = useState<'domestic' | 'sepa' | null>(null)
+  const reviewBackRef = useRef<HTMLButtonElement>(null)
+  const reviewConfirmRef = useRef<HTMLButtonElement>(null)
+  const domesticSubmitRef = useRef<HTMLButtonElement>(null)
+  const sepaSubmitRef = useRef<HTMLButtonElement>(null)
+
+  const returnToPaymentForm = () => {
+    const submit = paymentReview === 'domestic' ? domesticSubmitRef.current : sepaSubmitRef.current
+    setPaymentReview(null)
+    setCreateError(null)
+    window.requestAnimationFrame(() => submit?.focus())
+  }
 
   // SCT Inst monitoring state
   const [sctPayments, setSctPayments] = useState<SctInstPayment[]>([])
   const [sctLoading, setSctLoading] = useState(true)
   const [sctSearch, setSctSearch] = useState('')
   const [sctServiceUp, setSctServiceUp] = useState<boolean | null>(null)
+  const [sctError, setSctError] = useState<string | null>(null)
 
   const handleTabChange = useCallback((t: Tab) => {
     setActiveTab(t)
@@ -299,16 +324,27 @@ function PaymentsContent() {
 
   const loadSct = useCallback(async () => {
     setSctLoading(true)
-    try {
-      await Promise.all([
-        fetch(`${SEPA_INSTANT_API}/q/health/ready`).then(r => setSctServiceUp(r.ok)).catch(() => setSctServiceUp(false)),
-        fetch(`${SEPA_INSTANT_API}/api/v1/sepa-instant`).then(r => r.json())
-          .then(d => setSctPayments(Array.isArray(d) ? d : d.payments ?? []))
-          .catch(() => setSctPayments([])),
-      ])
-    } catch { setSctServiceUp(false) }
-    finally { setSctLoading(false) }
-  }, [])
+    setSctError(null)
+    const [healthResult, paymentsResult] = await Promise.allSettled([
+      fetch(`${SEPA_INSTANT_API}/q/health/ready`).then(r => r.ok),
+      fetch(`${SEPA_INSTANT_API}/api/v1/sepa-instant`).then(async r => {
+        if (!r.ok) throw new Error(`SCT Inst request failed (${r.status})`)
+        const data = await r.json()
+        return Array.isArray(data) ? data : data.payments ?? []
+      }),
+    ])
+
+    setSctServiceUp(healthResult.status === 'fulfilled' ? healthResult.value : false)
+    if (paymentsResult.status === 'fulfilled') {
+      setSctPayments(paymentsResult.value)
+    } else {
+      setSctError(t(
+        'Aktuální SCT Inst platby nejsou dostupné. Zobrazené údaje mohou být zastaralé.',
+        'Current SCT Inst payments are unavailable. Displayed data may be stale.',
+      ))
+    }
+    setSctLoading(false)
+  }, [t])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { if (activeTab === 'sct-inst') loadSct() }, [activeTab, loadSct])
@@ -326,8 +362,8 @@ function PaymentsContent() {
     }
   }
 
-  const handleDomesticCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleDomesticCreate = async (e?: React.FormEvent, confirmed = false) => {
+    e?.preventDefault()
     setCreateError(null); setCreateSuccess(null)
     if (!canCreate) {
       setCreateError(t('Nemáte oprávnění vytvářet platby', 'You do not have permission to create payments'))
@@ -339,6 +375,11 @@ function PaymentsContent() {
       setCreateError(t('Vyplňte všechna povinná pole', 'Please fill all required fields'))
       return
     }
+    if (!confirmed) {
+      setPaymentReview('domestic')
+      return
+    }
+    const outcome = await flight.run('payment:create:domestic', async () => {
     setCreating(true)
     try {
       const payload = {
@@ -356,20 +397,26 @@ function PaymentsContent() {
         ...(f.endToEndId && { endToEndId: f.endToEndId }),
       }
       const res = await fetch(`/api/domestic-payments`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': domesticIdem.forPayload(payload) },
         body: JSON.stringify(payload),
       })
       if (!res.ok) throw new Error(await res.text() || t('Vytvoření platby selhalo', 'Failed to create payment'))
+      // Cleared only once the attempt has definitively succeeded: the next deliberate
+      // submission of an identical payload is then a NEW payment, not a replay.
+      domesticIdem.clear()
       setCreateSuccess(t(f.instant ? 'Okamžitá platba vytvořena' : 'Platba vytvořena', f.instant ? 'Instant payment created' : 'Payment created'))
+      setPaymentReview(null)
       setShowCreate(null)
       load()
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : t('Neznámá chyba', 'Unknown error'))
     } finally { setCreating(false) }
+    })
+    if (wasSkipped(outcome)) return
   }
 
-  const handleSepaCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSepaCreate = async (e?: React.FormEvent, confirmed = false) => {
+    e?.preventDefault()
     setCreateError(null); setCreateSuccess(null)
     if (!canCreate) {
       setCreateError(t('Nemáte oprávnění vytvářet platby', 'You do not have permission to create payments'))
@@ -393,6 +440,11 @@ function PaymentsContent() {
       setCreateError(t('Jméno příjemce nesouhlasí (VoP NO_MATCH) — platbu nelze odeslat', 'Payee name does not match (VoP NO_MATCH) — payment cannot be sent'))
       return
     }
+    if (!confirmed) {
+      setPaymentReview('sepa')
+      return
+    }
+    const outcome = await flight.run('payment:create:sepa', async () => {
     setCreating(true)
     try {
       const payload = {
@@ -405,16 +457,20 @@ function PaymentsContent() {
         ...(f.purposeCode && { purposeCode: f.purposeCode }),
       }
       const res = await fetch(`/api/sepa-payments`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': sepaIdem.forPayload(payload) },
         body: JSON.stringify(payload),
       })
       if (!res.ok) throw new Error(await res.text() || t('Vytvoření platby selhalo', 'Failed to create payment'))
+      sepaIdem.clear()
       setCreateSuccess(t(f.instant ? 'SCT Inst platba vytvořena' : 'SEPA platba vytvořena', f.instant ? 'SCT Inst payment created' : 'SEPA payment created'))
+      setPaymentReview(null)
       setShowCreate(null)
       load()
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : t('Neznámá chyba', 'Unknown error'))
     } finally { setCreating(false) }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   // ── Filtered data ──────────────────────────────────────────────
@@ -517,6 +573,21 @@ function PaymentsContent() {
             </div>
           )}
 
+          {sctError && (
+            <div role="status" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
+              background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', fontWeight: 600, color: 'var(--warning-text)' }}>
+                <AlertTriangle size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+                {sctError}
+              </span>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={loadSct} disabled={sctLoading} aria-busy={sctLoading}>
+                <RefreshCw size={12} aria-hidden="true" />
+                {t('Zkusit znovu', 'Retry')}
+              </button>
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
             {[
               { label: t('Platby celkem', 'Total payments'), value: sctPayments.length, icon: <Zap size={16} />, color: 'var(--accent)' },
@@ -558,7 +629,7 @@ function PaymentsContent() {
               <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
                 <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
               </div>
-            ) : sctFiltered.length === 0 ? (
+            ) : !sctError && sctFiltered.length === 0 ? (
               <div style={{ padding: '48px', textAlign: 'center' }}>
                 <Zap size={32} style={{ color: 'var(--text-tertiary)', marginBottom: '12px' }} />
                 <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Žádné SCT Inst platby', 'No SCT Inst payments')}</div>
@@ -785,7 +856,7 @@ function PaymentsContent() {
                 {createError && <div style={{ color: 'var(--red)', fontSize: '13px', marginTop: '4px' }}>{createError}</div>}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(null)}>{t('Zrušit', 'Cancel')}</button>
-                  <button type="submit" className="btn btn-primary" disabled={creating}>
+                  <button ref={domesticSubmitRef} type="submit" className="btn btn-primary" disabled={creating}>
                     {creating ? t('Odesílám...', 'Sending...') : t(domesticForm.instant ? 'Odeslat okamžitě' : 'Vytvořit', domesticForm.instant ? 'Send instant' : 'Create')}
                   </button>
                 </div>
@@ -867,11 +938,77 @@ function PaymentsContent() {
                 {createError && <div style={{ color: 'var(--red)', fontSize: '13px', marginTop: '4px' }}>{createError}</div>}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(null)}>{t('Zrušit', 'Cancel')}</button>
-                  <button type="submit" className="btn btn-primary" disabled={creating}>
+                  <button ref={sepaSubmitRef} type="submit" className="btn btn-primary" disabled={creating}>
                     {creating ? t('Odesílám...', 'Sending...') : t(sepaForm.instant ? 'Odeslat okamžitě' : 'Vytvořit', sepaForm.instant ? 'Send instant' : 'Create')}
                   </button>
                 </div>
               </form>
+            </div>
+          )}
+
+          {paymentReview && (
+            <div
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="payment-create-review-title"
+              aria-describedby="payment-create-review-impact"
+              onKeyDown={event => {
+                if (event.key === 'Escape' && !creating) {
+                  returnToPaymentForm()
+                }
+                if (event.key === 'Tab') {
+                  const first = reviewBackRef.current
+                  const last = reviewConfirmRef.current
+                  if (event.shiftKey && document.activeElement === first) {
+                    event.preventDefault()
+                    last?.focus()
+                  } else if (!event.shiftKey && document.activeElement === last) {
+                    event.preventDefault()
+                    first?.focus()
+                  }
+                }
+              }}
+              style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+            >
+              <div className="card" style={{ width: 'min(620px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}>
+                <h2 id="payment-create-review-title" style={{ margin: 0, fontSize: 18 }}>
+                  {t('Zkontrolovat platební příkaz', 'Review payment order')}
+                </h2>
+                <p id="payment-create-review-impact" style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.55 }}>
+                  {t('Potvrzením odešlete přesně tento příkaz platební službě. Přijetí příkazu ještě neznamená vypořádání; další stav a případné schválení řídí platební workflow.', 'Confirmation submits this exact order to the payment service. Acceptance is not settlement; subsequent status and any required approval remain controlled by the payment workflow.')}
+                </p>
+                {paymentReview === 'domestic' ? (
+                  <dl style={{ display: 'grid', gridTemplateColumns: '155px minmax(0, 1fr)', gap: '9px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
+                    <dt>{t('Typ', 'Type')}</dt><dd>{domesticForm.instant ? t('Domácí okamžitá', 'Domestic instant') : t('Domácí standardní', 'Domestic standard')}</dd>
+                    <dt>{t('Částka', 'Amount')}</dt><dd style={{ fontSize: 16, fontWeight: 750 }}>{formatAmount(Number(domesticForm.amount), domesticForm.currency, language)}</dd>
+                    <dt>{t('Plátce', 'Debtor')}</dt><dd>{domesticForm.debtorName}<br/><span className="mono">{domesticForm.debtorAccountNumber}/{domesticForm.debtorBankCode}</span></dd>
+                    <dt>{t('Příjemce', 'Beneficiary')}</dt><dd>{domesticForm.creditorName}<br/><span className="mono">{domesticForm.creditorAccountNumber}/{domesticForm.creditorBankCode}</span></dd>
+                    <dt>{t('Rozsah převodu', 'Transfer scope')}</dt><dd>{domesticForm.transferScope}</dd>
+                    <dt>{t('Priorita', 'Priority')}</dt><dd>{domesticForm.priority}</dd>
+                    <dt>{t('Variabilní symbol', 'Variable symbol')}</dt><dd>{domesticForm.variableSymbol || '—'}</dd>
+                    <dt>{t('End-to-End ID', 'End-to-End ID')}</dt><dd className="mono">{domesticForm.endToEndId || '—'}</dd>
+                    <dt>{t('Zpráva', 'Message')}</dt><dd>{domesticForm.messageForPayee || '—'}</dd>
+                  </dl>
+                ) : (
+                  <dl style={{ display: 'grid', gridTemplateColumns: '155px minmax(0, 1fr)', gap: '9px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
+                    <dt>{t('Typ', 'Type')}</dt><dd>{sepaForm.instant ? 'SEPA Instant (SCT Inst)' : 'SEPA Credit Transfer (SCT)'}</dd>
+                    <dt>{t('Částka', 'Amount')}</dt><dd style={{ fontSize: 16, fontWeight: 750 }}>{formatAmount(Number(sepaForm.amount), 'EUR', language)}</dd>
+                    <dt>{t('IBAN plátce', 'Debtor IBAN')}</dt><dd className="mono" style={{ overflowWrap: 'anywhere' }}>{sepaForm.debtorIban}</dd>
+                    <dt>{t('Příjemce', 'Beneficiary')}</dt><dd>{sepaForm.creditorName}<br/><span className="mono" style={{ overflowWrap: 'anywhere' }}>{sepaForm.creditorIban}</span></dd>
+                    <dt>BIC</dt><dd className="mono">{sepaForm.bic || t('Odvozen z IBAN', 'Derived from IBAN')}</dd>
+                    <dt>{t('VoP výsledek', 'VoP result')}</dt><dd>{sepaForm.vopStatus === 'idle' ? t('Nebylo provedeno', 'Not performed') : sepaForm.vopStatus.toUpperCase()}{sepaForm.vopResult && sepaForm.vopResult !== sepaForm.vopStatus ? ` — ${sepaForm.vopResult}` : ''}</dd>
+                    <dt>{t('End-to-End ID', 'End-to-End ID')}</dt><dd className="mono">{sepaForm.endToEndId || '—'}</dd>
+                    <dt>{t('Zpráva', 'Remittance')}</dt><dd>{sepaForm.remittanceInfo || '—'}</dd>
+                  </dl>
+                )}
+                {createError && <div role="alert" data-testid="payment-create-review-error" style={{ marginTop: 14, padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{createError}</div>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+                  <button ref={reviewBackRef} autoFocus type="button" className="btn btn-secondary" disabled={creating} onClick={returnToPaymentForm}>{t('Zpět k úpravám', 'Back to editing')}</button>
+                  <button ref={reviewConfirmRef} type="button" className="btn btn-primary" aria-busy={creating} disabled={creating} onClick={() => void (paymentReview === 'domestic' ? handleDomesticCreate(undefined, true) : handleSepaCreate(undefined, true))}>
+                    {creating ? t('Odesílám…', 'Submitting…') : t('Potvrdit a odeslat', 'Confirm and submit')}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

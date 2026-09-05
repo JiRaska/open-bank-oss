@@ -18,10 +18,9 @@
 #   surfaced by kube-state-metrics, which is what prometheus-rules-journey.yaml alerts on.
 #
 # WHAT A RED RUN MEANS
-#   k6 exits non-zero when a threshold fails. The checks assert `status < 500`: a 401 from
-#   an authenticated route is the service working (it challenged us), a 502 is not. So a red
-#   run means an edge is serving errors or is unreachable from in-cluster — not that
-#   something needs a login.
+#   k6 exits non-zero when a threshold fails. Each edge has a concrete protocol contract:
+#   the two protected APIs must answer 401 and the Admin UI must issue an SSO redirect. A
+#   generic `status < 500` check is not enough: it marked a 404 on a removed API route green.
 #
 # WHAT IT CANNOT SAY
 #   This journey proves the front door answers as itself. It does not touch a payment, a
@@ -64,28 +63,31 @@ data:
     const CUSTOMER_BASE = __ENV.CUSTOMER_BASE || 'https://customer.open-bank.tech';
     const ADMIN_BASE = __ENV.ADMIN_BASE || 'https://admin.open-bank.tech';
 
-    // Status < 500 is the assertion, deliberately. A 401 from an authenticated route means
-    // the service is up and challenged us; a 502 means it is not. Asserting `status == 200`
-    // would make an auth challenge look like an outage, and asserting only "a response
-    // arrived" would make an outage look healthy — an nginx 502 is a valid HTTP response.
-    function reachable(res) {
-      return res.status >= 200 && res.status < 500;
+    // These routes deliberately require authentication. A 401 proves that the ingress selected
+    // the real route and the edge enforced its boundary. A 404 is not an acceptable substitute:
+    // that was the old false-green condition on /api/v1/info, which the API gateway does not own.
+    function authChallenge(res) {
+      return res.status === 401;
+    }
+
+    // Ask for the redirect response itself rather than following it into Keycloak. This proves
+    // the Admin UI owns its public boundary while avoiding a duplicate monitor of Keycloak.
+    function ssoRedirect(res) {
+      return [302, 303, 307, 308].includes(res.status) && Boolean(res.headers.Location);
     }
 
     export default function () {
-      group('api info', () => {
-        const r = http.get(`${API_BASE}/api/v1/info`);
-        check(r, { 'api edge answers': reachable });
+      group('public API boundary', () => {
+        const r = http.get(`${API_BASE}/api/v1/accounts`, { redirects: 0 });
+        check(r, { 'public API requires authentication': authChallenge });
       });
       group('customer edge', () => {
-        // Root path is empty — the ingress only routes /customer/v1, so 401 is the healthy
-        // answer here: the route exists and demands a token.
-        const r = http.get(`${CUSTOMER_BASE}/customer/v1/accounts`);
-        check(r, { 'customer edge answers': reachable });
+        const r = http.get(`${CUSTOMER_BASE}/customer/v1/accounts`, { redirects: 0 });
+        check(r, { 'customer edge requires authentication': authChallenge });
       });
       group('admin ui', () => {
-        const r = http.get(`${ADMIN_BASE}/`);
-        check(r, { 'admin ui answers': reachable });
+        const r = http.get(`${ADMIN_BASE}/`, { redirects: 0 });
+        check(r, { 'admin ui redirects to SSO': ssoRedirect });
       });
     }
 ---

@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.customeredge.domain.model.CustomerIdentity
 import com.openbank.customeredge.infrastructure.audit.EdgeAuditPublisher
 import com.openbank.customeredge.infrastructure.cnb.CnbBanksClient
+import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
@@ -40,6 +41,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -108,6 +110,9 @@ class CustomerEdgeResource(
     @Inject
     lateinit var partyMergeResolver: PartyMergeResolver
 
+    @Inject
+    lateinit var creditFunnel: com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
+
     @ConfigProperty(name = "openbank.edge.account-service-url")
     lateinit var accountServiceUrl: String
 
@@ -133,6 +138,12 @@ class CustomerEdgeResource(
         defaultValue = "http://product-catalog.accounts.svc:8104",
     )
     lateinit var productCatalogUrl: String
+
+    @ConfigProperty(
+        name = "openbank.edge.incentive-service-url",
+        defaultValue = "http://localhost:8156",
+    )
+    lateinit var incentiveServiceUrl: String
 
     @ConfigProperty(name = "openbank.edge.transaction-service-url")
     lateinit var transactionServiceUrl: String
@@ -417,6 +428,45 @@ class CustomerEdgeResource(
      * this edge has an M2M credential. This projection is therefore also the single source for
      * the product eligibility check at [openTermDeposit].
      */
+    /**
+     * The customer-facing product catalogue: what this customer may open today.
+     *
+     * Generalises the projection [listTermDepositOffers] already applies to term deposits, for the
+     * same reason and with the same filters — the operator catalogue holds draft, private,
+     * withdrawn and future-dated products, and none of them may become discoverable merely
+     * because this edge holds an M2M credential.
+     *
+     * **Rates are read, never derived.** A savings product prices by balance tier and a term
+     * deposit by its own fixed term, so this endpoint reports the catalogue's numbers and the
+     * shape they came in. It does not flatten tiers into one "from" rate or interpolate a term
+     * curve: the app would then be quoting a price the bank never set. Where a product carries no
+     * rate at all — a current account — the field is absent rather than zero, because 0 % is a
+     * price and "not priced" is not.
+     *
+     * `type` narrows the list; omitted, every discoverable type comes back.
+     */
+    @GET
+    @Path("/products")
+    @Authorize(action = "customer.products.read")
+    @Blocking
+    fun listProductOffers(@QueryParam("type") type: String?): Response {
+        val customer = customer()
+        val requested = type?.takeIf { it.isNotBlank() }?.uppercase()
+        if (requested != null && requested !in CUSTOMER_PRODUCT_TYPES) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(mapOf("error" to "Unsupported product type"))
+                .build()
+        }
+        val query = requested?.let { "?type=$it&status=ACTIVE" } ?: "?status=ACTIVE"
+        val catalog = upstream.get("$productCatalogUrl/api/v1/products$query", customer.partyId.toString())
+        if (catalog.status != 200) return productCatalogueUnavailable()
+        val products = parseJson(catalog)?.takeIf { it.isArray } ?: return productCatalogueUnavailable()
+        val today = LocalDate.now(clock)
+        val offers = objectMapper.createArrayNode()
+        products.forEach { product -> productOffer(product, today)?.let(offers::add) }
+        return Response.ok(objectMapper.createObjectNode().set<ArrayNode>("items", offers)).build()
+    }
+
     @GET
     @Path("/products/term-deposits")
     @Authorize(action = "customer.products.read")
@@ -446,6 +496,70 @@ class CustomerEdgeResource(
         }
 
     /**
+     * Reserve the fixed reward attached to a campaign treatment the signed-in customer received.
+     * The phone supplies only the opaque interaction reference, promo code and intended product.
+     * Party and offer identity are resolved server-side; the product must still be an ACTIVE,
+     * public term-deposit offer before Incentive Service sees the request.
+     */
+    @POST
+    @Path("/incentives/claims")
+    @Authorize(action = "customer.incentives.claim")
+    @Blocking
+    fun claimIncentive(body: String, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        require(idempotencyKey.length <= MAX_IDEMPOTENCY_KEY_LENGTH) { "Idempotency-Key is too long" }
+        val customer = customer()
+        val request = runCatching { objectMapper.readTree(body) }.getOrNull()?.takeIf { it.isObject }
+            ?: return badRequest("Malformed incentive claim")
+        if (request.fieldNames().asSequence().any { it !in INCENTIVE_CLAIM_FIELDS }) {
+            return badRequest("Incentive claim contains unsupported fields")
+        }
+        val interactionRef = request.uuidField("interactionRef")
+            ?: return badRequest("interactionRef must be a UUID")
+        val productId = request.uuidField("productId")
+            ?: return badRequest("productId must be a UUID")
+        val code = request.path("code").takeIf { it.isTextual }?.textValue()?.trim()
+            ?.takeIf { it.length in MIN_PROMO_CODE_LENGTH..MAX_PROMO_CODE_LENGTH }
+            ?: return badRequest("code must be a string between 8 and 128 characters")
+
+        when (resolvePublicTermDeposit(customer, productId)) {
+            is TermDepositResolution.Found -> Unit
+            TermDepositResolution.NotFound -> return termDepositNotFound()
+            TermDepositResolution.Unavailable -> return termDepositCatalogueUnavailable()
+        }
+
+        val attributionResponse = upstream.get(
+            "$campaignServiceUrl/api/v1/campaigns/interactions/$interactionRef/attribution",
+            customer.partyId.toString(),
+        )
+        if (attributionResponse.status != Response.Status.OK.statusCode) {
+            return if (attributionResponse.status >= UPSTREAM_SERVER_ERROR_MIN) {
+                Response.status(Response.Status.BAD_GATEWAY).build()
+            } else {
+                badRequest("Invalid interaction reference")
+            }
+        }
+        val attribution = parseJson(attributionResponse)
+            ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+        val offerId = attribution.path("incentiveOfferRef").uuidField("id")
+            ?: return Response.status(Response.Status.CONFLICT)
+                .entity("{\"error\":\"Campaign treatment has no claimable incentive\"}")
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+
+        val trustedRequest = objectMapper.createObjectNode()
+            .put("code", code)
+            .put("productRef", productId.toString())
+            .put("attributionRef", interactionRef.toString())
+        return upstream.post(
+            "$incentiveServiceUrl/api/v1/customer-incentives/offers/$offerId/reservations",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(trustedRequest),
+            idempotencyKey,
+        )
+    }
+
+    /**
      * Opens a term-deposit account selected from [listTermDepositOffers]. The app intentionally
      * supplies no account type or currency: both are fixed by the public catalogue product, so a
      * crafted client cannot turn a term-deposit offer into another account kind or currency.
@@ -460,10 +574,20 @@ class CustomerEdgeResource(
     fun openTermDeposit(body: String, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
         requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header must not be blank" }
+        require(idempotencyKey.length <= MAX_IDEMPOTENCY_KEY_LENGTH) { "Idempotency-Key is too long" }
         val customer = customer()
-        val productId = extractTextField(objectMapper, body, "productId")
-            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val request = runCatching { objectMapper.readTree(body) }.getOrNull()?.takeIf { it.isObject }
+            ?: return badRequest("Malformed term-deposit request")
+        if (request.fieldNames().asSequence().any { it !in TERM_DEPOSIT_OPEN_FIELDS }) {
+            return badRequest("Term-deposit request contains unsupported fields")
+        }
+        val productId = request.uuidField("productId")
             ?: return Response.status(400).entity("{\"error\":\"productId must be a UUID\"}").build()
+        val reservationId = request.get("incentiveReservationId")?.takeUnless { it.isNull }?.let {
+            it.takeIf { node -> node.isTextual }?.textValue()?.let { value ->
+                runCatching { UUID.fromString(value) }.getOrNull()
+            } ?: return badRequest("incentiveReservationId must be a UUID")
+        }
         val offer = when (val result = resolvePublicTermDeposit(customer, productId)) {
             is TermDepositResolution.Found -> result.offer
             TermDepositResolution.NotFound -> return termDepositNotFound()
@@ -493,7 +617,63 @@ class CustomerEdgeResource(
             resourceId = extractTextField(objectMapper, (response.entity as? String).orEmpty(), "id"),
             details = mapOf("productId" to productId.toString(), "currency" to offer.path("currency").asText()),
         )
+        if (reservationId != null) {
+            return reconcileTermDepositIncentive(response, customer, productId, reservationId, idempotencyKey)
+        }
         return response
+    }
+
+    private fun reconcileTermDepositIncentive(
+        accountResponse: Response,
+        customer: CustomerIdentity,
+        productId: UUID,
+        reservationId: UUID,
+        idempotencyKey: String,
+    ): Response {
+        if (accountResponse.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
+            val account = parseJson(accountResponse)?.takeIf { it.isObject }
+                ?: return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity("{\"error\":\"Account outcome lacked qualifying evidence\"}").build()
+            val qualifiedAt = qualifyingAccountOpenedAt(account, customer.partyId, productId)
+                ?: return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity("{\"error\":\"Account outcome lacked qualifying evidence\"}").build()
+            val commitBody = objectMapper.createObjectNode()
+                .put("productRef", productId.toString())
+                .put("qualifiedAt", qualifiedAt.toString())
+            val commit = upstream.post(
+                "$incentiveServiceUrl/api/v1/customer-incentives/reservations/$reservationId/commit",
+                customer.partyId.toString(),
+                objectMapper.writeValueAsString(commitBody),
+                idempotencyKey,
+            )
+            if (commit.statusInfo.family != Response.Status.Family.SUCCESSFUL) return commit
+            val incentive = parseJson(commit)?.takeIf { it.isObject }
+                ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            val result = (account.deepCopy<JsonNode>() as ObjectNode).set<JsonNode>("incentiveReservation", incentive)
+            return Response.status(accountResponse.status).entity(result).type(MediaType.APPLICATION_JSON).build()
+        }
+
+        if (accountResponse.status !in TERMINAL_ACCOUNT_REJECTION_STATUSES) {
+            return accountResponse
+        }
+        val releaseBody = objectMapper.createObjectNode().put("productRef", productId.toString())
+        val release = upstream.post(
+            "$incentiveServiceUrl/api/v1/customer-incentives/reservations/$reservationId/release",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(releaseBody),
+            idempotencyKey,
+        )
+        return if (release.statusInfo.family == Response.Status.Family.SUCCESSFUL) accountResponse else release
+    }
+
+    private fun qualifyingAccountOpenedAt(account: JsonNode, partyId: UUID, productId: UUID): Instant? {
+        val authoritative = account.path("partyId").asText() == partyId.toString() &&
+            account.path("productId").asText() == productId.toString() &&
+            account.path("accountType").asText() == "TERM_DEPOSIT" &&
+            account.path("status").asText() == "ACTIVE"
+        if (!authoritative) return null
+        return account.path("openedAt").takeIf { it.isTextual }?.textValue()
+            ?.let { runCatching { Instant.parse(it) }.getOrNull() }
     }
 
     // --- KYC / identity verification status (AML Act §8, ADR-0116) ---
@@ -606,6 +786,90 @@ class CustomerEdgeResource(
             result = if (resp.statusInfo.family == Response.Status.Family.SUCCESSFUL) "SUCCESS" else "FAILURE",
             resourceId = extractTextField(objectMapper, (resp.entity as? String).orEmpty(), "id"),
             details = mapOf("upstreamStatus" to resp.status.toString()),
+        )
+        return Response.status(resp.status)
+            .entity(resp.entity ?: "{}")
+            .type(MediaType.APPLICATION_JSON)
+            .build()
+    }
+
+    /**
+     * One credit-journey funnel event (ADR-0269 rule 8's metrics).
+     *
+     * Authenticated on purpose — see [CreditFunnelPublisher] for why this is not the onboarding
+     * funnel's public endpoint. The party is taken from the JWT and never from the body, so a
+     * caller can only ever describe their own journey.
+     *
+     * Always 202, even for a rejected value: telemetry must not teach a client anything, and a 400
+     * here would turn the allow-list into an oracle for what the bank tracks. Rejected values are
+     * counted, not answered.
+     */
+    @POST
+    @Path("/credit/events")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun trackCreditEvent(body: String): Response {
+        val customer = customer()
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+        val step = node?.get("step")?.asText()
+        val action = node?.get("action")?.asText()
+        if (step in CreditFunnelPublisher.VALID_STEPS && action in CreditFunnelPublisher.VALID_ACTIONS) {
+            creditFunnel.emit(customer.partyId, step!!, action!!)
+        }
+        return Response.accepted().build()
+    }
+
+    /**
+     * The caller's own four-pillar financial health (ADR-0269 / APP-ADR-0001 rule 5).
+     *
+     * Assembled by lending-service, which already reaches the credit profile and the loan book;
+     * this route only scopes it to the caller. No score, no rating, no eligibility — and no path
+     * into a credit decision.
+     *
+     * Fail-soft to an empty list. An unreachable upstream means the app shows no pillars rather
+     * than four invented ones, and each pillar can independently answer UNKNOWN, so a partial
+     * answer is the normal case rather than an error.
+     */
+    @GET
+    @Path("/financial-health")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun getFinancialHealth(): Response {
+        val customer = customer()
+        val resp = upstream.get(
+            "$lendingServiceUrl/api/v1/lending/intake/financial-health",
+            customer.partyId.toString(),
+        )
+        if (resp.status != 200) return Response.ok("[]").type(MediaType.APPLICATION_JSON).build()
+        return Response.ok(resp.entity ?: "[]").type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * An indicative, non-binding price for an amount and term (ADR-0269 rule 4).
+     *
+     * The ONLY route by which the app may learn what a loan costs. The client computes no price:
+     * rate, instalment, APRC and total come from lending-service, which resolves them from the
+     * pinned catalog revision. The body carries amount and term and nothing else — a
+     * customer-supplied rate would let the applicant price their own loan.
+     *
+     * Deliberately NOT fail-soft, and deliberately passes the upstream status through. A 409 means
+     * lending's distress floor suppressed pricing and carries a reason code; turning that into an
+     * empty 200 would leave the app rendering a quote-shaped hole, which is exactly how a client
+     * ends up showing "0".
+     */
+    @POST
+    @Path("/credit/quotes")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun quoteCredit(request: Map<String, Any?>): Response {
+        val customer = customer()
+        val body = objectMapper.writeValueAsString(
+            mapOf("amount" to request["amount"], "termMonths" to request["termMonths"]),
+        )
+        val resp = upstream.post(
+            "$lendingServiceUrl/api/v1/lending/intake/quotes",
+            customer.partyId.toString(),
+            body,
         )
         return Response.status(resp.status)
             .entity(resp.entity ?: "{}")
@@ -840,6 +1104,63 @@ class CustomerEdgeResource(
         )
     }
 
+    /**
+     * GDPR Art. 15 — right of access. The subject's full PII set, aggregated by party-service
+     * across party, kyc and card-issuance (ADR-0118).
+     *
+     * ## Why this route exists
+     *
+     * party-service has implemented both exports since ADR-0118/ADR-0204 and they were reachable by
+     * nobody: the handler accepts ROLE_ADMIN, ROLE_DPO, or the subject's own JWT, and this edge
+     * forwards none of the three. It validates the customer token in the `openbank-customers` realm
+     * and calls upstream with its OWN client_credentials token from the operator realm, so
+     * party-service saw `sub = service-account-openbank-edge` with ROLE_OPERATOR — not admin, not
+     * DPO, not the subject — and answered 403 to every request a data subject could make. There was
+     * also no route here to make one with: 136 `@Path` declarations and none for either export
+     * (#8421). ADR-0204 D6 left "who gets a button for it" open rather than deciding against it.
+     *
+     * ## Scoping
+     *
+     * Party-scoped by the JWT party — never a client-supplied id — so a customer only ever exports
+     * their own record (no IDOR), the same shape as `/profile` and `/privacy/access-log`.
+     * party-service independently requires that `X-Customer-Party-Id` name the same party as the
+     * path, so a header alone cannot widen the read.
+     *
+     * A distinct action from `customer.portabilityExport.read` below because Art. 15 and Art. 20 are
+     * distinct rights with different output obligations (ADR-0204: Art. 20 excludes Art. 6(1)(c)
+     * legal-obligation data and adds transaction history) — party-service audits them under
+     * different `gdprArticle` codes for exactly that reason, and collapsing them here would undo it.
+     */
+    @GET
+    @Path("/privacy/gdpr-export")
+    @Authorize(action = "customer.gdprExport.read", resource = "")
+    @Blocking
+    fun gdprExport(): Response {
+        val customer = customer()
+        return upstream.get(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/gdpr-export",
+            customer.partyId.toString(),
+        )
+    }
+
+    /**
+     * GDPR Art. 20 — right to data portability. The consent/contract-basis subset only, with
+     * counterparty IBANs redacted per Art. 20(4); Art. 20(2) direct controller-to-controller
+     * transmission is explicitly not offered (ADR-0204 D1/D2/D4). Same scoping and same trust
+     * boundary as [gdprExport].
+     */
+    @GET
+    @Path("/privacy/portability-export")
+    @Authorize(action = "customer.portabilityExport.read", resource = "")
+    @Blocking
+    fun portabilityExport(): Response {
+        val customer = customer()
+        return upstream.get(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/gdpr-portability-export",
+            customer.partyId.toString(),
+        )
+    }
+
     /** The third-party / agent data-access consents granted by the caller. */
     @GET
     @Path("/consents")
@@ -877,6 +1198,123 @@ class CustomerEdgeResource(
             body,
         )
         return Response.status(resp.status).entity(resp.entity).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * The caller's own ADR-0269 credit consents, as three booleans.
+     *
+     * ## Why this route exists at all
+     *
+     * consent-service could already grant these scopes, and the edge could already list and revoke
+     * consents — but there was no way for a CUSTOMER to switch one ON. The app's existing marketing
+     * toggle goes somewhere else entirely (party-service's `marketingConsent` boolean), so without
+     * this route the credit consents were grantable only by an operator, which is the opposite of
+     * what "the customer decides" means.
+     *
+     * ## Why booleans and not the consent objects
+     *
+     * The app renders three switches. Handing it consent aggregates would make every client
+     * re-derive "is CREDIT_OFFERS on" from a list, and the first client to write that filter
+     * slightly differently gets a different answer — the same reasoning ADR-0210 D2 gives for the
+     * party key. The derivation happens once, here.
+     */
+    @GET
+    @Path("/credit/consents")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun getCreditConsents(): Response {
+        val customer = customer()
+        val party = customer.partyId.toString()
+        val resp = upstream.get("$consentServiceUrl/api/v1/consents/party/$party", party)
+        val arr = if (resp.status == 200) {
+            runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") as? ArrayNode }.getOrNull()
+        } else {
+            null
+        }
+        // An unreadable consent list answers "everything off", which is the SAFE default and the
+        // true one for every customer who has never granted anything. It is not fail-soft
+        // convenience: the client uses this to decide whether to fetch offers at all, so an
+        // optimistic default here would fetch offers for a customer whose consent we cannot read.
+        val active = arr?.filter { it.get("status")?.asText() == "ACTIVE" }?.flatMap { c ->
+            c.get("scopes")?.mapNotNull { it.asText() } ?: emptyList()
+        }?.toSet().orEmpty()
+        val out = objectMapper.createObjectNode()
+        CREDIT_SCOPES.forEach { (field, scope) -> out.put(field, scope in active) }
+        return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * Set the caller's credit consents to exactly the state in the body (ADR-0269 rule 1).
+     *
+     * A full-state PUT, not a partial patch: "turn offers off" and "leave offers alone" must not be
+     * the same request. Anything the body sets to false is revoked, immediately and for every
+     * channel — the ADR's requirement that switching offers off takes effect at once rather than at
+     * the next batch.
+     *
+     * These scopes are GDPR Art. 7 data-processing consents, so consent-service activates them
+     * without an SCA ceremony; an SCA designed for payment authorisation is a disproportionate
+     * burden on a data-processing opt-in (ADR-0205 D1). Granting still requires the customer's own
+     * authenticated session — the party comes from the JWT, never the body.
+     */
+    @PUT
+    @Path("/credit/consents")
+    @Authorize(action = "customer.profile.consent.update", resource = "")
+    @Blocking
+    fun putCreditConsents(body: String): Response {
+        val customer = customer()
+        val requested = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+            ?: return badRequest("Malformed credit consent body")
+        val desired = CREDIT_SCOPES.mapValues { (field, _) -> requested.get(field)?.asBoolean() ?: false }
+        val party = customer.partyId.toString()
+
+        val existing = upstream.get("$consentServiceUrl/api/v1/consents/party/$party", party)
+        if (existing.status != 200) return Response.status(existing.status).entity(existing.entity).build()
+        val consents = runCatching { objectMapper.readTree(existing.entity?.toString() ?: "") as? ArrayNode }
+            .getOrNull() ?: objectMapper.createArrayNode()
+
+        desired.forEach { (field, wanted) ->
+            val scope = CREDIT_SCOPES.getValue(field)
+            val held = consents.firstOrNull { c ->
+                c.get("status")?.asText() == "ACTIVE" &&
+                    c.get("scopes")?.any { it.asText() == scope } == true
+            }
+            when {
+                wanted && held == null -> grantCreditScope(customer.partyId, scope)
+                !wanted && held != null -> revokeHeldConsent(customer.partyId, held.get("id")?.asText())
+                else -> Unit // already in the requested state; granting again would churn the audit trail
+            }
+        }
+        return getCreditConsents()
+    }
+
+    private fun grantCreditScope(partyId: UUID, scope: String) {
+        val body = objectMapper.createObjectNode().apply {
+            put("partyId", partyId.toString())
+            put("granteeId", BANK_GRANTEE)
+            put("granteeType", "INTERNAL_SERVICE")
+            put("granteeName", "OpenBank")
+            putArray("scopes").add(scope)
+            // 365 days: the non-AISP bucket's maximum. It is a ceiling, not a promise — the customer
+            // can revoke at any time, and nothing re-arms the consent when it lapses.
+            put("validTo", java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(CONSENT_DAYS).toString())
+        }.toString()
+        upstream.post("$consentServiceUrl/api/v1/consents", partyId.toString(), body)
+    }
+
+    private fun revokeHeldConsent(partyId: UUID, consentId: String?) {
+        if (consentId.isNullOrBlank()) return
+        val body = objectMapper.createObjectNode().put("reason", "Revoked by customer").toString()
+        // granteeId is REQUIRED here, not optional: ConsentResource.revoke binds OPA's
+        // resource.id to it (`#granteeId`, issue #2911 — binding it to the consent UUID instead
+        // made every M2M revoke unconditionally 403). Omitting it left resource.id null, which
+        // service-consent-m2m-credit's `input.resource.id == "openbank"` comparison can never
+        // satisfy — so turning a credit consent switch OFF 403'd exactly like turning it on did
+        // before this fix, just one call further into the flow.
+        upstream.delete(
+            "$consentServiceUrl/api/v1/consents/$consentId?partyId=$partyId&granteeId=$BANK_GRANTEE",
+            partyId.toString(),
+            body,
+        )
     }
 
     private fun projectConsent(c: com.fasterxml.jackson.databind.JsonNode): ObjectNode {
@@ -2038,6 +2476,106 @@ class CustomerEdgeResource(
         )
     }
 
+    /**
+     * Reserve cumulative headroom against the grant before a delegated payment is initiated
+     * (ADR-0249 D3). Returns [SpendReservationOutcome.NotDelegated] untouched for an owner's own
+     * payment — the counter exists to bound what a DELEGATE may spend, and an owner has no ceiling
+     * to count against.
+     *
+     * Reserve-then-confirm, never count-after: counting settled payments lets two concurrent
+     * requests both pass a check that neither would pass alone, and "we noticed afterwards" is not
+     * a limit. delegation-service owns the arithmetic because one grant can be spent through
+     * domestic, SEPA, instant and cards — a counter per rail cannot see the others.
+     *
+     * The reservation carries the PAYMENT's idempotency key, not a per-attempt one, so a rail
+     * replay takes the headroom exactly once. When the caller supplied no key there is nothing
+     * stable to key on, so each attempt reserves separately: that over-counts a retry rather than
+     * under-counting a ceiling, and over-counting is the direction a limit may safely fail in.
+     *
+     * A reservation that cannot be established at all — upstream down, unparseable answer — is a
+     * refusal. The ceiling is not advisory, so being unable to consult it must stop the payment.
+     */
+    private fun reserveDelegatedSpend(
+        debit: DebitAuthority,
+        customer: CustomerIdentity,
+        amount: String,
+        currency: String,
+        idempotencyKey: String?,
+    ): SpendReservationOutcome {
+        val grantId = debit.delegationId ?: return SpendReservationOutcome.NotDelegated
+        val body = objectMapper.createObjectNode().apply {
+            put("amount", amount)
+            put("currency", currency)
+            put("idempotencyKey", idempotencyKey?.takeIf { it.isNotBlank() } ?: Ids.randomId().toString())
+            put("operationType", "DOMESTIC_PAYMENT")
+        }
+        val resp = runCatching {
+            upstream.post(
+                "$delegationServiceUrl/api/v1/delegations/$grantId/reservations",
+                customer.partyId.toString(),
+                objectMapper.writeValueAsString(body),
+            )
+        }.getOrNull()
+        val reservationId = resp
+            ?.takeIf { it.statusInfo.family == Response.Status.Family.SUCCESSFUL }
+            ?.let { extractTextField(objectMapper, (it.entity as? String).orEmpty(), "reservationId") }
+        if (reservationId == null) {
+            audit.emit(
+                eventType = "CUSTOMER_PAYMENT_REFUSED",
+                partyId = customer.partyId.toString(),
+                operation = "payments.domestic",
+                result = "DENIED",
+                resourceId = debit.delegationId,
+                details = mapOf(
+                    "reason" to "DELEGATED_SPEND_CEILING",
+                    "upstreamStatus" to (resp?.status?.toString() ?: "UNAVAILABLE"),
+                    "amount" to amount,
+                    "currency" to currency,
+                ),
+            )
+            // The delegate already knows they hold this grant — the authorization decision said so
+            // one call ago — so naming their own ceiling is not an oracle about anyone else's
+            // account. How much headroom is left is deliberately NOT echoed: that is the grantor's
+            // configuration, and the 409 body carrying it stays in the audit trail.
+            return SpendReservationOutcome.Refused(
+                Response.status(Response.Status.FORBIDDEN)
+                    .entity(
+                        """{"error":"This payment is over the spending limit set for you on this account",""" +
+                            """"code":"DELEGATED_SPEND_LIMIT_EXCEEDED"}""",
+                    )
+                    .type(MediaType.APPLICATION_JSON)
+                    .build(),
+            )
+        }
+        return SpendReservationOutcome.Held(SpendReservation(grantId, reservationId))
+    }
+
+    /**
+     * Settle a held reservation: [confirmed] keeps the headroom consumed, otherwise it comes back.
+     *
+     * Every failure branch after a successful reserve must reach this with `confirmed = false`. A
+     * leaked reservation silently shrinks the delegate's ceiling until it expires, which is a
+     * defect the customer experiences as their limit quietly shrinking for no stated reason.
+     *
+     * "Confirmed" here means the instruction was ACCEPTED by the rail, not that it settled in
+     * clearing. Tracking true settlement would need an async outcome this synchronous route does
+     * not have; a payment that is accepted and later fails in clearing therefore leaves the
+     * headroom consumed. That over-counts rather than under-counts, which is the safe direction
+     * for a ceiling, and it is stated here rather than implied.
+     */
+    private fun settleDelegatedSpend(reservation: SpendReservation?, customer: CustomerIdentity, confirmed: Boolean) {
+        if (reservation == null) return
+        val verb = if (confirmed) "confirm" else "release"
+        runCatching {
+            upstream.post(
+                "$delegationServiceUrl/api/v1/delegations/${reservation.delegationId}" +
+                    "/reservations/${reservation.reservationId}/$verb",
+                customer.partyId.toString(),
+                "{}",
+            )
+        }
+    }
+
     // Resolve the caller's legal name from party-service (for the debtorName a domestic payment needs).
     // Party-scoped by the JWT party; null on any non-200 / missing field.
     private fun fetchPartyLegalName(partyId: UUID): String? {
@@ -2200,17 +2738,33 @@ class CustomerEdgeResource(
             creditorAcctNo,
             creditorBank,
         ) ?: return badRequest("Malformed or incomplete payment body")
+        // Cumulative ceiling (ADR-0249 D3) BEFORE the SCA gate, not after: a payment that the
+        // delegate's monthly limit will refuse must not first cost them a biometric prompt and a
+        // single-use challenge they cannot get back. Every return below this point releases.
+        val reservation = when (val held = reserveDelegatedSpend(debit, customer, amount, currency, idempotencyKey)) {
+            is SpendReservationOutcome.Refused -> return held.response
+            is SpendReservationOutcome.Held -> held.reservation
+            SpendReservationOutcome.NotDelegated -> null
+        }
         // Settlement gate (ADR-0021): no money path without a device-signed, amount+payee-bound,
         // single-use SCA approval. The compare-and-consume happens in sca-service, atomically.
         // The challenge belongs to the INITIATOR (the delegate's own device), not to the account
         // holder — a delegate authenticates as themselves; the grant is what makes it their debit
         // to make. So `customer` here stays the delegate on the delegated path, deliberately.
-        scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")?.let { return it }
+        scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")?.let {
+            settleDelegatedSpend(reservation, customer, confirmed = false)
+            return it
+        }
         val resp = upstream.post(
             "$domesticPaymentServiceUrl/api/v1/domestic-payments",
             customer.partyId.toString(),
             enriched,
             idempotencyKey,
+        )
+        settleDelegatedSpend(
+            reservation,
+            customer,
+            confirmed = resp.statusInfo.family == Response.Status.Family.SUCCESSFUL,
         )
         // Receiver-side honesty (ADR-0108): a 2xx here means the instruction was ACCEPTED, not that
         // the money settled. Bind the created payment id to the session so the receiver's status poll
@@ -3316,10 +3870,9 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Historical bank commercial rates for a currency pair (newest-first). The edge fixes
-     * source=INTERNAL so customers only see the bank's own published rates, not ECB/CNB reference
-     * rows. from/to are ISO-8601 Instant strings; limit is capped at 365 (one year of daily rates).
-     * The app uses this list to render a rate-history chart.
+     * Historical ČNB reference mid-rates for a currency pair (newest-first). When the caller omits
+     * bounds, the edge supplies an exact three-calendar-month UTC window. This is deliberately a
+     * reference trend, not a promise that a historical commercial quote can be recreated.
      */
     @GET
     @Path("/fx/rates/{base}/{quote}/history")
@@ -3339,19 +3892,19 @@ class CustomerEdgeResource(
         if (to != null && !isValidInstant(to)) return badRequest("Invalid 'to' instant: $to")
         val safeLimit = (limit ?: 90).coerceIn(1, 365)
         val safeOffset = (offset ?: 0).coerceAtLeast(0)
+        val windowEnd = to ?: java.time.Instant.now().toString()
+        val windowStart = from ?: threeMonthWindowStart(java.time.Instant.parse(windowEnd)).toString()
         val url = buildString {
-            // No source filter: CNB reference rows are excluded by mapFxRateList (cnbRef partition);
-            // INTERNAL + ECB bank rows all appear in the chart — correct union of published rates.
-            append("$fxServiceUrl/api/v1/fx/rates/$base/$quote/history?limit=$safeLimit&offset=$safeOffset")
-            if (from != null) append("&from=${java.net.URLEncoder.encode(from, "UTF-8")}")
-            if (to != null) append("&to=${java.net.URLEncoder.encode(to, "UTF-8")}")
+            append("$fxServiceUrl/api/v1/fx/rates/$base/$quote/history?source=CNB&limit=$safeLimit&offset=$safeOffset")
+            append("&from=${java.net.URLEncoder.encode(windowStart, "UTF-8")}")
+            append("&to=${java.net.URLEncoder.encode(windowEnd, "UTF-8")}")
         }
         val resp = upstream.get(url, customer.partyId.toString())
         val upstreamBody = (resp.entity as? String).orEmpty()
         if (resp.status != 200) {
             return Response.status(resp.status).entity(upstreamBody).type(MediaType.APPLICATION_JSON).build()
         }
-        val mapped = mapFxRateList(objectMapper, upstreamBody)
+        val mapped = mapFxHistoryList(objectMapper, upstreamBody)
             ?: return Response.status(Response.Status.BAD_GATEWAY)
                 .entity("""{"error":"malformed fx history"}""")
                 .type(MediaType.APPLICATION_JSON).build()
@@ -4533,6 +5086,60 @@ class CustomerEdgeResource(
         }
     }
 
+    /**
+     * Customer-safe projection of one catalogue product, or null when it is not discoverable.
+     *
+     * Carries only what a customer needs to choose: identity, copy, currency, limits, and the
+     * price IN THE SHAPE THE CATALOGUE PRICES IT — `annualRate` for a term deposit (which has one
+     * fixed rate for one fixed term), `interestTiers` for savings (which prices by balance), and
+     * neither for a current account. Internal fields — version history, eligibility segments,
+     * draft state, operator notes — never cross.
+     */
+    private fun productOffer(product: JsonNode, today: LocalDate): ObjectNode? {
+        if (!isDiscoverableProduct(product) || !isCurrentlyValid(product, today)) return null
+        val type = product.path("type").asText()
+        return objectMapper.createObjectNode().apply {
+            put("id", product.path("id").asText())
+            put("code", product.path("code").asText())
+            put("name", product.path("name").asText())
+            put("type", type)
+            put("currency", product.path("currency").asText())
+            product.get("shortDescription")?.takeIf { !it.isNull }?.let { set<JsonNode>("shortDescription", it) }
+            product.get("description")?.takeIf { !it.isNull }?.let { set<JsonNode>("description", it) }
+            product.get("minBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("minBalance", it) }
+            product.get("maxBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("maxBalance", it) }
+            // The monthly account fee, when the catalogue states one. Zero IS a price here — "no
+            // fee, forever" is the current account's whole pitch — so unlike a rate it is copied
+            // even when it is 0.
+            product.get("fee")?.takeIf { !it.isNull }?.let { set<JsonNode>("fee", it) }
+            // Price, in the catalogue's own shape. Never flattened, never interpolated.
+            product.get("termDepositConfig")?.takeIf { it.isObject }?.let { configuration ->
+                put("annualRate", configuration.path("interestRateAnnual").asDouble())
+                set<JsonNode>("term", configuration)
+            }
+            product.get("savingsConfig")?.takeIf { it.isObject }?.let { configuration ->
+                set<JsonNode>("savings", configuration)
+            }
+            set<JsonNode>("termsAndConditions", product.path("termsAndConditions"))
+        }
+    }
+
+    /**
+     * Discoverability, deliberately identical to [isDiscoverableTermDeposit] apart from the type
+     * gate: ACTIVE, public, identifiable, priced in a currency. A product failing any of these is
+     * invisible rather than greyed out — an offer the customer cannot take is not an offer.
+     */
+    private fun isDiscoverableProduct(product: JsonNode): Boolean =
+        product.path("type").asText() in CUSTOMER_PRODUCT_TYPES &&
+            product.path("status").asText() == "ACTIVE" &&
+            product.path("isPublic").asBoolean(false) &&
+            product.path("id").asText().isNotBlank() &&
+            product.path("currency").asText().isNotBlank()
+
+    private fun productCatalogueUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+        .entity(mapOf("error" to "Product catalogue unavailable"))
+        .build()
+
     private fun isDiscoverableTermDeposit(product: JsonNode): Boolean =
         product.path("type").asText() == "TERM_DEPOSIT" &&
             product.path("status").asText() == "ACTIVE" &&
@@ -4570,6 +5177,35 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+
+        /**
+         * The product types a customer may discover and open from the app.
+         *
+         * An allow-list, not a deny-list: MORTGAGE, CREDIT_CARD, OVERDRAFT and INVESTMENT exist in
+         * the catalogue and are deliberately absent — each needs its own suitability and disclosure
+         * journey, and surfacing one here would let the app offer a regulated product with no path
+         * to take it. A new type becomes customer-visible by being added here, on purpose.
+         */
+        internal val CUSTOMER_PRODUCT_TYPES = setOf("CURRENT", "SAVINGS", "TERM_DEPOSIT")
+
+        /**
+         * The ADR-0269 credit consents, as the app's field name → the consent-service scope.
+         *
+         * One map, so the read and the write cannot disagree about which switch means which scope —
+         * the failure that would look like a customer turning offers off and still being offered.
+         */
+        private val CREDIT_SCOPES: Map<String, String> = linkedMapOf(
+            "offers" to "CREDIT_OFFERS",
+            "profileUse" to "CREDIT_PROFILE_USE",
+            "aiAgent" to "CREDIT_AI_AGENT",
+        )
+
+        /** First-party consent: the bank itself is the grantee, not a TPP. */
+        private const val BANK_GRANTEE = "openbank"
+
+        /** The non-AISP validity ceiling. A ceiling, not a promise — revocation is immediate. */
+        private const val CONSENT_DAYS = 365L
+
         /** Closed at the edge as well as upstream: a path is never an app-controlled URL. */
         private val SURFACE_SLOTS: Set<String> = setOf(
             "HOME_BANNER",
@@ -4578,6 +5214,12 @@ class CustomerEdgeResource(
             "PRODUCT_FEED",
             "REWARDS_HUB",
         )
+        private val INCENTIVE_CLAIM_FIELDS = setOf("interactionRef", "code", "productId")
+        private val TERM_DEPOSIT_OPEN_FIELDS = setOf("productId", "incentiveReservationId")
+        private val TERMINAL_ACCOUNT_REJECTION_STATUSES = setOf(422)
+        private const val MIN_PROMO_CODE_LENGTH = 8
+        private const val MAX_PROMO_CODE_LENGTH = 128
+        private const val MAX_IDEMPOTENCY_KEY_LENGTH = 255
 
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
@@ -4987,6 +5629,20 @@ class CustomerEdgeResource(
             mapper.writeValueAsString(out)
         }.getOrNull()
 
+        /** History keeps ČNB rows (unlike the commercial rate-sheet projection) and removes
+         * duplicate snapshots for the same business timestamp before returning newest-first. */
+        internal fun mapFxHistoryList(mapper: ObjectMapper, upstreamJson: String): String? = runCatching {
+            val arr = mapper.readTree(upstreamJson) as? com.fasterxml.jackson.databind.node.ArrayNode ?: return null
+            val rows = arr.mapNotNull { it as? ObjectNode }
+                .mapNotNull { mapFxRateRow(mapper, it) }
+                .distinctBy { it.get("timestamp")?.asText() ?: return@distinctBy it.toString() }
+                .sortedByDescending { it.get("timestamp")?.asText().orEmpty() }
+            mapper.writeValueAsString(mapper.createArrayNode().addAll(rows))
+        }.getOrNull()
+
+        internal fun threeMonthWindowStart(now: java.time.Instant): java.time.Instant =
+            java.time.ZonedDateTime.ofInstant(now, java.time.ZoneOffset.UTC).minusMonths(3).toInstant()
+
         /**
          * Project one upstream rate record to the app row {base, quote, rate, bid?, ask?,
          * timestamp?, refMid?, spreadPct?}, or null to skip the row (missing currency codes or
@@ -5317,6 +5973,20 @@ internal data class DebitAuthority(
     val onBehalfOf: UUID? = null,
     val delegationId: String? = null,
 )
+
+/** Cumulative headroom held against a grant while one delegated payment is in flight (ADR-0249 D3). */
+internal data class SpendReservation(val delegationId: String, val reservationId: String)
+
+/**
+ * The three ways asking for headroom can end. [NotDelegated] is not a failure — it is an owner
+ * paying from their own account, where there is no grant and so no ceiling to count against, and
+ * it is kept distinct from a refusal so the two can never be collapsed by accident.
+ */
+internal sealed interface SpendReservationOutcome {
+    data class Held(val reservation: SpendReservation) : SpendReservationOutcome
+    data class Refused(val response: Response) : SpendReservationOutcome
+    data object NotDelegated : SpendReservationOutcome
+}
 
 /** Allowed-with-authority, or an already-audited refusal to hand straight back to the caller. */
 internal sealed interface DebitAuthorityResult {

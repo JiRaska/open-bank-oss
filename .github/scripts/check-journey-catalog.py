@@ -162,6 +162,20 @@ def cronjob_facts(root: pathlib.Path, rel_path: str, journey_id: str):
     return None, defined_configmaps, f"{rel_path} defines no CronJob named {CRONJOB_PREFIX}{journey_id}"
 
 
+def workflow_facts(root: pathlib.Path, rel_path: str, schedule: str, workflow_name: str):
+    """Validate a GitHub Actions-backed journey from its committed schedule, not prose."""
+    path = root / rel_path
+    if not path.is_file():
+        return f"workflow not found: {rel_path}"
+    text = path.read_text(encoding="utf-8")
+    if not re.search(rf"(?m)^name:\s*{re.escape(workflow_name)}\s*$", text):
+        return f"workflow {rel_path} does not declare name {workflow_name!r}"
+    # The literal scheduled trigger is the executable cadence. Quotes are optional in Actions YAML.
+    if not re.search(rf"(?m)^\s*-\s*cron:\s*['\"]?{re.escape(schedule)}['\"]?\s*$", text):
+        return f"workflow {rel_path} does not schedule {schedule!r}"
+    return None
+
+
 def extract_script(root: pathlib.Path, journey_id: str) -> str:
     """Return the exact ConfigMap-mounted k6 program for one active catalog journey.
 
@@ -189,6 +203,23 @@ def extract_script(root: pathlib.Path, journey_id: str) -> str:
     if len(scripts) != 1:
         raise ValueError(f"{journey_id}: expected one mounted non-empty journey.js, found {len(scripts)}")
     return scripts[0]
+
+
+def active_ids(root: pathlib.Path) -> list[str]:
+    """Return active Kubernetes journey ids whose mounted k6 program CI can extract.
+
+    The catalog also admits active GitHub Actions browser synthetics. They have no ConfigMap
+    script by design, so including them here would ask the k6 workflow to execute an artifact
+    that does not exist. Their workflow is independently validated by ``workflow_facts``.
+    """
+    findings, fatal, _ = check(root)
+    if fatal:
+        raise ValueError(fatal)
+    if findings:
+        raise ValueError("catalog is not consistent: " + "; ".join(findings))
+    catalog = yaml.safe_load((root / CATALOG).read_text(encoding="utf-8")) or {}
+    return sorted(str(item["id"]) for item in (catalog.get("journeys") or [])
+                  if isinstance(item, dict) and item.get("status") == "active" and item.get("cronjob"))
 
 
 def alerted_journeys(root: pathlib.Path):
@@ -264,6 +295,11 @@ def check(root: pathlib.Path):
             findings.append(f"{jid}: severity must be one of {VALID_SEVERITY}")
 
         if status == "planned":
+            if entry.get("runtime_note"):
+                findings.append(
+                    f"{jid}: planned journeys use `blocked_by`, not `runtime_note` — "
+                    "a runtime prerequisite belongs to a scheduled journey with a live verdict"
+                )
             if not entry.get("blocked_by"):
                 findings.append(
                     f"{jid}: planned journeys must name what blocks them (`blocked_by`) — "
@@ -282,6 +318,31 @@ def check(root: pathlib.Path):
         if status != "active":
             continue
 
+        runtime_note = entry.get("runtime_note")
+        if runtime_note is not None and (not isinstance(runtime_note, str) or not runtime_note.strip()):
+            findings.append(f"{jid}: runtime_note must be a non-empty string when declared")
+        browser_variants = entry.get("browser_variants")
+        if browser_variants is not None:
+            allowed_browsers = {"chromium", "firefox", "webkit"}
+            if (not isinstance(browser_variants, list) or not browser_variants
+                    or len(browser_variants) != len(set(browser_variants))
+                    or not set(browser_variants).issubset(allowed_browsers)):
+                findings.append(f"{jid}: browser_variants must be a non-empty unique subset of {sorted(allowed_browsers)}")
+
+        if entry.get("workflow"):
+            if entry.get("cronjob"):
+                findings.append(f"{jid}: an active journey declares one executor, not both workflow and cronjob")
+            if not entry.get("schedule"):
+                findings.append(f"{jid}: workflow-backed active journeys need `schedule`")
+            if not entry.get("workflow_name"):
+                findings.append(f"{jid}: workflow-backed active journeys need `workflow_name`")
+            elif not CRON_EXPRESSION.match(str(entry.get("schedule"))):
+                findings.append(f"{jid}: schedule is not a five-field cron expression")
+            else:
+                error = workflow_facts(root, str(entry["workflow"]), str(entry["schedule"]), str(entry["workflow_name"]))
+                if error:
+                    findings.append(f"{jid}: {error}")
+            continue
         for field in REQUIRED_ACTIVE:
             if entry.get(field) in (None, ""):
                 findings.append(f"{jid}: active journeys need `{field}`")
@@ -384,13 +445,39 @@ spec:
           expr: absent(kube_cronjob_status_last_successful_time{cronjob="journey-demo"})
 """
 
+SELF_TEST_CATALOG_WORKFLOW = """
+version: 1
+journeys:
+  - id: browser-boundary
+    title: Browser boundary
+    capability: proves the public browser hand-off
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/browser-synthetic.yml
+    workflow_name: Browser synthetic
+    schedule: "13 */2 * * *"
+    falsification: remove the SSO boundary
+"""
 
-def write_tree(root: pathlib.Path, catalog: str, cronjob: str, rules: str, cronjob_name="cronjob-journey-demo.yaml"):
+SELF_TEST_WORKFLOW = """
+name: Browser synthetic
+on:
+  schedule:
+    - cron: '13 */2 * * *'
+"""
+
+
+def write_tree(root: pathlib.Path, catalog: str, cronjob: str, rules: str, cronjob_name="cronjob-journey-demo.yaml", workflow=None):
     (root / "openbank-libs/governance").mkdir(parents=True, exist_ok=True)
     (root / COMPONENTS / "observability").mkdir(parents=True, exist_ok=True)
     (root / CATALOG).write_text(catalog, encoding="utf-8")
     if cronjob is not None:
         (root / COMPONENTS / "observability" / cronjob_name).write_text(cronjob, encoding="utf-8")
+    if workflow is not None:
+        target = root / ".github/workflows/browser-synthetic.yml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(workflow, encoding="utf-8")
     (root / RULES).write_text(rules, encoding="utf-8")
 
 
@@ -401,10 +488,10 @@ def self_test():
     """
     cases = []
 
-    def run(label, catalog, cronjob, rules, expect_finding, cronjob_name="cronjob-journey-demo.yaml"):
+    def run(label, catalog, cronjob, rules, expect_finding, cronjob_name="cronjob-journey-demo.yaml", workflow=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
-            write_tree(root, catalog, cronjob, rules, cronjob_name)
+            write_tree(root, catalog, cronjob, rules, cronjob_name, workflow)
             findings, fatal, _ = check(root)
             got = bool(findings) or bool(fatal)
             ok = got == expect_finding
@@ -412,6 +499,14 @@ def self_test():
 
     run("control: a consistent catalog is clean",
         SELF_TEST_CATALOG_OK, SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=False)
+
+    run("control: a workflow-backed active journey is schedule-verified",
+        SELF_TEST_CATALOG_WORKFLOW, None, SELF_TEST_RULES, expect_finding=False,
+        workflow=SELF_TEST_WORKFLOW)
+
+    run("workflow-backed journey schedule drift is detected",
+        SELF_TEST_CATALOG_WORKFLOW, None, SELF_TEST_RULES, expect_finding=True,
+        workflow=SELF_TEST_WORKFLOW.replace("13 */2 * * *", "0 * * * *"))
 
     run("catalog entry whose manifest does not exist",
         SELF_TEST_CATALOG_OK.replace("cronjob-journey-demo.yaml", "cronjob-journey-ghost.yaml"),
@@ -441,6 +536,10 @@ def self_test():
 
     run("planned journey with no target schedule",
         SELF_TEST_CATALOG_OK.replace('    target_schedule: "0 * * * *"\n', ""),
+        SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
+
+    run("planned journey cannot mislabel its blocker as a runtime prerequisite",
+        SELF_TEST_CATALOG_OK.replace('    blocked_by: "#4348 — needs synthetic parties"\n', '    runtime_note: needs synthetic parties\n    blocked_by: "#4348 — needs synthetic parties"\n'),
         SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
 
     run("journey with no falsification",
@@ -502,12 +601,20 @@ def main():
     parser.add_argument("--self-test", action="store_true", dest="selftest")
     parser.add_argument("--extract", metavar="JOURNEY_ID")
     parser.add_argument("--out")
+    parser.add_argument("--active-ids", action="store_true")
     args = parser.parse_args()
 
     if args.selftest:
         return self_test()
 
     root = pathlib.Path(args.root).resolve()
+    if args.active_ids:
+        try:
+            print("\n".join(active_ids(root)))
+        except (OSError, yaml.YAMLError, ValueError) as exc:
+            print(f"::error::check-journey-catalog: cannot enumerate active journeys: {exc}")
+            return 1
+        return 0
     if args.extract:
         if not args.out:
             parser.error("--extract requires --out")

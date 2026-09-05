@@ -73,6 +73,8 @@ class FlakyTestModelsTest {
             FlakyTestCheckType.OBSERVED_FLAKY_TESTS,
             FlakyTestCheckType.STALE_TEST_EVIDENCE,
             FlakyTestCheckType.UNPROVEN_TEST_INFRASTRUCTURE,
+            FlakyTestCheckType.UNTERMINATED_TEST_INFRASTRUCTURE,
+            FlakyTestCheckType.REQUIRED_CONTROL_GAP,
         )
     }
 

@@ -1,0 +1,33 @@
+# Service-owned Testcontainers resources awaiting migration to
+# TestInfrastructureEvidence. This is a ratchet: a new unrecorded resource
+# fails CI, and a migrated path must be removed from this list. The gate also requires a
+# real start AND stop lifecycle pair, not merely the recorder's name in the file (#7246):
+# a start-only resource leaves teardown unobservable while reading as migrated.
+#
+# Select the next migration from the remaining entries below, after classifying its topology
+# and money-path status. Do not maintain a second candidate list here: it drifts as paths are
+# migrated and can send an operator back to already-recorded resources.
+# Money-path entries (ledger, transaction, account, balance, sepa-*, domestic-payment,
+# clearing, swift, fx, lending, sdd, interest, sca, consent) are tracked separately: they
+# need the two-approval + threat-model process before their topology is touched.
+openbank-account-service/src/test/kotlin/com/openbank/account/it/PostgresRedpandaRedisTestResource.kt
+openbank-balance-service/src/test/kotlin/com/openbank/balance/it/PostgresRedpandaTestResource.kt
+openbank-billing-service/src/test/kotlin/com/openbank/billing/it/PostgresRedisTestResource.kt
+openbank-clearing-service/src/test/kotlin/com/openbank/clearing/it/PostgresRedpandaRedisTestResource.kt
+openbank-consent-service/src/test/kotlin/com/openbank/consent/it/ConsentPostgresRedisTestResource.kt
+openbank-consent-service/src/test/kotlin/com/openbank/consent/it/PostgresTestResource.kt
+openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/it/PostgresRedisTestResource.kt
+openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisRedpandaTestResource.kt
+openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisTestResource.kt
+openbank-fx-service/src/test/kotlin/com/openbank/fx/it/PostgresRedisTestResource.kt
+openbank-interest-service/src/test/kotlin/com/openbank/interest/it/PostgresRedisTestResource.kt
+openbank-lending-service/src/test/kotlin/com/openbank/lending/it/PostgresRedisTestResource.kt
+openbank-psd2-service/src/test/kotlin/com/openbank/psd2/it/PostgresRedisTestResource.kt
+openbank-sca-service/src/test/kotlin/com/openbank/sca/it/PostgresRedisTestResource.kt
+openbank-sdd-service/src/test/kotlin/com/openbank/sdd/it/PostgresTestResource.kt
+openbank-sepa-instant/src/test/kotlin/com/openbank/sepainstant/it/PostgresRedpandaRedisTestResource.kt
+openbank-sepa-payment/src/test/kotlin/com/openbank/sepa/it/PostgresRedisTestResource.kt
+openbank-settlement-service/src/test/kotlin/com/openbank/settlement/it/PostgresTestResource.kt
+openbank-standing-order-service/src/test/kotlin/com/openbank/standingorder/it/PostgresRedisTestResource.kt
+openbank-swift-service/src/test/kotlin/com/openbank/swift/it/PostgresRedisTestResource.kt
+openbank-vop-service/src/test/kotlin/com/openbank/vop/PostgresTestResource.kt

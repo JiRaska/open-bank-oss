@@ -38,6 +38,8 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.quarkus.test.security)
+    testImplementation(project(":openbank-libs-testing"))
     // Consumer-driven contracts for party-service (REST + Kafka) and kyc-service (Kafka)
     // (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)

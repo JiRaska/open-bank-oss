@@ -15,15 +15,17 @@ metadata:
     app.kubernetes.io/part-of: app
 spec:
   replicas: 1
-  # Terminate-first, deliberately (#3545): with one replica the default maxSurge 1 /
-  # maxUnavailable 0 needs room for two pods, and the old pod holds exactly those
-  # resources - on a full cluster the rollout never completes while reporting 1/1 READY.
-  # No HA to lose: this workload is already unavailable for the moment its pod is replaced.
+  # Keep the public SSO boundary available during image rollouts. The browser synthetic
+  # proved that terminate-first creates a real 503 window: one engine can reach the old
+  # pod while the other reaches the interval before the replacement becomes Ready.
+  # The small, bounded surge is therefore part of the availability contract; a rollout
+  # that cannot schedule the additional 100m/256Mi pod must remain visibly pending,
+  # rather than deliberately taking the operator surface offline.
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 0
-      maxUnavailable: 1
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: admin-ui
@@ -47,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: admin-ui
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-a1d80ff17-run32946281940
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-994eddd43-run33943694797
           ports:
             - name: http
               containerPort: 3000
@@ -92,8 +94,8 @@ spec:
             #
             # Setting this is what TURNS TRACING ON: src/lib/telemetry/tracing.ts starts no SDK
             # at all without it, so dev and test export nothing (same gating shape as the
-            # GlitchTip DSN, ADR-0075 inv. 2). This is server-side only; ADR-0088 D4's rejection
-            # of browser RUM for this console is untouched and still stands.
+            # GlitchTip DSN, ADR-0075 inv. 2). The authenticated, same-origin browser-RUM relay
+            # uses this same runtime-only endpoint; browsers never receive this address.
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://tempo.observability.svc:4318
             - name: OTEL_SERVICE_NAME
@@ -104,7 +106,7 @@ spec:
             #   3. Add a RoleBinding for admin-ui-discovery below.
             # Adding a service *inside* an existing namespace is fully automatic.
             - name: OPENBANK_NAMESPACES
-              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement
+              value: accounts,payments,compliance,identity,open-banking,platform,ledger,balances,audit,sanctions,security-scanner,onboarding,party,sca,statements,customer-edge,kyc,notifications,aml,consent,dispute,fraud,fx,interest,pid,psd2,documents,campaign,anacredit,billing,finrep,lending,sdd,tpp-registry,delegation,engagement,referral
             # agent-service (MCP) is NOT reached via the discovery proxy: the
             # /api/agent/mcp and /api/agent/chat routes resolve it from this env
             # directly. Unset, they fall back to localhost:8109 (the admin-ui pod
@@ -304,6 +306,22 @@ kind: RoleBinding
 metadata:
   name: admin-ui-discovery
   namespace: accounts
+  labels:
+    app.kubernetes.io/name: admin-ui
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin-ui-discovery
+subjects:
+  - kind: ServiceAccount
+    name: admin-ui
+    namespace: admin-ui
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: admin-ui-discovery
+  namespace: referral
   labels:
     app.kubernetes.io/name: admin-ui
 roleRef:

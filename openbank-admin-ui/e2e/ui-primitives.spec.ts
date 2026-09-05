@@ -22,6 +22,7 @@
 // All BFF traffic is intercepted with page.route(); no live services required.
 
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 test.beforeEach(async ({ context, baseURL }) => {
@@ -104,9 +105,26 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
 
     // The shell is part of the operator experience, not decorative page chrome: the
     // navigation rail and command bar must retain their deliberate working geometry.
-    expect(Math.round((await page.locator('aside').boundingBox())!.width)).toBe(264)
+    expect(Math.round((await page.locator('#admin-sidebar').boundingBox())!.width)).toBe(264)
     expect(Math.round((await page.locator('header').boundingBox())!.height)).toBe(60)
     expect(await page.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
+
+    // The Explorer portrait is deliberately oversized and clipped by the guide,
+    // but its top (and therefore its head) must remain inside the visible banner.
+    // A negative portrait top previously left only the torso visible in production.
+    const explorerGuide = page.getByLabel('Welcome to your operations cockpit')
+    const guideBox = await explorerGuide.boundingBox()
+    const portraitBox = await explorerGuide.locator('img').boundingBox()
+    expect(guideBox).not.toBeNull()
+    expect(portraitBox).not.toBeNull()
+    expect(portraitBox!.y).toBeGreaterThanOrEqual(guideBox!.y)
+
+    const scan = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(scan.violations, scan.violations.map(violation =>
+      `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+    ).join('\n')).toEqual([])
   })
 
   test('tone swatches are square with zero padding, at both sizes', async ({ page }) => {
@@ -137,6 +155,13 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     expect(Math.round(smallBox!.height)).toBe(18)
     // The digit must actually be inside it — zero content width renders an empty box.
     expect((await small.textContent())?.trim()).not.toBe('')
+
+    const scan = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(scan.violations, scan.violations.map(violation =>
+      `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+    ).join('\n')).toEqual([])
   })
 
   test('StatCard tints both its label and its value when a tone is set', async ({ page }) => {
@@ -204,5 +229,30 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     // vocabulary ever collapses to one tone, an operator loses the distinction at a glance.
     const bg = (l: typeof active) => l.evaluate(el => getComputedStyle(el).backgroundColor)
     expect(await bg(active)).not.toBe(await bg(revoked))
+  })
+
+  test('the dark token theme changes shared surfaces without collapsing status distinction', async ({ page }) => {
+    await page.route('**/api/prod-readiness', route =>
+      route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),
+    )
+    await page.goto('/system/readiness')
+
+    const body = page.locator('body')
+    const lightBackground = await body.evaluate(el => getComputedStyle(el).backgroundColor)
+    await page.locator('html').evaluate(el => el.classList.add('dark'))
+    const darkBackground = await body.evaluate(el => getComputedStyle(el).backgroundColor)
+    expect(darkBackground).not.toBe(lightBackground)
+
+    const [go, noGo] = await Promise.all(
+      ['GO', 'NO-GO'].map(label => page.locator('.badge', { hasText: new RegExp(`^${label}$`) }).evaluate(el => getComputedStyle(el).backgroundColor)),
+    )
+    expect(go).not.toBe(noGo)
+
+    const scan = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze()
+    expect(scan.violations, scan.violations.map(violation =>
+      `${violation.id}: ${violation.nodes.map(node => node.target.join(' ')).join(', ')}`,
+    ).join('\n')).toEqual([])
   })
 })

@@ -24,11 +24,17 @@ export default function ClearingPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
-  const { data, loading, unavailable, waking } = useServiceResource<ClearingBatch[]>(
+  const [lastSuccessfulAt, setLastSuccessfulAt] = useState<Date | null>(null)
+  const { data, loading, unavailable, waking, reload } = useServiceResource<ClearingBatch[]>(
     svcUrl('clearing-service', '/api/v1/clearing/batches'),
-    { select: (raw) => (Array.isArray(raw) ? (raw as ClearingBatch[]) : ((raw as { batches?: ClearingBatch[] }).batches ?? [])) },
+    { select: (raw) => {
+      setLastSuccessfulAt(new Date())
+      return Array.isArray(raw) ? (raw as ClearingBatch[]) : ((raw as { batches?: ClearingBatch[] }).batches ?? [])
+    } },
   )
   const batches = data ?? []
+  const hasSnapshot = data !== null
+  const showingRetainedSnapshot = unavailable !== null && hasSnapshot
 
   const filtered = batches.filter(b =>
     b.batchReference?.toLowerCase().includes(search.toLowerCase()) ||
@@ -41,34 +47,52 @@ export default function ClearingPage() {
   const totalVolume = batches.reduce((s, b) => s + (b.totalAmount ?? 0), 0)
 
   return (
-    <AuthGuard permission="payments:view">
+    <AuthGuard permission="payment-rails:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <PageHeader
           icon={<Layers size={20} aria-hidden="true" />}
           title={t('Zúčtování & Vypořádání', 'Clearing & Settlement')}
           subtitle={t('Mezibankovní zúčtování — SEPA · SWIFT · Domestic netting', 'Interbank clearing — SEPA · SWIFT · Domestic netting')}
-          actions={<ServiceStatusBadge
-            label="clearing-service :8124"
-            loading={loading}
-            waking={waking}
-            unavailable={unavailable}
-            copy={{
-              up: t('clearing-service běží', 'clearing-service is up'),
-              idle: t('clearing-service spí (scale-to-zero), probouzí se…', 'clearing-service idle (scaled to zero), waking…'),
-              down: t('clearing-service neodpovídá', 'clearing-service is not responding'),
-              checking: t('Zjišťuji stav služby…', 'Checking service…'),
-            }}
-          />}
+          actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ServiceStatusBadge
+              label="clearing-service :8124"
+              loading={loading}
+              waking={waking}
+              unavailable={unavailable}
+              copy={{
+                up: t('clearing-service běží', 'clearing-service is up'),
+                idle: t('clearing-service spí (scale-to-zero), probouzí se…', 'clearing-service idle (scaled to zero), waking…'),
+                down: t('clearing-service neodpovídá', 'clearing-service is not responding'),
+                checking: t('Zjišťuji stav služby…', 'Checking service…'),
+              }}
+            />
+            <button type="button" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit clearing dávky', 'Refresh clearing batches')} className="btn btn-secondary btn-sm">
+              <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+            </button>
+          </div>}
         />
 
-        <div className="grid-4" style={{ marginBottom: '24px' }}>
+        {showingRetainedSnapshot && <div role="status" aria-live="polite" style={{ marginBottom: 20 }}>
+          <DataUnavailable kind={unavailable.kind} service={t('Clearing-service', 'Clearing-service')} feature={t('Aktualizace clearing dávek', 'Clearing batch refresh')} lang={language} dense />
+          <p style={{ margin: '6px 0 0', color: 'var(--text-tertiary)', fontSize: 11 }}>
+            {t('Zobrazen je poslední úspěšný snapshot', 'Showing the last successful snapshot')}
+            {lastSuccessfulAt ? ` (${lastSuccessfulAt.toLocaleString(numberLocale)})` : ''}.
+            {' '}{t('Stav vypořádání i objem se od té doby mohly změnit.', 'Settlement status and volume may have changed since then.')}
+          </p>
+        </div>}
+
+        {loading && hasSnapshot && <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+          {t('Aktualizuji clearing dávky; poslední snapshot zůstává dostupný.', 'Refreshing clearing batches; the last snapshot remains available.')}
+        </p>}
+
+        {hasSnapshot && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
             { label: t('Dávky celkem', 'Total batches'), value: batches.length, icon: <Layers size={16} aria-hidden="true" /> },
             { label: t('Vypořádáno', 'Settled'), value: settled.length, icon: <CheckCircle2 size={16} aria-hidden="true" />, tone: 'success' as const },
             { label: t('Čeká / Zpracovává', 'Pending / Processing'), value: pending.length, icon: <Clock size={16} aria-hidden="true" />, tone: 'warning' as const },
             { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume.toLocaleString(numberLocale, { maximumFractionDigits: 0 }), icon: <Banknote size={16} aria-hidden="true" /> },
           ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone} />)}
-        </div>
+        </div>}
 
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -80,11 +104,11 @@ export default function ClearingPage() {
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
           </div>
-          {loading ? (
+          {loading && !hasSnapshot ? (
             <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
-          ) : unavailable ? (
+          ) : unavailable && !hasSnapshot ? (
             <DataUnavailable kind={unavailable.kind} service={t('Clearing-service', 'Clearing-service')} feature={t('Clearing dávky', 'Clearing batches')} lang={language} />
           ) : filtered.length === 0 ? (
             <DataUnavailable kind="no_data" feature={t('Clearing dávky', 'Clearing batches')} lang={language}

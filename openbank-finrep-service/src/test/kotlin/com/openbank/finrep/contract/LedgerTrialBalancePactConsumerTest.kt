@@ -127,6 +127,30 @@ class LedgerTrialBalancePactConsumerTest {
         .toPact()
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
+    fun livePreviewTrialBalancePact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("ledger has frozen monthly trial balance for the reporting date")
+        .uponReceiving("GET the mutable monthly GL trial balance for an internal working preview")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/trial-balance")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.stringValue("period", "MONTH:2026-06")
+                o.booleanType("balanced", true)
+                o.minArrayLike("lines", 0, 1) { line ->
+                    line.stringType("code", "1100-CASH-CLEARING-CZK")
+                    line.stringType("type", "ASSET")
+                    line.decimalType("net", 150_000.00)
+                    line.stringType("currency", "CZK")
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun closedPeriodsPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("ledger has frozen monthly trial balance for the reporting date")
         .uponReceiving("GET closed periods available for regulatory reporting")
@@ -180,8 +204,8 @@ class LedgerTrialBalancePactConsumerTest {
             ),
             LocalDate.parse(REPORTING_DATE),
         )
-        assertThat(template.cells.map { it.rowRef }).containsExactly("r010", "r380", "r490")
-        assertThat(template.cells.first().value).isEqualByComparingTo(BigDecimal("150000.00"))
+        assertThat(template.cells.map { it.rowRef }).contains("r0380")
+        assertThat(template.cells.single { it.rowRef == "r0380" }.value).isEqualByComparingTo(BigDecimal("150000.00"))
         // The pact's single ASSET line does not tie out on its own, so the contract also proves the
         // balance check runs over real contract data and can answer `false` (issue #5987) — it is
         // not merely unit-testable against hand-built fixtures.
@@ -216,6 +240,20 @@ class LedgerTrialBalancePactConsumerTest {
         assertThat(period.to).isEqualTo(LocalDate.parse(REPORTING_DATE))
         assertThat(period.status).isEqualTo("FROZEN")
         assertThat(period.evidenceState).isEqualTo("LINES_V1")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "livePreviewTrialBalancePact")
+    fun `the ledger client uses a distinct explicit path for the mutable working preview`(mockServer: MockServer) {
+        assertThat(ledgerLiveTrialBalancePath)
+            .isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/trial-balance")
+
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get(ledgerLiveTrialBalancePath.replace("{asOf}", REPORTING_DATE))
+            .then()
+            .statusCode(200)
     }
 
     /** Issues the request against the path the production client is annotated with. */
@@ -253,6 +291,8 @@ class LedgerTrialBalancePactConsumerTest {
 
         private val getTrialBalanceMethod =
             LedgerRestClient::class.java.getDeclaredMethod("getTrialBalance", String::class.java)
+        private val getLiveTrialBalanceMethod =
+            LedgerRestClient::class.java.getDeclaredMethod("getLiveTrialBalance", String::class.java)
         private val listClosedPeriodsMethod = LedgerRestClient::class.java.getDeclaredMethod(
             "listClosedPeriods",
             String::class.java,
@@ -266,6 +306,11 @@ class LedgerTrialBalancePactConsumerTest {
         val ledgerTrialBalancePath: String = listOf(
             LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
             getTrialBalanceMethod.getAnnotation(Path::class.java).value,
+        ).joinToString("/") { it.trim('/') }.let { "/$it" }
+
+        val ledgerLiveTrialBalancePath: String = listOf(
+            LedgerRestClient::class.java.getAnnotation(Path::class.java).value,
+            getLiveTrialBalanceMethod.getAnnotation(Path::class.java).value,
         ).joinToString("/") { it.trim('/') }.let { "/$it" }
 
         val ledgerPeriodsPath: String = LedgerRestClient::class.java.getAnnotation(Path::class.java).value

@@ -9,4 +9,24 @@ describe('product catalog locale formatting', () => {
     expect(source).toContain('toLocaleString(numberLocale)')
     expect(source).not.toContain("toLocaleString('cs-CZ'")
   })
+
+  it('keeps the detail, portfolio and editor copy behind the language boundary', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/app/product-catalog/page.tsx'), 'utf8')
+    for (const literal of [
+      'label="Základní informace"',
+      'label="Konfigurace karet"',
+      'label="Termínovaný vklad"',
+      '>Interní<',
+      '>Aktuální<',
+      '>Zrušit<',
+      "saving ? 'Ukládám…'",
+      '<strong>Chyba:</strong>',
+    ]) {
+      expect(source).not.toContain(literal)
+    }
+    expect(source).toContain("t('Základní informace', 'Core information')")
+    expect(source).toContain("t('Konfigurace karet', 'Card configuration')")
+    expect(source).toContain("t('Historie verzí', 'Version history')")
+    expect(source).toContain("t('Produkt se nepodařilo uložit.', 'Failed to save product.')")
+  })
 })

@@ -27,10 +27,12 @@ test('KYC resolves a customer name before loading that customer’s cases', asyn
   })
   await page.route('**/api/svc/kyc-service/api/v1/kyc/cases**', route => {
     seen.push(route.request().url())
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{
+    // The party-scoped route answers a single KycCaseResponse, not a page — unlike the
+    // collection route, which always answers an array.
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       id: 'case-anna-1', partyId: PARTY_ID, status: 'OPEN', reviewedBy: 'reviewer@openbank.test',
       updatedAt: '2026-08-22T08:00:00Z', checks: [{ checkType: 'IDENTITY', status: 'APPROVED' }],
-    }]) })
+    }) })
   })
 
   await page.goto('/kyc')
@@ -114,7 +116,7 @@ test('regulatory preview blocks fiction: it shows real FINREP cells and no submi
   await page.route('**/api/svc/finrep-service/api/v1/finrep/templates/**', route => {
     const path = new URL(route.request().url()).pathname
     const body = path.includes('F01.01')
-      ? { templateId: 'F01.01', period: '2026-06-30', isBalanced: true, cells: [{ rowRef: 'r010', colRef: 'c010', value: 1250.5, currency: 'CZK' }] }
+      ? { templateId: 'F01.01', period: '2026-06-30', isBalanced: true, cells: [{ rowRef: 'r0380', colRef: 'c0010', value: 1250.5, currency: 'CZK' }] }
       : { templateId: 'F02.00', period: '2026-06-30', isBalanced: true, cells: [{ rowRef: 'r450', colRef: 'c010', value: 42, currency: 'CZK' }] }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })
@@ -136,7 +138,7 @@ test('Temporal and approvals show live source-backed operator state and human pr
   await expect(page.getByText(/Provozní|Running/)).toBeVisible()
   await page.getByRole('button', { name: /Metriky|Metrics/ }).click()
   await expect(page.getByRole('heading', { name: /Workflowy \(posledních 60 minut\)|Workflows \(last 60 minutes\)/ })).toBeVisible()
-  await expect(page.getByText('12')).toBeVisible()
+  await expect(page.getByLabel(/^(Spuštěno|Scheduled): 12$/)).toBeVisible()
 
   await json(page, '**/api/agent/proposals?state=all', [{
     id: 'proposal-human', title: 'Human customer correction', rationale: 'verified with customer', suggestedAction: 'party.correct',

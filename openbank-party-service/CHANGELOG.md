@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.22.1...party-service-v0.22.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* send occurredAt on the last four audit-consumed producers that omit it ([#8352](https://github.com/JiRaska/open-bank-oss/issues/8352)) ([#8503](https://github.com/JiRaska/open-bank-oss/issues/8503)) ([146fe87](https://github.com/JiRaska/open-bank-oss/commit/146fe87adaeca4e56fb8da285a57daaaf840cb1d))
+
+## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.22.0...party-service-v0.22.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **party:** answer 400 for a null phone hash in a directory lookup, not 500 ([#7861](https://github.com/JiRaska/open-bank-oss/issues/7861)) ([0b05abe](https://github.com/JiRaska/open-bank-oss/commit/0b05abe058827a8fa0bdfa9955164d278a41182f)), closes [#5913](https://github.com/JiRaska/open-bank-oss/issues/5913)
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.21.0...party-service-v0.22.0) (2026-08-28)
+
+
+### Features
+
+* **party:** expose pending approvals in unified inbox ([#7020](https://github.com/JiRaska/open-bank-oss/issues/7020)) ([0445a3e](https://github.com/JiRaska/open-bank-oss/commit/0445a3ec6c9fafc25c3640998b3872cb118aa94b))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.20.0...party-service-v0.21.0) (2026-08-24)
 
 

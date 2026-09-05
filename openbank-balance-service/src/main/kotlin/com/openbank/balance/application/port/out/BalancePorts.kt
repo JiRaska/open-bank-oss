@@ -102,9 +102,30 @@ interface HoldRepository {
     suspend fun save(hold: BalanceHold): BalanceHold
 
     suspend fun update(hold: BalanceHold): BalanceHold
+
+    /**
+     * Transactional outbox (#8510): persists [hold], applies the reservation to [balance] and
+     * writes the HOLD_PLACED [event] row — all in ONE transaction, so the state change and its
+     * event either both commit or neither does. The event is a REQUIRED parameter: there is no
+     * eventless overload to bypass.
+     */
+    suspend fun saveWithEvent(hold: BalanceHold, balance: Balance, event: BalanceEvent): BalanceHold
+
+    /**
+     * Transactional outbox (#8510): persists the [hold] release, applies it to [balance] and
+     * writes the HOLD_RELEASED [event] row — all in ONE transaction.
+     */
+    suspend fun releaseWithEvent(hold: BalanceHold, balance: Balance, event: BalanceEvent): BalanceHold
 }
 
-/** Outbound port for publishing balance domain events to the broker. */
+/** Outbound port for publishing balance domain events to the broker.
+ *
+ *  Since #8510 this is backed by the transactional outbox (`balance_outbox` +
+ *  `balance-outbox-out` channel), NOT a direct emitter: the only remaining caller is the
+ *  value-date roll's announcement-only event (no state change to commit alongside), and even
+ *  that now survives a crash between the decision and the emit. State-changing callers do NOT
+ *  use this port at all — their event is written by the repository in the same transaction as
+ *  the mutation ([HoldRepository.saveWithEvent], [BalanceMovementPort], [LedgerProjectionPort]). */
 interface BalanceEventPublisher {
 
     suspend fun publish(event: BalanceEvent)
@@ -120,8 +141,10 @@ interface LedgerProjectionPort {
     /**
      * Atomically: record the dedup marker for ([journalEntryId], [accountId], [currency]) and apply
      * [delta] to that balance (initializing a zero balance if none exists yet — a posted accounting
-     * fact must land even on an account the read-model has not seen). Returns the updated [Balance],
-     * or `null` if the marker already existed (duplicate delivery — nothing was applied).
+     * fact must land even on an account the read-model has not seen) **and write the BALANCE_UPDATED
+     * outbox row naming [actorId]** — all in the SAME transaction (#8510). Returns the updated
+     * [Balance], or `null` if the marker already existed (duplicate delivery — nothing was applied
+     * and no event was written).
      */
     @Suppress("LongParameterList")
     suspend fun applyBookedDelta(
@@ -131,6 +154,7 @@ interface LedgerProjectionPort {
         delta: BigDecimal,
         transactionId: UUID,
         entryDate: java.time.LocalDate,
+        actorId: String,
     ): Balance?
 }
 
@@ -146,13 +170,34 @@ data class MovementOutcome(val balance: Balance, val applied: Boolean)
  */
 interface BalanceMovementPort {
 
-    /** Idempotently credit [amount]. Returns the resulting balance and whether it was applied now. */
-    suspend fun applyCredit(accountId: UUID, currency: String, referenceId: String, amount: BigDecimal): MovementOutcome
+    /**
+     * Idempotently credit [amount]. Returns the resulting balance and whether it was applied now.
+     *
+     * On the FIRST application the impl also writes the BALANCE_UPDATED outbox row inside the same
+     * transaction as the dedup marker and the balance mutation (#8510) — the event names [actorId]
+     * as its system origin and carries the post-mutation figures, which only the impl knows. A
+     * duplicate delivery writes nothing, so a replay can never double-count downstream.
+     */
+    suspend fun applyCredit(
+        accountId: UUID,
+        currency: String,
+        referenceId: String,
+        amount: BigDecimal,
+        actorId: String,
+    ): MovementOutcome
 
     /**
      * Idempotently debit [amount]. Returns the resulting balance and whether it was applied now.
      * Throws [IllegalArgumentException] (overdraft guard) if the first application would breach the
      * floor — the caller maps it to an insufficient-funds error; a duplicate never re-checks/throws.
+     * The event rule is [applyCredit]'s: first application writes the outbox row (with the amount
+     * negated, matching the pre-#8510 wire shape), a duplicate writes nothing.
      */
-    suspend fun applyDebit(accountId: UUID, currency: String, referenceId: String, amount: BigDecimal): MovementOutcome
+    suspend fun applyDebit(
+        accountId: UUID,
+        currency: String,
+        referenceId: String,
+        amount: BigDecimal,
+        actorId: String,
+    ): MovementOutcome
 }

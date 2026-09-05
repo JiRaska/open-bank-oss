@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.15.0...fraud-service-v0.15.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **fraud:** declare quarkus.redis.hosts so the service can boot without out-of-band config ([#8453](https://github.com/JiRaska/open-bank-oss/issues/8453)) ([b682fec](https://github.com/JiRaska/open-bank-oss/commit/b682fece3cfd1f41017f963920b2a5690246fbab)), closes [#8348](https://github.com/JiRaska/open-bank-oss/issues/8348)
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.14.0...fraud-service-v0.15.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.13.2...fraud-service-v0.14.0) (2026-08-24)
 
 

@@ -266,10 +266,14 @@ what the catalogue may hold.
   defect (§4) that had to be fixed before any payment rail settles through the engine. (2) **Dual-write
   removed:** the saga drops `balanceCoverPort.debit/credit` (and the compensation refund); booked balance
   is the ledger projection's sole mover, the cover hold released by the projection. Risk class =
-  **integrity** (money direction + single booked source of truth), mitigated by `PaymentJournalFactoryTest`,
-  `PaymentSagaOrchestratorTest`, and — as written at the time — a `PaymentSagaLedgerIT` that was
-  never committed (noted 2026-08-20; left in place because a change log records what was claimed
-  on the day, and correcting it silently would erase the evidence that it was). Coupled
+  **integrity** (money direction + single booked source of truth), mitigated by `PaymentJournalFactoryTest`
+  (real, still present) and — as written at the time — two classes that are not in the tree:
+  `PaymentSagaOrchestratorTest` and a `PaymentSagaLedgerIT` that was never committed (the IT noted
+  2026-08-20, the orchestrator test noted 2026-09-03; both left in place because a change log
+  records what was claimed on the day, and correcting them silently would erase the evidence that
+  they were). `PaymentSagaOrchestratorTest` went away with its subject: ADR-0120 Phase 5 made
+  Temporal the sole orchestrator and removed `PaymentSagaOrchestrator` itself, so the surviving
+  coverage of that path is `PaymentWorkflowImplTest`. Coupled
   balance-service change:
   `openbank.balance.projection.enabled=true`.
 - **2026-05-30** — K7/ADR-0018: role-gated the previously `@PermitAll` read endpoints; raw-string
@@ -290,6 +294,32 @@ what the catalogue may hold.
   Touches the **E — elevation of privilege** and **T — tampering** rows (§4b): the action is
   deliberately distinct from `transaction.create` so it can be four-eyes gated without pausing the
   M2M payment rails, and so the resulting journal is distinguishable from a customer payment.
-  Risk class = **integrity** (segregation of duties + auditability of a correction), mitigated by
-  `MergeSweepDescriptionTest` and `TransactionResourceMergeSweepTest`. `authz.four-eyes.enforce`
-  remains `false`; the verb is inert until that flip.
+  Risk class = **integrity** (segregation of duties + auditability of a correction). The
+  **auditability** half is mitigated by `MergeSweepDescriptionTest`, which pins the server-minted
+  description's prefix, its merge reference and both party ids in survivor-last order, and asserts
+  it names no PII — that string is the only thing distinguishing a merge correction from an ordinary
+  transfer in the trial balance. The
+  **segregation-of-duties** half is weaker than this entry claimed, in three separable ways, and
+  only the first is a missing artifact. (1) `TransactionResourceMergeSweepTest`, named here as the
+  mitigation, is in **no** file of any kind — `git grep -n TransactionResourceMergeSweepTest` finds
+  nothing on any path, so the name resolves to nothing rather than to a renamed class. (2) What does
+  cover `mergeSweep` is `TransactionSecurityContractTest`'s sweep-all assertion, which walks every
+  HTTP endpoint on `TransactionResource` by reflection and requires each to be `@RolesAllowed` and
+  never `@PermitAll` — so the endpoint cannot silently become permit-all, and that much of the claim
+  does hold. Its **specific** role set is not pinned, unlike `listTransactions`, `searchTransactions`,
+  `getTransaction` and `initiateTransaction`, which the same class pins by name: widening
+  `mergeSweep` from OPERATOR/ADMIN to any other non-empty role set would pass every test in the
+  module. (3) No test exercises the sweep endpoint over HTTP at all. What gates it today is therefore
+  declarative — `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` plus
+  `@Authorize(action = "transaction.sweep")` on `TransactionResource.mergeSweep` — with the
+  never-permit-all half locked by test and the exact role set not.
+  `authz.four-eyes.enforce` remains `false` (`AUTHZ_FOUR_EYES_ENFORCE:false`); the verb is inert
+  until that flip, so the four-eyes leg of the segregation-of-duties claim is not enforced in any
+  environment today.
+- **2026-08-27** — Transaction-initiation trace contract. `TransactionService` emits the internal
+  `transaction.initiate` span only with the terminal transaction status. It deliberately excludes
+  amount, account/party identifiers, description, idempotency key and payment metadata. Risk class
+  = **confidentiality** (telemetry data minimisation) and **availability** (a trace exporter must not
+  alter initiation); the span is assertion-backed by `TransactionApiIT`, which drives the real HTTP
+  endpoint against PostgreSQL/Redpanda Testcontainers and the test Temporal terminal-write workflow.
+  The contract proves this service boundary only — it does not claim a distributed downstream trace.

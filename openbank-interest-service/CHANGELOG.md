@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.1...interest-service-v0.20.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* send occurredAt on the last four audit-consumed producers that omit it ([#8352](https://github.com/JiRaska/open-bank-oss/issues/8352)) ([#8503](https://github.com/JiRaska/open-bank-oss/issues/8503)) ([146fe87](https://github.com/JiRaska/open-bank-oss/commit/146fe87adaeca4e56fb8da285a57daaaf840cb1d))
+
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.20.0...interest-service-v0.20.1) (2026-09-03)
+
+
+### Security
+
+* **interest:** enforce authorization by default, not by manifest ([#8424](https://github.com/JiRaska/open-bank-oss/issues/8424)) ([faaacfa](https://github.com/JiRaska/open-bank-oss/commit/faaacfaf24945110c0e6e40e01ac48cabbd0c5ca))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.19.0...interest-service-v0.20.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.18.0...interest-service-v0.19.0) (2026-08-24)
 
 

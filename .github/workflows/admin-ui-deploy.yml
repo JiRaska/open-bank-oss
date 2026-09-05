@@ -59,7 +59,16 @@ on:
       - "openbank-infra/gitops/components/*/feature-flags.yaml"
       - "openbank-libs/governance/agents.yaml"
       - "openbank-libs/governance/compliance-controls.yaml"
+      # Test Intelligence's governed performance plans are baked into
+      # test-intelligence.json. Without these inputs a GitOps manifest can be Synced
+      # while the running UI still presents the prior plan/blocker snapshot.
+      - "perf/scenarios.yaml"
+      - "perf/k6/**"
       - "openbank-libs/governance/rules.yaml"
+      # Test Intelligence snapshot inputs. A journey catalog/manifest change must rebuild
+      # the image: the sandbox CronJob alone proves runtime, but the operator's bundled
+      # inventory and blockers would otherwise remain stale until an unrelated UI edit.
+      - "openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"
       - "openbank-libs/governance/journeys.yaml"
       # openbank-libs/docs is the ONLY docs tree baked into the image: the Dockerfile's
       # docs-collector copies /repo/openbank-*/docs, and src/lib/services/docs.ts serves the
@@ -91,16 +100,19 @@ concurrency:
   # later, far from the cause (same hazard auto-deploy.yml documents). Queueing is
   # safe: GitHub keeps only the newest pending run per group, so the latest commit
   # still wins — it just waits for the in-flight deploy to finish signing.
-  # Job-level `if:` is evaluated only after concurrency admission. A cancelled CI
-  # workflow_run therefore used to enter this shared queue, evict the valid pending push
-  # deploy, and then skip itself in deploy-source. Observed in runs 32945400498/32945568749
-  # (#7023). Give events that cannot possibly deploy a run-unique group; only eligible
-  # push/dispatch/schedule and successful main workflow_run events share the deploy queue.
+  # Job-level `if:` is evaluated only after concurrency admission. A workflow_run that is
+  # successful but belongs to an OLDER main SHA can therefore enter the shared queue, evict the
+  # pending deploy for a newer push, and only then discover that it must skip. That exact race
+  # cancelled the pending Test Intelligence deploy for 29dc20e2 in favour of a stale evidence
+  # refresh (#7211). Keep workflow-run events in a SHA-scoped queue; deploy-source independently
+  # rejects a source SHA that has been superseded by build-relevant work before the privileged
+  # build. Push, dispatch and schedule retain one queue, so the newest operator/source-triggered
+  # deploy still wins normally. A waiting source remains eligible when main advanced solely through
+  # this workflow's own image-pin commit; otherwise that harmless commit can starve the source that
+  # produced it and leave newer UI code undeployed.
   group: >-
     admin-ui-deploy-${{
-      github.event_name == 'workflow_run' &&
-      (github.event.workflow_run.conclusion != 'success' || github.event.workflow_run.head_branch != 'main') &&
-      github.run_id || 'eligible'
+      github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'eligible'
     }}
   cancel-in-progress: false
 
@@ -126,23 +138,24 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 1
       - id: source
-        name: Reject a self-generated GitOps refresh
+        name: Reject stale or self-generated deploy source
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" != "push" ] && [ "$EVENT_NAME" != "workflow_run" ]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            exit 0
+          source_sha="$(git rev-parse HEAD)"
+          main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [ -z "$main_sha" ]; then
+            echo "::error::could not resolve origin/main; refusing a privileged build from an unverified source"
+            exit 1
           fi
-
-          subject="$(git log -1 --format=%s)"
-          if [[ "$subject" == "chore(admin-ui): deploy "* ]]; then
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping self-generated GitOps commit; its image is already built, signed and attested."
-          else
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          if ! git cat-file -e "${main_sha}^{commit}" 2>/dev/null; then
+            # A waiting run checked out its own (now older) SHA. Fetch a bounded current-main
+            # ancestry window for the image-pin-only proof; a longer gap safely remains stale.
+            git fetch --no-tags --depth=64 origin "$main_sha"
           fi
+          proceed="$(bash .github/scripts/authorize-admin-ui-deploy-source.sh "$source_sha" "$main_sha")"
+          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
 
   build-push:
     name: Build + push admin-ui
@@ -259,7 +272,7 @@ jobs:
           python3 -c "import json,pathlib; p=pathlib.Path.home()/'.docker'/'config.json'; d=json.loads(p.read_text()) if p.exists() else {}; d.pop('credsStore',None); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(json.dumps(d))"
 
       - name: ECR login
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       - name: Rebuild ob-deploy-builder with native arm64 image
         # ob-deploy-builder's BuildKit container was created from an amd64 moby/buildkit
@@ -482,6 +495,12 @@ jobs:
           set -u
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
+          # Measured 2026-09-04: only 54 non-expired main-branch `test-intelligence-run-*`
+          # artifacts exist repo-wide, so this cap does not bind and lowering it saves ~4
+          # requests, not ~50. Left at 100 deliberately. What those 54 buy is the number
+          # that matters and it is not this one: 21 components across 10 CI runs spanning
+          # 0.6 HOURS, median 2 envelopes per component — a snapshot, not the per-test-case
+          # history it feeds. The binding constraint is artifact retention (see #8690).
           MAX_ENVELOPES=100
           # The workflow-runs endpoint is dominated by deploy-only Services CI runs, which
           # produce no per-service envelope.  Even a 100-run scan can therefore find zero
@@ -510,11 +529,12 @@ jobs:
               done
           echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes."
 
-      - name: Stage pitest mutation results from latest weekly run
+      - name: Stage pitest mutation results from latest completed weekly run
         # pitest.yml uploads one artifact per service: pitest-{service} (30-day retention).
         # collect-quality-report.mjs reads openbank-*/build/reports/pitest/mutations.xml.
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
-        # Best-effort: absent → mutations tab stays empty (acceptable, never blocks build).
+        # Do not filter to success: a failed/latest attempt must not disappear behind an
+        # older green run. Best-effort absence stays visible as missing evidence.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -522,11 +542,11 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=success&per_page=1" \
+            "https://api.github.com/repos/${REPO}/actions/workflows/pitest.yml/runs?branch=main&status=completed&per_page=1" \
             | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
             2>/dev/null || true)
           if [ -z "${RUN_ID}" ]; then
-            echo "No successful pitest run found — skipping pitest staging."
+            echo "No completed pitest run found — skipping pitest staging."
             exit 0
           fi
           echo "Staging pitest results from run ${RUN_ID}..."
@@ -559,12 +579,24 @@ jobs:
           COUNT=$(find . -path "*/build/reports/pitest/mutations.xml" | wc -l | tr -d ' ')
           echo "Staged ${COUNT} mutations.xml files from ${DOWNLOADED} artifacts."
 
-      - name: Stage performance evidence from latest successful k6 run
+      - name: Stage performance evidence from latest complete k6 run
         # The Test Intelligence collector reads k6 summaries only from the deployment-local
         # perf-artifacts directory.  A declared scenario is deliberately not promoted to a
-        # result, so bring in only artifacts emitted by the latest successful main run of the
-        # governed performance workflows.  The money-path baseline may intentionally emit only
-        # a `not-run` envelope when no safe runner target exists; retain that provenance too.
+        # result, so bring in the newest authoritative completed main-run evidence even when
+        # that attempt failed or was cancelled.  The money-path baseline may intentionally emit
+        # only a `not-run` envelope when no safe runner target exists; retain that provenance too.
+        # A positively-proven narrowed perf-gate dispatch is useful for diagnosis, but must not
+        # replace the broader declared-scope snapshot with one service's result. A scheduled or
+        # default dispatch whose matrix is incomplete is instead an authoritative stop barrier.
+        # Select the newest completed run whose latest-view jobs prove BOTH declared v1
+        # subjects, regardless of conclusion; artifact completeness is evaluated only after
+        # that run is selected.
+        # REST does not promise workflow-run ordering, and a rerun advances run_started_at;
+        # order candidates by that attempt timestamp (then id) before selecting evidence.
+        # GitHub retains artifacts from every rerun attempt under one run id. Latest-view jobs
+        # identify a successful sibling carried by "re-run failed jobs"; a job that actually
+        # reran must have a new artifact after its job start. Stop at that authoritative run
+        # even when one bundle is missing, so an older green run can never replace it.
         # Missing or expired evidence remains `not-run` in the
         # UI; this best-effort staging step must never turn absence into a deployment failure.
         env:
@@ -573,70 +605,169 @@ jobs:
         run: |
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
+          SELECTOR=.github/scripts/select-performance-evidence.py
+          SELECTOR_DIR="$(mktemp -d)"
+          fetch_artifact_pages() {
+            local run_id="$1"
+            local prefix="$2"
+            local page=1
+            local page_size
+            local artifact_page
+            ARTIFACT_ARGS=()
+            while [ "${page}" -le 100 ]; do
+              artifact_page="${SELECTOR_DIR}/${prefix}-${page}.json"
+              if ! api "https://api.github.com/repos/${REPO}/actions/runs/${run_id}/artifacts?per_page=100&page=${page}" \
+                -o "${artifact_page}"; then
+                return 1
+              fi
+              ARTIFACT_ARGS+=(--artifacts "${artifact_page}")
+              if ! page_size=$(python3 "${SELECTOR}" artifact-page-size --artifacts "${artifact_page}"); then
+                return 1
+              fi
+              if [ "${page_size}" -lt 100 ]; then
+                return 0
+              fi
+              page=$((page + 1))
+            done
+            return 1
+          }
+          fetch_run_pages() {
+            local workflow="$1"
+            local prefix="$2"
+            local page=1
+            local page_size
+            local run_page
+            RUN_ARGS=()
+            while [ "${page}" -le 100 ]; do
+              run_page="${SELECTOR_DIR}/${prefix}-${page}.json"
+              if ! api "https://api.github.com/repos/${REPO}/actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100&page=${page}" \
+                -o "${run_page}"; then
+                return 1
+              fi
+              RUN_ARGS+=(--runs "${run_page}")
+              if ! page_size=$(python3 "${SELECTOR}" run-page-size --runs "${run_page}"); then
+                return 1
+              fi
+              if [ "${page_size}" -lt 100 ]; then
+                return 0
+              fi
+              page=$((page + 1))
+            done
+            return 1
+          }
           mkdir -p openbank-admin-ui/perf-artifacts
-          RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/perf-gate.yml/runs?branch=main&status=success&per_page=1" \
-            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
-            2>/dev/null || true)
-          if [ -z "${RUN_ID}" ]; then
-            echo "No successful performance run found — performance evidence remains not-run."
-            exit 0
+          RUN_ID=""
+          ARTIFACTS=""
+          if fetch_run_pages perf-gate.yml gate-runs; then
+            RUN_CANDIDATES=$(python3 "${SELECTOR}" runs "${RUN_ARGS[@]}" 2>/dev/null || true)
+          else
+            RUN_CANDIDATES=""
+            echo "::warning::Could not enumerate all completed perf-gate runs; refusing partial history."
           fi
-          ARTIFACTS=$(api \
-            "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100" \
-            | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('perf-reports-') and not a['expired']]" \
-            2>/dev/null || true)
-          if [ -z "${ARTIFACTS}" ]; then
-            echo "No non-expired performance artifacts in run ${RUN_ID} — performance evidence remains not-run."
-            exit 0
-          fi
-          DOWNLOADED=0
-          while IFS=' ' read -r artifact_id artifact_name; do
-            [ -n "${artifact_id}" ] || continue
-            archive="/tmp/${artifact_name}.zip"
-            if api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null; then
-              unzip -q "${archive}" -d openbank-admin-ui/perf-artifacts 2>/dev/null || true
-              DOWNLOADED=$((DOWNLOADED + 1))
+          while read -r candidate candidate_started_at candidate_attempt candidate_event; do
+            [ -n "${candidate}" ] && [ -n "${candidate_started_at}" ] \
+              && [ -n "${candidate_attempt}" ] && [ -n "${candidate_event}" ] || continue
+            candidate_jobs="${SELECTOR_DIR}/gate-${candidate}-jobs.json"
+            if ! api "https://api.github.com/repos/${REPO}/actions/runs/${candidate}/jobs?filter=latest&per_page=100" \
+              -o "${candidate_jobs}"; then
+              echo "::warning::Could not classify perf-gate run ${candidate} scope; refusing older evidence."
+              break
             fi
-          done <<< "${ARTIFACTS}"
-          COUNT=$(find openbank-admin-ui/perf-artifacts -name '*-summary.json' | wc -l | tr -d ' ')
-          echo "Staged ${COUNT} k6 summary file(s) from ${DOWNLOADED} performance artifact(s), run ${RUN_ID}."
+            candidate_scope_log="${SELECTOR_DIR}/gate-${candidate}-scope.log"
+            candidate_scope_args=()
+            candidate_prepare_job=$(python3 "${SELECTOR}" prepare-job \
+              --jobs "${candidate_jobs}" 2>/dev/null || true)
+            if [ -n "${candidate_prepare_job}" ] && api \
+              "https://api.github.com/repos/${REPO}/actions/jobs/${candidate_prepare_job}/logs" \
+              -L -o "${candidate_scope_log}" 2>/dev/null; then
+              candidate_scope_args=(--scope-log "${candidate_scope_log}")
+            fi
+            if candidate_scope=$(python3 "${SELECTOR}" gate \
+              --attempt-start "${candidate_started_at}" --event "${candidate_event}" \
+              --jobs "${candidate_jobs}" "${candidate_scope_args[@]}" --scope-only 2>/dev/null); then
+              :
+            else
+              candidate_status=$?
+              if [ "${candidate_status}" -eq 3 ]; then
+                continue
+              fi
+              echo "::warning::Could not prove perf-gate run ${candidate} scope; refusing older evidence."
+              break
+            fi
+            [ "${candidate_scope}" = full ] || break
 
-          BASELINE_RUN_ID=$(api \
-            "https://api.github.com/repos/${REPO}/actions/workflows/perf-baseline.yml/runs?branch=main&status=success&per_page=1" \
-            | python3 -c "import json,sys; r=json.load(sys.stdin).get('workflow_runs',[]); print(r[0]['id'] if r else '')" \
-            2>/dev/null || true)
-          if [ -z "${BASELINE_RUN_ID}" ]; then
-            echo "No successful money-path baseline run found — it remains declared but unmeasured."
-            exit 0
+            RUN_ID="${candidate}"
+            echo "Selecting authoritative perf-gate run ${RUN_ID}, attempt ${candidate_attempt}."
+            if ! fetch_artifact_pages "${candidate}" "gate-${candidate}-artifacts"; then
+              echo "::warning::Could not inspect perf-gate run ${candidate} artifacts; refusing older evidence."
+            else
+              ARTIFACTS=$(python3 "${SELECTOR}" gate --attempt-start "${candidate_started_at}" \
+                --event "${candidate_event}" --jobs "${candidate_jobs}" \
+                "${candidate_scope_args[@]}" "${ARTIFACT_ARGS[@]}" 2>/dev/null || true)
+            fi
+            break
+          done <<< "${RUN_CANDIDATES}"
+          if [ -z "${RUN_ID}" ]; then
+            echo "No completed full-scope performance run found — performance evidence remains not-run."
+          elif [ -z "${ARTIFACTS}" ]; then
+            echo "Perf-gate run ${RUN_ID} has no attributable current-attempt evidence — it remains not-run."
+          else
+            DOWNLOADED=0
+            while IFS=' ' read -r artifact_id artifact_name; do
+              [ -n "${artifact_id}" ] || continue
+              archive="/tmp/${artifact_name}.zip"
+              if api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null; then
+                unzip -q "${archive}" -d openbank-admin-ui/perf-artifacts 2>/dev/null || true
+                DOWNLOADED=$((DOWNLOADED + 1))
+              fi
+            done <<< "${ARTIFACTS}"
+            COUNT=$(find openbank-admin-ui/perf-artifacts -name '*-summary.json' | wc -l | tr -d ' ')
+            echo "Staged ${COUNT} k6 summary file(s) from ${DOWNLOADED} performance artifact(s), run ${RUN_ID}."
           fi
-          BASELINE_ARTIFACT=$(api \
-            "https://api.github.com/repos/${REPO}/actions/runs/${BASELINE_RUN_ID}/artifacts?per_page=100" \
-            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if x['name']=='k6-money-path-summary' and not x['expired']]; print(a[0]['id'] if a else '')" \
-            2>/dev/null || true)
-          if [ -z "${BASELINE_ARTIFACT}" ]; then
-            echo "Money-path baseline ${BASELINE_RUN_ID} has no retained evidence artifact."
-            exit 0
+
+          if fetch_run_pages perf-baseline.yml baseline-runs; then
+            BASELINE_RUN=$(python3 "${SELECTOR}" runs --latest "${RUN_ARGS[@]}" 2>/dev/null || true)
+          else
+            BASELINE_RUN=""
+            echo "::warning::Could not enumerate all completed baseline runs; refusing partial history."
           fi
-          BASELINE_DIR="$(mktemp -d)"
-          if ! api "https://api.github.com/repos/${REPO}/actions/artifacts/${BASELINE_ARTIFACT}/zip" -L -o /tmp/k6-money-path-summary.zip \
-            || ! unzip -q /tmp/k6-money-path-summary.zip -d "${BASELINE_DIR}"; then
-            echo "::warning::Could not stage money-path baseline evidence from run ${BASELINE_RUN_ID}."
-            exit 0
+          read -r BASELINE_RUN_ID BASELINE_STARTED_AT BASELINE_ATTEMPT BASELINE_EVENT <<< "${BASELINE_RUN}"
+          if [ -z "${BASELINE_RUN_ID}" ] || [ -z "${BASELINE_STARTED_AT}" ] \
+            || [ -z "${BASELINE_ATTEMPT}" ] || [ -z "${BASELINE_EVENT}" ]; then
+            echo "No completed money-path baseline run found — it remains declared but unmeasured."
+          else
+            if fetch_artifact_pages "${BASELINE_RUN_ID}" "baseline-${BASELINE_RUN_ID}-artifacts"; then
+              BASELINE_ARTIFACT_ROW=$(python3 "${SELECTOR}" baseline \
+                --attempt-start "${BASELINE_STARTED_AT}" \
+                "${ARTIFACT_ARGS[@]}" 2>/dev/null || true)
+            else
+              BASELINE_ARTIFACT_ROW=""
+            fi
+            BASELINE_ARTIFACT="${BASELINE_ARTIFACT_ROW%% *}"
+            if [ -z "${BASELINE_ARTIFACT}" ]; then
+              echo "Money-path baseline ${BASELINE_RUN_ID} has no retained evidence artifact."
+            else
+              BASELINE_DIR="$(mktemp -d)"
+              if ! api "https://api.github.com/repos/${REPO}/actions/artifacts/${BASELINE_ARTIFACT}/zip" -L -o /tmp/k6-money-path-summary.zip \
+                || ! unzip -q /tmp/k6-money-path-summary.zip -d "${BASELINE_DIR}"; then
+                echo "::warning::Could not stage money-path baseline evidence from run ${BASELINE_RUN_ID}."
+              else
+                BASELINE_SUMMARY=$(find "${BASELINE_DIR}" -name 'perf-summary.json' -print -quit)
+                BASELINE_ENVELOPE=$(find "${BASELINE_DIR}" -name 'perf-run.json' -print -quit)
+                SUMMARY_STATUS=no
+                if [ -n "${BASELINE_SUMMARY}" ]; then
+                  cp "${BASELINE_SUMMARY}" openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json
+                  SUMMARY_STATUS=yes
+                fi
+                ENVELOPE_STATUS=no
+                if [ -n "${BASELINE_ENVELOPE}" ]; then
+                  cp "${BASELINE_ENVELOPE}" openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json
+                  ENVELOPE_STATUS=yes
+                fi
+                echo "Staged money-path baseline ${BASELINE_RUN_ID}: summary=${SUMMARY_STATUS} envelope=${ENVELOPE_STATUS}."
+              fi
+            fi
           fi
-          BASELINE_SUMMARY=$(find "${BASELINE_DIR}" -name 'perf-summary.json' -print -quit)
-          BASELINE_ENVELOPE=$(find "${BASELINE_DIR}" -name 'perf-run.json' -print -quit)
-          SUMMARY_STATUS=no
-          if [ -n "${BASELINE_SUMMARY}" ]; then
-            cp "${BASELINE_SUMMARY}" openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json
-            SUMMARY_STATUS=yes
-          fi
-          ENVELOPE_STATUS=no
-          if [ -n "${BASELINE_ENVELOPE}" ]; then
-            cp "${BASELINE_ENVELOPE}" openbank-admin-ui/perf-artifacts/money-path-smoke-summary.json.run.json
-            ENVELOPE_STATUS=yes
-          fi
-          echo "Staged money-path baseline ${BASELINE_RUN_ID}: summary=${SUMMARY_STATUS} envelope=${ENVELOPE_STATUS}."
 
       - name: Collect production-readiness scorecard
         # Derives C1–C9 maturity scores from the repo and writes

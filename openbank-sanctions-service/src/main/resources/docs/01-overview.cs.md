@@ -40,8 +40,8 @@ Při zahájení převodu volá platební služba `POST /api/v1/sanctions/screen`
 
 | Use case | API | Event |
 |---|---|---|
-| Prověřit stranu před platbou | `POST /api/v1/sanctions/screen` | `SanctionsCheckCompleted` |
-| Přezkoumat potenciální hit | `POST /api/v1/sanctions/review` | `SanctionsReviewSubmitted` |
+| Prověřit stranu před platbou | `POST /api/v1/sanctions/screen` | `SanctionChecked` |
+| Přezkoumat potenciální hit | `POST /api/v1/sanctions/review` | `SanctionReviewed` |
 | Zobrazit potvrzené hity | `GET /api/v1/sanctions/hits` | — |
 | Zobrazit hity čekající na přezkum | `GET /api/v1/sanctions/pending` | — |
 | Povolit / nakonfigurovat listinu | `PUT /api/v1/sanctions/lists/{id}` | — |

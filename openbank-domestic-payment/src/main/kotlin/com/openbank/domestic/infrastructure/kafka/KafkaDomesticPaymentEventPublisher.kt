@@ -6,8 +6,10 @@ package com.openbank.domestic.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
-import com.openbank.domestic.domain.event.DomesticPaymentStatusChangedEvent
 import com.openbank.domestic.domain.event.toCreatedEvent
+import com.openbank.domestic.domain.event.toFinalizedAbsentEvent
+import com.openbank.domestic.domain.event.toStatusChangedEvent
+import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -20,7 +22,6 @@ import org.apache.kafka.common.header.internals.RecordHeaders
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
 import java.time.Clock
-import java.time.Instant
 
 @ApplicationScoped
 class KafkaDomesticPaymentEventPublisher(
@@ -34,18 +35,10 @@ class KafkaDomesticPaymentEventPublisher(
         objectMapper.writeValueAsString(payment.toCreatedEvent(clock))
 
     override fun statusChangedPayload(previous: DomesticPayment, current: DomesticPayment): String =
-        objectMapper.writeValueAsString(
-            DomesticPaymentStatusChangedEvent(
-                paymentId = current.id,
-                previousStatus = previous.status,
-                newStatus = current.status,
-                rejectReason = current.rejectReason?.name,
-                rejectDetail = current.rejectDetail,
-                occurredAt = Instant.now(clock),
-                eventType = "DOMESTIC_PAYMENT_STATUS_CHANGED",
-                sourceService = "domestic-payment",
-            ),
-        )
+        objectMapper.writeValueAsString(current.toStatusChangedEvent(previous, clock))
+
+    override fun delegatedSpendFinalizedAbsentPayload(binding: DelegatedSpendBinding): String =
+        objectMapper.writeValueAsString(binding.toFinalizedAbsentEvent())
 
     override suspend fun publish(entry: OutboxEntry) {
         val kafkaHeaders = RecordHeaders()

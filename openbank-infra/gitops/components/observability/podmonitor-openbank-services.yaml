@@ -77,6 +77,7 @@ spec:
       - fx
       - governance-auditor
       - interest
+      - incentive
       - kyc
       - ledger
       - lending
@@ -87,6 +88,7 @@ spec:
       - pid
       - platform
       - psd2
+      - referral
       - release-steward
       - sanctions
       - sca

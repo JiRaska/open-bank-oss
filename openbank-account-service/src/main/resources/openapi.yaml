@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.11.0
+  version: 1.14.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -62,6 +62,23 @@ paths:
                 enum: ['true']
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+          description: >
+            Well-formed request refused by policy — e.g. product not eligible
+            (BUSINESS_RULE_VIOLATION) or sanctions screening refused the opening
+            (ACCOUNT_OPENING_BLOCKED). The screening-refusal body deliberately names
+            neither the matched name nor the party (#8512).
+        '503':
+          description: >
+            Sanctions screening temporarily unavailable; the opening gate fails
+            closed (ADR-0032 §C). Safe to retry after the Retry-After interval.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     get:
       tags: [Accounts]
       summary: List accounts for a party
@@ -616,6 +633,260 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/accounts/{accountId}/authorizations:
+    get:
+      tags: [Accounts]
+      summary: List account authorizations
+      operationId: listAccountAuthorizations
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Authorizations granted on the account
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuthorizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Accounts]
+      summary: Grant an account authorization
+      operationId: grantAccountAuthorization
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantAuthorizationRequest'
+      responses:
+        '201':
+          description: Authorization granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations/check:
+    get:
+      tags: [Accounts]
+      summary: Check whether a party holds an active account role
+      operationId: checkAccountAuthorization
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: role
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/AuthorizationRole'
+      responses:
+        '200':
+          description: Authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorized]
+                properties:
+                  authorized:
+                    type: boolean
+        '400':
+          description: partyId or role is missing or malformed
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations/{authorizationId}:
+    delete:
+      tags: [Accounts]
+      summary: Revoke an account authorization
+      operationId: revokeAccountAuthorization
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: authorizationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeAuthorizationRequest'
+      responses:
+        '200':
+          description: Revoked authorization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >
+            No such authorization on this account. Returned both when the authorization id does
+            not exist and when it exists on a DIFFERENT account, with an identical body, so the
+            endpoint cannot be used to probe which authorization ids exist (#5913). Before this
+            was documented the same two cases answered 500.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/accounts/{accountId}/pockets:
+    get:
+      tags: [Accounts]
+      summary: List currency pockets of an account
+      operationId: listCurrencyPockets
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Active and historical currency pockets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Accounts]
+      summary: Add a currency pocket to an account
+      operationId: addCurrencyPocket
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPocketRequest'
+      responses:
+        '201':
+          description: Currency pocket created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/pockets/resolve:
+    get:
+      tags: [Accounts]
+      summary: Resolve the pocket used to settle a payment currency
+      operationId: resolveCurrencyPocket
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: currency
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+        - name: policy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [REJECT, AUTO_CREATE, CONVERT_TO_PRIMARY]
+            default: CONVERT_TO_PRIMARY
+      responses:
+        '200':
+          description: Pocket routing decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketResolutionResponse'
+        '400':
+          description: Currency or policy is missing or malformed
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/pockets/{currency}:
+    delete:
+      tags: [Accounts]
+      summary: Close a non-primary currency pocket
+      operationId: closeCurrencyPocket
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: currency
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+      responses:
+        '200':
+          description: Closed currency pocket
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/approvals:
+    get:
+      tags: [Accounts]
+      summary: List pending account approvals, oldest first
+      description: >-
+        PENDING maker-checker approvals for account lifecycle actions, oldest first. This is the
+        read side consumed by the unified approval inbox; deciding remains on
+        PATCH /api/v1/accounts/approvals/{id}. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending account approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/accounts/approvals/{id}:
     patch:
       tags: [Accounts]
@@ -648,22 +919,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [id, action, status]
-                properties:
-                  id:
-                    type: string
-                  action:
-                    type: string
-                    description: The gated action this approval was raised for.
-                  resourceId:
-                    type: string
-                    nullable: true
-                  status:
-                    type: string
-                  decidedBy:
-                    type: string
-                    nullable: true
+                $ref: '#/components/schemas/ApprovalResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -707,6 +963,187 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    AuthorizationRole:
+      type: string
+      enum: [FULL_ACCESS, PAYMENT_ONLY, READ_ONLY, CARD_HOLDER]
+
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    GrantAuthorizationRequest:
+      type: object
+      required: [partyId, role, validFrom, grantedBy]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/AuthorizationRole'
+        dailyLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        transactionLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+          nullable: true
+        grantedBy:
+          type: string
+          format: uuid
+
+    RevokeAuthorizationRequest:
+      type: object
+      required: [revokedBy, reason]
+      properties:
+        revokedBy:
+          type: string
+          format: uuid
+        reason:
+          type: string
+
+    AuthorizationResponse:
+      type: object
+      required: [id, accountId, partyId, role, validFrom, status, grantedBy, grantedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/AuthorizationRole'
+        dailyLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        transactionLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED, REVOKED, EXPIRED]
+        grantedBy:
+          type: string
+          format: uuid
+        grantedAt:
+          type: string
+          format: date-time
+
+    AddPocketRequest:
+      type: object
+      required: [currencyCode]
+      properties:
+        currencyCode:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    PocketResponse:
+      type: object
+      required: [id, accountId, currencyCode, isPrimary, status, openedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        currencyCode:
+          type: string
+        isPrimary:
+          type: boolean
+        status:
+          type: string
+          enum: [ACTIVE, FROZEN, CLOSED]
+        openedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    PocketListResponse:
+      type: object
+      required: [pockets]
+      properties:
+        pockets:
+          type: array
+          items:
+            $ref: '#/components/schemas/PocketResponse'
+
+    PocketResolutionResponse:
+      type: object
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+          enum: [USE_EXISTING, CREATE_NEW, CONVERT_TO_PRIMARY, REJECTED]
+        pocketCurrency:
+          type: string
+          nullable: true
+        convertFrom:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes account approval. makerId identifies who requested the gated action; the
+        shared ApprovalStore requires a different authenticated principal to decide it.
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+          description: The gated account action this approval was raised for.
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          description: Request time; pending approvals expire after 24 hours.
+        decidedBy:
+          type: string
+          nullable: true
+
     OpenAccountRequest:
       type: object
       required: [partyId, productId, accountType, currencyCode, legalName]
@@ -759,7 +1196,7 @@ components:
           type: string
         status:
           type: string
-          enum: [ACTIVE, FROZEN, CLOSED, PENDING]
+          enum: [PENDING_ACTIVATION, ACTIVE, DORMANT, FROZEN, CLOSED]
         openedAt:
           type: string
           format: date-time

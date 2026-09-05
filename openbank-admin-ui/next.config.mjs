@@ -68,6 +68,9 @@ const nextConfig = {
     NEXT_PUBLIC_GLITCHTIP_RELEASE:
       process.env.NEXT_PUBLIC_GLITCHTIP_RELEASE ||
       `openbank-admin-ui@${process.env.BUILD_VERSION || 'dev'}`,
+    // This identifies the browser bundle and must therefore be baked at build time. The
+    // collector endpoint stays server-side and environment-specific in the relay route.
+    NEXT_PUBLIC_BUILD_VERSION: process.env.BUILD_VERSION || 'dev',
   },
   async headers() {
     return [{ source: '/(.*)', headers: securityHeaders }]

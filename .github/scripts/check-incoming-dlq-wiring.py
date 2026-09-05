@@ -64,31 +64,33 @@ KNOWN_UNWIRED = {
     # #5737 (merged) wired notification-service's `party-events-in` — and did it through the
     # msg-override ConfigMap, not application.yaml, because the key is a dotted leaf (#686). It is
     # therefore NOT listed here: it is wired, and recording it as debt would be a false statement
-    # in the baseline. The gate reads the ConfigMap and sees it. Its two SIBLING channels are a
-    # different matter — #5737 did not touch them, and they carry no `failure-strategy` at all.
-    ("openbank-notification-service", "notification-events-in"): "#5737 wired only party-events-in; this channel has no failure-strategy yet (#5745)",
+    # in the baseline. The gate reads the ConfigMap and sees it. #5745 wired `notification-events-in`
+    # the same way, so it is gone from here too — only `delegation-events-in` remains untouched.
     ("openbank-notification-service", "delegation-events-in"): "#5737 wired only party-events-in; this channel has no failure-strategy yet (#5745)",
     ("openbank-tax-reporting-service", "withholding-remitted-in"): "no KafkaUser in gitops — a Write ACL cannot be granted, so a DLQ would wedge on the send (#5745)",
-    # The four channels that had a DLQ BEFORE #5745, all on SmallRye's implicit
-    # `dead-letter-topic-<channel>` name. Naming them explicitly is a RENAME of a live topic: it
-    # strands whatever is already parked in the old one and silently blinds the existing
-    # AccountPartyEventDeadLettered alert, which reads `dead-letter-topic-party-events-in` by name.
-    # That is an operational change with a migration, not a config edit, so it is recorded here
-    # rather than done in passing. It is not cosmetic: account-service and card-issuance-service
-    # BOTH consume `delegation-events-in` and therefore already share
-    # `dead-letter-topic-delegation-events-in` today — two services' dead letters in one topic,
-    # misattributed by anything that reads it. That is the collision this gate exists to prevent,
-    # observed live (#5745).
-    ("openbank-account-service", "party-events-in"): "pre-#5745 implicit DLQ name; renaming is a live-topic migration",
-    ("openbank-account-service", "delegation-events-in"): "pre-#5745 implicit DLQ name; ALREADY COLLIDES with card-issuance-service",
-    ("openbank-card-issuance-service", "delegation-events-in"): "pre-#5745 implicit DLQ name; ALREADY COLLIDES with account-service",
-    # NOT the implicit name, and not a rename: fraud-service already sets an EXPLICIT topic
-    # (`openbank.transactions.transaction.initiated.fraud.dlq`) in
-    # components/fraud-service/fraud-service-msg-override.yaml, with a matching [Write, Describe]
-    # ACL in kafka-fraud-mtls.yaml. What it lacks is requirement 5 — no `KafkaTopic` CR exists for
-    # that name anywhere. One CR, no migration; load-bearing because #5715 makes
-    # TransactionSignalConsumer rethrow on this very channel.
-    ("openbank-fraud-service", "transaction-signal"): "explicit topic set in fraud-service-msg-override.yaml; the gap is a missing KafkaTopic CR, not a rename (#5745)",
+    # The channels that had a DLQ BEFORE #5745, on SmallRye's implicit `dead-letter-topic-<channel>`
+    # name. Naming one explicitly is a RENAME of a live topic: it strands whatever is already parked
+    # in the old one and moves what the AccountPartyEventDeadLettered alert must read. That is an
+    # operational change with a migration, not a config edit, which is why they were recorded here
+    # rather than done in passing.
+    #
+    # account-service is OFF this list as of #5752. Its two channels now name
+    # `openbank.dlq.account.party-events-in` / `openbank.dlq.account.delegation-events-in`, with
+    # KafkaTopic CRs and Write ACLs, and the migration is carried explicitly: the two old topics and
+    # their Write ACLs are RETAINED so an existing backlog stays drainable, and the alert matches
+    # both names for the length of the rollout (old and new pods run side by side under a Rollout).
+    #
+    # card-issuance-service's `delegation-events-in` stays. It no longer COLLIDES — account-service
+    # was the other writer of `dead-letter-topic-delegation-events-in` and has moved off it — so what
+    # remains is a single service on an implicit, channel-derived name. Renaming it is still a live
+    # topic migration, and it is card-issuance's to make.
+    ("openbank-card-issuance-service", "delegation-events-in"): "pre-#5745 implicit DLQ name; sole writer since #5752 moved account-service off it, but the rename is still a live-topic migration",
+    # openbank-fraud-service :: `transaction-signal` is OFF this list. It never was an implicit-name
+    # case: the explicit topic (`openbank.transactions.transaction.initiated.fraud.dlq`) has been set
+    # in components/fraud-service/fraud-service-msg-override.yaml since before #5745, with a matching
+    # [Write, Describe] ACL in kafka-fraud-mtls.yaml. The single missing part was requirement 5, and
+    # the `KafkaTopic` CR now exists in components/kafka/kafka-dlq-topics.yaml. No migration was
+    # involved — nothing had ever been parked in a topic that did not exist.
 }
 
 

@@ -14,6 +14,7 @@ import com.openbank.flakytest.domain.model.RunTrigger
 import com.openbank.flakytest.domain.model.TestIntelligenceAnalysisRequest
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -49,6 +50,20 @@ class FlakyTestResource(
         Response.accepted(FlakyTestCheckStarted(runCheck.startDetached(RunTrigger.OPERATOR_MANUAL))).build()
     }
 
+    /**
+     * Idempotent recovery admission on a distinct route. An old backend has no matching route and
+     * therefore returns 404 before reaching Temporal instead of silently ignoring the key.
+     */
+    @POST
+    @Path("/check/trigger-async-idempotent")
+    @RolesAllowed("ROLE_ADMIN")
+    fun triggerCheckAsyncIdempotent(@HeaderParam("Idempotency-Key") idempotencyKey: String?): Response = runBlocking {
+        val boundedKey = requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        Response.accepted(
+            FlakyTestCheckStarted(runCheck.startDetached(RunTrigger.OPERATOR_MANUAL, boundedKey)),
+        ).build()
+    }
+
     /** The agent receives only a bounded provenance projection and cannot apply a remediation. */
     @POST
     @Path("/evidence/analyze")
@@ -59,16 +74,13 @@ class FlakyTestResource(
     @GET
     @Path("/findings")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getActiveFindings(): List<FlakyTestFinding> = runBlocking {
-        getFindings.getActive()
-    }
+    suspend fun getActiveFindings(): List<FlakyTestFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getFinding(@PathParam("id") id: String): FlakyTestFinding = runBlocking {
+    suspend fun getFinding(@PathParam("id") id: String): FlakyTestFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
-    }
 }
 
 data class FlakyTestCheckStarted(val workflowId: String)

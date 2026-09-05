@@ -58,6 +58,14 @@ spec:
           name: openbank.engagement.events
           patternType: literal
         operations: [Read, Describe]
+      # Authoritative, no-PII attributed incentive lifecycle outcomes. Campaign only projects
+      # these after it validates the opaque interaction ref and immutable campaign offer; it never
+      # reserves, commits or issues a reward.
+      - resource:
+          type: topic
+          name: openbank.incentive.events
+          patternType: literal
+        operations: [Read, Describe]
       # Consume the product events that count as a conversion (ADR-0245 D2). Read-only, and the
       # service only ever appends an outcome row from them — it cannot cause, suppress or alter a
       # send, so the blast radius of this grant is a reporting number.
@@ -112,6 +120,11 @@ spec:
       - resource:
           type: group
           name: openbank-campaign-service-engagement-events
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: group
+          name: openbank-campaign-service-incentive-events
           patternType: literal
         operations: [Read, Describe]
       # #5745: SmallRye dead-letter topic for the `account-conversions-in` channel (failure-strategy:
@@ -171,6 +184,15 @@ spec:
       - resource:
           type: topic
           name: openbank.dlq.campaign.engagement-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # Dead-letter sink for malformed or persistently unprojectable Incentive events. It must be
+      # writable independently of the source-topic read grant, otherwise the configured parking
+      # strategy becomes a consumer retry loop.
+      - resource:
+          type: topic
+          name: openbank.dlq.campaign.incentive-events-in
           patternType: literal
         operations: [Write, Describe]
         host: "*"

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.22.0...consent-service-v0.23.0) (2026-09-01)
+
+
+### Features
+
+* **consent:** expose pending approvals in unified inbox ([#7037](https://github.com/JiRaska/open-bank-oss/issues/7037)) ([77573dc](https://github.com/JiRaska/open-bank-oss/commit/77573dc07495e784dc325a656c47f067217606ba))
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.21.0...consent-service-v0.22.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.20.0...consent-service-v0.21.0) (2026-08-24)
 
 

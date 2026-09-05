@@ -8,6 +8,7 @@ import com.openbank.copilot.application.port.out.ConversationStore
 import com.openbank.copilot.domain.model.ChatMessage
 import com.openbank.copilot.domain.model.ChatRole
 import com.openbank.copilot.it.PGVECTOR_IMAGE
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -32,6 +33,7 @@ class PostgresConversationStoreIT {
                 .withUsername("openbank")
                 .withPassword("openbank")
             postgres.start()
+            TestInfrastructureEvidence.record("postgres", PGVECTOR_IMAGE.asCanonicalNameString(), "started")
             return mapOf(
                 "quarkus.datasource.reactive.url" to
                     "postgresql://${postgres.host}:${postgres.firstMappedPort}/${postgres.databaseName}",
@@ -44,7 +46,10 @@ class PostgresConversationStoreIT {
             )
         }
         override fun stop() {
-            if (::postgres.isInitialized) postgres.stop()
+            if (::postgres.isInitialized) {
+                postgres.stop()
+                TestInfrastructureEvidence.record("postgres", PGVECTOR_IMAGE.asCanonicalNameString(), "stopped")
+            }
         }
     }
 

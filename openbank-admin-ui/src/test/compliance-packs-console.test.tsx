@@ -121,6 +121,22 @@ describe('compliance pack activation console', () => {
     expect(screen.getByText(PENDING[0].contentHash)).toBeInTheDocument()
   })
 
+  it('opens pack details as a labelled modal and restores focus after Escape', async () => {
+    vi.stubGlobal('fetch', mockFetch({ active: { status: 200, body: ACTIVE } }))
+    render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
+
+    const trigger = await screen.findByRole('button', { name: 'View details' })
+    fireEvent.click(trigger)
+
+    const dialog = screen.getByRole('dialog', { name: /CZ.*CONSUMER_CREDIT.*v1/i })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+  })
+
   it('an empty active list states the enforce-pack consequence, not just "none"', async () => {
     vi.stubGlobal('fetch', mockFetch({}))
     render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
@@ -156,9 +172,11 @@ describe('compliance pack activation console', () => {
 
     await waitFor(() => expect(screen.getByTestId(`proposal-${PROPOSAL_ID}`)).toBeTruthy())
     fireEvent.click(screen.getByText('Approve'))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm activation' }))
 
-    await waitFor(() => expect(screen.getByTestId('error')).toBeTruthy())
-    expect(screen.getByTestId('error').textContent).toMatch(/must differ from maker/)
+    await waitFor(() => expect(screen.getByTestId('decision-review-error')).toBeTruthy())
+    expect(screen.getByTestId('decision-review-error').textContent).toMatch(/must differ from maker/)
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
   })
 
   it('keeps decision controls separate from the pack-detail disclosure', async () => {
@@ -177,19 +195,29 @@ describe('compliance pack activation console', () => {
     expect(screen.getByText('Exact pack content')).toBeInTheDocument()
   })
 
-  it('approving posts approve=true to the proposal decide route', async () => {
+  it('reviews the exact proposal and impact before approving', async () => {
     const f = mockFetch({ pending: { status: 200, body: PENDING } })
     vi.stubGlobal('fetch', f)
     render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
 
     await waitFor(() => expect(screen.getByTestId(`proposal-${PROPOSAL_ID}`)).toBeTruthy())
+    fireEvent.change(screen.getByRole('textbox', { name: 'Decision reason' }), { target: { value: 'independent compliance review' } })
     fireEvent.click(screen.getByText('Approve'))
 
+    const dialog = screen.getByRole('alertdialog')
+    expect(dialog).toHaveTextContent('immediately governs new lending applications')
+    expect(dialog).toHaveTextContent(PENDING[0].contentHash)
+    expect(dialog).toHaveTextContent(PROPOSAL_ID)
+    expect(dialog).toHaveTextContent('maker@openbank.local')
+    expect(dialog).toHaveTextContent('independent compliance review')
+    expect(f.mock.calls.some(([u]) => String(u).includes('/decide'))).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm activation' }))
     await waitFor(() => {
       const call = f.mock.calls.find(([u]) => String(u).includes('/decide'))
       expect(call).toBeTruthy()
       expect(String(call?.[0])).toContain(`/proposals/${PROPOSAL_ID}/decide`)
-      expect(JSON.parse(String((call?.[1] as RequestInit)?.body))).toMatchObject({ approve: true })
+      expect(JSON.parse(String((call?.[1] as RequestInit)?.body))).toEqual({ approve: true, reason: 'independent compliance review' })
     })
   })
 

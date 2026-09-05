@@ -17,6 +17,25 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ## How to Contribute
 
+### Your first contribution (the 15-minute path)
+
+1. **Pick a [`good-first-issue`](https://github.com/JiRaska/open-bank-oss/labels/good-first-issue).**
+   The set is curated to stay at ≥5 open issues, and each carries a *newcomer context* comment:
+   where the code lives, what the fix shape is, and which repo conventions the PR will be judged
+   against.
+2. **Spin up the dev environment (one command).** Prereqs: Docker Desktop ≥ 4.x, 16 GB RAM.
+   ```bash
+   cd openbank-infra && cp .env.example .env && make up-infra && make up-all && make health-all
+   ```
+   Full detail in [`DEPLOYMENT.md`](DEPLOYMENT.md) §2; to poke the *live* sandbox instead of
+   running anything, use [`docs/QUICKSTART_SANDBOX.md`](docs/QUICKSTART_SANDBOX.md).
+3. **Make the change on a branch** `<type>/<scope>-<summary>`; the commit message *is* the
+   changelog (Conventional Commits, `git commit -s -S`).
+4. **Run the local gate before pushing:** `./gradlew detekt ktlintCheck koverVerify build`
+   (add `:<svc>:quarkusBuild` — CDI wiring failures surface only there).
+5. **Open the PR** — every PR links its issue (`Closes #<n>`), CI is path-scoped, and
+   `/ship-check` runs the same governance gates CI enforces.
+
 ### Reporting bugs
 
 - Open a GitHub issue using the **Bug report** template.
@@ -167,6 +186,15 @@ issue → fork → branch → commit -s -S → push → PR → review → CI gre
 
 `<scope>` = service name without `openbank-` prefix (e.g. `ledger`, `psd2`, `sepa`).
 
+> **Why admin-ui `e2e/` does not trigger a release** (recorded decision, #8354): release-please
+> releases on commit type × touched path, and `openbank-admin-ui/e2e` sits in `exclude-paths`
+> next to `src/test`. That is deliberate: e2e specs verify the *deployed* system (the browser
+> synthetic lane attests the deployed build), they ship no runtime artifact, and releasing the
+> npm package for a test-only change would cut a version whose bits are identical to the
+> previous one. If an e2e change ever ships a behavioural fix to the harness users run locally,
+> say so in the PR and use a `fix(admin-ui)` commit touching a non-excluded path. Do not
+> "fix" the exclusion without reading this note.
+
 ### Commit messages (Conventional Commits)
 
 ```
@@ -231,6 +259,33 @@ A pull request is **ready to merge** only when ALL apply:
   - License check (allowlist: Apache-2.0, MIT, BSD-2/3, EPL-2.0, MPL-2.0, ISC). GPL and AGPL would force copyleft on the Apache-2.0 tree — open an issue first.
   - CVE check (no Critical / High open vulnerabilities).
   - Reasonable source review (no obfuscated or suspicious patterns).
+
+### Real names in tracked files
+
+A real person's name can appear in a tracked file two different ways, and they look identical to a
+reader — only one of them is a problem. Ask two questions before naming a real person anywhere in
+this repository:
+
+1. Is this row **sourced reference data** (drawn from a public register, with an external source
+   identifier attached), or an **invented fixture**?
+2. Does the classification carry an **implication about the person** beyond what the source itself
+   asserts?
+
+**Sourced reference data is fine, and expected.** A sanctions/PEP screening list seeded from a
+public register (OFAC, EU, UN, or a national register) legitimately names real, public figures —
+that is the correct content for that kind of seed data. Each such row must carry its source
+identifier (e.g. a Wikidata id) so the classification is traceable to the source rather than
+invented, and so the identifier's presence gives a reviewer (or a future check) a usable signal to
+tell it apart from a fixture.
+
+**An invented fixture must not use a real person's name**, especially not in a context — like an
+adverse-media / negative-news test — where the classification implies something about that person
+the source data does not assert. Use an obviously fictional name instead (`Adverse Subject Zero`,
+`Jan Novák`), never a real living or recently deceased person, even a public figure.
+
+A blanket "no real names" rule would be wrong — it would forbid legitimate sourced reference data.
+The source identifier is the discriminator: sourced rows carry one, invented fixtures never should
+need one because they never claim to be real.
 
 ## What NOT to do
 

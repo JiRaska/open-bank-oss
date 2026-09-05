@@ -105,7 +105,7 @@ class PartyResourceAuditTest {
         coEvery { res.partyUseCase.exportPartyData(partyId) } returns
             PartyGdprExport(sampleParty(), emptyList(), now)
 
-        res.exportPartyGdpr(partyId)
+        res.exportPartyGdpr(partyId, null)
 
         assertThat(events).singleElement().satisfies({ e ->
             assertThat(e.operation).isEqualTo("party.gdpr-export")
@@ -113,6 +113,36 @@ class PartyResourceAuditTest {
             assertThat(e.actorType).isEqualTo("HUMAN")
             assertThat(e.resourceType).isEqualTo("party")
             assertThat(e.resourceId).isEqualTo(partyId.toString())
+            assertThat(e.result).isEqualTo(AuditResult.SUCCESS)
+            assertThat(e.payload["gdpr_article"]).isEqualTo("15")
+            // #8421: the Art. 30 record must separate a staff read from a subject-initiated one.
+            // actorId is the edge service account for every subject export, so it cannot.
+            assertThat(e.payload["channel"]).isEqualTo("staff")
+        })
+    }
+
+    @Test
+    fun `exportPartyGdpr admits a DPO caller and audits the access`(): Unit = runBlocking {
+        // #8495: ROLE_DPO is now a real realm role, so pin the branch the other way than the
+        // fixture above — a caller holding ONLY ROLE_DPO (no ROLE_ADMIN, no self-JWT) must be
+        // admitted. Before the role was defined in the realm this branch was unreachable and
+        // the suite stayed green precisely because nothing could hold it.
+        val events = mutableListOf<AuditEvent>()
+        val res = resource(events).apply {
+            securityIdentity = mockk<io.quarkus.security.identity.SecurityIdentity>().also {
+                every { it.hasRole("ROLE_ADMIN") } returns false
+                every { it.hasRole("ROLE_DPO") } returns true
+            }
+        }
+        coEvery { res.partyUseCase.getPartyKeycloakSub(partyId) } returns "somebody-else"
+        coEvery { res.partyUseCase.exportPartyData(partyId) } returns
+            PartyGdprExport(sampleParty(), emptyList(), now)
+
+        val response = res.exportPartyGdpr(partyId, null)
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(events).singleElement().satisfies({ e ->
+            assertThat(e.operation).isEqualTo("party.gdpr-export")
             assertThat(e.result).isEqualTo(AuditResult.SUCCESS)
             assertThat(e.payload["gdpr_article"]).isEqualTo("15")
         })
@@ -124,7 +154,7 @@ class PartyResourceAuditTest {
         val res = resource(events)
         coEvery { res.partyUseCase.exportPartyData(partyId) } throws RuntimeException("not found")
 
-        runCatching { res.exportPartyGdpr(partyId) }
+        runCatching { res.exportPartyGdpr(partyId, null) }
 
         assertThat(events).isEmpty()
     }

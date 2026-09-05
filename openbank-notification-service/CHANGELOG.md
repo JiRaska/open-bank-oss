@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.30.0...notification-service-v0.30.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **notification:** KYC outcome notifications get a producer — consume openbank.kyc.events ([#8432](https://github.com/JiRaska/open-bank-oss/issues/8432)) ([#8547](https://github.com/JiRaska/open-bank-oss/issues/8547)) ([e6d3e35](https://github.com/JiRaska/open-bank-oss/commit/e6d3e35be818978324c9508e9d524e6462b1fb05))
+
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.2...notification-service-v0.30.0) (2026-09-02)
+
+
+### Features
+
+* **notification:** complete delegation lifecycle alerts ([#8184](https://github.com/JiRaska/open-bank-oss/issues/8184)) ([0656e71](https://github.com/JiRaska/open-bank-oss/commit/0656e7187fd1cdcffa36c0c9d8009b4bd534f14e)), closes [#8183](https://github.com/JiRaska/open-bank-oss/issues/8183) [#8172](https://github.com/JiRaska/open-bank-oss/issues/8172)
+
+## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.1...notification-service-v0.29.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **notification:** reject a null map value with 400 instead of 500 ([#8005](https://github.com/JiRaska/open-bank-oss/issues/8005)) ([56bfc37](https://github.com/JiRaska/open-bank-oss/commit/56bfc37ee6c8e8f43964305feeef26c0a3c2a7e2)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.0...notification-service-v0.29.1) (2026-08-30)
+
+
+### Bug Fixes
+
+* **notification:** stop acking a failed dispatch and wire its DLQ ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#7588](https://github.com/JiRaska/open-bank-oss/issues/7588)) ([69a64ad](https://github.com/JiRaska/open-bank-oss/commit/69a64ad29cdd06b72b15a7f3b12e760079d66a5f))
+
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.28.0...notification-service-v0.29.0) (2026-08-27)
+
+
+### Features
+
+* **notification:** add safe no-device push fallback ([#7463](https://github.com/JiRaska/open-bank-oss/issues/7463)) ([7c9cc2c](https://github.com/JiRaska/open-bank-oss/commit/7c9cc2c2b87b8d2a6d1a9fc4a5ef2b94a5935012))
+
 ## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.27.0...notification-service-v0.28.0) (2026-08-24)
 
 

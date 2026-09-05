@@ -7,26 +7,54 @@ import RegulatoryPage from '@/app/regulatory/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
 function finrepResponse(templateId: string) {
-  if (templateId === 'F01.01') {
-    return {
-      templateId,
-      period: '2026-06-30',
-      isBalanced: true,
-      cells: [{ rowRef: 'r010', colRef: 'c010', value: 1250.5, currency: 'CZK' }],
-    }
+  const cellsByTemplate: Record<string, Array<{ rowRef: string; colRef: string; value: number; currency: string }>> = {
+    'F01.01': [{ rowRef: 'r0380', colRef: 'c0010', value: 1250.5, currency: 'CZK' }],
+    'F01.02': [{ rowRef: 'r0300', colRef: 'c0010', value: 900, currency: 'CZK' }],
+    'F01.03': [{ rowRef: 'r0300', colRef: 'c0010', value: 350.5, currency: 'CZK' }],
+    'F02.00': [{ rowRef: 'r0670', colRef: 'c0010', value: 42, currency: 'CZK' }],
   }
   return {
     templateId,
     period: '2026-06-30',
     isBalanced: true,
-    cells: [{ rowRef: 'r450', colRef: 'c010', value: 42, currency: 'CZK' }],
+    cells: cellsByTemplate[templateId],
   }
 }
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Regulatory report preview', () => {
-  it('loads the two implemented FINREP templates through the authenticated BFF and renders their real cells', async () => {
+  it('opens as a labelled modal and restores the trigger after Escape', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 502 })))
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    const finrepCard = screen.getByText('CNB — Finanční výkazy (FINREP)').closest('.card')
+    const trigger = within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' })
+    fireEvent.click(trigger)
+
+    const dialog = await screen.findByRole('dialog', { name: /Export preview.*FINREP/i })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    expect(screen.getByRole('button', { name: 'Close export preview' })).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+  })
+
+  it('does not offer a fake export preview for catalogue-only reports', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    const paymentsCard = screen.getByText('SDAT — Platební statistika').closest('.card')
+    expect(paymentsCard).not.toBeNull()
+    expect(within(paymentsCard as HTMLElement).queryByRole('button', { name: 'Preview export' })).not.toBeInTheDocument()
+    expect(within(paymentsCard as HTMLElement).getByRole('status')).toHaveTextContent('Preview unavailable')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('loads all four implemented FINREP templates through the authenticated BFF and renders their real cells', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/api/v1/finrep/periods')) {
         return new Response(JSON.stringify({ latest: '2026-06-30', periods: ['2026-06-30', '2026-05-31'] }), {
@@ -34,7 +62,7 @@ describe('Regulatory report preview', () => {
           headers: { 'content-type': 'application/json' },
         })
       }
-      const templateId = url.includes('F01.01') ? 'F01.01' : 'F02.00'
+      const templateId = ['F01.01', 'F01.02', 'F01.03'].find(id => url.includes(id)) ?? 'F02.00'
       return new Response(JSON.stringify(finrepResponse(templateId)), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -51,17 +79,24 @@ describe('Regulatory report preview', () => {
     expect(finrepCard).not.toBeNull()
     fireEvent.click(within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5))
     await waitFor(() => {
       expect(screen.queryByText(/FINREP \/ COREP service/)).not.toBeInTheDocument()
       expect(screen.getByText(/Celková aktiva/)).toBeInTheDocument()
-      expect(screen.getByText(/Čistý zisk \/ ztráta/)).toBeInTheDocument()
+      expect(screen.getByText(/Celkové závazky/)).toBeInTheDocument()
+      expect(screen.getByText(/Celkový vlastní kapitál/)).toBeInTheDocument()
+      expect(screen.getByText(/Zisk \/ ztráta za období/)).toBeInTheDocument()
     })
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
     expect(String(fetchMock.mock.calls[0][0])).toContain('/api/svc/finrep-service/api/v1/finrep/periods')
     expect(String(fetchMock.mock.calls[1][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F01.01?asOf=2026-06-30')
-    expect(String(fetchMock.mock.calls[2][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F02.00?asOf=2026-06-30')
-    expect(screen.getByText('finrep-service ← ledger trial balance (ne ClickHouse)')).toBeInTheDocument()
+    expect(String(fetchMock.mock.calls[2][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F01.02?asOf=2026-06-30')
+    expect(String(fetchMock.mock.calls[3][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F01.03?asOf=2026-06-30')
+    expect(String(fetchMock.mock.calls[4][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F02.00?asOf=2026-06-30')
+    expect(screen.getByText('finrep-service ← zmrazená ledger předvaha (FROZEN / LINES_V1)')).toBeInTheDocument()
+    expect(screen.getByTestId('test-data-watermark')).toHaveTextContent(/TEST DATA/i)
+    expect(screen.getByText('TEST_ONLY')).toBeInTheDocument()
+    expect(screen.getByText(/NESMÍ BÝT ODESLÁNO REGULÁTOROVI/)).toBeInTheDocument()
     expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Ready for internal export/)
     expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeEnabled()
   })
@@ -86,21 +121,25 @@ describe('Regulatory report preview', () => {
     expect(screen.queryByText('Dostupnost dat')).not.toBeInTheDocument()
   })
 
-  it('explains and blocks export when no immutable closed period exists', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ latest: null, periods: [] }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }))
+  it('shows actual working-preview values but blocks regulatory export when no immutable period exists', async () => {
+    const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.includes('/api/v1/finrep/periods')
+        ? { latest: null, periods: [] }
+        : finrepResponse(['F01.01', 'F01.02', 'F01.03'].find(id => url.includes(id)) ?? 'F02.00'),
+    ), { status: 200, headers: { 'content-type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
     const finrepCard = screen.getByText('CNB — Finanční výkazy (FINREP)').closest('.card')
     fireEvent.click(within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
-    expect(await screen.findByText(/A correct report cannot be rendered/i)).toBeInTheDocument()
-    expect(screen.getByTestId('export-blocked')).toHaveAttribute('data-block-reason', 'no_closed_periods')
+    expect(await screen.findByText(/Working preview of actual values/i)).toBeInTheDocument()
+    expect(screen.getByText(/Celková aktiva/)).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(String(fetchMock.mock.calls[1][0])).toContain('evidence=LIVE_PREVIEW')
+    expect(screen.getByTestId('export-blocked')).toHaveAttribute('data-block-reason', 'provisional_data')
+    expect(screen.getByRole('link', { name: /Open regulatory close/i })).toHaveAttribute('href', '/day-end?tab=regulatory')
     expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeDisabled()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('blocks export when COREP honestly reports a data gap', async () => {

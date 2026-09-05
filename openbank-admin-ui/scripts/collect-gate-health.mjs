@@ -16,10 +16,15 @@
 //   * Per-GATE detail (id-level status, subjects, self-test, budget) — requires
 //     downloading and unzipping the `gate-results-<group>` artifact `run-gates.py
 //     --json` writes and ci.yml uploads. Bounded to `--gate-detail-runs` (default
-//     5): artifacts expire (this repo has not overridden GitHub's 90-day default,
-//     but 5 runs is enough for "current state + is this flaky right now" without
-//     paying for a long backfill on every deploy). Missing/expired artifacts
-//     degrade that run to shard-only data, never a crash.
+//     3): artifacts expire (this repo has not overridden GitHub's 90-day default,
+//     but a few runs are enough for "current state + is this flaky right now"
+//     without paying for a long backfill on every deploy). Missing/expired
+//     artifacts degrade that run to shard-only data, never a crash.
+//     Lowered 5 -> 3 on 2026-09-04. Each detail run costs 1 artifact listing plus
+//     one download per shard, and the shard count went 8 -> 3 (#6257), so 5 runs
+//     is 20 requests where 3 is 12. The installation API quota — 1000/hour, shared
+//     by every workflow — was exhausted at 08:01 on 2026-09-03 and took Trivy's
+//     SARIF upload and dependency-review down fleet-wide, including on main.
 //
 // Honest by construction, like every other collector in this directory: outside
 // a token, or on any API failure, this writes `available:false` and a reason —
@@ -40,7 +45,7 @@ const getArg = (flag, dflt) => {
 }
 const OUT = getArg('--out', 'gate-health.json')
 const RUNS = parseInt(getArg('--runs', '20'), 10)
-const GATE_DETAIL_RUNS = parseInt(getArg('--gate-detail-runs', '5'), 10)
+const GATE_DETAIL_RUNS = parseInt(getArg('--gate-detail-runs', '3'), 10)
 // A build-time observability collector must degrade, never strand a deployment
 // behind one unavailable GitHub API connection. Keep this bounded and allow a
 // runner-specific override for diagnosed transient network conditions.

@@ -150,6 +150,27 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     }
 
     /**
+     * Validate the complete draft before the app starts SCA. The authoritative service repeats
+     * every check during [offer], so preview creates no authority and cannot be used as a stale
+     * authorization decision. The edge still derives the grantor from the customer token.
+     */
+    @POST
+    @Path("/preview")
+    @Blocking
+    fun preview(body: String?): Response {
+        val partyId = partyId()
+        val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
+            ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
+        val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
+        if (declared != null && declared != partyId) {
+            return refuse(Response.Status.FORBIDDEN, "grantorPartyId must be the authenticated party")
+        }
+        node.put(FIELD_GRANTOR, partyId)
+        node.remove(FIELD_GRANT_SCA_SESSION)
+        return upstream.post("$delegationServiceUrl$UPSTREAM/preview", partyId, json.writeValueAsString(node))
+    }
+
+    /**
      * Offer a grant over one of the caller's own resources (SCA-bound, purpose `DELEGATION_GRANT`).
      *
      * `grantorPartyId` is FORCED to the token's party. A body naming a different grantor is
@@ -157,18 +178,24 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
      * and quietly issuing a grant the user did not ask for is the worse of the two outcomes. An
      * absent field is filled in, since the app has no reason to send it at all.
      *
-     * `dailyLimit`/`monthlyLimit` are the ONE exception to pass-through, and they are rejected here
-     * rather than only upstream. Nothing in this platform counts cumulative spend against a grant
-     * (`DelegationOffered` does not even carry the two fields), so a ceiling set through this route
-     * would be stored, echoed back, and never applied to a single payment — the grantor would be
-     * told they capped their delegate at "5 000 Kč/den" by an API that cannot do it. delegation-
-     * service refuses them too and is the binding gate; this copy exists so the customer channel
-     * fails on its own terms and the refusal is visible in the edge contract the app reads, not
-     * only in an upstream 400 the app would surface as a generic error.
+     * `dailyLimit`/`monthlyLimit` USED to be refused here, on the ground that nothing in the
+     * platform counted cumulative spend against a grant, so a ceiling set through this route would
+     * be stored, echoed back and never applied to a single payment. That premise is no longer true:
+     * delegation-service owns the authoritative reservation counter (ADR-0249 D3), and the edge now
+     * reserves against it before initiating a delegated payment, confirming on acceptance and
+     * releasing on failure.
      *
-     * Everything else — grantee, resource, capabilities, perTransactionLimit, SCA session — is
-     * passed through untouched; delegation-service owns that validation and verifies resource
-     * ownership itself.
+     * Keeping the refusal past that point turned a safeguard into a total deadlock. delegation-
+     * service REQUIRES a cumulative ceiling on any grant carrying `ACCOUNT_INITIATE_PAYMENT`
+     * (ADR-0249 D5 — no unlimited access to someone else's account by omission), so with a ceiling
+     * this route answered 400 CUMULATIVE_LIMIT_UNSUPPORTED and without one upstream answered 400
+     * SPEND_WITHOUT_CEILING. A payment-capable grant was unconstructible through the customer
+     * channel — which silently made `POST /cards/delegated` unreachable too, since an
+     * additional-cardholder card requires exactly such a grant to exist.
+     *
+     * The body is therefore pass-through in full: grantee, resource, capabilities,
+     * perTransactionLimit, cumulative ceilings and SCA session. delegation-service owns that
+     * validation, verifies resource ownership, and is the single binding gate for the ceiling rules.
      */
     @POST
     @Blocking
@@ -176,16 +203,6 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         val partyId = partyId()
         val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
             ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
-        val unenforced = UNENFORCED_CEILING_FIELDS.filter { !node.get(it).let { v -> v == null || v.isNull } }
-        if (unenforced.isNotEmpty()) {
-            return refuse(
-                Response.Status.BAD_REQUEST,
-                "${unenforced.joinToString(" and ")} cannot be accepted: this platform enforces only " +
-                    "perTransactionLimit. No service counts cumulative spend against a grant, so a ceiling " +
-                    "set here would never be applied to any payment. Omit the field (ADR-0232 D1/D6).",
-                CODE_CUMULATIVE_LIMIT_UNSUPPORTED,
-            )
-        }
         val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
         if (declared != null && declared != partyId) {
             return refuse(Response.Status.FORBIDDEN, "grantorPartyId must be the authenticated party")
@@ -261,11 +278,10 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     private companion object {
         const val UPSTREAM = "/api/v1/delegations"
         const val FIELD_GRANTOR = "grantorPartyId"
+        const val FIELD_GRANT_SCA_SESSION = "grantScaSessionId"
         const val DEFAULT_REASON = "Revoked by grantor"
-        const val CODE_CUMULATIVE_LIMIT_UNSUPPORTED = "CUMULATIVE_LIMIT_UNSUPPORTED"
 
         /** Constraints the schema still names but no service enforces. See [offer]. */
-        val UNENFORCED_CEILING_FIELDS = listOf("dailyLimit", "monthlyLimit")
 
         /** Matches audit-service's own customer-facing page cap; a larger value is clamped there too. */
         const val MAX_ACTIVITY_PAGE = 500

@@ -9,6 +9,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { readStashedRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -67,6 +68,7 @@ export default function SwiftDetailPage() {
   useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id])
 
   return (
+    <AuthGuard permission="payment-rails:view">
     <div>
       <PageHeader
         title={message?.messageType ?? t('SWIFT zpráva', 'SWIFT message')}
@@ -129,6 +131,7 @@ export default function SwiftDetailPage() {
         </div>
       ) : null}
     </div>
+    </AuthGuard>
   )
 }
 

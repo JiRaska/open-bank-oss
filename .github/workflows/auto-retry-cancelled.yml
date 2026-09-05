@@ -112,6 +112,13 @@ jobs:
   retry:
     name: Re-run spot-killed run (once)
     runs-on: ubuntu-latest
+    # A rate-limit wait is now "until the limit resets" (capped at GH_RETRY_MAX_WAIT_SECONDS,
+    # 600s here) rather than a flat 15s, because a 45-second budget cannot outlast an
+    # installation limit whose window is minutes — that is #6853/#7976 and it reproduced on run
+    # 33738356244. Four waits at 600s is ~40 min worst case; this bounds it rather than letting
+    # the job sit for the 360-min default. ubuntu-latest is free on a public repo, so the trade
+    # is a concurrency slot against a reclaimed CI run that otherwise needs a human.
+    timeout-minutes: 50
     # `failure` is admitted here only so the step below can inspect the jobs; the decision to
     # re-run is made there, not by this expression. A job-level `if:` cannot reach the jobs API.
     if: >-
@@ -136,7 +143,13 @@ jobs:
       - name: Fetch the decision script (sparse, default branch)
         uses: actions/checkout@v5
         with:
-          sparse-checkout: .github/scripts/spot-kill-retry.sh
+          # BOTH files: spot-kill-retry.sh `source`s gh-retry.sh, so fetching only the first
+          # gives a job that dies on line 1 with "No such file or directory". A sparse checkout
+          # is a hand-kept list of what the script needs — the failure mode CLAUDE.md warns
+          # about for any gate whose scope is maintained separately from its subject.
+          sparse-checkout: |
+            .github/scripts/spot-kill-retry.sh
+            .github/scripts/gh-retry.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -150,6 +163,14 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          # Cap on a SINGLE wait inside gh-retry.sh. Kept under the job's timeout-minutes above
+          # with room for four of them plus the calls themselves.
+          GH_RETRY_MAX_WAIT_SECONDS: "600"
+          # GH_RETRY_DEAD_LETTER is deliberately NOT set. The library files its own
+          # `ci-dead-letter` issue when a caller has no other way to be heard; this workflow
+          # already has one — `raise-issue` below, which exists for exactly this (#2901) and
+          # writes a far better body. Turning both on would file two issues per incident and
+          # split the signal, which is the #5266/#5285 split-ledger failure in a new place.
         # Exit 0 = a decision was reached (re-run issued, or correctly declined). Exit 1 = the
         # control could not do its job, which routes to raise-issue below. The script's header
         # carries the full rationale, including why an unreadable jobs API is NOT a pass here
@@ -184,10 +205,26 @@ jobs:
     permissions:
       contents: read
       issues: write
-    # No actions/checkout, so gh cannot infer the repo from a git remote (#2841).
     env:
       GH_REPO: ${{ github.repository }}
     steps:
+      # A sparse checkout for `resolve-tracking-issue.sh` only. This job used to have none, and
+      # the note that lived here said so — that was load-bearing when the whole job was one
+      # inline `run:`, and `-R`/`GH_REPO` (both still set, above and in the script) is what
+      # actually defends against #2841's `failed to determine base repo`. Fetching one file at
+      # depth 1 is not the "clone the repo to make one API call" waste; the `retry` job took the
+      # same trade in #6255 for the same reason — an inline expression is only executable by a
+      # real `workflow_run` event, so its branches cannot be falsified before they misfire.
+      #
+      # No `ref:` on purpose: a `workflow_run` checkout defaults to the DEFAULT BRANCH, which is
+      # what a job holding `issues: write` should execute.
+      - name: Fetch the issue-resolver (sparse, default branch)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts/resolve-tracking-issue.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Open or refresh the tracking issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -231,12 +268,15 @@ jobs:
           \`GH_REPO\` env — \`.github/scripts/check-gh-repo-context.py\` should have caught it
           at PR time, so check that gate too.
 
-          **If instead the log says \`HTTP 5xx\` / \`Server Error\`, detection worked and only
-          the API call lost.** Since #4595 that call is retried 3x with backoff, so reaching
-          this issue on a 5xx means all three attempts lost — re-run the triggering run by
-          hand and check GitHub's status page. The \`decision=\` line in the retry job's log
-          and step summary says what was examined and what was decided on every path,
-          including the no-op ones.
+          **If instead the log says \`HTTP 5xx\` / \`Server Error\` or a rate limit, detection
+          worked and only the API call lost.** Both calls go through
+          \`.github/scripts/gh-retry.sh\`, which retries a 5xx/connection error with exponential
+          backoff and waits out a rate limit until it RESETS (capped at
+          \`GH_RETRY_MAX_WAIT_SECONDS\`), for \`SPOT_KILL_ATTEMPTS\` attempts — so reaching this
+          issue means every attempt lost across that whole window. Re-run the triggering run by
+          hand and check GitHub's status page. The \`decision=\` line in the retry job's log and
+          step summary says what was examined and what was decided on every path, including the
+          no-op ones, and now names the actual last error rather than \`unknown\`.
 
           Read the step output from **after the last** \`##[endgroup]\`: GitHub prints the
           step's own script into the log header, so grepping the whole log matches strings
@@ -244,12 +284,24 @@ jobs:
 
           This issue is refreshed on each further failure; close it once a run is green.
           EOF
-          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
-          if [ -n "$existing" ]; then
+          # `.[0].number` off a title search used to live here. It pins nothing: the candidate
+          # set's size was never checked, so two same-titled issues silently split the alarm
+          # between them and each half reads as a quieter problem than it is. That is exactly
+          # what happened to the flake ledger below (#5266/#5285). The resolver makes an
+          # ambiguous set exit 1 instead of an arbitrary pick, and it still creates the issue
+          # when there is genuinely none — same one `gh issue list` call as before.
+          status_file="${RUNNER_TEMP:-/tmp}/resolve-status"
+          existing=$(bash .github/scripts/resolve-tracking-issue.sh \
+            --title "$TITLE" \
+            --create-body-file "${RUNNER_TEMP:-/tmp}/issue-body.md" \
+            --create-label tech-debt --create-label "severity:high" \
+            --status-file "$status_file")
+          # A freshly created issue already carries this text as its BODY; only an issue that
+          # already existed gets it again as a refresh comment.
+          if [ "$(cat "$status_file")" = "existing" ]; then
             gh issue comment "$existing" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md"
           else
-            gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md" \
-              --label tech-debt --label "severity:high"
+            echo "Opened #${existing} with this text as its body; no refresh comment needed."
           fi
 
   # ── Flake recording (issue #4878) ────────────────────────────────────────────
@@ -382,21 +434,31 @@ jobs:
         if: steps.classify.outputs.count != '0'
         run: |
           set -euo pipefail
+          # THE LEDGER IS PINNED BY NUMBER, and auto-creation is deliberately gone (#5266).
+          #
+          # This used to be `--search "$TITLE in:title" ... .[0].number` plus "create one if the
+          # search finds nothing", and both halves failed together. GitHub's issue search index
+          # is eventually consistent, so a second `workflow_run` listener querying moments after
+          # the first one created the issue legitimately sees nothing and creates a RIVAL ledger
+          # with the same title. That is how #5266 (14:45Z) and #5285 (17:37Z) came to exist:
+          # same author, same labels, byte-identical bodies. `.[0]` then chose between them by
+          # whatever order the search API happened to return — and it CHANGED: the first record
+          # landed on #5266 at 16:19Z and every record from 17:37Z onward on #5285, leaving 85
+          # records in one and 1 in the other with nothing anywhere saying so.
+          #
+          # A split ledger is worse than a missing one. Each half reads as a low flake count and
+          # neither reader can tell they are seeing part of the data — `list-recorded-flakes.py`
+          # takes one `--issue` and would have reported either half as the whole truth.
+          #
+          # Sorting the candidates would not have fixed it: that still selects by a mutable
+          # property of an unbounded set. The number below is the identity. If it must change,
+          # it changes in a reviewed PR — the ledger cannot relocate itself.
+          LEDGER_ISSUE="5285"
           TITLE="Flaky test observations (recorded from CI re-run evidence)"
-          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
-          if [ -z "${existing}" ]; then
-            printf '%s\n' \
-              "This issue is a running log, not something to action directly (#4878)." \
-              "" \
-              "Each comment below is one job that failed for a real reason (not a runner reclaim -- see auto-retry-cancelled.yml's \`record-flake\` job) and went green on a later attempt of the SAME run, with no source change in between. That is the definition of a flake this repo can act on." \
-              "" \
-              "Read it back with \`.github/scripts/list-recorded-flakes.py --issue <this-issue-number>\`." \
-              "" \
-              "Deciding what to DO with this data (thresholds, alerts, the 29-copy \`*OutboxClaimIT\` construction) is explicitly out of scope for #4878 -- this issue exists so that decision has evidence to work from." \
-              > "${RUNNER_TEMP}/issue-body.md"
-            existing=$(gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP}/issue-body.md" \
-              --label flaky-test --label tech-debt | grep -oE '[0-9]+$')
-          fi
+          # Verifies open + still titled as expected, and exits 1 otherwise. Exiting 1 is the
+          # point: a record that cannot be filed correctly must not be filed somewhere plausible.
+          existing=$(bash .github/scripts/resolve-tracking-issue.sh \
+            --title "$TITLE" --pinned "$LEDGER_ISSUE")
 
           for f in "${RUNNER_TEMP}"/comments/record-*.json; do
             [ -e "$f" ] || continue

@@ -19,7 +19,7 @@ a prompt hash does.
 
 ## Scenario packs
 
-### 1. Fraud review — shipped in this PR
+### 1. Fraud review — shipped (PR #5105)
 
 Location: `openbank-fraud-service/src/test/kotlin/com/openbank/fraud/evals/`.
 
@@ -44,38 +44,60 @@ this eval pack; archives the JSON report as a build artifact on every run.
 **Data.** Every account/counterparty id is a deterministic name-based UUID derived from a fixed
 seed string (ADR-0175 §5 class 3 — synthetic/non-personal). No production data of any kind.
 
-### 2. Copilot proposal quality — deferred, not shipped in this PR
+### 2. Copilot proposal quality — shipped
 
-Issue #4463 also asked for a pack asserting that `propose.payment`/`propose.card_freeze`
-proposals "carry correct SCA binding and never exceed consent scope." Scoping this out for a
-follow-up rather than shipping a shallow version, for two concrete reasons found while surveying
-`openbank-copilot-service`:
+Location: `openbank-copilot-service/src/test/kotlin/com/openbank/copilot/evals/`.
 
-1. **"Consent scope" checking does not exist in the code path the issue names.** PSD2
-   consent-scope enforcement lives in `openbank-mcp-service`
-   (`ProposedOnly.kt`/`ProposePaymentArgs.kt`), which is a *different, currently-unwired* tool
-   implementation from `openbank-copilot-service`'s `PaymentProposalTool`/`CardFreezeProposalTool`
-   (see `docs/adr/0195-mcp-server-caller-authentication-and-psd2-consent-binding.md` and issue
-   #2414). A "consent-scope" eval scenario against `openbank-copilot-service` today would be
-   asserting on a check that literally does not run there — an eval suite that always trivially
-   passes because the property under test is absent is worse than no suite (same failure mode
-   ADR-0148's own "Negative" section warns about: "a shallow eval suite would satisfy the gate's
-   letter without its purpose").
-2. **"SCA binding" is not a single field to assert on.** It spans three separate classes
-   (`PaymentProposalTool`/`CardFreezeProposalTool` build the `ActionProposal`; `ProposalToken`
-   assembly happens inside `CopilotChatService`; binding is enforced as an identity check in
-   `ActionConfirmResource`) — a real scenario pack needs to drive that whole path, which is a
-   materially bigger integration surface than the fraud pack's single pure function.
+Issue #4463 asked for scenarios proving `propose.payment` / `propose.card_freeze` proposals "carry
+correct SCA binding and never exceed consent scope". **Two of those three properties are not
+assertable in this service today**, and the pack says so with a distinct outcome rather than
+scoring them:
 
-**What doing this properly needs**, tracked as this issue's follow-up rather than invented here:
-either wire `openbank-copilot-service`'s proposal tools to the same consent-scope check
-`openbank-mcp-service` already has (closing #2414 first — an eval against a gap that's about to
-close is more useful than one against a gap that stays open), or explicitly scope the pack to what
-*does* exist today (`CopilotPolicyGate.authorize` capability/OPA checks, `ProposalToken`
-expiry/customer-id binding) and document the consent-scope gap as a known limitation rather than
-silently asserting nothing. Either way this is deterministic application-layer logic, not model
-output — the same "assert on the business logic around the AI, not on live model text" principle
-the fraud pack already applies, per ADR-0148/ADR-0235's record/replay rationale.
+| property | outcome class | why |
+|---|---|---|
+| proposal construction is validated, propose-only, bounded | **runnable** — 8 scenarios | `PaymentProposalTool` / `CardFreezeProposalTool` are pure functions over a `JsonNode` |
+| capability gating is deny-by-default | **runnable** — 3 scenarios | `CopilotPolicyGate.authorize` is application-layer code with injectable ports |
+| SCA binding (proposal token → confirm) | **`UNAVAILABLE`** | nothing under `openbank-copilot-service/src/main` ever constructs a `ProposalToken`. `ActionConfirmResource` reads the token store; no production code writes to it, so `/api/v1/copilot/actions/{id}/confirm` can only ever answer `404 PROPOSAL_NOT_FOUND` and there is no binding to assert on |
+| PSD2 consent scope not exceeded | **`UNAVAILABLE`** | consent-scope enforcement lives in `openbank-mcp-service`'s tool implementation (ADR-0195), a different and currently-unwired path — issue #2414 |
+
+**`UNAVAILABLE` is a first-class outcome with its own value.** It is never folded into a pass (which
+would claim a measurement nobody made) and never into a failure or a zero (which would report an
+agent-quality regression for a wiring gap). The pass rate is computed over `passed + failed` only;
+the unavailable count rides beside it in the archived report. When *nothing* is assertable the rate
+is `null` and `regressed` is `true` — a pack that measured nothing must never read as a clean pass.
+This repo has shipped the collapsed version of that distinction before: a disabled push adapter
+whose skip returned `success = true`, and a pentest attestation minted by a job that fuzzed nothing.
+
+Files:
+
+- `CopilotProposalScenarios.kt` — the pack: declarative ground truth (expected proposal fields,
+  expected rejection, expected policy verdict) over fixed synthetic UUIDs (ADR-0175 §5 class 3).
+- `CopilotProposalEvalRunner.kt` — calls the real production classes and returns the three-valued
+  `ScenarioOutcome`.
+- `CopilotProposalEvalSuiteTest.kt` — one `DynamicTest` per scenario (per-scenario pass/fail in the
+  JUnit XML; an `UNAVAILABLE` scenario is `abort`ed so it appears as a **third status — skipped —
+  with its reason**), plus the regression gate that archives
+  `build/eval-reports/copilot-proposal-quality.json` and fails below
+  `src/test/resources/evals/copilot-proposal-baseline.json`.
+- `CopilotProposalEvalHarnessSelfTest.kt` — proves the gate can go red *and* that the third outcome
+  cannot collapse: known-bad ground truth must FAIL, an unavailable scenario must not become a pass,
+  and adding unavailable scenarios must not move the pass rate.
+- `ProposalPathAvailabilityTest.kt` — **stops an `UNAVAILABLE` declaration outliving its gap.** Each
+  unavailability rests on a checkable fact about the source tree, re-proven every run; the moment a
+  `ProposalToken` is constructed in `src/main`, or a consent scope is referenced there, the build
+  goes red telling you to promote the scenario. Same bidirectional rule as
+  `openbank-libs/governance/evals/recordings/backlog.yaml`: an undeclared gap and a stale
+  declaration are both errors.
+
+CI: `.github/workflows/evals-copilot-proposal.yml`, path-scoped to the proposal tools, the policy
+gate, the copilot domain and this eval pack; archives the JSON report on every run.
+
+**Why this pack needs no live model.** The LLM egress path is not a dependency of a single scenario
+here — every one calls deterministic production code. That matters right now: the platform's
+`openbank_llm_requests_total` has only ever recorded `http_error` outcomes (issue #5736), so a
+benchmark that drove the real agents would today score zero for reasons that have nothing to do with
+agent quality. The ADR-0148 record/replay gate reaches the model half by replaying *recorded*
+output, which is why it is a different mechanism in a different tree — see the table at the top.
 
 ## References
 

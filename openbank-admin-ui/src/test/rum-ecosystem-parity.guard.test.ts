@@ -25,4 +25,12 @@ describe('mobile RUM ecosystem parity', () => {
     expect(page).toContain("client.rum.source === 'tempo' ? 'traces' : 'span-counter increments'")
     expect(page).toContain('error span-counter increments')
   })
+
+  it('keeps RUM tag values out of the cardinality audit logs', () => {
+    const audit = read('openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml')
+    expect(audit).toContain('unique_value_count')
+    expect(audit).toContain('Never put a response sample in logs.')
+    expect(audit).not.toContain('"sample"')
+    expect(audit).not.toContain('head -c 512')
+  })
 })

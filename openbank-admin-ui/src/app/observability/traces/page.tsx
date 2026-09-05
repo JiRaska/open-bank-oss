@@ -16,6 +16,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
 
 interface TraceSummary {
   traceID: string
@@ -157,6 +158,15 @@ export default function TraceExplorerPage() {
             {t('Obnovit', 'Refresh')}
           </button>}
         />
+
+        {!selected && !unavailable && !loading && (
+          <ExplorerGuide compact title={t('Najděte nejpomalejší předávku', 'Find the slowest hand-off')}>
+            {t(
+              'Vyberte trasu a čtěte waterfall zleva doprava. Dlouhý span ukazuje, kde požadavek čekal; změna barvy znamená přechod do další služby. Explorer doporučuje začít u nejdelšího pruhu, ne u nejhlasitějšího logu.',
+              'Select a trace and read the waterfall from left to right. A long span shows where the request waited; a colour change marks a hand-off to another service. Explorer recommends starting with the longest bar, not the loudest log.',
+            )}
+          </ExplorerGuide>
+        )}
 
         {/*
           Three distinct states, never collapsed into one another (issue #5904):

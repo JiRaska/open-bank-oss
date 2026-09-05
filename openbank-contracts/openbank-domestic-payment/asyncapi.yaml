@@ -1,0 +1,223 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Domestic Payment Service — events
+  version: 1.1.0
+  description: >-
+    Events produced by the Czech domestic-payment lifecycle. A delegated payment carries one
+    indivisible delegationId/reservationId pair from creation through every status transition;
+    owner-initiated payments omit both fields. The input reservation-state contract remains owned
+    by openbank-delegation-service and is referenced below rather than copied into this document.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+x-openbank-consumes:
+  - channel: openbank.delegation.spend-reservation-state
+    contract: ../openbank-delegation-service/asyncapi.yaml#/channels/spendReservationState
+    description: >-
+      Compacted reservation snapshots are applied by monotonic reservationVersion, not event
+      timestamps. Source timestamps are canonicalized to microsecond precision before persistence
+      and comparison, including older nanosecond payloads. Terminal evidence is retained so a
+      delayed RESERVED revision 1 cannot reopen it.
+
+servers:
+  local:
+    host: localhost:29092
+    protocol: kafka
+    description: Local development broker; deployed endpoints are supplied by environment config.
+
+channels:
+  domesticPaymentEvents:
+    address: openbank.domestic.payment.events
+    messages:
+      DOMESTIC_PAYMENT_CREATED:
+        $ref: '#/components/messages/DOMESTIC_PAYMENT_CREATED'
+      DOMESTIC_PAYMENT_STATUS_CHANGED:
+        $ref: '#/components/messages/DOMESTIC_PAYMENT_STATUS_CHANGED'
+      DELEGATED_SPEND_FINALIZED_ABSENT:
+        $ref: '#/components/messages/DELEGATED_SPEND_FINALIZED_ABSENT'
+  notificationRequests:
+    address: openbank.notification.requests
+    description: >-
+      Existing notification-service delivery command (see openbank-campaign-service/asyncapi.yaml),
+      emitted here for a rejected domestic payment via KafkaNotificationSendAdapter (#8352).
+
+operations:
+  publishDomesticPaymentEvents:
+    action: send
+    channel:
+      $ref: '#/channels/domesticPaymentEvents'
+    messages:
+      - $ref: '#/channels/domesticPaymentEvents/messages/DOMESTIC_PAYMENT_CREATED'
+      - $ref: '#/channels/domesticPaymentEvents/messages/DOMESTIC_PAYMENT_STATUS_CHANGED'
+      - $ref: '#/channels/domesticPaymentEvents/messages/DELEGATED_SPEND_FINALIZED_ABSENT'
+
+components:
+  messageTraits:
+    outboxHeaders:
+      headers:
+        type: object
+        required: [ce-id, ce-type, idempotency-key]
+        properties:
+          ce-id: {type: string, format: uuid}
+          ce-type: {type: string}
+          idempotency-key: {type: string, format: uuid}
+
+  schemas:
+    paymentStatus:
+      type: string
+      enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
+
+    delegationContext:
+      type: object
+      description: >-
+        Additive delegated-spend context. delegationId and reservationId are both UUIDs or both
+        absent/null. initiatedByPartyId identifies the authenticated customer who initiated the
+        payment and is independent of whether the payment was delegated.
+      properties:
+        initiatedByPartyId:
+          type: [string, 'null']
+          format: uuid
+        delegationId:
+          type: [string, 'null']
+          format: uuid
+        reservationId:
+          type: [string, 'null']
+          format: uuid
+
+    delegatedSpendTuple:
+      type: object
+      required:
+        - reservationId
+        - delegationId
+        - grantorPartyId
+        - granteePartyId
+        - resourceType
+        - resourceId
+        - operationType
+        - amount
+        - currency
+        - idempotencyKeyHash
+      properties:
+        reservationId: {type: string, format: uuid}
+        delegationId: {type: string, format: uuid}
+        grantorPartyId: {type: string, format: uuid}
+        granteePartyId: {type: string, format: uuid}
+        resourceType: {type: string, const: ACCOUNT}
+        resourceId: {type: string, format: uuid}
+        operationType: {type: string, const: DOMESTIC_PAYMENT}
+        amount: {type: number, format: decimal, exclusiveMinimum: 0}
+        currency: {type: string, minLength: 3, maxLength: 3, pattern: '^[A-Z]{3}$'}
+        idempotencyKeyHash:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: '^[0-9a-f]{64}$'
+          description: >-
+            Lowercase SHA-256 hex over UTF-8 bytes of
+            openbank.delegation.spend-reservation.idempotency-key.v1, one NUL byte, then the raw
+            Idempotency-Key. The raw caller-controlled key is never retained in compacted state.
+
+  messages:
+    DOMESTIC_PAYMENT_CREATED:
+      name: DOMESTIC_PAYMENT_CREATED
+      title: Domestic payment created
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/delegationContext'
+          - type: object
+            required:
+              - paymentId
+              - idempotencyKey
+              - status
+              - debtorAccountId
+              - debtorAccountNumber
+              - debtorBankCode
+              - creditorAccountNumber
+              - creditorBankCode
+              - amount
+              - currency
+              - priority
+              - endToEndId
+              - occurredAt
+              - eventType
+              - sourceService
+            properties:
+              paymentId: {type: string, format: uuid}
+              idempotencyKey: {type: string}
+              status: {$ref: '#/components/schemas/paymentStatus'}
+              debtorAccountId: {type: string, format: uuid}
+              debtorAccountNumber: {type: string}
+              debtorBankCode: {type: string}
+              creditorAccountNumber: {type: string}
+              creditorBankCode: {type: string}
+              amount: {type: number}
+              currency: {type: string}
+              priority: {type: string, enum: [STANDARD, URGENT, INSTANT]}
+              endToEndId: {type: string}
+              occurredAt: {type: string, format: date-time}
+              eventType: {type: string, const: DOMESTIC_PAYMENT_CREATED}
+              sourceService: {type: string, const: domestic-payment}
+
+    DOMESTIC_PAYMENT_STATUS_CHANGED:
+      name: DOMESTIC_PAYMENT_STATUS_CHANGED
+      title: Domestic payment status changed
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/delegationContext'
+          - type: object
+            required:
+              - paymentId
+              - previousStatus
+              - newStatus
+              - occurredAt
+              - eventType
+              - sourceService
+            properties:
+              paymentId: {type: string, format: uuid}
+              previousStatus: {$ref: '#/components/schemas/paymentStatus'}
+              newStatus: {$ref: '#/components/schemas/paymentStatus'}
+              rejectReason: {type: [string, 'null']}
+              rejectDetail: {type: [string, 'null']}
+              occurredAt: {type: string, format: date-time}
+              eventType: {type: string, const: DOMESTIC_PAYMENT_STATUS_CHANGED}
+              sourceService: {type: string, const: domestic-payment}
+
+    DELEGATED_SPEND_FINALIZED_ABSENT:
+      name: DELEGATED_SPEND_FINALIZED_ABSENT
+      title: Domestic payment permanently finalized a reservation without creating a payment
+      summary: >-
+        Emitted transactionally with PENDING to FINALIZED_ABSENT by the default-off finalizer.
+        delegation-service must release only after the full immutable tuple matches.
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/delegatedSpendTuple'
+          - type: object
+            required:
+              - reservationState
+              - reservationVersion
+              - finalizedAt
+              - occurredAt
+              - eventType
+              - sourceService
+              - version
+            properties:
+              reservationState: {type: string, const: RESERVED}
+              reservationVersion: {type: integer, const: 1}
+              finalizedAt: {type: string, format: date-time}
+              occurredAt: {type: string, format: date-time}
+              eventType: {type: string, const: DELEGATED_SPEND_FINALIZED_ABSENT}
+              sourceService: {type: string, const: domestic-payment}
+              version: {type: integer, const: 1}

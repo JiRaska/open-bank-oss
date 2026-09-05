@@ -74,7 +74,7 @@ class PartyEventConsumerTest {
     @Test
     fun `PARTY_CREATED skips PEP screening when the sandbox auto-approve path already settled the case`(): Unit =
         runBlocking {
-            // openbank.kyc.auto-approve=true (sandbox STP, ADR-0073) settles the case to APPROVED
+            // openbank.kyc.auto-approve=true (sandbox STP, ADR-0116 §4) settles the case to APPROVED
             // before this consumer ever sees it — re-screening a terminal case here would race the
             // already-closed state rather than extend it.
             val partyId = UUID.randomUUID()

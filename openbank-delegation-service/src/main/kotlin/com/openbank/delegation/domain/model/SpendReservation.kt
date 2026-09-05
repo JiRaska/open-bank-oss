@@ -24,6 +24,26 @@ enum class SpendReservationState {
     RELEASED,
 }
 
+/** Identifies the rail that owns reconciliation; it is not workload authentication. */
+enum class SpendReservationOperationType {
+    UNSPECIFIED,
+    DOMESTIC_PAYMENT,
+}
+
+const val MAX_RESERVATION_IDEMPOTENCY_KEY_LENGTH = 200
+const val MAX_DOMESTIC_PAYMENT_IDEMPOTENCY_KEY_LENGTH = 128
+
+fun validateSpendReservationIdempotencyKey(idempotencyKey: String, operationType: SpendReservationOperationType) {
+    require(idempotencyKey.isNotBlank()) { "idempotencyKey must not be blank" }
+    val maximum = when (operationType) {
+        SpendReservationOperationType.UNSPECIFIED -> MAX_RESERVATION_IDEMPOTENCY_KEY_LENGTH
+        SpendReservationOperationType.DOMESTIC_PAYMENT -> MAX_DOMESTIC_PAYMENT_IDEMPOTENCY_KEY_LENGTH
+    }
+    require(idempotencyKey.codePointCount(0, idempotencyKey.length) <= maximum) {
+        "idempotencyKey must be at most $maximum characters for $operationType"
+    }
+}
+
 /**
  * One reservation against a [DelegationGrant]'s cumulative ceilings.
  *
@@ -41,12 +61,13 @@ data class SpendReservation(
     val grantId: UUID,
     val amount: Money,
     val idempotencyKey: String,
+    val operationType: SpendReservationOperationType = SpendReservationOperationType.UNSPECIFIED,
     val state: SpendReservationState = SpendReservationState.RESERVED,
     val createdAt: OffsetDateTime,
     val settledAt: OffsetDateTime? = null,
 ) {
     init {
-        require(idempotencyKey.isNotBlank()) { "idempotencyKey must not be blank" }
+        validateSpendReservationIdempotencyKey(idempotencyKey, operationType)
         require(amount.isPositive()) { "a reservation amount must be positive" }
         require((state == SpendReservationState.RESERVED) == (settledAt == null)) {
             "settledAt is set exactly when the reservation has left RESERVED (is $state)"

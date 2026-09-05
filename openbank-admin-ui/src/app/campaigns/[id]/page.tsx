@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, Megaphone } from 'lucide-react'
@@ -17,12 +17,14 @@ import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
 import { CampaignOutcomeBrief } from '@/components/campaigns/CampaignOutcomeBrief'
 import { CampaignAttentionFunnel, type CampaignAttentionMetric } from '@/components/campaigns/CampaignAttentionFunnel'
+import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 
 interface Campaign {
   id: string
   name: string
   goal: string
   segmentRef: { name: string; version: number }
+  incentiveOfferRef?: { id: string; name: string; version: number } | null
   state: string
   createdBy: string
   approvedBy: string | null
@@ -113,6 +115,7 @@ type Detail = {
   sendSummary: Record<string, number>
   journey: StepFunnel[]
   engagement: CampaignAttentionMetric[]
+  incentives: { reserved: number; committed: number; released: number; expired: number } | null
   experiment: Experiment | null
   contentExperiment: ContentExperiment | null
   entryCatalogues?: {
@@ -203,6 +206,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   // maker != checker on activate. The UI renders capability, the policy decides it.
   const [actionError, setActionError] = useState<string | null>(null)
   const [actingAction, setActingAction] = useState<string | null>(null)
+  const [actionIntent, setActionIntent] = useState<string | null>(null)
+  const actionTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [duplicating, setDuplicating] = useState(false)
 
   /**
@@ -232,35 +237,45 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       .finally(() => setDuplicating(false))
   }
 
-  const runAction = (action: string) => {
+  const runAction = async (action: string): Promise<boolean> => {
     setActingAction(action)
     setActionError(null)
-    fetch(`/api/campaigns/${encodeURIComponent(id ?? '')}/actions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action }),
-    })
-      .then(r => r.json())
-      .then((d: { state: string; error?: string }) => {
-        if (d.state === 'ok') {
-          // Drop the paged override too: after a transition the first page is the right thing to
-          // show, and keeping page 7 of a log that just changed is a stale view of a new state.
-          setSendOverride(null)
-          setReloadToken(n => n + 1)
-          return
-        }
-        // The service answers a refused transition with the invariant that blocked it — including
-        // "the approver must differ from the creator". That sentence IS the four-eyes gate becoming
-        // visible; replacing it with "action failed" would make a working control look like a bug.
-        setActionError(
-          d.error ??
-            (d.state === 'forbidden'
-              ? t('Nemáte oprávnění k této akci.', 'You are not permitted to do that.')
-              : t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')),
-        )
+    try {
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(id ?? '')}/actions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action }),
       })
-      .catch(() => setActionError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')))
-      .finally(() => setActingAction(null))
+      const d = await response.json() as { state: string; error?: string }
+      if (d.state === 'ok') {
+        // Drop the paged override too: after a transition the first page is the right thing to
+        // show, and keeping page 7 of a log that just changed is a stale view of a new state.
+        setSendOverride(null)
+        setReloadToken(n => n + 1)
+        return true
+      }
+      // The service answers a refused transition with the invariant that blocked it — including
+      // "the approver must differ from the creator". That sentence IS the four-eyes gate becoming
+      // visible; replacing it with "action failed" would make a working control look like a bug.
+      setActionError(
+        d.error ??
+          (d.state === 'forbidden'
+            ? t('Nemáte oprávnění k této akci.', 'You are not permitted to do that.')
+            : t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')),
+      )
+      return false
+    } catch {
+      setActionError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.'))
+      return false
+    } finally {
+      setActingAction(null)
+    }
+  }
+
+  const closeActionReview = () => {
+    if (actingAction !== null) return
+    setActionIntent(null)
+    requestAnimationFrame(() => actionTriggerRef.current?.focus())
   }
 
   const actionsFor = (state?: string): string[] => {
@@ -312,6 +327,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   }
   const summary = detail?.sendSummary ?? {}
   const engagement = Array.isArray(detail?.engagement) ? detail.engagement : []
+  const incentiveFunnel = detail?.incentives
   const experiment = detail?.experiment
   const contentExperiment = detail?.contentExperiment
   const cadence = c?.schedule
@@ -508,9 +524,12 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             <Can key={a} permission={actionPermission(a)} fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného operátora', 'Awaiting an authorized operator')}</span>}>
               <button
                 type="button"
-                onClick={() => runAction(a)}
+                onClick={event => {
+                  actionTriggerRef.current = event.currentTarget
+                  setActionError(null)
+                  setActionIntent(a)
+                }}
                 disabled={actingAction !== null}
-                aria-busy={actingAction === a}
                 className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-40"
               >
                 {actionLabel(a)}
@@ -529,6 +548,17 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           )}
         </div>
       )}
+
+      {c && actionIntent && <CampaignActionReviewDialog
+        campaign={c}
+        action={actionIntent}
+        busy={actingAction === actionIntent}
+        error={actionError}
+        onCancel={closeActionReview}
+        onConfirm={async () => {
+          if (await runAction(actionIntent)) setActionIntent(null)
+        }}
+      />}
 
       {!loading && !unavailable && c && (
         <aside className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-sm" data-testid="campaign-reuse-draft">
@@ -557,7 +587,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         </aside>
       )}
 
-      {actionError && <p className="text-sm text-red-600">{actionError}</p>}
+      {actionError && !actionIntent && <p role="alert" className="text-sm text-red-600">{actionError}</p>}
 
       {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
       {!loading && unavailable && (
@@ -800,6 +830,40 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           )}
 
           <section className="space-y-2">
+            <h2 className="text-sm font-semibold">{t('Motivace', 'Incentive')}</h2>
+            <p className="text-sm text-muted-foreground">
+              {c.incentiveOfferRef
+                ? `${c.incentiveOfferRef.name}@${c.incentiveOfferRef.version}`
+                : t('Bez odměny', 'No reward')}
+            </p>
+            {c.incentiveOfferRef && detail?.sources?.incentives !== 'ok' ? (
+              <DataUnavailable
+                kind={detail?.sources?.incentives === 'not_ready' ? 'no_data' : detail?.sources?.incentives === 'unauthorized' ? 'unauthorized' : detail?.sources?.incentives === 'not_deployed' ? 'not_deployed' : 'unreachable'}
+                service="Campaign-service"
+                feature={t('Výsledky odměn', 'Reward outcomes')}
+                title={detail?.sources?.incentives === 'not_ready' ? t('Projekce výsledků se připravuje', 'Outcome projection is preparing') : undefined}
+                detail={detail?.sources?.incentives === 'not_ready' ? t('Kafka projekce se po nasazení ještě ověřuje; nuly by nebyly spolehlivý výsledek.', 'The Kafka projection is still being verified after rollout; zeroes would not be reliable outcomes.') : undefined}
+                dense
+              />
+            ) : c.incentiveOfferRef && incentiveFunnel ? (
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4" data-testid="campaign-incentive-funnel">
+                {[
+                  [t('Rezervováno', 'Reserved'), incentiveFunnel.reserved, t('Držená odměna, ne uplatnění', 'Held, not redeemed')],
+                  [t('Uplatněno', 'Redeemed'), incentiveFunnel.committed, t('Pouze potvrzené splnění', 'Committed only')],
+                  [t('Uvolněno', 'Released'), incentiveFunnel.released, t('Nesplněná podmínka', 'Qualification not completed')],
+                  [t('Expirováno', 'Expired'), incentiveFunnel.expired, t('Rezervace vypršela', 'Reservation expired')],
+                ].map(([label, value, hint]) => (
+                  <div key={String(label)} className="rounded-lg border p-3">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-xl font-semibold tabular-nums">{value}</p>
+                    <p className="text-xs text-muted-foreground">{hint}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="space-y-2">
             <h2 className="text-sm font-semibold">{t('Čtyři oči', 'Four-eyes')}</h2>
             <p className="text-sm text-muted-foreground">
               {t('Vytvořil', 'Created by')} <span className="font-mono">{c.createdBy}</span>{t(', schválil ', ', approved by ')}
@@ -977,4 +1041,72 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       )}
     </div>
   </AuthGuard>
+}
+
+function CampaignActionReviewDialog({ campaign, action, busy, error, onCancel, onConfirm }: {
+  campaign: Campaign
+  action: string
+  busy: boolean
+  error: string | null
+  onCancel: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const { t } = useLanguage()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const titleId = `campaign-${campaign.id}-action-title`
+  const impactId = `campaign-${campaign.id}-action-impact`
+  const label = ({
+    submit: t('Odeslat ke schválení', 'Submit for approval'),
+    activate: t('Schválit a spustit', 'Approve and activate'),
+    enrol: t('Zařadit publikum', 'Enrol audience'),
+    pause: t('Pozastavit kampaň', 'Pause campaign'),
+    resume: t('Obnovit kampaň', 'Resume campaign'),
+    close: t('Uzavřít kampaň', 'Close campaign'),
+  } as Record<string, string>)[action] ?? action
+  const impact = ({
+    submit: t('Koncept předáte k nezávislému schválení. Kampaň se ještě neaktivuje ani nic neodešle.', 'The draft moves to independent approval. The campaign is not activated and nothing is sent yet.'),
+    activate: t('Kampaň se stane aktivní. Autor ji nemůže schválit sám; služba znovu ověří čtyři oči.', 'The campaign becomes active. Its maker cannot self-approve; the service rechecks four-eyes.'),
+    enrol: t('Aktuálně způsobilí členové schváleného publika budou zařazeni do této aktivní cesty. Souhlas a kontaktní ochrany se vyhodnocují při každém odeslání.', 'Currently eligible members of the approved audience will enter this active journey. Consent and contact protections are evaluated for every send.'),
+    pause: t('Nový průchod se pozastaví, dokud kampaň znovu neobnovíte. Dosavadní auditní stopa zůstane zachována.', 'Further progression pauses until the campaign is resumed. Existing audit history remains intact.'),
+    resume: t('Pozastavená cesta znovu pokračuje podle své uložené definice a ochranných pravidel.', 'The paused journey resumes under its stored definition and protection rules.'),
+    close: t('Kampaň se uzavře a tato lifecycle akce není běžně vratná. Dosavadní výsledky a auditní stopa zůstanou dostupné.', 'The campaign closes and this lifecycle action is not normally reversible. Existing outcomes and audit history remain available.'),
+  } as Record<string, string>)[action] ?? t('Ověřte dopad před změnou stavu kampaně.', 'Review the impact before changing campaign state.')
+
+  return <div
+    ref={dialogRef}
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby={titleId}
+    aria-describedby={impactId}
+    aria-busy={busy}
+    onKeyDown={event => {
+      if (event.key === 'Escape' && !busy) onCancel()
+      trapDialogFocus(event, dialogRef.current)
+    }}
+    className="fixed inset-0 z-[1200] grid place-items-center bg-slate-950/70 p-5"
+  >
+    <div className="w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" style={{ maxHeight: 'calc(100dvh - 40px)' }}>
+      <div className="flex items-start gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700"><Megaphone className="h-5 w-5" aria-hidden="true" /></span>
+        <div>
+          <h2 id={titleId} className="text-lg font-semibold text-slate-950">{label}</h2>
+          <p id={impactId} className="mt-1 text-sm leading-6 text-slate-600">{impact}</p>
+        </div>
+      </div>
+      <dl className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
+        <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Kampaň', 'Campaign')}</dt><dd className="mt-1 font-semibold text-slate-900">{campaign.name}</dd></div>
+        <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Cíl', 'Goal')}</dt><dd className="mt-1 text-slate-700">{campaign.goal}</dd></div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Autor', 'Maker')}</dt><dd className="mt-1 text-slate-700">{campaign.createdBy}</dd></div>
+          <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Publikum', 'Audience')}</dt><dd className="mt-1 text-slate-700">{campaign.segmentRef.name} · v{campaign.segmentRef.version}</dd></div>
+          <div><dt className="text-xs font-bold uppercase tracking-wide text-slate-400">{t('Kroků', 'Steps')}</dt><dd className="mt-1 text-slate-700">{campaign.steps.length}</dd></div>
+        </div>
+      </dl>
+      {error && <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</p>}
+      <div className="mt-5 flex justify-end gap-2">
+        <button type="button" autoFocus disabled={busy} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">{t('Zpět ke kontrole', 'Back to review')}</button>
+        <button type="button" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()} className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{busy ? t('Provádím změnu…', 'Applying change…') : t('Potvrdit akci', 'Confirm action')}</button>
+      </div>
+    </div>
+  </div>
 }

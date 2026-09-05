@@ -15,7 +15,10 @@
         "commit": { "type": "string", "minLength": 7 },
         "branch": { "type": "string", "minLength": 1 },
         "workflow": { "type": "string", "minLength": 1 },
-        "url": { "type": "string" },
+        "url": {
+          "type": "string",
+          "pattern": "^(|https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[^/?#]+)$"
+        },
         "observedAt": { "type": "string", "format": "date-time" }
       },
       "additionalProperties": false
@@ -23,6 +26,7 @@
     "component": { "type": "string", "pattern": "^openbank-" },
     "suites": { "type": "array", "items": { "$ref": "#/$defs/suite" } },
     "testCases": { "type": "array", "items": { "$ref": "#/$defs/testCase" } },
+    "testImpact": { "$ref": "#/$defs/testImpact" },
     "coverage": { "oneOf": [{ "$ref": "#/$defs/coverageObservation" }, { "type": "null" }] },
     "testInfrastructure": {
       "type": "object",
@@ -82,7 +86,34 @@
         "classname": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },
         "state": { "enum": ["passed", "failed", "skipped"] },
-        "durationMs": { "type": "integer", "minimum": 0 }
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "retryFlaky": {
+          "const": true,
+          "description": "The testcase passed only after one or more failed attempts in this run."
+        },
+        "failedAttemptCount": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "failedAttemptDurationMs": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "testDefinitionPath": { "type": "string", "pattern": "^(?!.*\\/(?:\\.|\\.\\.)\\/)src/test/(?:kotlin|java)/[A-Za-z0-9_./-]+\\.(?:kt|java)$" }
+      },
+      "dependentRequired": {
+        "retryFlaky": ["failedAttemptCount", "failedAttemptDurationMs"],
+        "failedAttemptCount": ["retryFlaky", "failedAttemptDurationMs"],
+        "failedAttemptDurationMs": ["retryFlaky", "failedAttemptCount"]
+      },
+      "allOf": [{
+        "if": { "properties": { "retryFlaky": { "const": true } }, "required": ["retryFlaky"] },
+        "then": { "properties": { "state": { "const": "passed" } } }
+      }],
+      "additionalProperties": false
+    },
+    "testImpact": {
+      "type": "object",
+      "required": ["schemaVersion", "mode", "mappingState", "selectionState"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "mode": { "const": "shadow" },
+        "mappingState": { "const": "unknown" },
+        "selectionState": { "const": "unavailable" }
       },
       "additionalProperties": false
     },
@@ -93,8 +124,22 @@
         "resource": { "enum": ["postgres", "redpanda", "valkey"] },
         "image": { "type": "string", "minLength": 1 },
         "lifecycle": { "enum": ["started", "stopped"] },
-        "observedAt": { "type": "string", "format": "date-time" }
+        "observedAt": { "type": "string", "format": "date-time" },
+        "resourceScopeId": {
+          "type": "string",
+          "description": "Opaque, job-local UUID emitted by a shared resource manager; never a Docker or network identity.",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "reprovisions": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Physical reprovisions collapsed into this terminal logical lifecycle; present only on stopped observations."
+        }
       },
+      "allOf": [{
+        "if": { "required": ["reprovisions"] },
+        "then": { "properties": { "lifecycle": { "const": "stopped" } } }
+      }],
       "additionalProperties": false
     },
     "specializedEvidence": {
@@ -115,7 +160,10 @@
         "kind": { "const": "playwright-report" },
         "suiteKind": { "const": "e2e" },
         "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
-        "url": { "type": "string", "pattern": "^https://" },
+        "url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[^/?#]+#artifacts$"
+        },
         "retentionDays": { "const": 7 },
         "access": { "const": "github-run-authenticated" },
         "mayContainSensitiveData": { "const": true }

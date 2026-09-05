@@ -117,11 +117,8 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     outgoing:
-      balance-events-out:
-        connector: smallrye-kafka
-        client.id: balance-service-${quarkus.uuid}
-        topic: openbank.balance.events
-        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # #8510: the direct `balance-events-out` channel is gone with its emitter — two publishers
+      # on one topic would race, and only the outbox one can be atomic with the state change.
       balance-outbox-out:
         connector: smallrye-kafka
         client.id: balance-outbox-service-${quarkus.uuid}
@@ -148,7 +145,7 @@ mp:
         group.id: openbank-balance-service
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest
-      # ADR-0073: create a zero balance row when an account is created (event-driven init,
+      # ADR-0267 §3: create a zero balance row when an account is created (event-driven init,
       # so onboarding accounts opened from a Kafka consumer get a balance without the
       # synchronous authenticated REST call). initializeBalance is idempotent.
       balance-init-in:

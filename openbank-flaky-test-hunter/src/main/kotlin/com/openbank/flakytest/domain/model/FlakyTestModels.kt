@@ -24,6 +24,8 @@ enum class FlakyTestCheckType {
     OBSERVED_FLAKY_TESTS,
     STALE_TEST_EVIDENCE,
     UNPROVEN_TEST_INFRASTRUCTURE,
+    UNTERMINATED_TEST_INFRASTRUCTURE,
+    REQUIRED_CONTROL_GAP,
 }
 
 enum class FindingSeverity { WARNING, CRITICAL }
@@ -118,19 +120,47 @@ enum class RunTrigger { SCHEDULED, CI_TEST_SUITE_FAILURE_WEBHOOK, OPERATOR_MANUA
 data class TestIntelligenceAnalysisRequest(
     val snapshotId: String,
     val collectedAt: Instant,
-    val components: List<TestIntelligenceComponentInput>,
-)
+    /**
+     * Declared with a NULLABLE element type on purpose, because that is the truth on the wire.
+     * Jackson's Kotlin module null-checks CONSTRUCTOR PARAMETERS; it does not check the ELEMENTS
+     * of a collection, so `{"components": [null]}` deserialises happily into a
+     * `List<TestIntelligenceComponentInput>` holding a null. Writing the type honestly is what
+     * makes [requireComponents] reachable instead of dead code.
+     */
+    val components: List<TestIntelligenceComponentInput?> = emptyList(),
+) {
+    /**
+     * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`;
+     * no service-local mapper is added (#526).
+     */
+    fun requireComponents(): List<TestIntelligenceComponentInput> = components.mapIndexed { index, component ->
+        requireNotNull(component) { "components[$index] must not be null" }
+    }
+}
 
 data class TestIntelligenceComponentInput(
     val component: String,
     val moneyPath: Boolean,
-    val evidence: List<TestIntelligenceEvidenceInput>,
+    /** Nullable elements for the same reason as [TestIntelligenceAnalysisRequest.components]. */
+    val evidence: List<TestIntelligenceEvidenceInput?> = emptyList(),
+    /** Nullable elements for the same reason as [TestIntelligenceAnalysisRequest.components]. */
+    val requiredControls: List<TestIntelligenceEvidenceInput?> = emptyList(),
     val declaredInfrastructure: List<String>,
     val observedInfrastructureStarts: Int,
+    /** A start event proves neither teardown nor an isolated next test. */
+    val observedInfrastructureStops: Int = 0,
     val flakyTests: Int = 0,
     val failingTests: Int = 0,
     val sameCommitTransitions: Int = 0,
     val wastedDurationMs: Int = 0,
-)
+) {
+    fun requireEvidence(): List<TestIntelligenceEvidenceInput> = evidence.mapIndexed { index, item ->
+        requireNotNull(item) { "evidence[$index] must not be null" }
+    }
+
+    fun requireRequiredControls(): List<TestIntelligenceEvidenceInput> = requiredControls.mapIndexed { index, item ->
+        requireNotNull(item) { "requiredControls[$index] must not be null" }
+    }
+}
 
 data class TestIntelligenceEvidenceInput(val kind: String, val state: String)

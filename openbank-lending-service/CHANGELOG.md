@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.32.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.1...lending-service-v0.32.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **lending:** rename worker switch to openbank.lending.worker.enabled ([#8374](https://github.com/JiRaska/open-bank-oss/issues/8374)) ([1bd8471](https://github.com/JiRaska/open-bank-oss/commit/1bd84712836abf92ba0d73e41f3fab163028a690))
+
+## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.0...lending-service-v0.32.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **lending:** distinguish an unconfigured court register from a clear one ([#7595](https://github.com/JiRaska/open-bank-oss/issues/7595)) ([3144e07](https://github.com/JiRaska/open-bank-oss/commit/3144e073e9dc5391190861402c8944257a9a9ae7))
+
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.31.0...lending-service-v0.32.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
 ## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.30.0...lending-service-v0.31.0) (2026-08-26)
 
 

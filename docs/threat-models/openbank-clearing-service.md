@@ -30,7 +30,7 @@ management, item lifecycle. Aggregates many payments into settlement — high bl
 - The prior class-level `@PermitAll` was replaced with per-operation least-privilege roles (K7 /
   ADR-0018): submit is service/payment-ops, reads are payment-ops/viewer/operator, and **settle +
   cycle/trigger are restricted to `@RolesAllowed(PAYMENTS, ADMIN)`** (locked by
-  `ClearingResourceSecurityTest`). `settle` additionally carries `@Authorize(clearingBatch.settle)`
+  `ClearingSecurityContractTest`). `settle` additionally carries `@Authorize(clearingBatch.settle)`
   (OPA, ADR-0034) in **advisory** mode, graduating to enforce in Phase 5.
 - Four-eyes approval-decide endpoint: same role set as the gated `settle` action, plus a
   domain-level segregation-of-duties check (checker id != maker id) — see §4a.
@@ -86,6 +86,15 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-02** — Doc correction, no behavior change: §3 credited the role-gating regression guard
+  to `ClearingResourceSecurityTest`, a class that is in no Kotlin source in this repository. **The
+  guard is real** and is `ClearingSecurityContractTest`, which asserts by reflection that
+  `ClearingResource` carries no class-level `@PermitAll`, that every HTTP endpoint on it is
+  `@RolesAllowed` and never `@PermitAll`, and — matching the claim in §3 exactly — that `settleBatch`
+  and `triggerCycle` resolve to exactly `ROLE_PAYMENTS` + `ROLE_ADMIN`. Only the name was wrong; the
+  access-control contract described in §3 is in place and locked. The same stale name is corrected in
+  the `ClearingResource` KDoc in this change. No DB, schema, endpoint or policy change.
+
 - **2026-05-30** — Added `clearing_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
   surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
   Rollback: `DROP SEQUENCE`.
@@ -110,3 +119,18 @@ not change any existing request's outcome until explicitly flipped.
   `clearingBatch.approval.read` action with no `rules.yaml` change — unlike balance-service
   (#5690), which needed a `role_action_matrix` entry because its authz shape is matrix-based
   rather than prefix-based.
+- **2026-09-04** — ADR-0281 net-settlement ledger leg (issue #8361). `settleBatch` now commits a
+  second outbox row (`openbank.clearing.net_settlement.post`) atomically with the batch flip, and
+  `NetSettlementPostingConsumer` posts the balanced DEBIT cash-clearing / CREDIT scheme-settlement
+  journal to ledger-service with idempotency key `clearing-net-settlement-{batchId}`. New trust
+  boundary crossed: clearing-service -> ledger-service `POST /api/v1/journals` (OidcC client-
+  credentials, SyntheticTaint header filter) — journal content is server-derived from the settled
+  batch row, not caller input, so the injection surface is the batch's own validated amounts.
+  Failure mode by design: retry with backoff, then DLQ
+  `openbank.dlq.clearing-service.clearing-net-settlement-in` (nested-YAML topic + KafkaTopic CR +
+  KafkaUser Write ACL in the same change — a rethrow without any of the three wedges the channel,
+  #5745). A DLQ record means "batch SETTLED, journal not booked" — reconciliation alert, manual
+  re-drive; the ledger idempotency key makes replay collapse onto the one journal. Reversal of a
+  settled batch stays a manual reversing journal (documented limit, ADR-0281). No DB schema change
+  in clearing-service; ledger gains V26 seed accounts (additive). Rollback: revert the commit —
+  unsettled batches post nothing; already-committed outbox rows drain or dead-letter harmlessly.

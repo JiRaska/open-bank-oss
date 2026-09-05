@@ -47,7 +47,6 @@ type FunnelCounts = Record<string, number>
 const STAGES = [
   'REGISTERED',
   'KYC_OPEN',
-  'KYC_DOCUMENTS_REQUIRED',
   'KYC_UNDER_REVIEW',
   'SCA_PENDING',
   'ACTIVE',
@@ -59,7 +58,6 @@ type Stage = typeof STAGES[number]
 const STAGE_LABEL_CS: Record<Stage, string> = {
   REGISTERED:               'Registrován',
   KYC_OPEN:                 'KYC otevřeno',
-  KYC_DOCUMENTS_REQUIRED:   'KYC — dokumenty',
   KYC_UNDER_REVIEW:         'KYC — přezkoumání',
   SCA_PENDING:              'SCA čeká',
   ACTIVE:                   'Aktivní',
@@ -69,7 +67,6 @@ const STAGE_LABEL_CS: Record<Stage, string> = {
 const STAGE_LABEL_EN: Record<Stage, string> = {
   REGISTERED:               'Registered',
   KYC_OPEN:                 'KYC Open',
-  KYC_DOCUMENTS_REQUIRED:   'KYC — Docs Needed',
   KYC_UNDER_REVIEW:         'KYC Under Review',
   SCA_PENDING:              'SCA Pending',
   ACTIVE:                   'Active',
@@ -79,7 +76,6 @@ const STAGE_LABEL_EN: Record<Stage, string> = {
 const STAGE_COLOR: Record<Stage, string> = {
   REGISTERED:               'var(--text-muted)',
   KYC_OPEN:                 'var(--yellow)',
-  KYC_DOCUMENTS_REQUIRED:   'var(--yellow)',
   KYC_UNDER_REVIEW:         'var(--accent)',
   SCA_PENDING:              '#a855f7',
   ACTIVE:                   'var(--green)',
@@ -92,8 +88,10 @@ export default function OnboardingPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
-  // funnel KPI
-  const [counts, setCounts] = useState<FunnelCounts>({})
+  // funnel KPI — `counts` stays null until the first response lands, so an in-flight or
+  // failed fetch is never rendered as an authoritative zero (issue #8233).
+  const [counts, setCounts] = useState<FunnelCounts | null>(null)
+  const [countsLoading, setCountsLoading] = useState(true)
   const [countsUnavail, setCountsUnavail] = useState<{ kind: UnavailableKind } | null>(null)
 
   // list
@@ -117,14 +115,14 @@ export default function OnboardingPage() {
   // ── Load funnel counts ──────────────────────────────────────────────────────
 
   const loadCounts = useCallback(async () => {
-    setCountsUnavail(null)
+    setCountsLoading(true); setCountsUnavail(null)
     try {
       const res = await fetch(svcUrl(SVC, '/api/v1/onboarding/funnel'), { signal: AbortSignal.timeout(5000) })
       if (!res.ok) { setCountsUnavail({ kind: await classifyBffFailure(res) }); return }
       setCounts(await res.json())
     } catch {
       setCountsUnavail({ kind: 'unreachable' })
-    }
+    } finally { setCountsLoading(false) }
   }, [])
 
   // ── Load records list ───────────────────────────────────────────────────────
@@ -172,23 +170,41 @@ export default function OnboardingPage() {
             <TrendingUp size={13} style={{ color: 'var(--accent)' }} />
             {t('Konverze', 'Conversion')}
           </Link>
-          <button className="btn btn-secondary" type="button" onClick={refresh} disabled={loading}
-            aria-busy={loading} aria-label={t('Obnovit onboarding', 'Refresh onboarding')}>
-            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          <button className="btn btn-secondary" type="button" onClick={refresh} disabled={loading || countsLoading}
+            aria-busy={loading || countsLoading} aria-label={t('Obnovit onboarding', 'Refresh onboarding')}>
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: (loading || countsLoading) ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}
       />
 
-      {/* KPI funnel tiles */}
-      {countsUnavail ? (
+      {/* KPI funnel tiles — never render a fabricated 0 while the count is unknown (#8233) */}
+      {countsLoading ? (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+          aria-label={t('Načítání počtů funnelu…', 'Loading funnel counts…')}
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px', marginBottom: '20px' }}
+        >
+          {STAGES.map(s => (
+            <div key={s} style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '12px 8px', textAlign: 'center' }}>
+              <div className="skeleton" style={{ height: '22px', width: '32px', margin: '0 auto' }} />
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px', lineHeight: 1.3 }}>
+                {stageLabel(s)}
+              </div>
+            </div>
+          ))}
+          <span className="sr-only">{t('Načítání počtů funnelu…', 'Loading funnel counts…')}</span>
+        </div>
+      ) : countsUnavail ? (
         <div className="card" style={{ padding: 0, marginBottom: '20px' }}>
           <DataUnavailable kind={countsUnavail.kind} service={t('Onboarding-service', 'Onboarding-service')} feature={t('Funnel počty', 'Funnel counts')} lang={language} dense />
         </div>
       ) : (
         <div role="group" aria-label={t('Filtr fází onboardingu', 'Onboarding stage filters')} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px', marginBottom: '20px' }}>
           {STAGES.map(s => {
-            const count = counts[s] ?? 0
+            const count = counts?.[s] ?? 0
             const isActive = stage === s
             const color = STAGE_COLOR[s]
             return (

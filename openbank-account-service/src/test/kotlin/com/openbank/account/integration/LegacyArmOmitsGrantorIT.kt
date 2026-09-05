@@ -21,6 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
 
@@ -188,6 +189,15 @@ class LegacyArmOmitsGrantorIT {
      *
      * `transactionLimit` is deliberately null: `withinLegacyTransactionLimit` treats a null as
      * "no ceiling", which is the shape of most rows and the unbounded case.
+     *
+     * `validFrom` is [SERVICE_TODAY], not `LocalDate.now()`. The legacy disjunct is answered by
+     * `AccountAuthorizationRepositoryImpl.findActiveByAccountAndParty`, whose SQL filters
+     * `validFrom <= ?3` with `?3 = LocalDate.now(clock)` and whose `clock` is the CDI bean
+     * `ClockProducer` produces — `Clock.systemUTC()`. A `validFrom` read off the JVM default zone
+     * is one day AHEAD of that for every hour the local date leads UTC, so the row this test
+     * writes is filtered out of its own lookup, the outcome comes back `NO_GRANT` instead of
+     * `LEGACY_AUTHORIZATION`, and the test fails having proved nothing about the invariant. The
+     * margin is zero days, so there is no slack to absorb it.
      */
     private fun grantLegacyPaymentRole(accountId: UUID) {
         Given {
@@ -195,7 +205,7 @@ class LegacyArmOmitsGrantorIT {
             body(
                 """
                 {"partyId":"$delegateParty","role":"PAYMENT_ONLY","dailyLimit":null,"transactionLimit":null,
-                 "validFrom":"${LocalDate.now()}","validTo":null,"grantedBy":"$operator"}
+                 "validFrom":"$SERVICE_TODAY","validTo":null,"grantedBy":"$operator"}
                 """.trimIndent(),
             )
         } When {
@@ -231,6 +241,7 @@ class LegacyArmOmitsGrantorIT {
         """
         {
           "eventType": "DelegationActivated",
+          "lifecycleRevision": 1,
           "aggregateId": "$grantId",
           "grantorPartyId": "$ownerParty",
           "granteePartyId": "$delegateParty",
@@ -245,5 +256,12 @@ class LegacyArmOmitsGrantorIT {
     private companion object {
         const val ATTEMPTS = 40
         const val POLL_MILLIS = 250L
+
+        /**
+         * Today in the zone the SERVICE reads dates in, not the one this JVM happens to run in.
+         * Deliberately not a literal: a pinned date goes stale, and a frozen clock would hide a
+         * real ordering bug. See [grantLegacyPaymentRole] for what disagrees with what.
+         */
+        private val SERVICE_TODAY: LocalDate = LocalDate.now(Clock.systemUTC())
     }
 }

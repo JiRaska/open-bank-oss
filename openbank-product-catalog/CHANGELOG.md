@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.2...product-catalog-v0.18.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* **product-catalog:** require product timestamps, read-repair legacy docs ([#8454](https://github.com/JiRaska/open-bank-oss/issues/8454)) ([40c42d5](https://github.com/JiRaska/open-bank-oss/commit/40c42d58564ce4ba509f4500b3084bd510768c17))
+
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.1...product-catalog-v0.18.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* **product-catalog:** reject a null array element with a client error instead of 500 ([#8004](https://github.com/JiRaska/open-bank-oss/issues/8004)) ([3370d18](https://github.com/JiRaska/open-bank-oss/commit/3370d18614e17953afa2d7d698e9cb0bc487bb91))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.0...product-catalog-v0.18.1) (2026-08-20)
 
 

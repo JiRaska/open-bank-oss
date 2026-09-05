@@ -54,7 +54,7 @@ class SpendReservationServiceTest {
     private val accountId: UUID = UUID.randomUUID()
 
     private val delegationRepository: DelegationRepository = mockk()
-    private val reservations = InMemorySpendReservationRepository()
+    private val reservations = InMemorySpendReservationRepository { currentGrant }
 
     private lateinit var service: SpendReservationService
 
@@ -216,7 +216,8 @@ class SpendReservationServiceTest {
      * Counts for real instead of returning canned answers, so the "reserved counts / confirmed
      * counts / released does not" rule is exercised by every test above rather than restated.
      */
-    private class InMemorySpendReservationRepository : SpendReservationRepository {
+    private class InMemorySpendReservationRepository(private val grant: () -> DelegationGrant) :
+        SpendReservationRepository {
         private val rows = ConcurrentHashMap<UUID, SpendReservation>()
 
         fun all(): List<SpendReservation> = rows.values.toList()
@@ -224,7 +225,7 @@ class SpendReservationServiceTest {
         override suspend fun reserve(
             candidate: SpendReservation,
             window: SpendWindow,
-            decide: (CountedSpend) -> SpendDecision,
+            decide: (DelegationGrant, CountedSpend) -> SpendDecision,
         ): ReserveOutcome {
             rows.values.firstOrNull {
                 it.grantId == candidate.grantId && it.idempotencyKey == candidate.idempotencyKey
@@ -242,7 +243,7 @@ class SpendReservationServiceTest {
                 .let { Money(it.setScale(currency.defaultFractionDigits), currency) }
 
             val counted = CountedSpend(sumSince(window.dayStart), sumSince(window.monthStart))
-            return when (val decision = decide(counted)) {
+            return when (val decision = decide(grant(), counted)) {
                 is SpendDecision.Refused -> ReserveOutcome.Refused(decision)
                 SpendDecision.Allowed -> {
                     rows[candidate.id] = candidate

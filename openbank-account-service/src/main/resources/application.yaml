@@ -180,7 +180,7 @@ mp:
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
-      # Onboarding account lifecycle (ADR-0266): open a PENDING_ACTIVATION account on
+      # Onboarding account lifecycle (ADR-0267): open a PENDING_ACTIVATION account on
       # PARTY_CREATED and activate it when the party clears KYC + AML.
       party-events-in:
         connector: smallrye-kafka
@@ -191,12 +191,24 @@ mp:
         # rather than swallowed. dead-letter-queue routes that record to the DLQ topic and lets
         # the consumer keep moving — so a transient dependency outage parks the event for replay
         # instead of destroying it (which a prior catch-all did, dropping a whole cohort's
-        # PARTY_CREATED, 2026-06-24..2026-07-17). The DLQ topic name is left at SmallRye's default
-        # (dead-letter-topic-party-events-in): setting `dead-letter-queue.topic` explicitly here
-        # would be a DOTTED leaf key, which SmallRye Config's YAML source silently quotes so the
-        # connector never reads it (the group.id/dead-letter-queue.topic trap documented in
-        # fraud-service/transaction-service) — the default name avoids that entirely.
+        # PARTY_CREATED, 2026-06-24..2026-07-17).
+        #
+        # The topic is EXPLICIT. SmallRye's implicit default is `dead-letter-topic-<channel>`,
+        # derived from the channel name ALONE, and `party-events-in` is declared by eight services
+        # here — left implicit they all dead-letter into one topic and the
+        # AccountPartyEventDeadLettered alert misattributes every record in it.
+        #
+        # NESTED under `dead-letter-queue:`, never the dotted leaf `dead-letter-queue.topic:`.
+        # SmallRye Config's YAML source quotes a leaf key containing a literal dot, registering it
+        # as ..."dead-letter-queue.topic" which the connector's plain getOptionalValue never reads
+        # (#686). An earlier comment here read that trap as making an explicit topic IMPOSSIBLE in
+        # this file — true premise, wrong conclusion: only the DOTTED spelling is inert, and the
+        # nested one resolves. card-issuance-service has carried the nested form since #5745, and
+        # aml-service's DeadLetterQueueConfigResolutionTest proves both directions against the real
+        # SmallRye YAML source. #5752.
         failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.account.party-events-in
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key:
@@ -209,7 +221,13 @@ mp:
         topic: openbank.delegation.events
         group.id: openbank-account-service
         auto.offset.reset: earliest
+        # Explicit + nested for the reasons spelled out on party-events-in above. This channel is
+        # the one where the collision was not hypothetical: card-issuance-service also consumes
+        # `delegation-events-in`, so both services were writing their dead letters into the single
+        # implicit `dead-letter-topic-delegation-events-in` (#5752).
         failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.account.delegation-events-in
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key:

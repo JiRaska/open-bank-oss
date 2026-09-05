@@ -61,6 +61,12 @@ spec:
       - resource: { type: topic, name: openbank.onboarding.funnel.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
+      # ADR-0269 rule 8 credit-journey funnel. Separate from the onboarding funnel above because
+      # that one is written from an anonymous public endpoint and this one only from an
+      # authenticated request — the trust levels must not be merged into one stream.
+      - resource: { type: topic, name: openbank.credit.funnel.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
       # ADR-0192 in-app screen feedback (metadata + screenshot object key; never image bytes).
       - resource: { type: topic, name: openbank.feedback.events, patternType: literal }
         operations: [Read, Describe]

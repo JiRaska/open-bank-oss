@@ -3,8 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState } from 'react'
-import { TrendingUp, Search, CheckCircle2, RefreshCw, Percent, Calendar } from 'lucide-react'
+import { useCallback, useState } from 'react'
+import { AlertTriangle, ShieldAlert, TrendingUp, Search, CheckCircle2, RefreshCw, Percent, Calendar } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
@@ -18,15 +18,66 @@ interface AccrualRecord {
   currency: string; rate: number; dayCount: string; status: string
 }
 
+type AccessBlock = 'unauthorized' | 'forbidden'
+
+function InterestAccessDenied({ language }: { language: 'cs' | 'en' }) {
+  const cs = language === 'cs'
+  return (
+    <div
+      role="alert"
+      aria-live="assertive"
+      style={{
+        padding: '40px', textAlign: 'center', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', gap: '10px',
+      }}
+    >
+      <ShieldAlert size={28} aria-hidden="true" style={{ color: 'var(--danger)' }} />
+      <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
+        {cs ? 'Přístup odepřen' : 'Access denied'}
+      </div>
+      <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', maxWidth: '460px', lineHeight: 1.5 }}>
+        {cs
+          ? 'Vaše aktuální role nemá oprávnění zobrazit tato data. Žádná dříve načtená data se nezobrazují.'
+          : 'Your current role does not have permission to view this data. No previously loaded data is shown.'}
+      </div>
+    </div>
+  )
+}
+
 export default function InterestPage() {
   const { t, language } = useLanguage()
   const [search, setSearch] = useState('')
+  const [lastSuccessfulAt, setLastSuccessfulAt] = useState<Date | null>(null)
+  const [retainedAccessBlock, setRetainedAccessBlock] = useState<{
+    kind: AccessBlock
+    snapshot: AccrualRecord[] | null
+  } | null>(null)
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const { data, loading, unavailable, waking } = useServiceResource<AccrualRecord[]>(
+  const { data, loading, unavailable, waking, reload } = useServiceResource<AccrualRecord[]>(
     svcUrl('interest-service', '/api/v1/interest/accruals'),
-    { select: (raw) => (Array.isArray(raw) ? (raw as AccrualRecord[]) : ((raw as { accruals?: AccrualRecord[] }).accruals ?? [])) },
+    { select: (raw) => {
+      setLastSuccessfulAt(new Date())
+      return Array.isArray(raw) ? (raw as AccrualRecord[]) : ((raw as { accruals?: AccrualRecord[] }).accruals ?? [])
+    } },
   )
   const accruals = data ?? []
+  const hasSnapshot = data !== null
+  const currentAccessBlock: AccessBlock | null = unavailable?.kind === 'unauthorized'
+    ? 'unauthorized'
+    : unavailable?.status === 403 ? 'forbidden' : null
+  const persistedAccessBlock = retainedAccessBlock?.snapshot === data ? retainedAccessBlock.kind : null
+  const accessBlock = currentAccessBlock ?? persistedAccessBlock
+  const visibleSnapshot = hasSnapshot && accessBlock === null
+  const settledFailure = unavailable !== null && !loading && !waking
+  const showingRetainedSnapshot = settledFailure && visibleSnapshot
+
+  const requestReload = useCallback(() => {
+    if (loading) return
+    setRetainedAccessBlock(currentAccessBlock
+      ? { kind: currentAccessBlock, snapshot: data }
+      : null)
+    reload()
+  }, [currentAccessBlock, data, loading, reload])
 
   const filtered = accruals.filter(a =>
     a.accountId?.toLowerCase().includes(search.toLowerCase()) ||
@@ -39,22 +90,85 @@ export default function InterestPage() {
   const totalAccrued = accruals.reduce((s, a) => s + (a.accruedAmount ?? 0), 0)
 
   return (
-    <AuthGuard permission="payments:view">
+    <AuthGuard permission="interest:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <PageHeader icon={<Percent size={20} aria-hidden="true" />} title={t('Úrokové výpočty', 'Interest Calculations')} subtitle={t('Akruální účetnictví — ACT/365 · ACT/360 · kapitalizace', 'Accrual accounting — ACT/365 · ACT/360 · capitalisation')} actions={<ServiceStatusBadge
-            label="interest-service :8125"
-            loading={loading}
-            waking={waking}
-            unavailable={unavailable}
-            copy={{
-              up: t('interest-service běží', 'interest-service is up'),
-              idle: t('interest-service spí (scale-to-zero), probouzí se…', 'interest-service idle (scaled to zero), waking…'),
-              down: t('interest-service neodpovídá', 'interest-service is not responding'),
-              checking: t('Zjišťuji stav služby…', 'Checking service…'),
-            }}
-          />} />
+        <PageHeader
+          icon={<Percent size={20} aria-hidden="true" />}
+          title={t('Úrokové výpočty', 'Interest Calculations')}
+          subtitle={t('Akruální účetnictví — ACT/365 · ACT/360 · kapitalizace', 'Accrual accounting — ACT/365 · ACT/360 · capitalisation')}
+          actions={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {accessBlock === null && (
+              <ServiceStatusBadge
+                label="interest-service :8125"
+                loading={loading}
+                waking={waking}
+                unavailable={unavailable}
+                copy={{
+                  up: t('interest-service běží', 'interest-service is up'),
+                  idle: t('interest-service spí (scale-to-zero), probouzí se…', 'interest-service idle (scaled to zero), waking…'),
+                  down: t('interest-service neodpovídá', 'interest-service is not responding'),
+                  checking: t('Zjišťuji stav služby…', 'Checking service…'),
+                }}
+              />
+            )}
+            <button
+              type="button"
+              onClick={requestReload}
+              disabled={loading}
+              aria-busy={loading}
+              aria-label={settledFailure
+                ? t('Zkusit znovu načíst úrokové záznamy', 'Retry loading interest records')
+                : t('Obnovit úrokové záznamy', 'Refresh interest records')}
+              className="btn btn-secondary btn-sm"
+            >
+              <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} />
+              {settledFailure ? t('Zkusit znovu', 'Try again') : t('Obnovit', 'Refresh')}
+            </button>
+          </div>}
+        />
 
-        <div className="grid-4" style={{ marginBottom: '24px' }}>
+        {showingRetainedSnapshot && (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-label={t('Aktuálnost úrokových dat', 'Interest data freshness')}
+            style={{
+              marginBottom: 20, padding: '14px 16px', borderRadius: 10,
+              border: '1px solid var(--warning-border)', background: 'var(--warning-bg)',
+              color: 'var(--text-primary)', display: 'flex', alignItems: 'flex-start', gap: 10,
+            }}
+          >
+            <AlertTriangle size={18} aria-hidden="true" style={{ color: 'var(--warning)', flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>
+                {t(
+                  'Obnovení selhalo — zobrazuji poslední úspěšný snapshot.',
+                  'Refresh failed — showing the last successful snapshot.',
+                )}
+              </div>
+              <div style={{ marginTop: 3, fontSize: 12, color: 'var(--text-secondary)' }}>
+                {lastSuccessfulAt && <>
+                  {t('Poslední úspěšné načtení', 'Last successful load')}: {lastSuccessfulAt.toLocaleString(numberLocale)}.{' '}
+                </>}
+                {t(
+                  'Naakruované částky i stavy se od té doby mohly změnit.',
+                  'Accrued amounts and statuses may have changed since then.',
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {loading && visibleSnapshot && (
+          <p role="status" aria-live="polite" style={{ margin: '0 0 12px', color: 'var(--text-tertiary)', fontSize: 11 }}>
+            {t(
+              'Aktualizuji úrokové záznamy; poslední snapshot zůstává dostupný.',
+              'Refreshing interest records; the last snapshot remains available.',
+            )}
+          </p>
+        )}
+
+        {visibleSnapshot && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
             { label: t('Záznamy celkem', 'Total records'), value: accruals.length, icon: <TrendingUp size={16} aria-hidden="true" />, color: 'var(--accent)' },
             { label: t('Akruuje', 'Accruing'), value: accruing.length, icon: <Percent size={16} aria-hidden="true" />, color: 'var(--warning)' },
@@ -68,7 +182,7 @@ export default function InterestPage() {
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
             </div>
           ))}
-        </div>
+        </div>}
 
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -80,16 +194,22 @@ export default function InterestPage() {
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
           </div>
-          {loading ? (
+          {accessBlock === 'forbidden' ? (
+            <InterestAccessDenied language={language} />
+          ) : accessBlock === 'unauthorized' ? (
+            <DataUnavailable kind="unauthorized" service={t('Interest-service', 'Interest-service')} feature={t('Úrokové záznamy', 'Interest records')} lang={language} />
+          ) : loading && !visibleSnapshot ? (
             <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
               <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
-          ) : unavailable ? (
+          ) : unavailable && !visibleSnapshot ? (
             <DataUnavailable kind={unavailable.kind} service={t('Interest-service', 'Interest-service')} feature={t('Úrokové záznamy', 'Interest records')} lang={language} />
           ) : filtered.length === 0 ? (
             <DataUnavailable kind="no_data" feature={t('Úrokové záznamy', 'Interest records')} lang={language}
               detail={accruals.length === 0
-                ? t('Služba běží, zatím žádné úrokové záznamy.', 'The service is running; no interest records yet.')
+                ? showingRetainedSnapshot
+                  ? t('Poslední úspěšný snapshot neobsahoval žádné úrokové záznamy.', 'The last successful snapshot contained no interest records.')
+                  : t('Služba běží, zatím žádné úrokové záznamy.', 'The service is running; no interest records yet.')
                 : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>

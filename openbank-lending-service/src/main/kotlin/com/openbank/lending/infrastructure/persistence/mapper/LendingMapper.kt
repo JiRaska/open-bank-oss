@@ -179,6 +179,7 @@ class LendingMapper {
         it.stage = p.stage
         it.expectedCreditLoss = p.expectedCreditLoss.amount
         it.createdAt = p.createdAt
+        it.modelVersion = p.modelVersion
     }
 
     fun toDomain(e: LoanProvisioningEntity) = LoanProvisioningRecord(
@@ -192,6 +193,7 @@ class LendingMapper {
         stage = e.stage,
         expectedCreditLoss = Money.of(e.expectedCreditLoss, e.currency),
         createdAt = e.createdAt,
+        modelVersion = e.modelVersion,
     )
 }
 

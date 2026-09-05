@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.15.0...fx-service-v0.15.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **fx:** drop EPOCH instant defaults from events and rate entities ([#8456](https://github.com/JiRaska/open-bank-oss/issues/8456)) ([d8bd2c0](https://github.com/JiRaska/open-bank-oss/commit/d8bd2c0f141a21e5d555b2ed307139eabc55ee26))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.14.1...fx-service-v0.15.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** unify the three-month FX rate trend ([#7736](https://github.com/JiRaska/open-bank-oss/issues/7736)) ([5e85aa6](https://github.com/JiRaska/open-bank-oss/commit/5e85aa60dab75048024186ff7072c0918cddaeea))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.14.0...fx-service-v0.14.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **ci:** event-handler-swallow gate was blind to every read-model receiver ([#7600](https://github.com/JiRaska/open-bank-oss/issues/7600)) ([336c2f1](https://github.com/JiRaska/open-bank-oss/commit/336c2f1857060696f4b0945cc9ae0556cf3edbda)), closes [#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.13.0...fx-service-v0.14.0) (2026-08-24)
 
 

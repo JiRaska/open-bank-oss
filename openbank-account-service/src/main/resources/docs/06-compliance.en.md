@@ -7,7 +7,7 @@
 | **AMLD** (Anti-Money Laundering Directive) | Account = candidate for screening, freeze workflow for suspicious activity | freeze/unfreeze API, event `account.frozen.v1` with `reason=AML_HOLD` |
 | **GDPR** | IBAN is PII, owner_party_id pseudonymized | PiiMask in logs, 10-year AML-driven retention (overrides GDPR erasure) |
 | **PSD2** | Account info accessible via Open Banking | `consent-service` validates TPP access; account-service serves account info |
-| **DORA** | Operational resilience | health probes, BootstrapVerifier, audit events, SLO, runbooks |
+| **DORA** | Operational resilience | health probes, audit events, SLO, runbooks. `BootstrapVerifier` was listed here and does not exist (#8426) — secrets are held instead by ESO/OpenBao `secretKeyRef` injection (ADR-0007) |
 | **NIS2** | Network & info security | mTLS via Istio, network policies, audit log |
 | **CNB Decree 163/2014** | Account keeping, IBAN per ISO 13616 | `libs.domain.account.Iban` validator with mod-97 checksum |
 
@@ -114,6 +114,6 @@ Endpoint for audit query: `audit-service /api/v1/audit/events?aggregateId=acc-..
 - ✅ Rate limiting: `libs.web.RateLimitFilter` (100 req/min per token)
 - ✅ Idempotency: required on mutations
 - ✅ TLS: mTLS in-cluster (Istio), TLS termination at gateway
-- ✅ Secrets: BootstrapVerifier blocks dev placeholders in prod (ADR 0017 Vault)
+- ⬜ Secrets: **no `BootstrapVerifier` exists** — nothing fails startup on a dev placeholder. The property is held by `POSTGRES_PASSWORD` arriving through `secretKeyRef` from ESO/OpenBao in the deployed manifest (ADR-0007), which carries no placeholder. Configuration, not a boot-time control (#8426)
 - ✅ Audit: every state change → audit-service via event
 - ⚠️ Tokenisation (PCI-like for IBAN): not implemented yet, tracked as a risk in the regulatory audit

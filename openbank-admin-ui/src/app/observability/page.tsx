@@ -27,6 +27,17 @@ interface MetricsData {
   prometheusUp: boolean
 }
 
+function metricColor(
+  value: number | null | undefined,
+  good: (value: number) => boolean,
+  warning?: (value: number) => boolean,
+) {
+  if (value === null || value === undefined) return 'var(--text-muted)'
+  if (good(value)) return 'var(--success)'
+  if (warning?.(value)) return 'var(--warning)'
+  return 'var(--danger)'
+}
+
 export default function ObservabilityPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -194,29 +205,33 @@ export default function ObservabilityPage() {
           icon={<Server size={18} />}
           label={t('Dostupnost služeb', 'Service Availability')}
           value={formatValue(metrics?.availability.value, '%', 1)}
+          known={metrics?.availability.value != null}
           sub={t('Dostupnost celé platformy', 'Platform-wide uptime')}
-          color={(metrics?.availability.value ?? 0) >= 99 ? 'var(--success)' : (metrics?.availability.value ?? 0) >= 95 ? 'var(--warning)' : 'var(--danger)'}
+          color={metricColor(metrics?.availability.value, value => value >= 99, value => value >= 95)}
         />
         <KpiCard
           icon={<AlertTriangle size={18} />}
           label={t('Chybovost služeb', 'Service Error Rate')}
           value={formatValue(metrics?.errorRate.value, '%', 2)}
+          known={metrics?.errorRate.value != null}
           sub={t('Aplikační 5xx / požadavky (1h)', 'App-recorded 5xx / requests (1h)')}
-          color={(metrics?.errorRate.value ?? 0) < 1 ? 'var(--success)' : (metrics?.errorRate.value ?? 0) < 5 ? 'var(--warning)' : 'var(--danger)'}
+          color={metricColor(metrics?.errorRate.value, value => value < 1, value => value < 5)}
         />
         <KpiCard
           icon={<Clock size={18} />}
           label={t('p99 Latence', 'p99 Latency')}
           value={formatValue(metrics?.p99Latency.value, 'ms', 0)}
+          known={metrics?.p99Latency.value != null}
           sub={t('99. percentil doby odezvy', '99th percentile response time')}
-          color={(metrics?.p99Latency.value ?? 0) < 200 ? 'var(--success)' : (metrics?.p99Latency.value ?? 0) < 500 ? 'var(--warning)' : 'var(--danger)'}
+          color={metricColor(metrics?.p99Latency.value, value => value < 200, value => value < 500)}
         />
         <KpiCard
           icon={<Activity size={18} />}
           label={t('Propustnost', 'Throughput')}
           value={formatValue(metrics?.throughput.value, ' req/s', 1)}
+          known={metrics?.throughput.value != null}
           sub={t('Globální rychlost požadavků', 'Global request rate')}
-          color="var(--info)"
+          color={metrics?.throughput.value == null ? 'var(--text-muted)' : 'var(--info)'}
         />
       </div>
 
@@ -225,15 +240,17 @@ export default function ObservabilityPage() {
           icon={<Globe size={18} />}
           label={t('Chybovost na edge', 'Edge Error Rate')}
           value={formatValue(metrics?.edgeErrorRate.value, '%', 2)}
+          known={metrics?.edgeErrorRate.value != null}
           sub={t('Co vidí klient: nginx 5xx / 1h', 'Customer-facing: nginx 5xx / total (1h)')}
-          color={(metrics?.edgeErrorRate.value ?? 0) < 1 ? 'var(--success)' : (metrics?.edgeErrorRate.value ?? 0) < 5 ? 'var(--warning)' : 'var(--danger)'}
+          color={metricColor(metrics?.edgeErrorRate.value, value => value < 1, value => value < 5)}
         />
         <KpiCard
           icon={<Zap size={18} />}
           label={t('Neúspěšné platby', 'Failed Payments')}
           value={formatValue(metrics?.failedPayments.value, '', 0)}
+          known={metrics?.failedPayments.value != null}
           sub={t('Selhání za posledních 5 minut', 'Failures in last 5 minutes')}
-          color={(metrics?.failedPayments.value ?? 0) === 0 ? 'var(--success)' : 'var(--danger)'}
+          color={metricColor(metrics?.failedPayments.value, value => value === 0)}
         />
       </div>
     </div>
@@ -241,13 +258,13 @@ export default function ObservabilityPage() {
   )
 }
 
-function KpiCard({ icon, label, value, sub, color }: {
-  icon: React.ReactNode; label: string; value: string; sub: string; color: string;
+function KpiCard({ icon, label, value, sub, color, known }: {
+  icon: React.ReactNode; label: string; value: string; sub: string; color: string; known: boolean;
 }) {
   return (
-    <div className="stat-card">
+    <div className="stat-card" data-metric-state={known ? 'available' : 'unknown'}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>
-        <div style={{ width: '36px', height: '36px', borderRadius: '10px',
+        <div data-metric-icon style={{ width: '36px', height: '36px', borderRadius: '10px',
           background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
           {icon}
         </div>

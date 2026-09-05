@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.73.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.72.0...customer-edge-v0.73.0) (2026-09-03)
+
+
+### Features
+
+* **customer-edge:** the product catalogue a customer may open from ([#8536](https://github.com/JiRaska/open-bank-oss/issues/8536)) ([ea114a2](https://github.com/JiRaska/open-bank-oss/commit/ea114a245740e58715daff4e0f3632f3531094ef))
+
+## [0.72.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.71.0...customer-edge-v0.72.0) (2026-09-02)
+
+
+### Features
+
+* **delegation:** preview client grants before SCA ([#8173](https://github.com/JiRaska/open-bank-oss/issues/8173)) ([cb8065c](https://github.com/JiRaska/open-bank-oss/commit/cb8065c425dde53ba02073b938ca908f2f3e7dfc))
+
+## [0.71.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.70.0...customer-edge-v0.71.0) (2026-08-31)
+
+
+### Features
+
+* **admin-ui:** unify the three-month FX rate trend ([#7736](https://github.com/JiRaska/open-bank-oss/issues/7736)) ([5e85aa6](https://github.com/JiRaska/open-bank-oss/commit/5e85aa60dab75048024186ff7072c0918cddaeea))
+
+## [0.70.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.69.0...customer-edge-v0.70.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
+## [0.69.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.68.0...customer-edge-v0.69.0) (2026-08-27)
+
+
+### Features
+
+* **customer-edge:** add campaign incentive claims ([#7281](https://github.com/JiRaska/open-bank-oss/issues/7281)) ([e8a1d6c](https://github.com/JiRaska/open-bank-oss/commit/e8a1d6c0cbb8b203666822650c0d0a9f95d26203))
+
 ## [0.68.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.67.0...customer-edge-v0.68.0) (2026-08-26)
 
 

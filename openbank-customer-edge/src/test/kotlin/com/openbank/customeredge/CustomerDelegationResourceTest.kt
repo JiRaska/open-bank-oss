@@ -91,6 +91,58 @@ class CustomerDelegationResourceTest {
     }
 
     @Test
+    fun `preview derives grantor strips SCA and calls the literal upstream preview path`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val body = slot<String>()
+        every { upstream.post(capture(url), any(), capture(body), any()) } returns
+            Response.ok("{\"valid\":true}").build()
+
+        val response = resource(upstream).preview(
+            """{"granteePartyId":"$stranger","resourceType":"ACCOUNT","resourceId":"$GRANT_ID",""" +
+                """"capabilities":["ACCOUNT_READ_BALANCES"],"grantScaSessionId":"$GRANT_ID"}""",
+        )
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(url.captured).isEqualTo("$svc/api/v1/delegations/preview")
+        assertThat(body.captured).contains("\"grantorPartyId\":\"$caller\"")
+        assertThat(body.captured).doesNotContain("grantScaSessionId")
+    }
+
+    @Test
+    fun `preview rejects another grantor before upstream`() {
+        val upstream = mockk<UpstreamClient>()
+
+        val wrongGrantor = resource(upstream).preview(
+            """{"grantorPartyId":"$stranger","granteePartyId":"$caller"}""",
+        )
+
+        assertThat(wrongGrantor.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    /**
+     * A preview exists to tell the customer whether the grant they are about to sign for can
+     * succeed. Answering 400 to a cumulative ceiling would now be a lie — delegation-service both
+     * counts them (ADR-0249 D3) and REQUIRES one on a payment-capable grant (D5) — so the ceiling
+     * has to reach the authority that judges it.
+     */
+    @Test
+    fun `preview forwards a cumulative ceiling to the authority that judges it`() {
+        val upstream = mockk<UpstreamClient>()
+        val body = slot<String>()
+        every { upstream.post(any(), any(), capture(body), any()) } returns Response.ok().build()
+
+        val response = resource(upstream).preview(
+            """{"granteePartyId":"$stranger","capabilities":["ACCOUNT_INITIATE_PAYMENT"],""" +
+                """"dailyLimit":{"amount":100,"currency":"CZK"}}""",
+        )
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(body.captured).contains("\"dailyLimit\"")
+    }
+
+    @Test
     fun `offer REJECTS a body naming someone else as grantor instead of rewriting it`() {
         val upstream = mockk<UpstreamClient>()
 
@@ -112,36 +164,39 @@ class CustomerDelegationResourceTest {
     }
 
     /**
-     * A ceiling the platform cannot keep must not reach upstream, and above all must not reach the
-     * customer as a 201. Asserting `upstream.post` is never called: the defect being fixed is that
-     * this body used to sail through the edge, be stored, and come back echoed — the grantor walked
-     * away believing the delegate was capped at 5 000 Kč/den while only `perTransactionLimit` was
-     * ever checked on a payment.
+     * The refusal this replaces was correct when nothing counted cumulative spend and became a
+     * deadlock when something did: delegation-service REQUIRES a cumulative ceiling on a grant
+     * carrying `ACCOUNT_INITIATE_PAYMENT` (ADR-0249 D5), so refusing the ceiling here made a
+     * payment-capable grant unconstructible through the customer channel — and with it every
+     * additional-cardholder card, which needs such a grant to exist.
+     *
+     * The ceiling must therefore reach upstream verbatim. Asserting on the FORWARDED BODY and not
+     * merely on a 201: a route that dropped the field would still answer 201 and would still leave
+     * the grantor believing in a cap nobody was told about.
      */
     @Test
-    fun `offer rejects a body carrying dailyLimit or monthlyLimit`() {
+    fun `offer forwards dailyLimit and monthlyLimit verbatim`() {
         val upstream = mockk<UpstreamClient>()
+        val body = slot<String>()
+        every { upstream.post(any(), any(), capture(body), any()) } returns Response.status(201).build()
 
-        val daily = resource(upstream).offer(
-            """{"granteePartyId":"$stranger","dailyLimit":{"amount":5000.00,"currency":"CZK"}}""",
+        val response = resource(upstream).offer(
+            """{"granteePartyId":"$stranger","capabilities":["ACCOUNT_INITIATE_PAYMENT"],""" +
+                """"dailyLimit":{"amount":5000.00,"currency":"CZK"},""" +
+                """"monthlyLimit":{"amount":50000.00,"currency":"CZK"}}""",
         )
-        assertThat(daily.status).isEqualTo(400)
-        assertThat(daily.entity.toString()).contains("CUMULATIVE_LIMIT_UNSUPPORTED").contains("dailyLimit")
 
-        val monthly = resource(upstream).offer(
-            """{"granteePartyId":"$stranger","monthlyLimit":{"amount":50000.00,"currency":"CZK"}}""",
-        )
-        assertThat(monthly.status).isEqualTo(400)
-        assertThat(monthly.entity.toString()).contains("monthlyLimit")
-
-        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+        assertThat(response.status).isEqualTo(201)
+        // The VALUE, not its rendering: the body is re-serialised through Jackson on the way out,
+        // which normalises 5000.00 to 5000.0. Asserting the literal decimal would pin a formatting
+        // detail this route does not own and does not promise.
+        assertThat(body.captured).contains("\"dailyLimit\"").contains("5000")
+        assertThat(body.captured).contains("\"monthlyLimit\"").contains("50000")
     }
 
     /**
-     * The control without which the test above is vacuous: an explicit JSON `null` is the app
-     * sending "no ceiling", not a ceiling, and `perTransactionLimit` is the one limit this platform
-     * enforces — both must still pass through. A naive `node.has(field)` check fails the first of
-     * these, and a check that rejected all limits would fail the second while looking correct.
+     * An explicit JSON `null` is the app saying "no ceiling", not a ceiling, and `perTransactionLimit`
+     * is the per-payment limit that was always enforced. Both must pass through untouched.
      */
     @Test
     fun `offer passes through a null ceiling and a perTransactionLimit`() {

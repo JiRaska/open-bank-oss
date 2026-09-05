@@ -51,6 +51,11 @@ data:
     mp.messaging.incoming.notification-events-in.client.id=notification-service-${quarkus.uuid}
     mp.messaging.incoming.notification-events-in.group.id=notification-service
     mp.messaging.incoming.notification-events-in.auto.offset.reset=earliest
+    # #5745 (sweep of #5698): explicit DLQ topic for the notification-events-in channel
+    # (failure-strategy: dead-letter-queue, set in application.yaml). Explicit rather than the
+    # SmallRye default `dead-letter-topic-notification-events-in` for the same reason as
+    # party-events-in below — a dotted leaf key, so it MUST live here (issue #686).
+    mp.messaging.incoming.notification-events-in.dead-letter-queue.topic=openbank.notification.requests.dlq
     mp.messaging.incoming.party-events-in.client.id=notification-service-party-${quarkus.uuid}
     mp.messaging.incoming.party-events-in.group.id=notification-service-party
     mp.messaging.incoming.party-events-in.auto.offset.reset=earliest
@@ -65,3 +70,23 @@ data:
     mp.messaging.incoming.delegation-events-in.client.id=notification-service-delegation-${quarkus.uuid}
     mp.messaging.incoming.delegation-events-in.group.id=notification-service-delegation
     mp.messaging.incoming.delegation-events-in.auto.offset.reset=earliest
+    # #8432 (phase 2 of #8547): KYC outcome notifications. Same dotted-key constraint (issue
+    # #686) as above — these keys can only live in a properties source. Phase 1 shipped the
+    # connector + consumer in the image (deployed as sandbox-c754eabb or later), so naming the
+    # channel here no longer risks the SRMSG00071 boot failure the parity gate guards.
+    mp.messaging.incoming.kyc-events-in.client.id=notification-service-kyc-${quarkus.uuid}
+    mp.messaging.incoming.kyc-events-in.group.id=notification-service-kyc
+    mp.messaging.incoming.kyc-events-in.auto.offset.reset=earliest
+    # #8432 consent-events-in is DELIBERATELY ABSENT here, and must stay absent until the image
+    # carrying its connector is deployed. Naming a channel in this ConfigMap is enough for
+    # SmallRye to consider it DECLARED; the `connector:` that makes it servable ships in the
+    # service's own application.yaml, inside the image. A declared channel with no connector is a
+    # hard boot failure (SRMSG00071), not a degraded feature — that is the card-issuance
+    # CrashLoopBackOff of 2026-08-02, and check-msg-channel-image-parity.py is the gate written
+    # from it. Phase 2, once this image is live, adds:
+    #   mp.messaging.incoming.consent-events-in.client.id=notification-service-consent-${quarkus.uuid}
+    #   mp.messaging.incoming.consent-events-in.group.id=notification-service-consent
+    #   mp.messaging.incoming.consent-events-in.auto.offset.reset=latest
+    # `latest`, deliberately unlike the channels above: this is a NEW consumer group on a topic
+    # live for months, and `earliest` would replay the whole retained history, pushing "a third
+    # party was granted access to your accounts" for every consent ever granted.

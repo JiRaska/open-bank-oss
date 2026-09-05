@@ -211,3 +211,10 @@ retiring the corresponding KEK version in Transit, not after.
   DLQ so a close event is never destroyed, idempotent upsert per grant id. Residual: seconds-level
   revoke propagation per ADR-0232; customer-edge adoption of the check endpoint is its own slice.
   Rollback: revert; the projection tables are droppable without touching `cards`.
+## Delegation lifecycle ordering
+
+The card enforcement projection uses a durable monotonic cursor before changing access or blocking
+a supplementary card. Revisionless opens are ignored and revisionless closes install permanent
+legacy tombstones. A delayed lower revision cannot reopen a closed grant or trigger irreversible
+card blocking after a newer lifecycle decision. Consumers must be deployed and verified before the
+revisioned delegation producer.

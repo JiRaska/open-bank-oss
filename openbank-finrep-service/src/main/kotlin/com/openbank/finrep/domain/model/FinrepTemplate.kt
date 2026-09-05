@@ -14,6 +14,8 @@ data class FinrepTemplate(
     val templateId: String,
     val period: LocalDate,
     val cells: List<FinrepCell>,
+    /** Explicit findings that make this bounded preview ineligible as a regulatory artifact. */
+    val dataGaps: List<FinrepDataGap>,
     /**
      * Whether this template may be treated as balanced — TRUE only when finrep's own recomputation
      * (`Σ net == 0` per currency, `TrialBalanceIdentity`) and openbank-ledger-service's published
@@ -34,4 +36,6 @@ data class FinrepTemplate(
      * `PushResult.skipped()` failure this repo already paid for once.
      */
     val balanceVerdict: BalanceVerdict,
-)
+) {
+    val hasDataGaps: Boolean get() = dataGaps.isNotEmpty()
+}

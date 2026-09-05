@@ -5,6 +5,8 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
+import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
 import {
   FileSignature, Plus, Search, RefreshCw, Edit, Eye, X, Send, Archive,
@@ -16,7 +18,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
-import { PageHeader } from '@/components/ui/PageHeader'
+import { PageHeader, StatusBadge, type Tone } from '@/components/ui'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -90,10 +92,10 @@ async function apiFetch(path: string, opts?: RequestInit) {
   try { return JSON.parse(text) } catch { return null }
 }
 
-const STATUS_COLOR: Record<string, { bg: string; text: string; border: string }> = {
-  DRAFT:     { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' },
-  PUBLISHED: { bg: 'var(--success-bg)', text: 'var(--success-text)', border: 'var(--success-border)' },
-  RETIRED:   { bg: 'var(--surface-3)',  text: 'var(--text-tertiary)', border: 'var(--border)' },
+const TEMPLATE_STATUS_TONE: Record<TemplateStatus, Tone> = {
+  DRAFT: 'warning',
+  PUBLISHED: 'success',
+  RETIRED: 'neutral',
 }
 
 // Generic merge-field tokens offered as clickable chips. These are a UX aid for
@@ -188,15 +190,6 @@ const DEFAULT_SAMPLE_DATA = {
 }
 const DEFAULT_SAMPLE_DATA_TEXT = JSON.stringify(DEFAULT_SAMPLE_DATA, null, 2)
 
-function StatusBadge({ status }: { status?: string }) {
-  const c = STATUS_COLOR[status ?? ''] ?? STATUS_COLOR.DRAFT
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, background: c.bg, color: c.text, border: `1px solid ${c.border}`, letterSpacing: '0.03em' }}>
-      {status ?? 'DRAFT'}
-    </span>
-  )
-}
-
 export default function DocumentTemplatesPage() {
   const { t, language } = useLanguage()
   const { data: session } = useSession()
@@ -251,6 +244,20 @@ export default function DocumentTemplatesPage() {
   // so this bar is modelled on the app's own modal-overlay convention instead.
   const [pendingAction, setPendingAction] = useState<{ id: string; kind: 'publish' | 'retire' } | null>(null)
   const [actioning, setActioning] = useState(false)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const actionCancelRef = useRef<HTMLButtonElement>(null)
+  const actionReturnFocusRef = useRef<HTMLElement | null>(null)
+  const actionReturnIdRef = useRef<string | null>(null)
+
+  const openLifecycleDialog = (
+    event: React.MouseEvent<HTMLButtonElement>,
+    action: { id: string; kind: 'publish' | 'retire' },
+  ) => {
+    actionReturnFocusRef.current = event.currentTarget
+    actionReturnIdRef.current = `template-row-primary-${action.id}`
+    setLifecycleError(null)
+    setPendingAction(action)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -267,7 +274,6 @@ export default function DocumentTemplatesPage() {
       setTemplates(items)
       setVisibleCount(PAGE_SIZE)
     } catch (e) {
-      setTemplates([])
       setUnavailable({ kind: e instanceof ApiError ? e.kind : 'unreachable' })
     } finally {
       setLoading(false)
@@ -403,8 +409,14 @@ export default function DocumentTemplatesPage() {
     })
   }
 
+  // ONE lock across save, publish and retire (#7091): they were separate React flags,
+  // so a save could overlap a publish on the same template. React state disables the
+  // control a render too late, so the claim is synchronous.
+  const flight = useSingleFlight()
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    const outcome = await flight.run('template:write', async () => {
     setSaving(true)
     setActionError(null)
     try {
@@ -427,20 +439,25 @@ export default function DocumentTemplatesPage() {
     } finally {
       setSaving(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   const runAction = async (id: string, kind: 'publish' | 'retire') => {
+    const outcome = await flight.run('template:write', async () => {
     setActioning(true)
-    setActionError(null)
+    setLifecycleError(null)
     try {
       await apiFetch(`${TEMPLATES_PATH}/${id}/${kind}`, { method: 'POST' })
       await load()
       setPendingAction(null)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('Akci se nepodařilo provést', 'The action could not be completed'))
+      setLifecycleError(err instanceof Error ? err.message : t('Akci se nepodařilo provést', 'The action could not be completed'))
     } finally {
       setActioning(false)
     }
+    })
+    if (wasSkipped(outcome)) return
   }
 
   return (
@@ -479,6 +496,11 @@ export default function DocumentTemplatesPage() {
             {unavailable && (
               <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
                 <DataUnavailable kind={unavailable.kind} service={t('Document-service', 'Document-service')} feature={t('Šablony dokumentů', 'Document templates')} lang={language} dense />
+                {templates.length > 0 && (
+                  <div role="status" aria-live="polite" style={{ padding: '0 16px 14px', color: 'var(--warning-text)', fontSize: '12px', fontWeight: 600 }}>
+                    {t('Zobrazené šablony a jejich publikační stavy jsou poslední dostupná data; obnovení se nezdařilo.', 'Displayed templates and publication states are the last available data; refresh failed.')}
+                  </div>
+                )}
               </div>
             )}
 
@@ -537,7 +559,7 @@ export default function DocumentTemplatesPage() {
                       <td key={j}><div className="skeleton" style={{ height: '13px', width: j === 1 ? '140px' : '60px' }} /></td>
                     ))}</tr>
                   ))}
-                  {!loading && visible.length === 0 && (
+                  {!loading && !unavailable && visible.length === 0 && (
                     <tr><td colSpan={7} style={{ padding: 0 }}>
                       <DataUnavailable kind="no_data" feature={t('Šablony', 'Templates')} lang={language} dense />
                     </td></tr>
@@ -547,21 +569,21 @@ export default function DocumentTemplatesPage() {
                       <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '11px' }}>{tpl.code}</td>
                       <td style={{ fontSize: '13px', fontWeight: 600 }}>{tpl.name}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>v{tpl.version}</td>
-                      <td><StatusBadge status={tpl.status} /></td>
+                      <td><StatusBadge status={tpl.status ?? 'DRAFT'} tone={TEMPLATE_STATUS_TONE[tpl.status ?? 'DRAFT']} /></td>
                       <td style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{tpl.locale ?? '—'}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{tpl.productRef ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
-                          <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')} onClick={() => openEditModal(tpl)}>
+                          <button id={`template-row-primary-${tpl.id}`} type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')} onClick={() => openEditModal(tpl)}>
                             {canEdit ? <Edit size={13} /> : <Eye size={13} />}
                           </button>
                           {canEdit && (tpl.status ?? 'DRAFT') === 'DRAFT' && (
-                            <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--success-text)' }} title={t('Publikovat', 'Publish')} aria-label={t('Publikovat šablonu', 'Publish template')} onClick={() => setPendingAction({ id: tpl.id, kind: 'publish' })}>
+                            <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--success-text)' }} title={t('Publikovat', 'Publish')} aria-label={t('Publikovat šablonu', 'Publish template')} onClick={event => openLifecycleDialog(event, { id: tpl.id, kind: 'publish' })}>
                               <Send size={13} />
                             </button>
                           )}
                           {canEdit && tpl.status === 'PUBLISHED' && (
-                            <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--warning-text)' }} title={t('Vyřadit', 'Retire')} aria-label={t('Vyřadit šablonu', 'Retire template')} onClick={() => setPendingAction({ id: tpl.id, kind: 'retire' })}>
+                            <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--warning-text)' }} title={t('Vyřadit', 'Retire')} aria-label={t('Vyřadit šablonu', 'Retire template')} onClick={event => openLifecycleDialog(event, { id: tpl.id, kind: 'retire' })}>
                               <Archive size={13} />
                             </button>
                           )}
@@ -787,24 +809,58 @@ export default function DocumentTemplatesPage() {
 
       {/* Inline confirm for publish/retire — never a raw browser confirm()/alert() */}
       {pendingAction && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,23,42,0.65)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div className="card" style={{ width: '400px', maxWidth: '100%', padding: '20px' }}>
-            <div style={{ fontSize: '14px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)' }}>
+        <Dialog.Root open onOpenChange={open => {
+          if (!open && !actioning) {
+            setLifecycleError(null)
+            setPendingAction(null)
+          }
+        }}>
+          <Dialog.Portal>
+            <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(15,23,42,0.65)' }} />
+            <Dialog.Content
+              className="card"
+              aria-modal="true"
+              aria-busy={actioning}
+              onOpenAutoFocus={event => {
+                event.preventDefault()
+                actionCancelRef.current?.focus()
+              }}
+              onCloseAutoFocus={event => {
+                event.preventDefault()
+                const original = actionReturnFocusRef.current
+                const rowFallback = actionReturnIdRef.current ? document.getElementById(actionReturnIdRef.current) : null
+                const pageFallback = document.getElementById('template-status-filter')
+                const target = original?.isConnected ? original : rowFallback ?? pageFallback
+                target?.focus()
+              }}
+              onEscapeKeyDown={event => { if (actioning) event.preventDefault() }}
+              onInteractOutside={event => { if (actioning) event.preventDefault() }}
+              style={{ position: 'fixed', zIndex: 1101, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'calc(100% - 40px)', maxWidth: '400px', padding: '20px' }}
+            >
+            <Dialog.Title style={{ fontSize: '14px', fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)' }}>
               {pendingAction.kind === 'publish' ? t('Publikovat šablonu?', 'Publish this template?') : t('Vyřadit šablonu?', 'Retire this template?')}
-            </div>
-            <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
+            </Dialog.Title>
+            <Dialog.Description style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
               {pendingAction.kind === 'publish'
                 ? t('Publikovaná verze je neměnná — další úprava vytvoří novou verzi.', 'A published version is immutable — a further edit creates a new version.')
                 : t('Vyřazená šablona se přestane nabízet pro generování nových dokumentů.', 'A retired template stops being offered for new document generation.')}
-            </div>
+            </Dialog.Description>
+            {lifecycleError && (
+              <div role="alert" style={{ padding: '10px 12px', marginBottom: '16px', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--danger-border)' }}>
+                {lifecycleError}
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button className="btn btn-secondary" type="button" onClick={() => setPendingAction(null)} disabled={actioning}>{t('Zrušit', 'Cancel')}</button>
+              <Dialog.Close asChild>
+                <button ref={actionCancelRef} className="btn btn-secondary" type="button" disabled={actioning}>{t('Zrušit', 'Cancel')}</button>
+              </Dialog.Close>
               <button className="btn btn-primary" type="button" onClick={() => runAction(pendingAction.id, pendingAction.kind)} disabled={actioning} aria-busy={actioning}>
                 {actioning ? t('Provádím…', 'Working…') : t('Potvrdit', 'Confirm')}
               </button>
             </div>
-          </div>
-        </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
     </AuthGuard>
   )

@@ -85,7 +85,19 @@ data class DomesticPayment(
      * authenticated and in hand (issue #3994).
      */
     val initiatedByPartyId: UUID? = null,
+    /** SHA-256 of the normalized create command and authenticated actor scope; null only on legacy rows. */
+    val requestFingerprint: String? = null,
+    /** Delegation grant that authorized this payment; null for an owner-initiated payment. */
+    val delegationId: UUID? = null,
+    /** Spend reservation bound one-to-one to this payment; null for an owner-initiated payment. */
+    val reservationId: UUID? = null,
 ) {
+    init {
+        require((delegationId == null) == (reservationId == null)) {
+            "delegationId and reservationId must either both be present or both be absent"
+        }
+    }
+
     fun transitionTo(
         targetStatus: DomesticPaymentStatus,
         reason: DomesticRejectReason? = null,

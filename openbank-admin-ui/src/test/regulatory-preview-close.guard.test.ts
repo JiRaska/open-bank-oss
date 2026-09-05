@@ -9,6 +9,7 @@ describe('regulatory export preview close contract', () => {
     expect(source).toContain('type="button" className="btn btn-secondary"')
     expect(source).toContain("aria-label={t('Zavřít náhled exportu', 'Close export preview')}")
     expect(source).toContain('<X size={15} aria-hidden="true" />')
-    expect(source).toContain('onClick={() => setPreview(null)}')
+    expect(source).toContain('<Dialog.Close asChild>')
+    expect(source).toContain('onOpenChange={open => { if (!open) setPreview(null) }}')
   })
 })
