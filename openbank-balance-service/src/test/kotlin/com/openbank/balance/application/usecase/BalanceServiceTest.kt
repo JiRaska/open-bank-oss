@@ -1,4 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.\n// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.\n
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
 package com.openbank.balance.application.usecase
 
 import com.fasterxml.jackson.databind.JsonNode
@@ -8,7 +11,6 @@ import com.openbank.balance.application.port.`in`.DebitAccountCommand
 import com.openbank.balance.application.port.`in`.InitializeBalanceCommand
 import com.openbank.balance.application.port.`in`.PlaceHoldCommand
 import com.openbank.balance.application.port.`in`.SetOverdraftLimitCommand
-import com.openbank.balance.application.port.out.BalanceEventPublisher
 import com.openbank.balance.application.port.out.BalanceMovementPort
 import com.openbank.balance.application.port.out.BalanceRepository
 import com.openbank.balance.application.port.out.HoldRepository
@@ -47,28 +49,29 @@ class BalanceServiceTest {
         val balance = sampleBalance()
         val balanceRepo = FakeBalanceRepository(balance)
         val holdRepo = FakeHoldRepository()
-        val publisher = RecordingBalanceEventPublisher()
-        val service = BalanceService(balanceRepo, holdRepo, publisher, FakeBalanceMovementPort(balanceRepo))
+        val movement = FakeBalanceMovementPort(balanceRepo)
+        val service = BalanceService(balanceRepo, holdRepo, movement)
 
         val hold = service.placeHold(
             PlaceHoldCommand(balance.accountId, BigDecimal("20.00"), "CZK", "card auth", "ref-1", ttlSeconds = 60),
         )
 
         assertEquals(0, hold.amount.compareTo(BigDecimal("20.00")))
-        assertEquals(0, balanceRepo.updated.single().reservedAmount.compareTo(BigDecimal("20.00")))
-        assertEquals(BalanceEventType.HOLD_PLACED, publisher.events.single().eventType)
+        // The reservation, the hold row and the event travel together now (#8510): the service no
+        // longer touches balanceRepo.update / holdRepo.save / a publisher separately.
+        assertEquals(0, holdRepo.savedWithEvent.single().second.reservedAmount.compareTo(BigDecimal("20.00")))
+        assertEquals(BalanceEventType.HOLD_PLACED, holdRepo.savedWithEvent.single().third.eventType)
+        assertTrue(balanceRepo.updated.isEmpty())
     }
 
     @Test
     fun `debit wraps insufficient funds as domain exception`(): Unit = runBlocking {
         val balanceRepo = FakeBalanceRepository(sampleBalance(booked = "10.00", available = "10.00"))
-        val service =
-            BalanceService(
-                balanceRepo,
-                FakeHoldRepository(),
-                RecordingBalanceEventPublisher(),
-                FakeBalanceMovementPort(balanceRepo),
-            )
+        val service = BalanceService(
+            balanceRepo,
+            FakeHoldRepository(),
+            FakeBalanceMovementPort(balanceRepo),
+        )
 
         assertThrows<InsufficientFundsException> {
             runBlocking {
@@ -80,23 +83,25 @@ class BalanceServiceTest {
     @Test
     fun `credit applies once and emits a BALANCE_UPDATED event`(): Unit = runBlocking {
         val balanceRepo = FakeBalanceRepository(sampleBalance(booked = "100.00", available = "100.00"))
-        val publisher = RecordingBalanceEventPublisher()
-        val service = BalanceService(balanceRepo, FakeHoldRepository(), publisher, FakeBalanceMovementPort(balanceRepo))
+        val movement = FakeBalanceMovementPort(balanceRepo)
+        val service = BalanceService(balanceRepo, FakeHoldRepository(), movement)
 
         val result = service.credit(
             CreditAccountCommand(balanceRepo.seed.accountId, BigDecimal("40.00"), "CZK", "pay-1"),
         )
 
         assertEquals(0, result.bookedAmount.compareTo(BigDecimal("140.00")))
-        assertEquals(1, publisher.events.size)
-        assertEquals(BalanceEventType.BALANCE_UPDATED, publisher.events.single().eventType)
+        // The event is the port's job now (#8510): the fake records what the real impl would write
+        // to balance_outbox inside the movement transaction.
+        assertEquals(1, movement.events.size)
+        assertEquals(BalanceEventType.BALANCE_UPDATED, movement.events.single().eventType)
     }
 
     @Test
     fun `a duplicate credit referenceId does not double-apply and emits no second event`(): Unit = runBlocking {
         val balanceRepo = FakeBalanceRepository(sampleBalance(booked = "100.00", available = "100.00"))
-        val publisher = RecordingBalanceEventPublisher()
-        val service = BalanceService(balanceRepo, FakeHoldRepository(), publisher, FakeBalanceMovementPort(balanceRepo))
+        val movement = FakeBalanceMovementPort(balanceRepo)
+        val service = BalanceService(balanceRepo, FakeHoldRepository(), movement)
         val acct = balanceRepo.seed.accountId
 
         val first = service.credit(CreditAccountCommand(acct, BigDecimal("40.00"), "CZK", "pay-1"))
@@ -105,35 +110,35 @@ class BalanceServiceTest {
         // Applied exactly once: 100 + 40 = 140 on both the first call and the idempotent replay.
         assertEquals(0, first.bookedAmount.compareTo(BigDecimal("140.00")))
         assertEquals(0, replay.bookedAmount.compareTo(BigDecimal("140.00")))
-        // Only the first application emits an event — a replay must not double-count downstream.
-        assertEquals(1, publisher.events.size)
+        // Only the first application writes an event — a replay must not double-count downstream.
+        assertEquals(1, movement.events.size)
     }
 
     @Test
     fun `a duplicate debit referenceId does not double-apply`(): Unit = runBlocking {
         val balanceRepo = FakeBalanceRepository(sampleBalance(booked = "100.00", available = "100.00"))
-        val publisher = RecordingBalanceEventPublisher()
-        val service = BalanceService(balanceRepo, FakeHoldRepository(), publisher, FakeBalanceMovementPort(balanceRepo))
+        val movement = FakeBalanceMovementPort(balanceRepo)
+        val service = BalanceService(balanceRepo, FakeHoldRepository(), movement)
         val acct = balanceRepo.seed.accountId
 
         service.debit(DebitAccountCommand(acct, BigDecimal("30.00"), "CZK", "wd-1"))
         val replay = service.debit(DebitAccountCommand(acct, BigDecimal("30.00"), "CZK", "wd-1")) // same ref
 
         assertEquals(0, replay.bookedAmount.compareTo(BigDecimal("70.00"))) // 100 - 30, applied once
-        assertEquals(1, publisher.events.size)
+        assertEquals(1, movement.events.size)
+        // The debit event keeps the pre-#8510 wire shape: the amount is NEGATED on the wire.
+        assertEquals(0, movement.events.single().amount!!.compareTo(BigDecimal("-30.00")))
     }
 
     @Test
     fun `getBalance without asOf returns the live current balance`(): Unit = runBlocking {
         val balanceRepo = FakeBalanceRepository(sampleBalance(booked = "100000.00", available = "100000.00"))
         balanceRepo.futureDelta = BigDecimal("777.00") // must be ignored when asOf is absent
-        val service =
-            BalanceService(
-                balanceRepo,
-                FakeHoldRepository(),
-                RecordingBalanceEventPublisher(),
-                FakeBalanceMovementPort(balanceRepo),
-            )
+        val service = BalanceService(
+            balanceRepo,
+            FakeHoldRepository(),
+            FakeBalanceMovementPort(balanceRepo),
+        )
 
         val result = service.getBalance(
             com.openbank.balance.application.port.`in`.GetBalanceQuery(balanceRepo.seed.accountId, "CZK"),
@@ -147,13 +152,11 @@ class BalanceServiceTest {
         // Current booked 100000; 30000 was booked AFTER asOf → balance as of that date was 70000.
         val balanceRepo = FakeBalanceRepository(sampleBalance(booked = "100000.00", available = "100000.00"))
         balanceRepo.futureDelta = BigDecimal("30000.00")
-        val service =
-            BalanceService(
-                balanceRepo,
-                FakeHoldRepository(),
-                RecordingBalanceEventPublisher(),
-                FakeBalanceMovementPort(balanceRepo),
-            )
+        val service = BalanceService(
+            balanceRepo,
+            FakeHoldRepository(),
+            FakeBalanceMovementPort(balanceRepo),
+        )
 
         val result = service.getBalance(
             com.openbank.balance.application.port.`in`.GetBalanceQuery(
@@ -174,13 +177,11 @@ class BalanceServiceTest {
     fun `getBalance with asOf and no later movements equals current booked`(): Unit = runBlocking {
         val balanceRepo = FakeBalanceRepository(sampleBalance(booked = "100000.00", available = "100000.00"))
         // futureDelta defaults to ZERO (projection empty / no activity after asOf)
-        val service =
-            BalanceService(
-                balanceRepo,
-                FakeHoldRepository(),
-                RecordingBalanceEventPublisher(),
-                FakeBalanceMovementPort(balanceRepo),
-            )
+        val service = BalanceService(
+            balanceRepo,
+            FakeHoldRepository(),
+            FakeBalanceMovementPort(balanceRepo),
+        )
 
         val result = service.getBalance(
             com.openbank.balance.application.port.`in`.GetBalanceQuery(
@@ -197,13 +198,11 @@ class BalanceServiceTest {
     fun `initializeBalance returns existing balance without overwriting`(): Unit = runBlocking {
         val existing = sampleBalance()
         val balanceRepo = FakeBalanceRepository(existing)
-        val service =
-            BalanceService(
-                balanceRepo,
-                FakeHoldRepository(),
-                RecordingBalanceEventPublisher(),
-                FakeBalanceMovementPort(balanceRepo),
-            )
+        val service = BalanceService(
+            balanceRepo,
+            FakeHoldRepository(),
+            FakeBalanceMovementPort(balanceRepo),
+        )
 
         val result = service.initializeBalance(InitializeBalanceCommand(existing.accountId, "CZK", BigDecimal("5.00")))
 
@@ -218,7 +217,6 @@ class BalanceServiceTest {
         val service = BalanceService(
             balanceRepo,
             FakeHoldRepository(),
-            RecordingBalanceEventPublisher(),
             FakeBalanceMovementPort(balanceRepo),
         )
 
@@ -235,7 +233,6 @@ class BalanceServiceTest {
         val service = BalanceService(
             FakeBalanceRepository(),
             FakeHoldRepository(),
-            RecordingBalanceEventPublisher(),
             FakeBalanceMovementPort(FakeBalanceRepository()),
         )
 
@@ -257,11 +254,10 @@ class BalanceServiceTest {
     fun `an inbound hold names the balance API as its system origin - no person placed it`(): Unit = runBlocking {
         val balance = sampleBalance()
         val balanceRepo = FakeBalanceRepository(balance)
-        val publisher = RecordingBalanceEventPublisher()
+        val holdRepo = FakeHoldRepository()
         val service = BalanceService(
             balanceRepo,
-            FakeHoldRepository(),
-            publisher,
+            holdRepo,
             FakeBalanceMovementPort(balanceRepo),
         )
 
@@ -269,7 +265,7 @@ class BalanceServiceTest {
             PlaceHoldCommand(balance.accountId, BigDecimal("20.00"), "CZK", "card auth", "ref-1", ttlSeconds = 60),
         )
 
-        val event = publisher.events.single()
+        val event = holdRepo.savedWithEvent.single().third
         assertEquals("system:balance-service:balance-api", event.actorId)
         assertEquals("SYSTEM", event.actorType)
     }
@@ -277,25 +273,21 @@ class BalanceServiceTest {
     @Test
     fun `a credit carries the same system origin`(): Unit = runBlocking {
         val balanceRepo = FakeBalanceRepository(sampleBalance())
-        val publisher = RecordingBalanceEventPublisher()
-        val service = BalanceService(
-            balanceRepo,
-            FakeHoldRepository(),
-            publisher,
-            FakeBalanceMovementPort(balanceRepo),
-        )
+        val movement = FakeBalanceMovementPort(balanceRepo)
+        val service = BalanceService(balanceRepo, FakeHoldRepository(), movement)
 
         service.credit(CreditAccountCommand(balanceRepo.seed.accountId, BigDecimal("5.00"), "CZK", "ref-credit"))
 
-        assertEquals("system:balance-service:balance-api", publisher.events.single().actorId)
-        assertEquals("SYSTEM", publisher.events.single().actorType)
+        assertEquals("system:balance-service:balance-api", movement.events.single().actorId)
+        assertEquals("SYSTEM", movement.events.single().actorType)
     }
 
     /**
      * The wire, not the object (#3994).
      *
-     * `BalanceEvent` is a SERIALISED data class — `KafkaBalanceEventPublisher` hands it to
-     * `ObjectMapper.writeValueAsString`, so the JSON keys are Kotlin property names and no string
+     * `BalanceEvent` is a SERIALISED data class — the outbox payload is built by
+     * `ObjectMapper.writeValueAsString` (#8510: same mapper call the retired direct emitter used,
+     * so the bytes are unchanged), so the JSON keys are Kotlin property names and no string
      * literal `"actorId"` exists anywhere in this module. A `command grep '"actorId"'` over
      * balance-service therefore reports nothing whether the field is on the wire or not, which is
      * exactly how a survey by grep misses half this fleet's event fields. Only serialising can
@@ -392,22 +384,39 @@ class BalanceServiceTest {
     /**
      * In-memory idempotent movement port: applies the domain rule to the repo's seed once per
      * (account, currency, referenceId, operation); a duplicate returns the current balance with
-     * applied=false and mutates nothing — mirroring the real adapter's dedup contract.
+     * applied=false and mutates nothing — mirroring the real adapter's dedup contract. Since #8510
+     * the port also owns the event: the fake records exactly what the real impl persists into
+     * `balance_outbox` inside the movement transaction (post-mutation figures, negated debit
+     * amount, the caller-supplied actor), so the use-case tests still see the event contract.
      */
     private class FakeBalanceMovementPort(private val repo: FakeBalanceRepository) : BalanceMovementPort {
         private val applied = mutableSetOf<String>()
+        val events = mutableListOf<BalanceEvent>()
 
-        override suspend fun applyCredit(accountId: UUID, currency: String, referenceId: String, amount: BigDecimal) =
-            apply(accountId, currency, referenceId, "CREDIT") { it.applyCredit(amount) }
+        override suspend fun applyCredit(
+            accountId: UUID,
+            currency: String,
+            referenceId: String,
+            amount: BigDecimal,
+            actorId: String,
+        ) = apply(accountId, currency, referenceId, "CREDIT", amount, actorId) { it.applyCredit(amount) }
 
-        override suspend fun applyDebit(accountId: UUID, currency: String, referenceId: String, amount: BigDecimal) =
-            apply(accountId, currency, referenceId, "DEBIT") { it.applyDebit(amount) }
+        override suspend fun applyDebit(
+            accountId: UUID,
+            currency: String,
+            referenceId: String,
+            amount: BigDecimal,
+            actorId: String,
+        ) = apply(accountId, currency, referenceId, "DEBIT", amount, actorId) { it.applyDebit(amount) }
 
+        @Suppress("LongParameterList")
         private fun apply(
             accountId: UUID,
             currency: String,
             referenceId: String,
             op: String,
+            amount: BigDecimal,
+            actorId: String,
             mutate: (Balance) -> Balance,
         ): MovementOutcome {
             val current = repo.seed.takeIf { it.accountId == accountId && it.currency == currency }
@@ -417,12 +426,31 @@ class BalanceServiceTest {
             val updated = mutate(current) // may throw IllegalArgumentException (overdraft) before marking
             repo.seed = updated
             applied += key
+            events += BalanceEvent(
+                eventId = UUID.randomUUID(),
+                eventType = BalanceEventType.BALANCE_UPDATED,
+                accountId = accountId,
+                currency = currency,
+                amount = if (op == "DEBIT") amount.negate() else amount,
+                bookedAmount = updated.bookedAmount,
+                availableAmount = updated.availableAmount,
+                reservedAmount = updated.reservedAmount,
+                occurredAt = OffsetDateTime.parse("2026-01-01T00:00:00Z"),
+                actorId = actorId,
+                actorType = EventActor.TYPE_SYSTEM,
+                sourceService = "balance-service",
+            )
             return MovementOutcome(updated, applied = true)
         }
     }
 
     private class FakeHoldRepository : HoldRepository {
         val saved = mutableListOf<BalanceHold>()
+
+        /** (hold, balance, event) triples the service handed to the transactional methods (#8510). */
+        val savedWithEvent = mutableListOf<Triple<BalanceHold, Balance, BalanceEvent>>()
+        val releasedWithEvent = mutableListOf<Triple<BalanceHold, Balance, BalanceEvent>>()
+
         override suspend fun findById(holdId: UUID): BalanceHold? = saved.firstOrNull { it.id == holdId }
         override suspend fun findActiveByAccountId(accountId: UUID): List<BalanceHold> = saved.filter {
             it.accountId ==
@@ -436,12 +464,14 @@ class BalanceServiceTest {
         }
         override suspend fun save(hold: BalanceHold): BalanceHold = hold.also { saved += it }
         override suspend fun update(hold: BalanceHold): BalanceHold = hold
-    }
-
-    private class RecordingBalanceEventPublisher : BalanceEventPublisher {
-        val events = mutableListOf<BalanceEvent>()
-        override suspend fun publish(event: BalanceEvent) {
-            events += event
-        }
+        override suspend fun saveWithEvent(hold: BalanceHold, balance: Balance, event: BalanceEvent): BalanceHold =
+            hold.also {
+                saved += it
+                savedWithEvent += Triple(hold, balance, event)
+            }
+        override suspend fun releaseWithEvent(hold: BalanceHold, balance: Balance, event: BalanceEvent): BalanceHold =
+            hold.also {
+                releasedWithEvent += Triple(hold, balance, event)
+            }
     }
 }

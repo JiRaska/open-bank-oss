@@ -110,3 +110,31 @@ spec:
   config:
     retention.ms: 2592000000
     cleanup.policy: delete
+---
+# #8432: dead-letter topic for notification-service's kyc-events-in channel (SmallRye
+# failure-strategy: dead-letter-queue, set in the service's application.yaml in nested form).
+# A KYC outcome event that survives the consumer's own poison-pill handling and still fails
+# (a delivery-pipeline failure further down) is parked here instead of stopping the channel.
+#
+# Explicitly named (openbank.kyc.events.notification.dlq) rather than left to SmallRye's
+# implicit `dead-letter-topic-kyc-events-in`: channel names repeat across services, so the
+# fleet convention is an explicit per-service name any alert can attribute unambiguously.
+#
+# A CR is required, not optional: this cluster does not auto-create topics, so without it the
+# DLQ send itself fails and the consumer wedges on the failure it was meant to park.
+#
+# Longer retention than the source topic, mirroring the sibling DLQs above: a dead-lettered
+# SECURITY-category notification is worth triaging, not merely replaying within a week.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.kyc.events.notification.dlq
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete

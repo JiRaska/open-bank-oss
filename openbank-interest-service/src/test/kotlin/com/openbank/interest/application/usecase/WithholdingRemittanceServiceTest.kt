@@ -12,6 +12,7 @@ import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTaxStatus
 import com.openbank.interest.domain.tax.WithholdingTreatment
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.audit.AuditEventTime
 import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
@@ -22,8 +23,11 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 class WithholdingRemittanceServiceTest {
@@ -32,6 +36,15 @@ class WithholdingRemittanceServiceTest {
     private val remittanceRepo = mockk<WithholdingRemittanceRepository>()
     private val eventOutbox = mockk<InterestEventOutbox>()
     private val service = WithholdingRemittanceService(withholdingTaxRepo, remittanceRepo, eventOutbox)
+
+    /**
+     * A FIXED clock, and the service built on its four-arg constructor so the assembly instant is
+     * knowable (#8352). The other tests in this file use the `@Inject` three-arg constructor, which
+     * takes `Clock.systemUTC()` — fine while nothing asserts a time, useless the moment one does.
+     */
+    private val fixedClock = Clock.fixed(Instant.parse("2026-02-03T09:15:00Z"), ZoneOffset.UTC)
+    private val clockedService =
+        WithholdingRemittanceService(withholdingTaxRepo, remittanceRepo, eventOutbox, fixedClock)
 
     private fun withheld(taxAmount: BigDecimal, periodTo: LocalDate = LocalDate.of(2026, 1, 31)) = WithholdingTax(
         id = UUID.randomUUID(),
@@ -151,5 +164,48 @@ class WithholdingRemittanceServiceTest {
         assertThat(result.totalTaxAmount).isEqualByComparingTo("0")
         verify(exactly = 1) { remittanceRepo.save(any()) }
         verify(exactly = 1) { eventOutbox.append(any()) }
+    }
+
+    /**
+     * #8352: red against `origin/main`, where this payload carried no event time of any name.
+     *
+     * `dueDate` is the field that looks like an answer and is not: a `LocalDate` regulatory
+     * deadline is the date the obligation must be met BY, not a moment anything happened. So
+     * `AuditConsumer.eventTime` found nothing and every audit row for a tax remittance recorded
+     * the audit consumer's ingest clock as the assembly time.
+     *
+     * The instant asserted is the batch's own `createdAt` — stamped by [assembleRemittance] from
+     * the injected clock as it built this batch, which IS the event. Asserting the exact value
+     * rather than mere presence is what separates the fix from a fresh `Instant.now()` at
+     * serialisation, which would look identical in the audit trail and measure nothing.
+     */
+    @Test
+    fun `the remitted payload carries the assembly instant as the audit event time`() {
+        val records = listOf(withheld(BigDecimal("15")))
+        val savedSlot: CapturingSlot<WithholdingRemittance> = slot()
+        val eventSlot: CapturingSlot<OutboxMessage> = slot()
+
+        every { remittanceRepo.findByPeriod(2026, 1) } returns Uni.createFrom().nullItem()
+        every {
+            withholdingTaxRepo.findRecordedForPeriod(
+                LocalDate.of(2026, 1, 1),
+                LocalDate.of(2026, 1, 31),
+            )
+        } returns Uni.createFrom().item(records)
+        every { remittanceRepo.save(capture(savedSlot)) } answers {
+            Uni.createFrom().item(firstArg<WithholdingRemittance>())
+        }
+        every { withholdingTaxRepo.markRemitted(any(), any()) } returns Uni.createFrom().item(1)
+        every { eventOutbox.append(capture(eventSlot)) } returns Uni.createFrom().nullItem()
+
+        clockedService.assembleRemittance(2026, 1).await().indefinitely()
+
+        // Not `fixedClock.instant()` directly: the assertion has to be the instant the batch
+        // actually recorded, or it would still pass against a payload that read a second clock.
+        AuditEventTime.assertRecordedAsEventTime(
+            eventSlot.captured.payload,
+            savedSlot.captured.createdAt.toInstant(),
+        )
+        assertThat(savedSlot.captured.createdAt.toInstant()).isEqualTo(fixedClock.instant())
     }
 }
