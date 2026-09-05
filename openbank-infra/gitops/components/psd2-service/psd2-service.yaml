@@ -127,6 +127,8 @@ spec:
             # log (openbank.authz.decisions, outcome=deny enforced=false) before the enforce
             # flip — a separate, deliberate follow-up per the rules.yaml AUTHZ_ENFORCE
             # guardrail. The app default is `true`, so this explicit `false` is load-bearing.
+            # Dated per #8470: flip target 2026-10-05, once the decision log shows an empty
+            # "would DENY" population for real eIDAS-authenticated TPP traffic.
             - name: AUTHZ_ENFORCE
               value: "false"
           startupProbe: {tcpSocket: {port: management}, initialDelaySeconds: 10, periodSeconds: 5, failureThreshold: 30}

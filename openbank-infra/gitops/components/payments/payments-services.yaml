@@ -1796,6 +1796,8 @@ spec:
             # other service's rollout convention. Before this the pod inherited the libs default
             # enforce=true with NO sidecar, so standingOrder.pause failed closed on an unreachable
             # PDP. Flip to true only after an observation window with a clean advisory report.
+            # Dated per #8470: flip target 2026-10-05 — its money-path effect is a FUTURE scheduled
+            # debit and pause/cancel reduces money movement, so a bounded advisory window is safe.
             - name: AUTHZ_ENFORCE
               value: "false"
           startupProbe:
