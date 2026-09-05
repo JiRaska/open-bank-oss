@@ -1196,3 +1196,58 @@ spec:
         metric: traces_spanmetrics_latency_bucket{service="openbank-card-issuance-service",le="1"}
       total:
         metric: traces_spanmetrics_calls_total{service="openbank-card-issuance-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-card-processing-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-card-processing-service
+spec:
+  target: "99.9"
+  window: 30d
+  alerting:
+    absent: false
+  # NOTE (ADR-0283 phase 1): this service fails CLOSED — if card-issuance cannot be reached the
+  # authorisation is declined, never approved. So burning this budget means genuine card
+  # transactions are being refused, not that a control is being skipped. That is the opposite of
+  # the VoP SLO above, and the two must not be read the same way.
+  description: "openbank-card-processing-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-card-processing-service",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-card-processing-service"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-card-processing-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-card-processing-service
+spec:
+  target: "99"
+  window: 30d
+  alerting:
+    absent: false
+  # The fleet-uniform 1s threshold is the tightest constraint in this file and also the most
+  # honest: an authorisation is on the acquirer's critical path and a scheme expects an issuer
+  # answer well inside a second, so a breach here is a real timeout at a real till.
+  description: "openbank-card-processing-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-card-processing-service",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-card-processing-service"}
