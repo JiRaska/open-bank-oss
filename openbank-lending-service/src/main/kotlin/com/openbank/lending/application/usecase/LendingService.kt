@@ -1198,6 +1198,7 @@ class LendingService @Inject constructor(
                         stage = ecl.stage,
                         horizon = ecl.horizon,
                         expectedCreditLoss = ecl.expectedCreditLoss,
+                        modelVersion = adjustedInputs.modelVersion,
                     )
                 }
             }
@@ -1294,6 +1295,7 @@ class LendingService @Inject constructor(
                 stage = snapshot.stage,
                 expectedCreditLoss = snapshot.expectedCreditLoss,
                 createdAt = OffsetDateTime.now(clock),
+                modelVersion = snapshot.modelVersion,
             )
             // A genuine IFRS 9 stage transition (Stage 1/2/3) is a distinct signal from an ECL delta: ECL
             // can move within the same stage (PD/EAD drift), and — first cycle aside — a stage can change

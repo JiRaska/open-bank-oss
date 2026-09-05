@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.application.usecase
 
+import com.openbank.sanctions.application.port.out.ListImportOutcome
 import com.openbank.sanctions.application.port.out.SanctionsEntryRepository
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsEntry
@@ -24,16 +25,25 @@ import java.time.Instant
 import java.time.ZoneOffset
 
 /**
- * Covers the import pipeline: format dispatch (OFAC XML / OpenSanctions CSV / skipped formats),
- * name normalization, CSV parsing edge cases, and the catch-all error path. Uses a real loopback
- * [HttpServer] instead of mocking [java.net.http.HttpClient] directly — the service builds its own
- * HttpClient internally, so the only seam available is the actual socket.
+ * Covers the import pipeline: format dispatch (OFAC XML / EU FSF XML / OpenSanctions CSV /
+ * skipped formats), the outcome enum every attempt resolves to (issue #8362 — never an
+ * ambiguous count), name normalization, CSV parsing edge cases, and the catch-all error path.
+ * Uses a real loopback [HttpServer] instead of mocking [java.net.http.HttpClient] directly —
+ * the service builds its own HttpClient internally, so the only seam available is the actual
+ * socket.
  */
 class SanctionsImportServiceTest {
 
     private val entryRepo = mockk<SanctionsEntryRepository>()
     private val clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
     private val service = SanctionsImportService(entryRepo, clock)
+
+    /** EU list pinned to the OpenSanctions CSV source so CSV-format tests keep their loopback URL. */
+    private val openSanctionsEuService = SanctionsImportService(
+        entryRepo,
+        clock,
+        euSource = SanctionsImportService.EU_SOURCE_OPENSANCTIONS,
+    )
 
     private var server: HttpServer? = null
 
@@ -68,23 +78,26 @@ class SanctionsImportServiceTest {
 
     @Test
     fun `importList skips FATF_HIGH_RISK as country-risk`(): Unit = runBlocking {
-        val count = service.importList(SanctionsListType.FATF_HIGH_RISK, "https://example.com/unused")
+        val result = service.importList(SanctionsListType.FATF_HIGH_RISK, "https://example.com/unused")
 
-        assertThat(count).isZero()
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.SKIPPED_NOT_ENTITY_BASED)
+        assertThat(result.entriesImported).isZero()
     }
 
     @Test
     fun `importList skips CNB_DOMESTIC as seeded via migration`(): Unit = runBlocking {
-        val count = service.importList(SanctionsListType.CNB_DOMESTIC, "https://example.com/unused")
+        val result = service.importList(SanctionsListType.CNB_DOMESTIC, "https://example.com/unused")
 
-        assertThat(count).isZero()
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.SKIPPED_NOT_ENTITY_BASED)
     }
 
     @Test
-    fun `importList returns zero and swallows exception when download fails`(): Unit = runBlocking {
-        val count = service.importList(SanctionsListType.OFAC_SDN, "http://127.0.0.1:1/does-not-exist")
+    fun `importList reports FAILED_KEPT_EXISTING when the download fails`(): Unit = runBlocking {
+        val result = service.importList(SanctionsListType.OFAC_SDN, "http://127.0.0.1:1/does-not-exist")
 
-        assertThat(count).isZero()
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.FAILED_KEPT_EXISTING)
+        assertThat(result.entriesImported).isZero()
+        assertThat(result.detail).isNotBlank()
     }
 
     @Test
@@ -121,9 +134,10 @@ class SanctionsImportServiceTest {
         val entriesSlot = slot<List<SanctionsEntry>>()
         coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
 
-        val count = service.importList(SanctionsListType.OFAC_SDN, url)
+        val result = service.importList(SanctionsListType.OFAC_SDN, url)
 
-        assertThat(count).isEqualTo(2)
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(2)
         val entries = entriesSlot.captured
         assertThat(entries).hasSize(2)
 
@@ -159,9 +173,9 @@ class SanctionsImportServiceTest {
 
         coEvery { entryRepo.upsertAll(any()) } returns 0
 
-        val count = service.importList(SanctionsListType.OFAC_SDN, url)
+        val result = service.importList(SanctionsListType.OFAC_SDN, url)
 
-        assertThat(count).isZero()
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.EMPTY_FEED)
     }
 
     @Test
@@ -176,9 +190,10 @@ class SanctionsImportServiceTest {
         coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
         coEvery { entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("os-1", "os-2")) } returns 0
 
-        val count = service.importList(SanctionsListType.PEP_GLOBAL, url)
+        val result = service.importList(SanctionsListType.PEP_GLOBAL, url)
 
-        assertThat(count).isEqualTo(2)
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(2)
         val entries = entriesSlot.captured
         val person = entries.first { it.externalId == "os-1" }
         assertThat(person.primaryName).isEqualTo("Andrej Babis")
@@ -194,13 +209,13 @@ class SanctionsImportServiceTest {
     }
 
     @Test
-    fun `importList returns zero when CSV header is missing required columns`(): Unit = runBlocking {
+    fun `importList reports EMPTY_FEED when CSV header is missing required columns`(): Unit = runBlocking {
         val csv = "foo,bar\nbaz,qux\n"
         val url = serveOnce(csv, "text/csv")
 
-        val count = service.importList(SanctionsListType.EU_CONSOLIDATED, url)
+        val result = openSanctionsEuService.importList(SanctionsListType.EU_CONSOLIDATED, url)
 
-        assertThat(count).isZero()
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.EMPTY_FEED)
     }
 
     @Test
@@ -215,9 +230,9 @@ class SanctionsImportServiceTest {
         // still runs (the stream completed without error), just with an empty present set.
         coEvery { entryRepo.deactivateMissing(SanctionsListType.UN_CONSOLIDATED, emptySet()) } returns 0
 
-        val count = service.importList(SanctionsListType.UN_CONSOLIDATED, url)
+        val result = service.importList(SanctionsListType.UN_CONSOLIDATED, url)
 
-        assertThat(count).isZero()
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.EMPTY_FEED)
     }
 
     @Test
@@ -266,13 +281,13 @@ class SanctionsImportServiceTest {
         val url = serveOnce(csv, "text/csv")
 
         // The batch flush throws partway through the stream (simulates a DB hiccup between
-        // reading rows) — this must propagate out of importOpenSanctionsCsv, get swallowed by
-        // importList's catch-all, and never reach deactivateMissing.
+        // reading rows) — this must propagate out of importOpenSanctionsCsv, resolve to
+        // FAILED_KEPT_EXISTING in runImport's catch-all, and never reach deactivateMissing.
         coEvery { entryRepo.upsertAll(any()) } throws RuntimeException("connection reset")
 
-        val count = service.importList(SanctionsListType.PEP_GLOBAL, url)
+        val result = service.importList(SanctionsListType.PEP_GLOBAL, url)
 
-        assertThat(count).isZero()
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.FAILED_KEPT_EXISTING)
         coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
     }
 
@@ -295,5 +310,112 @@ class SanctionsImportServiceTest {
             entryRepo.upsertAll(any())
             entryRepo.deactivateMissing(SanctionsListType.PEP_GLOBAL, setOf("os-1"))
         }
+    }
+
+    // ──── EU consolidated list — first-party FSF XML (issue #8362) ────────────
+
+    @Test
+    fun `the default EU source imports the official FSF XML and upserts entries`(): Unit = runBlocking {
+        val fsfXml = """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <export xmlns="http://eu.europa.ec/fpi/fsd/export" generationDate="2026-08-05T16:47:04.449+02:00" globalFileId="184961">
+                <sanctionEntity designationDetails="" unitedNationId="" euReferenceNumber="EU.27.28" logicalId="13">
+                    <regulation regulationType="regulation" programme="IRQ" logicalId="348"/>
+                    <subjectType code="person" classificationCode="P"/>
+                    <nameAlias firstName="Saddam" middleName="" lastName="Hussein Al-Tikriti" wholeName="Saddam Hussein Al-Tikriti" strong="true" logicalId="17"/>
+                    <nameAlias wholeName="Abu Ali" strong="true" logicalId="19"/>
+                    <citizenship region="" countryIso2Code="IQ" countryDescription="IRAQ" logicalId="1"/>
+                    <birthdate circa="false" birthdate="1937-04-28" logicalId="1"/>
+                </sanctionEntity>
+                <sanctionEntity euReferenceNumber="EU.12345.67" logicalId="999">
+                    <subjectType code="enterprise" classificationCode="E"/>
+                    <nameAlias wholeName="ACME Trading" strong="true" logicalId="1"/>
+                    <regulation programme="TAQA" logicalId="2"/>
+                </sanctionEntity>
+            </export>
+        """.trimIndent()
+        val url = serveOnce(fsfXml, "application/xml")
+        val fsfService = SanctionsImportService(entryRepo, clock, euFsfUrl = url)
+
+        val entriesSlot = slot<List<SanctionsEntry>>()
+        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 2
+        coEvery {
+            entryRepo.deactivateMissing(SanctionsListType.EU_CONSOLIDATED, setOf("eu-fsf-13", "eu-fsf-999"))
+        } returns 0
+
+        // The default euSource is eu-fsf — no explicit source selection in this service instance.
+        val result = fsfService.importList(SanctionsListType.EU_CONSOLIDATED, "https://ignored.example/seed-url")
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(2)
+        val entries = entriesSlot.captured
+
+        val person = entries.first { it.externalId == "eu-fsf-13" }
+        assertThat(person.primaryName).isEqualTo("Saddam Hussein Al-Tikriti")
+        assertThat(person.entityType).isEqualTo(EntityType.INDIVIDUAL)
+        assertThat(person.aliases).containsExactly("Abu Ali")
+        assertThat(person.dateOfBirth).isEqualTo("1937-04-28")
+        assertThat(person.nationalities).containsExactly("IQ")
+        assertThat(person.programs).containsExactly("IRQ")
+        assertThat(person.listType).isEqualTo(SanctionsListType.EU_CONSOLIDATED)
+        // searchText carries the normalized primary name and aliases for the pg_trgm match.
+        assertThat(person.searchText).contains("saddam hussein al-tikriti").contains("abu ali")
+
+        val org = entries.first { it.externalId == "eu-fsf-999" }
+        assertThat(org.entityType).isEqualTo(EntityType.ORGANIZATION)
+        assertThat(org.programs).containsExactly("TAQA")
+    }
+
+    @Test
+    fun `an FSF entity without a programme falls back to the EU default`(): Unit = runBlocking {
+        val fsfXml = """
+            <export xmlns="http://eu.europa.ec/fpi/fsd/export">
+                <sanctionEntity logicalId="42">
+                    <subjectType code="person"/>
+                    <nameAlias wholeName="No Programme" strong="true" logicalId="1"/>
+                </sanctionEntity>
+            </export>
+        """.trimIndent()
+        val url = serveOnce(fsfXml, "application/xml")
+        val fsfService = SanctionsImportService(entryRepo, clock, euFsfUrl = url)
+
+        val entriesSlot = slot<List<SanctionsEntry>>()
+        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 1
+        coEvery { entryRepo.deactivateMissing(SanctionsListType.EU_CONSOLIDATED, setOf("eu-fsf-42")) } returns 0
+
+        val result = fsfService.importList(SanctionsListType.EU_CONSOLIDATED, "https://ignored.example/seed-url")
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(entriesSlot.captured.single().programs).containsExactly("EU-SANCTIONS")
+    }
+
+    @Test
+    fun `the seed source reports SEED_FALLBACK_NON_PRODUCTION and never touches the store`(): Unit = runBlocking {
+        val seedService = SanctionsImportService(
+            entryRepo,
+            clock,
+            euSource = SanctionsImportService.EU_SOURCE_SEED,
+        )
+
+        val result = seedService.importList(SanctionsListType.EU_CONSOLIDATED, "https://example.com/unused")
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.SEED_FALLBACK_NON_PRODUCTION)
+        assertThat(result.detail).contains("NON-PRODUCTION")
+        coVerify(exactly = 0) { entryRepo.upsertAll(any()) }
+        coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
+    }
+
+    @Test
+    fun `an unreachable FSF endpoint reports FAILED_KEPT_EXISTING, not an empty import`(): Unit = runBlocking {
+        val fsfService = SanctionsImportService(
+            entryRepo,
+            clock,
+            euFsfUrl = "http://127.0.0.1:1/does-not-exist",
+        )
+
+        val result = fsfService.importList(SanctionsListType.EU_CONSOLIDATED, "https://example.com/unused")
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.FAILED_KEPT_EXISTING)
+        coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
     }
 }

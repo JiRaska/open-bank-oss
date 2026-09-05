@@ -40,10 +40,11 @@ Edge je **průchozí processor**: neukládá osobní data (viz [04 — Data](./0
 
 | Právo | Aplikace na edge |
 |---|---|
-| Přístup (čl. 15) | `GET /profile`, `GET /accounts`, … vrací vlastní data subjektu (omezeno na party / vynuceno vlastnictví) |
+| Přístup (čl. 15) | `GET /privacy/gdpr-export` vrací kompletní export přístupu subjektu (party + KYC + karty, ADR-0118 §6); `GET /profile`, `GET /accounts`, … vrací tatáž data po částech (omezeno na party / vynuceno vlastnictví) |
 | Oprava (čl. 16) | upstream (party-service) — edge profilová data neukládá |
 | Výmaz (čl. 17) | upstream controllery; AMLD přebíjí kde aplikovatelné (10 let) — edge neukládá nic |
-| Omezení / Přenositelnost / Námitka | upstream controllery; edge nedrží žádné záznamy |
+| Přenositelnost (čl. 20) | `GET /privacy/portability-export` — pouze data na základě souhlasu/smlouvy, IBANy protistran redigované dle čl. 20 odst. 4; přímý přenos dle čl. 20 odst. 2 se nenabízí (ADR-0204 D4) |
+| Omezení / Námitka | upstream controllery; edge nedrží žádné záznamy |
 
 ### Datové toky
 

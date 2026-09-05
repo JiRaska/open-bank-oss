@@ -1,0 +1,70 @@
+# Security-signal log alerting (ADR-0279 WS2 — security observability).
+#
+# THE GAP THIS CLOSES. The observability stack (Alloy -> Loki -> ruler -> Alertmanager) was
+# built for liveness and workflow staleness (ADR-0237), and Falco runtime detections got their
+# alerts in loki-rules-falco-runtime.yaml — but no rule answered "is someone PROBING us right
+# now". The HoneytokenFilter in openbank-libs-runtime (com.openbank.libs.security, #8554) now
+# emits exactly one log line for exactly one condition, and this file turns it into an alert.
+#
+# WHY A HONEY ENDPOINT ALERT CAN BE TRUSTED. A honey path is never routed, never linked and
+# never documented, so a hit cannot be a confused-but-legitimate user — it is reconnaissance
+# by construction. That makes this the rare alert whose false-positive rate is ~0 by design,
+# not by tuning. The one deliberate exception is our OWN synthetic/fuzz tooling, which is why
+# the rule excludes the namespaces those run in; add exclusions only for tooling that provably
+# crawls every route, never for "it was noisy".
+#
+# SEVERITY. Starts at `warning` per the estate's documented convention (a new rule that pages
+# is a regression even when it is correct — see loki-rules-falco-runtime.yaml). PROMOTION
+# CRITERION: flip to `critical` the day a known-positive (a manual curl against a sandbox honey
+# path) has been shown to reach Slack end-to-end — that proof is part of the runbook-0018
+# purple-team tabletop, which is exactly the drill this alert exists to make observable.
+#
+# MECHANISM. ConfigMap labelled loki_rule=1, picked up by the Loki chart's sidecar into the
+# ruler — the same, and only, log-alerting mechanism this repo operates (see the header of
+# loki-rules-falco-runtime.yaml for why no other). A separate file, not an appended document,
+# per the #3450/#3460 clean-merge-that-kept-one-side lesson.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-security-signals
+  namespace: observability
+  labels:
+    loki_rule: "1"
+    app.kubernetes.io/part-of: observability
+data:
+  security-signals.yaml: |
+    groups:
+      - name: openbank.logs.security-signals
+        interval: 1m
+        rules:
+          # Any hit on a configured honey endpoint. The HoneytokenFilter logs
+          # `honey endpoint hit: path=... remote=...` at WARN in the hitting service's pod and
+          # answers the caller a plain 404 — the caller learns nothing, we learn everything.
+          # The match string is emitted by exactly one class in the estate, so the filter
+          # cannot collide with an unrelated log line.
+          #
+          # No `for:` — a probe is a point event; see the Falco alert for why `for` on a bursty
+          # log signal can drop the notification entirely.
+          - alert: HoneyEndpointHit
+            expr: |
+              sum by (namespace) (
+                count_over_time(
+                  {namespace=~".+", namespace!~"observability|falco|kube-system|monitoring"}
+                    |= "honey endpoint hit"
+                  [10m]
+                )
+              ) > 0
+            labels:
+              severity: warning
+              team: security
+            annotations:
+              summary: "Honey endpoint hit in {{ $labels.namespace }}: {{ $value | printf \"%.0f\" }}x in 10m"
+              description: >-
+                A request reached a configured honey endpoint — a path no legitimate caller can
+                know, so this is reconnaissance by construction. Read the full line in Loki:
+                {namespace="{{ $labels.namespace }}"} |= "honey endpoint hit"
+                — it carries the sanitized honey path and the X-Forwarded-For value. Correlate
+                with the openbank.security.honeytoken.hits counter (Prometheus) and with Falco
+                events in the same window; a honey hit plus a runtime detection is an incident,
+                not an alert. Tuning: only exclude a source that provably crawls every route
+                (our own fuzz/synthetic jobs); never silence the rule.
