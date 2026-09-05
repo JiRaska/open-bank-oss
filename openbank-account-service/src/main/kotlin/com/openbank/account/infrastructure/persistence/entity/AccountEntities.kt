@@ -88,10 +88,10 @@ class AccountEntity : PanacheEntityBase {
 
     /** Stamped from the injected [java.time.Clock] in the repository layer (ADR-0100 — no wall-clock reads here). */
     @Column(name = "created_at", nullable = false, updatable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @Column(name = "updated_at", nullable = false)
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 }
 
 @Entity
@@ -130,10 +130,10 @@ class AccountPocketEntity : PanacheEntityBase {
 
     /** Stamped from the injected [java.time.Clock] in the repository layer (ADR-0100 — no wall-clock reads here). */
     @Column(name = "created_at", nullable = false, updatable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @Column(name = "updated_at", nullable = false)
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 }
 
 /**
@@ -154,5 +154,5 @@ class AccountIdempotencyEntity : PanacheEntityBase {
     lateinit var accountId: UUID
 
     @Column(name = "created_at", nullable = false, updatable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 }

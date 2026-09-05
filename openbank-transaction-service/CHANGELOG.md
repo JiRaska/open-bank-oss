@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.21.0...transaction-service-v1.21.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **transaction:** entity timestamp defaults EPOCH -&gt; Instant.now() ([#8463](https://github.com/JiRaska/open-bank-oss/issues/8463)) ([941a93b](https://github.com/JiRaska/open-bank-oss/commit/941a93bf0182c9a9d8ebe32df7d55788e1ca647e))
+
 ## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.20.0...transaction-service-v1.21.0) (2026-08-24)
 
 

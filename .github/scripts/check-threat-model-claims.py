@@ -126,8 +126,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
     #
     # Eight entries name an OPEN PR. Those are the sweep's own corrections; they retire themselves
     # the day each PR lands, and re-editing the same rows here would conflict with a live branch.
-    'document-service|Trust boundaries|openbank.billing.billing.event':
-        'open PR #8415 — no such topic; the real ingress is `openbank.billing.fee.event`',
     'onboarding-service|5. AML / sanctions override — special controls|kyc.check.override':
         'an ADR-0068 planned control; absent from `rules.yaml` and from every resource',
     'onboarding-service|5. AML / sanctions override — special controls|confirmedBy':
@@ -152,8 +150,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'removed by #4221; `application.yaml:174` records the removal in a comment',
     'openbank-fraud-service|6. Change log|fraudServiceUrl':
         'occurs only inside a comment in `fraud_rest_ext.rego`; not a policy input',
-    'openbank-fx-service|6. Change log|FxConversionService':
-        'open PR #8414 — the wrapper is real and is `FxService.scoreFraudShadow()`',
     'openbank-ledger-service|8. Change log|ledgerServiceUrl':
         'occurs only inside a comment in `ledger_rest_ext.rego`; not a policy input',
     'openbank-lending-service|3. Controls in place (this slice)|lending.origination.worker.enabled':
@@ -168,8 +164,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'previous repository contract, replaced by `upsertAll`; only the port KDoc names it',
     'openbank-security-scanner|1. Scope & purpose|openbank.security.scan.event':
         'topic named in CHANGELOGs only; no producer, consumer, contract or KafkaTopic CR',
-    'openbank-security-scanner|5. Residual risks|SecurityContractTest':
-        'open PR #8418 — no fleet-wide class; nine per-service variants cover 8 of 61 modules',
     'openbank-sepa-instant|6. Change log|SctInstOutboxBacklogGaugeTest':
         'test for the outbox dropped by `V4__drop_sct_inst_outbox.sql` (#5126); no such class',
     'openbank-sepa-instant|6. Change log|KafkaSctInstOutboxEventPublisher':
@@ -182,8 +176,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'names the StAX API; `Pacs004Reader` IS XXE-hardened, via `DocumentBuilderFactory` (`disallow-doctype-decl`, external entities off). Control real, API name wrong',
     'openbank-sepa-payment|5a. Return path (pacs.004) — STRIDE supplement|XMLInputFactory':
         'names the StAX API; `Pacs004Reader` IS XXE-hardened, via `DocumentBuilderFactory` (`disallow-doctype-decl`, external entities off). Control real, API name wrong',
-    'openbank-sepa-payment|5a. Return path (pacs.004) — STRIDE supplement|openbank.sepa.returns.enabled':
-        'open PR #8416 — no such property; `/returns` reads no config at all',
     'openbank-sepa-payment|6. Change log|settleProcessingPayment':
         'no such function in the tree',
     'openbank-settlement-service|T1|workflowRunId':
@@ -208,8 +200,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
     'openbank-swift-service|6. Change log|swift_rest_ext.rego':
         "file does not exist; swift's ext policy is embedded in its bundle generator",
-    'openbank-tpp-registry-service|5. Residual risks / assumptions|openbank.tpp.cache-ttl-seconds':
-        'open PR #8417 — neither the knob nor the cache psd2 was said to keep exists',
     'openbank-transaction-service|5. Residual risks / assumptions|PaymentSagaOrchestrator':
         'retired for Temporal (ADR-0120 Phase 5); survives only in KDoc that says it was removed',
     'openbank-transaction-service|6. Change log|PaymentSagaOrchestrator':

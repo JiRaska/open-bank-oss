@@ -585,7 +585,10 @@ class AccountOpeningBlockedByScreeningException(partyId: UUID, matchedName: Stri
  * that fails open (see [ProductCatalogPort]). Extends [IllegalStateException] deliberately (not
  * a bare [RuntimeException] like [AccountOpeningBlockedByScreeningException]) so it resolves to
  * the libs-runtime `IllegalStateExceptionMapper` (422 BUSINESS_RULE_VIOLATION) instead of falling
- * through to the generic 500 mapper.
+ * through to the generic 500 mapper. The screening exception above must NEVER copy this pattern
+ * (#8512): its message carries the matched sanctions name, and the IllegalStateException mapper
+ * echoes `message` on the wire — a free sanctions-list oracle. It has a dedicated mapper in
+ * ExceptionMappers.kt that answers 422 with a fixed body and keeps the detail in a WARN log.
  */
 class ProductNotEligibleException(productId: UUID, reason: String) :
     IllegalStateException("Cannot open account against product $productId: $reason")

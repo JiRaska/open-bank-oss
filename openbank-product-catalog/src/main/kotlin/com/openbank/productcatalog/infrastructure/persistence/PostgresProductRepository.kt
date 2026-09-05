@@ -113,7 +113,7 @@ class PostgresProductRepository(
     // upgrade does not need to rewrite JSONB. The relational primary key is the canonical
     // product identity, however, and it is the only id the v1 API may expose: downstream
     // account records hold that UUID and must be able to round-trip it through this resource.
-    private fun ProductEntity.toDomain(): Product = mapper.readValue(doc, Product::class.java).copy(
+    private fun ProductEntity.toDomain(): Product = LegacyProductJson.readProduct(mapper, doc).copy(
         id = id.toString(),
         revision = revision,
     )
