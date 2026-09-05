@@ -335,6 +335,24 @@ change_requirements:
     gate: schema-compat
     enforced: advisory
     target_enforce_date: "2026-09-15"   # ADR-0144
+    # GRADUATION EVIDENCE, measured 2026-09-05. Replayed check-event-schema-compat.py over the
+    # REAL population — the 20 commits in 90 days touching a file that contains `DomainEvent(`,
+    # found with `git grep -l`, not by path name — and the gate was demonstrably exercised:
+    # 59 event-class property-set changes across DelegationEvents, ConsentEvents and others.
+    # It flagged none, correctly: every delta was an ADDED field, which is backward compatible.
+    # False positives on real history: 0 of 20. Same evidence shape #3438 used before
+    # graduating threat-model-diff.
+    #
+    # Two caveats worth carrying, because the first four attempts at this measurement all
+    # produced clean-looking numbers that meant nothing:
+    #   * it only became meaningful after #8713 fixed a parser blind spot — a KDoc inside a
+    #     constructor parameter list hid the parameter after it, so 15 properties fleet-wide
+    #     were invisible and REMOVING one produced no finding at all;
+    #   * selecting commits by path name (`*Event*.kt`, `*/events/*`) gave 40 commits of which
+    #     ZERO touched an event file. Select the population from the code, never from names.
+    #
+    # NOT evidenced: no commit in the window REMOVED or retyped a field, so those paths rest on
+    # the gate's own --self-test (17 cases), not on history.
     # CI producer is LIVE (advisory): .github/scripts/check-event-schema-compat.py runs in
     # the "Validate manifests" job on every PR — diff-scoped over DomainEvent data classes
     # (removed/renamed props, type changes, non-nullable-no-default additions = replay break,
