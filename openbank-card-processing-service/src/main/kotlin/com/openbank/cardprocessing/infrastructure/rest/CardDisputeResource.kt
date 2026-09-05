@@ -73,10 +73,7 @@ class CardDisputeResource(private val useCase: CardDisputeUseCase) {
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "cardprocessing.dispute", resource = "#id")
     @Operation(summary = "File evidence against an open case")
-    suspend fun submitEvidence(
-        @PathParam("id") id: UUID,
-        request: SubmitEvidenceRequestDto,
-    ): Response = respond(
+    suspend fun submitEvidence(@PathParam("id") id: UUID, request: SubmitEvidenceRequestDto): Response = respond(
         useCase.submitEvidence(SubmitEvidenceCommand(id, request.documentReference, request.note)),
     )
 

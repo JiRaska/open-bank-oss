@@ -21,10 +21,7 @@ data class ProvisionTokenCommand(
     val idempotencyKey: String,
 )
 
-data class ChangeTokenStatusCommand(
-    val tokenReference: String,
-    val status: NetworkTokenStatus,
-)
+data class ChangeTokenStatusCommand(val tokenReference: String, val status: NetworkTokenStatus)
 
 /**
  * The caller for [TokenisationPort][com.openbank.libs.domain.cards.scheme.TokenisationPort].
@@ -55,11 +52,7 @@ data class OpenDisputeCommand(
     val idempotencyKey: String,
 )
 
-data class SubmitEvidenceCommand(
-    val disputeId: UUID,
-    val documentReference: String,
-    val note: String?,
-)
+data class SubmitEvidenceCommand(val disputeId: UUID, val documentReference: String, val note: String?)
 
 interface CardDisputeUseCase {
     suspend fun open(command: OpenDisputeCommand): DisputeOutcome

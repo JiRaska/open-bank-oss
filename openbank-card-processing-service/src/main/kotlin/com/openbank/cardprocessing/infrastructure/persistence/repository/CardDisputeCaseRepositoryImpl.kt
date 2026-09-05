@@ -23,21 +23,18 @@ class CardDisputeCaseRepositoryImpl(private val outbox: CardProcessingOutboxRepo
     CardDisputeCaseRepository,
     PanacheRepository<CardDisputeCaseEntity> {
 
-    override suspend fun save(
-        case: CardDisputeCase,
-        event: OutboxMessage,
-        idempotencyKey: String,
-    ): CardDisputeCase = Panache.withTransaction {
-        find("id", case.id).firstResult().flatMap { existing ->
-            val persisted: Uni<CardDisputeCaseEntity> = if (existing != null) {
-                existing.applyFrom(case)
-                Uni.createFrom().item(existing)
-            } else {
-                persist(case.toEntity(idempotencyKey))
+    override suspend fun save(case: CardDisputeCase, event: OutboxMessage, idempotencyKey: String): CardDisputeCase =
+        Panache.withTransaction {
+            find("id", case.id).firstResult().flatMap { existing ->
+                val persisted: Uni<CardDisputeCaseEntity> = if (existing != null) {
+                    existing.applyFrom(case)
+                    Uni.createFrom().item(existing)
+                } else {
+                    persist(case.toEntity(idempotencyKey))
+                }
+                persisted.chain { _ -> outbox.persistInTransaction(event) }.replaceWith(case)
             }
-            persisted.chain { _ -> outbox.persistInTransaction(event) }.replaceWith(case)
-        }
-    }.awaitSuspending()
+        }.awaitSuspending()
 
     override suspend fun findById(id: UUID): CardDisputeCase? =
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain()

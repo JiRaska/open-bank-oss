@@ -13,11 +13,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-data class ProvisionTokenRequestDto(
-    val cardId: UUID,
-    val requestorId: String,
-    val requestorLabel: String,
-)
+data class ProvisionTokenRequestDto(val cardId: UUID, val requestorId: String, val requestorLabel: String)
 
 data class ChangeTokenStatusRequestDto(val status: String)
 

@@ -65,8 +65,7 @@ class CardTokenServiceTest {
     private fun service(port: TokenisationPort = simulator) =
         CardTokenService(port, registrations, cards, metrics, mapper, clock)
 
-    private fun command(key: String = "idem-token-1") =
-        ProvisionTokenCommand(cardId, "wallet-apple", "Apple Pay", key)
+    private fun command(key: String = "idem-token-1") = ProvisionTokenCommand(cardId, "wallet-apple", "Apple Pay", key)
 
     @Test
     fun `provisioning mirrors what the scheme answered and emits the event in the same write`(): Unit = runBlocking {
@@ -90,20 +89,19 @@ class CardTokenServiceTest {
     }
 
     @Test
-    fun `a repeated idempotency key returns the first registration and does not call the scheme`(): Unit =
-        runBlocking {
-            val existing = registration(NetworkTokenStatus.ACTIVE)
-            coEvery { registrations.findByIdempotencyKey("idem-token-1") } returns existing
-            val port = mockk<TokenisationPort>()
+    fun `a repeated idempotency key returns the first registration and does not call the scheme`(): Unit = runBlocking {
+        val existing = registration(NetworkTokenStatus.ACTIVE)
+        coEvery { registrations.findByIdempotencyKey("idem-token-1") } returns existing
+        val port = mockk<TokenisationPort>()
 
-            val outcome = service(port).provision(command())
+        val outcome = service(port).provision(command())
 
-            assertThat((outcome as TokenOutcome.Provisioned).registration).isEqualTo(existing)
-            // The discriminating assertion: without the idempotency read, a retry mints a SECOND
-            // wallet credential the customer can see, and every other assertion here still passes.
-            coVerify(exactly = 0) { port.provision(any(), any()) }
-            coVerify(exactly = 0) { registrations.save(any(), any(), any()) }
-        }
+        assertThat((outcome as TokenOutcome.Provisioned).registration).isEqualTo(existing)
+        // The discriminating assertion: without the idempotency read, a retry mints a SECOND
+        // wallet credential the customer can see, and every other assertion here still passes.
+        coVerify(exactly = 0) { port.provision(any(), any()) }
+        coVerify(exactly = 0) { registrations.save(any(), any(), any()) }
+    }
 
     @Test
     fun `a scheme that cannot answer refuses and writes no row`(): Unit = runBlocking {
