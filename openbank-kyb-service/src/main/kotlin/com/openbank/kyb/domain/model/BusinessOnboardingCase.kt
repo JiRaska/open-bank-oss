@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.domain.model
 
+import com.openbank.libs.domain.identifiers.Ids
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -138,7 +139,7 @@ data class BusinessOnboardingCase(
     }
 
     private fun initiatorSigner(index: Int?, name: String, dob: LocalDate?, at: Instant) = Signer(
-        id = UUID.randomUUID(),
+        id = Ids.newId(),
         representativeIndex = index,
         fullName = name,
         dateOfBirth = dob,
@@ -169,7 +170,7 @@ data class BusinessOnboardingCase(
         val invited = distinct.mapIndexed { i, idx ->
             val rep = ex.representatives[idx]
             Signer(
-                id = UUID.randomUUID(),
+                id = Ids.newId(),
                 representativeIndex = idx,
                 fullName = rep.fullName,
                 dateOfBirth = rep.dateOfBirth,

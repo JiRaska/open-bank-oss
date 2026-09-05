@@ -213,7 +213,8 @@ class PartyService : PartyUseCase {
         val existing = mandateRepo.findActive(principal.id, agent.id, cmd.role.name)
         val mandate = (
             existing ?: PartyMandate(
-                id = UUID.randomUUID(),
+                // ADR-0106: a durable, indexed identifier — UUIDv7 for insert locality, not a v4.
+                id = Ids.newId(),
                 principalPartyId = principal.id,
                 agentPartyId = agent.id,
                 role = cmd.role,

@@ -27,6 +27,7 @@ import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.LegalFormClass
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.SignerStatus
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.jboss.logging.Logger
@@ -74,7 +75,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
             )
         }
         val now = Instant.now(clock)
-        val started = BusinessOnboardingCase.start(UUID.randomUUID(), identifier, cmd.initiatorPartyId, now)
+        val started = BusinessOnboardingCase.start(Ids.newId(), identifier, cmd.initiatorPartyId, now)
         val extract = lookup.lookup(identifier, LookupCommand(cmd.scheme, cmd.identifier, cmd.declared))
             ?: return cases.save(
                 started.copy(
