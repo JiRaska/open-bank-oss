@@ -41,6 +41,19 @@ class AccountResourceAuthzTest {
     }
 
     @Test
+    fun `anonymous request to the IBAN lookup answers 401`() {
+        // The VoP hop-1 path (GET /api/v1/accounts/iban/{iban}, #8552). A recorded 401 pact
+        // cannot survive provider replay — the replay TestAuthMechanism authenticates every
+        // request as pact-verifier/ROLE_OPERATOR — so the negative case lives HERE, where an
+        // anonymous request genuinely carries no identity.
+        Given { this } When {
+            get("/api/v1/accounts/iban/123456789/0800")
+        } Then {
+            statusCode(401)
+        }
+    }
+
+    @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     fun `advisory mode does not block an annotated read - request reaches the handler`() {
         // Unknown account id -> the handler's own not-found path answers, proving the
