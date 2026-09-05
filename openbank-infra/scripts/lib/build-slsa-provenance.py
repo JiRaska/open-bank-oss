@@ -64,7 +64,7 @@ def build_predicate(env: dict[str, str]) -> dict:
     try:
         entry_point = workflow_ref[len(repo) + 1:].split("@", 1)[0]
     except (IndexError, ValueError):
-        raise SystemExit(f"build-slsa-provenance: unparseable GITHUB_WORKFLOW_REF: {workflow_ref!r}")
+        raise SystemExit(f"build-slsa-provenance: unparseable GITHUB_WORKFLOW_REF: {workflow_ref!r}") from None
     if not entry_point.endswith((".yml", ".yaml")):
         raise SystemExit(f"build-slsa-provenance: entryPoint does not look like a workflow: {entry_point!r}")
 
