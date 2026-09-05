@@ -446,7 +446,7 @@ components:
           type: array
           items:
             type: string
-            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, CNB_DOMESTIC]
+            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
         reviewedBy:
           type: string
           nullable: true
@@ -466,7 +466,7 @@ components:
       properties:
         listType:
           type: string
-          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, CNB_DOMESTIC]
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
         matchType:
           type: string
           enum: [EXACT, FUZZY, PHONETIC, ALIAS]

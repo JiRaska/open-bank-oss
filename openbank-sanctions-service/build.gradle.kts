@@ -49,8 +49,12 @@ dependencies {
     // POST /api/v1/sanctions/screen. @TestSecurity supplies the operator role Pact replays with.
     testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security)
-    // #8699: the partial-screen defect is only observable as an HTTP status, so the test has
-    // to drive the real endpoint. Test-only, and the fleet-standard REST client here.
+    // RestAssured: SanctionsOutboxAtomicityIT (#8353) drives POST /screen and POST /review over
+    // real HTTP, the only way to exercise a reactive Panache write (a bare @QuarkusTest thread
+    // carries no Vert.x context). Pact's own provider verification uses HttpTestTarget, so this
+    // module had no RestAssured on its test classpath before. #8699 adds a second driver: the
+    // partial-screen defect is only observable as an HTTP status, so that test drives the real
+    // endpoint too.
     testImplementation(libs.rest.assured.kotlin)
 }
 

@@ -132,8 +132,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'an ADR-0068 planned field; present in no entity, DTO or migration',
     'openbank-account-service|6. Change log|openAccountIdempotencyKey':
         'no such identifier anywhere in the tree',
-    'openbank-balance-service|3. Authn / Authz|BalanceResourceSecurityTest':
-        'open PR #8408 — the guard is real and is `BalanceSecurityContractTest`',
     'openbank-clearing-service|3. Authn/Authz|ClearingResourceSecurityTest':
         'open PR #8409 — the guard is real and is `ClearingSecurityContractTest`',
     'openbank-consent-service|6. Change log|ConsentEventPublisher':

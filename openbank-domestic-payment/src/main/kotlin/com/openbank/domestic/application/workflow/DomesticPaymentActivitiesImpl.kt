@@ -4,8 +4,10 @@
 
 package com.openbank.domestic.application.workflow
 
+import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.AmlCasePort
 import com.openbank.domestic.application.port.out.AmlCaseRiskLevel
+import com.openbank.domestic.application.port.out.CustomerNotificationPort
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.port.out.FraudScoreCommand
@@ -18,6 +20,7 @@ import com.openbank.domestic.application.port.out.SchemeGatewayUnavailableExcept
 import com.openbank.domestic.application.port.out.ScreeningUnavailableException
 import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
+import com.openbank.domestic.application.port.out.customerSafeReason
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
@@ -45,7 +48,10 @@ private const val PAYMENT_STATUS_CHANGED_EVENT = "domestic.payment.status-change
 private const val ALERT_SANCTIONS_HIT = "SANCTIONS_HIT"
 private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
 
-@Suppress("LongParameterList")
+// TooManyFunctions: one over detekt's threshold since #8432 added the private notification helper.
+// The activities are a Temporal contract — one method per workflow step — so splitting the class to
+// satisfy a count would put steps of one workflow in two places.
+@Suppress("LongParameterList", "TooManyFunctions")
 @ApplicationScoped
 open class DomesticPaymentActivitiesImpl(
     private val paymentRepository: DomesticPaymentRepository,
@@ -55,6 +61,8 @@ open class DomesticPaymentActivitiesImpl(
     private val fraudScoringPort: FraudScoringPort,
     private val schemeGatewayPort: SchemeGatewayPort,
     private val settlementPort: SettlementPort,
+    private val accountLookupPort: AccountLookupPort,
+    private val customerNotificationPort: CustomerNotificationPort,
     private val clock: Clock,
     private val metrics: DomainMetrics,
     @ConfigProperty(name = "openbank.domestic.scheme-submission.enabled", defaultValue = "false")
@@ -183,6 +191,46 @@ open class DomesticPaymentActivitiesImpl(
         Unit
     }
 
+    /**
+     * Tell the owner their payment did not go — best effort, and only for a SCHEME rejection.
+     *
+     * **Never called from [rejectPayment].** That activity is the sanctions-screening BLOCK path
+     * and always records [DomesticRejectReason.SANCTIONS_HIT]; telling the customer their payment
+     * was stopped by a financial-crime control is tipping-off. Whether they should instead receive
+     * a neutral "we could not complete this, please contact us" is a compliance decision, not a
+     * mapping — see #8432. [customerSafeReason] would render those three reasons harmlessly
+     * anyway, but the guard that matters is this call site, not the string.
+     *
+     * The recipient is the account OWNER, not [DomesticPayment.actorId]: for a delegated payment
+     * the actor is the dispositor, and it is the owner whose money did not move.
+     *
+     * Failure is swallowed. A notification that cannot be published must never fail the activity —
+     * Temporal would retry it, and the retry would re-run bookkeeping for a verdict already
+     * recorded.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun notifyPaymentFailed(payment: DomesticPayment, reason: DomesticRejectReason?) {
+        try {
+            val ownerPartyId = accountLookupPort.findPartyByAccountId(payment.debtorAccountId)
+            if (ownerPartyId == null) {
+                log.warnf(
+                    "Payment %s was rejected but its account owner could not be resolved — " +
+                        "the customer will not be told (#8432)",
+                    payment.id,
+                )
+                return
+            }
+            customerNotificationPort.notifyPaymentFailed(
+                partyId = ownerPartyId,
+                amount = payment.amount,
+                currency = payment.currency,
+                reason = customerSafeReason(reason),
+            )
+        } catch (e: Exception) {
+            log.warnf(e, "Payment %s rejection recorded but the customer notification failed (#8432)", payment.id)
+        }
+    }
+
     override fun shadowFraudScore(paymentId: UUID): Unit = vtx {
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during fraud score activity")
@@ -299,6 +347,9 @@ open class DomesticPaymentActivitiesImpl(
                     payload = eventPublisher.statusChangedPayload(payment, updated),
                 ),
             )
+            if (nextStatus == DomesticPaymentStatus.REJECTED) {
+                notifyPaymentFailed(updated, reason)
+            }
             nextStatus
         }
     }
