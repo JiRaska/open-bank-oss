@@ -640,7 +640,21 @@ change_requirements:
     gate: docs-currency
     enforced: advisory
     target_enforce_date: "2026-09-15"   # ADR-0144
-    blocked_on: "no CI checker for section-documentation currency (not yet written) — likely needs a docs-touched-when-page-touched heuristic, not a strict diff rule"
+    # MEASURED 2026-09-04, and the number is the argument: 451 commits in 30 days touch an
+    # admin-ui `page.tsx`, and of a 60-commit sample only 3 (5%) also touch docs/, a .mmd
+    # diagram or process.yaml. So the rule as written — "the section's documentation updated
+    # in the same PR" — would fail 95% of admin-ui page commits, and the
+    # docs-touched-when-page-touched heuristic this note proposes would fail exactly the same
+    # 95%: it IS that rule. A gate that reddens 19 of every 20 PRs in a tree is not a control,
+    # it is a thing people learn to click past (the same reasoning that keeps
+    # check-entity-column-names.py checking a decidable convention instead of guessing).
+    #
+    # What is missing is therefore not a checker but a DEFINITION of currency that a machine
+    # can decide and that a normal page edit does not violate — e.g. scoping to pages whose
+    # documented CONTROLS changed, rather than to any page edit. Until that exists this date
+    # cannot be met by writing code, and moving it without saying so would make this record
+    # the fourth stale one found this week.
+    blocked_on: "the rule as written is not enforceable: measured 2026-09-04, a strict or heuristic docs-touched-when-page-touched gate fails 95% of admin-ui page commits (451 page.tsx commits in 30 days; 3 of a 60-commit sample also touched docs). Needs a decidable definition of currency scoped to changed controls, not a checker"
   clock_injection:
     # ADR-0100 (DST Layer 1): no Instant.now() / LocalDateTime.now() / System.currentTimeMillis()
     # in domain or application layer of money-path services. All time must flow from an injected
