@@ -47,7 +47,6 @@ type FunnelCounts = Record<string, number>
 const STAGES = [
   'REGISTERED',
   'KYC_OPEN',
-  'KYC_DOCUMENTS_REQUIRED',
   'KYC_UNDER_REVIEW',
   'SCA_PENDING',
   'ACTIVE',
@@ -59,7 +58,6 @@ type Stage = typeof STAGES[number]
 const STAGE_LABEL_CS: Record<Stage, string> = {
   REGISTERED:               'Registrován',
   KYC_OPEN:                 'KYC otevřeno',
-  KYC_DOCUMENTS_REQUIRED:   'KYC — dokumenty',
   KYC_UNDER_REVIEW:         'KYC — přezkoumání',
   SCA_PENDING:              'SCA čeká',
   ACTIVE:                   'Aktivní',
@@ -69,7 +67,6 @@ const STAGE_LABEL_CS: Record<Stage, string> = {
 const STAGE_LABEL_EN: Record<Stage, string> = {
   REGISTERED:               'Registered',
   KYC_OPEN:                 'KYC Open',
-  KYC_DOCUMENTS_REQUIRED:   'KYC — Docs Needed',
   KYC_UNDER_REVIEW:         'KYC Under Review',
   SCA_PENDING:              'SCA Pending',
   ACTIVE:                   'Active',
@@ -79,7 +76,6 @@ const STAGE_LABEL_EN: Record<Stage, string> = {
 const STAGE_COLOR: Record<Stage, string> = {
   REGISTERED:               'var(--text-muted)',
   KYC_OPEN:                 'var(--yellow)',
-  KYC_DOCUMENTS_REQUIRED:   'var(--yellow)',
   KYC_UNDER_REVIEW:         'var(--accent)',
   SCA_PENDING:              '#a855f7',
   ACTIVE:                   'var(--green)',

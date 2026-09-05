@@ -95,7 +95,13 @@ class TppRegistryServiceTest {
     fun `checkAuthorization returns unauthorized when QWAC expired`(): Unit = runBlocking {
         coEvery { repo.findByTppId("tpp-5") } returns sampleTpp(
             roles = setOf(TppRole.AISP),
-            qwacExpiresAt = LocalDate.now().minusDays(1),
+            // Derived from the SAME clock the service is given, not from the JVM default zone.
+            // `checkAuthorization` compares against `LocalDate.now(clock)`, and `clock` here is
+            // `Clock.systemUTC()`, so a bare `LocalDate.now()` disagrees with it for every hour
+            // the test JVM's zone is a day ahead of UTC. The margin is exactly one day, so the
+            // expired certificate reads as still valid and `authorized` comes back `true`.
+            // Measured RED under `TZ=Pacific/Kiritimati`; see the KDoc on `sampleTpp`.
+            qwacExpiresAt = LocalDate.now(clock).minusDays(1),
         )
 
         val result = service.checkAuthorization(CheckTppAuthorizationQuery("tpp-5", TppRole.AISP))

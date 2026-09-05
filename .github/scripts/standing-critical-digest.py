@@ -91,11 +91,21 @@ def main() -> int:
     if not url or not token:
         print("ERROR: ALERTMANAGER_URL and ALERTMANAGER_DIGEST_TOKEN are required", file=sys.stderr)
         return 2
+    now = dt.datetime.now(dt.timezone.utc)
     try:
-        digest = render(fetch(url, token), dt.datetime.now(dt.timezone.utc))
+        alerts = fetch(url, token)
+        digest = render(alerts, now)
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    # Persist the raw active-alert array so alert-rca-ledger.py folds the SAME
+    # observation the digest reports (ADR-0241 D3). Only written on the success
+    # path: a fail-closed run must not hand the ledger an empty observation,
+    # which observe() would read as "everything resolved".
+    alerts_output = os.environ.get("DIGEST_ALERTS_OUTPUT")
+    if alerts_output:
+        with open(alerts_output, "w", encoding="utf-8") as stream:
+            json.dump({"observedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "alerts": alerts}, stream)
     output = os.environ.get("DIGEST_OUTPUT", "standing-critical-digest.md")
     with open(output, "w", encoding="utf-8") as stream:
         stream.write(digest)

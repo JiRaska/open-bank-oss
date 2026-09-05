@@ -61,13 +61,21 @@ find nothing.
   parameterized/dynamic tests) is deliberately not flagged, to avoid false-flagging every
   parameterized suite in the fleet — a real but rarer drift shape (a source-level `@Test` that
   somehow inflates the reported count) is out of scope.
-- `LlmDiagnosisPort.proposeFixDiff` only branches non-null-eligible for `TEST_COUNT_DRIFT`, and even
-  that branch still returns `null` unconditionally in v1 — this agent never proposes a fix diff for
-  any check type yet, the same bootstrap-stub state every sibling agent shipped with, but a
-  deliberately more conservative default (see Mission) than most of them.
-- The `LlmDiagnosisPort` and `GitHubProposalPort` adapters are stubs pending the shared LiteLLM
-  gateway and GitHub App installation-token wiring, the same bootstrap state every sibling agent
-  shipped with.
+- `LlmDiagnosisPort.proposeFixDiff` returns a fix marker for exactly one shape:
+  `RUNBLOCKING_UNIT_MISSING` inside this agent's own `src/test/kotlin/` tree. It never returns a
+  model-generated diff — the model is kept out of the write decision entirely (ADR-0031 D9). Every
+  other finding, and every other check type, is ticket-only and human-triaged.
+- `GitHubProposalAdapter` is a real, token-backed writer as of ADR-0031 D9 phase 3 (#5281), not a
+  stub. It fails closed on an absent or blank token (no network call at all), refuses any path
+  outside `BoundedTestPath` and any fix marker it does not recognise, and never merges, approves or
+  requests review — a human disposes of the PR through the ordinary protected-branch policy. Both
+  bounds are enforced at build time by `.github/scripts/check-agent-bounded-write-surface.py`
+  (gate `agent-bounded-write-surface`), which binds the writer's target module to
+  `rules.yaml: money_path_services` rather than to a second hand-kept list.
+- Sibling agents (`docs-truth-agent`, `authz-policy-auditor`) still carry the original bootstrap
+  `GitHubProposalAdapter` stub, which returns a fabricated `pending-...` URL rather than refusing.
+  That is the opposite of the `UnwiredProposalPort` pattern the fleet has since settled on and is
+  tracked separately; nothing in this agent depends on it.
 - `repo-root` (`FLAKY_TEST_HUNTER_REPO_ROOT`) must point at a mounted, up-to-date checkout of `main`
   for the `TestScanPort` checks to be meaningful — the deployment-side checkout-mount wiring is
   tracked separately and not yet part of this PR's gitops manifest.

@@ -132,10 +132,9 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'an ADR-0068 planned field; present in no entity, DTO or migration',
     'openbank-account-service|6. Change log|openAccountIdempotencyKey':
         'no such identifier anywhere in the tree',
-    'openbank-balance-service|3. Authn / Authz|BalanceResourceSecurityTest':
-        'open PR #8408 — the guard is real and is `BalanceSecurityContractTest`',
-    'openbank-clearing-service|3. Authn/Authz|ClearingResourceSecurityTest':
-        'open PR #8409 — the guard is real and is `ClearingSecurityContractTest`',
+    'openbank-clearing-service|6. Change log|ClearingResourceSecurityTest':
+        'the change-log entry records the correction itself — it names the wrong old class in '
+        'order to say it was wrong. §3 no longer cites it (#8409)',
     'openbank-consent-service|6. Change log|ConsentEventPublisher':
         'named in ADR-0126 and the ktlint baseline only; no such class in Kotlin',
     'openbank-consent-service|6. Change log|KafkaConsentEventPublisher':

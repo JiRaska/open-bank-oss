@@ -124,7 +124,7 @@ sequenceDiagram
 | `libs.domain.identifiers.AccountId` | typesafe ID místo UUID |
 | `libs.idempotency.IdempotencyStore` | Redis-backed implementace |
 | `libs.persistence.outbox` | OutboxEntity, OutboxRepository, OutboxDispatcherBase |
-| `libs.security.BootstrapVerifier` | fail-fast pro dev hesla v prod |
+| `libs.security.BootstrapVerifier` — ⬜ **nekonzumuje se, neexistuje** | **Nic.** Tato třída v `openbank-libs` není a nikdy nebyla (`git grep BootstrapVerifier -- '*.kt'` vrací 0); ADR-0017 ji předepisuje a její delivery note uvádí, že dodána nebyla. Dev hesla drží mimo prod injektáž přes ESO/OpenBao `secretKeyRef` (ADR-0007), ne kód z libs (#8426) |
 | `libs.web.ServiceInfoResource` | `/api/v1/info` (build metadata) |
 | `libs.docs.DocsResource` | **tahle dokumentace** (`/q/openbank/docs`) |
 | `libs.util.BuildInfo` | runtime tech-stack snapshot |
