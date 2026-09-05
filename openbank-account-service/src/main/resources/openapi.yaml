@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.13.0
+  version: 1.14.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -62,6 +62,23 @@ paths:
                 enum: ['true']
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+          description: >
+            Well-formed request refused by policy — e.g. product not eligible
+            (BUSINESS_RULE_VIOLATION) or sanctions screening refused the opening
+            (ACCOUNT_OPENING_BLOCKED). The screening-refusal body deliberately names
+            neither the matched name nor the party (#8512).
+        '503':
+          description: >
+            Sanctions screening temporarily unavailable; the opening gate fails
+            closed (ADR-0032 §C). Safe to retry after the Retry-After interval.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     get:
       tags: [Accounts]
       summary: List accounts for a party

@@ -4,15 +4,20 @@
 
 package com.openbank.sanctions.application.usecase
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.sanctions.application.port.out.ListImportOutcome
+import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsEntryRepository
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsEntry
 import com.openbank.sanctions.domain.model.SanctionsListType
+import com.openbank.sanctions.infrastructure.importer.EuFsfSaxParser
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.xml.sax.Attributes
 import org.xml.sax.helpers.DefaultHandler
 import java.io.BufferedReader
@@ -34,20 +39,39 @@ import javax.xml.parsers.SAXParserFactory
  *
  * Supported formats:
  *  - OFAC SDN     → sdn.xml (Treasury XML)               — SAX streaming, O(1) memory
- *  - PEP_GLOBAL / EU / UN / HM → OpenSanctions targets.simple.csv — BufferedReader streaming, batch upsert
+ *  - EU_CONSOLIDATED → official EU FSF XML (first-party) by default; OpenSanctions CSV selectable
+ *  - PEP_GLOBAL / UN / HM → OpenSanctions targets.simple.csv — BufferedReader streaming, batch upsert
  *  - FATF         → country-risk, not entity-based — skipped
  *  - CNB          → no machine-readable feed — seeded in Flyway V6
+ *
+ * Every import attempt returns a [ListImportResult] whose outcome is one of the
+ * [ListImportOutcome] values — never an ambiguous count (issue #8362 / the #4348 rule: a
+ * failed, skipped or seed-fallback import must not look like a working one). Each attempt also
+ * increments `openbank.sanctions.list.imports{list_type,outcome}` so "the EU list has not
+ * reported outcome=imported in N days" is alertable.
  *
  * Called by [SanctionsListService.refresh].
  * Memory design: never buffers the full HTTP body as String; parses from InputStream.
  */
 @ApplicationScoped
-class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, private val clock: Clock) {
+class SanctionsImportService(
+    private val entryRepo: SanctionsEntryRepository,
+    private val clock: Clock,
+    private val metrics: DomainMetrics? = null,
+    private val euSource: String = EU_SOURCE_EU_FSF,
+    private val euFsfUrl: String = DEFAULT_EU_FSF_URL,
+) {
 
-    // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
-    // fixed Clock for deterministic timestamps (ADR-0100 Layer 1).
+    // CDI entry point: injects the production UTC clock and the configured EU list source.
+    // Tests use the primary constructor with a fixed Clock for deterministic timestamps
+    // (ADR-0100 Layer 1) and explicit source selection.
     @Inject
-    constructor(entryRepo: SanctionsEntryRepository) : this(entryRepo, Clock.systemUTC())
+    constructor(
+        entryRepo: SanctionsEntryRepository,
+        metrics: DomainMetrics,
+        @ConfigProperty(name = "openbank.sanctions.eu.source", defaultValue = EU_SOURCE_EU_FSF) euSource: String,
+        @ConfigProperty(name = "openbank.sanctions.eu-fsf.url", defaultValue = DEFAULT_EU_FSF_URL) euFsfUrl: String,
+    ) : this(entryRepo, Clock.systemUTC(), metrics, euSource, euFsfUrl)
 
     private val http: HttpClient = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NORMAL)
@@ -56,37 +80,114 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
 
     /**
      * Downloads and imports [listType] from [sourceUrl].
-     * @return number of entries upserted (0 if format not yet implemented).
+     *
+     * @return the import outcome — [ListImportOutcome.IMPORTED] with the upserted count, or a
+     * named non-success (see [ListImportResult]); the caller must key its bookkeeping on the
+     * outcome, never on "count > 0".
      */
-    suspend fun importList(listType: SanctionsListType, sourceUrl: String): Int {
+    suspend fun importList(listType: SanctionsListType, sourceUrl: String): ListImportResult {
         Log.infof("Importing %s from %s", listType, sourceUrl)
-        return try {
-            when (listType) {
-                // OFAC SDN: official Treasury XML — SAX streaming
-                SanctionsListType.OFAC_SDN -> importOfacSdn(sourceUrl)
-                // OpenSanctions-normalised CSV for PEP, EU, UN, HM — stream line-by-line
-                SanctionsListType.PEP_GLOBAL -> importOpenSanctionsCsv(sourceUrl, listType, listOf("PEP"))
-                SanctionsListType.EU_CONSOLIDATED -> importOpenSanctionsCsv(sourceUrl, listType, listOf("EU-SANCTIONS"))
-                SanctionsListType.UN_CONSOLIDATED -> importOpenSanctionsCsv(sourceUrl, listType, listOf("UN-SANCTIONS"))
-                SanctionsListType.HM_TREASURY -> importOpenSanctionsCsv(sourceUrl, listType, listOf("HMT-SANCTIONS"))
-                SanctionsListType.FATF_HIGH_RISK -> {
-                    Log.info("FATF is country-risk — skipping import")
-                    0
-                }
-                SanctionsListType.CNB_DOMESTIC -> {
-                    Log.info("CNB has no machine-readable feed — entries seeded via migration")
-                    0
-                }
-            }
-        } catch (ex: Exception) {
+        val result = runImport(listType, sourceUrl)
+        metrics?.sanctionsListImport(listType.name, result.outcome.name.lowercase())
+        if (result.outcome != ListImportOutcome.IMPORTED) {
             Log.warnf(
-                "Import failed for %s (%s: %s) — keeping existing entries",
+                "List %s import outcome %s (%s) — stored entries left untouched",
                 listType,
-                ex.javaClass.simpleName,
-                ex.message,
+                result.outcome,
+                result.detail ?: "no detail",
             )
-            0
         }
+        return result
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun runImport(listType: SanctionsListType, sourceUrl: String): ListImportResult = try {
+        when (listType) {
+            // OFAC SDN: official Treasury XML — SAX streaming
+            SanctionsListType.OFAC_SDN -> importedOrEmpty(importOfacSdn(sourceUrl))
+            // EU consolidated list: first-party EU FSF XML by default (issue #8362);
+            // OpenSanctions CSV stays selectable for rollback; `seed` = the non-production
+            // Flyway sample entries (local dev only).
+            SanctionsListType.EU_CONSOLIDATED -> when (euSource) {
+                EU_SOURCE_OPENSANCTIONS -> importedOrEmpty(importOpenSanctionsCsv(sourceUrl, listType, EU_PROGRAMS))
+                EU_SOURCE_SEED -> ListImportResult.seedFallback(
+                    "openbank.sanctions.eu.source=seed — EU list runs on the Flyway V6 sample " +
+                        "entries; NON-PRODUCTION configuration",
+                )
+                else -> importedOrEmpty(importEuFsf())
+            }
+            // OpenSanctions-normalised CSV for PEP, UN, HM — stream line-by-line
+            SanctionsListType.PEP_GLOBAL -> importedOrEmpty(
+                importOpenSanctionsCsv(sourceUrl, listType, listOf("PEP")),
+            )
+            SanctionsListType.UN_CONSOLIDATED -> importedOrEmpty(
+                importOpenSanctionsCsv(sourceUrl, listType, listOf("UN-SANCTIONS")),
+            )
+            SanctionsListType.HM_TREASURY -> importedOrEmpty(
+                importOpenSanctionsCsv(sourceUrl, listType, listOf("HMT-SANCTIONS")),
+            )
+            SanctionsListType.FATF_HIGH_RISK ->
+                ListImportResult.skippedNotEntityBased("FATF is country-risk — no entity feed")
+            SanctionsListType.CNB_DOMESTIC ->
+                ListImportResult.skippedNotEntityBased(
+                    "CNB has no machine-readable feed — entries seeded via migration",
+                )
+        }
+    } catch (ex: Exception) {
+        // Deliberately broad: any fetch/parse/store failure means the SAME thing to the
+        // caller — the previously stored entries were kept — and the outcome names it. The
+        // mid-stream partial-wipe case is handled inside the importers (deactivateMissing
+        // only runs after a fully-consumed stream, #1432), never by this catch.
+        ListImportResult.failedKeptExisting("${ex.javaClass.simpleName}: ${ex.message}")
+    }
+
+    private fun importedOrEmpty(count: Int): ListImportResult =
+        if (count > 0) ListImportResult.imported(count) else ListImportResult.emptyFeed()
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // EU FSF (official consolidated list, first-party) — SAX streaming (issue #8362)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Import the EU consolidated list from the official FSF XML endpoint ([euFsfUrl]) rather
+     * than the OpenSanctions-normalised mirror — the migration V7 switch to OpenSanctions was a
+     * workaround for an endpoint that then returned HTML redirects; the first-party feed is the
+     * source of record and is what a compliance audit expects the bank to screen against.
+     *
+     * Same durability contract as the CSV path: entries upsert in batches, and the
+     * deactivateMissing reconciliation sweep runs ONLY after the whole stream parsed — a
+     * mid-stream failure propagates and the stored list is left untouched (#1432).
+     */
+    private suspend fun importEuFsf(): Int {
+        val inputStream = withContext(Dispatchers.IO) { httpGetStream(euFsfUrl) }
+        val entities = withContext(Dispatchers.IO) {
+            inputStream.use { EuFsfSaxParser.parse(it) }
+        }
+        Log.infof("SAX-parsed %d EU FSF sanction entities", entities.size)
+
+        var total = 0
+        val seenExternalIds = mutableSetOf<String>()
+        for (chunk in entities.chunked(IMPORT_BATCH_SIZE)) {
+            val entries = chunk.map { fsf ->
+                val externalId = "eu-fsf-${fsf.logicalId}"
+                seenExternalIds += externalId
+                buildEntry(
+                    listType = SanctionsListType.EU_CONSOLIDATED,
+                    externalId = externalId,
+                    entityType = if (fsf.subjectType == "person") EntityType.INDIVIDUAL else EntityType.ORGANIZATION,
+                    primaryName = fsf.primaryName,
+                    aliases = fsf.aliases,
+                    dateOfBirth = fsf.dateOfBirth,
+                    nationalities = fsf.nationalities,
+                    programs = fsf.programmes.ifEmpty { EU_PROGRAMS },
+                )
+            }
+            total += entryRepo.upsertAll(entries)
+        }
+
+        val deactivated = entryRepo.deactivateMissing(SanctionsListType.EU_CONSOLIDATED, seenExternalIds)
+        Log.infof("Imported %d EU FSF entries (%d no longer present, deactivated)", total, deactivated)
+        return total
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -404,5 +505,16 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
 
     companion object {
         const val IMPORT_BATCH_SIZE = 500
+
+        /** `openbank.sanctions.eu.source` values: first-party FSF XML (default), the OpenSanctions mirror, or non-production seeds. */
+        const val EU_SOURCE_EU_FSF = "eu-fsf"
+        const val EU_SOURCE_OPENSANCTIONS = "opensanctions"
+        const val EU_SOURCE_SEED = "seed"
+
+        /** The official EU Financial Sanctions Files endpoint (full consolidated list, FSF v1.1). */
+        const val DEFAULT_EU_FSF_URL =
+            "https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw"
+
+        private val EU_PROGRAMS = listOf("EU-SANCTIONS")
     }
 }
