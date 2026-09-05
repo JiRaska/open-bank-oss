@@ -35,15 +35,18 @@ class SchemeResultTest {
 
     @Test
     fun `an unanswered call yields no value and keeps its reason`() {
+        // Typed as the sealed interface, then narrowed — the declared type is what a caller holds,
+        // and `valueOrNull` has to work on it without a cast.
         val result: SchemeResult<BinAttributes> =
             SchemeResult.Unanswered(SchemeFailure.NOT_BOUND, CardScheme.VISA, "adapter not configured")
 
         assertThat(result.valueOrNull()).isNull()
-        assertThat(result.failure).isEqualTo(SchemeFailure.NOT_BOUND)
+        val unanswered = result as SchemeResult.Unanswered
+        assertThat(unanswered.failure).isEqualTo(SchemeFailure.NOT_BOUND)
         // NOT_BOUND and UNAVAILABLE must never be folded together: one is permanent until someone
         // configures an adapter, the other clears on its own. A caller that cannot tell them apart
         // retries the first for ever and gives up on the second.
-        assertThat(result.failure).isNotEqualTo(SchemeFailure.UNAVAILABLE)
+        assertThat(unanswered.failure).isNotEqualTo(SchemeFailure.UNAVAILABLE)
     }
 
     @Test
