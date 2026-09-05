@@ -64,8 +64,12 @@
 # ===========================================================================
 
 # ghcr.io/actions/actions-runner:latest @ 2026-06-01 (multi-arch index digest).
-FROM ghcr.io/actions/actions-runner@sha256:0cfdcc701ce933c6d243c6b0b2da767366dc9f2e99961d4c3754b0b78084cdda
+FROM ghcr.io/actions/actions-runner@sha256:e5496277be5d09bc968b3d64911b74e219ac4a3f2edce956a3ecf9271bea1ef4
 
+# Build-time tool installation; the actions-runner entrypoint drops to the runner user.
+# Service images are held to the no-root rule; this is the one documented exception,
+# visible at the site rather than in a CI exclude list.
+# nosemgrep: dockerfile-root-user
 USER root
 
 # --- pinned tool versions + arm64 sha256 ----------------------------------

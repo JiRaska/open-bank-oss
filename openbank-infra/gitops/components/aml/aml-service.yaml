@@ -1,6 +1,6 @@
 # aml-service: AML screening case lifecycle. Publishes openbank.aml.events via a
 # transactional outbox (consumed by party-service for the KYC+AML activation gate,
-# ADR-0073) and consumes openbank.party.events to auto-open onboarding screenings.
+# ADR-0267 §2) and consumes openbank.party.events to auto-open onboarding screenings.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-aml-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "cb7ffb6cb4103a95"
+        openbank.tech/policy-checksum: "a01f1b07ec9de52f"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -42,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: aml-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-aml-service:sandbox-21049aef
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-aml-service:sandbox-ab83fe6e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -105,8 +105,10 @@ spec:
             # createCase. Point at the in-namespace redis (redis.yaml).
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.aml.svc:6379
-            # Sandbox straight-through AML (ADR-0073): auto-clear onboarding screenings so
-            # onboarding activates without an analyst. MUST be false in production.
+            # Sandbox straight-through AML: auto-clear onboarding screenings so onboarding
+            # activates without an analyst. MUST be false in production. No ADR decides this
+            # flag — ADR-0116 §4 decides only the KYC equivalent (openbank.kyc.auto-approve);
+            # the AML side is recorded in aml-service's own docs/ only (#5785).
             - name: OPENBANK_AML_AUTO_CLEAR
               value: "true"
             # ADR-0034 Phase 5 / issue #1797: aml-service shipped @Authorize with the app default

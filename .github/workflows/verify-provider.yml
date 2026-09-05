@@ -74,5 +74,8 @@ jobs:
       service: ${{ inputs.service }}
       ref: ${{ inputs.ref }}
       provider_version: ${{ inputs.provider_version }}
+      # A maintainer explicitly requested a provider proof. A no-op consumer-only outcome
+      # would otherwise make this workflow green without publishing the promised evidence.
+      require_provider_pact_test: true
     secrets:
       PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}

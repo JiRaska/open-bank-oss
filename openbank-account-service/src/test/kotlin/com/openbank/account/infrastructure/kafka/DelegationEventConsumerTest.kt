@@ -34,28 +34,33 @@ class DelegationEventConsumerTest {
         consumer = DelegationEventConsumer(repository, objectMapper)
     }
 
-    private fun event(type: String, resourceType: String = "ACCOUNT", resourceId: UUID? = accountId): String =
-        objectMapper.writeValueAsString(
-            mapOf(
-                "eventType" to type,
-                "aggregateId" to grantId,
-                "grantorPartyId" to grantor,
-                "granteePartyId" to grantee,
-                "resourceType" to resourceType,
-                "resourceId" to resourceId,
-                "capabilities" to listOf("ACCOUNT_READ_BALANCES", "ACCOUNT_INITIATE_PAYMENT"),
-                "perTransactionLimit" to mapOf("amount" to "5000.00", "currency" to "CZK"),
-                "validFrom" to "2026-07-31T12:00:00Z",
-                "validTo" to "2027-07-31T12:00:00Z",
-                "occurredAt" to "2026-08-01T12:00:00Z",
-            ),
-        )
+    private fun event(
+        type: String,
+        resourceType: String = "ACCOUNT",
+        resourceId: UUID? = accountId,
+        revision: Long? = 1,
+    ): String = objectMapper.writeValueAsString(
+        mapOf(
+            "eventType" to type,
+            "aggregateId" to grantId,
+            "grantorPartyId" to grantor,
+            "granteePartyId" to grantee,
+            "resourceType" to resourceType,
+            "resourceId" to resourceId,
+            "capabilities" to listOf("ACCOUNT_READ_BALANCES", "ACCOUNT_INITIATE_PAYMENT"),
+            "perTransactionLimit" to mapOf("amount" to "5000.00", "currency" to "CZK"),
+            "validFrom" to "2026-07-31T12:00:00Z",
+            "validTo" to "2027-07-31T12:00:00Z",
+            "occurredAt" to "2026-08-01T12:00:00Z",
+            "lifecycleRevision" to revision,
+        ),
+    )
 
     @Test
     fun `DelegationActivated upserts an active projection row`(): Unit = runBlocking {
         consumer.consume(event("DelegationActivated"))
         coVerify {
-            repository.upsertActive(
+            repository.applyActive(
                 match<DelegatedAccessGrant> {
                     it.id == grantId &&
                         it.accountId == accountId &&
@@ -66,6 +71,7 @@ class DelegationEventConsumerTest {
                         "ACCOUNT_READ_BALANCES" in it.capabilities &&
                         it.perTransactionLimitAmount?.compareTo("5000.00".toBigDecimal()) == 0
                 },
+                1,
             )
         }
     }
@@ -95,7 +101,7 @@ class DelegationEventConsumerTest {
         for (type in listOf("DelegationRevoked", "DelegationSuspended", "DelegationRenounced", "DelegationExpired")) {
             consumer.consume(event(type))
         }
-        coVerify(exactly = 4) { repository.closeById(grantId) }
+        coVerify(exactly = 4) { repository.applyClosed(grantId, 1) }
     }
 
     @Test
@@ -110,10 +116,11 @@ class DelegationEventConsumerTest {
     fun `SAVINGS_GOAL events are projected with their resource type`(): Unit = runBlocking {
         consumer.consume(event("DelegationActivated", resourceType = "SAVINGS_GOAL"))
         coVerify {
-            repository.upsertActive(
+            repository.applyActive(
                 match<DelegatedAccessGrant> {
                     it.id == grantId && it.resourceType == "SAVINGS_GOAL" && it.active
                 },
+                1,
             )
         }
     }
@@ -140,9 +147,18 @@ class DelegationEventConsumerTest {
 
     @Test
     fun `transient failure is retried then escapes to the DLQ`(): Unit = runBlocking {
-        coEvery { repository.upsertActive(any()) } throws IllegalStateException("db blip")
+        coEvery { repository.applyActive(any(), any()) } throws IllegalStateException("db blip")
         assertThatThrownBy { runBlocking { consumer.consume(event("DelegationActivated")) } }
             .isInstanceOf(IllegalStateException::class.java)
-        coVerify(exactly = 4) { repository.upsertActive(any()) }
+        coVerify(exactly = 4) { repository.applyActive(any(), 1) }
+    }
+
+    @Test
+    fun `revisionless opening is ignored but revisionless close installs a tombstone`(): Unit = runBlocking {
+        consumer.consume(event("DelegationActivated", revision = null))
+        consumer.consume(event("DelegationRevoked", revision = null))
+
+        coVerify(exactly = 0) { repository.applyActive(any(), any()) }
+        coVerify(exactly = 1) { repository.applyClosed(grantId, null) }
     }
 }

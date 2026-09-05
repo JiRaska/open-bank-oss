@@ -166,6 +166,22 @@ FEEDS = [
             "const": "FEED_NAME",
         },
     },
+    {
+        "name": "eu-fsf-sanctions-list",
+        "file": "openbank-sanctions-service/src/main/resources/application.yaml",
+        "yaml_path": "openbank.sanctions.eu-fsf.url",
+        "shape": "xml_document",
+        "why": (
+            "The European Commission's consolidated Financial Sanctions Files list "
+            "(issue #8362). `EuFsfSaxParser` streams this XML into `SanctionsListImport`; "
+            "an HTML error page or empty body in place of the feed would otherwise be "
+            "parsed as zero designated entities, silently clearing the screening list "
+            "instead of failing loudly."
+        ),
+        # No kotlin_liveness entry yet: this PR wires the import path (SanctionsImportService /
+        # EuFsfSaxParser) but does not add a scheduled FeedFetchRecorder for it — a feed with
+        # no kotlin_liveness is skipped by that half of the check, not flagged.
+    },
 ]
 
 # External URLs that exist in a scanned YAML but cannot be probed by an unauthenticated CI job.
@@ -173,6 +189,7 @@ FEEDS = [
 NOT_PROBED = [
     ("https://api.github.com", "authenticated API, not a data feed; failure is loud at call time"),
     ("https://api.deepinfra.com/v1/openai", "authenticated LLM gateway; needs a key"),
+    ("https://integrate.api.nvidia.com/v1", "authenticated LLM gateway; needs a key"),
     ("https://s3.eu-north-1.amazonaws.com", "AWS endpoint, reached with SigV4 credentials"),
     ("https://kc.open-bank.tech/realms/openbank-customers", "our own Keycloak realm, covered by its own probes"),
     ("https://pid.open-bank.tech", "our own PID issuer, covered by its own probes"),

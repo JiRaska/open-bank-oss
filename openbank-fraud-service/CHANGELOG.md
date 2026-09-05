@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.15.0...fraud-service-v0.15.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **fraud:** declare quarkus.redis.hosts so the service can boot without out-of-band config ([#8453](https://github.com/JiRaska/open-bank-oss/issues/8453)) ([b682fec](https://github.com/JiRaska/open-bank-oss/commit/b682fece3cfd1f41017f963920b2a5690246fbab)), closes [#8348](https://github.com/JiRaska/open-bank-oss/issues/8348)
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.14.0...fraud-service-v0.15.0) (2026-09-01)
+
+
+### Features
+
+* **ledger:** declare sourceService on five money-path event producers ([#7716](https://github.com/JiRaska/open-bank-oss/issues/7716)) ([bf489ad](https://github.com/JiRaska/open-bank-oss/commit/bf489ad147f16b461e7a6c3d6f1244f596741a73))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.13.2...fraud-service-v0.14.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.13.1...fraud-service-v0.13.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.13.0...fraud-service-v0.13.1) (2026-08-21)
 
 

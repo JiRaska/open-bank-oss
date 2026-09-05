@@ -23,6 +23,6 @@ Jde o **money-path službu** (`rules.yaml: money_path_services`): změny vyžadu
 - **Port:** 8116 (aplikace), 8085 (management, root-path `/q`)
 - **Perzistence:** dedikovaná databáze `openbank_domestic_payments`, Flyway migrace V1..V5 (governance manifest deklaruje logické jméno schématu `domestic_schema`)
 - **Outbox:** `domestic_payment_outbox` → Kafka topic `openbank.domestic.payment.events` (kanál `events-out`)
-- **Idempotence:** hlavička `Idempotency-Key` (povinná při založení) → `IdempotencyStore` nad Redisem
+- **Idempotence:** `Idempotency-Key` je v PostgreSQL trvale svázán s normalizovaným požadavkem a aktérem
 - **Auth:** Keycloak OIDC; mutace vyžadují `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_PAYMENTS`; OPA authz sidecar (ADR-0034, defaultně advisory)
 - **Screening:** synchronní sankční screening jmen plátce + příjemce při založení, fail-closed (ADR-0032)

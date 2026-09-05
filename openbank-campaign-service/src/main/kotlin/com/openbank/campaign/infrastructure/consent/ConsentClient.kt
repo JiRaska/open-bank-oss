@@ -10,6 +10,7 @@ import com.openbank.libs.contact.ContactSuppressionPort
 import com.openbank.libs.contact.SuppressionEntry
 import com.openbank.libs.contact.SuppressionReason
 import com.openbank.libs.contact.SuppressionScope
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -27,6 +28,7 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
 
 @RegisterRestClient(configKey = "consent-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/consents")
 @Produces(MediaType.APPLICATION_JSON)
@@ -41,6 +43,7 @@ interface ConsentServiceClient {
 }
 
 @RegisterRestClient(configKey = "consent-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/suppressions")
 @Produces(MediaType.APPLICATION_JSON)

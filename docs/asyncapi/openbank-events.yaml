@@ -206,8 +206,9 @@ channels:
     address: openbank.balance.events
     description: |
       Balance movements. The address in the previous revision (`openbank.balances.balance.event`)
-      was fiction. Published by a **direct emitter** (`KafkaBalanceEventPublisher`), so no
-      `ce-type` header is set on that path.
+      was fiction. Since #8510 it goes through the transactional outbox (`balance-outbox-out`),
+      so every record now carries the additive OutboxKafkaHeaders and a partition key on top of the
+      unchanged payload bytes; the pre-#8510 direct emitter set no `ce-type` header.
 
       The discriminator is a genuine, explicitly declared **body eventType** — `BalanceEvent` is a
       plain data class (not a `DomainEvent`) that declares the field itself, with values

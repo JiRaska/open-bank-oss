@@ -376,10 +376,9 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   settlement had therefore NEVER been fuzzed; and six services register a Temporal worker at
   `StartupEvent`, so with no Temporal present transaction-service failed to boot outright while
   lending, sepa-payment and domestic-payment retried past the deadline. Every registrar carries a
-  disable switch but under a DIFFERENT name each (`openbank.transaction.worker.enabled`,
-  `openbank.sepa.worker.enabled`, … and lending's `lending.origination.worker.enabled`, not even
-  under `openbank.`), so the harness derives the property from each registrar's own
-  `@ConfigProperty` rather than listing six names. This matters beyond the lane: the `pentest`
+  disable switch, and since the `temporal-worker-switch-naming` gate (2026-09) all of them follow
+  one convention — `openbank.<service>.worker.enabled` — so the harness derives the property from
+  each registrar's own `@ConfigProperty` rather than listing names. This matters beyond the lane: the `pentest`
   attestation is earned by this workflow with its run URL as `ref`, so while a service could not be
   fuzzed, C7=Bank-grade was blocked on an event that could not happen for it.
 
@@ -729,6 +728,25 @@ mechanics, gate declaration, log-reading, bot signing, runner isolation. It load
 touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
 `rules.yaml`, an `application.yaml`, or merging a PR from anywhere.
 
+### Shell probes
+- **A probe fails by reporting CLEAN — source `.github/scripts/lib/probe.sh` instead of
+  re-deriving one.** BSD tools take GNU-ish input, do not error, and return a plausible nothing, so
+  a broken probe is indistinguishable from a clean subject. The library carries the ones this repo
+  has actually got wrong — `probe_utc_epoch` (BSD `date -j -f` ignores the trailing `Z` and parses
+  as LOCAL time: 53 branches falsely flagged), `probe_files_modified_since` (`-newermt "-60 minutes"`
+  is *always* empty on BSD, so a busy worktree reads as idle), `probe_remote_branch_exists`
+  (`git rev-parse origin/<b>` reads the LOCAL tracking ref and a plain fetch never prunes),
+  `probe_pr_failing_checks` (job names contain spaces, so an `awk` column is a word of the NAME),
+  `probe_lint_findings` (a newline-joined file list arrives as ONE argument; post-filtering a
+  linter's output hides the failures that are not findings), and `probe_zombie_runs`.
+  Each is held to a known-positive **and** a known-negative by the enforced
+  `probe-lib-known-positive` gate — `bash .github/scripts/lib/probe.sh --selftest`.
+- **`status=in_progress` is not a measure of CI load: 189 of those runs are wedged** — the run
+  record never transitioned while every one of its jobs is `completed`, the oldest from
+  2026-08-09. They are **not reapable**: both `POST /actions/runs/{id}/cancel` and `.../force-cancel`
+  answer HTTP 500 on every one. Subtract them with `probe_zombie_runs` before any statement about
+  saturation. Three automation workflows account for 163 of the 189.
+
 ### Reviewing a diff
 - **Use 3-dot diff for pre-merge review:** `git diff origin/main...origin/<branch>` is the actual
   squash delta; 2-dot includes main's post-divergence commits and makes stale branches look like
@@ -755,6 +773,12 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   `openbank-admin-ui/ai-governance-snapshot.json` (`gen-ai-governance-snapshot.py`; also stale
   after a `prompts/registry.yaml` change). #3771 regenerated none and red-gated main; #4002 is the
   regeneration template.
+- **Don't regenerate by hand — `bash .github/scripts/regen-derived.sh`** runs every generator, in
+  dependency order (derived data before the bundles that embed it), for the sources your branch
+  actually changed; `--all` does the lot unconditionally. It deliberately runs **no checker**, so
+  the regenerate → commit → check order above is structural rather than something you have to
+  remember. Its inventory is held to the generators that exist by the `regen-derived-inventory`
+  gate, in both directions, so a generator added later cannot be silently left out of it.
 
 ### gh CLI
 - **Always write a PR/issue body to a file and pass `--body-file`. Never `--body` with an

@@ -11,17 +11,16 @@ import com.openbank.delegation.application.port.`in`.ReserveSpendUseCase
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.ReserveOutcome
 import com.openbank.delegation.application.port.out.SpendReservationRepository
-import com.openbank.delegation.domain.event.EventMoney
-import com.openbank.delegation.domain.event.SpendConfirmed
-import com.openbank.delegation.domain.event.SpendReleased
-import com.openbank.delegation.domain.event.SpendReserved
+import com.openbank.delegation.domain.model.CountedSpend
+import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.SpendCeilings
 import com.openbank.delegation.domain.model.SpendDecision
 import com.openbank.delegation.domain.model.SpendReservation
+import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.delegation.domain.model.SpendWindows
-import com.openbank.libs.domain.event.DomainEvent
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
@@ -36,6 +35,12 @@ class SpendReservationNotFoundException(id: UUID) : RuntimeException("Spend rese
 
 /** A settle that cannot be replayed into the state the caller asked for. */
 class SpendReservationStateException(message: String) : RuntimeException(message)
+
+class SpendReservationIdempotencyConflictException :
+    RuntimeException("idempotencyKey already belongs to a different immutable reservation tuple")
+
+class SpendReservationStateStreamUnavailableException :
+    RuntimeException("domestic-payment reservation state stream is not active")
 
 /**
  * ADR-0249 D3 — the cumulative-spend counter, in ONE place.
@@ -64,32 +69,40 @@ class SpendReservationService(
             grantId = grant.id,
             amount = command.amount,
             idempotencyKey = command.idempotencyKey,
+            operationType = command.operationType,
             createdAt = now,
         )
         val outcome = reservationRepository.reserve(
             candidate = candidate,
             window = SpendWindows.windowAt(now),
-            // ADR-0249 D4 (#5728). `now` is this call's real clock reading, not a default: an
-            // `occurredAt` that defaults is the Instant.EPOCH shape (#3874/#3883) that every
-            // isNotNull() assertion in the fleet agreed with while the trail claimed 1970.
-            auditEvent = { reservation ->
-                SpendReserved(
-                    aggregateId = grant.id,
-                    reservationId = reservation.id,
-                    grantorPartyId = grant.grantorPartyId,
-                    granteePartyId = grant.granteePartyId,
-                    amount = EventMoney(reservation.amount.amount, reservation.amount.currency.code),
-                    idempotencyKey = reservation.idempotencyKey,
-                    occurredAt = now.toInstant(),
-                )
-            },
-        ) { counted -> SpendCeilings.evaluate(grant, command.amount, counted, now) }
+        ) { lockedGrant, counted -> evaluateLockedGrant(command, lockedGrant, counted, now) }
 
         return when (outcome) {
             is ReserveOutcome.Created -> ReserveSpendResult(outcome.reservation, replayed = false)
             is ReserveOutcome.Replayed -> ReserveSpendResult(outcome.reservation, replayed = true)
+            ReserveOutcome.IdempotencyConflict -> throw SpendReservationIdempotencyConflictException()
+            ReserveOutcome.StateStreamUnavailable -> throw SpendReservationStateStreamUnavailableException()
             is ReserveOutcome.Refused -> throw SpendReservationRefusedException(outcome.decision)
         }
+    }
+
+    private fun evaluateLockedGrant(
+        command: ReserveSpendCommand,
+        lockedGrant: DelegationGrant,
+        counted: CountedSpend,
+        now: OffsetDateTime,
+    ): SpendDecision {
+        if (command.operationType == SpendReservationOperationType.DOMESTIC_PAYMENT &&
+            (
+                lockedGrant.resourceType != DelegationResourceType.ACCOUNT ||
+                    !lockedGrant.hasCapability(DelegationCapability.ACCOUNT_INITIATE_PAYMENT)
+                )
+        ) {
+            return SpendDecision.Refused(
+                com.openbank.delegation.domain.model.SpendRefusalReason.NO_SPEND_CAPABILITY,
+            )
+        }
+        return SpendCeilings.evaluate(lockedGrant, command.amount, counted, now)
     }
 
     override suspend fun confirm(
@@ -116,11 +129,8 @@ class SpendReservationService(
         callerPartyId: CallerPartyId,
         target: SpendReservationState,
     ): SpendReservation {
-        val grant = loadForGrantee(delegationId, callerPartyId)
-        val now = OffsetDateTime.now(clock)
-        val settled = reservationRepository.settle(delegationId, reservationId, target, now) { reservation ->
-            settlementEvent(grant, reservation, target, now)
-        }
+        loadForGrantee(delegationId, callerPartyId)
+        val settled = reservationRepository.settle(delegationId, reservationId, target, OffsetDateTime.now(clock))
         if (settled != null) return settled
 
         val current = reservationRepository.findById(delegationId, reservationId)
@@ -129,50 +139,6 @@ class SpendReservationService(
         throw SpendReservationStateException(
             "reservation $reservationId is ${current.state} and cannot become $target",
         )
-    }
-
-    /**
-     * ADR-0249 D4 — the confirmation and the release halves of "every grant, reservation,
-     * confirmation and revocation is an audit event" (#5728).
-     *
-     * Built here rather than in the repository because the grantor/grantee pair belongs to the
-     * grant, which the use case has already loaded and authorised against; the repository sees
-     * only the reservation row.
-     */
-    private fun settlementEvent(
-        grant: DelegationGrant,
-        reservation: SpendReservation,
-        target: SpendReservationState,
-        now: OffsetDateTime,
-    ): DomainEvent {
-        val amount = EventMoney(reservation.amount.amount, reservation.amount.currency.code)
-        val settledAt = reservation.settledAt ?: now
-        return when (target) {
-            SpendReservationState.CONFIRMED -> SpendConfirmed(
-                aggregateId = grant.id,
-                reservationId = reservation.id,
-                grantorPartyId = grant.grantorPartyId,
-                granteePartyId = grant.granteePartyId,
-                amount = amount,
-                settledAt = settledAt,
-                occurredAt = now.toInstant(),
-            )
-
-            SpendReservationState.RELEASED -> SpendReleased(
-                aggregateId = grant.id,
-                reservationId = reservation.id,
-                grantorPartyId = grant.grantorPartyId,
-                granteePartyId = grant.granteePartyId,
-                amount = amount,
-                settledAt = settledAt,
-                occurredAt = now.toInstant(),
-            )
-
-            // `settle` is only ever reached from confirm() or release(); RESERVED is not a target
-            // the compare-and-set accepts, so this branch is unreachable rather than a state to
-            // audit. Failing loudly beats inventing an event type for it.
-            SpendReservationState.RESERVED -> error("RESERVED is not a settlement target")
-        }
     }
 
     /**

@@ -87,8 +87,8 @@ class LedgerResourceAuthzTest {
     fun `advisory mode does not block year-close create draft`() {
         // Whatever the use case's own business-rule verdict is for a fiscal year with no seeded
         // activity, it must not be the @Authorize interceptor's own 403 (deny) or 503 (PDP
-        // unreachable, enforce=true) — this is the ledger.create no-op assertion for the
-        // YearCloseResource action, distinct from LedgerResource's own ledger.create above.
+        // unreachable, enforce=true) — this is the ledger.close.draft no-op assertion,
+        // deliberately distinct from LedgerResource's M2M-capable ledger.create action above.
         val status = (Given { this } When { post("/api/v1/ledger/close/1999") }).statusCode()
         org.assertj.core.api.Assertions.assertThat(status).isNotIn(403, 503)
     }

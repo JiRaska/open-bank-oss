@@ -89,6 +89,16 @@ jobs:
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2g"
 
+      - name: Build mutation Test Intelligence envelope
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service "${{ matrix.service }}" \
+            --mutation-report "${{ matrix.service }}/build/reports/pitest/mutations.xml" \
+            --mutation-threshold 70 \
+            --out "${{ matrix.service }}/build/reports/pitest/test-intelligence-run.json"
+
       - name: Upload pitest XML report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -127,3 +137,91 @@ jobs:
           else
             echo "::notice::Mutation score ${SCORE}% — OK"
           fi
+
+  # Targeted mutation testing of the authorization decision path (ADR-0279 item #7).
+  # Unlike the advisory domain lanes above this job is ENFORCED: com.openbank.libs.authz
+  # (AuthorizeInterceptor scope derivation + OPA PDP call) is the fleet's security-critical
+  # decision code — a surviving mutant there is an authorization check no test could tell
+  # from its negation. The package is small (3 files, ~40s), so a blocking lane costs
+  # nothing. Threshold 63 = measured baseline (2026-09-05: 174 mutations, 109 killed);
+  # raise it as surviving mutants get killed — the lane is a ratchet, never lowered.
+  # pitest is applied by init script, NOT the plugins DSL: any external versioned plugin
+  # in openbank-libs-runtime's plugins{} block splits the classloaders and kordamp jandex
+  # loads twice (Banner$Inject_ ClassCastException) — see the init script header.
+  pitest-authz:
+    name: pitest / authz decision path (enforced)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          java-version: "25"
+          distribution: temurin
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          # READ-ONLY — same cache-pool reasoning as the matrix job above (#3299).
+          cache-read-only: true
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Run pitest on the authz package (threshold 63 enforced)
+        run: |
+          ./gradlew -I .github/scripts/pitest-authz.init.gradle \
+            :openbank-libs-runtime:pitest \
+            -Ppitest.mutationThreshold=63
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2g"
+
+      - name: Build mutation Test Intelligence envelope
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service "openbank-libs-runtime-authz" \
+            --mutation-report openbank-libs-runtime/build/reports/pitest/mutations.xml \
+            --mutation-threshold 63 \
+            --out openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json
+
+      - name: Upload pitest XML report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pitest-authz
+          path: openbank-libs-runtime/build/reports/pitest/
+          retention-days: 30
+
+      # Reporting mirror of the Gradle-enforced threshold (single-quote XML note as above).
+      - name: Report mutation score
+        if: always()
+        run: |
+          XML="openbank-libs-runtime/build/reports/pitest/mutations.xml"
+          if [ ! -f "$XML" ]; then
+            echo "::error file=$XML::pitest XML report not found — the enforced lane cannot score a run without it"
+            exit 1
+          fi
+          TOTAL=$(grep -o '<mutation ' "$XML" | wc -l | tr -d ' ')
+          # PIT's own mutation score — the one the Gradle threshold enforces — counts
+          # TIMED_OUT mutants as detected (a hanging mutant is a caught mutant). Counting
+          # only KILLED here undercounted CI by 4 points (59% vs PIT's 63%) and failed a
+          # green Gradle step (run 33929681493).
+          KILLED=$(grep -oE "status=['\"](KILLED|TIMED_OUT)['\"]" "$XML" | wc -l | tr -d ' ')
+          if [ "$TOTAL" -eq "0" ]; then
+            echo "::error::No mutations generated for the authz package — check targetClasses in pitest-authz.init.gradle"
+            exit 1
+          fi
+          # Round-half-up, matching PIT's displayed percentage: floor division of the
+          # 2026-09-05 baseline (109/174) gives 62% and would fail a lane PIT itself
+          # scored 63% — the floor this job enforces.
+          SCORE=$(( (KILLED * 100 + TOTAL / 2) / TOTAL ))
+          echo "Mutation score: ${SCORE}% (${KILLED}/${TOTAL} killed)"
+          if [ "$SCORE" -lt "63" ]; then
+            echo "::error::Mutation score ${SCORE}% is below the 63% enforced threshold for the authz decision path"
+            exit 1
+          fi
+          echo "::notice::Mutation score ${SCORE}% — OK (enforced floor 63%)"

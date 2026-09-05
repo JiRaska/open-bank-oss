@@ -4,7 +4,6 @@
 
 package com.openbank.domestic.infrastructure.rest
 
-import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.port.`in`.DomesticPaymentUseCase
 import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
 import com.openbank.domestic.application.port.`in`.PaymentConfirmationUseCase
@@ -13,7 +12,7 @@ import com.openbank.domestic.infrastructure.rest.dto.CreateDomesticPaymentReques
 import com.openbank.domestic.infrastructure.rest.dto.TransitionDomesticPaymentStatusRequest
 import com.openbank.domestic.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
-import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -27,6 +26,8 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.container.ContainerRequestContext
+import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
@@ -42,8 +43,6 @@ import java.util.UUID
 class DomesticPaymentResource(
     private val paymentUseCase: DomesticPaymentUseCase,
     private val confirmationUseCase: PaymentConfirmationUseCase,
-    private val idempotencyStore: IdempotencyStore,
-    private val objectMapper: ObjectMapper,
 ) {
 
     // OIDC identity is taken from the CDI request-scoped SecurityIdentity, NOT the
@@ -57,6 +56,17 @@ class DomesticPaymentResource(
             runCatching { UUID.fromString(it) }.getOrNull()
         }
 
+    /** Issuer-qualified when a JWT supplies one, so equal subjects from different realms never share a key. */
+    private val actorScope: String
+        get() {
+            val principal = identity.principal
+            val jwt = principal as? JsonWebToken
+            val issuer = jwt?.getClaim<Any>("iss")?.toString()?.trim()?.ifBlank { null }
+            val subject = jwt?.subject?.trim()?.ifBlank { null }
+                ?: principal.name.trim().ifBlank { error("Authenticated principal has no stable scope") }
+            return listOfNotNull(issuer, subject).joinToString("\u001f")
+        }
+
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
     @Authorize(action = "domestic-payment.create")
@@ -64,6 +74,7 @@ class DomesticPaymentResource(
     suspend fun createPayment(
         request: CreateDomesticPaymentRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @Context requestContext: ContainerRequestContext,
     ): Response {
         // #3104 — the guard below could not run when the header was ABSENT: JAX-RS injected null,
         // and `null.isNotBlank()` threw NPE, so the very case it exists for answered 500. `suspend`
@@ -71,21 +82,23 @@ class DomesticPaymentResource(
         // function — the null reached the first dereference instead of failing at the boundary.
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
 
-        idempotencyStore.get(idempotencyKey)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
-                .type(MediaType.APPLICATION_JSON)
-                .header("X-Idempotency-Replayed", "true")
-                .build()
-        }
+        // SyntheticTaintRequestFilter accepts this flag only after authenticating a configured
+        // canary principal. Read its request property, never the caller's header or coroutine MDC,
+        // then persist it through the outbox boundary for asynchronous consumers.
+        val result = paymentUseCase.createPayment(
+            request.toCommand(
+                idempotencyKey,
+                actorId,
+                actorScope,
+                requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
+            ),
+        )
+        val responseBody = result.payment.toResponse()
 
-        val payment = paymentUseCase.createPayment(request.toCommand(idempotencyKey, actorId))
-        val responseBody = payment.toResponse()
-        idempotencyStore.save(idempotencyKey, 201, objectMapper.writeValueAsString(responseBody))
-
-        return Response.created(URI.create("/api/v1/domestic-payments/${payment.id}"))
+        val response = Response.created(URI.create("/api/v1/domestic-payments/${result.payment.id}"))
             .entity(responseBody)
-            .build()
+        if (result.replayed) response.header("X-Idempotency-Replayed", "true")
+        return response.build()
     }
 
     @GET

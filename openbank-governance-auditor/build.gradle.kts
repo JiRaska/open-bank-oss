@@ -41,6 +41,9 @@ dependencies {
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
+    // Emits secret-free Testcontainers lifecycle evidence into the versioned CI envelope.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers.postgresql)

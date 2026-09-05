@@ -57,13 +57,22 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 # Baselined violations. Each is a service that ships an outbox nothing writes to, measured
 # 2026-08-07. Removing one from this list is the definition of done for that service.
 BASELINE = {
     # openbank-audit-service is no longer a violation: the dead outbox apparatus was deleted
     # entirely (#5126) rather than wired, since no consumer need for an outbound audit-service
     # event was ever identified. The service no longer ships a dispatcher at all.
-    "openbank-balance-service": "#4007 — publishes via the direct KafkaBalanceEventPublisher instead",
+    # openbank-balance-service was wired instead of deleted (#8510): the write side now exists —
+    # HoldRepository.saveWithEvent/releaseWithEvent, BalanceMovementPortImpl and
+    # LedgerProjectionPortImpl write the outbox row in the SAME transaction as the state change,
+    # the direct KafkaBalanceEventPublisher is retired, and OutboxBalanceEventPublisher covers the
+    # announcement-only value-date roll. Its baseline reason was the #4007 mis-bin: the count had
+    # included the port DECLARATION of persistInTransaction, not a call. Proven by
+    # BalanceOutboxWriteIT — a real-DB IT, because a mocked repository cannot tell whether an
+    # outbox row was written.
     # openbank-billing-service was never a violation (#4007): it writes billing.fee.post-intent.v1
     # from BillingAssessmentRepositoryImpl by constructing BillingOutboxEntity() inside the same
     # sf.withTransaction as the assessment, which is a correct atomic outbox write this gate could
@@ -78,7 +87,14 @@ BASELINE = {
     # through party_outbox in the state-change transaction and the direct KafkaPartyEventPublisher
     # is gone. Removing an entry from this list is the definition of done for that service.
     "openbank-pid-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
-    "openbank-psd2-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
+    # openbank-psd2-service is no longer a violation (#8510): the dead outbox apparatus was
+    # deleted entirely (port/dispatcher/gauge/repository/entity/publisher, the psd2_outbox
+    # table + sequence via V5, the psd2-events-out channel and the openbank.psd2.events
+    # KafkaTopic CR) — the audit-service/#5126 disposition, since no consumer of
+    # openbank.psd2.events exists anywhere in the fleet and no domain event of its own was
+    # ever identified. Its baseline reason was also wrong on one half: it claimed
+    # `dispatch-enabled` was absent (defaulting to false); it was set to true.
+
     # openbank-tpp-registry-service was wired instead of deleted (#4007): TPP_REGISTERED and
     # TPP_BLACKLISTED now go through tpp_outbox in the same transaction as the tpp_entries row
     # (TppRepositoryImpl.save/update, which take the event as a REQUIRED parameter so there is no
@@ -274,9 +290,15 @@ def classify_service(files: dict[str, str]) -> tuple[bool, bool]:
     return dispatcher, writes
 
 
-def scan(root: pathlib.Path) -> dict[str, bool]:
-    """service -> constructs_a_message, for every service that ships a dispatcher."""
+def scan(root: pathlib.Path) -> tuple[dict[str, bool], int]:
+    """(service -> constructs_a_message for every service that ships a dispatcher, services walked).
+
+    The walked count is returned as well because the dispatcher-shipping set is a SUBSET: an
+    empty result is what a renamed module prefix or a moved source root produces, and it prints
+    identically to a fleet where nothing ships an outbox.
+    """
     result: dict[str, bool] = {}
+    walked = 0
     for svc in sorted(p for p in root.glob("openbank-*") if p.is_dir()):
         # openbank-libs-* ships the ABSTRACT dispatcher every service extends. It owns no table and
         # constructs no message by design, so including it is a permanent false positive.
@@ -285,6 +307,7 @@ def scan(root: pathlib.Path) -> dict[str, bool]:
         main = svc / "src" / "main" / "kotlin"
         if not main.is_dir():
             continue
+        walked += 1
         files = {}
         for kt in main.rglob("*.kt"):
             try:
@@ -294,7 +317,7 @@ def scan(root: pathlib.Path) -> dict[str, bool]:
         dispatcher, writes = classify_service(files)
         if dispatcher:
             result[svc.name] = writes
-    return result
+    return result, walked
 
 
 def self_test() -> int:
@@ -468,7 +491,8 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    found = scan(pathlib.Path(args.root))
+    found, walked = scan(pathlib.Path(args.root))
+    gatelib.subjects(walked, "service Kotlin main source trees walked")
     violations = sorted(svc for svc, writes in found.items() if not writes)
     new = [v for v in violations if v not in BASELINE]
     stale = sorted(b for b in BASELINE if b not in violations)

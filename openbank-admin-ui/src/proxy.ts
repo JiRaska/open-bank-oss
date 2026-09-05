@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { hasPermission, permissionForPath } from "@/lib/auth/roles"
+import { isPublicSurface } from "@/lib/auth/publicSurface"
 
 // ADR-0080 P1 (F-AUTH-06): per-request CSP with a nonce + 'strict-dynamic' instead of
 // 'unsafe-inline' on script-src. A static next.config header can't carry a fresh nonce, so the
@@ -23,8 +24,8 @@ function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self'",
     "img-src 'self' data: blob:",
     `connect-src 'self' ${KC_URL} ${GLITCHTIP_ORIGIN}`,
     "frame-src 'self'",
@@ -57,7 +58,12 @@ export default auth((req) => {
   // auth gate (it would loop /auth/login → /auth/login, or make the incident
   // contact unreachable without an account). Matched by middleware only so the
   // CSP still reaches them (ADR-0080 P1: CSP must cover pre-auth pages too).
-  if (pathname.startsWith("/auth") || pathname === "/privacy" || pathname.startsWith("/.well-known/")) {
+  //
+  // Uses the SAME predicate as the provider boundary (#7073) so the two cannot drift.
+  // This was startsWith("/auth"), a loose prefix that would serve any future
+  // /auth*-named route (e.g. /authorization) with no auth gate, while publicSurface
+  // called it protected. No such route exists today — the hole was latent, not live.
+  if (isPublicSurface(pathname) || pathname.startsWith("/.well-known/")) {
     return nextWithNonce()
   }
 
@@ -104,7 +110,8 @@ export const config = {
     // api/sanctions reachable WITHOUT a token — the same unauthenticated-info-disclosure class as
     // F-AUTH-01/02. They are consumed only by gated pages (security, system/tests, product-catalog,
     // fees, devops), so the session cookie still reaches them; nothing pre-auth needs them. Now the
-    // ONLY exclusions are Auth.js's own handlers and Next static assets — everything else is gated.
+    // ONLY exclusions are Auth.js's own handlers, Next static assets, and the public brand assets
+    // needed by the pre-auth login page — everything else is gated.
     // (k8s probes the pod via tcpSocket, not an /api path, so gating /api can't break liveness.)
     // NOTE: /auth/* is intentionally NOT excluded (ADR-0080 P1): the middleware must run there to
     // emit the nonce CSP on the pre-auth login page. The callback short-circuits /auth so the auth
@@ -114,6 +121,6 @@ export const config = {
     // not 2xx/401/403 to a 500 — so the middleware's 302-to-login would make the gate fail closed on
     // precisely the unauthenticated request it exists to reject cleanly. The route runs the same
     // session + role check itself, returns 204/401/403 with no body, and proxies nothing.
-    "/((?!api/auth|api/gate|_next/static|_next/image|favicon.ico|robots.txt).*)",
+    "/((?!api/auth|api/gate|_next/static|_next/image|brand/|favicon.ico|robots.txt).*)",
   ],
 }

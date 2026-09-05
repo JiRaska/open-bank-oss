@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.9.0...settlement-service-v0.9.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **settlement:** make the ledger compensation reachable and truthful ([#6410](https://github.com/JiRaska/open-bank-oss/issues/6410)) ([#6481](https://github.com/JiRaska/open-bank-oss/issues/6481)) ([a312b17](https://github.com/JiRaska/open-bank-oss/commit/a312b17dec0a1ba1fae219d62c13c5b7a920a8c0))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.8.0...settlement-service-v0.9.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.3...settlement-service-v0.8.0) (2026-08-22)
+
+
+### Features
+
+* **settlement:** emit domain metrics and alert on them ([#5705](https://github.com/JiRaska/open-bank-oss/issues/5705)) ([#5723](https://github.com/JiRaska/open-bank-oss/issues/5723)) ([c84cdd9](https://github.com/JiRaska/open-bank-oss/commit/c84cdd965c4a1dde8e129fd446c27cba22615eac))
+
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.2...settlement-service-v0.7.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **settlement:** remove the ledger compensation that could never run ([#6484](https://github.com/JiRaska/open-bank-oss/issues/6484)) ([2da87cf](https://github.com/JiRaska/open-bank-oss/commit/2da87cf6f35ef52572629e6f081b330cb8f74fd3)), closes [#6410](https://github.com/JiRaska/open-bank-oss/issues/6410)
+
 ## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.1...settlement-service-v0.7.2) (2026-08-22)
 
 

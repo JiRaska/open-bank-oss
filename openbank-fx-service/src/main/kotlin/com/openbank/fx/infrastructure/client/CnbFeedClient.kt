@@ -4,6 +4,7 @@
 
 package com.openbank.fx.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintExternalBoundary
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Produces
@@ -20,6 +21,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * no OIDC filter is registered because the ČNB feed is a public, unauthenticated endpoint.
  */
 @RegisterRestClient(configKey = "cnb-feed")
+@SyntheticTaintExternalBoundary("public Czech National Bank exchange-rate feed is outside OpenBank")
 @Produces(MediaType.TEXT_PLAIN)
 interface CnbFeedClient {
 

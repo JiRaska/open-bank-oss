@@ -20,7 +20,6 @@ import com.openbank.sca.application.port.out.OtpStore
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
-import com.openbank.sca.application.port.out.ScaOutboxRepository
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.DeviceDecisionType
 import com.openbank.sca.domain.model.DynamicLinkingData
@@ -33,9 +32,7 @@ import com.openbank.sca.domain.model.SignatureAlgorithm
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
-import io.mockk.just
 import io.mockk.mockk
-import io.mockk.runs
 import io.mockk.slot
 import io.mockk.verify
 import jakarta.persistence.PersistenceException
@@ -65,7 +62,6 @@ class ScaServiceTest {
     private val enrolledDeviceRepository = mockk<EnrolledDeviceRepository>()
     private val decisionStore = mockk<ScaDecisionStore>()
     private val assertionVerifier = mockk<DeviceAssertionVerifier>()
-    private val outboxRepository = mockk<ScaOutboxRepository>(relaxed = true)
     private val objectMapper = ObjectMapper()
     private val metrics = mockk<DomainMetrics>(relaxed = true)
 
@@ -82,7 +78,6 @@ class ScaServiceTest {
             enrolledDeviceRepository = enrolledDeviceRepository,
             decisionStore = decisionStore,
             assertionVerifier = assertionVerifier,
-            outboxRepository = outboxRepository,
             objectMapper = objectMapper,
             metrics = metrics,
             idempotencyTtlSeconds = 300L,
@@ -166,6 +161,57 @@ class ScaServiceTest {
         }
         coVerify(exactly = 1) { notificationDispatchGuard.sendPushNotification(partyId, any(), any()) }
         coVerify(exactly = 1) { idempotencyStore.save(any(), any(), 300L) }
+    }
+
+    /**
+     * The load-bearing guard (#8432). `preferredMethod` comes straight off the request body, and
+     * TOTP had no delivery path at all: `initiate` generated a code, stored it, and sent it
+     * nowhere. The challenge that came back could never be satisfied, so whatever it authorised
+     * could not proceed. Refusing before a challenge exists is the whole fix.
+     */
+    @Test
+    fun `initiate refuses TOTP instead of minting a challenge nobody can satisfy`(): Unit = runBlocking {
+        coEvery { idempotencyStore.get(any()) } returns null
+        coEvery { repository.save(any()) } answers { firstArg() }
+
+        assertThatThrownBy {
+            runBlocking {
+                service.initiate(
+                    InitiateScaCommand(
+                        partyId = UUID.randomUUID(),
+                        purpose = ScaPurpose.LOGIN,
+                        preferredMethod = ScaMethod.TOTP,
+                        dynamicLinkingData = null,
+                        redirectUrl = null,
+                    ),
+                )
+            }
+        }.isInstanceOf(ScaMethodNotDeliverableException::class.java)
+
+        // Nothing may be persisted, and no code may be generated or stored, for a refused method.
+        coVerify(exactly = 0) { repository.save(any()) }
+        coVerify(exactly = 0) { otpStore.store(any(), any(), any()) }
+    }
+
+    @Test
+    fun `the deliverable methods still work`(): Unit = runBlocking {
+        coEvery { idempotencyStore.get(any()) } returns null
+        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
+        coEvery { notificationDispatchGuard.sendPushNotification(any(), any(), any()) } returns Unit
+
+        listOf(ScaMethod.PUSH_NOTIFICATION, ScaMethod.BIOMETRIC).forEach { method ->
+            val result = service.initiate(
+                InitiateScaCommand(
+                    partyId = UUID.randomUUID(),
+                    purpose = ScaPurpose.LOGIN,
+                    preferredMethod = method,
+                    dynamicLinkingData = null,
+                    redirectUrl = null,
+                ),
+            )
+            assertThat(result.method).isEqualTo(method)
+        }
     }
 
     @Test
@@ -280,28 +326,14 @@ class ScaServiceTest {
         coVerify(exactly = 1) { repository.save(any()) }
     }
 
-    @Test
-    fun `initiate generates OTP for TOTP method`(): Unit = runBlocking {
-        val partyId = UUID.randomUUID()
-        every { otpGenerator.generate() } returns "123456"
-        coEvery { idempotencyStore.get(any()) } returns null
-        coEvery { repository.save(any()) } answers { firstArg() }
-        coEvery { idempotencyStore.save(any(), any(), any()) } returns Unit
-        coEvery { otpStore.store(any(), any(), any()) } returns Unit
-
-        val result = service.initiate(
-            InitiateScaCommand(
-                partyId = partyId,
-                purpose = ScaPurpose.LOGIN,
-                preferredMethod = ScaMethod.TOTP,
-                dynamicLinkingData = null,
-                redirectUrl = null,
-            ),
-        )
-
-        assertThat(result.method).isEqualTo(ScaMethod.TOTP)
-        coVerify(exactly = 1) { otpStore.store(result.id, "123456", 300L) }
-    }
+    // REMOVED (#8432): `initiate generates OTP for TOTP method` asserted that initiate stored a
+    // generated code — and never that anything delivered it, because nothing did. It locked in the
+    // defect: the customer was asked for a code no transport ever sent them. Superseded by
+    // `initiate refuses TOTP instead of minting a challenge nobody can satisfy` above.
+    //
+    // `verify completes challenge on successful OTP verification` below is deliberately kept: it
+    // builds a TOTP challenge directly rather than through initiate, and any challenge already
+    // stored with that method must still be verifiable.
 
     @Test
     fun `verify completes challenge on successful OTP verification`(): Unit = runBlocking {
@@ -585,22 +617,20 @@ class ScaServiceTest {
     fun `enroll saves the device credential`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { enrolledDeviceRepository.findByCredentialId("cred-1") } returns null
-        coEvery { enrolledDeviceRepository.save(any()) } answers { firstArg() }
+        coEvery { enrolledDeviceRepository.saveWithOutbox(any(), any()) } answers { firstArg() }
 
         val result = service.enroll(EnrollDeviceCommand(partyId, "cred-1", "pk", SignatureAlgorithm.ES256))
 
         assertThat(result.partyId).isEqualTo(partyId)
         assertThat(result.credentialId).isEqualTo("cred-1")
+        // ONE call, carrying BOTH the device and its event — the atomicity of that pair is
+        // what a mock cannot observe, and is pinned by ScaEnrollOutboxAtomicityIT (#8679).
         coVerify(exactly = 1) {
-            enrolledDeviceRepository.save(
+            enrolledDeviceRepository.saveWithOutbox(
                 match {
                     it.credentialId == "cred-1" &&
                         it.partyId == partyId
                 },
-            )
-        }
-        coVerify(exactly = 1) {
-            outboxRepository.save(
                 match {
                     it.eventType == "DEVICE_ENROLLED" &&
                         it.aggregateId == partyId
@@ -622,9 +652,8 @@ class ScaServiceTest {
     fun `enroll publishes eventType in the payload body, not only the outbox column`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { enrolledDeviceRepository.findByCredentialId("cred-wire") } returns null
-        coEvery { enrolledDeviceRepository.save(any()) } answers { firstArg() }
         val captured = slot<OutboxMessage>()
-        coEvery { outboxRepository.save(capture(captured)) } just runs
+        coEvery { enrolledDeviceRepository.saveWithOutbox(any(), capture(captured)) } answers { firstArg() }
 
         service.enroll(EnrollDeviceCommand(partyId, "cred-wire", "pk", SignatureAlgorithm.ES256))
 
@@ -646,9 +675,8 @@ class ScaServiceTest {
     fun `enroll publishes sourceService in the payload body for AuditConsumer attribution`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { enrolledDeviceRepository.findByCredentialId("cred-attribution") } returns null
-        coEvery { enrolledDeviceRepository.save(any()) } answers { firstArg() }
         val captured = slot<OutboxMessage>()
-        coEvery { outboxRepository.save(capture(captured)) } just runs
+        coEvery { enrolledDeviceRepository.saveWithOutbox(any(), capture(captured)) } answers { firstArg() }
 
         service.enroll(EnrollDeviceCommand(partyId, "cred-attribution", "pk", SignatureAlgorithm.ES256))
 
@@ -665,8 +693,7 @@ class ScaServiceTest {
         val result = service.enroll(EnrollDeviceCommand(partyId, "cred-dup", "pk", SignatureAlgorithm.ES256))
 
         assertThat(result).isEqualTo(existing)
-        coVerify(exactly = 0) { enrolledDeviceRepository.save(any()) }
-        coVerify(exactly = 0) { outboxRepository.save(any()) }
+        coVerify(exactly = 0) { enrolledDeviceRepository.saveWithOutbox(any(), any()) }
     }
 
     @Test
@@ -683,14 +710,14 @@ class ScaServiceTest {
                     )
                 }
             }.isInstanceOf(CredentialAlreadyEnrolledException::class.java)
-            coVerify(exactly = 0) { enrolledDeviceRepository.save(any()) }
+            coVerify(exactly = 0) { enrolledDeviceRepository.saveWithOutbox(any(), any()) }
         }
 
     @Test
     fun `enroll throws CredentialAlreadyEnrolledException on TOCTOU unique-constraint race`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { enrolledDeviceRepository.findByCredentialId("cred-race") } returns null
-        coEvery { enrolledDeviceRepository.save(any()) } throws
+        coEvery { enrolledDeviceRepository.saveWithOutbox(any(), any()) } throws
             PersistenceException("duplicate key violates unique constraint (23505)")
 
         assertThatThrownBy {
@@ -698,7 +725,10 @@ class ScaServiceTest {
                 service.enroll(EnrollDeviceCommand(partyId, "cred-race", "pk", SignatureAlgorithm.ES256))
             }
         }.isInstanceOf(CredentialAlreadyEnrolledException::class.java)
-        coVerify(exactly = 0) { outboxRepository.save(any()) }
+        // The unique violation aborts the ONE transaction that carries both legs, so the event
+        // cannot outlive the failed device insert — a property the two-transaction shape could
+        // not offer (#8679).
+        coVerify(exactly = 1) { enrolledDeviceRepository.saveWithOutbox(any(), any()) }
     }
 
     @Test

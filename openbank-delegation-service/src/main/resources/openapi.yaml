@@ -5,12 +5,56 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.4.0
+  version: 1.9.0
 servers:
   - url: http://localhost:8126
 tags:
   - name: Delegations
+  - name: Delegation role presets
 paths:
+  /api/v1/delegation-role-presets:
+    get:
+      tags: [Delegation role presets]
+      summary: List reusable delegation role presets
+      responses:
+        '200':
+          description: Presets ordered by name
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DelegationRolePresetResponse' } }
+        '403': { description: ROLE_OPERATOR or ROLE_ADMIN is required }
+    post:
+      tags: [Delegation role presets]
+      summary: Create a delegation role preset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DelegationRolePresetRequest' }
+      responses:
+        '201': { description: Preset created }
+        '400': { description: Invalid capability/resource combination }
+        '403': { description: ROLE_ADMIN is required }
+  /api/v1/delegation-role-presets/{id}:
+    parameters:
+      - $ref: '#/components/parameters/DelegationId'
+    put:
+      tags: [Delegation role presets]
+      summary: Replace a delegation role preset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DelegationRolePresetRequest' }
+      responses:
+        '200': { description: Preset updated }
+        '404': { description: Preset not found }
+    delete:
+      tags: [Delegation role presets]
+      summary: Delete a delegation role preset
+      responses:
+        '204': { description: Preset deleted }
+        '404': { description: Preset not found }
   /api/v1/delegations:
     post:
       tags: [Delegations]
@@ -45,6 +89,32 @@ paths:
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
         '403': { description: The authenticated party is not the grantor }
         '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
+  /api/v1/delegations/preview:
+    post:
+      tags: [Delegations]
+      summary: Validate a complete delegation draft before starting SCA
+      description: >-
+        Runs the same caller, constraint, resource-ownership and party-eligibility gates as offer,
+        but does not read or consume an SCA challenge, persist a grant, or emit an event. A later
+        offer repeats every check; this response is never authorization and must not be cached as
+        one. Counterparty names are deliberately not returned, so this endpoint is not a party
+        directory.
+      parameters:
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PreviewDelegationRequest' }
+      responses:
+        '200':
+          description: The exact draft is currently eligible to proceed to SCA
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DelegationPreviewResponse' }
+        '400': { description: Unsupported or inconsistent constraints }
+        '403': { description: The authenticated party is not the grantor }
+        '422': { description: Eligibility gate, or resource ownership could not be established }
   /api/v1/delegations/{id}:
     get:
       tags: [Delegations]
@@ -90,6 +160,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: Not the grantor, and not a bank-initiated revoke }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/grantor/{partyId}:
     get:
       tags: [Delegations]
@@ -144,6 +215,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: The authenticated party is not the grantee }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/decline:
     post:
       tags: [Delegations]
@@ -162,6 +234,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: The authenticated party is not the grantee }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/renounce:
     post:
       tags: [Delegations]
@@ -180,6 +253,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: The authenticated party is not the grantee }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/suspend:
     post:
       tags: [Delegations]
@@ -198,6 +272,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: Bank-initiated only — requires an operator/admin session and no X-Customer-Party-Id }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/reinstate:
     post:
       tags: [Delegations]
@@ -211,6 +286,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '403': { description: Bank-initiated only — requires an operator/admin session and no X-Customer-Party-Id }
+        '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/check:
     post:
       tags: [Delegations]
@@ -236,9 +312,10 @@ paths:
         reservation already consumes headroom; that is the point, and it is why two concurrent
         payments cannot both pass a check that neither passes alone.
 
-        `idempotencyKey` is the caller's key for the spend: a retry under the same key returns the
-        SAME reservation and takes the headroom once. The response carries
-        `X-Idempotency-Replayed: true` when it did.
+        A retry under the same `idempotencyKey` and immutable amount/currency/operation tuple
+        returns the same reservation. A different tuple is refused. `operationType` defaults to
+        `UNSPECIFIED`; `DOMESTIC_PAYMENT` opts into the durable state stream and remains disabled
+        until its downstream binding consumer is ready.
       parameters:
         - $ref: '#/components/parameters/DelegationId'
         - $ref: '#/components/parameters/CustomerPartyId'
@@ -254,13 +331,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SpendReservationResponse' }
         '404': { description: No such delegation, or the caller is not its grantee }
+        '400': { description: Malformed request, including an idempotency key above its rail limit }
         '409':
           description: >-
-            Refused. The body names WHICH ceiling was hit and how much remains under it, because a
-            client that only learns "no" can only guess.
+            Refused by a ceiling, or the idempotency key names a different immutable tuple.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SpendRefusalResponse' }
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/SpendIdempotencyConflictResponse' }
+        '503':
+          description: Domestic reservation admission is disabled; no reservation was created.
   /api/v1/delegations/{id}/reservations/{rid}/confirm:
     post:
       tags: [Delegations]
@@ -329,6 +410,27 @@ components:
       required: true
       schema: { type: string, format: uuid }
   schemas:
+    DelegationRolePresetRequest:
+      type: object
+      required: [name, resourceType, capabilities]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT] }
+        capabilities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string }
+    DelegationRolePresetResponse:
+      allOf:
+        - $ref: '#/components/schemas/DelegationRolePresetRequest'
+        - type: object
+          required: [id, createdAt, updatedAt]
+          properties:
+            id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
     MoneyDto:
       type: object
       required: [amount, currency]
@@ -354,8 +456,10 @@ components:
           type: array
           items:
             type: string
-            enum: [ACCOUNT_READ_BALANCES, ACCOUNT_READ_TRANSACTIONS, ACCOUNT_INITIATE_PAYMENT,
-                   ACCOUNT_PROPOSE_PAYMENT, CARD_VIEW, CARD_MANAGE_LIMITS, SAVINGS_DEPOSIT,
+            enum: [ACCOUNT_VIEW_DETAILS, ACCOUNT_READ_BALANCES, ACCOUNT_READ_TRANSACTIONS,
+                   ACCOUNT_DOWNLOAD_STATEMENTS, ACCOUNT_INITIATE_PAYMENT, ACCOUNT_PROPOSE_PAYMENT,
+                   ACCOUNT_MANAGE_BENEFICIARIES, ACCOUNT_MANAGE_LIMITS, CARD_VIEW,
+                   CARD_VIEW_TRANSACTIONS, CARD_MANAGE_LIMITS, CARD_MANAGE_STATUS, CARD_MANAGE_CHANNELS, SAVINGS_DEPOSIT,
                    SAVINGS_WITHDRAW, SAVINGS_PROPOSE_WITHDRAW, OBJECT_READ, DELEGATION_MANAGE]
         approvalPolicy:
           type: string
@@ -399,6 +503,38 @@ components:
         validTo: { type: string, format: date-time }
         grantScaSessionId: { type: string, format: uuid }
         note: { type: string }
+    PreviewDelegationRequest:
+      type: object
+      required: [grantorPartyId, granteePartyId, resourceType, resourceId, capabilities]
+      description: The offer draft without grantScaSessionId; preview never reads or consumes SCA.
+      properties:
+        grantorPartyId: { type: string, format: uuid }
+        granteePartyId: { type: string, format: uuid }
+        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT] }
+        resourceId: { type: string, format: uuid }
+        capabilities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [ACCOUNT_VIEW_DETAILS, ACCOUNT_READ_BALANCES, ACCOUNT_READ_TRANSACTIONS,
+                   ACCOUNT_DOWNLOAD_STATEMENTS, ACCOUNT_INITIATE_PAYMENT, ACCOUNT_PROPOSE_PAYMENT,
+                   ACCOUNT_MANAGE_BENEFICIARIES, ACCOUNT_MANAGE_LIMITS, CARD_VIEW,
+                   CARD_VIEW_TRANSACTIONS, CARD_MANAGE_LIMITS, CARD_MANAGE_STATUS, CARD_MANAGE_CHANNELS,
+                   SAVINGS_DEPOSIT, SAVINGS_WITHDRAW, SAVINGS_PROPOSE_WITHDRAW, OBJECT_READ, DELEGATION_MANAGE]
+        approvalPolicy: { type: string, enum: [SOLO, ANY_ONE, ALL, N_OF_M], default: SOLO }
+        requiredApprovals: { type: integer }
+        perTransactionLimit: { $ref: '#/components/schemas/MoneyDto' }
+        dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
+        monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
+        exposure: { $ref: '#/components/schemas/ExposureDto' }
+        validTo: { type: string, format: date-time }
+    DelegationPreviewResponse:
+      type: object
+      required: [valid]
+      properties:
+        valid: { type: boolean, const: true }
     RevokeDelegationRequest:
       type: object
       required: [reason]
@@ -490,13 +626,21 @@ components:
           description: >-
             The caller's key for this spend, unique per delegation. Enforced by a database
             constraint, so a replay cannot double-count even across replicas.
+        operationType:
+          type: string
+          enum: [UNSPECIFIED, DOMESTIC_PAYMENT]
+          default: UNSPECIFIED
+          description: Reconciliation rail; it is not workload authentication.
     SpendReservationResponse:
       type: object
-      required: [reservationId, delegationId, amount, state, createdAt]
+      required: [reservationId, delegationId, amount, operationType, state, createdAt]
       properties:
         reservationId: { type: string, format: uuid }
         delegationId: { type: string, format: uuid }
         amount: { $ref: '#/components/schemas/MoneyDto' }
+        operationType:
+          type: string
+          enum: [UNSPECIFIED, DOMESTIC_PAYMENT]
         state:
           type: string
           enum: [RESERVED, CONFIRMED, RELEASED]
@@ -519,4 +663,14 @@ components:
         remaining:
           $ref: '#/components/schemas/MoneyDto'
           description: What is still spendable under the breached ceiling, clamped at zero.
+        error: { type: string }
+    SpendIdempotencyConflictResponse:
+      type: object
+      required: [type, title, status, detail, code, error]
+      properties:
+        type: { type: string, enum: ['urn:openbank:error:idempotency-key-reused'] }
+        title: { type: string, enum: [Idempotency key reused] }
+        status: { type: integer, enum: [409] }
+        detail: { type: string }
+        code: { type: string, enum: [IDEMPOTENCY_KEY_REUSED] }
         error: { type: string }

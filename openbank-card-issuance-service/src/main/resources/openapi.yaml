@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Card Issuance Service API
-  version: 1.8.0
+  version: 1.9.0
   description: Debit/credit card lifecycle — issue, activate, block, suspend, resume, cancel;
     synthetic PAN vault, product-catalog entitlements, and additional-cardholder cards issued
     under a delegation grant (ADR-0249 D1/D2).
@@ -631,7 +631,8 @@ components:
 
     IssueCardRequest:
       type: object
-      required: [partyId, accountId, cardType, cardNetwork]
+      required: [partyId, accountId, productCode, cardType, network, cardholderName,
+                 embossedName, currency]
       properties:
         partyId:
           type: string
@@ -639,16 +640,32 @@ components:
         accountId:
           type: string
           format: uuid
+        productCode:
+          type: string
         cardType:
           type: string
           enum: [DEBIT, CREDIT, PREPAID, VIRTUAL, SINGLE_USE]
-        cardNetwork:
+        network:
           type: string
-          enum: [VISA, MASTERCARD]
+          enum: [VISA, MASTERCARD, AMEX, UNIONPAY]
+        cardholderName:
+          type: string
         embossedName:
           type: string
+        currency:
+          type: string
+          description: ISO 4217 alphabetic code.
+        dailyLimitMinorUnits:
+          type: integer
+          format: int64
+          default: 500000
+        monthlyLimitMinorUnits:
+          type: integer
+          format: int64
+          default: 5000000
         deliveryAddress:
-          type: object
+          type: string
+          nullable: true
         delegationGrantId:
           type: string
           format: uuid

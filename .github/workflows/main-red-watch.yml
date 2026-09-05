@@ -55,6 +55,9 @@ on:
       - "Dependency submission"
       - "Gradle wrapper validation"
       - "Release Please"
+      # ADR-0279 #16/#20: the Semgrep IaC lane is a security gate; its red on main is a
+      # container/manifest regression and must not stay silent.
+      - "Semgrep IaC security"
       # Pushes to main unconditionally (issue #4240). Its red is meaningful in a way worth
       # naming: it means the watch could NOT read the ruleset bypass log — a permission-shaped
       # absence, not "nothing was bypassed". Exactly the state that must not stay silent.
@@ -73,6 +76,8 @@ on:
       - "Pact drift check"
       - "Product Catalog Native Build (T1 enabler smoke test)"
       - "Schema registry apply (document-service pilot)"
+      - "Synthetic journeys"
+      - "Admin UI browser synthetic"
     types: [completed]
   pull_request:
     paths:
@@ -106,7 +111,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: pip install --quiet pyyaml
+      - run: bash .github/scripts/install-pyyaml-hash-pinned.sh
       - name: Self-test the watcher
         run: python3 .github/scripts/check-main-red-watch.py --self-test
       - name: Every push-on-main workflow is watched or declared
@@ -130,7 +135,7 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: pip install --quiet pyyaml
+      - run: bash .github/scripts/install-pyyaml-hash-pinned.sh
 
       # A verdict that has only ever said "green" is indistinguishable from a
       # classifier that finds nothing. This step failing voids the run.

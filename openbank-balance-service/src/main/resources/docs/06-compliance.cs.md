@@ -8,7 +8,7 @@
 | **AnaCredit** (Reg. EU 2016/867) | reporting povolených/nepovolených overdraftů | per-account `arranged_overdraft_limit`, separátní field; výstup do balance-reporting servisu |
 | **PSD2** | balance read přes TPP (AISP) | `consent-service` → `psd2-service` → balance-service GET (role `ROLE_SERVICE_PSD2`) |
 | **GDPR** | account_id je nepřímý identifikátor | žádný IBAN/name/email; join na party přes řízený přístup |
-| **DORA** | operational resilience | health probes, SLO, runbooks, BootstrapVerifier, audit events |
+| **DORA** | operational resilience | health probes, SLO, runbooks, audit events. `BootstrapVerifier` byl uveden zde a neexistuje (#8426) — secrets drží injektáž přes ESO/OpenBao `secretKeyRef` (ADR-0007) |
 
 ## ČNB / AnaCredit overdraft
 
@@ -63,6 +63,6 @@ Recon job (denní 02:00 UTC) ověří `sum(balances.booked) per account == sum(l
 - ✅ AuthZ: `@RolesAllowed` + per-account ownership check via `account-service`
 - ✅ Rate limiting: `libs.web.RateLimitFilter`
 - ✅ TLS: mTLS in-cluster (Istio)
-- ✅ Secrets: BootstrapVerifier
+- ⬜ Secrets: **`BootstrapVerifier` neexistuje** — nic nekontroluje dev placeholder při startu. Credentials přicházejí přes `secretKeyRef` z ESO/OpenBao (ADR-0007). Konfigurace, ne kontrola (#8426)
 - ✅ Audit: every state change → audit-service
 - ⚠️ Encryption-at-rest balance amounts: not implemented (low risk — amounts jsou samy o sobě non-PII)

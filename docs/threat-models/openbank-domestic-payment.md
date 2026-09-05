@@ -20,6 +20,8 @@ to a beneficiary — a primary fraud target.
                                                                                   |
                                                                                   +--> [(domestic_payment_outbox)] --> [Kafka payment events] --> clearing/ledger
                                                                                   |
+[Kafka compacted delegated reservation state] --> [durable binding projection] --+
+                                                                                  |
                                                                                   +--> [fraud-service] (shadow, OIDC CC / mTLS, fail-open)
                                                                                   |
                                                                                   +--> [clearing-simulator] (pacs.008 out / pacs.002 in; OIDC CC; ADR-0104 D4; flag-gated)
@@ -47,6 +49,11 @@ to a beneficiary — a primary fraud target.
 | **S**poofing | Forged `pacs.002` ACSC from clearing-simulator (ADR-0104 D4) | clearing-simulator is cluster-internal only; OIDC CC verifies identity; `Pacs002Reader` validates XML schema before parsing; scheme accept moves payment to SENT_TO_CLEARING, then settlement call to transaction-service (ADR-0108) triggers the debit |
 | **T**ampering | ACSC verdict triggers double-booking via settlement retry | Idempotency key `domestic-settlement-<paymentId>` on transaction-service; 409 = already-booked success; debit runs once regardless of Temporal retries |
 | **T**ampering | Alter amount/beneficiary in flight | Server-validated instruction; signed/immutable once accepted; audit |
+| **T**ampering / **I**nfo disclosure | Reuse another caller's `Idempotency-Key`, or change amount/beneficiary while receiving the first caller's cached 201 body | Redis is no longer an authority for create-payment responses. A canonical SHA-256 over the complete normalized command, issuer-qualified actor scope, synthetic classification and delegation/reservation binding is stored on `domestic_payments` in the same transaction as the payment and outbox. Exact digest replay returns the durable row; any mismatch and every legacy NULL fingerprint fail closed with 409 `IDEMPOTENCY_KEY_REUSED`. The DB unique key arbitrates concurrent creators; the losing transaction (including its outbox) rolls back before its winner is fingerprint-verified. Cutover is blue/green with creates quiesced and drained for the 15-second request timeout, never a mixed-writer rolling interval. |
+| **T**ampering / **E**oP | Forged, replayed or reordered delegated reservation snapshot authorizes a payment | The default-OFF Kafka consumer accepts the exact version-1 envelope and complete immutable tuple only. A domain-separated SHA-256 binds the raw Idempotency-Key without retaining it. PostgreSQL stores the monotonic reservation revision; same/stale revisions are idempotent, contradictory tuples fail to DLQ, and cross-pod timestamps never override the version. Source timestamps are truncated to PostgreSQL's microsecond precision before both persistence and comparison, so a nanosecond-bearing first delivery/redelivery cannot become a false contradiction. The create transaction locks PENDING and revalidates grantee, grantor/debit owner, account, amount, currency, operation, delegation and key hash before atomically inserting payment+created outbox and moving to BOUND. |
+| **T**ampering / **E**oP | A delegated request names the reserved account id but supplies another debtor account number/bank code, or the account has moved to another owner | Before any payment/outbox/workflow side effect, the default-OFF use-case rebuilds the canonical Czech IBAN from the normalized debtor coordinates, requires account-service to resolve it to the exact reserved resource id, and independently requires that id's owner to equal the reservation grantor. A different resolved id/owner is a permanent tuple mismatch; a null result (404 and outage are intentionally indistinguishable in the existing narrow port) is retryable `AccountAuthorityUnavailable`, never authorization. The repository still locks and revalidates the tuple in the create transaction. |
+| **T**ampering / **R**epudiation | Create races an absence finalizer, or a future code path inserts a standalone payment against PENDING and later releases its reservation | Pessimistic row lock plus deferred two-way FKs serialize the race. The inverse link is composite `(reservation_id,payment_id)`, backed by a non-partial unique target, so PENDING+NULL cannot authorize any delegated payment and only the exact BOUND pair can commit; owner rows pass via `MATCH SIMPLE` NULL reservation. Exactly BOUND+payment+created outbox or permanent FINALIZED_ABSENT+absence outbox can commit; failures roll back the entire transaction. Tombstones are retained and delayed RESERVED cannot reopen them. No HTTP callback and no blind delegation TTL release exists. |
+| **I**nfo disclosure | Indefinitely compacted state retains caller-controlled Idempotency-Key text | Only lowercase domain-separated SHA-256 is published and persisted (`openbank.delegation.spend-reservation.idempotency-key.v1`, NUL delimiter, raw UTF-8 key). The callback also carries only this digest. |
 | **R**epudiation | Customer/operator denies initiating | AuditEvent + SCA evidence + correlation id |
 | **I**nfo disclosure | Payment history harvesting | AuthZ scoping; `ROLE_VIEWER` read-only, owner-scoped |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-payment inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077 / ADR-0079): the `openbank.outbox.backlog` gauge is tagged **only** by `service="domestic"` — never a payment id, IBAN, amount, debtor/creditor identity, or any PII. The value is a read-only `COUNT` of PENDING+FAILED outbox rows refreshed off the scrape thread (a cached `AtomicLong` ticked by a scheduled `suspend` query), so a Prometheus scrape touches neither the DB nor payment data. `/q/metrics` is cluster-internal |
@@ -82,13 +89,102 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 5. Residual risks / assumptions
 
-- **Idempotency-key required** — duplicate payment on retry must be rejected.
+- **Idempotency-key required** — only an exact, actor-bound retry may replay the durable payment;
+  changed or unverifiable legacy requests are rejected with 409.
+- **Global-key collision remains fail-closed:** V1's existing `UNIQUE(idempotency_key)` is intentionally
+  retained for mixed-version safety. A key already used in another actor scope can therefore deny
+  that same key to a victim (409), but can never replay or disclose the first actor's response. Do
+  not weaken the constraint while an old writer can still omit the fingerprint. Follow-up must be
+  an expand/contract rollout: first deploy every writer with a separately persisted one-way actor-
+  scope binding and prove no legacy writers remain; then add/validate the scoped uniqueness rule;
+  only in a later migration may the global unique constraint be removed. Until then clients should
+  generate high-entropy keys and treat a cross-scope collision as terminal, not retry it unchanged.
+- **Delegated-spend rollout is intentionally inert:** the consumer and finalizer are separate,
+  default-OFF switches; GitOps provisions ACL/DLQ only, while the group/offset activation ConfigMap
+  is deliberately absent until a compatible image is pinned. Enable projection/backfill first,
+  then the separately approved workload-only
+  create endpoint, and finalization last. Until the consumer is caught up, create returns the future
+  425 semantic and the caller must retry; a permanent absence returns the future 410 semantic.
+- **Account authority proof is an activation gate:** do not expose or enable the workload endpoint
+  unless both canonical-IBAN-to-account-id and account-id-to-owner checks are green. A lookup outage
+  must stay retryable and must produce no payment, outbox event or workflow start; it must never be
+  downgraded to a tuple mismatch or treated as proof of ownership.
+- **Finalizer availability trade-off:** a disabled/stalled finalizer retains PENDING rows and reserved
+  headroom rather than releasing funds without proof. This fail-closed strand is observable/retryable
+  and is safer than a time-only release; the callback is a transactional domestic outbox event.
 - SCA (sca-service) must gate customer-initiated transfers.
 - **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit
   trail** (ADR-0155) — a durable-audit requirement for "who approved what, forever" would
   need an additional store; not implemented in this PR.
 
 ## 6. Change log
+
+- **2026-09-01** — Added an expand-first, default-OFF delegated-spend binding state machine; no REST
+  endpoint or new caller is exposed in this phase. V13 creates the durable PENDING/BOUND/
+  FINALIZED_ABSENT projection with full immutable party/resource/money tuple, domain-separated
+  Idempotency-Key hash, partial indexes, `NOT VALID` checks and deferred two-way payment FKs. The
+  inverse FK uses the exact `(reservation_id,payment_id)` pair rather than reservation alone, so a
+  standalone payment can never commit against PENDING; V14
+  validates separately. A default-OFF Kafka consumer applies compacted version-1 snapshots by
+  monotonic reservationVersion, tolerates clock skew and canonicalizes older nanosecond timestamps
+  to the database's microsecond precision before persistence/comparison. A separate default-OFF suspend scheduler
+  atomically finalizes old PENDING rows and writes `DELEGATED_SPEND_FINALIZED_ABSENT`; it does not
+  call delegation over HTTP and never releases by TTL alone. The workload-only application port
+  accepts only a reservation selector, derives grantee identity/delegation/debit owner/account id
+  from the local projection, proves the normalized debtor coordinates resolve to that exact account
+  and that its current owner is the grantor, then locks/revalidates before
+  payment+created-outbox+BOUND commit. An unprovable lookup is retryable and has no write/workflow
+  side effects. GitOps adds
+  exact future consumer-group ACL and DLQ but intentionally omits the group/offset ConfigMap and any
+  activation wiring until a compatible image is pinned. V10's nullable reservation uniqueness is
+  the one deliberate table scan (PostgreSQL cannot attach a UNIQUE constraint `NOT VALID`); table
+  sizing must be checked before rollout, and its named constraint is the rollback boundary.
+  **Risk class:** money-path integrity, confidentiality and availability.
+  **Rollback:** disable finalizer, workload seam and consumer in that order; retain/export BOUND and
+  FINALIZED_ABSENT evidence, verify no PENDING rows, then drop inverse FK before the binding table.
+
+- **2026-09-01** — Hardened create-payment idempotency from a raw Redis key lookup to a durable,
+  actor-bound request fingerprint. Previously, the REST resource queried Redis by the caller-
+  supplied key before it parsed or compared the payment command; a reused key could therefore
+  return another request's cached response body, while the DB fallback compared only the emerging
+  delegation/reservation pair. New payments persist a length-framed canonical SHA-256 of all
+  normalized command fields, the authenticated issuer/subject scope, synthetic taint and
+  delegation/reservation ids atomically with the payment and outbox. Postgres remains the sole
+  authority across replicas; the unique-key race path returns the committed winner only after the
+  loser's transaction is rolled back, then verifies its fingerprint. A changed request or legacy
+  row with no provable fingerprint returns RFC 9457 media type `application/problem+json`, status
+  409 and code `IDEMPOTENCY_KEY_REUSED`; exact replay returns the existing payment and
+  `X-Idempotency-Replayed: true`. V11 is an additive nullable metadata-only column plus a
+  `NOT VALID`/`VALIDATE` format check; NULL is retained intentionally so legacy replay fails closed
+  rather than being falsely backfilled. No endpoint, caller, role or network edge was added.
+  V1's global unique key remains deliberately intact through the cutover: this preserves
+  fail-closed collision handling at the cost of a bounded cross-scope key-collision DoS; it never
+  permits cross-scope replay because the fingerprint comparison happens before any row is returned.
+  The former Redis replay contract was 24 hours (`86400` seconds). A pre-cutover NULL-fingerprint
+  row inside that window now returns 409 even for a legitimate retry: this is an explicit residual
+  availability break chosen over returning another request's response. The caller must not switch
+  keys because the first attempt may have committed; status lookup/operator reconciliation decides
+  the outcome. There is no flag that re-enables unprovable replay.
+  **Risk class:** integrity, confidentiality and bounded cutover availability. **Rollback:** do not
+  make Redis or a NULL fingerprint authoritative again. Quiesce creates, keep the additive column
+  and constraint, and reconcile every ambiguous request before any image reversal/resubmission;
+  reverting to the previous Redis-authoritative behavior requires a separate security decision.
+
+- **2026-08-26** — The existing authenticated initiation edge now carries a bounded synthetic
+  classification into the existing `domestic_payment_outbox` event boundary. The resource copies
+  it only from the `SyntheticTaintRequestFilter` request property after that filter has accepted a
+  configured trusted principal; it does **not** accept a request header, JWT claim, MDC value, or
+  an unconfigured caller as synthetic. The property is persisted on the payment-created outbox
+  message so an asynchronous consumer can retain the classification instead of treating a canary
+  payment as real. This adds no caller, role, OPA grant, endpoint, payment-control bypass, or new
+  network edge: authentication, authorisation, SCA, limits, sanctions and fraud remain on the
+  normal initiation path. **STRIDE-S/T:** an untrusted caller attempting to label a real payment as
+  synthetic is mitigated by the fail-closed filter decision and by copying only that server-side
+  property. **Residual risk:** no trusted principal is configured and no downstream regulatory
+  exclusion is claimed here; activating either remains a separately reviewed production change.
+  Rollback: revert this propagation, which restores the previous default of `synthetic=false`.
+
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass: sanctions, fraud, limits and SCA continue to run. It prevents a canary payment becoming indistinguishable before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
   `domestic-payment.transitionStatus` four-eyes decision parked at 202 was discoverable only by
@@ -221,7 +317,7 @@ not change any existing request's outcome until explicitly flipped.
   true; `%test` false) so @QuarkusTest boot does not connect to an absent Temporal frontend; a test
   `WorkflowClientTestProducer` backs the CDI `WorkflowClient` with an in-process `TestWorkflowEnvironment`.
   **No new trust boundary or external caller** — the same screening/fraud/scheme/settlement steps now run
-  inside Temporal activities (each already OIDC/mTLS-bounded), with the workflow adding durable retries +
+  inside Temporal activities (each already OIDC-bounded; mTLS is NOT deployed for service-to-service HTTP — the only PeerAuthentication/DestinationRule in the tree is `openbank-infra/k8s/base/istio.yaml`, which no ArgoCD application applies, #1914. Kafka mTLS is real and separate), with the workflow adding durable retries +
   reverse compensation. The prerequisite that the Temporal path was missing shadow fraud scoring was
   fixed in the same change (the `shadowFraudScore` activity is now invoked between validation and scheme
   submission, matching the retired flow). Rollback: revert the commit (the flag + in-service flow return).

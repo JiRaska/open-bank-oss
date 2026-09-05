@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.10.0...dispute-service-v0.10.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* send occurredAt on the last four audit-consumed producers that omit it ([#8352](https://github.com/JiRaska/open-bank-oss/issues/8352)) ([#8503](https://github.com/JiRaska/open-bank-oss/issues/8503)) ([146fe87](https://github.com/JiRaska/open-bank-oss/commit/146fe87adaeca4e56fb8da285a57daaaf840cb1d))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.6...dispute-service-v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
 ## [0.9.6](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.5...dispute-service-v0.9.6) (2026-08-18)
 
 

@@ -16,7 +16,7 @@ graph LR
   dp[(domestic-payment-service)]:::svc
   db[(PostgreSQL<br/>openbank_domestic_payments)]
   kafka[(Kafka<br/>openbank.domestic.payment.events)]
-  redis[(Valkey<br/>idempotence)]
+  redis[(Valkey<br/>four-eyes schvalování)]
 
   ch -- "POST/GET/PATCH /domestic-payments" --> dp
   admin -- "čtení + ruční přechody" --> dp
@@ -25,7 +25,7 @@ graph LR
 
   dp --> db
   dp -- "outbox → publish" --> kafka
-  dp --> redis
+  dp -- "stav schvalovacího workflow" --> redis
 
   kafka --> clr
   kafka --> led
@@ -47,22 +47,22 @@ graph TB
     persist[Persistence<br/>DomesticPaymentRepositoryImpl<br/>Hibernate Reactive / Panache]
     outbox[Outbox<br/>DomesticPaymentOutboxDispatcher<br/>poll á 5s, dávka 25]
     kafkaPub[Kafka publisher<br/>KafkaDomesticPaymentEventPublisher]
-    idem[Idempotence<br/>libs IdempotencyStore - Redis]
+    idem[Idempotence<br/>otisk normalizovaného požadavku]
     sancCli[Sanctions klient<br/>SanctionsScreeningAdapter]
     amlCli[AML klient<br/>AmlCaseAdapter]
   end
 
   rest --> uc
-  rest --> idem
   uc --> dom
+  uc --> idem
   uc --> persist
+  idem --> persist
   uc --> sancCli
   uc --> amlCli
   persist -.-> db[(PostgreSQL)]
   outbox --> kafkaPub
   outbox -.-> db
   kafkaPub -.-> kafka[(Kafka)]
-  idem -.-> redis[(Valkey)]
   sancCli -.-> sanc[(sanctions-service)]
   amlCli -.-> aml[(aml-service)]
 ```
@@ -90,7 +90,7 @@ com.openbank.domestic/
     ├── persistence/           implementace repository, JPA entity, mappery
     ├── outbox/                DomesticPaymentOutboxDispatcher (scheduled, fault-tolerant)
     ├── kafka/                 KafkaDomesticPaymentEventPublisher
-    ├── idempotency/           IdempotencyConfig
+    ├── approval/              ApprovalConfig (pouze four-eyes workflow v Redisu)
     ├── client/               SanctionsServiceClient + adaptér, AmlServiceClient + adaptér
     └── authz/                AuthzProducer (OPA, ADR-0034)
 ```
@@ -168,7 +168,6 @@ sequenceDiagram
 
 | Modul | Použití zde |
 |---|---|
-| `libs.idempotency.IdempotencyStore` | idempotence při založení nad Redisem |
 | `libs.persistence.outbox` | konvence outbox entity/repository |
 | `libs.api.error.ApiError` / `ErrorCode` | jednotná chybová obálka (404 NOT_FOUND, 409 CONFLICT) |
 | `libs.authz.@Authorize` | OPA autorizace při přechodu stavu (ADR-0034) |
@@ -181,4 +180,4 @@ sequenceDiagram
 2. **Persist před screeningem** — řádek `RECEIVED` + outbox jsou commitnuty před synchronním screeningovým voláním, takže platba se nikdy neztratí.
 3. **Fail closed** — výpadek sanctions-service drží platbu v `RECEIVED`; nikdy se automaticky neuvolní.
 4. **Žádné vzdálené volání uvnitř perzistenční transakce** — screening a volání AML případu probíhají mezi transakcemi.
-5. **Idempotence na hraně** — `Idempotency-Key` je při založení povinný; replaye vrací cachovanou odpověď a repository navíc deduplikuje podle idempotency klíče.
+5. **Trvalá idempotence svázaná s aktérem** — `Idempotency-Key` je povinný; Postgres uloží otisk normalizovaného požadavku atomicky s platbou/outboxem, přesný replay vrátí tento řádek a odlišný požadavek skončí 409.

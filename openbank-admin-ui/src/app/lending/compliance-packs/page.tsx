@@ -17,8 +17,9 @@
 
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { CheckCircle2, Clock, RefreshCw, ShieldCheck, ScrollText, AlertTriangle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
@@ -38,6 +39,9 @@ type PackActivationView = {
   proposedBy: string
   decidedBy: string | null
   decidedAt: string | null
+  proposedAt: string | null
+  decisionReason: string | null
+  pack: Record<string, unknown>
 }
 
 /** A read that was REFUSED must never render as "nothing pending" — same reasoning as /approvals
@@ -66,6 +70,16 @@ export default function CompliancePacksPage() {
   const [notice, setNotice] = useState<string | null>(null)
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [packJson, setPackJson] = useState('')
+  const [detail, setDetail] = useState<PackActivationView | null>(null)
+  const [review, setReview] = useState<{ proposal: PackActivationView; approve: boolean } | null>(null)
+  const reviewCancelRef = useRef<HTMLButtonElement>(null)
+  const reviewConfirmRef = useRef<HTMLButtonElement>(null)
+  const detailTriggerRef = useRef<HTMLElement | null>(null)
+
+  const openDetail = (pack: PackActivationView, event: React.MouseEvent<HTMLElement>) => {
+    detailTriggerRef.current = event.currentTarget
+    setDetail(pack)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -164,6 +178,7 @@ export default function CompliancePacksPage() {
         ? t('Pack aktivován. Guard ho používá okamžitě, bez restartu služby.',
             'Pack activated. The origination guard uses it immediately — no service restart.')
         : t('Návrh zamítnut.', 'Proposal rejected.'))
+      setReview(null)
       await load()
     } catch {
       setError(t('lending-service je nedostupný.', 'lending-service is unreachable.'))
@@ -243,7 +258,12 @@ export default function CompliancePacksPage() {
                 <td style={cell}>{p.productType}</td>
                 <td style={cell}>v{p.packVersion}</td>
                 <td style={cell}>{p.effectiveFrom}</td>
-                <td style={{ ...cell, fontSize: 11 }} className="mono">{p.contentHash.slice(0, 16)}…</td>
+                <td style={{ ...cell, fontSize: 11 }}>
+                  <span className="mono">{p.contentHash.slice(0, 16)}…</span>{' '}
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={event => openDetail(p, event)}>
+                    {t('Zobrazit detail', 'View details')}
+                  </button>
+                </td>
               </tr>
             ))}
             {active.length === 0 && (
@@ -278,6 +298,9 @@ export default function CompliancePacksPage() {
               <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
                 {t('Navrhl', 'Proposed by')}: {p.proposedBy} · <span className="mono">{p.contentHash.slice(0, 16)}…</span>
               </div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={event => openDetail(p, event)} style={{ marginTop: 6 }}>
+                {t('Zobrazit detail', 'View details')}
+              </button>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <Can permission="lending:compliance:decide" fallback={<span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Rozhodnutí je pouze pro compliance principály.', 'Decisions are limited to compliance principals.')}</span>}>
@@ -290,10 +313,10 @@ export default function CompliancePacksPage() {
                 onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}
                 style={{ fontSize: 12 }}
               />
-              <button type="button" className="btn btn-primary" disabled={busyId === p.id} onClick={() => void decide(p.id, true)} style={{ fontSize: 12 }}>
+              <button type="button" className="btn btn-primary" disabled={busyId === p.id} onClick={() => { setError(null); setReview({ proposal: p, approve: true }) }} style={{ fontSize: 12 }}>
                 {t('Schválit', 'Approve')}
               </button>
-              <button type="button" className="btn btn-secondary" disabled={busyId === p.id} onClick={() => void decide(p.id, false)} style={{ fontSize: 12 }}>
+              <button type="button" className="btn btn-secondary" disabled={busyId === p.id} onClick={() => { setError(null); setReview({ proposal: p, approve: false }) }} style={{ fontSize: 12 }}>
                 {t('Zamítnout', 'Reject')}
               </button>
               </Can>
@@ -306,6 +329,90 @@ export default function CompliancePacksPage() {
           </div>
         )}
       </div>
+
+      {review && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="pack-decision-review-title"
+          aria-describedby="pack-decision-review-impact"
+          onKeyDown={event => {
+            if (event.key === 'Escape' && busyId !== review.proposal.id) {
+              setReview(null)
+              setError(null)
+            }
+            if (event.key === 'Tab') {
+              const first = reviewCancelRef.current
+              const last = reviewConfirmRef.current
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault()
+                last?.focus()
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault()
+                first?.focus()
+              }
+            }
+          }}
+          style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
+          <div className="card" style={{ width: 'min(620px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}>
+            <h2 id="pack-decision-review-title" style={{ margin: 0, fontSize: 17 }}>
+              {review.approve ? t('Zkontrolovat aktivaci packu', 'Review pack activation') : t('Zkontrolovat zamítnutí packu', 'Review pack rejection')}
+            </h2>
+            <p id="pack-decision-review-impact" style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.55 }}>
+              {review.approve
+                ? t('Po potvrzení začne tento pack okamžitě řídit nové úvěrové žádosti. Není potřeba restart ani release služby.', 'Once confirmed, this pack immediately governs new lending applications. No service restart or release is required.')
+                : t('Po potvrzení bude návrh definitivně zamítnut a nebude ovlivňovat nové úvěrové žádosti.', 'Once confirmed, the proposal is rejected and will not affect new lending applications.')}
+            </p>
+            <dl style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: '8px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
+              <dt>{t('Jurisdikce', 'Jurisdiction')}</dt><dd>{review.proposal.jurisdiction}</dd>
+              <dt>{t('Produkt', 'Product')}</dt><dd>{review.proposal.productType}</dd>
+              <dt>{t('Verze', 'Version')}</dt><dd>v{review.proposal.packVersion}</dd>
+              <dt>{t('Účinnost od', 'Effective from')}</dt><dd>{review.proposal.effectiveFrom}</dd>
+              <dt>{t('Navrhl', 'Proposed by')}</dt><dd>{review.proposal.proposedBy}</dd>
+              <dt>{t('Důvod rozhodnutí', 'Decision reason')}</dt><dd>{reasons[review.proposal.id]?.trim() || t('Neuveden', 'Not provided')}</dd>
+              <dt>{t('Otisk obsahu', 'Content hash')}</dt><dd className="mono" style={{ overflowWrap: 'anywhere' }}>{review.proposal.contentHash}</dd>
+              <dt>{t('ID návrhu', 'Proposal ID')}</dt><dd className="mono" style={{ overflowWrap: 'anywhere' }}>{review.proposal.id}</dd>
+            </dl>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+              {t('Four-eyes kontrolu vynucuje lending-service: checker musí být jiný principál než maker.', 'The lending service enforces four-eyes: the checker must be a different principal from the maker.')}
+            </p>
+            {error && <div data-testid="decision-review-error" style={{ padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+              <button ref={reviewCancelRef} autoFocus type="button" className="btn btn-secondary" disabled={busyId === review.proposal.id} onClick={() => { setReview(null); setError(null) }}>
+                {t('Zpět', 'Back')}
+              </button>
+              <button ref={reviewConfirmRef} type="button" className={review.approve ? 'btn btn-primary' : 'btn btn-secondary'} aria-busy={busyId === review.proposal.id} disabled={busyId === review.proposal.id} onClick={() => void decide(review.proposal.id, review.approve)}>
+                {busyId === review.proposal.id ? t('Odesílám…', 'Submitting…') : review.approve ? t('Potvrdit aktivaci', 'Confirm activation') : t('Potvrdit zamítnutí', 'Confirm rejection')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Dialog.Root open={detail !== null} onOpenChange={open => { if (!open) setDetail(null) }}>
+      {detail && <Dialog.Portal>
+        <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)' }} />
+        <Dialog.Content
+          className="card"
+          aria-modal="true"
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            if (detailTriggerRef.current?.isConnected) detailTriggerRef.current.focus()
+          }}
+          style={{ position: 'fixed', zIndex: 1001, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'calc(100% - 48px)', maxWidth: 820, maxHeight: '88vh', overflow: 'auto', padding: 20 }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><Dialog.Title style={{ margin: 0 }}>{detail.jurisdiction} / {detail.productType} · v{detail.packVersion}</Dialog.Title><Dialog.Description className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{detail.contentHash}</Dialog.Description></div><Dialog.Close asChild><button type="button" className="btn btn-secondary">{t('Zavřít', 'Close')}</button></Dialog.Close></div>
+          <dl style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: '8px 12px', fontSize: 12, margin: '18px 0' }}>
+            <dt>{t('Navrhl', 'Proposed by')}</dt><dd>{detail.proposedBy || '—'} · {detail.proposedAt || '—'}</dd>
+            <dt>{t('Rozhodl', 'Decided by')}</dt><dd>{detail.decidedBy || '—'} · {detail.decidedAt || '—'}</dd>
+            <dt>{t('Důvod rozhodnutí', 'Decision reason')}</dt><dd>{detail.decisionReason || '—'}</dd>
+          </dl>
+          <h3 className="section-title">{t('Přesný obsah packu', 'Exact pack content')}</h3>
+          <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 11 }}>{JSON.stringify(detail.pack, null, 2)}</pre>
+        </Dialog.Content>
+      </Dialog.Portal>}
+      </Dialog.Root>
 
       <Can permission="lending:compliance:propose">
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

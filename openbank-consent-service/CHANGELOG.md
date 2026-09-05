@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.22.0...consent-service-v0.23.0) (2026-09-01)
+
+
+### Features
+
+* **consent:** expose pending approvals in unified inbox ([#7037](https://github.com/JiRaska/open-bank-oss/issues/7037)) ([77573dc](https://github.com/JiRaska/open-bank-oss/commit/77573dc07495e784dc325a656c47f067217606ba))
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.21.0...consent-service-v0.22.0) (2026-08-27)
+
+
+### Features
+
+* **lending:** ADR-0269 platform — quotes, credit profile, AI levels, consent surface, financial health, funnel ([#6235](https://github.com/JiRaska/open-bank-oss/issues/6235)) ([3b62a4a](https://github.com/JiRaska/open-bank-oss/commit/3b62a4a5d42a80d0726c8018ca1af58599fb371b))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.20.0...consent-service-v0.21.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.19.1...consent-service-v0.20.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.19.0...consent-service-v0.19.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **consent:** supersede the consent a new grant replaces ([#6505](https://github.com/JiRaska/open-bank-oss/issues/6505)) ([2a499da](https://github.com/JiRaska/open-bank-oss/commit/2a499da386b08eaded7f5c462dbb5be325c4f996)), closes [#6487](https://github.com/JiRaska/open-bank-oss/issues/6487)
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.18.2...consent-service-v0.19.0) (2026-08-21)
 
 

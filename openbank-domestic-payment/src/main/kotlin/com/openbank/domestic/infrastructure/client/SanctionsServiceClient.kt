@@ -5,6 +5,7 @@
 package com.openbank.domestic.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -21,6 +22,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * like the other inter-service clients (ADR-0032 §D).
  */
 @RegisterRestClient(configKey = "sanctions-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/sanctions")
 @Produces(MediaType.APPLICATION_JSON)

@@ -62,6 +62,10 @@ quarkus:
     sanctions-service:
       url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
       scope: jakarta.inject.Singleton
+    # Party register enumeration for the #5698 orphaned-party reconciliation (read-only).
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      scope: jakarta.inject.Singleton
   smallrye-reactive-messaging:
     kafka:
       bootstrap-servers: localhost:29092
@@ -156,6 +160,14 @@ mp:
       enabled: false
     oidc-client:
       enabled: false
+  openbank:
+    kyc:
+      # kyc-service does NOT set quarkus.scheduler.enabled=false under %test, so every @Scheduled
+      # bean fires during unrelated suites. This reconciliation calls party-service over REST, which
+      # no test JVM serves, so leaving it on would log a connection error every tick of every test
+      # class. OrphanedPartyDetectionSchedulerIT re-enables it, with a shrunk cron and a stub port.
+      orphan-detection:
+        enabled: false
 openbank:
   rate-limit:
     enabled: true
@@ -174,6 +186,30 @@ openbank:
       retention-years: "${RETENTION_KYC_YEARS:5}"
       cron: "${RETENTION_KYC_CRON:0 30 3 * * ?}"
       dry-run: "${RETENTION_KYC_DRY_RUN:false}"
+  kyc:
+    # Time-driven exit from OPEN (#8548). Every case is created with expires_at = now + 30 days,
+    # and until this sweep existed nothing ever wrote EXPIRED — so an abandoned case kept
+    # uq_kyc_cases_active_party occupied and its party could never be KYC'd again.
+    #
+    # 03:00 is AFTER onboarding-service's abandoned-registration cleaner (02:00, also 30 days) and
+    # BEFORE kyc retention (03:30), and that order is deliberate: the cleaner suspends the
+    # abandoned party first, then this releases its case, so an operator reactivating the party
+    # from the cockpit can open a fresh one. Sweeping first would take the record out of the
+    # cleaner's KYC_OPEN window and the party would never be suspended at all.
+    expiration:
+      enabled: "${KYC_EXPIRATION_ENABLED:true}"
+      cron: "${KYC_EXPIRATION_CRON:0 0 3 * * ?}"
+      batch-size: "${KYC_EXPIRATION_BATCH_SIZE:500}"
+    # Cross-service reconciliation: parties with no KYC case at all (issue #5698). Read-only —
+    # it publishes openbank_kyc_orphaned_parties and never opens a case (remediation is a
+    # human-gated replay). Hourly; the grace period keeps a party that was created seconds ago,
+    # whose PARTY_CREATED is still in flight, from being counted as stranded.
+    orphan-detection:
+      enabled: "${KYC_ORPHAN_DETECTION_ENABLED:true}"
+      cron: "${KYC_ORPHAN_DETECTION_CRON:0 15 * * * ?}"
+      grace-period: "${KYC_ORPHAN_DETECTION_GRACE:PT1H}"
+      page-size: "${KYC_ORPHAN_DETECTION_PAGE_SIZE:100}"
+      max-pages: "${KYC_ORPHAN_DETECTION_MAX_PAGES:500}"
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:

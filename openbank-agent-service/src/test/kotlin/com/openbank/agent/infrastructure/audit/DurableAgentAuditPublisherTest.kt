@@ -45,6 +45,31 @@ class DurableAgentAuditPublisherTest {
     }
 
     @Test
+    fun `publisher sends a null aggregateId rather than substituting the actor when there is no resource`(): Unit =
+        runBlocking {
+            val event =
+                AuditEvent(
+                    actorId = "agent:rca",
+                    actorType = "AI_AGENT",
+                    operation = "agent.run",
+                    resourceType = "INCIDENT",
+                    resourceId = null,
+                )
+            every { outbox.enqueue(any(), any()) } returns Unit
+
+            DurableAgentAuditPublisher(outbox, jacksonObjectMapper().findAndRegisterModules()).publish(event)
+
+            verify {
+                outbox.enqueue(
+                    event.eventId,
+                    match {
+                        it.contains("\"aggregateId\":null") && !it.contains("\"aggregateId\":\"agent:rca\"")
+                    },
+                )
+            }
+        }
+
+    @Test
     fun `dispatcher retains outbox row when Kafka rejects it`(): Unit = runBlocking {
         val id = UUID.randomUUID()
         val emitter = mockk<Emitter<Record<String, String>>>()

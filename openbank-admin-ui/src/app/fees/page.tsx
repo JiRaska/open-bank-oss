@@ -10,8 +10,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui/PageHeader'
-import { StatCard } from '@/components/ui/StatCard'
+import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 
 // Shape served by openbank-product-catalog GET /api/v1/fees — the bank-wide fee
 // schedule, flattened from the per-product Fee model. The UI no longer hardcodes
@@ -32,14 +31,6 @@ interface FeeScheduleItem {
   productName: string
   status: string
   updatedAt: string
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  ACTIVE: 'var(--green)',
-  INACTIVE: 'var(--text-muted)',
-  DRAFT: 'var(--yellow)',
-  DEPRECATED: 'var(--text-muted)',
-  ARCHIVED: 'var(--text-muted)',
 }
 
 export default function FeesPage() {
@@ -63,20 +54,17 @@ export default function FeesPage() {
       // auth-gated). product-catalog is the KEDA-scaled fees system of record.
       const res = await fetch(svcUrl('product-catalog', '/api/v1/fees'), { cache: 'no-store' })
       if (!res.ok) {
-        setFees([])
         setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
       const data = await res.json()
       if (!Array.isArray(data)) {
-        setFees([])
         setUnavailable({ kind: 'error' })
         return
       }
       setFees(data as FeeScheduleItem[])
     } catch {
       // Timeout / abort / network — product-catalog didn't answer.
-      setFees([])
       setUnavailable({ kind: 'unreachable' })
     } finally {
       setLoading(false)
@@ -154,6 +142,9 @@ export default function FeesPage() {
               service={t('Product-catalog', 'Product-catalog')}
               feature={t('Poplatky', 'Fees')}
               lang={language}
+              detail={fees.length > 0
+                ? t('Zobrazen je poslední úspěšně načtený ceník; údaje mohou být zastaralé.', 'The last successfully loaded fee schedule is shown; data may be stale.')
+                : undefined}
               dense
             />
           </div>
@@ -214,11 +205,7 @@ export default function FeesPage() {
                   </td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{fee.currency}</td>
                   <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{fee.frequency}</td>
-                  <td>
-                    <span className="pill" style={{ background: `${STATUS_COLOR[fee.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[fee.status] ?? 'var(--text-muted)' }}>
-                      {fee.status}
-                    </span>
-                  </td>
+                  <td><StatusBadge status={fee.status} /></td>
                 </tr>
               ))}
             </tbody>

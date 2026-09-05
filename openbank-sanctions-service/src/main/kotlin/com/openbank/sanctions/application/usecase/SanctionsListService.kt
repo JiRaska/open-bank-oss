@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.application.usecase
 
+import com.openbank.sanctions.application.port.out.ListImportOutcome
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
@@ -55,10 +56,12 @@ class SanctionsListService(
         val list = repo.findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
         val count = if (enumType != null) {
-            val imported = importer.importList(enumType, list.sourceUrl)
-            // If importer returned 0 (format stub / network error), fall back to stored count
-            if (imported > 0) {
-                imported
+            val result = importer.importList(enumType, list.sourceUrl)
+            // Key on the outcome, never on "count > 0" (issue #8362 / #4348): only IMPORTED means
+            // the stored list now reflects the upstream source; every other outcome left the
+            // stored entries untouched, so the stored count stays the honest number.
+            if (result.outcome == ListImportOutcome.IMPORTED) {
+                result.entriesImported
             } else {
                 list.lastEntryCount ?: 0
             }
@@ -105,6 +108,11 @@ class SanctionsListService(
             try {
                 refresh(list.listType)
             } catch (ex: Exception) {
+                // observed-by: the list's own due-ness. A failed refresh does not advance
+                // lastRefreshedAt, so `isDueForScheduledRefresh` stays true and the next tick
+                // re-attempts it — the work is rescheduled rather than lost, which is why this
+                // per-item catch is not the #5698 swallow even though it logs and continues.
+                // Aborting the batch instead would let one unreachable list starve every other.
                 Log.warnf(
                     "Scheduled refresh failed for %s (%s: %s) — will retry next due tick",
                     list.listType,

@@ -5,6 +5,7 @@
 package com.openbank.sdd.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.messaging.EventRetry
 import com.openbank.sdd.infrastructure.client.InitiateTransactionRequest
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -45,72 +46,93 @@ class SddCollectionDebitConsumer(
     private val log = Logger.getLogger(SddCollectionDebitConsumer::class.java)
 
     @Incoming("sdd-collection-authorised-in")
-    // Poison-pill safety: this boundary must swallow ANY failure (parse, rail call) and ack, so
-    // one bad event cannot wedge the consumer group.
+    // Poison-pill safety applies to the PAYLOAD only: an unparseable event is acked, because a
+    // redelivery decodes identically and fails identically forever. The debit itself is NOT in
+    // that class — it moves real customer money, so a failing rail call is retried and then
+    // rethrown so the connector dead-letters it (#5698). The previous version's comment claimed
+    // this boundary "must swallow ANY failure (parse, rail call) and ack": under it, a transient
+    // transaction-service outage acked an authorised collection that never debited, with the
+    // event gone and no way to re-drive it.
     @Suppress("TooGenericExceptionCaught")
     suspend fun consume(payload: String) {
+        val node = try {
+            objectMapper.readTree(payload)
+        } catch (e: Exception) {
+            log.errorf(e, "[sdd-collection-debit] unparseable event, acking: %.300s", payload)
+            return
+        }
         try {
-            val node = objectMapper.readTree(payload)
             if (node.path("eventType").asText() != EVENT_COLLECTION_AUTHORISED) return
 
             val mandateId = node.path("mandateId").asText()
             val umr = node.path("umr").asText()
-            val dueDate = node.path("dueDate").asText()
-            val currency = node.path("currency").asText()
-            val idempotencyKey = "so-sdd-$mandateId-$umr-$dueDate"
+            val request = debitRequestFrom(node, mandateId, umr)
 
-            // EUR (SDD's only currency, CollectionAuthorisationPolicy FF05) has 2 fraction digits;
-            // transaction-service rejects an amount whose scale exceeds the currency's — normalise
-            // defensively (same footgun domestic-payment's SettlementAdapter already hit).
-            val fractionDigits = runCatching { java.util.Currency.getInstance(currency).defaultFractionDigits }
-                .getOrDefault(2).coerceAtLeast(0)
-            val amount = node.path("amount").decimalValue().setScale(fractionDigits, RoundingMode.HALF_UP)
-
-            val request = InitiateTransactionRequest(
-                idempotencyKey = idempotencyKey,
-                type = "DEBIT",
-                sourceAccountId = java.util.UUID.fromString(node.path("accountId").asText()),
-                amount = amount,
-                currencyCode = currency,
-                description = "SEPA Direct Debit ${node.path(
-                    "creditorIdentifier",
-                ).asText()} / $umr".take(MAX_DESCRIPTION),
-                valueDate = dueDate,
-                rail = "SEPA_CT",
-                instructionType = "DIRECT_DEBIT",
-            )
-
-            val response = transactionClient.initiateTransaction(request).awaitSuspending()
-            when {
-                response.statusInfo.family == Response.Status.Family.SUCCESSFUL -> {
-                    log.infof(
-                        "[sdd-collection-debit] mandate=%s umr=%s debited (HTTP %d)",
-                        mandateId,
-                        umr,
-                        response.status,
-                    )
-                }
-                response.status == HTTP_CONFLICT -> {
-                    log.infof(
-                        "[sdd-collection-debit] mandate=%s umr=%s already booked (409) — idempotent success",
-                        mandateId,
-                        umr,
-                    )
-                }
-                else -> {
-                    log.errorf(
-                        "[sdd-collection-debit] mandate=%s umr=%s FAILED to debit (HTTP %d) — an authorised " +
-                            "collection did not move money. R-transaction/return generation is not yet built " +
-                            "(#1000 follow-up); this requires manual investigation.",
-                        mandateId,
-                        umr,
-                        response.status,
-                    )
+            EventRetry.withRetry(log, "SDD collection debit", "$mandateId/$umr") {
+                val response = transactionClient.initiateTransaction(request).awaitSuspending()
+                when {
+                    response.statusInfo.family == Response.Status.Family.SUCCESSFUL -> {
+                        log.infof(
+                            "[sdd-collection-debit] mandate=%s umr=%s debited (HTTP %d)",
+                            mandateId,
+                            umr,
+                            response.status,
+                        )
+                    }
+                    response.status == HTTP_CONFLICT -> {
+                        log.infof(
+                            "[sdd-collection-debit] mandate=%s umr=%s already booked (409) — idempotent success",
+                            mandateId,
+                            umr,
+                        )
+                    }
+                    else -> {
+                        // A non-2xx-non-409 is the rail refusing an AUTHORISED collection. Throwing
+                        // rather than logging is the whole point: R-transaction/return generation is
+                        // not built (#1000), so the only way this reaches a human is the DLQ.
+                        throw SddDebitFailedException(
+                            "[sdd-collection-debit] mandate=$mandateId umr=$umr FAILED to debit " +
+                                "(HTTP ${response.status}) — an authorised collection did not move money",
+                        )
+                    }
                 }
             }
-        } catch (e: Exception) {
-            log.errorf(e, "[sdd-collection-debit] failed to handle collection-authorised event: %.300s", payload)
+        } catch (e: IllegalArgumentException) {
+            // Field-shape defects (a missing id, an amount that will not parse) are unretryable:
+            // the same bytes fail the same way forever, so ack rather than wedge the partition.
+            log.errorf(e, "[sdd-collection-debit] malformed collection-authorised event, acking: %.300s", payload)
         }
+    }
+
+    /**
+     * Field-shape work only — no I/O. Throws [IllegalArgumentException] on a malformed event
+     * (a bad UUID, an unparseable amount), which [consume] treats as the poison pill and acks.
+     */
+    private fun debitRequestFrom(
+        node: com.fasterxml.jackson.databind.JsonNode,
+        mandateId: String,
+        umr: String,
+    ): InitiateTransactionRequest {
+        val dueDate = node.path("dueDate").asText()
+        val currency = node.path("currency").asText()
+        // EUR (SDD's only currency, CollectionAuthorisationPolicy FF05) has 2 fraction digits;
+        // transaction-service rejects an amount whose scale exceeds the currency's — normalise
+        // defensively (same footgun domestic-payment's SettlementAdapter already hit).
+        val fractionDigits = runCatching { java.util.Currency.getInstance(currency).defaultFractionDigits }
+            .getOrDefault(2).coerceAtLeast(0)
+        return InitiateTransactionRequest(
+            idempotencyKey = "so-sdd-$mandateId-$umr-$dueDate",
+            type = "DEBIT",
+            sourceAccountId = java.util.UUID.fromString(node.path("accountId").asText()),
+            amount = node.path("amount").decimalValue().setScale(fractionDigits, RoundingMode.HALF_UP),
+            currencyCode = currency,
+            description = "SEPA Direct Debit ${node.path(
+                "creditorIdentifier",
+            ).asText()} / $umr".take(MAX_DESCRIPTION),
+            valueDate = dueDate,
+            rail = "SEPA_CT",
+            instructionType = "DIRECT_DEBIT",
+        )
     }
 
     private companion object {
@@ -119,3 +141,6 @@ class SddCollectionDebitConsumer(
         const val MAX_DESCRIPTION = 140
     }
 }
+
+/** The rail refused an authorised collection. Rethrown so the connector dead-letters it (#5698). */
+class SddDebitFailedException(message: String) : RuntimeException(message)

@@ -14,6 +14,7 @@ import com.openbank.onboarding.domain.model.PartyStage
 import com.openbank.onboarding.domain.model.ProjectionResult
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import java.time.Instant
 import java.util.UUID
 
 class OnboardingRecordNotFoundException(partyId: UUID) :
@@ -55,11 +56,12 @@ class OnboardingProjectionService : OnboardingUseCase {
     /**
      * Applies one event to the read model and reports what it did.
      *
-     * Returns [ProjectionResult.SKIPPED_UNKNOWN_PARTY] rather than throwing when the event names
-     * a party with no row: the three source topics are independent consumer groups with no
-     * ordering between them, so this is an expected race, not a fault. The caller must record it
-     * as its own outcome and never as a success — see [ProjectionResult] for what folding the two
-     * together cost (#6248).
+     * No branch drops an event any more. The three source topics are independent consumer
+     * groups with no ordering between them, so an SCA or KYC event legitimately arrives before
+     * `PARTY_CREATED` has created the row. That used to `return` without writing anything, and
+     * nothing ever replayed it — so the enrolment was lost permanently. The row is now seeded
+     * from the event instead, and [ProjectionResult.APPLIED_TO_SEEDED_RECORD] says so, because
+     * an out-of-order arrival is still worth seeing (#6248).
      */
     suspend fun applyEvent(event: OnboardingEvent): ProjectionResult = when (event) {
         is OnboardingEvent.PartyCreated -> repo.applyPartyCreated(event)
@@ -104,23 +106,78 @@ class OnboardingProjectionService : OnboardingUseCase {
 // nothing else from it, and keeping them off the class holds it under detekt's TooManyFunctions
 // threshold, which fires AT 11 and not above it.
 
-/** The only branch that creates a row, and so the only one that cannot skip. */
+/**
+ * The row this event applies to, creating a placeholder if the party has none yet (#6248).
+ *
+ * Returns the record and whether it had to be seeded. A seeded row carries only what is known
+ * without `PARTY_CREATED` — the party id and the event time. No PII, because none is available,
+ * and none is invented.
+ */
+private suspend fun OnboardingRepository.recordFor(
+    partyId: UUID,
+    occurredAt: Instant,
+): Pair<OnboardingRecord, Boolean> {
+    val existing = findByPartyId(partyId)
+    if (existing != null) return existing to false
+    val seeded = OnboardingRecord(
+        partyId = partyId,
+        legalName = null,
+        email = null,
+        partyStatus = PartyStage.PENDING_KYC,
+        kycCaseId = null,
+        kycStatus = null,
+        scaEnrolled = false,
+        deviceCount = 0,
+        funnelStage = FunnelStage.REGISTERED,
+        blockedReason = null,
+        createdAt = occurredAt,
+        updatedAt = occurredAt,
+    )
+    return seeded to true
+}
+
+private fun result(seeded: Boolean) =
+    if (seeded) ProjectionResult.APPLIED_TO_SEEDED_RECORD else ProjectionResult.APPLIED
+
+/**
+ * `PARTY_CREATED` fills in identity; it must never reset progress.
+ *
+ * It used to write a fixed `scaEnrolled = false, deviceCount = 0, kycStatus = null,
+ * funnelStage = REGISTERED` over whatever the row held. That is destructive on exactly the two
+ * occasions it now matters: when the row was seeded by an out-of-order SCA/KYC event, and when
+ * `PARTY_CREATED` is replayed. Preserve the projected state and re-derive the stage from it.
+ */
 private suspend fun OnboardingRepository.applyPartyCreated(event: OnboardingEvent.PartyCreated): ProjectionResult {
-    val now = event.occurredAt
+    val existing = findByPartyId(event.partyId)
+    val base = existing ?: OnboardingRecord(
+        partyId = event.partyId,
+        legalName = null,
+        email = null,
+        partyStatus = PartyStage.PENDING_KYC,
+        kycCaseId = null,
+        kycStatus = null,
+        scaEnrolled = false,
+        deviceCount = 0,
+        funnelStage = FunnelStage.REGISTERED,
+        blockedReason = null,
+        createdAt = event.occurredAt,
+        updatedAt = event.occurredAt,
+    )
+    // Re-derive ONLY where there is progress to preserve. A brand-new party has none, and
+    // `derive(PENDING_KYC, null, false)` answers KYC_OPEN — so deriving unconditionally would
+    // push every new registration a stage down the funnel, and push it there again on replay.
+    val hasProgress = base.scaEnrolled || base.kycStatus != null || base.partyStatus != PartyStage.PENDING_KYC
     upsert(
-        OnboardingRecord(
-            partyId = event.partyId,
+        base.copy(
             legalName = event.legalName,
             email = event.email,
-            partyStatus = PartyStage.PENDING_KYC,
-            kycCaseId = null,
-            kycStatus = null,
-            scaEnrolled = false,
-            deviceCount = 0,
-            funnelStage = FunnelStage.REGISTERED,
-            blockedReason = null,
-            createdAt = now,
-            updatedAt = now,
+            funnelStage = if (hasProgress) {
+                FunnelStage.derive(base.partyStatus, base.kycStatus, base.scaEnrolled)
+            } else {
+                base.funnelStage
+            },
+            createdAt = event.occurredAt,
+            updatedAt = maxOf(base.updatedAt, event.occurredAt),
         ),
     )
     return ProjectionResult.APPLIED
@@ -129,7 +186,7 @@ private suspend fun OnboardingRepository.applyPartyCreated(event: OnboardingEven
 private suspend fun OnboardingRepository.applyPartyStatusChanged(
     event: OnboardingEvent.PartyStatusChanged,
 ): ProjectionResult {
-    val existing = findByPartyId(event.partyId) ?: return ProjectionResult.SKIPPED_UNKNOWN_PARTY
+    val (existing, seeded) = recordFor(event.partyId, event.occurredAt)
     upsert(
         existing.copy(
             partyStatus = event.newStatus,
@@ -144,11 +201,11 @@ private suspend fun OnboardingRepository.applyPartyStatusChanged(
             updatedAt = event.occurredAt,
         ),
     )
-    return ProjectionResult.APPLIED
+    return result(seeded)
 }
 
 private suspend fun OnboardingRepository.applyKycCaseOpened(event: OnboardingEvent.KycCaseOpened): ProjectionResult {
-    val existing = findByPartyId(event.partyId) ?: return ProjectionResult.SKIPPED_UNKNOWN_PARTY
+    val (existing, seeded) = recordFor(event.partyId, event.occurredAt)
     upsert(
         existing.copy(
             kycCaseId = event.kycCaseId,
@@ -157,13 +214,13 @@ private suspend fun OnboardingRepository.applyKycCaseOpened(event: OnboardingEve
             updatedAt = event.occurredAt,
         ),
     )
-    return ProjectionResult.APPLIED
+    return result(seeded)
 }
 
 private suspend fun OnboardingRepository.applyKycStatusChanged(
     event: OnboardingEvent.KycStatusChanged,
 ): ProjectionResult {
-    val existing = findByPartyId(event.partyId) ?: return ProjectionResult.SKIPPED_UNKNOWN_PARTY
+    val (existing, seeded) = recordFor(event.partyId, event.occurredAt)
     upsert(
         existing.copy(
             kycStatus = event.newStatus,
@@ -176,18 +233,28 @@ private suspend fun OnboardingRepository.applyKycStatusChanged(
             updatedAt = event.occurredAt,
         ),
     )
-    return ProjectionResult.APPLIED
+    return result(seeded)
 }
 
+/**
+ * `deviceCount` is DERIVED from the credential ledger, never incremented (#6248).
+ *
+ * `deviceCount + 1` cannot be replayed: re-consuming an event the read model has already seen
+ * inflates the count instead of converging on it. That matters because replay is the only way
+ * back for the enrolments lost to #4353 — the Kafka topic's retention dropped the originals long
+ * ago, so any recovery necessarily re-publishes from `sca_enrolled_devices`, and a backfill you
+ * cannot run twice is a backfill nobody dares run once.
+ */
 private suspend fun OnboardingRepository.applyDeviceEnrolled(event: OnboardingEvent.DeviceEnrolled): ProjectionResult {
-    val existing = findByPartyId(event.partyId) ?: return ProjectionResult.SKIPPED_UNKNOWN_PARTY
+    val (existing, seeded) = recordFor(event.partyId, event.occurredAt)
+    val total = recordDeviceEnrolment(event.partyId, event.credentialId, event.occurredAt)
     upsert(
         existing.copy(
-            scaEnrolled = true,
-            deviceCount = existing.deviceCount + 1,
-            funnelStage = FunnelStage.derive(existing.partyStatus, existing.kycStatus, true),
+            scaEnrolled = total > 0,
+            deviceCount = total,
+            funnelStage = FunnelStage.derive(existing.partyStatus, existing.kycStatus, total > 0),
             updatedAt = event.occurredAt,
         ),
     )
-    return ProjectionResult.APPLIED
+    return result(seeded)
 }

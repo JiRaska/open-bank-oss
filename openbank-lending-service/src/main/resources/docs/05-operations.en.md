@@ -15,7 +15,7 @@
 
 | Var | Default | Purpose |
 |---|---|---|
-| `POSTGRES_PASSWORD` | `CHANGE_ME_LOCAL_DEV_ONLY` | DB credential (BootstrapVerifier blocks placeholders in prod) |
+| `POSTGRES_PASSWORD` | `CHANGE_ME_LOCAL_DEV_ONLY` | DB credential. ⬜ No `BootstrapVerifier` exists, so nothing blocks this placeholder at startup (#8426) — in prod the value arrives through `secretKeyRef` from ESO/OpenBao in `lending-service.yaml` (ADR-0007) |
 | `OIDC_CLIENT_SECRET` | `CHANGE_ME_LOCAL_DEV_ONLY` | Keycloak client secret |
 | `QUARKUS_OIDC_AUTH_SERVER_URL` | `http://localhost:8080/realms/openbank` | OIDC issuer |
 | `LEDGER_SERVICE_URL` | `http://localhost:8101` | ledger-service REST client base |

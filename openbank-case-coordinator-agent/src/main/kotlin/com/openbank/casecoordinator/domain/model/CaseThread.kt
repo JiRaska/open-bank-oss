@@ -22,6 +22,7 @@ data class CaseRow(
     val contributionCount: Int,
     val budgetTokens: Int,
     val budgetContributions: Int,
+    val deliveryMode: String = "HITL",
 )
 
 /** Raw `case_contribution` row (V1 + V3 columns). */
@@ -45,7 +46,22 @@ data class ProposalEventRow(
     val emittedAtEpochMs: Long,
 )
 
+data class CaseSignalEvidenceRow(
+    val signalId: String,
+    val agentId: String,
+    val capability: String,
+    val stage: String,
+    val observedAtEpochMs: Long,
+    val rolloutId: String?,
+    val policyDecisionId: String?,
+    val policyReason: String?,
+)
+
 enum class RuntimeEvidenceStage {
+    AUTHORIZED,
+    DENIED,
+    INVOKED,
+    CONSUMED,
     RECORDED,
     PERSISTED,
     EMITTED,
@@ -69,6 +85,10 @@ enum class ThreadEntryType {
     CONTRIBUTION,
     PROPOSAL_EMITTED,
     SHADOW_RECORDED,
+    POLICY_DECISION,
+    SIGNAL_INVOKED,
+    SIGNAL_CONSUMED,
+    CONTRIBUTION_PERSISTED,
 }
 
 /** One thread entry in the ADR-0246 timeline, oldest first. */
@@ -86,6 +106,9 @@ data class ThreadEntry(
     val shadow: Boolean = false,
     val runtimeEvidence: RuntimeEvidence,
     val tokensUsed: Int? = null,
+    val signalId: String? = null,
+    val capability: String? = null,
+    val rolloutId: String? = null,
 )
 
 /** Case list item — `GET /api/v1/case-coordinator/cases`. */

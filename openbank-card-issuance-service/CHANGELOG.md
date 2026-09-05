@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.26.3](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.2...card-issuance-service-v0.26.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* **card-issuance:** Card lifecycle functions and category-rule entity drop EPOCH defaults ([#8396](https://github.com/JiRaska/open-bank-oss/issues/8396)) ([f61a78d](https://github.com/JiRaska/open-bank-oss/commit/f61a78d00e1a7b7e54bc5ed5167726a511396de5)), closes [#8357](https://github.com/JiRaska/open-bank-oss/issues/8357)
+
+## [0.26.2](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.1...card-issuance-service-v0.26.2) (2026-09-02)
+
+
+### Security
+
+* **delegation:** reject stale lifecycle projections ([#8220](https://github.com/JiRaska/open-bank-oss/issues/8220)) ([6537342](https://github.com/JiRaska/open-bank-oss/commit/65373422f3e3c38e266e411f219beaceab407005))
+
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.0...card-issuance-service-v0.26.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **card-issuance:** reconcile IssueCardRequest with the DTO it describes ([#6019](https://github.com/JiRaska/open-bank-oss/issues/6019)) ([1309980](https://github.com/JiRaska/open-bank-oss/commit/130998006d157543e6769dda19ab73e6f6133728))
+* **card-issuance:** reject a null array element with 400 instead of 500 ([#8009](https://github.com/JiRaska/open-bank-oss/issues/8009)) ([9fc2c38](https://github.com/JiRaska/open-bank-oss/commit/9fc2c38c51e2c5273ed5bb72d2c8448763f8a5c9)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.25.0...card-issuance-service-v0.26.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.4...card-issuance-service-v0.25.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.24.4](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.3...card-issuance-service-v0.24.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.24.3](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.2...card-issuance-service-v0.24.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **card-issuance:** alert on dead-lettered outbox rows and add an operator requeue path ([#4308](https://github.com/JiRaska/open-bank-oss/issues/4308)) ([c666a4d](https://github.com/JiRaska/open-bank-oss/commit/c666a4deae12d1025722647e4813e9ccd0d86944))
+
 ## [0.24.2](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.1...card-issuance-service-v0.24.2) (2026-08-22)
 
 

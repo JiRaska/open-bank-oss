@@ -5,6 +5,7 @@
 package com.openbank.party.domain.model
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.testing.audit.AuditEventTime
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -32,9 +33,16 @@ import java.util.UUID
  */
 class PartyEventEnvelopeContractTest {
 
-    // Mirror the Quarkus-configured ObjectMapper (JSR-310 registered) so this test serializes
-    // Instant exactly as the running producer does.
+    // Mirrors the RUNNING producer's mapper. `findAndRegisterModules()` ALONE is not that mapper
+    // and this file claimed it was until #8352: the feature it leaves ON, WRITE_DATES_AS_TIMESTAMPS,
+    // renders an `Instant` as the number `1.7866E9`, a wire shape no consumer of this topic ever
+    // receives (Quarkus defaults `quarkus.jackson.write-dates-as-timestamps` to false). Nothing
+    // here noticed, because every time assertion in this file was `json.has(...)` — true of a
+    // number just as much as of the ISO-8601 string, so the assertion could not fail either way.
+    // `PartyChangeMaterialityContractTest` in this same package already had the correct mapper and
+    // says why; this is the copy that drifted.
     private val mapper = ObjectMapper().findAndRegisterModules()
+        .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
     private val at = Instant.parse("2026-06-11T08:00:00Z")
 
@@ -67,6 +75,7 @@ class PartyEventEnvelopeContractTest {
         assertThat(json.get("partyId").asText()).isEqualTo("11111111-1111-1111-1111-111111111111")
         // account-service gates on partyType; legalName required for OpenAccountCommand (sanctions, ADR-0032 §C)
         assertThat(json.get("partyType").asText()).isEqualTo("INDIVIDUAL")
+        assertThat(json.get("classification").asText()).isEqualTo("CUSTOMER")
         assertThat(json.get("legalName").asText()).isEqualTo("Jan Novák")
         assertThat(json.get("status").asText()).isEqualTo("PENDING_KYC")
         assertThat(json.has("occurredAt")).isTrue()
@@ -91,6 +100,15 @@ class PartyEventEnvelopeContractTest {
         // account-service activates the pending account when it sees status=ACTIVE
         assertThat(json.get("status").asText()).isEqualTo("ACTIVE")
         assertThat(json.get("partyId").asText()).isEqualTo("11111111-1111-1111-1111-111111111111")
+    }
+
+    @Test
+    fun `synthetic classification is preserved in the lifecycle contract`() {
+        val canary = individual().copy(classification = PartyClassification.SYNTHETIC)
+        val event = PartyEvents.created(canary, at, PartyActor.system("canary"))
+        val json = mapper.readTree(mapper.writeValueAsString(event.envelope))
+
+        assertThat(json.get("classification").asText()).isEqualTo("SYNTHETIC")
     }
 
     @Test
@@ -119,11 +137,52 @@ class PartyEventEnvelopeContractTest {
 
         assertThat(json.get("eventType").asText()).isEqualTo("PARTY_ERASED")
         assertThat(json.get("partyId").asText()).isEqualTo(id.toString())
-        assertThat(json.has("erasedAt")).isTrue()
+        // The VALUE, not `has`: an epoch number satisfies `has("erasedAt")` and is unreadable by
+        // any consumer parsing a timestamp. Same reason the mapper above had to be corrected.
+        assertThat(json.get("erasedAt").asText()).isEqualTo(at.toString())
         assertThat(json.get("sourceService").asText()).isEqualTo("party-service")
         listOf("legalName", "email", "partyType", "status", "kycStatus").forEach {
             assertThat(json.has(it)).describedAs("PARTY_ERASED must not carry %s", it).isFalse()
         }
+    }
+
+    /**
+     * #8352: red against `origin/main`, where the `PARTY_ERASED` envelope projected the erasure
+     * instant as `erasedAt` and nothing else. `AuditConsumer.eventTime` reads `occurredAt` and only
+     * `occurredAt`, so the audit row for a GDPR Art. 17 erasure recorded the audit consumer's
+     * ingest clock as the moment the subject's data was erased — on the one event in this service
+     * where "when did this happen" is itself the regulatory artefact.
+     *
+     * The value was never missing: `PartyEvent.occurredAt` already held it and fed the outbox row's
+     * `createdAt`. Only the projection into the envelope — the part that goes on the wire — was
+     * absent, which is why the fix cannot invent a time and the assertion can name the exact one.
+     *
+     * `erasedAt` is asserted alongside on purpose: the change had to be ADDITIVE, and a test that
+     * looked only at the new key could not tell an addition from a rename.
+     */
+    @Test
+    fun `PARTY_ERASED carries the erasure instant as the audit event time`() {
+        val envelope = PartyEvents.erased(UUID.randomUUID(), at).envelope
+
+        AuditEventTime.assertRecordedAsEventTime(mapper.writeValueAsString(envelope), at)
+
+        val json = mapper.readTree(mapper.writeValueAsString(envelope))
+        assertThat(json.get("erasedAt").asText())
+            .describedAs("occurredAt is ADDITIVE — erasedAt keeps its name, place and form")
+            .isEqualTo(at.toString())
+    }
+
+    /**
+     * The narrowing PARTY_ERASED exists for is about IDENTIFIERS, and this pins that adding a time
+     * did not widen it. Without this, "the envelope is narrow" is only asserted by the PII list
+     * above, which cannot see a future key that is neither PII nor expected.
+     */
+    @Test
+    fun `PARTY_ERASED carries exactly five keys - a time, not an identifier, was added`() {
+        val envelope = PartyEvents.erased(UUID.randomUUID(), at).envelope
+
+        assertThat(envelope.keys)
+            .containsExactly("eventType", "partyId", "erasedAt", "occurredAt", "sourceService")
     }
 
     /**

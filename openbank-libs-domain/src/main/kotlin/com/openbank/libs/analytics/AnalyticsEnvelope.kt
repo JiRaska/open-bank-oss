@@ -64,9 +64,14 @@ data class AnalyticsEnvelope(
      */
     val batchId: String? = null,
     /** When this envelope was materialised into the bronze layer. */
-    val ingestedAt: Instant = Instant.EPOCH,
+    val ingestedAt: Instant,
     /** PII-masked event body. NEVER raw PII — mask with [com.openbank.libs.security.PiiMask] at the sink. */
     val payload: Map<String, Any?> = emptyMap(),
+    /**
+     * True only for a bank-owned synthetic customer's activity. Bronze retains the audit trail;
+     * baseline projections must exclude it so test traffic cannot contaminate regulatory or BI facts.
+     */
+    val synthetic: Boolean = false,
 )
 
 /**

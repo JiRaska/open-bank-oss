@@ -38,6 +38,7 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.junit.jupiter)
+    testImplementation(project(":openbank-libs-testing"))
     // Boot smoke-test (TppRegistryBootSmokeIT): per-job Testcontainers Postgres + Valkey and the
     // in-memory Kafka connector, so a real Quarkus boot + Flyway runs in CI (issue #578).
     testImplementation(libs.smallrye.reactive.messaging.inmemory)

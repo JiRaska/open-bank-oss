@@ -5,6 +5,7 @@
 package com.openbank.sepa.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -26,6 +27,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * Carries the service OIDC token like the other inter-service clients in this module.
  */
 @RegisterRestClient(configKey = "document-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/documents/templates")
 @Produces(MediaType.APPLICATION_JSON)

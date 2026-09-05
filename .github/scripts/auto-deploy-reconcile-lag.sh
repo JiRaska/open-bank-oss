@@ -79,6 +79,15 @@ while IFS= read -r pin; do
   tag="${pin##*:sandbox-}"
   [ -n "$svc" ] && [ -n "$tag" ] || continue
 
+  # Manual evidence refreshes rebuild an already-tested commit under ECR's immutable
+  # tag policy, carrying a provenance-only `-run<GitHub run id>` suffix. Resolve the
+  # commit part only; an arbitrary suffix remains a placeholder and is re-driven.
+  if [[ "$tag" =~ ^([0-9a-f]{8,40})(-run[1-9][0-9]*)?$ ]]; then
+    commit="${BASH_REMATCH[1]}"
+  else
+    commit=""
+  fi
+
   # Restrict to the buildable fleet when an allowlist was supplied.
   if [ -n "$ALLOWLIST" ] && ! grep -qxF "$svc" <<< "$ALLOWLIST"; then
     continue
@@ -86,15 +95,22 @@ while IFS= read -r pin; do
 
   # A pin that is not a resolvable commit is a placeholder (never really deployed) -> stale,
   # sortkey 0 so placeholders re-drive before any real-but-old pin.
-  if ! git rev-parse -q --verify "${tag}^{commit}" >/dev/null 2>&1; then
+  if [ -z "$commit" ] || ! git rev-parse -q --verify "${commit}^{commit}" >/dev/null 2>&1; then
     lagging+=("0	$svc")
     continue
   fi
 
   # Any build-relevant commit on this checkout's HEAD since the pinned image was built?
-  if [ -n "$(git log --format=%H "${tag}..HEAD" -- \
-              "${svc}/src/main" "${svc}/build.gradle.kts" 2>/dev/null)" ]; then
-    epoch="$(git log -1 --format=%ct "${tag}^{commit}" 2>/dev/null || echo 0)"
+  # The path set must match the auto-deploy push trigger EXACTLY — including version.txt:
+  # a release-please commit touches only version.txt, and the push path rebuilds+deploys on
+  # it ("that release marker must rebuild/deploy the component"). When this probe omitted
+  # version.txt, a release-triggered deploy blocked at can-i-deploy stayed stranded FOREVER:
+  # no src/main delta, so no reconcile tick ever re-offered it — clearing-simulator ran 0.5.0
+  # for 9 days after 0.6.0 was cut (#8127). Dockerfile is in for the same reason.
+  if [ -n "$(git log --format=%H "${commit}..HEAD" -- \
+              "${svc}/src/main" "${svc}/build.gradle.kts" \
+              "${svc}/version.txt" "${svc}/Dockerfile" 2>/dev/null)" ]; then
+    epoch="$(git log -1 --format=%ct "${commit}^{commit}" 2>/dev/null || echo 0)"
     lagging+=("${epoch}	$svc")
   fi
 done < <(

@@ -4,11 +4,14 @@
 
 package com.openbank.settlement.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
@@ -17,6 +20,7 @@ import java.math.BigDecimal
 import java.util.UUID
 
 @RegisterRestClient(configKey = "ledger-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/journals")
 @Produces(MediaType.APPLICATION_JSON)
@@ -24,6 +28,16 @@ import java.util.UUID
 interface LedgerRestClient {
     @POST
     fun postJournal(body: PostJournalRequest): Uni<JournalResponse>
+
+    /**
+     * Journal entries the ledger holds for [transactionId] (issue #6410). settlement-service posts
+     * with `transactionId = settlementId`, so this is how the compensation establishes whether a
+     * booking actually reached the general ledger. Answers `200` with an empty array — not `404` —
+     * for a transaction the ledger has never seen.
+     */
+    @GET
+    @Path("/transaction/{transactionId}")
+    fun getJournalsByTransaction(@PathParam("transactionId") transactionId: UUID): Uni<List<JournalResponse>>
 }
 
 data class PostJournalRequest(

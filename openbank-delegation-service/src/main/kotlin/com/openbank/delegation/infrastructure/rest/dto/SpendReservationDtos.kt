@@ -7,14 +7,20 @@ package com.openbank.delegation.infrastructure.rest.dto
 import com.openbank.delegation.domain.model.SpendDecision
 import com.openbank.delegation.domain.model.SpendRefusalReason
 import com.openbank.delegation.domain.model.SpendReservation
+import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.libs.domain.money.Money
 import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
 
-/** ADR-0249 D3 request shape: `{amount, currency, idempotencyKey}`. */
-data class ReserveSpendRequest(val amount: BigDecimal, val currency: String, val idempotencyKey: String) {
+/** Existing callers default to a rail-neutral reservation. */
+data class ReserveSpendRequest(
+    val amount: BigDecimal,
+    val currency: String,
+    val idempotencyKey: String,
+    val operationType: SpendReservationOperationType = SpendReservationOperationType.UNSPECIFIED,
+) {
     fun toMoney(): Money = Money.of(amount, currency)
 }
 
@@ -22,6 +28,7 @@ data class SpendReservationResponse(
     val reservationId: UUID,
     val delegationId: UUID,
     val amount: MoneyDto,
+    val operationType: SpendReservationOperationType,
     val state: SpendReservationState,
     val createdAt: OffsetDateTime,
     val settledAt: OffsetDateTime?,
@@ -31,6 +38,7 @@ data class SpendReservationResponse(
             reservationId = r.id,
             delegationId = r.grantId,
             amount = MoneyDto.from(r.amount),
+            operationType = r.operationType,
             state = r.state,
             createdAt = r.createdAt,
             settledAt = r.settledAt,

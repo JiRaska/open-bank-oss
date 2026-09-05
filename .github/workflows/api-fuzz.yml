@@ -28,11 +28,14 @@
 # reports itself instead of consuming the budget of everything after it in the list, which the
 # shared `OVERALL=1` used to hide.
 #
-# Batch lane (openbank-batch): weekly + manual, never a PR gate (ADR-0053).
+# Batch lane (openbank-batch): nightly + manual, never a PR gate (ADR-0053). Nightly since
+# ADR-0279 #2 — a weekly cadence meant a money-path endpoint regression could sit unfuzzed
+# for three days; hosted runners on a public repo make the nightly pass free.
 name: API fuzz
 
 on:
   schedule:
+    - cron: "17 4 * * *"   # nightly 04:17 UTC (ADR-0279 #2)
     - cron: "30 5 * * 2"   # weekly Tue 05:30 UTC — after the Monday dep bumps
     - cron: "30 5 * * 4"   # weekly Thu 05:30 UTC
   workflow_dispatch:
@@ -67,6 +70,13 @@ jobs:
       # a service that becomes money-path is fuzzed the day rules.yaml says so. A service that
       # cannot be fuzzed is EXCLUDED OUT LOUD with its reason — a silently shortened list reads as
       # "covered" when it is not, which is the failure this whole issue is about.
+      # The harness's boot-failure CLASSIFIER, exercised against a known crash and a known
+      # timeout before the matrix runs. #6492 was eighteen days of a timeout reported as a
+      # failure; a diagnostic that has only ever printed one message cannot be trusted to tell
+      # the two apart, so prove it here rather than assume it. ~0.1s.
+      - name: Self-test the fuzz harness diagnostics
+        run: .github/scripts/fuzz-services.sh --self-test
+
       - name: Derive service list
         id: derive
         env:
@@ -105,7 +115,18 @@ jobs:
           print(f"fuzzing {len(keep)} service(s); {len(skipped)} excluded")
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write("services=" + json.dumps(keep) + "\n")
+          # Durable scope record for the aggregate step: the job list alone is NOT
+          # evidence of what was in scope (#2) — keep and skipped-with-reason both.
+          with open("fuzz-scope.json", "w") as fh:
+              json.dump({"keep": keep, "skipped": skipped}, fh, indent=2)
           PY
+
+      - name: Upload derived scope
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-scope
+          path: fuzz-scope.json
+          retention-days: 30
 
   fuzz:
     name: "schemathesis (${{ matrix.service }})"
@@ -162,217 +183,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Fuzz services
-        run: |
-          set -uo pipefail
-          mkdir -p fuzz-reports
-          OVERALL=0
-
-          for svc in $SERVICES; do
-            APP_YAML="${svc}/src/main/resources/application.yaml"
-            SPEC="${svc}/src/main/resources/openapi.yaml"
-            if [ ! -f "$APP_YAML" ] || [ ! -f "$SPEC" ]; then
-              echo "::error::[${svc}] missing application.yaml or openapi.yaml — skip"
-              OVERALL=1; continue
-            fi
-
-            # Derive the HTTP port and database name from the service's own
-            # config — no per-service table to rot.
-            PORT="$(grep -m1 -A3 '^  http:' "$APP_YAML" | grep -m1 'port:' | grep -oE '[0-9]+')"
-            DB="$(grep -m1 -E 'postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
-            DBUSER="$(grep -m1 '^    username:' "$APP_YAML" | awk '{print $2}')"
-            # The username is often a Quarkus config EXPRESSION, not a literal:
-            # `${POSTGRES_USER:openbank}` (vop) or `"${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}"`
-            # (settlement). Taken verbatim, that string was handed to `docker run -e POSTGRES_USER=`
-            # and then to `pg_isready -U`, which can never succeed — so both services died on
-            # "postgres never became ready" and had NEVER been fuzzed, silently, while the job list
-            # showed them as covered. Resolve the expression to its default, which is exactly what
-            # the %dev profile resolves it to here (none of these vars are set in this job).
-            DBUSER="$(printf '%s' "$DBUSER" | tr -d "\"'" | sed -E 's/^\$\{[A-Za-z_][A-Za-z0-9_]*:?-?([^}]*)\}$/\1/')"
-            if [ -z "$DBUSER" ] || printf '%s' "$DBUSER" | grep -q '[^A-Za-z0-9_]'; then
-              echo "::error::[${svc}] could not resolve a usable datasource username from ${APP_YAML} (got '${DBUSER}') — skip"
-              OVERALL=1; continue
-            fi
-            echo "==> [${svc}] port=${PORT} db=${DB} user=${DBUSER}"
-
-            # Job-local postgres on the localhost:5432 the %dev profile
-            # expects. NB: the batch pool's chart-managed dind has no
-            # registry-mirror (unlike the build pool) — this pull hits Docker
-            # Hub directly; weekly cadence keeps it under the anon rate limit.
-            docker rm -f fuzz-pg >/dev/null 2>&1 || true
-            docker run -d --name fuzz-pg -p 5432:5432 \
-              -e POSTGRES_USER="${DBUSER}" \
-              -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
-              -e POSTGRES_DB="${DB}" \
-              postgres:16.3-alpine >/dev/null
-            PG_UP=0
-            for i in $(seq 1 30); do
-              docker exec fuzz-pg pg_isready -U "${DBUSER}" >/dev/null 2>&1 && { PG_UP=1; break; }
-              sleep 2
-            done
-            if [ "$PG_UP" != "1" ]; then
-              echo "::error::[${svc}] postgres never became ready — skip"
-              OVERALL=1
-              docker rm -f fuzz-pg >/dev/null 2>&1 || true
-              continue
-            fi
-
-            # Quarkus dev mode: %dev disables OIDC; Flyway migrates at start.
-            # Kafka producers are lazy — no broker needed for the HTTP surface
-            # (the transactional outbox keeps brokers out of the request path).
-            # Temporal worker OFF for the fuzz run. Six services register a Temporal worker at
-            # StartupEvent and there is no Temporal here, so the gRPC channel to
-            # temporal-frontend:7233 is refused: transaction-service failed outright
-            # ("Failed to start quarkus", Caused by StatusRuntimeException UNAVAILABLE) while
-            # lending, sepa-payment and domestic-payment retried past the boot deadline. Four
-            # money-path services were reported as fuzz failures for an absent dependency, which
-            # is not a finding about their HTTP surface — and it drowned the ONE real finding in
-            # the same run (consent-service, #5711).
-            #
-            # Every registrar already has the switch, because @QuarkusTest needs it too. What they
-            # do NOT have is a shared name for it: openbank.transaction.worker.enabled,
-            # openbank.domestic.worker.enabled, openbank.sepa.worker.enabled,
-            # openbank.campaign.worker.enabled, openbank.settlement.worker.enabled — and
-            # lending's is `lending.origination.worker.enabled`, not even under `openbank.`. So the
-            # property is DERIVED from the registrar's own @ConfigProperty rather than listed here;
-            # a hand-kept table of six names is the thing this repo keeps finding rotted.
-            # An ARRAY, not a string: an unquoted string here would rely on word splitting to
-            # become separate flags, which is the one shell behaviour that silently does the wrong
-            # thing the day a property name gains a space or the variable is empty.
-            # An ARRAY, not a string: an unquoted string at the use site would rely on word
-            # splitting to become separate flags, which is the one shell behaviour that silently
-            # does the wrong thing the day the variable is empty.
-            WORKER_FLAGS=()
-            WORKER_PROPS="$(grep -rhoE '"[A-Za-z0-9._-]*worker\.enabled"' "${svc}/src/main" 2>/dev/null | tr -d '"' | sort -u || true)"
-            for prop in ${WORKER_PROPS}; do
-              WORKER_FLAGS+=("-D${prop}=false")
-              echo "==> [${svc}] disabling Temporal worker via ${prop}=false"
-            done
-
-            # Compile BEFORE the readiness clock starts. The 180s budget below was being spent
-            # on the Gradle build, not on the Quarkus boot: measured on run 32288156614,
-            # `starting quarkusDev` was echoed at 18:43:10 and quarkusDev's first log line landed
-            # at 18:45:38 — 148 of the 180 seconds gone to configuration and compilation, leaving
-            # the application ~32s before teardown killed it. It never had a chance, and the job
-            # reported "failed to boot" about a service that had not finished starting.
-            #
-            # Services with a warm build cache passed; the ones without did not, which is why the
-            # same service flips between runs. Doing the compile as its own step makes the wait
-            # measure what it claims to measure, and a slow BUILD now shows up as a slow build.
-            # The compile status is READ, not discarded. `|| true` here would reproduce exactly
-            # the misattribution this PR exists to remove: a compile failure leaves no classes to
-            # run, quarkusDev exits immediately, the readiness loop below then spends its full
-            # 180s budget on a service that was never going to answer, and the job reports
-            # "failed to boot" about a COMPILE error. Fail fast instead, and name the real cause.
-            #
-            # The build log is its own file: quarkusDev opens `${svc}-boot.log` with `>` a few
-            # lines below, so appending the compile output there would have it truncated away
-            # before anyone could read it — the evidence destroyed by the next command.
-            echo "==> [${svc}] compiling (outside the readiness budget)"
-            BUILD_START=$SECONDS
-            BUILD_LOG="fuzz-reports/${svc}-build.log"
-            ./gradlew ":${svc}:quarkusGenerateCode" ":${svc}:classes" \
-              --console=plain --quiet > "${BUILD_LOG}" 2>&1
-            BUILD_RC=$?
-            echo "==> [${svc}] compiled in $((SECONDS - BUILD_START))s (gradle exit ${BUILD_RC})"
-            if [ "$BUILD_RC" != "0" ]; then
-              echo "::error::[${svc}] COMPILE FAILED (gradle exit ${BUILD_RC}) — this is a build error, NOT a boot failure; see ${svc}-build.log artifact"
-              tail -50 "${BUILD_LOG}" || true
-              OVERALL=1
-              docker rm -f fuzz-pg >/dev/null 2>&1 || true
-              continue
-            fi
-
-            echo "==> [${svc}] starting quarkusDev"
-            # FORCE the credentials this job actually created the container with, rather than
-            # trusting the service to pick them up from an env var. The fleet convention is
-            # `password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}`, and the job env supplies
-            # POSTGRES_PASSWORD — but openbank-settlement-service names its expressions
-            # QUARKUS_DATASOURCE_USERNAME/PASSWORD instead, so POSTGRES_PASSWORD never reached it
-            # and Flyway died on `FATAL: password authentication failed for user
-            # "openbank_settlement"` after a 237s compile (run 32289597634). Only 3 of ~50
-            # services use that spelling, which is exactly why an assumption about it is worth
-            # nothing: this is the third naming convention this lane assumed and did not have
-            # (#5714 was the username expression and the six differently-named worker properties).
-            #
-            # System properties sit above application.yaml in SmallRye's ordinal chain, so they
-            # win over any `${...:default}` expression whatever it is spelled. username/password
-            # live on `quarkus.datasource`, above both `reactive:` and `jdbc:`, so one pair of
-            # overrides covers the reactive datasource and the Flyway/Agroal one together.
-            ./gradlew ":${svc}:quarkusDev" \
-              -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
-              -Dquarkus.datasource.username="${DBUSER}" \
-              -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
-              "${WORKER_FLAGS[@]}" \
-              -Dquarkus.console.basic=true \
-              --console=plain --quiet \
-              > "fuzz-reports/${svc}-boot.log" 2>&1 &
-            DEV_PID=$!
-
-            # Readiness = the main HTTP socket answers anything (000 = conn
-            # refused). /q/* may live on the management port in prod profiles;
-            # here only socket-open matters before pointing schemathesis at it.
-            #
-            # The wait deliberately does NOT use $DEV_PID as a liveness proxy. `./gradlew` is a
-            # launcher: it hands the build to the Gradle daemon and the client can exit while
-            # quarkusDev keeps running under the daemon. `kill -0 $DEV_PID || break` therefore
-            # aborted the wait on a service that was booting perfectly well — a race, which is why
-            # the same service passed one run and "failed to boot" the next. Measured on run
-            # 32284304038: openbank-domestic-payment logged `Listening on: http://localhost:8116`
-            # at 18:21:52, ~34s into a 180s budget, and the job still reported
-            # "failed to boot"; its boot log ends one second later, when teardown killed it. Its
-            # artifact contains no error of any kind. openbank-settlement-service is the same
-            # shape, one step earlier — it was still pulling a Dev Services LGTM container
-            # (46 mentions in 137 lines) when the wait gave up.
-            #
-            # So the loop now runs its full budget and reports what it actually observed. A
-            # genuinely dead JVM costs the remaining wait instead of exiting early — the right
-            # trade against silently mislabelling a healthy service, which is the failure this
-            # lane exists to avoid making. WAITED is printed so a slow boot is visible as a slow
-            # boot rather than inferred from a timestamp in an artifact.
-            UP=0
-            WAITED=0
-            for i in $(seq 1 90); do
-              code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health" || true)"
-              if [ "$code" != "000" ]; then UP=1; break; fi
-              WAITED=$((WAITED + 2))
-              sleep 2
-            done
-            if [ "$UP" = "1" ]; then
-              echo "==> [${svc}] answered after ${WAITED}s"
-            fi
-            if [ "$UP" != "1" ]; then
-              echo "::error::[${svc}] failed to boot — see ${svc}-boot.log artifact"
-              tail -50 "fuzz-reports/${svc}-boot.log" || true
-              OVERALL=1
-            else
-              echo "==> [${svc}] fuzzing http://localhost:${PORT}"
-              # schemathesis 4.x CLI (bumped from 3.39.16 to close 6 Dependabot alerts on
-              # transitive starlette/pytest — schemathesis 3.x hard-caps pytest<9 and
-              # starlette<1, so the vulnerable pins couldn't be bumped without this jump):
-              #   --base-url        -> --url (same semantics)
-              #   --hypothesis-max-examples -> --max-examples (dropped hypothesis- prefix)
-              #   --hypothesis-deadline     -> removed; no CLI equivalent in 4.x (deadline
-              #                                is no longer user-configurable this way)
-              #   --request-timeout unit changed ms -> seconds (5000ms was the old value)
-              #   --experimental=openapi-3.1 -> removed; OpenAPI 3.1 support is now default
-              #   --junit-xml       -> --report junit --report-junit-path
-              schemathesis run "$SPEC" \
-                --url "http://localhost:${PORT}" \
-                --checks not_a_server_error \
-                --max-examples "${MAX_EXAMPLES}" \
-                --request-timeout 5 \
-                --report junit --report-junit-path "fuzz-reports/${svc}-junit.xml" \
-                | tee "fuzz-reports/${svc}-fuzz.log" || OVERALL=1
-            fi
-
-            # Teardown before the next service re-binds 5432/dev port.
-            kill "$DEV_PID" 2>/dev/null || true
-            pkill -f "quarkusDev" 2>/dev/null || true
-            sleep 3
-            docker rm -f fuzz-pg >/dev/null 2>&1 || true
-          done
-
-          exit "$OVERALL"
+        run: .github/scripts/fuzz-services.sh
 
       - name: Upload fuzz reports
         if: always()
@@ -381,3 +192,51 @@ jobs:
           name: api-fuzz-reports-${{ matrix.service }}
           path: fuzz-reports/
           retention-days: 30
+
+  # ADR-0279 #2: merge the per-service exercised-surface records into ONE fuzz-coverage.json
+  # (uploaded as the `fuzz-coverage` artifact). The security-kpis snapshot publisher reads
+  # the latest run's artifact into the excellence console, so "what did DAST actually test"
+  # is a durable number, not a job list. if: always() — a failed leg is exactly what this
+  # record must capture (as no-evidence), so the aggregate runs on red runs too.
+  aggregate:
+    name: fuzz coverage record
+    needs: [prepare, fuzz]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test the aggregator
+        run: python3 .github/scripts/fuzz-coverage-aggregate.py --self-test
+
+      - name: Download all fuzz reports
+        uses: actions/download-artifact@9dbf31a64cf2a9f7b784a4c24c203321ddd843e0 # v7.0.1
+        with:
+          pattern: api-fuzz-reports-*
+          path: fuzz-artifacts
+          merge-multiple: true
+
+      - name: Download the derived scope
+        uses: actions/download-artifact@9dbf31a64cf2a9f7b784a4c24c203321ddd843e0 # v7.0.1
+        with:
+          name: fuzz-scope
+          path: fuzz-scope-dir
+
+      - name: Build fuzz-coverage.json
+        run: |
+          python3 .github/scripts/fuzz-coverage-aggregate.py \
+            --artifacts fuzz-artifacts \
+            --scope fuzz-scope-dir/fuzz-scope.json \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --out fuzz-coverage.json
+
+      - name: Upload fuzz-coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-coverage
+          path: fuzz-coverage.json
+          retention-days: 90   # the KPI publisher reads the latest run's artifact; 90d
+                               # covers a long stretch of red fuzz runs without losing it

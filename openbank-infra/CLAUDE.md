@@ -27,6 +27,18 @@ out of it (they are path-scoped, not less important — several are live-inciden
   is the only thing missing". Fix without downtime: `kubectl delete sts <n> --cascade=orphan` leaves
   the pod and the PVC running and lets Argo recreate the object with the new template; the PVC keeps
   whatever size it was expanded to separately.
+  **Now held by the `argocd-sync-verifier` CronJob** (#6371): six-hourly it captures
+  `kubectl -n argocd get applications -o json`, runs the committed
+  `.github/scripts/check-argocd-sync-integrity.py`, publishes a report ConfigMap and then FAILS the
+  Job so `KubeJobFailed` carries it. It rejects three states — any `*Error` condition (the class no
+  metric exposes), an app reporting `Synced` at the very revision whose only sync operation
+  *Failed*, and a repo-sourced app whose `sync.revision` is not an ancestor of `origin/main`
+  (ancestry, never a tag — #6234). It deliberately does NOT fire on a stale `finishedAt`: 15 of 93
+  apps last synced over a month ago and every one was correct. The kube-state-metrics
+  `customResourceState` route was rejected on blast radius — a malformed CRS config takes down the
+  pod serving every `kube_*` series, and KSM parses that config only after connecting to an
+  apiserver, so it cannot be falsified offline. Exposing the condition as a metric is still the
+  better long-run answer and needs a *dedicated* KSM instance.
 - **`realm-template.json` is read ONLY on Keycloak's cold start (`--import-realm`), so editing it
   changes nothing on a running realm — and ArgoCD reports `Synced/Healthy` throughout.** ArgoCD
   manages the ConfigMap, and the ConfigMap does match the repo; the drift is one layer below what it
@@ -366,6 +378,31 @@ out of it (they are path-scoped, not less important — several are live-inciden
   glob silently reach a REST action anyway.
 
 ### Prometheus / Loki rules — configured-looking and inert
+
+- **An alert built on a threshold cannot see a subject that emits NOTHING, and `up` does not
+  save you — Prometheus writes `up` per TARGET, so a workload nobody scrapes has no `up` either.**
+  `PostgresInstanceDown` documents at length that `cnpg_collector_up` cannot report its own
+  exporter's death and that `up` survives instead; that is right and stops one level short. A CNPG
+  `Cluster` without `spec.monitoring.enablePodMonitor` creates no PodMonitor, so all nine Postgres
+  alerts — `PostgresInstanceDown` included — matched an empty vector forever. Measured 2026-08-30:
+  4 of 62 declared clusters, two of them the party and identity golden-record databases, both
+  backing up to S3 with that backup state watched by nothing. **The fix is a denominator that
+  exists whether or not the subject does**: a constant `vector(1)` recording rule per declared
+  subject, `unless on(...)` the set derived from real `up`, so absence is a positive series. Derive
+  the constant series from the manifests and generate the rule — a hand-kept expected-list is the
+  same defect one layer up (`check-cnpg-scrape-coverage.py`, #7220).
+- **Two promtool traps that make a unit test pass while measuring nothing.** Both were live in the
+  first draft of `openbank-infra/tests/promtool/postgres_threshold_alerts_test.yaml`:
+  - **`time()` starts at the unix epoch.** A sentinel-zero guard (`... and metric > 0`, which
+    exists because `time() - 0` is ~56 years on a real cluster) tested at `eval_time: 45m` sees
+    `time() - 0 = 45 minutes` — under every threshold, so the case passes with the guard DELETED.
+    Push `eval_time` past the threshold (33h here) and give the series enough samples to reach it.
+  - **An input `interval:` wider than the 5m staleness window makes `for:` unreachable.** At
+    `interval: 10m` the series is stale for half of every gap, the condition flickers between
+    evaluations, and a `for: 30m` never matures — so the alert reads as "does not fire" for a
+    reason that has nothing to do with the rule. Keep test intervals at 1m.
+  Falsify every case by deleting the clause it covers and confirming it goes red; `promtool check
+  rules` proves a rule PARSES and has been green through every alerting defect recorded here.
 
 - **A recording rule's `interval` decides whether its output EXISTS for its consumers, not just
   how fresh it is.** Prometheus answers an instant query from a 5-minute lookback window, so a

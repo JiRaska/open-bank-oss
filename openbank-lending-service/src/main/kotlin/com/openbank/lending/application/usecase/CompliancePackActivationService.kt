@@ -9,6 +9,7 @@ import com.openbank.lending.infrastructure.persistence.entity.CompliancePackActi
 import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
 import com.openbank.libs.lending.compliance.CompiledCompliancePack
+import com.openbank.libs.lending.compliance.CompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
 import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
@@ -30,6 +31,9 @@ data class PackActivationView(
     val proposedBy: String,
     val decidedBy: String?,
     val decidedAt: String?,
+    val proposedAt: String?,
+    val decisionReason: String?,
+    val pack: CompliancePack,
 )
 
 /**
@@ -129,6 +133,9 @@ class CompliancePackActivationService(
             proposedBy = "-",
             decidedBy = null,
             decidedAt = null,
+            proposedAt = null,
+            decisionReason = null,
+            pack = compiled.pack,
         )
     }
 
@@ -156,5 +163,8 @@ class CompliancePackActivationService(
         proposedBy = proposedBy,
         decidedBy = decidedBy,
         decidedAt = decidedAt?.toString(),
+        proposedAt = proposedAt.toString(),
+        decisionReason = decisionReason,
+        pack = CompliancePackJson.fromJson(payload),
     )
 }

@@ -32,7 +32,7 @@ export default function GlobalError({ error }: { error: Error & { digest?: strin
               An unexpected error occurred. Please reload the page.<br />
               Došlo k neočekávané chybě. Načtěte prosím stránku znovu.
             </p>
-            <button
+            <button type="button" aria-label="Reload admin console / Načíst konzoli"
               onClick={() => window.location.reload()}
               style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer' }}
             >

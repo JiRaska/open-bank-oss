@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.27.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.3...account-service-v0.27.4) (2026-09-03)
+
+
+### Bug Fixes
+
+* **account:** entity createdAt/updatedAt defaults EPOCH → Instant.now() ([#8403](https://github.com/JiRaska/open-bank-oss/issues/8403)) ([c1a3953](https://github.com/JiRaska/open-bank-oss/commit/c1a3953bf54da88540b86f30418fedfdd0509a80))
+
+## [0.27.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.2...account-service-v0.27.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* **account:** revoking an unknown authorization answers 404, not 500 ([#8466](https://github.com/JiRaska/open-bank-oss/issues/8466)) ([909dee5](https://github.com/JiRaska/open-bank-oss/commit/909dee547a0bf602792adf60b9df91c28abe55be))
+
+## [0.27.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.1...account-service-v0.27.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **account:** dead-letter into an explicit topic, not the shared implicit one ([#8304](https://github.com/JiRaska/open-bank-oss/issues/8304)) ([4faf359](https://github.com/JiRaska/open-bank-oss/commit/4faf359eb20c990b0a54c9ef79d013ffed4b59c8)), closes [#5752](https://github.com/JiRaska/open-bank-oss/issues/5752)
+
+## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.0...account-service-v0.27.1) (2026-09-02)
+
+
+### Security
+
+* **delegation:** reject stale lifecycle projections ([#8220](https://github.com/JiRaska/open-bank-oss/issues/8220)) ([6537342](https://github.com/JiRaska/open-bank-oss/commit/65373422f3e3c38e266e411f219beaceab407005))
+
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.26.0...account-service-v0.27.0) (2026-08-31)
+
+
+### Features
+
+* **account:** expose pending approvals in unified inbox ([#7028](https://github.com/JiRaska/open-bank-oss/issues/7028)) ([82512a4](https://github.com/JiRaska/open-bank-oss/commit/82512a459701f9cbc9742a9b06fb5e7e94e5be37))
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.25.0...account-service-v0.26.0) (2026-08-26)
+
+
+### Features
+
+* **customer-edge:** add term deposit journey ([#6838](https://github.com/JiRaska/open-bank-oss/issues/6838)) ([c99828e](https://github.com/JiRaska/open-bank-oss/commit/c99828e110223ceebe63befda471bd9232720fad))
+
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.24.0...account-service-v0.25.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.23.1...account-service-v0.24.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.23.0...account-service-v0.23.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **docs:** repair the 7 .mmd diagrams that do not parse ([#6496](https://github.com/JiRaska/open-bank-oss/issues/6496)) ([c1e6ad7](https://github.com/JiRaska/open-bank-oss/commit/c1e6ad7b14887db70ec3365747f2ed06d9ec02db))
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.22.0...account-service-v0.23.0) (2026-08-20)
 
 

@@ -4,7 +4,20 @@
 package com.openbank.copilot.domain
 
 /** The kind of money-path action the customer is being asked to confirm. */
-enum class ActionKind { PAYMENT, CARD_FREEZE, DISPUTE, FX_CONVERSION }
+enum class ActionKind {
+    PAYMENT,
+    CARD_FREEZE,
+    DISPUTE,
+    FX_CONVERSION,
+
+    /**
+     * ADR-0269 rule 5, L2: a prepared loan application. Like every other kind here it is a DRAFT —
+     * the assistant fills the form, the customer confirms it into the existing intake flow. The
+     * proposal deliberately carries no rate and no instalment: a draft that claimed a price would
+     * be a quote the bank never made.
+     */
+    CREDIT_APPLICATION,
+}
 
 /**
  * A structured, validated proposal the assistant hands BACK to the app (ADR-0089 D2). The assistant

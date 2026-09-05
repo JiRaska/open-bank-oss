@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, RefreshCw, Lock, Users, FileText, Clock, Sparkles, Hand, Play, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Lock, Users, FileText, Clock, Sparkles, Hand, ShieldCheck } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useAuth } from '@/lib/auth/useAuth'
@@ -155,8 +155,6 @@ function AgentDetailContent() {
   const [data, setData] = useState<AgentDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
-  const [triggering, setTriggering] = useState(false)
-  const [triggerFeedback, setTriggerFeedback] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -175,39 +173,6 @@ function AgentDetailContent() {
 
   useEffect(() => { load() }, [load])
 
-  const triggerBoundedCheck = async () => {
-    setTriggering(true)
-    setTriggerFeedback(null)
-    try {
-      const res = await fetch('/api/iaops/flaky-test-hunter/trigger', { method: 'POST' })
-      if (res.status === 401 || res.status === 403) {
-        setTriggerFeedback({ tone: 'error', text: t('Tento krok vyžaduje roli administrátora.', 'This action requires the Administrator role.') })
-        return
-      }
-      if (res.status === 504) {
-        setTriggerFeedback({ tone: 'error', text: t('Nelze potvrdit, zda se kontrola spustila; před dalším pokusem ověř běh ve workflow historii.', 'The check admission could not be confirmed; verify the workflow history before trying again.') })
-        return
-      }
-      if (!res.ok) {
-        setTriggerFeedback({ tone: 'error', text: t('Kontrolu se nepodařilo spustit. Zkus ji prosím později.', 'The check could not be started. Please try again later.') })
-        return
-      }
-      const started = await res.json() as { workflowId?: string }
-      setTriggerFeedback({
-        tone: 'success',
-        text: t(
-          `Požadavek je evidován jako workflow ${started.workflowId ?? '—'}. Výsledek může trvat několik minut.`,
-          `The request is recorded as workflow ${started.workflowId ?? '—'}. Its result can take several minutes.`,
-        ),
-      })
-      void load()
-    } catch {
-      setTriggerFeedback({ tone: 'error', text: t('Služba kontroly testů není dostupná.', 'The test-check service is unavailable.') })
-    } finally {
-      setTriggering(false)
-    }
-  }
-
   if (unavailable) {
     return <DataUnavailable kind={unavailable.kind} service={agentId} feature={t('agent charter', 'agent charter')} lang={language} />
   }
@@ -225,8 +190,8 @@ function AgentDetailContent() {
       />
 
       {loading && !data ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
-          <RefreshCw size={16} style={{ animation: 'spin 0.8s linear infinite' }} />
+        <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
+          <RefreshCw size={16} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} />
           <span style={{ fontSize: '13px' }}>{t('Načítám agenta…', 'Loading agent…')}</span>
         </div>
       ) : data ? (
@@ -308,16 +273,10 @@ function AgentDetailContent() {
                     )}
                   </p>
                 </div>
-                <button type="button" className="btn btn-primary btn-sm" onClick={triggerBoundedCheck} disabled={triggering}>
-                  {triggering ? <RefreshCw size={13} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <Play size={13} aria-hidden="true" />}
-                  {triggering ? t('Kontroluji…', 'Checking…') : t('Spustit kontrolu', 'Run check')}
-                </button>
+                <Link href="/iaops/flaky-test-hunter" className="btn btn-primary btn-sm">
+                  {t('Otevřít řízené spuštění', 'Open governed check')}
+                </Link>
               </div>
-              {triggerFeedback && (
-                <p role="status" style={{ fontSize: '12px', margin: '12px 0 0', color: triggerFeedback.tone === 'success' ? '#15803d' : '#b91c1c' }}>
-                  {triggerFeedback.text}
-                </p>
-              )}
             </Card>
           )}
 

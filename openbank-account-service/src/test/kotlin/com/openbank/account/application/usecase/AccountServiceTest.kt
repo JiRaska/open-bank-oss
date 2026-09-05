@@ -13,6 +13,7 @@ import com.openbank.account.application.port.out.AccountScreeningUnavailableExce
 import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.CatalogProduct
 import com.openbank.account.application.port.out.CurrencyPocketRepository
+import com.openbank.account.application.port.out.NotificationRequestPort
 import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.application.port.out.ProductLookupResult
 import com.openbank.account.application.port.out.SanctionsScreenResult
@@ -50,6 +51,7 @@ class AccountServiceTest {
     private lateinit var sanctionsScreening: AccountSanctionsScreeningPort
     private lateinit var productCatalog: ProductCatalogPort
     private lateinit var metrics: DomainMetrics
+    private lateinit var notificationRequestPort: NotificationRequestPort
     private lateinit var service: AccountService
 
     @BeforeEach
@@ -62,6 +64,7 @@ class AccountServiceTest {
         sanctionsScreening = mockk()
         productCatalog = mockk()
         metrics = mockk(relaxed = true)
+        notificationRequestPort = mockk(relaxed = true)
         // Default: product-catalog unreachable — the fail-open path, so every pre-existing test
         // that doesn't care about product validation keeps passing unchanged.
         coEvery { productCatalog.findById(any()) } returns ProductLookupResult.Unavailable
@@ -76,6 +79,7 @@ class AccountServiceTest {
                 productCatalog,
                 metrics,
                 Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC),
+                notificationRequestPort,
             )
     }
 

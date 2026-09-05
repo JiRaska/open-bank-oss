@@ -4,6 +4,7 @@
 
 package com.openbank.notification.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -21,13 +22,17 @@ import org.testcontainers.utility.DockerImageName
  */
 class RedisTestResource : QuarkusTestResourceLifecycleManager {
 
+    private companion object {
+        const val VALKEY_IMAGE = "valkey/valkey:8-alpine"
+    }
+
     private var redis: GenericContainer<*>? = null
 
     override fun start(): Map<String, String> {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
-        val rd = GenericContainer(DockerImageName.parse("valkey/valkey:8-alpine")).withExposedPorts(6379)
+        val rd = GenericContainer(DockerImageName.parse(VALKEY_IMAGE)).withExposedPorts(6379)
         // Assign the field BEFORE start() (issue #1395), not after: if start() throws after the
         // container process was actually created on the Docker daemon (a wait-strategy timeout,
         // as opposed to Docker being wholly unavailable), the field must still be reachable so
@@ -36,12 +41,16 @@ class RedisTestResource : QuarkusTestResourceLifecycleManager {
         // host with no external reaper other than Ryuk to eventually catch it.
         redis = rd
         rd.start()
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
         return mapOf(
             "quarkus.redis.hosts" to "redis://${rd.host}:${rd.getFirstMappedPort()}",
         )
     }
 
     override fun stop() {
-        redis?.stop()
+        redis?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
+        }
     }
 }

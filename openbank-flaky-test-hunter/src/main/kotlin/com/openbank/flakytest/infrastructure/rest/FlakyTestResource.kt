@@ -5,13 +5,16 @@
 
 package com.openbank.flakytest.infrastructure.rest
 
+import com.openbank.flakytest.application.port.incoming.AnalyzeTestIntelligenceUseCase
 import com.openbank.flakytest.application.port.incoming.GetFindingsUseCase
 import com.openbank.flakytest.application.port.incoming.RunFlakyTestCheckUseCase
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.domain.model.FlakyTestReport
 import com.openbank.flakytest.domain.model.RunTrigger
+import com.openbank.flakytest.domain.model.TestIntelligenceAnalysisRequest
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -23,7 +26,11 @@ import kotlinx.coroutines.runBlocking
 
 @Path("/api/v1/flaky-test-hunter")
 @Produces(MediaType.APPLICATION_JSON)
-class FlakyTestResource(private val runCheck: RunFlakyTestCheckUseCase, private val getFindings: GetFindingsUseCase) {
+class FlakyTestResource(
+    private val runCheck: RunFlakyTestCheckUseCase,
+    private val getFindings: GetFindingsUseCase,
+    private val testIntelligenceAnalysis: AnalyzeTestIntelligenceUseCase,
+) {
     @POST
     @Path("/check/trigger")
     @RolesAllowed("ROLE_ADMIN")
@@ -43,19 +50,37 @@ class FlakyTestResource(private val runCheck: RunFlakyTestCheckUseCase, private 
         Response.accepted(FlakyTestCheckStarted(runCheck.startDetached(RunTrigger.OPERATOR_MANUAL))).build()
     }
 
+    /**
+     * Idempotent recovery admission on a distinct route. An old backend has no matching route and
+     * therefore returns 404 before reaching Temporal instead of silently ignoring the key.
+     */
+    @POST
+    @Path("/check/trigger-async-idempotent")
+    @RolesAllowed("ROLE_ADMIN")
+    fun triggerCheckAsyncIdempotent(@HeaderParam("Idempotency-Key") idempotencyKey: String?): Response = runBlocking {
+        val boundedKey = requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        Response.accepted(
+            FlakyTestCheckStarted(runCheck.startDetached(RunTrigger.OPERATOR_MANUAL, boundedKey)),
+        ).build()
+    }
+
+    /** The agent receives only a bounded provenance projection and cannot apply a remediation. */
+    @POST
+    @Path("/evidence/analyze")
+    @RolesAllowed("ROLE_ADMIN")
+    suspend fun analyzeEvidence(request: TestIntelligenceAnalysisRequest): List<FlakyTestFinding> =
+        testIntelligenceAnalysis.analyze(request)
+
     @GET
     @Path("/findings")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getActiveFindings(): List<FlakyTestFinding> = runBlocking {
-        getFindings.getActive()
-    }
+    suspend fun getActiveFindings(): List<FlakyTestFinding> = getFindings.getActive()
 
     @GET
     @Path("/findings/{id}")
     @RolesAllowed("ROLE_ADMIN", "ROLE_VIEWER")
-    fun getFinding(@PathParam("id") id: String): FlakyTestFinding = runBlocking {
+    suspend fun getFinding(@PathParam("id") id: String): FlakyTestFinding =
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
-    }
 }
 
 data class FlakyTestCheckStarted(val workflowId: String)

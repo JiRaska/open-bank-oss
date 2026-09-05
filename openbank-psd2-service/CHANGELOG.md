@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.0...psd2-service-v0.11.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **psd2,sanctions:** a null JSON array element is a 400, not a 500 ([#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)) ([#8003](https://github.com/JiRaska/open-bank-oss/issues/8003)) ([28eb8a3](https://github.com/JiRaska/open-bank-oss/commit/28eb8a3dee81237b6f07b5bf9e6e0f4dbe4e8f0f))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.10.0...psd2-service-v0.11.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.9.0...psd2-service-v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.8.14...psd2-service-v0.9.0) (2026-08-18)
 
 

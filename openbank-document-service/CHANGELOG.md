@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.1...document-service-v0.14.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **document:** createdAt defaults to now(), never Instant.EPOCH ([#8357](https://github.com/JiRaska/open-bank-oss/issues/8357)) ([#8504](https://github.com/JiRaska/open-bank-oss/issues/8504)) ([5d875d4](https://github.com/JiRaska/open-bank-oss/commit/5d875d48d4379faa543ec44e6985e01d4cf208a4))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.0...document-service-v0.14.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **document:** reject a null array element with 400 instead of 500 ([#8010](https://github.com/JiRaska/open-bank-oss/issues/8010)) ([49de0d8](https://github.com/JiRaska/open-bank-oss/commit/49de0d8c1e2f781bb01c586d3a051f1a5ab03a77)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.13.0...document-service-v0.14.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.12.3...document-service-v0.13.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.12.2...document-service-v0.12.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
 ## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.12.1...document-service-v0.12.2) (2026-08-22)
 
 

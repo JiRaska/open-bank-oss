@@ -56,6 +56,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Shared, secret-free lifecycle evidence collected into the Test Intelligence envelope in CI.
+    testImplementation(project(":openbank-libs-testing"))
 }
 
 // Pact: write the generated consumer contract to pacts/ and forward broker config, matching

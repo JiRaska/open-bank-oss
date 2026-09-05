@@ -92,12 +92,14 @@ _GAP_ISSUE = {
     # than probing it by hand - a careful manual enumeration of the same set, done twice, was
     # still two short.
     "openbank-standing-order-service": "#6035 - found by this check, not named in the issue",
-    "openbank-psd2-service": "#6035 - found by this check, not named in the issue",
+    # openbank-psd2-service left the list in #8510 not by being subscribed but by ceasing to be a
+    # producer at all: the psd2_outbox apparatus had zero writers and was deleted together with
+    # the openbank.psd2.events topic, so there is nothing left to audit-subscribe. A service that
+    # publishes no events has no audit-subscription gap.
 }
 _GAP_TOPICS = {
     "openbank-billing-service": "openbank.billing.fee.event",
     "openbank-standing-order-service": "openbank.standing-orders.order.event",
-    "openbank-psd2-service": "openbank.psd2.events",
 }
 
 # Topics a money-path service produces that are deliberately NOT audit subjects, each with the

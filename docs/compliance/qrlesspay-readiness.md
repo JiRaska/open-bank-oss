@@ -122,9 +122,12 @@ masked IBAN. Two things must become formal rather than implicit:
 
 ## 6. Legal, IP and standardisation — the least developed area
 
-1. **Bluetooth SIG identifiers.** The service UUIDs are placeholders and the 16-bit alias `0xF0B2`
-   is unallocated — effectively squatting. Immaterial for a pilot; mandatory before third parties
-   implement. Requires SIG membership and fees.
+1. **Bluetooth SIG identifiers.** The three 128-bit UUIDs (service, `bundle`, `sas`) are frozen
+   normative values — no registry applies to the 128-bit space, so nothing is pending there. The
+   16-bit alias `0xF0B2` is still unallocated — effectively squatting on a Bluetooth
+   SIG-administered space. Immaterial for a pilot; mandatory before third parties implement.
+   Requires SIG membership and fees, and the decision taken here is to defer that request until a
+   pilot with a second bank is real (see [wire spec §1](../specs/qrlesspay-v1.md#1-identifiers)).
 2. **Patents.** Proximity payments is densely patented. A standard offered to other banks needs a
    freedom-to-operate search and an IPR policy (royalty-free or FRAND commitment from
    contributors). No bank's counsel will approve adoption without one.

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.0...sepa-payment-v0.13.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **sepa-payment:** resolve AML case party_id via account-service ([#8505](https://github.com/JiRaska/open-bank-oss/issues/8505)) ([#8631](https://github.com/JiRaska/open-bank-oss/issues/8631)) ([2ea7bcc](https://github.com/JiRaska/open-bank-oss/commit/2ea7bcc98365ea005ab3ed77be7994cac75024c2))
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.12.0...sepa-payment-v0.13.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.11.1...sepa-payment-v0.12.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.11.0...sepa-payment-v0.11.1) (2026-08-21)
 
 

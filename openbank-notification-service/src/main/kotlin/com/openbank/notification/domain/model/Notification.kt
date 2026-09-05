@@ -76,6 +76,15 @@ enum class NotificationTemplate(val variables: Set<String>) {
     /** The grantor revoked an active grant; the grantee's access ends now (DelegationRevoked). */
     DELEGATION_REVOKED(setOf("resourceType")),
 
+    /** The bank temporarily removed delegated authority (DelegationSuspended). */
+    DELEGATION_SUSPENDED(setOf("resourceType")),
+
+    /** The bank restored previously suspended delegated authority (DelegationReinstated). */
+    DELEGATION_REINSTATED(setOf("resourceType")),
+
+    /** The grantee gave up delegated authority (DelegationRenounced). */
+    DELEGATION_RENOUNCED(setOf("resourceType")),
+
     /** A grant's validity window ended on its own; sent to both parties (DelegationExpired). */
     DELEGATION_EXPIRED(setOf("resourceType")),
 
@@ -85,6 +94,45 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
     fun unknownVariables(vars: Map<String, String>): Set<String> = vars.keys - variables
+
+    /**
+     * Owner-approved no-device fallback policy (#4363). This is intentionally part of the closed
+     * template model rather than a free-form configuration map: adding a template forces an
+     * explicit delivery decision in review. `null` means the existing in-app-feed-only behaviour
+     * remains correct.
+     *
+     * A fallback e-mail never contains the rendered notification body. It is a generic prompt to
+     * open the authenticated app, so a missing device cannot turn lock-screen-safe push content
+     * into unbounded e-mail PII (ADR-0135 §3).
+     */
+    val noDeviceFallbackChannel: NotificationChannel?
+        get() = when (this) {
+            ACCOUNT_FROZEN,
+            KYC_REJECTED,
+            KYC_DOCUMENT_REQUIRED,
+            TRANSACTION_FAILED,
+            -> NotificationChannel.EMAIL
+            ACCOUNT_OPENED,
+            ACCOUNT_CLOSED,
+            TRANSACTION_COMPLETED,
+            KYC_APPROVED,
+            CONSENT_GRANTED,
+            CONSENT_REVOKED,
+            OTP_CODE,
+            PASSWORD_RESET,
+            WELCOME,
+            SCA_APPROVAL,
+            MARKETING_PRODUCT_OFFER,
+            DELEGATION_OFFERED,
+            DELEGATION_ACCEPTED,
+            DELEGATION_DECLINED,
+            DELEGATION_REVOKED,
+            DELEGATION_SUSPENDED,
+            DELEGATION_REINSTATED,
+            DELEGATION_RENOUNCED,
+            DELEGATION_EXPIRED,
+            -> null
+        }
 
     /**
      * The customer-facing category a template belongs to (#2). SECURITY is deliberately un-mutable:
@@ -97,7 +145,8 @@ enum class NotificationTemplate(val variables: Set<String>) {
             KYC_APPROVED, KYC_REJECTED, KYC_DOCUMENT_REQUIRED,
             CONSENT_GRANTED, CONSENT_REVOKED,
             DELEGATION_OFFERED, DELEGATION_ACCEPTED, DELEGATION_DECLINED,
-            DELEGATION_REVOKED, DELEGATION_EXPIRED, DELEGATION_FIRST_USE,
+            DELEGATION_REVOKED, DELEGATION_SUSPENDED, DELEGATION_REINSTATED,
+            DELEGATION_RENOUNCED, DELEGATION_EXPIRED, DELEGATION_FIRST_USE,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
@@ -156,6 +205,8 @@ data class NotificationRequest(
 
 /** Closed allow-list for navigation metadata sent through FCM/APNs. */
 object MobileDeepLink {
+    private const val DELEGATION_DETAIL_PREFIX = "openbank://delegations/"
+
     private val allowed = setOf(
         "openbank://home",
         "openbank://savings",
@@ -164,5 +215,11 @@ object MobileDeepLink {
         "openbank://products",
     )
 
-    fun isAllowed(value: String?): Boolean = value == null || value in allowed
+    fun isAllowed(value: String?): Boolean = value == null || value in allowed || isCanonicalDelegationDetail(value)
+
+    private fun isCanonicalDelegationDetail(value: String): Boolean {
+        if (!value.startsWith(DELEGATION_DETAIL_PREFIX)) return false
+        val id = value.removePrefix(DELEGATION_DETAIL_PREFIX)
+        return runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)
+    }
 }

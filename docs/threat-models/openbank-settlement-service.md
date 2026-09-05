@@ -37,13 +37,21 @@ This document covers the Temporal-based replacement workflow and its security po
 [caller] ──HTTPS (OIDC)──▶ POST /api/v1/settlements ─▶ [settlement-service] ─▶ [settlements DB]
                                           │ originate → settle
                                           ▼
-[Temporal server] ──gRPC (mTLS)──▶ [settlement-service worker]
+[Temporal server] ──gRPC (no transport auth)──▶ [settlement-service worker]
                                           │
                                 ┌─────────┼──────────┐
                                 ▼         ▼          ▼
                           debit-port  credit-port  ledger-port
                           (balance)   (balance)   (ledger)
 ```
+
+*(Corrected 2026-08-27, #6066: this edge previously read `gRPC (mTLS)`, contradicting the S1
+row below, which was corrected on 2026-08-20 by #6055 and states that it is not mTLS. The
+diagram is now consistent with S1 — `TemporalClientProducer` builds
+`WorkflowServiceStubsOptions` with a target and an optional metrics scope and nothing else, the
+Temporal HelmRelease configures no frontend TLS, and no API key or namespace token is
+configured anywhere, so the edge carries no transport authentication at all rather than merely
+no mTLS. What does constrain it is stated in S1 and Residual risk 2.)*
 
 The settlement-service worker receives workflow tasks from Temporal over gRPC. The worker calls
 three downstream ports. Each port call is an activity — idempotency-keyed so Temporal can replay
@@ -64,7 +72,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 | ID | Threat | Mitigation |
 |----|--------|------------|
-| S1 | Attacker impersonates Temporal server, injects malicious workflow tasks | mTLS between Temporal server and workers (both directions). **Corrected 2026-08-20 (#6055) — the second half of this row credited a control that does not exist.** It named an OPA activity interceptor which is present in no Kotlin source in this repository; its only occurrence outside this document is a label rendered on an admin-UI page. No activity-level authorization runs today |
+| S1 | Attacker impersonates Temporal server, injects malicious workflow tasks | **Corrected 2026-08-20 (#6055) — neither control named here exists; see Residual risk 2.** `OpaActivityInterceptor` is present in no Kotlin source in this repository, and the worker↔frontend connection is not mTLS: `TemporalClientProducer` (`openbank-libs-temporal`, the single fleet-wide producer) builds `WorkflowServiceStubsOptions` with a target and nothing else — no SSL context — and the Temporal HelmRelease configures no TLS either. What actually constrains this edge: the `temporal-platform-ingress` NetworkPolicy admits port 7233 only from an explicit namespace allow-list, and the Temporal SDK dispatches only the activity types the worker registered (`SettlementActivitiesImpl`), so an unregistered activity name is not dispatchable at all. Transport authentication on this edge is unbuilt fleet-wide and tracked in #6066. |
 | S2 | Attacker impersonates settlement-service to call balance/ledger | Corrected 2026-08-16 (#3921) — see note below. `debit-port`/`credit-port`/`ledger-port` are `OidcClientRequestReactiveFilter`-backed REST clients (`BalanceRestClient`, `LedgerRestClient`) that attach a client-credentials bearer token from `quarkus.oidc-client`, the confidential `openbank-services` Keycloak client (`OIDC_CLIENT_SECRET` Vault-projected, never in git); OPA authz on the balance/ledger REST receivers checks that identity |
 
 ### T — Tampering
@@ -80,7 +88,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 | ID | Threat | Mitigation |
 |----|--------|------------|
 | R1 | Settlement denied by payer ("I never authorised this") | Temporal workflow execution ID links to the initiating payment ID in `sepa-payment-service` / `domestic-payment-service`; full chain queryable from admin UI |
-| R2 | Compensation claimed to have run when it did not | **This threat was realised, not mitigated, from ADR-0101 P3 until #6037.** The cited mitigation — "compensation activities update status to `REVERSED`/`CREDITED_REVERSED`/`LEDGER_REVERSED` atomically" — *was* the defect: updating the status column was the **only** thing `reverseDebit`/`reverseCredit`/`reverseBookToLedger` did. They logged `"stub: wire reversal to balance-service"` and returned success, so the status row asserted an unwind that had moved no money. Now: the two balance reversals issue real counter-movements to balance-service before writing a status, a refused reversal is recorded as `REVERSAL_FAILED` (not as success), and the unimplemented ledger reversal throws a non-retryable `ApplicationFailure` and records `LEDGER_REVERSAL_UNSUPPORTED`. Verified by `SettlementReversalIT`, which asserts the outbound HTTP request over real HTTP and the resulting row over plain JDBC — a mocked port cannot tell a counterparty call from a no-op. |
+| R2 | Compensation claimed to have run when it did not | **This threat was realised, not mitigated, from ADR-0101 P3 until #6037.** The cited mitigation — "compensation activities update status to `REVERSED`/`CREDITED_REVERSED`/`LEDGER_REVERSED` atomically" — *was* the defect: updating the status column was the **only** thing `reverseDebit`/`reverseCredit`/`reverseBookToLedger` did. They logged `"stub: wire reversal to balance-service"` and returned success, so the status row asserted an unwind that had moved no money. Now: the two balance reversals issue real counter-movements to balance-service before writing a status, a refused reversal is recorded as `REVERSAL_FAILED` (not as success), and the ledger reversal — which #6410 made reachable at all, and which now reads the ledger back before reporting — records `LEDGER_REVERSAL_UNSUPPORTED` with a non-retryable `ApplicationFailure` only for a journal confirmed to exist, `LEDGER_NOT_POSTED` when the ledger holds none, and `LEDGER_STATE_UNKNOWN` when it could not be asked. Verified by `SettlementReversalIT`, which asserts the outbound HTTP request over real HTTP and the resulting row over plain JDBC — a mocked port cannot tell a counterparty call from a no-op. |
 
 ### I — Information disclosure
 
@@ -100,7 +108,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 | ID | Threat | Mitigation |
 |----|--------|------------|
-| E1 | Attacker injects a workflow that calls `reverseBookToLedger` on a legitimate settlement | **Corrected 2026-08-20 (#6055) — no such gate is implemented.** The activity policy file exists in the service's resources but is bundled by no ConfigMap and loaded by nothing, so it is evaluated never; and it does not say what this row said it said — its allow rule is a single membership test over a fixed activity set, with no `compensation` term anywhere in the file, and the reversal activity is an unconditional member. The effective control on this boundary is the Temporal namespace ACL in E2 alone |
+| E1 | Attacker injects a workflow that calls `reverseBookToLedger` on a legitimate settlement | **Corrected 2026-08-20 (#6055) — no activity-level authorization exists; see Residual risk 2.** No policy gate mediates activity dispatch, and no `compensation=true` context is ever evaluated — the word `compensation` appeared nowhere in the policy file that this row cited. The residual constraints are structural, not authorization: only the seven methods registered on the worker are dispatchable, and `reverseBookToLedger` is not implemented — it throws a non-retryable failure and records `LEDGER_REVERSAL_UNSUPPORTED` (#6037), so it moves no money whoever invokes it. Ordering (that a compensation runs only after its forward leg) is a property of `SettlementWorkflowImpl`'s saga, which registers each compensation after the corresponding forward activity returns — it is not enforced by any external policy. |
 | E2 | Service account token used to submit arbitrary workflows | Temporal namespace ACL restricts task queue submission to settlement-service service account (SPIFFE `spiffe://openbank/ns/openbank-settlement/sa/settlement-service`) |
 
 ---
@@ -128,13 +136,49 @@ replacing the former in-memory stub), so settlement state is durable across rest
    narrow `service-settlement-m2m` rule the way `service-domestic-payment-m2m` / `service-sca-m2m`
    do it, not a blanket SERVICE allow.
 
-2. **OPA policy for settlement activities: REOPENED 2026-08-20 (#6055).** This entry was marked
-   *Closed* on the grounds that the policy file exists and is bundled, so an activity interceptor
-   would have a real policy to evaluate. Re-measured against `origin/main`: the policy file exists,
-   is referenced by no bundle ConfigMap, and the interceptor it was closed on behalf of exists in no
-   Kotlin source and never has. Nothing evaluates the policy. A residual risk marked *Closed* is the
-   state a reviewer stops re-checking, which is why this is recorded as a reopening rather than a
-   quiet edit — and why the pre-condition it was supplying for the flag flip below was never met.
+2. **OPEN — there is no activity-level authorization on the settlement worker, and this entry was
+   wrongly marked Closed (#6055).** The previous text ("`settlement_activity.rego` exists and is bundled
+   (`settlement-opa-bundle.yaml`), so `OpaActivityInterceptor` has a real policy to evaluate") was false in
+   all three of its parts, and every part was measured before this correction:
+
+   - **No interceptor.** `OpaActivityInterceptor` occurs in no Kotlin source anywhere in the repository.
+     `openbank-libs-temporal` contains only `TemporalClientProducer` and `TemporalConfig`; the
+     "OPA activity interceptor" listed in ADR-0101's P0 row was never built. `SettlementWorkerRegistrar`
+     registers workflow and activity implementations and installs no interceptor.
+   - **Not bundled.** `settlement-opa-bundle.yaml` carries exactly `rest.rego`,
+     `settlement_rest_ext.rego`, `agents.rego`, `agents-data.yaml`, `rules-data.yaml` and
+     `manifest.json` — the generator (`gen-settlement-opa-bundle.sh`) never reads the file. Materialising
+     the ConfigMap into the sidecar's directory layout and evaluating it confirms this from the outside:
+     `data.openbank.settlement` resolves to `{}`, i.e. the package is not in the deployed bundle at all.
+     Controls in the same run: `settlement.create` for a HUMAN `ROLE_OPERATOR` allows with reason
+     `operator-settlement-write`, and the same action for an ANONYMOUS principal denies — so the probe
+     was live and the empty result is absence, not a broken query.
+   - **Not queried, and it did not say what E1 said.** The service's only OPA query path is
+     `/v1/data/openbank/rest/allow` (`application.yaml`), which cannot reach an activity package. And the
+     policy's `allow` was a single membership test of `input.activity` against a fixed set in which
+     `reverseBookToLedger` was an unconditional member: evaluated directly, `reverseBookToLedger` with
+     `compensation: false` returned `true`. It could not have enforced E1 even if something had loaded it.
+
+   **Decision: the control is not being built, and the orphan policy file is deleted rather than left
+   reading as coverage.** The rationale is that the gate as specified would add no security property the
+   service does not already have. The Temporal SDK dispatches only registered activity types, and the
+   policy's allowed set was exactly the seven methods the worker registers — so the membership test
+   restated the registration and could never deny anything reachable. The threat S1 actually describes (a
+   spoofed or compromised Temporal frontend) is a transport-authentication problem: a task forged by such
+   a peer carries a legitimate activity name, so no name-based policy distinguishes it. The genuinely
+   security-relevant constraint in E1 — that a compensation may run only after its forward leg — is a saga
+   state invariant belonging in `SettlementWorkflowImpl`, not in an external stateless policy that cannot
+   see the workflow's history. `settlement_activity.rego` was the only `src/main/resources/opa/` file in
+   the fleet; every other service's policy lives in its bundle generator, so it was an orphan by
+   convention as well as by wiring.
+
+   **What remains open, and is tracked rather than closed here:** transport authentication on the
+   worker↔Temporal-frontend edge (S1's other clause, unbuilt fleet-wide — the shared client configures no
+   SSL context; filed as #6066), and the ledger-reversal/maker-checker questions raised by
+   #6037's `LEDGER_REVERSAL_UNSUPPORTED` path (numbering of residual risks is in flux while #6048 is
+   open, so this cites the issue rather than an index). This entry stays OPEN until the S1 edge
+   is decided. It is deliberately **not** re-closed by this change: nothing was built here, only a false
+   claim withdrawn.
 
 3. **Temporal is now the SOLE orchestrator (issue #1917, ADR-0120 Phase 6).** The
    `openbank.temporal.enabled` dispatch gate is removed and the in-process legacy saga
@@ -152,21 +196,47 @@ replacing the former in-memory stub), so settlement state is durable across rest
    frontend is unreachable — a sandbox canary must confirm the worker registers and a real settlement
    drives `PENDING → BOOKED` before merge, and the deterministic simulation (ADR-0100/0115) stays green.
 
-5. **A settlement that fails after `bookToLedger` leaves the GL entry standing (issue #6037).**
-   `reverseBookToLedger` is deliberately NOT implemented and fails loudly
-   (`LEDGER_REVERSAL_UNSUPPORTED` + a non-retryable `ApplicationFailure`) rather than reporting a
-   reversal it did not perform. ledger-service does expose `POST /api/v1/journals/{journalId}/reverse`,
-   but three things must be decided before settlement-service may call it: (a) `ledger.reverse` is
-   maker-checker gated, so a service-account call queues for approval instead of posting, and granting
-   a machine that action is a `rules.yaml: shared_m2m_matrix_write_grants` decision — an automatic GL
-   reversal driven by a failed saga is close to what maker-checker exists to prevent; (b) settlement
-   does not retain the journal id (`bookToLedger` discards the response), so it must be persisted or
-   re-resolved via `GET /api/v1/journals/transaction/{transactionId}`; (c) the endpoint answers 409
-   when the entry's fiscal period is ATTESTED, and the accounting convention there is to correct
-   forward in the open period, which is a different posting. **Operational consequence:** such a
-   settlement unwinds both balance movements and needs a manual correcting entry in the general
-   ledger. It is visible as a `LEDGER_REVERSAL_UNSUPPORTED` row and an ERROR log line, and is
-   announced at boot by `SettlementCompensationCapabilities`.
+5. **A settlement that fails after `bookToLedger` leaves the GL entry standing (issues #6037, #6410).**
+   `reverseBookToLedger` still does not reverse anything, and now **establishes what the general
+   ledger actually holds** before saying so. Until #6410 it could not run at all: its compensation
+   was registered only after `bookToLedger` RETURNED, and `bookToLedger` is the last forward step,
+   so nothing could fail afterwards to trigger it. What made it dead also made the exposure real —
+   `bookToLedger` posts the journal and *then* writes `BOOKED`, so a failure of the second half
+   left a GL entry standing while the settlement unwound both balance movements and wrote
+   `REJECTED`, with nothing in the row, the alerts or the audit trail recording it. The
+   compensation is now registered **before** the activity runs, and reports one of three
+   outcomes from a read of `GET /api/v1/journals/transaction/{settlementId}`:
+   `LEDGER_REVERSAL_UNSUPPORTED` (a journal confirmed to exist — the GL owes a correcting entry,
+   non-retryable), `LEDGER_NOT_POSTED` (the ledger holds nothing, so no obligation and no
+   failure), `LEDGER_STATE_UNKNOWN` (the lookup itself failed — retryable, and explicitly not
+   rounded to either neighbour).
+
+   Two of the three blockers to an automatic reversal stand and remain **decisions this service
+   cannot take**: (a) `reverse` is a `rules.yaml: four_eyes.verbs` verb, so `ledger.reverse`
+   carries `four_eyes_required`, computed from the action name alone with no awareness of the
+   caller — the guardrail on that list states that adding an automated caller to a four-eyes verb
+   pauses the automation indistinguishably from the human path it gates, and a failed saga posting
+   its own GL reversal is close to what dual control exists to prevent; (b) the endpoint answers
+   409 when the entry's fiscal year is ATTESTED, and correcting forward in the open period is a
+   *different posting* from a reversal. The third blocker cited in #6037 — "no journal id is
+   retained" — **does not hold**: `SettlementJournalFactory` posts with
+   `transactionId = settlementId`, so the settlement id is the handle, and that is what the new
+   read uses.
+
+   **No new trust boundary.** The lookup is read-only, goes to a counterparty settlement already
+   calls (`ledger-port`/`LedgerRestClient`, same `OidcClientRequestReactiveFilter` client-credentials
+   identity), and adds no new egress destination. It does inherit the existing authz exposure
+   rather than introduce one: ledger's `GET /journals/transaction/{id}` is `@Authorize(action =
+   "ledger.read")`, which the shared M2M identity reaches only through `matrix-allows`
+   (`ROLE_OPERATOR`) — and the deployed gitops realm grants `service-account-openbank-services`
+   only `ROLE_API`. That is the same "advisory: would DENY, masked by `AUTHZ_ENFORCE=false`"
+   state `ledger.create` is already in (issue #750), one action wider, and its failure mode is
+   the safe one: a denied lookup yields `LEDGER_STATE_UNKNOWN`, which is retryable and
+   non-terminal, not a false clean-ledger claim. **Operational consequence:** a settlement whose
+   booking landed and then failed unwinds both balance movements and needs a manual correcting
+   entry in the general ledger; it is visible as a `LEDGER_REVERSAL_UNSUPPORTED` row, an ERROR log
+   line, an age series behind `SettlementStuckAfterCompensation`, and is announced at boot by
+   `SettlementCompensationCapabilities`.
 
 6. **A reversal can be legitimately refused and the money stays moved (issue #6037).**
    balance-service enforces `booked - amount >= overdraftFloor` on every debit, so if the payee has
@@ -240,11 +310,26 @@ replacing the former in-memory stub), so settlement state is durable across rest
 ## References
 
 - ADR-0030 (threat model policy)
-- ADR-0034 (OPA unified authz — `OpaActivityInterceptor`)
+- ADR-0034 (OPA unified authz) — applies to this service at the **REST** layer only
+  (`settlement.create`). The `OpaActivityInterceptor` this line used to name does not exist (#6055).
 - ADR-0101 (Temporal durable execution — this migration)
 - Settlement money-bug (2026-06-19, root cause: missing intermediate-state timeout in hand-rolled saga)
 
 ## Change log
+
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing balance and ledger REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or settlement-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
+- **2026-08-20** (#6055) — **S1, E1 and residual risk 2 credited an OPA activity-authorization control
+  that has never existed, and risk 2 was signed off as Closed on it.** `OpaActivityInterceptor` is in no
+  Kotlin source; the policy file the entry cited was in no bundle ConfigMap, was reachable from no query
+  path, and did not contain the `compensation` term E1 attributed to it. Measured by materialising
+  `settlement-opa-bundle.yaml` into the sidecar layout and evaluating it — `data.openbank.settlement` is
+  `{}`, against a must-ALLOW and a must-DENY control on `settlement.create` in the same run. Same shape as
+  #3921's service-mesh correction on S2 in this very document: a mitigation cell naming a mechanism that
+  was never deployed here. Risk 2 is **re-opened**, not rewritten to match the absent code; the orphan
+  `settlement_activity.rego` is deleted; S1's mTLS clause is corrected too, since verifying the row
+  surfaced that the shared `TemporalClientProducer` configures no SSL context anywhere in the fleet — that
+  half is filed as #6066 rather than resolved here.
 
 - **2026-08-20** (#6037) — **The compensation path did not reverse money.** `reverseDebit`,
   `reverseCredit` and `reverseBookToLedger` wrote a status row, logged

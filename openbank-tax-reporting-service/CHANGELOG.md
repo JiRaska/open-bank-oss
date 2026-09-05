@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.5](https://github.com/JiRaska/open-bank-oss/compare/v0.9.4...v0.9.5) (2026-09-03)
+
+
+### Bug Fixes
+
+* **standing-order,swift,tax-reporting:** entity timestamp defaults EPOCH -&gt; Instant.now() ([#8462](https://github.com/JiRaska/open-bank-oss/issues/8462)) ([09119bb](https://github.com/JiRaska/open-bank-oss/commit/09119bbcb2c79c5fda9310060cb97d537c777a93))
+
+## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/v0.9.3...v0.9.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
 ## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/v0.9.2...v0.9.3) (2026-08-21)
 
 

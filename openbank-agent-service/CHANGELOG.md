@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.25.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.25.0...agent-service-v1.25.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **agent:** reject a null array element with 400 instead of 500 ([#8008](https://github.com/JiRaska/open-bank-oss/issues/8008)) ([f7beb2d](https://github.com/JiRaska/open-bank-oss/commit/f7beb2d9653a67b048fce01139a352d73428a29a)), closes [#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)
+
+## [1.25.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.24.0...agent-service-v1.25.0) (2026-08-25)
+
+
+### Features
+
+* **testing:** add trace contract kit ([#6805](https://github.com/JiRaska/open-bank-oss/issues/6805)) ([bcee169](https://github.com/JiRaska/open-bank-oss/commit/bcee1697140bbe1f96fec33a6ed6ddf7f90ab109))
+
+## [1.24.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.23.2...agent-service-v1.24.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [1.23.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.23.1...agent-service-v1.23.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **agent:** stop substituting actorId for a missing audit aggregateId ([#6579](https://github.com/JiRaska/open-bank-oss/issues/6579)) ([5268ef9](https://github.com/JiRaska/open-bank-oss/commit/5268ef98e7ec987266119606d49e5b0034e9e3cf))
+
 ## [1.23.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.23.0...agent-service-v1.23.1) (2026-08-22)
 
 

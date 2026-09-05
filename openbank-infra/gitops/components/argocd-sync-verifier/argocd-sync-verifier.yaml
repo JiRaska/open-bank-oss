@@ -1,0 +1,263 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ---------------------------------------------------------------------------
+# ArgoCD sync-integrity verifier (issue #6371).
+#
+# THE GAP THIS CLOSES
+#   ArgoCD applied NOTHING to the `loki` app for three weeks and reported `Synced / Healthy`
+#   the entire time. With `ServerSideApply=true` the controller diffs by a server-side dry-run
+#   apply; when that dry-run is rejected the comparison ERRORS and the Application keeps serving
+#   its LAST KNOWN status rather than going OutOfSync. The trigger on 2026-08-21 was
+#   `singleBinary.persistence.size` 10Gi -> 30Gi (#3278) against an immutable StatefulSet
+#   `volumeClaimTemplates`. Every values change merged after that date was silently not applied,
+#   including #6032's Loki ruler fix — which is why that fix appeared to have "landed" while the
+#   ruler had still never loaded a rule.
+#
+#   The state IS recorded, as `.status.conditions[].type == ComparisonError`, and NO ArgoCD
+#   metric exposes it: `argocd_app_info` carries `sync_status` and `health_status` only. So both
+#   rules in observability/prometheus-rules-argocd.yaml were quiet BY CONSTRUCTION —
+#   `ArgoCDAppDegraded` keys on `Degraded`, `ArgoCDAppHealthUnknown` on `Unknown`, and this app
+#   was `Healthy`. Nothing in the estate could have detected it.
+#
+# WHY THIS AND NOT kube-state-metrics customResourceState
+#   That was #6371's first proposal and it is not free. A malformed CRS config takes down the
+#   kube-state-metrics pod, and with it EVERY `kube_*` series in the estate — including the ones
+#   `FalcoAgentNotReady` and much of the existing alert set depend on. That is a far larger blast
+#   radius than the gap being closed. Worse, it cannot be falsified offline: KSM parses
+#   `--custom-resource-state-config-file` only AFTER connecting to an apiserver, so a deliberately
+#   broken config and a good one produce byte-identical startup logs. A probe that cannot tell the
+#   two apart is not validation. This job reads the same field with no shared failure domain, and
+#   its comparison is falsifiable offline against fixtures (`--self-test`). Exposing the condition
+#   as a metric remains the better long-run answer and is NOT closed by this — it needs a
+#   dedicated KSM instance validated against a real apiserver first, per #6371's own step 1-2.
+#
+# WHY A CronJob AND NOT A CI GATE
+#   The observation is of LIVE controller status; no PR runner holds cluster credentials. So the
+#   CAPTURE happens here and the COMPARISON is ordinary repo code —
+#   `.github/scripts/check-argocd-sync-integrity.py`, unit-tested in both directions by
+#   `openbank-infra/scripts/check_argocd_sync_integrity_test.py` and self-tested against the real
+#   2026-08-21 loki condition. This pod holds no logic worth testing; it holds a network path and
+#   a read verb. The repo half of the control (`--check-wiring`, gate `argocd-sync-integrity`)
+#   asserts this file still exists and still invokes that script — a detector that runs nowhere
+#   reports nothing, which reads exactly like a detector reporting no findings.
+#
+# WHY IT FAILS THE JOB RATHER THAN JUST WRITING A REPORT
+#   The sbom-drift-scanner lesson (2026-07-12): a finding that only lands in a ConfigMap is a
+#   finding nobody acts on. The report is published FIRST, then the Job fails, so KubeJobFailed
+#   carries it with the detail already readable.
+#
+# WHAT IT DELIBERATELY DOES NOT DO
+#   It does not treat a stale `.status.operationState.finishedAt` as a finding. Measured
+#   2026-08-23, 15 of 93 Applications last synced more than a month ago and every one was correct
+#   — they track a pinned upstream chart version and legitimately need no sync. A detector that
+#   fires on all of them is one nobody reads by week two.
+#   It reads only; it never syncs, patches or deletes. Remediating a ComparisonError means
+#   recreating an immutable object (`kubectl delete sts <n> --cascade=orphan` keeps the pod and
+#   the PVC), which is a human's decision, not a CronJob's.
+#
+# NAMESPACE: `argocd`, so the reader is co-located with what it reads and needs no NetworkPolicy
+# edge — it talks to the apiserver, not to ArgoCD.
+# ---------------------------------------------------------------------------
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argocd-sync-verifier
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-sync-verifier
+    app.kubernetes.io/part-of: argocd
+
+---
+# ─── RBAC: read Application status cluster-wide, write one report ConfigMap ──
+# `get/list` on applications only. No `patch` and no `update`: this job must never be able to
+# change the thing it observes, or a future edit turns a detector into an actor with no review.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-sync-verifier-read
+  labels:
+    app.kubernetes.io/name: argocd-sync-verifier
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-sync-verifier-read
+  labels:
+    app.kubernetes.io/name: argocd-sync-verifier
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argocd-sync-verifier-read
+subjects:
+  - kind: ServiceAccount
+    name: argocd-sync-verifier
+    namespace: argocd
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-sync-verifier-configmap
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-sync-verifier
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["argocd-sync-verifier"]
+    verbs: ["get", "patch", "update"]
+  # create: resourceNames cannot gate create — needed for the first run only.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-sync-verifier-configmap
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-sync-verifier
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-sync-verifier-configmap
+subjects:
+  - kind: ServiceAccount
+    name: argocd-sync-verifier
+    namespace: argocd
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: argocd-sync-verifier
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-sync-verifier
+    app.kubernetes.io/part-of: argocd
+spec:
+  # Every 6h, not daily: the failure this detects is a deploy that silently did not happen, and
+  # the cost of finding out is proportional to how long people keep merging into it. Daily was
+  # the wrong granularity for a three-week outage only because nothing ran at all; six hours
+  # bounds the window at one working session.
+  schedule: "25 */6 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # failedJobsHistoryLimit: 1 — keep the LATEST failure for triage, not an archive.
+  # kube-prometheus-stack's KubeJobFailed fires per surviving failed Job OBJECT, so a higher
+  # limit turns one recurring failure into several permanent alerts whose pods are already
+  # garbage-collected (measured 2026-08-02: 11 of 37 firing alerts, 8 with pods=0).
+  failedJobsHistoryLimit: 1
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      # 48h self-delete so a failed Job cannot become a permanent KubeJobFailed tombstone.
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 900
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: argocd-sync-verifier
+        spec:
+          serviceAccountName: argocd-sync-verifier
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            # Phase 1 — capture the live Application status and run the COMMITTED comparison.
+            # The logic is deliberately not inlined here: it lives in the repo, where it is
+            # reviewable and unit-tested, and the CI wiring check asserts this container still
+            # calls it rather than a second copy that can drift.
+            - name: capture-and-compare
+              image: docker.io/alpine/k8s:1.34.1
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+              args:
+                - |
+                  set -eu
+                  # --filter=blob:none, NOT --depth 1: the ancestry check needs the full commit
+                  # graph to answer `merge-base --is-ancestor`, and a shallow clone answers it
+                  # wrongly rather than erroring. Blobless keeps the clone small anyway.
+                  echo "Cloning openbank-oss (public repo, unauthenticated, blobless)..."
+                  git clone --filter=blob:none --single-branch --branch main --quiet \
+                    https://github.com/JiRaska/open-bank-oss.git /tmp/repo
+
+                  echo "Capturing Application status from the apiserver..."
+                  # A capture that fails must NOT leave an empty file that the checker reads as
+                  # "no Applications, no findings" — the checker rejects an absent, unparseable
+                  # or empty capture as a FAILED capture, and this `||` keeps the failure loud
+                  # here too rather than substituting an empty document.
+                  kubectl -n argocd get applications -o json > /work/applications.json
+
+                  cd /tmp/repo
+                  python3 .github/scripts/check-argocd-sync-integrity.py \
+                    --capture /work/applications.json \
+                    --repo /tmp/repo \
+                    --base-ref origin/main \
+                    > /work/report.txt 2>&1 \
+                    || echo findings > /work/findings
+                  cat /work/report.txt
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+          containers:
+            # Phase 2 — publish the report, THEN fail. Order is load-bearing: the alert must fire
+            # with the detail already readable, not with a promise of it.
+            - name: publish
+              image: docker.io/alpine/k8s:1.34.1
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+              args:
+                - |
+                  set -eu
+                  kubectl -n argocd create configmap argocd-sync-verifier \
+                    --from-file=report.txt=/work/report.txt \
+                    --dry-run=client -o yaml | kubectl apply -f -
+
+                  if [ -f /work/findings ]; then
+                    echo "FINDINGS PRESENT — failing the Job so KubeJobFailed carries it (#6371)."
+                    echo "An Application reporting Synced/Healthy that cannot compute a diff"
+                    echo "applies NOTHING. Read the report above, then"
+                    echo "kubectl -n argocd get configmap argocd-sync-verifier -o yaml"
+                    exit 1
+                  fi
+                  echo "No findings: every Application can back up the status it reports."
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: work
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}

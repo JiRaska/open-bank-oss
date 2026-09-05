@@ -52,6 +52,11 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass. The public CNB feed is explicitly a non-banking external boundary and does not receive the marker; a fleet gate requires every new client to choose one of these treatments.
+  The accompanying client-source normalization is formatting-only: request payloads, client targets,
+  authentication, retry policy, and the propagation decision are unchanged. No additional trust
+  boundary or STRIDE row is introduced by that refactor.
+
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so an `fx.convert`
   four-eyes decision parked at 202 was discoverable only by whoever had been handed its approval
   id out of band — the ceremony completed only if the two operators were already talking, and the
@@ -113,12 +118,23 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 
 - **2026-08-05** — Trust-boundary change (#3734): the three operator rules (`operator-fx-write`, `operator-fx-trigger`, `operator-fx-approval-decide`) now exclude `service-account-*` principals, and a new `prohibited` veto closes `fx.convert` to `service-account-openbank-edge` — the only fx write in the role_action_matrix's ROLE_OPERATOR grant, which matrix-allows re-admits regardless of the exclusion. Both M2M clients are verified read-only (edge: rate-sheet proxy; shared client: ledger FX revaluation + agent-service MCP read tools) and keep their identity-scoped reads. `fx.trigger`/`fx.approval.decide` are absent from the matrix grant, so the exclusion closes them outright. Ext moved from generator heredoc to standalone `fx_rest_ext.rego` with an 11-test opa suite.
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `Idempotency-Key` on convert, the sibling of the null-body guard added by #3050 one argument position over. Same defect as domestic-payment: `require(key.isNotBlank())` in a `suspend` handler threw NPE on an absent header, so the replay control answered 500 for a missing key and 400 only for a blank one. Now `require(!key.isNullOrBlank())`. No new caller or boundary. Rollback: revert.
+- **2026-09-03** — Doc correction, no behavior change: the 2026-06-17 entry credited the
+  fail-open shadow-scoring wrapper to `FxConversionService`, a class that exists in no Kotlin
+  source in this repository — `git grep -l FxConversionService -- '*.kt'` returns nothing, and the
+  name occurs nowhere outside this document. **The control is real and unchanged**: the method is
+  `FxService.scoreFraudShadow()`
+  (`openbank-fx-service/src/main/kotlin/com/openbank/fx/application/usecase/FxService.kt`), called
+  at line 123 and defined at line 337, and it does wrap the fraud call so that any fault leaves the
+  conversion outcome untouched. Only the class name was wrong. The sibling entry in
+  `openbank-sepa-instant.md` names its equivalent (`SctInstPaymentService.scoreFraudShadow()`)
+  correctly, which is what makes this one identifiable as a typo rather than a renamed control.
+
 - **2026-05-30** — Added `fx_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
   boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
   Rollback: `DROP SEQUENCE`.
 - **2026-06-17** — ADR-0084 fraud shadow scoring (observe-only). New outbound trust boundary:
   `fx-service → fraud-service (POST /api/v1/fraud/score, OIDC client-credentials)`.
-  **Shadow = fail-open and never-enforce**: `FxConversionService.scoreFraudShadow()` wraps the call
+  **Shadow = fail-open and never-enforce**: `FxService.scoreFraudShadow()` wraps the call
   in `.onFailure().recoverWithItem {}` — any fault (timeout, circuit-open, 5xx) is swallowed; the
   conversion outcome is unchanged. `FraudScoringAdapter` applies `@CircuitBreaker` (30% failure ratio)
   + `@Timeout(3 s)`. No retry (avoid double-scoring on the same conversion).

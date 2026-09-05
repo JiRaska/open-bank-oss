@@ -25,7 +25,7 @@ Assets protected, in priority order:
 1. **Journal integrity** — every posting is balanced (Σdebit = Σcredit per base currency) and immutable
    once `POSTED`. Corrections happen only by compensating reversal, never mutation.
 2. **GL account structure** — chart of accounts, deposit-control accounts (2100–2103), FX-position
-   accounts; their `type`/normal-side semantics.
+   accounts and regulatory-capital source accounts (6000–6060); their `type`/normal-side semantics.
 3. **Sub-ledger dimension** (`subAccountId`, Phase B) — analytická evidence that lets GL control
    accounts tie out per customer (CNB zákon 563/1991 Sb., vyhláška 501/2002 Sb.).
 4. **Trial balance / sub-ledger balances** — derived reporting that auditors and reconciliation rely on.
@@ -70,6 +70,7 @@ isolation from transport/persistence.
 | D2 | Outbox relay | **DoS** — a poison outbox row retried forever starves the dispatch batch | **Bounded retries → terminal `DEAD` + operator alert** (ADR-0050 N5); `concurrentExecution=SKIP`; sequential per-aggregate dispatch | `FOR UPDATE SKIP LOCKED` claim for multi-writer — *planned* |
 | E1 | Roles | **Elevation** — reader triggers a posting | Mutations gated by `ROLE_OPERATOR`; read roles exclude write capability; no posting logic on read endpoints; **OPA enforce mode is now ON (ADR-0034 Phase 5)** — a call with no matching `allowed_reasons` (e.g. a compliance/viewer role attempting `ledger.create`) is 403'd by `data.openbank.rest.allow`'s default-deny, in addition to the `@RolesAllowed` outer gate | Two independent gates (RBAC + OPA) both currently key off the SAME role set (`ROLE_OPERATOR`/`ROLE_ADMIN`) — OPA does not yet add attribute-based conditions (e.g. tenant/value-band) beyond role membership for ledger writes — *open* |
 | E2 | Attestation / year-close | **Elevation** — a SERVICE principal or a non-operator attests a fiscal year | `ledger.approve` (year-close attest) has **NO service-\* OPA grant**, and since #3765 the `operator-year-close-attest` rule also **excludes every `service-account-*` identity outright** (`not startswith(input.principal.id, "service-account-")`). That exclusion is what makes the "no M2M path" claim true: *absence of a service-\* rule was never sufficient* — the rule was role-only, and both `service-account-openbank-services` and `service-account-openbank-edge` are classified `HUMAN` while holding `ROLE_OPERATOR` in a realm, so `opa eval` against the deployed bundle returned `allow=true, reason="operator-year-close-attest"` for both. Measured before and after: the fix denies exactly `ledger.approve` for both service-accounts and changes no other decision, with staff (`ROLE_OPERATOR`/`ROLE_ADMIN`) still allowed. In-service four-eyes (draftedBy ≠ attestedBy, see §4) is a second, independent control on top | Low — two independent controls (OPA identity+role gate and in-service four-eyes) must both be defeated. **Was Medium until #3765**: a single compromised shared-client credential satisfied the OPA gate on its own |
+| E3 | Close DRAFT / maker evidence | **Elevation** — an M2M journal writer creates the close DRAFT and is recorded as its maker | Close creation uses the dedicated `ledger.close.draft` action and `operator-ledger-close-draft` OPA reason, which requires operator/admin and excludes every `service-account-*` identity. Routine M2M posting remains narrowly allowed only on `ledger.create`; it cannot manufacture maker evidence. Regression tests cover both the shared service account denial and the staff operator allow decision | Low — RBAC plus the identity-aware OPA rule gate the maker action; freeze independently requires a distinct human checker |
 | T4 | Outbox/Kafka | **Tampering** — downstream consumes a non-emitted, reordered or duplicated event | Transactional outbox (single DB tx with the posting); dispatch runs on the Vert.x event loop so it actually drains (ADR-0050 N1, was `HR000068`); **deterministic Kafka key = `aggregate_id`** preserves per-account order (N2); **`event.id` carried as `ce-id`/`idempotency-key` header** for consumer dedup (N3); idempotency key on posting dedupes retries | Schema-compat on event change (advisory gate); signed event provenance — *planned* |
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — ledger's `OIDC_CLIENT_SECRET` is projected from the **shared** Vault key `account-service` (all services reuse the single `openbank-services` Keycloak confidential client, see `gitops/components/ledger/oidc-externalsecret.yaml`). Compromise of that one Vault key would let an attacker mint bearer tokens accepted by **both** account-service and the ledger money path — a single secret is a single point of forgery across services. | Secret is Vault-projected (never in git/state); ExternalSecret `deletionPolicy: Retain`; the Keycloak client is **confidential** (not public), so the secret alone is required and it is access-controlled in Vault; ledger write endpoints additionally require `ROLE_OPERATOR` (S1/E1), so a forged service token still cannot post without the operator role claim. | **Shared-credential blast radius is accepted for sandbox only.** Tightening = a dedicated Vault path + per-service Keycloak client for ledger (planned, §5). **Production go-live requires the second money-path approver to explicitly sign off this residual** (ADR-0030). — *open* |
 
@@ -107,6 +108,9 @@ isolation from transport/persistence.
   regulatory source. During rollout the count of `HASH_ONLY` frozen records is an explicit report
   availability gate. No backfill is automatic: historical reproduction needs a separately approved,
   controlled evidence-import procedure and cannot be inferred from mutable journals.
+- **Regulatory capital source integrity:** COREP reads only explicit 6000–6060 EQUITY accounts.
+  Capital is never plugged as assets minus liabilities; each movement is a balanced, attributable
+  journal subject to normal posting, idempotency, period-lock and frozen-evidence controls.
 
 ## 5. Open items / follow-ups
 
@@ -238,6 +242,44 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-09-01** — `POST /api/v1/journals` answered **500** rather than 400 for two shapes of
+  malformed input: a `null` element inside the `lines` array, and an absent request body. Neither
+  crossed a trust boundary, moved money or bypassed a control — `@RolesAllowed(OPERATOR)`, the
+  `@Authorize(action = "ledger.create")` OPA gate and `validateBalance()` all run unchanged, and
+  the request failed before reaching the domain in both cases. It is recorded here because the
+  inbound REST surface changed shape: `PostJournalRequest.lines` is now `List<PostJournalLineRequest?>`
+  and the body parameter is nullable, so the `requireNotNull` guards are reachable instead of dead
+  code (Jackson's Kotlin module null-checks constructor parameters, never collection elements; and
+  a `suspend fun` emits no `Intrinsics.checkNotNullParameter`, so the injected null flowed into the
+  body and died at the first dereference). **STRIDE-D:** the 5xx was the availability-signal defect
+  — a caller could not distinguish "I sent a bad request" from "the server is broken", which on a
+  money path decides whether it retries, and it burned SLO error budget on client error. Both now
+  raise `IllegalArgumentException`, mapped to 400 by libs-runtime's `CommonExceptionMappers`; no
+  service-local mapper is added (#526). No new caller, endpoint, role, network edge or privilege.
+  Rollback: revert the two declarations to their non-nullable form, restoring the 500.
+  Refs #5913.
+
+- **2026-08-26** — `POST /api/v1/journals` now copies the trusted synthetic classification from
+  `SyntheticTaintRequestFilter` into the `JournalPosted` and derived `AccountBookedChanged` outbox
+  rows for that posting. The REST resource reads only the server-side request property after the
+  filter authenticates a configured canary principal; it does not trust a request header, JWT
+  claim, coroutine MDC value or unconfigured caller. **STRIDE-S/T:** a normal caller cannot label
+  a real ledger event synthetic, because the default is false and only the filter's fail-closed
+  decision is copied. No principal is configured and no regulatory consumer is changed here; this
+  neither activates a money-moving synthetic journey nor claims FINREP/COREP/AML exclusion.
+  Rollback: revert propagation, restoring false on newly written rows.
+
+- **2026-08-24** — Synthetic-journey taint now reaches this service over its existing internal FX REST edge through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or ledger-control bypass. It is the prerequisite for correctly classifying synthetic postings at a later persistence-backed ledger boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+- **2026-08-22** — `POST /api/v1/journals` answered 500, not 400, for a body carrying a `null`
+  element in `lines` (issue #5913): `List<PostJournalLineRequest>` is a compile-time-only non-null
+  promise Jackson does not keep at runtime, so `request.lines.map { it.toCommand() }` threw NPE on
+  the first null element — the same shape CLAUDE.md records for a non-null `@QueryParam`, where the
+  declared type only decides **where** the failure lands, never whether one happens. Fix: the
+  element type becomes nullable and each element is checked with `requireNotNull` carrying its
+  index; libs-runtime maps `IllegalArgumentException` to 400 (no service-local mapper, #526). `400`
+  added to the OpenAPI spec's documented responses for this operation (`info.version` 1.16.0 ->
+  1.17.0). **No new trust boundary, caller, or field** — same endpoint, same shape, an
+  input-validation fix. Rollback: revert; the previous behaviour was a 500 on malformed input.
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a `ledger.reverse`
   four-eyes decision parked at 202 was discoverable only by whoever had been handed its approval
   id out of band — the ceremony completed only if the two operators were already talking, and the
@@ -368,3 +410,15 @@ set) apply equally to the new `ledger.approval.decide` action.
   line inserts occur only during an operator four-eyes freeze, not on the posting path. **Rollback:**
   before FINREP depends on the source, stop writers and archive frozen evidence, then remove the
   trigger/function/table; never delete attested evidence as a convenience rollback.
+
+- **2026-08-27** — Journal posting now emits the bounded internal span
+  `ledger.journal.post`, asserted against an SDK exporter while the real reactive repository writes
+  a balanced journal and transactional outbox rows in `LedgerOutboxProjectionIT` (issue #7383).
+  **Information disclosure:** the span has one allow-listed attribute only,
+  `openbank.ledger.journal.status`; it carries no journal/account/transaction IDs, actor,
+  idempotency key, amount, currency, description, or payload. **Tampering:** telemetry is
+  observational and cannot alter the posting, its balance validation, day/period locks,
+  idempotency, or transactional outbox. **Availability:** tracing failure is not caught or
+  translated into a financial success; an application failure remains an error span and propagates
+  unchanged. Rollback: revert the instrumentation and its contract test; no stored financial data,
+  schema, caller, endpoint, role, or policy changes.

@@ -26,6 +26,7 @@ private data class DelegationEvent(
     val perTxLimitCurrency: String?,
     val validFrom: OffsetDateTime?,
     val validTo: OffsetDateTime?,
+    val lifecycleRevision: Long?,
 )
 
 /**
@@ -81,22 +82,24 @@ class DelegationEventConsumer(
                 runCatching { OffsetDateTime.parse(it) }.getOrNull()
             },
             validTo = node.path("validTo").asText(null)?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() },
+            lifecycleRevision = node.path("lifecycleRevision").takeIf { it.isIntegralNumber }?.longValue(),
         )
     }
 
     private suspend fun dispatch(event: DelegationEvent) {
         if (event.resourceType !in PROJECTED_RESOURCE_TYPES && event.type in LIFECYCLE_TYPES) return
         when (event.type) {
-            "DelegationActivated", "DelegationReinstated" -> upsert(event)
+            "DelegationActivated", "DelegationReinstated" ->
+                if (event.lifecycleRevision != null) upsert(event) else Unit
             "DelegationRevoked", "DelegationSuspended", "DelegationRenounced", "DelegationExpired" ->
-                projectionRepository.closeById(event.grantId)
+                projectionRepository.applyClosed(event.grantId, event.lifecycleRevision)
             else -> Unit // OFFERED/DECLINED/unknown: nothing enforceable to do, ack.
         }
     }
 
     private suspend fun upsert(event: DelegationEvent) {
         val accountId = event.resourceId ?: return
-        projectionRepository.upsertActive(
+        projectionRepository.applyActive(
             DelegatedAccessGrant(
                 id = event.grantId,
                 accountId = accountId,
@@ -110,6 +113,7 @@ class DelegationEventConsumer(
                 validTo = event.validTo,
                 active = true,
             ),
+            requireNotNull(event.lifecycleRevision),
         )
     }
 

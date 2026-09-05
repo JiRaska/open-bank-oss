@@ -36,6 +36,7 @@ data class EventMoney(val amount: BigDecimal, val currency: String) {
 
 data class DelegationOffered(
     override val aggregateId: UUID,
+    val lifecycleRevision: Long,
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val resourceType: DelegationResourceType,
@@ -53,6 +54,7 @@ data class DelegationOffered(
 
 data class DelegationActivated(
     override val aggregateId: UUID,
+    val lifecycleRevision: Long,
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val resourceType: DelegationResourceType,
@@ -70,6 +72,7 @@ data class DelegationActivated(
 
 data class DelegationDeclined(
     override val aggregateId: UUID,
+    val lifecycleRevision: Long,
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     override val occurredAt: Instant,
@@ -81,6 +84,7 @@ data class DelegationDeclined(
 
 data class DelegationRevoked(
     override val aggregateId: UUID,
+    val lifecycleRevision: Long,
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val resourceType: DelegationResourceType,
@@ -96,6 +100,7 @@ data class DelegationRevoked(
 
 data class DelegationSuspended(
     override val aggregateId: UUID,
+    val lifecycleRevision: Long,
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val resourceType: DelegationResourceType,
@@ -111,6 +116,7 @@ data class DelegationSuspended(
 
 data class DelegationReinstated(
     override val aggregateId: UUID,
+    val lifecycleRevision: Long,
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val resourceType: DelegationResourceType,
@@ -128,6 +134,7 @@ data class DelegationReinstated(
 
 data class DelegationRenounced(
     override val aggregateId: UUID,
+    val lifecycleRevision: Long,
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val resourceType: DelegationResourceType,
@@ -141,6 +148,7 @@ data class DelegationRenounced(
 
 data class DelegationExpired(
     override val aggregateId: UUID,
+    val lifecycleRevision: Long,
     val grantorPartyId: UUID,
     val granteePartyId: UUID,
     val resourceType: DelegationResourceType,

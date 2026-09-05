@@ -403,6 +403,17 @@ spec:
           # so these states are transient by construction and a row parked in one has a workflow
           # that died between the compensation and the terminal write.
           #
+          # LEDGER_NOT_POSTED and LEDGER_STATE_UNKNOWN join them for #6410, and only became
+          # reachable with it: the ledger compensation is now registered BEFORE bookToLedger runs,
+          # so it can actually execute, and it reports which of the three situations the general
+          # ledger is in rather than assuming the worst. Neither has customer money in limbo, so
+          # both belong at this severity rather than with SettlementReversalFailed below —
+          # LEDGER_NOT_POSTED because the ledger was asked and holds nothing, LEDGER_STATE_UNKNOWN
+          # because the balance reversals are unaffected by a ledger that could not be reached.
+          # LEDGER_STATE_UNKNOWN parked for 8h is the one to act on first: it means nobody has
+          # established whether the GL carries this settlement, so it could still turn out to be
+          # LEDGER_REVERSAL_UNSUPPORTED.
+          #
           # REVERSAL_FAILED is deliberately NOT in this rule — there the money did not come back,
           # so it is critical, not warning. See SettlementReversalFailed below.
           #
@@ -414,7 +425,7 @@ spec:
             max by (status) (
               openbank_settlement_non_terminal_oldest_age_seconds{
                 service="settlement",
-                status=~"REVERSED|CREDITED_REVERSED|LEDGER_REVERSED|LEDGER_REVERSAL_UNSUPPORTED"
+                status=~"REVERSED|CREDITED_REVERSED|LEDGER_REVERSED|LEDGER_REVERSAL_UNSUPPORTED|LEDGER_NOT_POSTED|LEDGER_STATE_UNKNOWN"
               }
             ) > 28800
           for: 30m
@@ -460,3 +471,141 @@ spec:
               balance compensation was attempted and refused, so funds moved and were not returned —
               this does not resolve itself. Identify the settlement, confirm which leg is
               outstanding, and start the collections/dispute path.
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# settlement-service (issue #5705)
+#
+# settlement-service is a declared money-path service that, until #5705, emitted no application
+# metric of any kind: the pod was scraped, the Rollout was Healthy, ArgoCD was Green, and there was
+# simply no series to query. Nothing here could distinguish "settlement is running normally" from
+# "settlement has booked nothing for six hours".
+#
+# Every series below is registered EAGERLY by SettlementMetricsAdapter.bindTo() at @PostConstruct
+# (the bean is @Startup because @ApplicationScoped is lazy), so it exists at 0.0 from the first
+# scrape. That is load-bearing, not tidiness: Micrometer does not create a counter until its first
+# increment, so `increase(openbank_settlement_terminal_total[6h]) == 0` written against a lazily
+# created counter matches NOTHING on a service that has never booked anything — precisely the state
+# these alerts exist to catch. SettlementMetricsAdapterTest asserts the rendered scrape text, so the
+# exact strings below (dot->underscore, the `_total` suffix, tag order) come from Micrometer rather
+# than from this file's idea of them.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-settlement-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: settlement-service
+spec:
+  groups:
+    - name: openbank.settlement.health
+      rules:
+        - alert: SettlementSagaNotCompleting
+          # THE alert for this service. Self-normalising by construction: it compares work accepted
+          # against work finished, so it needs no business-hours guard and no uptime guard — a
+          # freshly started pod has no originations either, making the first conjunct 0 and the
+          # rule silent, rather than firing 15m after every deploy the way an unguarded
+          # `increase(...) == 0` gauge alert does (the boot-time fourth state this repo has already
+          # paid for once, ADR-0237 / #4208).
+          #
+          # This is the shape of the failure the saga makes invisible: originate() answers 202 with
+          # a PENDING row and hands off to Temporal, so a worker that never picks work up (worker
+          # not registered, wrong task queue, Temporal frontend unreachable) leaves every settlement
+          # PENDING forever and produces no HTTP errors, no latency change and no log line anyone
+          # is watching. Money is accepted and nothing settles.
+          expr: |
+            increase(openbank_settlement_originated_total{outcome="created"}[1h]) > 0
+            and
+            increase(openbank_settlement_terminal_total[1h]) == 0
+          for: 15m
+          labels:
+            severity: critical
+            service: settlement
+          annotations:
+            # Subject: incremented on the settlement request/activity path
+            # (SettlementMetricsAdapter), not by any scheduler — no period to compare against.
+            subject_period: continuous
+            summary: "settlement-service accepted settlements but completed none"
+            description: >-
+              {{ $value }} settlement(s) were accepted in the last hour and not one reached a
+              terminal state (booked or rejected). Suspect the Temporal worker: check that the
+              settlement worker is registered on task queue `openbank-settlement` and that
+              temporal-frontend.temporal.svc:7233 is reachable. Rows will be sitting in PENDING.
+
+        - alert: SettlementNoBookingsInBusinessHours
+          # The issue's literal ask — "settlement has processed nothing for six hours".
+          #
+          # The `> 0` guard is what separates "was settling and went quiet" from "has not settled
+          # yet since it started", and it is required, not decorative. The counter is eagerly
+          # registered, so on a fresh pod the series EXISTS and reads 0; without the guard
+          # `increase(...) == 0` is true for every pod for the first six hours of its life and this
+          # warning fires after every deploy during business hours. Same guard, same reason, as
+          # AuditChainVerificationStale in components/observability/prometheus-rules-audit-chain.yaml.
+          #
+          # What the guard deliberately gives up: a pod that has NEVER booked anything since restart
+          # is not covered here. That case is SettlementSagaNotCompleting's, which catches it within
+          # the hour and at `critical` — so nothing is left uncovered by keeping this one narrow.
+          expr: |
+            increase(openbank_settlement_terminal_total{outcome="booked"}[6h]) == 0
+            and openbank_settlement_terminal_total{outcome="booked"} > 0
+            and on() hour() >= 6 and on() hour() <= 18
+          for: 30m
+          labels:
+            severity: warning
+            service: settlement
+          annotations:
+            # Subject: incremented on the settlement request/activity path
+            # (SettlementMetricsAdapter), not by any scheduler — no period to compare against.
+            subject_period: continuous
+            summary: "No settlements booked in 6h (business hours)"
+            description: >-
+              settlement-service has booked nothing to the ledger for 6h during business hours,
+              having booked normally earlier in this pod's life. Either upstream stopped
+              originating settlements, or the saga is failing short of the ledger — cross-check
+              openbank_settlement_saga_steps_total{outcome="failed"}.
+
+        - alert: SettlementSagaStepsFailing
+          # Temporal RETRIES a failing activity before it compensates, so a non-zero failure rate is
+          # not by itself an incident — a sustained one is the only warning before customer money
+          # gets moved and moved back. Warning, not critical: the compensation is the safety net
+          # working, and SettlementCompensationsElevated below is what pages if it is actually used.
+          expr: |
+            sum by (step) (rate(openbank_settlement_saga_steps_total{outcome="failed"}[15m])) > 0
+          for: 20m
+          labels:
+            severity: warning
+            service: settlement
+          annotations:
+            # Subject: incremented on the settlement request/activity path
+            # (SettlementMetricsAdapter), not by any scheduler — no period to compare against.
+            subject_period: continuous
+            summary: "settlement saga step {{ $labels.step }} is failing repeatedly"
+            description: >-
+              The `{{ $labels.step }}` activity has been failing continuously for 20m. Temporal is
+              still retrying; once the attempts are exhausted the saga compensates and the
+              settlement ends REJECTED. Check the downstream this step calls (balance-service for
+              debit/credit, ledger-service for ledger_book).
+
+        - alert: SettlementCompensationsElevated
+          # A compensated saga MOVES CUSTOMER MONEY AND MOVES IT BACK, then ends in REJECTED — a
+          # perfectly healthy-looking terminal state that no error rate and no HTTP status reports.
+          # This is the one alert that reads that outcome as the incident it is.
+          expr: |
+            sum(rate(openbank_settlement_terminal_total{outcome="rejected"}[1h]))
+              /
+            clamp_min(sum(rate(openbank_settlement_terminal_total[1h])), 1e-9)
+              > 0.1
+          for: 30m
+          labels:
+            severity: critical
+            service: settlement
+          annotations:
+            # Subject: incremented on the settlement request/activity path
+            # (SettlementMetricsAdapter), not by any scheduler — no period to compare against.
+            subject_period: continuous
+            summary: "Over 10% of settlements are being rejected after compensation"
+            description: >-
+              {{ $value | humanizePercentage }} of settlements reaching a terminal state in the last
+              hour were REJECTED after their compensations ran — each one debited and credited real
+              accounts and then reversed them. Treat as a money-path incident, not a error-rate blip.

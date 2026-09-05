@@ -99,6 +99,17 @@ tasks.withType<Test>().configureEach {
         providers.environmentVariable("DOCKER_HOST").orElse("unix:///var/run/docker.sock").get(),
     )
     environment("TESTCONTAINERS_RYUK_DISABLED", "true")
+    // A shared Testcontainers resource emits a deliberately secret-free lifecycle
+    // observation here. The CI envelope is evidence, not a container inventory:
+    // ports, hosts, credentials and ids must never leave the test runner.
+    val testIntelligenceRuntimeDir = layout.buildDirectory.dir("test-intelligence/runtime")
+    environment("OPENBANK_TEST_EVIDENCE_DIR", testIntelligenceRuntimeDir.get().asFile.absolutePath)
+    // Recorder output is append-only within one test task so concurrently managed resources do
+    // not lose transitions. Reset only this generated task directory before each invocation:
+    // otherwise a local re-run mixes prior lifecycle evidence into the next envelope.
+    doFirst {
+        project.delete(testIntelligenceRuntimeDir)
+    }
 
     // Committed pacts are derived data (ADR-0063), so a regenerated pact must be AUTHORITATIVE —
     // it has to be able to remove an interaction, not only add one. pact-jvm's default writer
@@ -197,6 +208,20 @@ tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setSchemaVersion("1.5")
 }
 
+// Kover instruments every class that a Quarkus test JVM loads unless told otherwise.
+// Testcontainers is third-party test infrastructure, never part of this module's coverage
+// denominator; attempting to transform its shaded classes has produced invalid frames and a
+// missing XML report while the advisory CI step still looked green.  Exclude it at the
+// instrumentation boundary (rather than report filtering) so application classes remain
+// measured and a Testcontainers-heavy integration suite can still publish its evidence.
+kover {
+    currentProject {
+        instrumentation {
+            excludedClasses.add("org.testcontainers.*")
+        }
+    }
+}
+
 // Coverage gate (ADR-0020, ratchet-only — sweep #466). koverVerify is wired into
 // check fleet-wide: a module with a kover verify{} rule gets its floor enforced, a
 // module without rules passes trivially — so a module cannot silently opt out of
@@ -204,6 +229,36 @@ tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
 // per-service re-enable boilerplate; that made "ungated" and "gated with floor 0"
 // indistinguishable from a real gate in a green build. Floors live in each module's
 // build.gradle.kts and only ever go up.
+// A service's coverage number must be about the SERVICE (issue #6384). Kover measures every
+// class the module's tests load, and the shared libraries (`com.openbank.libs.*`, i.e.
+// openbank-libs-domain / -runtime / -temporal / -testing) are on every service's classpath —
+// so a service's report mixed its own sources with whatever slice of the libraries its tests
+// happened to touch. That made each floor a function of shared-library SIZE: PR #5719 added 13
+// uncovered lines to libs-runtime's EventRetry, touched no fx-service file, and reddened
+// `build (openbank-fx-service)` (60.504200% against a floor of 65). The pressure that creates is
+// to lower a floor on a service the PR never looked at, which is the one move that makes the
+// ratchet meaningless — and fx's floor was in fact lowered 65 -> 60 for exactly that reason.
+//
+// The libraries are not left unmeasured: openbank-libs-domain and openbank-libs-runtime each
+// carry their own koverVerify floor (30 and 50), enforced by their own tests, which is the only
+// place a library's coverage can honestly be judged.
+//
+// Trade-off, stated plainly: each service's recorded floor now compares against a SMALLER, and
+// for most services a lower, number — its own sources alone. Floors that had to move down to
+// match were re-baselined in this change from the figure CI measured, and that is a re-baseline,
+// not a relaxation: the old number was never that service's coverage. What the gate protects is
+// unchanged in the direction that matters — a regression in a service's own sources still moves
+// its own number down and still reddens its build.
+kover {
+    reports {
+        filters {
+            excludes {
+                classes("com.openbank.libs.*")
+            }
+        }
+    }
+}
+
 tasks.named("check") {
     dependsOn("koverVerify")
 }

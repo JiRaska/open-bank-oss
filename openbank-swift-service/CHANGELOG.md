@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.0...swift-service-v0.11.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **standing-order,swift,tax-reporting:** entity timestamp defaults EPOCH -&gt; Instant.now() ([#8462](https://github.com/JiRaska/open-bank-oss/issues/8462)) ([09119bb](https://github.com/JiRaska/open-bank-oss/commit/09119bbcb2c79c5fda9310060cb97d537c777a93))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.10.0...swift-service-v0.11.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.9.0...swift-service-v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.8.0...swift-service-v0.9.0) (2026-08-19)
 
 

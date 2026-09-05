@@ -11,6 +11,7 @@ import com.openbank.sca.application.port.out.ScaOutboxRepository
 import com.openbank.sca.infrastructure.persistence.entity.ScaOutboxEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
@@ -102,12 +103,11 @@ class ScaOutboxRepositoryImpl(private val clock: Clock) :
             }
         }.awaitSuspending()
 
-    override suspend fun save(message: OutboxMessage) {
-        Panache.withTransaction { persistAndFlush(message.toEntity()) }.awaitSuspending()
-    }
+    override fun persistInTransaction(message: OutboxMessage): Uni<Void> = persist(message.toEntity()).replaceWithVoid()
 
     private fun OutboxMessage.toEntity() = ScaOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload

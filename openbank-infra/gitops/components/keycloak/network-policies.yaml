@@ -116,6 +116,9 @@ spec:
               kubernetes.io/metadata.name: governance-auditor
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: incentive
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: interest
         - namespaceSelector:
             matchLabels:
@@ -147,6 +150,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: psd2
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: referral
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: release-steward

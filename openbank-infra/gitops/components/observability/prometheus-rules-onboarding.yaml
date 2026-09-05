@@ -33,14 +33,31 @@ spec:
           # no account. This is the exact silent data-loss that ran for 3 weeks, now made loud.
           # increase() over 1h: fires while records are still arriving and clears an hour after
           # they stop (the topic offset is monotonic, so a plain `> 0` would latch forever).
+          #
+          # TWO topic names, deliberately (#5752). account-service now dead-letters into the
+          # explicit `openbank.dlq.account.party-events-in`; the implicit
+          # `dead-letter-topic-party-events-in` it used before is still matched because (a) under an
+          # Argo Rollout old and new pods run side by side, so the old name keeps receiving during
+          # the cutover, and (b) whatever was parked there before it stays visible. A regex over
+          # both is what keeps this alert from going quiet by construction on the day the topic is
+          # renamed — the failure mode a rename introduces is an alert that can no longer fire, and
+          # nothing about it looks broken. Drop the old alternative once the topic is confirmed
+          # empty and the ACL is removed from kafka-account-mtls.yaml.
+          #
+          # The dots are NOT backslash-escaped on purpose. This is a YAML literal block scalar, so
+          # a backslash reaches PromQL verbatim, and PromQL's own double-quoted string then applies
+          # Go escape rules — `\.` is not a valid one there, and `\\.` would ask the regex for a
+          # literal backslash. An unescaped `.` matches itself; `=~` is fully anchored, so the only
+          # over-match would be a topic differing from these two in a separator character alone,
+          # and no such topic exists in kafka-dlq-topics.yaml.
           expr: |
-            increase(kafka_topic_partition_current_offset{topic="dead-letter-topic-party-events-in"}[1h]) > 0
+            increase(kafka_topic_partition_current_offset{topic=~"dead-letter-topic-party-events-in|openbank.dlq.account.party-events-in"}[1h]) > 0
           for: 5m
           labels:
             severity: critical
           annotations:
             summary: "Party events are being dead-lettered (account-service)"
-            description: "account-service dead-lettered at least one party event in the last hour — a well-formed event it could not project even after retries. Almost always a downstream dependency is down (sanctions-service, product-catalog, the accounts DB). Inspect `dead-letter-topic-party-events-in`; every record there is a customer action (likely a PARTY_CREATED → no account opened) awaiting replay once the dependency recovers."
+            description: "account-service dead-lettered at least one party event in the last hour — a well-formed event it could not project even after retries. Almost always a downstream dependency is down (sanctions-service, product-catalog, the accounts DB). Inspect `openbank.dlq.account.party-events-in` (and, for anything parked before #5752, `dead-letter-topic-party-events-in`); every record there is a customer action (likely a PARTY_CREATED → no account opened) awaiting replay once the dependency recovers."
         - alert: OnboardingAccountsNotFollowingParties
           # The disparity that names this incident: parties ARE being created but accounts are NOT
           # following. Silent when nothing is happening — no parties created means the left side is
@@ -64,6 +81,78 @@ spec:
           annotations:
             summary: "Parties are being created but no accounts are opening"
             description: "openbank_parties_created_total rose over the last hour while openbank_accounts_created_total did not — new customers are registering but the PARTY_CREATED → account.created pipeline is not producing accounts. This is the onboarding outage signature (party-service → Kafka → account-service). Check the party-events consumer lag, the DLQ (PartyEventDeadLettered), and account-service's dependencies (sanctions-service, product-catalog)."
+        - alert: KycPartiesWithoutCase
+          # Issue #5698. PartyEventConsumer caught every exception, logged it and returned — which
+          # ACKS the Kafka message. A few seconds of kyc-db downtime therefore destroyed the only
+          # copy of a PARTY_CREATED: no KYC case, party stuck in PENDING_KYC forever, accounts stuck
+          # in PENDING_ACTIVATION, no welcome bonus. 10 of 73 sandbox parties were in that state,
+          # the oldest since 2026-06-07, and it was found only because a human noticed an account
+          # did not work.
+          #
+          # Why the two rules above could not catch it. PartyEventDeadLettered needs a DLQ record,
+          # and the whole defect is that the event was acked and never dead-lettered.
+          # OnboardingAccountsNotFollowingParties compares hourly RATES, so it is silent about a
+          # party stranded weeks ago and silent whenever the pipeline is working now — a backlog of
+          # already-stranded parties is invisible to a rate comparison. This is a STOCK, not a rate:
+          # it stays lit until someone actually replays the missing cases.
+          #
+          # Grace period is enforced in the service, not here: openbank_kyc_orphaned_parties only
+          # counts parties older than openbank.kyc.orphan-detection.grace-period (default 1h), so a
+          # party whose PARTY_CREATED is legitimately still in flight is never counted and this does
+          # not fire on every new signup. `for: 30m` on top absorbs a single failed pass.
+          #
+          # Boot-safe by construction: the gauge is seeded to 0 and only ever set by a COMPLETED
+          # pass, so a freshly started pod reads 0 and cannot fire this — deliberately unlike the
+          # Instant.EPOCH seeding that made WorkflowLivenessStale fire 15 minutes after every
+          # deploy (#2239). The converse risk — the reconciliation silently not running, which also
+          # reads 0 — is covered by WorkflowLivenessStale on the kyc-orphaned-party-detection
+          # heartbeat, not by this rule.
+          expr: openbank_kyc_orphaned_parties > 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $value }} party(ies) have no KYC case at all"
+            description: "openbank_kyc_orphaned_parties is {{ $value }} — that many parties, all past the detection grace period, have NO kyc_cases row. Each is a customer permanently stuck: PENDING_KYC party, accounts stuck in PENDING_ACTIVATION, no welcome bonus, and nothing retries because the PARTY_CREATED event was acked and dropped (#5698). Not self-healing — the event is gone, so it needs a replay per party. The stranded party ids are logged by kyc-service under `[orphan-detection]`; openbank_kyc_orphaned_parties_oldest_age_seconds says how long the worst one has been waiting."
+        - alert: OnboardingProjectionWireFormatMismatch
+          # #4353/#4692/#6248. sca-service published DEVICE_ENROLLED without the discriminator in
+          # the payload body; onboarding's parser fell through to `?: return`, and 15 enrolments
+          # were consumed, acked and discarded with no lag, no error and no log. The alertable
+          # state is therefore the SUCCESS state, not an error rate: a topic delivering messages
+          # of which NONE are projected. `ProjectionOutcomeMetrics` was added for exactly this
+          # and this rule was written only as prose in its KDoc — so when #6248 asked why the
+          # alert had not fired, the answer was that it had never been created. A suggested rule
+          # in a comment is documentation, not a control.
+          expr: |
+            sum by (topic) (rate(openbank_onboarding_projection_events_total{outcome="UNRECOGNISED"}[1h])) > 0
+            and
+            sum by (topic) (rate(openbank_onboarding_projection_events_total{outcome="PROJECTED"}[1h])) == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            # continuous: the subject is inbound event traffic, not a periodic job, so the 1h
+            # window is bounded by the `and PROJECTED == 0` clause rather than by a period.
+            subject_period: continuous
+            summary: "onboarding-service recognises nothing on {{ $labels.topic }}"
+            description: "Every message onboarding-service consumed from `{{ $labels.topic }}` in the last hour parsed as JSON and matched no known event type, and none was projected. The producer and this consumer disagree about the wire format — typically a missing or renamed `eventType` discriminator in the payload body. The funnel is silently frozen for this topic: no lag, no errors, no log lines. Compare a real message on the topic against the parser in `OnboardingEventConsumer`."
+        - alert: OnboardingProjectionSeedingBackwards
+          # Events arriving for parties whose row does not exist yet. Since #6248 the row is
+          # seeded from the event rather than dropped, so this is no longer data loss — but a
+          # topic where seeding DOMINATES means party-events is chronically behind its siblings,
+          # and every such row carries no legal name or email until PARTY_CREATED lands.
+          # A steady trickle is normal across three independent consumer groups; the ratio is not.
+          expr: |
+            sum by (topic) (rate(openbank_onboarding_projection_events_total{outcome="SEEDED_UNKNOWN_PARTY"}[1h]))
+            >
+            sum by (topic) (rate(openbank_onboarding_projection_events_total{outcome="PROJECTED"}[1h]))
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            subject_period: continuous
+            summary: "onboarding-service is assembling records backwards on {{ $labels.topic }}"
+            description: "More events on `{{ $labels.topic }}` created a placeholder onboarding record than updated an existing one, for 30 minutes. party-events-in is running behind the KYC/SCA topics, so rows are being built from the wrong end and will show no legal name or email until PARTY_CREATED arrives. Check the `onboarding-service-party` consumer group's lag."
         - alert: KafkaConsumerGroupLagStuck
           # General event-bus safety net — the config comment on the Kafka Exporter calls
           # consumer-group lag "the single most useful event-bus health signal" and until now NO

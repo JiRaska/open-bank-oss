@@ -165,7 +165,7 @@ test('keeps campaign outcome and app attention as distinct, readable decision su
   await expect(outcome).toBeVisible()
   await expect(attention).toBeVisible()
   await expect(outcome).toContainText(/18/)
-  await expect(outcome).toContainText(/4/)
+  await expect(outcome.locator('[data-conversion="measured"] > strong')).toHaveText('4')
   await expect(attention).toContainText(/1,200/)
   await expect(attention).toContainText(/186/)
 

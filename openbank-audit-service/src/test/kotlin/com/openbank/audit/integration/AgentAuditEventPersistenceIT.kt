@@ -148,38 +148,95 @@ class AgentAuditEventPersistenceIT {
     }
 
     /**
-     * `aggregate_id` is the one envelope field the consumer does NOT read back, and this test
-     * pins the consequence rather than the intent.
+     * The fix for #6318, driven through the real CDI consumer and read back over a plain JDBC
+     * connection that shares no code with the write path.
      *
-     * `AuditConsumer` takes `aggregateType` from the producer verbatim but derives `aggregateId`
-     * through `inferAggregateId`, a fixed (field name -> aggregate type) chain of business ids
-     * (`accountId`, `partyId`, …). The agent envelope carries none of those — it spells the
-     * resource `aggregateId` — so the chain falls through to the `"unknown"` sentinel and the row
-     * is not joinable to the resource the agent acted on. Every other consumed producer happens to
-     * send a field the chain knows, which is why nothing has noticed.
+     * This test previously asserted the `"unknown"` sentinel — deliberately, to pin the defect
+     * rather than agree with it silently. `AuditConsumer` took `aggregateType` from the producer
+     * verbatim while deriving `aggregateId` through `inferAggregateId`'s fixed business-id chain,
+     * and the agent envelope spells its resource `aggregateId`, so the chain fell through and the
+     * row was not joinable to the resource the agent acted on. `aggregateId` is now read from the
+     * envelope first, with the chain as fallback.
      *
-     * Asserting the sentinel is deliberate: audit_entries is append-only, so a row written this
-     * way can never be corrected, and a green test that quietly agreed with `"unknown"` would let
-     * the gap persist unnamed. Fixing it is a consumer change with its own blast radius across all
-     * 21 subscribed topics — filed rather than smuggled in here.
+     * The flip of this assertion IS the regression test: revert the one production line and this
+     * goes red on the exact value.
      */
     @Test
-    fun `the envelope aggregateId does not reach the row - it degrades to the unknown sentinel`() {
+    fun `the envelope aggregateId reaches the row`() {
         val eventId = "3ab7c410-55de-4e0a-9b12-${System.nanoTime().toString().takeLast(12).padStart(12, '0')}"
         val actorId = "agent:aggid-${System.nanoTime()}"
+        val before = Instant.now().minusSeconds(1)
 
         onEventLoop {
             consumer.consume(Message.of(agentAuditEnvelope(eventId, actorId, Instant.parse("2026-08-21T12:34:56Z"))))
         }
 
         jdbc().use { c ->
-            c.prepareStatement("select aggregate_id from audit_entries where actor_id = ?").use { st ->
+            c.prepareStatement("select aggregate_id, recorded_at from audit_entries where actor_id = ?").use { st ->
                 st.setString(1, actorId)
                 st.executeQuery().use { rs ->
                     assertThat(rs.next()).isTrue()
                     assertThat(rs.getString("aggregate_id"))
-                        .describedAs("the envelope sends aggregateId=acc-42; inferAggregateId cannot see it")
-                        .isEqualTo("unknown")
+                        .describedAs("the envelope sends aggregateId=acc-42 and the row must carry it")
+                        .isEqualTo("acc-42")
+                    // Recency, never non-nullity: an Instant.EPOCH default passes isNotNull() and
+                    // every test agrees with it. This bounds the ingest stamp on both sides.
+                    assertThat(rs.getTimestamp("recorded_at").toInstant())
+                        .isBetween(before, Instant.now().plusSeconds(1))
+                }
+            }
+        }
+    }
+
+    /**
+     * The other half of the precedence decision: with no envelope `aggregateId`, the inference
+     * chain still runs. Without this, envelope-first could have been implemented as
+     * envelope-ONLY and every producer that has never sent the key — 20 of the 27 subscribed
+     * topics — would have silently regressed from a correct inferred id to the sentinel, with
+     * nothing red to say so.
+     */
+    @Test
+    fun `with no envelope aggregateId the inference chain still supplies one`() {
+        val eventId = "5c2e88a1-0d44-4f37-9e60-${System.nanoTime().toString().takeLast(12).padStart(12, '0')}"
+        val actorId = "agent:infer-${System.nanoTime()}"
+        val accountId = "acct-${System.nanoTime()}"
+        val payload = agentAuditEnvelope(eventId, actorId, Instant.parse("2026-08-21T12:34:56Z"))
+            .replace(""""aggregateId": "acc-42",""", """"accountId": "$accountId",""")
+
+        onEventLoop { consumer.consume(Message.of(payload)) }
+
+        jdbc().use { c ->
+            c.prepareStatement("select aggregate_id from audit_entries where actor_id = ?").use { st ->
+                st.setString(1, actorId)
+                st.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getString("aggregate_id")).isEqualTo(accountId)
+                }
+            }
+        }
+    }
+
+    /**
+     * The third outcome, which the `"unknown"` sentinel alone cannot distinguish from the second:
+     * neither the producer nor the chain names a resource. The row still lands — a degraded audit
+     * entry beats no audit entry — and `openbank.audit.aggregate.id.provenance{provenance=ABSENT}`
+     * is what makes this state countable rather than invisible.
+     */
+    @Test
+    fun `with neither an envelope aggregateId nor an inferable id the row keeps the sentinel`() {
+        val eventId = "7d3f19c2-6b81-4a95-8c04-${System.nanoTime().toString().takeLast(12).padStart(12, '0')}"
+        val actorId = "agent:absent-${System.nanoTime()}"
+        val payload = agentAuditEnvelope(eventId, actorId, Instant.parse("2026-08-21T12:34:56Z"))
+            .replace(""""aggregateId": "acc-42",""", "")
+
+        onEventLoop { consumer.consume(Message.of(payload)) }
+
+        jdbc().use { c ->
+            c.prepareStatement("select aggregate_id from audit_entries where actor_id = ?").use { st ->
+                st.setString(1, actorId)
+                st.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getString("aggregate_id")).isEqualTo("unknown")
                 }
             }
         }

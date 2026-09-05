@@ -27,6 +27,7 @@ import com.openbank.account.application.port.out.AccountSanctionsScreeningPort
 import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.BalanceView
 import com.openbank.account.application.port.out.CurrencyPocketRepository
+import com.openbank.account.application.port.out.NotificationRequestPort
 import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.application.port.out.ProductLookupResult
 import com.openbank.account.domain.event.AccountClosedEvent
@@ -47,6 +48,7 @@ import com.openbank.libs.observability.DomainMetrics
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.PersistenceException
+import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -64,6 +66,11 @@ class AccountService(
     private val productCatalog: ProductCatalogPort,
     private val metrics: DomainMetrics,
     private val clock: Clock,
+    /**
+     * Customer-facing lifecycle notifications (#8432). NO Kotlin default value: a default on a
+     * CDI bean's constructor parameter makes Arc fail to resolve the bean, silently.
+     */
+    private val notificationRequestPort: NotificationRequestPort,
 ) : AccountUseCase {
 
     @Suppress("LongMethod") // issue #668: the product-catalog validation block added a few lines past threshold
@@ -173,6 +180,13 @@ class AccountService(
         )
 
         metrics.accountCreated(saved.accountType.name, saved.currency.code)
+        // Only an account that can already move money. ADR-0267 opens onboarding accounts
+        // PENDING_ACTIVATION and activateAccount announces those once the KYC+AML gate clears.
+        if (saved.status == AccountStatus.ACTIVE) {
+            notifyCustomer("account opened") {
+                notificationRequestPort.notifyAccountOpened(saved.partyId, saved.accountNumber.value)
+            }
+        }
         return saved
     }
 
@@ -218,6 +232,9 @@ class AccountService(
         )
 
         metrics.accountClosed(account.accountType.name, closeReasonTag(command.reason))
+        notifyCustomer("account closed") {
+            notificationRequestPort.notifyAccountClosed(updated.partyId, updated.accountNumber.value)
+        }
         return updated
     }
 
@@ -242,6 +259,11 @@ class AccountService(
             ),
         )
 
+        // Idempotent above (an already-ACTIVE account returns early), so this fires once —
+        // and it is the moment the customer can actually use the account.
+        notifyCustomer("account activated") {
+            notificationRequestPort.notifyAccountOpened(updated.partyId, updated.accountNumber.value)
+        }
         return updated
     }
 
@@ -265,6 +287,13 @@ class AccountService(
             ),
         )
 
+        notifyCustomer("account frozen") {
+            notificationRequestPort.notifyAccountFrozen(
+                updated.partyId,
+                updated.accountNumber.value,
+                command.reason,
+            )
+        }
         return updated
     }
 
@@ -289,6 +318,22 @@ class AccountService(
         )
 
         return updated
+    }
+
+    /**
+     * Emit a customer notification after the state change is persisted, never instead of it.
+     *
+     * **The failure is swallowed on purpose.** Opening, closing, freezing and activating an account
+     * are money-path state changes with events and audit behind them; a broker hiccup must not roll
+     * one back, nor turn a completed operation into a 500 that an operator or a saga retries. So a
+     * customer may, rarely, not be told about something that did happen — the honest direction to
+     * fail. Logged at WARN rather than dropped, because "the customer was not told" is an
+     * operational fact someone can act on.
+     */
+    private suspend fun notifyCustomer(what: String, emit: suspend () -> Unit) {
+        runCatching { emit() }.onFailure { failure ->
+            LOG.warnf(failure, "%s recorded but the customer notification could not be published (#8432)", what)
+        }
     }
 
     override suspend fun getAccount(query: GetAccountQuery): Account = requireAccount(query.accountId)
@@ -469,6 +514,8 @@ class AccountService(
     }
 
     companion object {
+        private val LOG: Logger = Logger.getLogger(AccountService::class.java)
+
         /** Matches the goal_name VARCHAR(120) column (ADR-0153, V13) — validated app-side too. */
         const val GOAL_NAME_MAX_LENGTH = 120
 
@@ -538,7 +585,10 @@ class AccountOpeningBlockedByScreeningException(partyId: UUID, matchedName: Stri
  * that fails open (see [ProductCatalogPort]). Extends [IllegalStateException] deliberately (not
  * a bare [RuntimeException] like [AccountOpeningBlockedByScreeningException]) so it resolves to
  * the libs-runtime `IllegalStateExceptionMapper` (422 BUSINESS_RULE_VIOLATION) instead of falling
- * through to the generic 500 mapper.
+ * through to the generic 500 mapper. The screening exception above must NEVER copy this pattern
+ * (#8512): its message carries the matched sanctions name, and the IllegalStateException mapper
+ * echoes `message` on the wire — a free sanctions-list oracle. It has a dedicated mapper in
+ * ExceptionMappers.kt that answers 422 with a fixed body and keeps the detail in a WARN log.
  */
 class ProductNotEligibleException(productId: UUID, reason: String) :
     IllegalStateException("Cannot open account against product $productId: $reason")

@@ -1,0 +1,166 @@
+# Audit attribution provenance (issue #3994, ADR-0133 neighbourhood).
+#
+# audit-service resolves the producing service of every consumed record in three tiers
+# (AuditConsumer.resolveSourceService): the producer's own `sourceService` field
+# (AttributionSource.EVENT), the Kafka topic via the verified TopicAttribution table
+# (TOPIC), or neither (ABSENT -> the literal "unknown" sentinel). Every non-EVENT
+# resolution increments
+#
+#     openbank_audit_attribution_missing_total{source_service, provenance}
+#
+# and every persisted row increments openbank_audit_actor_missing_total{...} regardless
+# of outcome, which is the only denominator either family has.
+#
+# WHY THIS IS AN ALERT AND NOT ONLY A DASHBOARD. `audit_entries` is append-only at the
+# database (a rewrite rule turns UPDATE into a no-op that still reports success) and
+# `source_service` is chain-hashed into `record_hash`. A row whose attribution was
+# inferred can therefore never be corrected — only the forward-looking signal exists.
+# Until this file, neither counter appeared in any PrometheusRule in the repository.
+#
+# WHY NOT "ANY TOPIC-DERIVED ROW". Several producers are attributed by topic today by
+# design and by a decision recorded in TopicAttribution's own comments; an alert on the
+# TOPIC provenance would be permanently firing, and noise on the control that exists to
+# make this gap visible is the thing that hides the gap. The three rules below alert on
+# what is genuinely actionable: an UNMAPPED producer (ABSENT), a producer newly joining
+# the derived set (a regression, or a topic subscribed without a table entry), and the
+# signal itself going away.
+#
+# COLD POD / COLD PROMETHEUS. Stated explicitly, because this repo has shipped an alert
+# over an existing metric that fired 15 minutes after every deploy:
+#   - rule 1 reads increase() over a counter that does not exist until the first ABSENT
+#     row. No series -> empty vector -> no firing. There is no seeded value to misread.
+#   - rule 2 compares the current derived set against the same set 6h ago and is
+#     explicitly gated on that older sample existing, so within the first ~7h of a fresh
+#     Prometheus it evaluates to nothing rather than declaring every service "new".
+#   - rule 3 is the deliberate absent() arm: a legitimately-zero counter and an unscraped
+#     one are otherwise identical, so silence is checked against the denominator family.
+# Longest lookback here is [1h] offset 6h = 7h, inside the 12h retention (no LTS).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-audit-attribution-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.audit.attribution
+      interval: 5m
+      rules:
+        # Recording rule: how many distinct producers are currently attributed by topic
+        # rather than by their own declaration. This is the number the gap is measured
+        # by, and the one a dashboard should trend; it is not alerted on directly,
+        # because its healthy value today is a positive constant, not zero.
+        - record: openbank:audit_attribution_topic_derived_services:count1h
+          expr: |
+            count(
+              sum by (source_service) (
+                increase(openbank_audit_attribution_missing_total{provenance="TOPIC"}[1h])
+              ) > 0
+            )
+
+        # 1. A record was stored with NO producer attribution at all -- neither declared
+        # by the producer nor derivable from the topic, so `source_service` is the
+        # "unknown" sentinel, hashed into record_hash, permanently.
+        #
+        # Unlike TOPIC this has no expected steady state: TopicAttribution's coverage is
+        # derived from the subscribed-topic list by AuditTopicAttributionTest, so an
+        # ABSENT row means a record reached the consumer from a topic that test does not
+        # know about -- a replay, a hand-constructed record, or a subscription added
+        # outside the config the test reads. Any of those is worth a human.
+        - alert: AuditAttributionAbsent
+          expr: |
+            sum(increase(openbank_audit_attribution_missing_total{provenance="ABSENT"}[1h])) > 0
+          for: 15m
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            # Driven by Kafka consumption, not by a scheduler: there is no period to
+            # size the window against.
+            subject_period: continuous
+            summary: "Audit rows stored with no producer attribution"
+            description: >-
+              audit-service resolved AttributionSource.ABSENT for at least one record in the
+              last hour, so those rows carry the "unknown" source_service sentinel. That value
+              is chain-hashed into record_hash and audit_entries is append-only, so it cannot
+              be corrected afterwards -- only the producer or the TopicAttribution table can
+              stop the next one. Find the topic in the audit-service pod log, then add the
+              verified producer to TopicAttribution (never a value derived from the topic
+              name: eight of the mapped topics do not follow the convention).
+
+        # 2. A producer that was NOT being attributed by topic six hours ago now is.
+        #
+        # This is the regression shape: a producer that used to declare `sourceService`
+        # stops (a payload refactor, a field renamed), or a newly subscribed topic starts
+        # resolving through the table. The steady-state derived set is a positive constant,
+        # so the actionable event is a CHANGE to it, not its size.
+        #
+        # The `and on()` clause is the guard, and it is load-bearing rather than
+        # decorative: without it a Prometheus with less than 7h of data has an empty
+        # offset side, `unless` subtracts nothing, and every derived producer is reported
+        # as new -- firing on the whole set after every Prometheus restart. With it, the
+        # rule is deliberately silent for the first ~7h instead. That silence is the
+        # honest trade; rule 3 is what keeps silence from being unaccountable.
+        - alert: AuditAttributionDerivedProducerNew
+          expr: |
+            (
+              sum by (source_service) (
+                increase(openbank_audit_attribution_missing_total{provenance="TOPIC"}[1h])
+              ) > 0
+              unless
+              sum by (source_service) (
+                increase(openbank_audit_attribution_missing_total{provenance="TOPIC"}[1h] offset 6h)
+              ) > 0
+            )
+            and on() (
+              count(
+                sum by (source_service) (
+                  increase(openbank_audit_attribution_missing_total{provenance="TOPIC"}[1h] offset 6h)
+                ) > 0
+              ) > 0
+            )
+          for: 30m
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            # Driven by Kafka consumption, not by a scheduler: there is no period to
+            # size the window against.
+            subject_period: continuous
+            summary: "{{ $labels.source_service }} newly attributed by topic, not by declaration"
+            description: >-
+              Audit records from {{ $labels.source_service }} are being attributed from the Kafka
+              topic rather than from a `sourceService` field the producer sends, and were not six
+              hours ago. Either that producer stopped declaring the field, or a topic was newly
+              subscribed. The attribution is still correct -- TopicAttribution's values are
+              verified against the module that declares the outgoing channel -- but it is derived,
+              and every row written while this is true records that fact irreversibly.
+
+        # 3. The success state, which is the one that is always missing.
+        #
+        # Zero ABSENT rows and a stable derived set is what healthy looks like, and it is
+        # byte-for-byte what "audit-service is not being scraped" looks like through rules
+        # 1 and 2, because a threshold over a missing series never fires. The denominator
+        # is openbank_audit_actor_missing_total: AuditConsumer increments it for EVERY
+        # persisted row including the fully-declared ones (it counts ActorProvenance.DECLARED
+        # too, precisely so a ratio has a denominator), so its absence means no audit rows
+        # are being persisted or nothing is scraping the pod -- not that nothing is wrong.
+        #
+        # for: 2h matches WorkflowLivenessHeartbeatAbsent: long enough to absorb a redeploy
+        # and a genuinely quiet stretch, short enough that an unscraped audit trail does not
+        # survive a working day.
+        - alert: AuditAttributionSignalAbsent
+          expr: absent(openbank_audit_actor_missing_total)
+          for: 2h
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "No audit attribution telemetry for 2h -- the quiet rules are unverified"
+            description: >-
+              openbank_audit_actor_missing_total is absent fleet-wide. That series is emitted for
+              every row AuditConsumer persists, so either audit-service is persisting nothing or
+              its pod is not being scraped. Until this resolves, AuditAttributionAbsent and
+              AuditAttributionDerivedProducerNew being quiet says nothing at all -- check the
+              Prometheus target for the audit namespace before reading them as healthy.

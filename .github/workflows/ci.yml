@@ -114,7 +114,7 @@ jobs:
       # `pretest` still regenerates governance.json for the suite below.
 
       - name: Test (unit + integration)
-        run: npm run test
+        run: npm run test -- --reporter=default --reporter=junit --outputFile.junit=build/test-results/test/vitest.xml
         # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
         # health-route integration tests all run here via Vitest.
 
@@ -137,6 +137,7 @@ jobs:
         continue-on-error: true
 
       - name: E2E tests (Playwright)
+        id: browser_e2e
         run: npm run test:e2e
         # ADR-0076 Phase 2: Playwright E2E for /services docs-coverage page.
         # Mocks all BFF endpoints via page.route() — no live services required.
@@ -151,12 +152,44 @@ jobs:
           NEXTAUTH_URL: "http://localhost:3001"
           NEXTAUTH_SECRET: "ci-e2e-secret"
           OPENBANK_REPO_ROOT: "${{ github.workspace }}"
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
+
+      - name: Build Admin UI Test Intelligence envelope
+        if: always()
+        continue-on-error: true
+        run: |
+          DIAGNOSTIC_ARGS=()
+          if [[ "${{ steps.browser_e2e.outcome }}" == "failure" ]]; then
+            DIAGNOSTIC_ARGS+=(--browser-report-dir playwright-report)
+          fi
+          python3 ../.github/scripts/collect-test-run-evidence.py \
+            --service . --component openbank-admin-ui --out build/test-intelligence/run.json \
+            "${DIAGNOSTIC_ARGS[@]}"
+
+      - name: Retain Admin UI test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-run-openbank-admin-ui-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-admin-ui/build/test-intelligence/run.json
+          retention-days: 30
+
+      - name: Publish latest Admin UI test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-openbank-admin-ui
+          path: |
+            openbank-admin-ui/build/test-intelligence/run.json
+            openbank-admin-ui/build/test-results/**/*.xml
+          retention-days: 14
+          overwrite: true
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
+        if: steps.browser_e2e.outcome == 'failure'
         with:
-          name: playwright-report
+          name: playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}
           path: openbank-admin-ui/playwright-report/
           retention-days: 7
 
@@ -243,7 +276,7 @@ jobs:
   # refuses a selection that matches no gates rather than reporting a green about no work.
   # ---------------------------------------------------------------------------
   gates:
-    name: gates (${{ matrix.group }})
+    name: gates (${{ matrix.slug }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -251,7 +284,32 @@ jobs:
       # gets a one-gate-at-a-time debugging loop instead of the whole picture in one run.
       fail-fast: false
       matrix:
-        group: [lint, gitops, supplychain, registry, kotlin, api, data, security]
+        # THREE buckets, not eight. Each entry is a SPACE-SEPARATED set of manifest groups;
+        # `--group` is repeatable, so the taxonomy in gates.yaml is untouched and
+        # `run-gates.py --group lint` still works locally exactly as before.
+        #
+        # WHY (#6252, measured over 6 PR runs): 93% of a CI job's elapsed time is runner
+        # QUEUE, not work. The eight shards are created in the same instant and admitted
+        # over a ~7 min stagger, so they spend 11.3 min wall-clock doing 5.6 min of work
+        # while holding eight hosted-runner slots. Sharding was the right call when
+        # #4340-#4346 measured it (62s -> 26s of CPU on the slowest shard); the binding
+        # constraint has since moved from CPU to slots, and eight-way parallelism the pool
+        # cannot supply now costs more than it buys — including 8x14s of duplicated
+        # checkout/setup-node/PyYAML per run.
+        #
+        # Balanced on measured gate work, not gate count: gitops alone is ~1.4 min, more
+        # than the other seven together in some runs, so it anchors its own bucket.
+        # `include:` rather than a bare list because each bucket needs TWO values: the set of
+        # manifest groups to pass to --group, and a filesystem/artifact-safe slug. There is no
+        # string-replace function in GitHub expressions (actionlint rejects `replace(...)`), so
+        # the slug is written out rather than derived.
+        include:
+          - slug: gitops-api
+            groups: gitops api
+          - slug: lint-supplychain-security
+            groups: lint supplychain security
+          - slug: registry-kotlin-data
+            groups: registry kotlin data
     env:
       # ${{ }} expressions cannot be expanded outside the workflow, so the two gate inputs
       # that need them are set here rather than in the manifest.
@@ -355,11 +413,12 @@ jobs:
             || python3 -c "import yaml" 2>/dev/null \
             || { echo "::error::pyyaml unavailable — add it to the runner base image"; exit 1; }
 
-      # yamllint is not on the hosted image (shellcheck is), and only the `lint` shard
-      # needs it — installing it in all eight would pay an apt-get eight times over.
-      # ADR-0040: direct CLI invocation, not a Docker container action.
+      # yamllint is not on the hosted image (shellcheck is), and only the bucket CONTAINING
+      # the `lint` group needs it — installing it in every bucket would pay an apt-get three
+      # times over. `contains(...)` on the space-separated set, since the bucket is no longer
+      # a single group name. ADR-0040: direct CLI invocation, not a Docker container action.
       - name: Install lint tools
-        if: matrix.group == 'lint'
+        if: contains(matrix.groups, 'lint')
         run: |
           command -v yamllint >/dev/null 2>&1 || {
             sudo apt-get update -q
@@ -389,8 +448,14 @@ jobs:
 
       - name: Run gates
         run: |
-          python3 .github/scripts/run-gates.py --group "${{ matrix.group }}" \
-            --json "${RUNNER_TEMP}/gate-results-${{ matrix.group }}.json"
+          # matrix.group is a space-separated SET of manifest groups; --group is repeatable.
+          # Unquoted on purpose so the shell word-splits it — the one place in this file where
+          # that is wanted rather than a bug.
+          FLAGS=""
+          for g in ${{ matrix.groups }}; do FLAGS="$FLAGS --group $g"; done
+          # shellcheck disable=SC2086  # deliberate word-splitting of the flag list built above
+          python3 .github/scripts/run-gates.py $FLAGS \
+            --json "${RUNNER_TEMP}/gate-results-${{ matrix.slug }}.json"
 
       # ADR-0255. A structured record per gate, not another log for something to re-parse —
       # CLAUDE.md documents at length why scraping a job's own printed log is fragile (the log
@@ -403,8 +468,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: gate-results-${{ matrix.group }}
-          path: ${{ runner.temp }}/gate-results-${{ matrix.group }}.json
+          # matrix.slug, not matrix.groups: a space is not valid in an artifact name, and
+          # this must match the --json path above exactly or the upload finds no file.
+          name: gate-results-${{ matrix.slug }}
+          path: ${{ runner.temp }}/gate-results-${{ matrix.slug }}.json
           if-no-files-found: warn
           retention-days: 90
 

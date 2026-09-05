@@ -28,7 +28,7 @@ short() { git rev-parse --short=8 "$1"; }
 
 # --- history -----------------------------------------------------------------------------
 # c0: fresh source for four services.
-for s in current-svc stale-svc placeholder-svc testonly-svc; do
+for s in current-svc stale-svc placeholder-svc testonly-svc release-svc; do
   mkdir -p "openbank-${s}/src/main/kotlin" "openbank-${s}/src/test/kotlin"
   echo "v1" > "openbank-${s}/src/main/kotlin/App.kt"
 done
@@ -42,6 +42,12 @@ commit "c1: change stale-svc main"
 # c2: bump ONLY testonly-svc's TEST source — must NOT count as build-relevant.
 echo "v2" > openbank-testonly-svc/src/test/kotlin/App.kt
 commit "c2: change testonly-svc test only"
+
+# c3: bump ONLY release-svc's version.txt — the release-please shape. The push trigger
+# rebuilds+deploys on it, so the reconcile probe must see it too (#8127: a release-triggered
+# deploy blocked at can-i-deploy was invisible to reconcile forever without it).
+echo "0.2.0" > openbank-release-svc/version.txt
+commit "c3: release-please bump of release-svc version.txt"
 TIP="$(short HEAD)"
 
 # --- gitops manifest ---------------------------------------------------------------------
@@ -49,18 +55,20 @@ TIP="$(short HEAD)"
 # stale-svc    : pinned at c0 (before c1)     -> main changed since -> LAGGING
 # placeholder  : pinned at a non-commit tag   -> never deployed     -> LAGGING
 # testonly-svc : pinned at c0, only test moved -> not build-relevant -> NOT lagging
+# release-svc  : pinned at c0, only version.txt moved -> release must deploy -> LAGGING
 # foreign-svc  : stale pin BUT built by another pipeline (not in allowlist) -> NOT lagging
 cat > gitops/deploy.yaml <<EOF
 image: repo/openbank-current-svc:sandbox-${TIP}
 image: repo/openbank-stale-svc:sandbox-${C0}
 image: repo/openbank-placeholder-svc:sandbox-pending
 image: repo/openbank-testonly-svc:sandbox-${C0}
+image: repo/openbank-release-svc:sandbox-${C0}
 image: repo/openbank-foreign-svc:sandbox-pending
 EOF
 
 # --- run + assert (no allowlist: every manifest service is a candidate) -------------------
 GOT="$(RECONCILE_SERVICES='' bash "$PROBE" "$WORK/gitops")"
-WANT='["openbank-foreign-svc","openbank-placeholder-svc","openbank-stale-svc"]'
+WANT='["openbank-foreign-svc","openbank-placeholder-svc","openbank-release-svc","openbank-stale-svc"]'
 
 # Normalise ordering (probe already sorts via jq unique, but compare defensively).
 GOT_N="$(echo "$GOT"  | jq -S .)"
@@ -87,12 +95,12 @@ fi
 
 # Third assertion: with every pin at TIP, nothing lags (loop-stability guarantee).
 cat > gitops/deploy.yaml <<EOF
-image: repo/openbank-current-svc:sandbox-${TIP}
+image: repo/openbank-current-svc:sandbox-${TIP}-run32826611610
 image: repo/openbank-stale-svc:sandbox-${TIP}
 EOF
 GOT2="$(bash "$PROBE" "$WORK/gitops")"
 if [ "$(echo "$GOT2" | jq -c .)" != "[]" ]; then
-  echo "FAIL: services pinned at tip must not lag (would loop). got: $GOT2"
+  echo "FAIL: current pins, including a manual-refresh tag, must not lag (would loop). got: $GOT2"
   exit 1
 fi
 

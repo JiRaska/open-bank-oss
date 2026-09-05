@@ -46,10 +46,41 @@ would make "delete the sentence" the cheapest fix, which is the wrong incentive.
 census over the 23 `money_path_services` models found roughly two thirds of all mitigation
 claims in that state. Reducing it is editorial work, not a gate.
 
+WIDENED 2026-09-03 — THE GATE WAS GREEN ABOUT DEFECTS INSIDE THE FILES IT READ
+------------------------------------------------------------------------------
+A sweep found 19 false claims; four of them sat in files this gate opens, and it exited 0.
+Three independent causes, each measured before it was changed:
+
+  1. REGION. The two parsers read STRIDE mitigation cells and nothing else. A claim in a table was
+     checked; the same claim two lines below it in a sentence was not. All eight of the sweep's
+     in-scope findings lived in §3 Authn/Authz prose, §5 residual-risk bullets, a `Rollback:` line
+     or a §7 change-log entry. `parse_prose` now reads the whole document.
+  2. SUBJECTS. The subject set was `money_path_services`, so 22 of the 45 models in
+     `docs/threat-models/` were never opened — and the unread half held four of the findings.
+     Subjects are now derived from the DIRECTORY. Money-path membership is reported, not gating.
+  3. RESOLUTION. `resolve()` was a substring search over every line, comments included. So
+     `BalanceResourceSecurityTest` "existed" because `BalanceResource.kt`'s KDoc repeated the
+     document's own false claim, and `SecurityContractTest` "existed" as a suffix of nine
+     per-service classes. Resolution is now word-boundary, over non-comment lines only.
+
+WHAT WAS DELIBERATELY LEFT ALONE
+--------------------------------
+  * REGULATORY APTNESS. Whether a control satisfies PSD2 Art. 5(3) is a legal question, not a tree
+    lookup. A gate pretending to check it is worse than one that does not.
+  * ADEQUACY. Whether a control that exists does what the sentence says. Unchanged from above.
+  * mTLS-ON-A-LINK. 28 of the 45 models credit `mTLS`, and no gitops hop uses TLS at all (243
+    plaintext V9.1 entries in `.github/asvs-l3-baseline.txt`; the mesh is unshipped). A rule here
+    would fire on 62% of the corpus at once — a census, not a check, and one that would be
+    baselined into meaninglessness on contact. The claim is real and belongs to the ASVS gate that
+    already tracks the plaintext hops, not to this one.
+  * UNCITED PROSE. Still counted, never failed. Widening the REGION cannot change this: a sentence
+    naming no mechanism produces no citation, so the 2068 unfalsifiable claims stay a printed
+    number. Failing them would make "delete the sentence" the cheapest fix.
+
 SCOPE IS DERIVED, NEVER HAND-KEPT
 ---------------------------------
-Subjects = `rules.yaml: money_path_services` x `docs/threat-models/<service>.md`, and the claims
-inside are enumerated by TWO independent parsers whose UNION is checked — a table parser keyed
+Subjects = every `docs/threat-models/*.md`, and the claims
+inside are enumerated by THREE independent parsers whose UNION is checked — a table parser keyed
 on a Mitigation/Control column header, and a section parser that reads STRIDE-titled sections
 with no header knowledge at all. They disagree by design: the fleet's models are not one format
 (2026-08-20: 296 claims by the table parser, 315 by the section parser, 390 in the union, and
@@ -79,26 +110,106 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 # Empty is the honest state: every finding this gate reports today is a real defect being
 # fixed in the same PR, not baselined debt.
 ALLOWED_UNRESOLVED: dict[str, str] = {
-    # openbank-settlement-service's threat model is being rewritten by PR #6048, which is the
-    # worked example this gate was built from. Editing the same rows here would create a
-    # semantic conflict with an open money-path PR, so they are excused by NAME and by ROW —
-    # never by service, which would blind the gate to the file entirely.
+    # Widening the gate on 2026-09-03 (subject set 23 -> 45 models; claim regions STRIDE-only ->
+    # whole document; resolution substring -> word-boundary on non-comment lines) surfaced 46
+    # citations that name something this tree does not contain. Every one was checked by hand
+    # against the tree before it was written down, and each carries the reason a reviewer accepted.
     #
-    # Each entry dies on its own: once #6048 lands, the claim it excuses is gone and the
-    # stale-exclusion check fails until the line is deleted. That is the point — an exclusion
-    # that outlives its subject is the failure mode this list is otherwise prone to.
-    "openbank-settlement-service|T1|workflowRunId":
-        "idempotency-key defect from #6037; the key is rewritten by PR #6048",
-    "openbank-settlement-service|T1|activityId":
-        "idempotency-key defect from #6037; the key is rewritten by PR #6048",
-    # (An E1 entry for the compensation stub was here and was DELETED, by this gate's own
-    #  stale-exclusion rule, the moment the E1 row was corrected: correcting the row disclaimed
-    #  the citation, the exclusion stopped matching anything, and the run went red until the
-    #  line went away. That is the check failing in the direction people forget to build.)
-    # NOT excused, and deliberately left failing until it is answered: S1's
-    # `OpaActivityInterceptor`. It is a different defect from #6037, outside #6048's scope, and
-    # filed as #6055 — a control that was never built, documented as present and signed off as
-    # Closed. It is corrected in the same PR that adds this gate.
+    # Nothing here is silenced by SERVICE or by FILE — always by (service, section, symbol), so a
+    # model stays fully in scope for every other claim it makes.
+    #
+    # THE LIST FAILS IN BOTH DIRECTIONS. An entry whose claim no longer exists matches nothing, and
+    # the run goes red until the line is deleted. That is not decoration: the two pre-existing
+    # settlement entries were keyed `T1`, and widening the parser moved those same claims into the
+    # sections they are actually written in — the old keys went stale immediately and had to be
+    # rewritten, which is the check doing its job on its own author.
+    #
+    # Eight entries name an OPEN PR. Those are the sweep's own corrections; they retire themselves
+    # the day each PR lands, and re-editing the same rows here would conflict with a live branch.
+    'onboarding-service|5. AML / sanctions override — special controls|kyc.check.override':
+        'an ADR-0068 planned control; absent from `rules.yaml` and from every resource',
+    'onboarding-service|5. AML / sanctions override — special controls|confirmedBy':
+        'an ADR-0068 planned field; present in no entity, DTO or migration',
+    'openbank-account-service|6. Change log|openAccountIdempotencyKey':
+        'no such identifier anywhere in the tree',
+    'openbank-clearing-service|3. Authn/Authz|ClearingResourceSecurityTest':
+        'open PR #8409 — the guard is real and is `ClearingSecurityContractTest`',
+    'openbank-consent-service|6. Change log|ConsentEventPublisher':
+        'named in ADR-0126 and the ktlint baseline only; no such class in Kotlin',
+    'openbank-consent-service|6. Change log|KafkaConsentEventPublisher':
+        'named in ADR-0126 and the ktlint baseline only; no such class in Kotlin',
+    'openbank-domestic-payment|6. Change log|applyFraudGate':
+        'retired by #4221 layer 3; `DomesticPaymentService.kt:125` says so in a comment',
+    'openbank-domestic-payment|6. Change log|attemptSettlement':
+        'retired by #4221 layer 3; `DomesticPaymentService.kt:125` says so in a comment',
+    'openbank-domestic-payment|6. Change log|fraudEnforcementEnabled':
+        'retired by #4221 layer 3; `FraudEnforcementFlagRetiredTest` locks its absence',
+    'openbank-domestic-payment|6. Change log|openbank.domestic.fraud.enforcement-enabled':
+        'removed by #4221; `application.yaml:174` records the removal in a comment',
+    'openbank-fraud-service|6. Change log|fraudServiceUrl':
+        'occurs only inside a comment in `fraud_rest_ext.rego`; not a policy input',
+    'openbank-ledger-service|8. Change log|ledgerServiceUrl':
+        'occurs only inside a comment in `ledger_rest_ext.rego`; not a policy input',
+    'openbank-lending-service|3. Controls in place (this slice)|lending.origination.worker.enabled':
+        'renamed to the `openbank.` convention; `rules.yaml:1544` records the rename',
+    'openbank-mcp-service|0. Phase posture — read this before anything below|HTTPRoute':
+        'no HTTPRoute manifest exists in this tree; ingress is expressed otherwise',
+    'openbank-mcp-service|8. Change log|StubProposalPort':
+        'open PR #8419 — replaced by `UnwiredProposalPort`; only past-tense KDoc remains',
+    'openbank-sanctions-service|T3|deactivateByListType':
+        'previous repository contract, replaced by `upsertAll`; only the port KDoc names it',
+    'openbank-sanctions-service|3. STRIDE analysis|deactivateByListType':
+        'previous repository contract, replaced by `upsertAll`; only the port KDoc names it',
+    'openbank-security-scanner|1. Scope & purpose|openbank.security.scan.event':
+        'topic named in CHANGELOGs only; no producer, consumer, contract or KafkaTopic CR',
+    'openbank-sepa-instant|6. Change log|SctInstOutboxBacklogGaugeTest':
+        'test for the outbox dropped by `V4__drop_sct_inst_outbox.sql` (#5126); no such class',
+    'openbank-sepa-instant|6. Change log|KafkaSctInstOutboxEventPublisher':
+        'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
+    'openbank-sepa-instant|6. Change log|SctInstOutboxDispatcher':
+        'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
+    'openbank-sepa-instant|6. Change log|SctInstOutboxPort':
+        'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
+    'openbank-sepa-payment|**T**ampering|XMLInputFactory':
+        'names the StAX API; `Pacs004Reader` IS XXE-hardened, via `DocumentBuilderFactory` (`disallow-doctype-decl`, external entities off). Control real, API name wrong',
+    'openbank-sepa-payment|5a. Return path (pacs.004) — STRIDE supplement|XMLInputFactory':
+        'names the StAX API; `Pacs004Reader` IS XXE-hardened, via `DocumentBuilderFactory` (`disallow-doctype-decl`, external entities off). Control real, API name wrong',
+    'openbank-sepa-payment|6. Change log|settleProcessingPayment':
+        'no such function in the tree',
+    'openbank-settlement-service|T1|workflowRunId':
+        'settlement idempotency-key defect #6037, reported from the T1 table row (the original entry)',
+    'openbank-settlement-service|T1|activityId':
+        'settlement idempotency-key defect #6037, reported from the T1 table row (the original entry)',
+    'openbank-settlement-service|T — Tampering|activityId':
+        'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
+    'openbank-settlement-service|T — Tampering|workflowRunId':
+        'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
+    'openbank-settlement-service|Residual risks|settlement_rest_ext.rego':
+        "file does not exist; settlement's ext policy is embedded in its bundle generator",
+    'openbank-settlement-service|Residual risks|OpaActivityInterceptor':
+        '#6055 — a control that was never built; deliberately left failing by the gate that found it',
+    'openbank-settlement-service|Residual risks|settlement_activity.rego':
+        "file does not exist; settlement's ext policy is embedded in its bundle generator",
+    'openbank-settlement-service|Residual risks|legacySettle':
+        'settlement #6037 family; no such function in the tree',
+    'openbank-settlement-service|Change log|activityId':
+        'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
+    'openbank-settlement-service|Change log|workflowRunId':
+        'settlement idempotency-key defect #6037; the widened parsers report the same claim from the section and the change log as well as the T1 row',
+    'openbank-swift-service|6. Change log|swift_rest_ext.rego':
+        "file does not exist; swift's ext policy is embedded in its bundle generator",
+    'openbank-transaction-service|5. Residual risks / assumptions|PaymentSagaOrchestrator':
+        'retired for Temporal (ADR-0120 Phase 5); survives only in KDoc that says it was removed',
+    'openbank-transaction-service|6. Change log|PaymentSagaOrchestrator':
+        'retired for Temporal (ADR-0120 Phase 5); survives only in KDoc that says it was removed',
+    'openbank-transaction-service|6. Change log|TransactionResourceMergeSweepTest':
+        'no class of that name; the merge-sweep tests are named otherwise',
+    'qrlesspay|8. Rollout gates (what must be true before code ships)|ProximityBeacon.android.kt':
+        'a file in the separate `openbank-app` repository, not in this tree',
+    'rum-ingest-gateway|**I1**|beforeSend':
+        'a RUM SDK callback living in admin-ui / the mobile app, both outside the backend corpus by design',
+    'rum-ingest-gateway|3. STRIDE Analysis|beforeSend':
+        'a RUM SDK callback living in admin-ui / the mobile app, both outside the backend corpus by design',
 }
 
 # ---------------------------------------------------------------- parsers
@@ -169,16 +280,91 @@ def parse_sections(text: str) -> list[tuple[str, str, str]]:
     return rows
 
 
-def claims(text: str) -> list[tuple[str, str, str]]:
-    """UNION of both parsers, deduplicated on (id, mitigation)."""
-    seen: set[tuple[str, str]] = set()
-    out: list[tuple[str, str, str]] = []
-    for rid, thr, mitig in parse_table(text) + parse_sections(text):
-        k = (rid, mitig)
-        if k in seen:
+HEADING = re.compile(r"^(#{1,4})\s+(.*?)\s*$")
+
+
+def parse_prose(text: str) -> list[tuple[str, str, str]]:
+    """METHOD 3 — every bullet, paragraph and table row in the WHOLE document.
+
+    The two parsers above read STRIDE mitigation cells and nothing else, so a claim written as a
+    sentence two lines below the table it belongs to was unread. That is not a hypothetical gap;
+    every one of the 2026-09-03 sweep's findings sat in a region neither parser reaches:
+
+      * `§3 Authn / Authz` prose — balance and clearing crediting regression guards
+        (`BalanceResourceSecurityTest`, `ClearingResourceSecurityTest`) that do not exist.
+      * `§5 Residual risks` — security-scanner crediting a fleet-wide `SecurityContractTest`;
+        tpp-registry describing a role cache, and the knob that tunes it, that were never built.
+      * `§7 Change log` — fx crediting `FxConversionService`, mcp asserting `StubProposalPort` was
+        "left untouched" when it had been replaced, sepa-payment documenting the rollback flag
+        `openbank.sepa.returns.enabled` as "off by default" for an endpoint that reads no config.
+      * `§5a Rollback:` lines and DFD notes — document-service naming a Kafka topic
+        (`openbank.billing.billing.event`) that no consumer, producer, contract or CR carries.
+
+    A change-log entry is a claim like any other: it is the thing a later reader relies on when
+    deciding whether a path has been revisited. It is checked on exactly the same terms — a
+    citation that names something the tree does not contain — and the disclaimer escape hatch
+    below is what a correction uses to retire its own finding.
+
+    The unfalsifiable majority is untouched by this. A sentence naming no mechanism produces no
+    citation, so widening the REGION cannot convert a counted non-claim into a finding; it can
+    only find claims that already name something checkable. That is the property that makes this
+    safe to run over prose at all (2026-08-20 census: 273 of ~410 claims name no mechanism).
+    """
+    rows: list[tuple[str, str, str]] = []
+    head = "preamble"
+    para: list[str] = []
+
+    def flush() -> None:
+        if para:
+            joined = " ".join(para).strip()
+            if joined:
+                rows.append((head, joined, joined))
+            para.clear()
+
+    for line in text.splitlines():
+        m = HEADING.match(line)
+        if m:
+            flush()
+            head = m.group(2).strip().strip("#").strip() or "untitled"
             continue
-        seen.add(k)
-        out.append((rid, thr, mitig))
+        s_ = line.strip()
+        if not s_:
+            flush()
+            continue
+        c = _cells(line)
+        if c is not None:
+            flush()
+            joined = " ".join(x for x in c if x).strip()
+            if joined:
+                rows.append((head, joined, joined))
+            continue
+        if re.match(r"^(?:[-*+]|\d+\.)\s+\S", s_):
+            flush()
+        para.append(s_)
+    flush()
+    return rows
+
+
+def claims(text: str) -> list[tuple[str, str, str, str]]:
+    """UNION of all three parsers, deduplicated on (id, mitigation).
+
+    The fourth element is the PARSER that produced the unit. It exists so the SELF-REF rule can
+    stay bound to structured STRIDE rows, where "threat" and "mitigation" are genuinely different
+    cells. Over free prose the two are the same sentence, so the rule would be comparing a
+    paragraph with itself and would fire on any paragraph that both describes a record-keeping
+    threat and mentions a status column — a shape that is ordinary narration, not a defect.
+    """
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str, str, str, str]] = []
+    for kind, rows in (("table", parse_table(text)),
+                       ("section", parse_sections(text)),
+                       ("prose", parse_prose(text))):
+        for rid, thr, mitig in rows:
+            k = (rid, mitig)
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append((rid, thr, mitig, kind))
     return out
 
 
@@ -190,6 +376,22 @@ CAMEL = re.compile(r"^(?=.*[a-z])[A-Z][A-Za-z0-9]*(?:[A-Z][A-Za-z0-9]*)+$")
 SRCPATH = re.compile(r"^[\w./-]+\.(?:kt|java|py|rego|sql|ts|tsx|sh)$")
 POLICYRULE = re.compile(r"^data\.[a-z][\w.]+$")
 LOWERCAMEL = re.compile(r"^[a-z][a-z0-9]*(?:[A-Z][A-Za-z0-9]*)+$")
+# A dotted lowercase key: a config property, a Kafka topic, a package. Three or more segments,
+# so a bare `example.com` or a version string is not one. This shape is what carried three of the
+# 2026-09-03 sweep's findings (`openbank.sepa.returns.enabled`, `openbank.billing.billing.event`,
+# `openbank.tpp.cache-ttl-seconds`) and the old extractor saw none of them: a dotted key is not
+# CamelCase, not a source path, and not `data.`-prefixed, so it fell through every branch.
+CONFIGKEY = re.compile(r"^[a-z][a-z0-9]*(?:[.][a-z0-9]+(?:-[a-z0-9]+)*){2,}$")
+# ...but a DNS name and a reverse-DNS coordinate have the same shape as a config key and are NOT
+# things this tree contains. Measured on the first widened run: `sanctionslistservice.ofac.treas.gov`
+# (an upstream OFAC host), `com.microsoft.onnxruntime` (a Maven coordinate) and
+# `tech.openbank.app.payment.nearpay` (a package in the separate openbank-app repo) were all
+# reported as phantom controls. None is a claim about this repository, and a gate that reports
+# three of those for every real finding is one people learn to silence.
+NOT_A_CONFIG_KEY = re.compile(
+    r"^(?:com|org|io|net|tech|dev|edu|gov)\.|"
+    r"\.(?:com|org|net|gov|edu|io|eu|cz|dev|ai|co|uk|int)$"
+)
 
 # Words that look like lowerCamelCase but are English or product prose, not identifiers.
 PROSE_LOWERCAMEL = {"noData", "closeMatch", "openBank", "javaScript", "iBan"}
@@ -202,7 +404,20 @@ def citations(text: str) -> list[str]:
             t = tok.split("(")[0].split("#")[0].split("::")[0].strip(" .`'\"")
             if not t or t in PROSE_LOWERCAMEL:
                 continue
-            structural = CAMEL.match(t) or SRCPATH.match(t) or POLICYRULE.match(t)
+            # A QUALIFIED reference — `FxConversionService.scoreFraudShadow()` — matched no shape
+            # at all and was dropped silently: it is not CamelCase (it has a dot), not a source
+            # path, not `data.`-prefixed, and not a lowercase config key. That is how fx-service
+            # credited its fail-open shadow-scoring wrapper to a class present in no Kotlin source
+            # for two and a half months. Take the owning TYPE, which is the checkable half; the
+            # member after the dot is not, because a method can be declared on a supertype.
+            if "." in t and not SRCPATH.match(t):
+                head = t.split(".", 1)[0]
+                if CAMEL.match(head):
+                    out.append(head)
+                    continue
+            config_key = CONFIGKEY.match(t) and not NOT_A_CONFIG_KEY.search(t)
+            structural = (CAMEL.match(t) or SRCPATH.match(t) or POLICYRULE.match(t)
+                          or config_key)
             # A lowerCamelCase identifier needs a length floor: short ones are ordinary English
             # in backticks far more often than they are symbols.
             identifier = LOWERCAMEL.match(t) and len(t) >= 8
@@ -248,7 +463,16 @@ def is_backend(rel: str) -> bool:
     """
     if rel.startswith("openbank-admin-ui/"):
         return False
-    return is_deployed(rel) or "/src/test/" in rel
+    # A Gradle build file is tracked backend source that no `/src/` path matches, and real
+    # mitigations cite it: ledger's §5 names pitest's `targetClasses`, which lives only in
+    # `openbank-account-service/build.gradle.kts`. Leaving build files out reported it as a
+    # phantom control on the first widened run.
+    # `openbank-libs/governance/` is where authz actions, four-eyes actions and gate ids are
+    # declared. A mitigation citing one of those names it correctly; without this the gate would
+    # report the authoritative rule file's own vocabulary as absent.
+    return (is_deployed(rel) or "/src/test/" in rel
+            or rel.endswith((".gradle.kts", ".gradle"))
+            or rel.startswith("openbank-libs/governance/"))
 
 
 class Corpus:
@@ -267,6 +491,8 @@ class Corpus:
         self.names = {pathlib.Path(f).name for f in self.files}
         self.paths = set(self.files)
         self.blobs: dict[str, str] = {}
+        self.code: dict[str, str] = {}
+        self._memo: dict[str, bool] = {}
         for f in self.files:
             if f.endswith(DOCISH) or not f.endswith(CODEISH) or not is_backend(f):
                 continue
@@ -277,15 +503,88 @@ class Corpus:
         # Stub detection anchors on DEPLOYED source only: a stubbed test helper is not the
         # defect this gate is about.
         self.main = {f: b for f, b in self.blobs.items() if is_deployed(f) and "/src/main/" in f}
+        # A COMMENT-ONLY view is not evidence a thing exists. Measured 2026-09-03: the sole
+        # occurrence of `BalanceResourceSecurityTest` anywhere in the tree is the KDoc line
+        # `* locked by BalanceResourceSecurityTest.` in `BalanceResource.kt`, and the sole
+        # occurrence of `ClearingResourceSecurityTest` is the identical KDoc line in
+        # `ClearingResource.kt`. Both classes are absent; both threat models credited them; and
+        # the old substring resolve() answered TRUE for both, because the document's own false
+        # claim was echoed in a comment next to the code. Prose cannot witness prose.
+        self.config_keys: set[str] = set()
+        for f, b in self.blobs.items():
+            if f.endswith((".yaml", ".yml", ".properties")):
+                self.config_keys |= self.yaml_paths(b)
+        for f, b in self.blobs.items():
+            self.code[f] = "\n".join(
+                ln for ln in b.splitlines()
+                if not ln.lstrip().startswith(("//", "*", "/*", "#", "<!--", "--"))
+            )
+
+    @staticmethod
+    def yaml_paths(blob: str) -> set[str]:
+        """Flatten a YAML file's mapping keys to dotted paths, by INDENT — no parser.
+
+        A Quarkus property is written nested (`openbank:` / `  sepa:` / `    enabled:`), so the
+        dotted form a threat model quotes appears nowhere in the file as a literal string. Without
+        this, every cited config key resolved to nothing and the widened gate would have reported
+        each of them as a phantom control — the systematic false-positive class that makes a gate
+        worth less than nothing. Caught by this gate's own self-test, not by the fleet run.
+
+        Deliberately indent-based rather than `yaml.safe_load`: half these files are Kustomize or
+        Helm templates carrying `{{ }}` and `${}` placeholders that no YAML parser will load, and a
+        parser that throws on them would silently shrink the corpus back down.
+        """
+        out: set[str] = set()
+        stack: list[tuple[int, str]] = []
+        for raw in blob.splitlines():
+            m = re.match(r"^(\s*)([A-Za-z_][\w.-]*)\s*:(\s|$)", raw)
+            if not m:
+                continue
+            indent, key = len(m.group(1)), m.group(2)
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            stack.append((indent, key))
+            out.add(".".join(k for _, k in stack))
+        return out
+
+    @staticmethod
+    def _word(sym: str) -> re.Pattern:
+        return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(sym) + r"(?![A-Za-z0-9_])")
 
     def resolve(self, sym: str) -> bool:
-        """True iff the symbol appears in at least one tracked backend file."""
+        """True iff the symbol occurs as REAL CONTENT in at least one tracked backend file.
+
+        Two boundaries, each of which the pre-2026-09-03 substring form got wrong on a live claim:
+
+          * WORD BOUNDARY, not substring. `SecurityContractTest` — credited by
+            `openbank-security-scanner.md` as the fleet-wide invariant that every JAX-RS endpoint
+            is annotated — is declared nowhere, but it is a suffix of nine per-service classes
+            (`BalanceSecurityContractTest`, ...), so `needle in blob` resolved it and the gate
+            agreed that a fleet-wide control existed. It covers 8 of the 61 modules that expose a
+            resource.
+          * CODE LINES, not comments. See the `self.code` note above: a citation whose only
+            occurrence is a KDoc repeating the same claim is not evidence of anything.
+
+        A source PATH is exempt from both: it is matched against the file list, not file content.
+        """
+        if sym in self._memo:
+            return self._memo[sym]
         if SRCPATH.match(sym):
-            if sym in self.paths or any(f.endswith("/" + sym) for f in self.files):
-                return True
-            return pathlib.Path(sym).name in self.names
+            hit = (sym in self.paths or any(f.endswith("/" + sym) for f in self.files)
+                   or pathlib.Path(sym).name in self.names)
+            self._memo[sym] = hit
+            return hit
+        # A dotted config key resolves either as a literal (a Kotlin `@ConfigProperty(name=...)`,
+        # an `override.properties` line, an env-var mapping) or as a nested YAML path.
+        if (CONFIGKEY.match(sym) and not POLICYRULE.match(sym)
+                and any(sym.endswith(k) or k.endswith(sym) for k in self.config_keys)):
+            self._memo[sym] = True
+            return True
         needle = sym.rsplit(".", 1)[-1] if POLICYRULE.match(sym) else sym
-        return any(needle in b for b in self.blobs.values())
+        pat = self._word(needle)
+        hit = any(pat.search(b) for b in self.code.values() if needle in b)
+        self._memo[sym] = hit
+        return hit
 
     def stub_site(self, sym: str) -> str | None:
         """A cited symbol whose own DECLARATION opens with a stub marker.
@@ -361,6 +660,22 @@ def self_referential(threat: str, mitigation: str) -> bool:
 
 
 # ---------------------------------------------------------------- driver
+def subjects_all(root: pathlib.Path) -> list[str]:
+    """Every threat model in the tree, derived from the DIRECTORY — never a hand-kept list.
+
+    The subject set was `rules.yaml: money_path_services`, so 23 of the 45 documents in
+    `docs/threat-models/` were never opened. That is not a tail: the unscanned half held four of
+    the eight findings the 2026-09-03 sweep produced (`document-service`, `openbank-mcp-service`,
+    `openbank-security-scanner`, `openbank-tpp-registry-service`), and a document being outside
+    the money path is a statement about blast radius, not about whether its claims are true.
+
+    Money-path membership is still read, but only to say so in the report — it no longer decides
+    what gets read, which is the property that made the old scope a probe rather than a census.
+    """
+    d = root / "docs" / "threat-models"
+    return sorted(f.stem for f in d.glob("*.md")) if d.is_dir() else []
+
+
 def money_path(root: pathlib.Path) -> list[str]:
     """Derived from rules.yaml via the coverage gate's own parser — one definition, not two."""
     p = root / "openbank-infra" / "scripts" / "check-threat-models.py"
@@ -371,7 +686,8 @@ def money_path(root: pathlib.Path) -> list[str]:
 
 
 def audit(root: pathlib.Path):
-    services = money_path(root)
+    services = subjects_all(root)
+    mp = set(money_path(root))
     corpus = Corpus(root)
     findings: list[tuple[str, str, str, str]] = []
     used: set[str] = set()
@@ -381,7 +697,7 @@ def audit(root: pathlib.Path):
         if not path.exists():
             continue  # the coverage gate's job, not this one
         subjects += 1
-        for rid, threat, mitig in claims(path.read_text(encoding="utf-8")):
+        for rid, threat, mitig, kind in claims(path.read_text(encoding="utf-8")):
             n_claims += 1
             if is_disclaimed(mitig):
                 n_disclaimed += 1
@@ -405,7 +721,7 @@ def audit(root: pathlib.Path):
                         continue
                     findings.append(("STUB", svc, rid,
                                      f"cites `{sym}`, whose implementation is a stub ({site})"))
-            if self_referential(threat, mitig):
+            if kind != "prose" and self_referential(threat, mitig):
                 key = f"{svc}|{rid}|SELF-REF"
                 if key in ALLOWED_UNRESOLVED:
                     used.add(key)
@@ -416,7 +732,7 @@ def audit(root: pathlib.Path):
                      "mitigation names only record-keeping"),
                 ))
     stale = sorted(set(ALLOWED_UNRESOLVED) - used)
-    return services, subjects, n_claims, n_uncited, n_disclaimed, findings, stale
+    return services, mp, subjects, n_claims, n_uncited, n_disclaimed, findings, stale
 
 
 def self_test() -> int:
@@ -507,6 +823,83 @@ def self_test() -> int:
     if len(parse_sections(headerless)) < 1:
         fails.append("section parser missed a headerless model — the census collapsed to one method")
 
+    # ---------------------------------------------------------------- the 2026-09-03 widening
+    # Each block below is a claim that sat INSIDE a file this gate already opened and was reported
+    # clean. They are the red cases the widening was built against: if a rule stops discriminating,
+    # this fails here rather than going quietly green over the fleet again.
+
+    # (1) REGION. Every one of these lived outside a STRIDE mitigation cell, so neither original
+    #     parser ever saw it. The prose parser must, and the STRIDE parsers must still see theirs.
+    s3 = ("## 3. Authn / Authz\n\n"
+          "- Money-moving endpoints are role-gated; **no endpoint is `@PermitAll`** (locked by\n"
+          "  `BalanceResourceSecurityTest`).\n")
+    case("a §3 prose bullet is invisible to the table parser", len(parse_table(s3)), 0)
+    case("a §3 prose bullet is invisible to the section parser", len(parse_sections(s3)), 0)
+    case("the prose parser sees it",
+         any("BalanceResourceSecurityTest" in citations(m) for _, _, m in parse_prose(s3)), True)
+    chg = ("## 7. Change log\n\n"
+           "- **2026-06-17** — `FxConversionService.scoreFraudShadow()` wraps the call.\n")
+    case("a change-log entry is a claim",
+         any("FxConversionService" in citations(m) for _, _, m in parse_prose(chg)), True)
+
+    # (2) CITATION SHAPE. A dotted config key / topic name matched no shape at all.
+    case("a config property is a citation",
+         "openbank.sepa.returns.enabled" in citations("flag `openbank.sepa.returns.enabled` (off by default)"), True)
+    case("a topic name is a citation",
+         "openbank.billing.billing.event" in citations("(`openbank.billing.billing.event`)"), True)
+    case("a hostname is NOT a citation",
+         citations("`sanctionslistservice.ofac.treas.gov`"), [])
+    case("a maven coordinate is NOT a citation", citations("`com.microsoft.onnxruntime`"), [])
+    case("a qualified method reference yields its owning type",
+         citations("`FxService.scoreFraudShadow()`"), ["FxService"])
+    case("a source path is still a path, not a split type",
+         citations("`ExceptionMappers.kt`"), ["ExceptionMappers.kt"])
+
+    # (3) RESOLUTION. Both of these answered TRUE under the old substring-over-all-lines rule.
+    class _FakeCorpus(Corpus):
+        def __init__(self, blobs):  # test double: no git, no filesystem
+            self.files, self.names, self.paths = [], set(), set()
+            self.blobs, self._memo = blobs, {}
+            self.main = {}
+            self.config_keys = set()
+            for _f, _b in blobs.items():
+                if _f.endswith((".yaml", ".yml", ".properties")):
+                    self.config_keys |= Corpus.yaml_paths(_b)
+            self.code = {f: "\n".join(ln for ln in b.splitlines()
+                                      if not ln.lstrip().startswith(("//", "*", "/*", "#", "<!--", "--")))
+                         for f, b in blobs.items()}
+
+    kdoc = _FakeCorpus({"openbank-x/src/main/kotlin/BalanceResource.kt":
+                        "/**\n * locked by BalanceResourceSecurityTest.\n */\nclass BalanceResource"})
+    case("a name that exists only in a COMMENT does not resolve",
+         kdoc.resolve("BalanceResourceSecurityTest"), False)
+    case("a name on a real code line does resolve", kdoc.resolve("BalanceResource"), True)
+    sub = _FakeCorpus({"openbank-x/src/test/kotlin/B.kt": "class BalanceSecurityContractTest {"})
+    case("a SUFFIX of a real class does not resolve", sub.resolve("SecurityContractTest"), False)
+    case("the real class still resolves", sub.resolve("BalanceSecurityContractTest"), True)
+
+    # (4) DISCRIMINATION. The widening must not simply fail everything: the CORRECTED form of each
+    #     red case has to come back clean, or the gate is a blanket and not a check.
+    good = _FakeCorpus({"openbank-x/src/test/kotlin/C.kt": "class ClearingSecurityContractTest {",
+                        "openbank-x/src/main/resources/application.yaml":
+                            "openbank:\n  sepa:\n    scheme-submission:\n      enabled: true\n"})
+    case("the corrected guard name resolves", good.resolve("ClearingSecurityContractTest"), True)
+    case("a real config key resolves", good.resolve("openbank.sepa.scheme-submission.enabled"), True)
+    case("SELF-REF is not applied to prose",
+         [k for _, _, _, k in claims("### Tampering\n\n- a bullet\n")] .count("prose") >= 1, True)
+
+    # (5) SUBJECT SET. The floor exists to catch COLLAPSE — a renamed directory or a changed glob —
+    #     so falsify it: point the deriver at a directory with no models and it must report none,
+    #     rather than reporting clean about files it stopped reading.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        empty = pathlib.Path(td)
+        case("an empty tree yields no subjects", subjects_all(empty), [])
+        (empty / "docs" / "threat-models").mkdir(parents=True)
+        (empty / "docs" / "threat-models" / "a.md").write_text("x")
+        (empty / "docs" / "threat-models" / "b.md").write_text("y")
+        case("subjects are derived from the directory", subjects_all(empty), ["a", "b"])
+
     for f in fails:
         print(f"SELF-TEST FAIL: {f}")
     print(f"self-test: {'FAILED' if fails else 'ok'} ({len(fails)} failure(s))")
@@ -524,11 +917,12 @@ def main() -> int:
         return self_test()
 
     root = pathlib.Path(a.root).resolve()
-    services, subjects, n_claims, n_uncited, n_disclaimed, findings, stale = audit(root)
+    services, mp, subjects, n_claims, n_uncited, n_disclaimed, findings, stale = audit(root)
 
     print(f"SUBJECTS={subjects}")
-    print(f"threat-model claim audit: {subjects}/{len(services)} money-path models, "
-          f"{n_claims} mitigation claims (union of two parsers), "
+    print(f"threat-model claim audit: {subjects}/{len(services)} models "
+          f"({len(mp)} of them money-path), "
+          f"{n_claims} mitigation claims (union of three parsers), "
           f"{n_uncited} name no mechanism at all "
           f"(unfalsifiable as written — counted, not failed), "
           f"{n_disclaimed} explicitly disclaimed as absent")

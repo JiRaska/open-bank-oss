@@ -38,9 +38,17 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.quarkus.test.security)
+    testImplementation(project(":openbank-libs-testing"))
     // Consumer-driven contracts for party-service (REST + Kafka) and kyc-service (Kafka)
     // (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
+    // Drives the real @Incoming handler without a broker (#6248): the projection defect is only
+    // observable as a row that does not change, so the test must go through the real channel.
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
 }
 
 // Pact: write the generated consumer contracts to pacts/ and forward broker config, matching

@@ -2,9 +2,6 @@
 <baseline version="1.0">
     <file name="src/main/kotlin/com/openbank/domestic/application/port/in/DomesticPaymentPorts.kt">
         <error line="5" column="9" source="standard:package-name" />
-        <error line="34" column="28" source="standard:trailing-comma-on-declaration-site" />
-        <error line="41" column="24" source="standard:trailing-comma-on-declaration-site" />
-        <error line="48" column="37" source="standard:trailing-comma-on-declaration-site" />
     </file>
     <file name="src/main/kotlin/com/openbank/domestic/application/port/out/DomesticPaymentPorts.kt">
         <error line="24" column="43" source="standard:trailing-comma-on-declaration-site" />
@@ -108,9 +105,6 @@
         <error line="54" column="5" source="standard:class-signature" />
         <error line="54" column="35" source="standard:class-signature" />
         <error line="54" column="35" source="standard:trailing-comma-on-declaration-site" />
-    </file>
-    <file name="src/main/kotlin/com/openbank/domestic/infrastructure/idempotency/IdempotencyConfig.kt">
-        <error line="27" column="77" source="standard:function-signature" />
     </file>
     <file name="src/main/kotlin/com/openbank/domestic/infrastructure/kafka/KafkaDomesticPaymentEventPublisher.kt">
         <error line="20" column="43" source="standard:trailing-comma-on-declaration-site" />

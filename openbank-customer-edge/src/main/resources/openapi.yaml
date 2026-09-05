@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.40.0
+  version: 1.51.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -24,6 +24,7 @@ servers:
 tags:
   - name: Reference
   - name: Accounts
+  - name: Term deposits
   - name: Balances
   - name: SCA
   - name: Devices
@@ -52,6 +53,173 @@ tags:
   - name: Complaints
 
 paths:
+  /products:
+    get:
+      tags: [Products]
+      summary: The product catalogue this customer may open from
+      description: >-
+        Generalises the term-deposit projection to the whole customer-facing catalogue, with the
+        same filters and for the same reason: the operator catalogue holds draft, private,
+        withdrawn and future-dated products, and none of them may become discoverable merely
+        because the edge holds an M2M credential.
+
+
+        Types are allow-listed to CURRENT, SAVINGS and TERM_DEPOSIT. MORTGAGE, CREDIT_CARD,
+        OVERDRAFT and INVESTMENT exist in the catalogue and are deliberately absent — each needs
+        its own suitability and disclosure journey, and surfacing one here would let the app offer
+        a regulated product with no path to take it.
+
+
+        Rates are reported in the shape the catalogue prices them and are never derived: a term
+        deposit carries `annualRate` plus its own fixed `term`, savings carries `savings` with its
+        balance tiers, and a current account carries neither. A product with no rate omits the
+        field rather than sending zero — 0 % is a price, "not priced" is not. `fee` IS sent at
+        zero, because "no fee, forever" is a current account's whole pitch.
+
+
+        A catalogue outage answers 503, never an empty list: an empty list reads as "we offer
+        nothing", which is a claim about the bank.
+      operationId: listProductOffers
+      security:
+        - customerOidc: [products:read]
+      parameters:
+        - name: type
+          in: query
+          required: false
+          description: Narrows the list. Rejected with 400 when outside the allow-list.
+          schema:
+            type: string
+            enum: [CURRENT, SAVINGS, TERM_DEPOSIT]
+      responses:
+        '200':
+          description: Discoverable product offers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProductOffer'
+        '400':
+          description: Unsupported product type
+        '503':
+          description: Product catalogue unavailable
+
+  /products/term-deposits:
+    get:
+      tags: [Term deposits]
+      summary: List public term-deposit offers available to the signed-in customer
+      description: >-
+        Projects only ACTIVE, public and currently valid TERM_DEPOSIT products from the operator
+        catalogue. The response includes the rate, fixed term, deposit limits, early-withdrawal
+        conditions and linked terms so the app can make the product discoverable before asking the
+        customer to open it.
+      operationId: listTermDepositOffers
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Current public offers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermDepositOfferList'
+        '502':
+          description: Product catalogue unavailable
+
+  /products/term-deposits/{productId}:
+    get:
+      tags: [Term deposits]
+      summary: Read one public term-deposit offer
+      operationId: getTermDepositOffer
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Offer and contractual conditions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermDepositOffer'
+        '404':
+          description: No active public term-deposit offer with this ID
+
+  /term-deposits:
+    post:
+      tags: [Term deposits]
+      summary: Open a term-deposit account from a public offer
+      description: >-
+        Requires an ACTIVE KYC party. The client submits only the catalogue product ID; the edge
+        derives TERM_DEPOSIT and the product currency server-side. This creates the dedicated
+        account. Initial funding is intentionally a separate normal account-funding flow.
+      operationId: openTermDeposit
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenTermDepositRequest'
+      responses:
+        '201':
+          description: Term-deposit account opened
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Account'}
+        '400':
+          description: Missing idempotency key or malformed product ID
+        '404':
+          description: Product is not an active public term-deposit offer, or party is absent
+        '422':
+          description: KYC not approved
+
+  /incentives/claims:
+    post:
+      tags: [Engagement]
+      summary: Reserve the fixed reward attached to an authenticated campaign treatment
+      description: >-
+        Party identity comes only from the customer Keycloak JWT. The opaque interaction reference
+        is resolved against Campaign Service and supplies the immutable offer reference; the phone
+        cannot choose either value. The product must be an active public term-deposit offer.
+        Reservation is not redemption: only a later authoritative product outcome may commit it.
+      operationId: claimCampaignIncentive
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimCampaignIncentiveRequest'
+      responses:
+        '201':
+          description: Reward inventory reserved; this is not yet redeemed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncentiveReservation'}
+        '400': {description: Malformed or foreign interaction reference}
+        '404': {description: Product is not an active public term-deposit offer}
+        '409': {description: Campaign treatment has no claimable incentive, or reservation conflicts}
+        '502': {description: Campaign, catalogue or Incentive Service unavailable}
+
   /feedback:
     post:
       tags: [Feedback]
@@ -168,6 +336,56 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/AccessLogEntry'
+
+  /privacy/gdpr-export:
+    get:
+      tags: [Privacy]
+      summary: The caller's own GDPR Art. 15 subject-access export
+      description: >
+        The full PII set the bank holds for the caller, aggregated by party-service across
+        party, KYC and card records (ADR-0118 §6). Party-scoped by the caller's own token —
+        there is no path or query parameter, so a customer can only ever export their own
+        record. Distinct from /privacy/portability-export: Art. 15 is the right of ACCESS and
+        reaches data held under every lawful basis, including Art. 6(1)(c) legal-obligation
+        KYC/AML fields that Art. 20 must exclude.
+      operationId: gdprExport
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's Art. 15 export, as returned by party-service
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '502':
+          description: party-service is unreachable
+
+  /privacy/portability-export:
+    get:
+      tags: [Privacy]
+      summary: The caller's own GDPR Art. 20 data-portability export
+      description: >
+        The portable subset only — data the caller provided under consent (Art. 6(1)(a)) or
+        contract (Art. 6(1)(b)), plus account and transaction history with counterparty IBANs
+        redacted to their bank-code prefix per Art. 20(4). KYC/AML due-diligence, risk ratings,
+        PEP flags and sanctions state are excluded by construction, and Art. 20(2) direct
+        controller-to-controller transmission is not offered (ADR-0204 D1/D2/D4). Party-scoped
+        by the caller's own token, like /privacy/gdpr-export.
+      operationId: portabilityExport
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's Art. 20 export, as returned by party-service
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '502':
+          description: party-service is unreachable
 
   /directory/lookup:
     post:
@@ -887,6 +1105,7 @@ paths:
                           - MARKETING_COMMS_INAPP
                           - CREDIT_OFFERS
                           - CREDIT_PROFILE_USE
+                          - CREDIT_AI_AGENT
                     accountIbans: {type: array, items: {type: string}, nullable: true}
                     validFrom: {type: string, format: date-time}
                     validTo: {type: string, format: date-time}
@@ -1012,11 +1231,11 @@ paths:
   /fx/rates/{base}/{quote}/history:
     get:
       tags: [FX]
-      summary: Historical bank commercial rates for a currency pair (newest-first)
+      summary: Three-month ČNB reference trend for a currency pair
       description: >-
-        Returns the bank's own published rates (source=INTERNAL) for the pair over time, ordered
-        newest-first. Use `from`/`to` (ISO-8601 Instant) to bound the window; `limit` is capped
-        at 365 (one year of daily rates). Designed for the app's rate-history chart.
+        Returns ČNB reference mid-rates for the pair over time, ordered newest-first. When bounds
+        are omitted, the interval is exactly three calendar months in UTC. The values are
+        indicative historical fixings, not reproducible or binding commercial customer quotes.
       operationId: getFxRateHistory
       security:
         - customerOidc: [accounts:read]
@@ -1091,6 +1310,177 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Loan'}
+
+  /financial-health:
+    get:
+      tags: [Lending]
+      summary: The caller's four-pillar financial health (no score)
+      description: >-
+        ADR-0269 / APP-ADR-0001 rule 5. Reserve, cashflow, obligations and habits, each with its own
+        zone. There is deliberately no aggregate: a single grade invites the customer to optimise it
+        and the bank to act on it, and neither is what this exists for. Any pillar may answer
+        UNKNOWN — the bank not having seen something is a fact about the bank, not a verdict about
+        the customer. Fails soft to an empty list.
+      operationId: getFinancialHealth
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The pillars (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/HealthPillar'}
+
+  /credit/events:
+    post:
+      tags: [Lending]
+      summary: One credit-journey funnel event
+      description: >-
+        ADR-0269 rule 8's metrics. AUTHENTICATED, unlike the onboarding funnel's public endpoint —
+        these events say "this person is looking at borrowing", which must not ride a stream anyone
+        can post to. The party comes from the JWT and a partyId in the body is ignored.
+
+        Always 202, including for a value outside the allow-list: a 400 would make the allow-list an
+        oracle for what the bank tracks, and telemetry has no business teaching a client anything.
+
+        The action vocabulary deliberately cannot express a conversion. The programme measures
+        self-activation and opt-out, not how many customers borrowed.
+      operationId: trackCreditEvent
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step, action]
+              properties:
+                step: {type: string, enum: [CONSENT, HEALTH, FINANCING, QUOTE, APPLICATION]}
+                action:
+                  type: string
+                  enum: [VIEWED, CONSENT_GRANTED, CONSENT_WITHDRAWN, QUOTE_REQUESTED,
+                         QUOTE_SUPPRESSED, APPLICATION_STARTED, APPLICATION_ABANDONED]
+      responses:
+        '202':
+          description: Accepted (or silently dropped — the caller cannot tell, by design)
+
+  /credit/consents:
+    get:
+      tags: [Consents]
+      summary: The caller's own credit consents, as three switches
+      description: >-
+        ADR-0269 rule 1. Derived once here rather than by every client filtering a consent list —
+        the first client to write that filter differently gets a different answer. An unreadable
+        consent list answers "everything off", which is both the safe default and the true state
+        for anyone who has never granted these.
+      operationId: getCreditConsents
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The three switches
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditConsents'}
+    put:
+      tags: [Consents]
+      summary: Set the caller's credit consents to exactly this state
+      description: >-
+        Full-state PUT, not a partial patch: "turn offers off" and "leave offers alone" must not be
+        the same request. Anything false is revoked immediately and for every channel. These are
+        GDPR Art. 7 data-processing consents, so no SCA ceremony is required (ADR-0205 D1); the
+        party comes from the JWT, never the body.
+      operationId: putCreditConsents
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreditConsents'}
+      responses:
+        '200':
+          description: The resulting state, re-read after the change
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditConsents'}
+        '400': {description: Malformed body}
+
+  /credit/quotes:
+    post:
+      tags: [Lending]
+      summary: Indicative, non-binding price for an amount and term
+      description: >-
+        ADR-0269 rule 4 — the only route by which the app may learn what a loan costs. The client
+        computes no price. Not fail-soft: a 409 (distress floor suppressed pricing, with a reason
+        code) passes through rather than becoming an empty 200, which a client renders as zero.
+      operationId: quoteCredit
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, termMonths]
+              properties:
+                amount: {type: string}
+                termMonths: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: The indicative quote
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditQuote'}
+        '400': {description: Amount or term outside the product bounds}
+        '409': {description: Pricing suppressed; body carries reasonCode}
+
+  /credit-applications:
+    get:
+      tags: [Lending]
+      summary: The caller's own credit applications as customer-readable journeys
+      description: >-
+        ADR-0269 rule 3. The read half of the intake pair: POST /loan-applications files an
+        application, this says where it got to. Carries no rate, instalment or APRC — price is
+        ADR-0269 rule 4 and arrives as a separate quote object. Fails soft to an empty array on
+        upstream failure, because an unfetchable journey must not be invented.
+      operationId: listCreditApplications
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's credit applications (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/CreditJourney'}
+
+  /credit-applications/{applicationId}:
+    get:
+      tags: [Lending]
+      summary: One of the caller's own credit applications
+      description: >-
+        Ownership is enforced upstream by party header: lending-service filters by owner and answers
+        404 for a foreign id, so a not-found and a not-yours are indistinguishable. Not fail-soft —
+        there is no honest empty value for a single journey.
+      operationId: getCreditApplication
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: The credit application journey
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditJourney'}
+        '404':
+          description: No such application for this caller
 
   /loans/{loanId}/schedule:
     get:
@@ -1388,7 +1778,11 @@ paths:
           description: >-
             Caller may not debit this account — not the owner and no authorising delegation grant
             (indistinguishable from an expired grant, an over-ceiling amount, or an unknown
-            account, by design), or SCA missing/rejected.
+            account, by design), or SCA missing/rejected. A delegated payment that is inside the
+            per-transaction ceiling but over the grant's cumulative daily/monthly one answers
+            `code: DELEGATED_SPEND_LIMIT_EXCEEDED` (ADR-0249 D3) — the delegate already knows they
+            hold the grant, so naming their own limit is not an oracle; how much headroom remains
+            is deliberately not echoed.
 
   /domestic-payments/{paymentId}:
     get:
@@ -2903,10 +3297,14 @@ paths:
         owns capability validation and verifies that the grantor actually owns the resource.
 
 
-        NOT SUPPORTED: dailyLimit and monthlyLimit. Cumulative ceilings are described by ADR-0232
-        D1/D6 but no service counts spend against a grant, so a body carrying either is rejected
-        with 400 CUMULATIVE_LIMIT_UNSUPPORTED rather than stored as a cap that never applies.
-        perTransactionLimit is the only limit this platform enforces.
+        dailyLimit and monthlyLimit ARE accepted, and are required on a grant carrying
+        ACCOUNT_INITIATE_PAYMENT (ADR-0249 D5). This route used to refuse them with 400
+        CUMULATIVE_LIMIT_UNSUPPORTED on the ground that nothing counted cumulative spend; that
+        premise ended when delegation-service gained the reservation counter (ADR-0249 D3) and the
+        edge began reserving against it before each delegated payment. Keeping the refusal made a
+        payment-capable grant unconstructible — with a ceiling this route refused it and without one
+        the upstream refused it with SPEND_WITHOUT_CEILING — which also left POST /cards/delegated
+        unreachable, since it requires exactly such a grant.
       operationId: offerDelegation
       security:
         - customerOidc: [delegations:write]
@@ -2914,9 +3312,48 @@ paths:
         '201': {description: Grant offered}
         '400':
           description: >-
-            Body is not a JSON object, upstream validation failed, or the body carries
-            dailyLimit/monthlyLimit (response `code: CUMULATIVE_LIMIT_UNSUPPORTED`).
+            Body is not a JSON object, or upstream validation failed — including
+            `code: SPEND_WITHOUT_CEILING` when ACCOUNT_INITIATE_PAYMENT is asked for with no
+            cumulative ceiling.
         '403': {description: grantorPartyId is not the authenticated party, or resource not owned}
+
+  /delegations/preview:
+    post:
+      tags: [Delegation]
+      summary: Validate a delegation draft before the app starts SCA
+      description: >-
+        The grantor is derived from the customer token. Runs the same authoritative constraint,
+        ownership and eligibility checks as offer, but creates no grant, emits no event and never
+        consumes SCA. The final offer repeats every check, so a successful preview is not an
+        authorization decision. grantScaSessionId, if supplied by an older client, is stripped.
+      operationId: previewDelegation
+      security:
+        - customerOidc: [delegations:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [granteePartyId, resourceType, resourceId, capabilities]
+              properties:
+                grantorPartyId: {type: string, format: uuid, description: Optional; if present it must match the token party}
+                granteePartyId: {type: string, format: uuid}
+                resourceType: {type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT]}
+                resourceId: {type: string, format: uuid}
+                capabilities: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+                approvalPolicy: {type: string, default: SOLO}
+                requiredApprovals: {type: integer}
+                perTransactionLimit: {type: object}
+                dailyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
+                monthlyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
+                exposure: {type: object}
+                validTo: {type: string, format: date-time}
+      responses:
+        '200': {description: Draft is currently eligible to proceed to SCA}
+        '400': {description: Invalid draft or a constraint the customer channel cannot enforce}
+        '403': {description: grantorPartyId does not match the authenticated customer}
+        '422': {description: Party eligibility or resource ownership could not be established}
 
   /delegations/shared-by-me:
     get:
@@ -3143,6 +3580,126 @@ components:
 
     # Edge's projected view of lending-service's Loan (internal fields dropped — see
     # CustomerEdgeResource.projectLoan).
+    HealthPillar:
+      type: object
+      required: [code, zone]
+      properties:
+        code: {type: string, enum: [RESERVE, CASHFLOW, OBLIGATIONS, HABITS]}
+        zone:
+          type: string
+          enum: [HEALTHY, STRETCHED, AT_RISK, UNKNOWN]
+          description: UNKNOWN means not enough data — never render it as a middling verdict.
+        value:
+          type: string
+          nullable: true
+          description: The working behind the zone (months of cover, net, DSTI). Null when UNKNOWN.
+        target:
+          type: string
+          nullable: true
+          description: What the pillar is measured against, where one exists.
+
+    CreditConsents:
+      type: object
+      description: >-
+        ADR-0269's three credit consents. All default FALSE — absence of consent is denial, and no
+        path re-arms one on the customer's behalf.
+      required: [offers, profileUse, aiAgent]
+      properties:
+        offers:
+          type: boolean
+          description: May the bank show this customer a credit offer it was not asked for.
+        profileUse:
+          type: boolean
+          description: >-
+            May the 360 profile be used to work out WHICH offer. Separate from `offers` because a
+            customer may want an affordability answer they asked for without their spending being
+            mined for eligibility.
+        aiAgent:
+          type: boolean
+          description: >-
+            May the assistant watch and PREPARE on the customer's behalf. Never extends to
+            submitting, accepting, raising a limit or drawing funds.
+
+    CreditQuote:
+      type: object
+      description: >-
+        An indicative price. Structurally not an offer: no id, no accept path, and `binding` is
+        always false.
+      required: [amount, currency, termMonths, monthlyPayment, totalPayable, totalCostOfCredit,
+                 validUntil, binding]
+      properties:
+        amount: {type: string}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        termMonths: {type: integer}
+        nominalAnnualRatePercent: {type: string}
+        monthlyPayment: {type: string}
+        totalPayable: {type: string}
+        totalCostOfCredit: {type: string}
+        aprcPercent:
+          type: string
+          nullable: true
+          description: >-
+            RPSN/APRC. NULL means "could not be computed" and must render as an absent figure, never
+            as 0% — which reads to a customer as free credit.
+        validUntil: {type: string, format: date-time}
+        binding: {type: boolean}
+
+    CreditJourney:
+      type: object
+      description: >-
+        A credit application as the customer sees it (ADR-0269 rule 3). The client RENDERS this and
+        derives nothing from it — no local step advancement, no inferred approval. Deliberately
+        carries no price of any kind.
+      required: [id, productKind, state, steps, requirements, awaitingCustomer, submittedAt]
+      properties:
+        id: {type: string, format: uuid}
+        productKind:
+          type: string
+          description: Which of the three shapes this is, and therefore which steps the customer walks.
+          enum: [UNSECURED, SECURED, REVOLVING]
+        state:
+          type: string
+          description: Canonical ADR-0211 origination state.
+        steps:
+          type: array
+          description: The product's own step sequence with each step's position. Codes, not display text.
+          items:
+            type: object
+            required: [code, status]
+            properties:
+              code:
+                type: string
+                enum: [APPLY, ASSESS, OFFER, COLLATERAL, SIGN, DISBURSE, DRAWDOWN, ACTIVATE_LIMIT]
+              status: {type: string, enum: [DONE, CURRENT, UPCOMING]}
+        requirements:
+          type: array
+          description: Outstanding paperwork. Empty until the collecting steps exist.
+          items:
+            type: object
+            required: [code, status, completedByCustomer]
+            properties:
+              code: {type: string}
+              status: {type: string, enum: [TODO, IN_REVIEW, SATISFIED, REJECTED]}
+              completedByCustomer:
+                type: boolean
+                description: >-
+                  False for work the bank does (a valuation). Rendering those as customer tasks
+                  leaves someone staring at a step they cannot action.
+              reason: {type: string, nullable: true}
+        awaitingCustomer:
+          type: array
+          description: >-
+            Requirement codes the customer must act on now. Empty is a real answer — nothing to do
+            but wait.
+          items: {type: string}
+        outcomeReasonCode:
+          type: string
+          nullable: true
+          description: >-
+            Decision-engine reason code, present only on a refused application. Never a human
+            checker's free-text note.
+        submittedAt: {type: string, format: date-time}
+
     Loan:
       type: object
       properties:
@@ -3354,6 +3911,20 @@ components:
         nickname:
           type: string
           nullable: true
+        sharedWithMe:
+          type: boolean
+          default: false
+          description: >-
+            True for an account GET /accounts APPENDS because an ACTIVE delegation grant covers it,
+            not because the caller owns it (ADR-0232 D6). The edge sets it on every shared entry
+            and never on an owned one, so absent means "mine" — that asymmetry is the whole point,
+            and a client that cannot see the flag presents someone else's account as the customer's
+            own. Served since #4021; published here because it was not, and a field the edge sends
+            but does not declare is one no client can rely on.
+        incentiveReservation:
+          allOf:
+            - {$ref: '#/components/schemas/IncentiveReservation'}
+          description: Present only when this account opening committed a campaign incentive.
 
     # Mirrors openbank-account-service AccountPage (GET /api/v1/accounts is cursor-paginated,
     # not a bare array).
@@ -3786,6 +4357,33 @@ components:
         variables:
           type: array
           items: {type: string}
+          description: >-
+            The presentation variable KEYS a catalogue item declares. Names, never values — copy
+            for a catalogue item lives in the app, which is what keeps this a typed server decision
+            rather than remote UI markup.
+        values:
+          type: object
+          additionalProperties: {type: string}
+          description: >-
+            Resolved values, present ONLY for a trusted campaign assignment; a catalogue item
+            declares keys and sends no values. A client that cannot see this renders a campaign
+            banner with its variables unfilled.
+        deepLink:
+          type: string
+          nullable: true
+          description: >-
+            Where a tap should go, as a closed `openbank://` app route. engagement-service enforces
+            the SCHEME only (`CampaignBannerPlacement` requires the `openbank://` prefix); it does
+            not constrain the destination, so a client must resolve this through its own allowlist
+            of known routes and ignore anything it does not recognise. Absent for content with no
+            tap target.
+        interactionRef:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Opaque reference tying this content to a campaign send. Copy it back verbatim on the
+            engagement event so attribution can be resolved server-side; the app never interprets it.
 
     EngagementSurfaceEvent:
       type: object
@@ -4057,10 +4655,161 @@ components:
           description: Product catalogue ID for the account product
         accountType:
           type: string
-          enum: [CURRENT, SAVINGS]
+          enum: [CURRENT, SAVINGS, TERM_DEPOSIT]
         currencyCode:
           type: string
           example: EUR
+
+    OpenTermDepositRequest:
+      type: object
+      required: [productId]
+      additionalProperties: false
+      properties:
+        productId:
+          type: string
+          format: uuid
+          description: ID returned by /products/term-deposits
+        incentiveReservationId:
+          type: string
+          format: uuid
+          description: >-
+            Optional opaque reservation returned by /incentives/claims. The edge commits it only
+            after account-service returns the authoritative openedAt; deterministic rejection
+            releases it, while transient failure leaves it retryable until its TTL.
+
+    ClaimCampaignIncentiveRequest:
+      type: object
+      additionalProperties: false
+      required: [interactionRef, code, productId]
+      properties:
+        interactionRef:
+          type: string
+          format: uuid
+          description: Opaque PUSH/BANNER interaction reference supplied with the treatment.
+        code:
+          type: string
+          minLength: 8
+          maxLength: 128
+          writeOnly: true
+        productId:
+          type: string
+          format: uuid
+          description: Active public term-deposit catalogue product selected by the customer.
+
+    IncentiveReservation:
+      type: object
+      additionalProperties: false
+      required: [id, offerRef, productRef, attributionRef, reservedAt, expiresAt, status]
+      properties:
+        id: {type: string, format: uuid}
+        offerRef:
+          type: object
+          required: [id, name, version]
+          properties:
+            id: {type: string, format: uuid}
+            name: {type: string}
+            version: {type: integer, minimum: 1}
+        productRef: {type: string}
+        attributionRef: {type: string, format: uuid}
+        reservedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        status: {type: string, enum: [RESERVED]}
+
+    TermDepositOfferList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TermDepositOffer'
+
+    ProductOffer:
+      type: object
+      description: >-
+        One discoverable product. Carries only what a customer needs in order to choose, priced in
+        the shape the catalogue prices it. Internal fields — version history, eligibility segments,
+        draft state — never cross this boundary.
+      required: [id, code, name, type, currency]
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+          description: Semantic product code, e.g. SAVINGS_STANDARD (ADR-0105).
+        name:
+          type: string
+        type:
+          type: string
+          enum: [CURRENT, SAVINGS, TERM_DEPOSIT]
+        currency:
+          type: string
+        shortDescription:
+          type: string
+        description:
+          type: string
+        minBalance:
+          type: number
+        maxBalance:
+          type: number
+        fee:
+          type: number
+          description: Monthly account fee as the catalogue states it. Sent even when zero.
+        annualRate:
+          type: number
+          description: >-
+            Term deposits only — one fixed rate for one fixed term. Absent for every other type;
+            absence means "not priced here", not 0 %.
+        term:
+          type: object
+          description: The term deposit's own TermDepositConfig, verbatim.
+        savings:
+          type: object
+          description: >-
+            Savings only — the SavingsConfig with its balance tiers, verbatim. Not flattened into
+            a single "from" rate: that would quote a price the bank never set for this balance.
+        termsAndConditions:
+          type: array
+          items:
+            type: object
+
+    TermDepositOffer:
+      type: object
+      required: [id, code, name, currency, annualRate, term, termsAndConditions]
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string, example: TERM_DEPOSIT_12M}
+        name: {type: string}
+        shortDescription: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        currency: {type: string, example: CZK}
+        minimumDeposit: {type: number, nullable: true}
+        maximumDeposit: {type: number, nullable: true}
+        annualRate: {type: number, format: double, example: 5.8}
+        term:
+          type: object
+          required: [termMonths, interestRateAnnual, payoutFrequency, autoRenewEnabled, earlyWithdrawalPenaltyPct, earlyWithdrawalNoticeDays]
+          properties:
+            termMonths: {type: integer, minimum: 1}
+            minTermMonths: {type: integer, nullable: true}
+            maxTermMonths: {type: integer, nullable: true}
+            interestRateAnnual: {type: number, format: double}
+            payoutFrequency: {type: string, enum: [MONTHLY, QUARTERLY, SEMI_ANNUAL, ANNUAL, AT_MATURITY]}
+            autoRenewEnabled: {type: boolean}
+            earlyWithdrawalPenaltyPct: {type: number, format: double}
+            earlyWithdrawalNoticeDays: {type: integer, minimum: 0}
+        termsAndConditions:
+          type: array
+          items:
+            type: object
+            required: [version, url, effectiveFrom, language]
+            properties:
+              version: {type: string}
+              url: {type: string, format: uri}
+              effectiveFrom: {type: string, format: date}
+              effectiveTo: {type: string, format: date, nullable: true}
+              language: {type: string, example: cs}
+              summary: {type: string, nullable: true}
 
     # --- Cards ---
     # Mirrors openbank-card-issuance-service CardResponse (masked PAN only).

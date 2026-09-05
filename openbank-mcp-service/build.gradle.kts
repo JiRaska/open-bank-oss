@@ -39,6 +39,7 @@ dependencies {
     // (PolicyDecisionPoint / OpaSidecarPolicyDecisionPoint) lives here.
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)
     testImplementation(libs.rest.assured.kotlin)

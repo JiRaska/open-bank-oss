@@ -41,11 +41,37 @@ enum class SettlementStatus {
     REVERSAL_FAILED,
 
     /**
-     * The ledger booking was **not** reversed because settlement-service cannot reverse a journal
-     * (see `SettlementActivitiesImpl.reverseBookToLedger`). Distinct from [LEDGER_REVERSED], which
-     * is what the old stub wrote while doing nothing.
+     * A settlement journal **exists in the general ledger** and was not reversed, because
+     * settlement-service cannot reverse a journal (see
+     * `SettlementActivitiesImpl.reverseBookToLedger`). The GL owes a manual correcting entry.
+     * Distinct from [LEDGER_REVERSED], which is what the old stub wrote while doing nothing.
      */
     LEDGER_REVERSAL_UNSUPPORTED,
+
+    /**
+     * The ledger compensation ran, asked the ledger whether a journal exists for this settlement,
+     * and was told **none does** — so there is nothing to reverse and the general ledger is clean.
+     *
+     * This is a *no-op*, not a success and not an unsupported reversal, and it has its own value
+     * for the same reason [REVERSAL_FAILED] does. Folding it into either neighbour would be the
+     * `PushResult.skipped()` shape once more: `LEDGER_REVERSAL_UNSUPPORTED` would summon an
+     * operator to correct a GL entry that was never posted, and a plain success would claim a
+     * reversal that never happened. It is transient by construction — the workflow rejects the
+     * settlement immediately afterwards — so a row resting here means the workflow died.
+     */
+    LEDGER_NOT_POSTED,
+
+    /**
+     * The ledger compensation could **not establish** whether a journal exists — the lookup itself
+     * failed (ledger unreachable, or answering an error). The truthful answer is "unknown", and
+     * that is a third fact, not a rounding of the other two: reporting
+     * [LEDGER_REVERSAL_UNSUPPORTED] would send an operator to correct an entry that may not exist,
+     * and reporting [LEDGER_NOT_POSTED] would assert a clean GL nobody checked.
+     *
+     * Recorded with a **retryable** failure, unlike [LEDGER_REVERSAL_UNSUPPORTED]: an unreachable
+     * ledger is the one case here a retry can genuinely resolve.
+     */
+    LEDGER_STATE_UNKNOWN,
 
     /**
      * Deprecated and **never written** since #6037. Retained so the value keeps its meaning for any

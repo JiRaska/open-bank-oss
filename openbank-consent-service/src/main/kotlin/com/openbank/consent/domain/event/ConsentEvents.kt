@@ -4,6 +4,7 @@
 
 package com.openbank.consent.domain.event
 
+import com.openbank.consent.domain.model.Consent
 import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.domain.model.GranteeType
 import com.openbank.consent.domain.model.SuppressionReason
@@ -38,6 +39,26 @@ data class ConsentGranted(
     override val aggregateType = "Consent"
     override val eventType = "ConsentGranted"
     override val version = 1L
+
+    /**
+     * Whether this consent grants access to the customer's banking data or money, as opposed to
+     * being a pure data-processing preference (#8432).
+     *
+     * **Computed here, on the wire, because only this service can compute it correctly.**
+     * [Consent.GDPR_ONLY_SCOPES] is the canonical set of preference scopes — marketing channels,
+     * RUM telemetry, credit-offer processing — and it is already the set that decides SCA
+     * exemption, guarded disjoint from [Consent.AISP_SCOPES] at class-load. A consumer that
+     * re-derived this from `scopes` would hold a second copy of that list, and the next preference
+     * scope added here would silently start reading as account access there. A Jackson-serialised
+     * getter keeps the definition in one place and puts the answer on the wire; there is no
+     * constructor parameter to set wrong at a call site, and nothing deserialises these events back
+     * into the class (consumers read them as `JsonNode`).
+     *
+     * notification-service's `ConsentNotificationConsumer` reads this to decide whether the
+     * customer is told: a third party gaining or losing access to their accounts is a security
+     * event they must hear about, while their own marketing toggle is not.
+     */
+    val accountAccess: Boolean get() = scopes.any { it !in Consent.GDPR_ONLY_SCOPES }
 }
 
 /**
@@ -59,6 +80,31 @@ data class ConsentRevoked(
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Consent"
     override val eventType = "ConsentRevoked"
+    override val version = 1L
+
+    /** See [ConsentGranted.accountAccess] (#8432). */
+    val accountAccess: Boolean get() = scopes.any { it !in Consent.GDPR_ONLY_SCOPES }
+}
+
+/**
+ * A consent was replaced by a newer one for the same grantee and the same scopes (#6487).
+ *
+ * Carries `supersededBy` so a consumer can tell this apart from a withdrawal: access continues
+ * under the named consent, and a journey keyed to the old id should follow it rather than stop.
+ * That is the opposite of [ConsentRevoked], which means access ended.
+ */
+data class ConsentSuperseded(
+    override val aggregateId: UUID,
+    val partyId: UUID,
+    val granteeId: String,
+    val scopes: Set<ConsentScope>,
+    val supersededBy: UUID,
+    override val occurredAt: Instant,
+    /** See [ConsentGranted.sourceService] (#3994/#5256). */
+    val sourceService: String = "consent-service",
+) : DomainEvent(occurredAt) {
+    override val aggregateType = "Consent"
+    override val eventType = "ConsentSuperseded"
     override val version = 1L
 }
 

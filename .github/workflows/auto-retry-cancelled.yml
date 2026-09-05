@@ -69,9 +69,23 @@
 # back in the queue, so the drain silently needed two passes and the re-added load landed on
 # everyone else's PRs (#3208, capacity itself is #2039).
 #
+# WHERE THE DECISION LIVES (issue #6255)
+# The classify-and-re-run logic is `.github/scripts/spot-kill-retry.sh`, not a `run:` block
+# here. It moved because inline it was unfalsifiable — GitHub Actions on a real `workflow_run`
+# event was its only executor, so the branches that exist for the rare case could only be
+# exercised BY the rare case, and #6255 is what that cost: the detection `gh api` call had no
+# transient handling while the `gh run rerun` call beside it had three attempts with backoff,
+# and one installation rate limit (HTTP 403) killed the step before it emitted any `decision=`
+# line at all. Its target, run 32499371733, had two jobs interrupted mid-flight and is still at
+# `run_attempt: 1`. The script's `--self-test` now drives every decision and every error class
+# against a stub `gh` on every PR (gate `spot-kill-retry-selftest`), including the two
+# prevent-proofs: a reclaim IS re-run, a deliberate queue cancel is NOT.
+#
 # `-R` ON EVERY `gh run rerun` IS LOAD-BEARING (issue #2841 follow-up)
-# This job has no `actions/checkout`, so there is no git repository for `gh` to infer the
-# target repo from, and a bare `gh run rerun <id>` dies with
+# This job used to have no `actions/checkout` at all — it now takes a sparse one for the script
+# above, and `-R` stays regardless, because a checkout that fails must not silently restore the
+# shape below. Without a git repository for `gh` to infer the target repo from, a bare
+# `gh run rerun <id>` dies with
 #   failed to determine base repo: failed to run git: fatal: not a git repository
 # That is not a new hazard: it is how this workflow behaved from the day it was written, so
 # the auto-retry from #2330 had NEVER once succeeded — every invocation exited 1. Nothing
@@ -98,6 +112,13 @@ jobs:
   retry:
     name: Re-run spot-killed run (once)
     runs-on: ubuntu-latest
+    # A rate-limit wait is now "until the limit resets" (capped at GH_RETRY_MAX_WAIT_SECONDS,
+    # 600s here) rather than a flat 15s, because a 45-second budget cannot outlast an
+    # installation limit whose window is minutes — that is #6853/#7976 and it reproduced on run
+    # 33738356244. Four waits at 600s is ~40 min worst case; this bounds it rather than letting
+    # the job sit for the 360-min default. ubuntu-latest is free on a public repo, so the trade
+    # is a concurrency slot against a reclaimed CI run that otherwise needs a human.
+    timeout-minutes: 50
     # `failure` is admitted here only so the step below can inspect the jobs; the decision to
     # re-run is made there, not by this expression. A job-level `if:` cannot reach the jobs API.
     if: >-
@@ -105,163 +126,56 @@ jobs:
        github.event.workflow_run.conclusion == 'failure') &&
       github.event.workflow_run.run_attempt == 1
     steps:
+      # A SPARSE checkout, added by #6255. The header note above says this job has none, and
+      # that was true and load-bearing while the decision logic lived inline in this file. It
+      # had a price nobody had paid attention to: a `run:` block is executable ONLY by GitHub
+      # Actions on a real `workflow_run` event, so its error paths were unfalsifiable and the
+      # detection call shipped with no transient handling at all (#6255). The logic now lives
+      # in `.github/scripts/spot-kill-retry.sh`, which has a `--self-test` run by the
+      # `spot-kill-retry-selftest` gate on every PR. Fetching one file at depth 1 is not the
+      # "clone the repo to make one API call" waste that note warned about — and `-R` stays on
+      # every `gh` call regardless, because a checkout that fails must not silently restore the
+      # #2898 shape (a bare `gh run rerun` resolving no repo, 208 silent failures).
+      #
+      # No `ref:` on purpose: a `workflow_run` checkout defaults to the DEFAULT BRANCH, which is
+      # what a privileged control should execute. Checking out the triggering branch here would
+      # let any PR author rewrite this script and have it run with `actions: write`.
+      - name: Fetch the decision script (sparse, default branch)
+        uses: actions/checkout@v5
+        with:
+          # BOTH files: spot-kill-retry.sh `source`s gh-retry.sh, so fetching only the first
+          # gives a job that dies on line 1 with "No such file or directory". A sparse checkout
+          # is a hand-kept list of what the script needs — the failure mode CLAUDE.md warns
+          # about for any gate whose scope is maintained separately from its subject.
+          sparse-checkout: |
+            .github/scripts/spot-kill-retry.sh
+            .github/scripts/gh-retry.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Re-run only if the runner was reclaimed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Belt AND braces with the `-R` on every call (see the header note): this job has no
-          # actions/checkout, so without one of the two `gh` exits 1 with "failed to determine
-          # base repo" — the defect behind 208 silent failures (#2898). `-R` stays because it
-          # is the explicit one; GH_REPO covers any `gh` call added later that forgets it, and
-          # is what check-gh-repo-context.py reads at PR time.
+          # Belt AND braces with the `-R` the script puts on every call: GH_REPO covers any
+          # `gh` call added later that forgets it, and is what check-gh-repo-context.py reads
+          # at PR time.
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-        run: |
-          set -euo pipefail
-
-          # ── EVIDENCE (issue #4595) ──────────────────────────────────────────────────
-          # Every exit path records ONE line saying what was examined and what was decided,
-          # into the job summary as well as the log. Before this, a no-op and a success were
-          # both "green with a notice buried in a log nobody opens", so the only observable
-          # difference between "the control ran and correctly declined" and "the control ran
-          # and did nothing because it could not tell" was a log download. `decision=` is the
-          # field to read; it is one of skipped-queue-cancel / rerun-cancelled /
-          # no-spot-kill-signature / jobs-unreadable / rerun-partial.
-          decide() { # decide <decision> <human sentence>
-            echo "spot-kill-auto-retry run=${RUN_ID} conclusion=${CONCLUSION} decision=$1"
-            echo "| \`${CONCLUSION}\` | [${RUN_ID}](${RUN_URL}) | \`$1\` | $2 |" \
-              >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          }
-          printf '%s\n' \
-            '| triggering conclusion | run | decision | detail |' \
-            '|---|---|---|---|' >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-
-          # ── TRANSIENT-FAILURE RETRY (issue #4595) ───────────────────────────────────
-          # The re-run API call itself can fail transiently, and when it does the whole point
-          # of this workflow is lost: the reclaimed run stays red and waits for the human
-          # round-trip #2330 removed. Measured on run 31710803432 — detection was correct
-          # ("1 job(s) interrupted mid-flight"), and `gh run rerun` answered
-          #   failed to rerun: HTTP 502: Server Error
-          # with no retry, so the step exited 1, raise-issue filed #4595, and the target run
-          # (31710216158) only reached attempt 2 seventeen minutes later by a human hand.
-          # Note what that failure was NOT: not "never triggered" and not "never detected" —
-          # 3 of 10 sampled runs the same day issued a real re-run that landed as attempt 2.
-          # Only 5xx / 429 / a transport error are retried. A 403/404/422 is a real answer
-          # (run too old, no permission); retrying those just burns the budget and delays the
-          # alarm, so they fail immediately.
-          #
-          # "ALREADY RUNNING" IS NOT ONE OF THOSE (issue #5489). Measured on run 32100417490:
-          # attempt 1 hit `HTTP 502: Server Error` (a transient loss, retried per the rule
-          # above); by attempt 2 the run had already started re-running — a race with GitHub's
-          # own retry of the first, lost call, or with a duplicate trigger — and `gh` answered
-          #   run 32100417490 cannot be rerun; This workflow is already running
-          # Treating that as a hard failure was wrong: the substance this workflow exists to
-          # achieve (the reclaimed run gets a fresh attempt) had ALREADY happened by the time
-          # attempt 2 asked. Filing #5489 for it escalates a no-op as if it were the #4595
-          # case (the API call losing 3/3), which it structurally cannot be — a losing call
-          # never gets to "already running", it gets HTTP 5xx/429/timeout every time. So this
-          # is matched and returned as a distinct success, not folded into the transient-retry
-          # loop above and not falling to the non-transient catch-all.
-          rerun_with_retry() {
-            # Written with `if ... fi`, never `[ x ] && cmd`, because a trailing AND-list that
-            # evaluates false is a FAILING last command and `set -e` would exit the whole step
-            # from inside the success path — the shape that turns a retry helper into a new
-            # silent failure.
-            local out
-            for attempt in 1 2 3; do
-              if out="$(gh run rerun -R "${GITHUB_REPOSITORY}" "$@" 2>&1)"; then
-                echo "${out}"
-                if [ "${attempt}" -gt 1 ]; then
-                  echo "gh run rerun succeeded on attempt ${attempt}/3 after a transient error"
-                fi
-                return 0
-              fi
-              echo "gh run rerun attempt ${attempt}/3 failed: ${out}"
-              case "${out}" in
-                *"already running"*)
-                  # Not an error to retry and not an error to escalate: the run is already
-                  # retrying, so there is nothing left for this step to do. Matched BEFORE the
-                  # transient-vs-non-transient case below so it can never fall into either —
-                  # it is neither.
-                  echo "gh run rerun attempt ${attempt}/3: ${RUN_URL} is already running (race with a prior attempt or GitHub's own mechanism) — nothing to do, treating as success"
-                  return 0 ;;
-                *"HTTP 5"*|*"HTTP 429"*|*"Server Error"*|*"connection reset"*|*"EOF"*|*"timeout"*) ;;
-                *) echo "::error title=spot-kill auto-retry::Non-transient error from gh run rerun; not retrying: ${out}"
-                   return 1 ;;
-              esac
-              if [ "${attempt}" -lt 3 ]; then
-                sleep $((attempt * 15))
-              fi
-            done
-            echo "::error title=spot-kill auto-retry::gh run rerun failed 3/3 times on ${RUN_URL} (last: ${out}). Needs a manual re-run."
-            return 1
-          }
-
-          if [ "${CONCLUSION}" = "cancelled" ]; then
-            # A reclaim kills a RUNNING job. So if not one cancelled job ever started a step,
-            # nothing was running and a reclaim is impossible — this was a queue cancel, and
-            # re-running it puts back exactly the load whoever cancelled was removing (#3208).
-            #
-            # `steps` is empty for a job that was still queued when the run was cancelled;
-            # a job interrupted mid-flight carries its steps with their conclusions. Verified on
-            # both sides against real runs: 30693441813 (operator drain) has 5 cancelled jobs and
-            # 0 with steps, while contemporaneous cancels that hit running jobs report 1-2 with
-            # steps. Attempt-scoped for the same reason the failure branch below is.
-            #
-            # ONE-DIRECTIONAL on purpose. This only rules a reclaim OUT; it never claims one
-            # happened. A human who cancels while jobs are running still looks exactly like a
-            # reclaim and is still retried once — unchanged, and still the accepted waste the
-            # LOOP SAFETY note describes. What it removes is the case the header never priced:
-            # draining a deep queue, where every cancelled job is one that never started, and the
-            # retry silently undid the drain (#3208, #2039).
-            RUNNING="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/1/jobs?per_page=100" \
-                        --jq '[.jobs[] | select(.conclusion == "cancelled") | select((.steps | length) > 0)] | length')"
-            if [ "${RUNNING:-0}" -eq 0 ]; then
-              echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL} — no cancelled job had started a step, so no runner was reclaimed. Treating it as a deliberate cancel (#3208)."
-              decide skipped-queue-cancel "0 cancelled jobs had started a step — deliberate cancel, not a reclaim (#3208)"
-              exit 0
-            fi
-
-            # At least one job was interrupted mid-flight: a reclaim is possible, so retry once.
-            # `--failed` is a no-op against `cancelled`, so this is always the full re-run.
-            echo "Re-running cancelled run ${RUN_URL} (${RUNNING} job(s) interrupted mid-flight; issue #2330)"
-            rerun_with_retry "${RUN_ID}"
-            echo "::notice title=spot-kill auto-retry::Re-ran cancelled run ${RUN_URL} (attempt 2 of max 2; a second kill stays for a human)"
-            decide rerun-cancelled "${RUNNING} job(s) interrupted mid-flight — full re-run issued (attempt 2 of max 2)"
-            exit 0
-          fi
-
-          # conclusion == failure: retry ONLY on the partial-spot-kill signature.
-          # ATTEMPT-SCOPED on purpose: /actions/runs/<id>/jobs returns the LATEST attempt's jobs,
-          # so a concurrent manual re-run would make this inspect a different (possibly green)
-          # attempt and silently decline to retry. The `if:` above already pins run_attempt to 1;
-          # this pins the query to match. Caught by running the real script against a fixture run
-          # that had since been re-run by hand — the unscoped query reported "no spot-kill
-          # signature" for a run whose attempt 1 was unambiguously spot-killed.
-          killed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/1/jobs?per_page=100" \
-            --jq '[.jobs[]
-                   | select(.conclusion == "failure")
-                   | select(([.steps[]? | select(.conclusion == "cancelled")] | length) > 0)
-                   | select(([.steps[]? | select(.conclusion == "failure")]  | length) == 0)]
-                  | length' 2>/dev/null || echo "")"
-
-          if [ -z "${killed}" ]; then
-            echo "::warning title=spot-kill auto-retry::Could not read jobs for ${RUN_URL}; not re-running. A genuine reclaim will need a manual re-run."
-            decide jobs-unreadable "the jobs API could not be read — a genuine reclaim here needs a MANUAL re-run"
-            exit 0
-          fi
-
-          if [ "${killed}" -eq 0 ]; then
-            echo "::notice title=spot-kill auto-retry::${RUN_URL} failed with no spot-kill signature (no job has a cancelled step and no failed step) — treating it as a real failure and NOT re-running."
-            decide no-spot-kill-signature "no failed job has a cancelled step and no failed step — a real build failure"
-            exit 0
-          fi
-
-          echo "Re-running ${RUN_URL}: ${killed} job(s) killed mid-step by a runner reclaim (issue #2841)"
-          rerun_with_retry "${RUN_ID}" --failed
-          echo "::notice title=spot-kill auto-retry::Re-ran ${killed} spot-killed job(s) in ${RUN_URL} (attempt 2 of max 2; a second kill stays for a human)"
-          decide rerun-partial "${killed} job(s) carry the spot-kill signature — failed jobs re-run (attempt 2 of max 2)"
+          # Cap on a SINGLE wait inside gh-retry.sh. Kept under the job's timeout-minutes above
+          # with room for four of them plus the calls themselves.
+          GH_RETRY_MAX_WAIT_SECONDS: "600"
+          # GH_RETRY_DEAD_LETTER is deliberately NOT set. The library files its own
+          # `ci-dead-letter` issue when a caller has no other way to be heard; this workflow
+          # already has one — `raise-issue` below, which exists for exactly this (#2901) and
+          # writes a far better body. Turning both on would file two issues per incident and
+          # split the signal, which is the #5266/#5285 split-ledger failure in a new place.
+        # Exit 0 = a decision was reached (re-run issued, or correctly declined). Exit 1 = the
+        # control could not do its job, which routes to raise-issue below. The script's header
+        # carries the full rationale, including why an unreadable jobs API is NOT a pass here
+        # and why a rate limit must be told from a permission denial by message text.
+        run: bash .github/scripts/spot-kill-retry.sh
 
   # ── The alarm (issue #2901) ───────────────────────────────────────────────────
   # Why this exists: this workflow failed 208 times without anyone noticing. It is
@@ -291,10 +205,26 @@ jobs:
     permissions:
       contents: read
       issues: write
-    # No actions/checkout, so gh cannot infer the repo from a git remote (#2841).
     env:
       GH_REPO: ${{ github.repository }}
     steps:
+      # A sparse checkout for `resolve-tracking-issue.sh` only. This job used to have none, and
+      # the note that lived here said so — that was load-bearing when the whole job was one
+      # inline `run:`, and `-R`/`GH_REPO` (both still set, above and in the script) is what
+      # actually defends against #2841's `failed to determine base repo`. Fetching one file at
+      # depth 1 is not the "clone the repo to make one API call" waste; the `retry` job took the
+      # same trade in #6255 for the same reason — an inline expression is only executable by a
+      # real `workflow_run` event, so its branches cannot be falsified before they misfire.
+      #
+      # No `ref:` on purpose: a `workflow_run` checkout defaults to the DEFAULT BRANCH, which is
+      # what a job holding `issues: write` should execute.
+      - name: Fetch the issue-resolver (sparse, default branch)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts/resolve-tracking-issue.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Open or refresh the tracking issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -338,12 +268,15 @@ jobs:
           \`GH_REPO\` env — \`.github/scripts/check-gh-repo-context.py\` should have caught it
           at PR time, so check that gate too.
 
-          **If instead the log says \`HTTP 5xx\` / \`Server Error\`, detection worked and only
-          the API call lost.** Since #4595 that call is retried 3x with backoff, so reaching
-          this issue on a 5xx means all three attempts lost — re-run the triggering run by
-          hand and check GitHub's status page. The \`decision=\` line in the retry job's log
-          and step summary says what was examined and what was decided on every path,
-          including the no-op ones.
+          **If instead the log says \`HTTP 5xx\` / \`Server Error\` or a rate limit, detection
+          worked and only the API call lost.** Both calls go through
+          \`.github/scripts/gh-retry.sh\`, which retries a 5xx/connection error with exponential
+          backoff and waits out a rate limit until it RESETS (capped at
+          \`GH_RETRY_MAX_WAIT_SECONDS\`), for \`SPOT_KILL_ATTEMPTS\` attempts — so reaching this
+          issue means every attempt lost across that whole window. Re-run the triggering run by
+          hand and check GitHub's status page. The \`decision=\` line in the retry job's log and
+          step summary says what was examined and what was decided on every path, including the
+          no-op ones, and now names the actual last error rather than \`unknown\`.
 
           Read the step output from **after the last** \`##[endgroup]\`: GitHub prints the
           step's own script into the log header, so grepping the whole log matches strings
@@ -351,12 +284,24 @@ jobs:
 
           This issue is refreshed on each further failure; close it once a run is green.
           EOF
-          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
-          if [ -n "$existing" ]; then
+          # `.[0].number` off a title search used to live here. It pins nothing: the candidate
+          # set's size was never checked, so two same-titled issues silently split the alarm
+          # between them and each half reads as a quieter problem than it is. That is exactly
+          # what happened to the flake ledger below (#5266/#5285). The resolver makes an
+          # ambiguous set exit 1 instead of an arbitrary pick, and it still creates the issue
+          # when there is genuinely none — same one `gh issue list` call as before.
+          status_file="${RUNNER_TEMP:-/tmp}/resolve-status"
+          existing=$(bash .github/scripts/resolve-tracking-issue.sh \
+            --title "$TITLE" \
+            --create-body-file "${RUNNER_TEMP:-/tmp}/issue-body.md" \
+            --create-label tech-debt --create-label "severity:high" \
+            --status-file "$status_file")
+          # A freshly created issue already carries this text as its BODY; only an issue that
+          # already existed gets it again as a refresh comment.
+          if [ "$(cat "$status_file")" = "existing" ]; then
             gh issue comment "$existing" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md"
           else
-            gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md" \
-              --label tech-debt --label "severity:high"
+            echo "Opened #${existing} with this text as its body; no refresh comment needed."
           fi
 
   # ── Flake recording (issue #4878) ────────────────────────────────────────────
@@ -489,21 +434,31 @@ jobs:
         if: steps.classify.outputs.count != '0'
         run: |
           set -euo pipefail
+          # THE LEDGER IS PINNED BY NUMBER, and auto-creation is deliberately gone (#5266).
+          #
+          # This used to be `--search "$TITLE in:title" ... .[0].number` plus "create one if the
+          # search finds nothing", and both halves failed together. GitHub's issue search index
+          # is eventually consistent, so a second `workflow_run` listener querying moments after
+          # the first one created the issue legitimately sees nothing and creates a RIVAL ledger
+          # with the same title. That is how #5266 (14:45Z) and #5285 (17:37Z) came to exist:
+          # same author, same labels, byte-identical bodies. `.[0]` then chose between them by
+          # whatever order the search API happened to return — and it CHANGED: the first record
+          # landed on #5266 at 16:19Z and every record from 17:37Z onward on #5285, leaving 85
+          # records in one and 1 in the other with nothing anywhere saying so.
+          #
+          # A split ledger is worse than a missing one. Each half reads as a low flake count and
+          # neither reader can tell they are seeing part of the data — `list-recorded-flakes.py`
+          # takes one `--issue` and would have reported either half as the whole truth.
+          #
+          # Sorting the candidates would not have fixed it: that still selects by a mutable
+          # property of an unbounded set. The number below is the identity. If it must change,
+          # it changes in a reviewed PR — the ledger cannot relocate itself.
+          LEDGER_ISSUE="5285"
           TITLE="Flaky test observations (recorded from CI re-run evidence)"
-          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
-          if [ -z "${existing}" ]; then
-            printf '%s\n' \
-              "This issue is a running log, not something to action directly (#4878)." \
-              "" \
-              "Each comment below is one job that failed for a real reason (not a runner reclaim -- see auto-retry-cancelled.yml's \`record-flake\` job) and went green on a later attempt of the SAME run, with no source change in between. That is the definition of a flake this repo can act on." \
-              "" \
-              "Read it back with \`.github/scripts/list-recorded-flakes.py --issue <this-issue-number>\`." \
-              "" \
-              "Deciding what to DO with this data (thresholds, alerts, the 29-copy \`*OutboxClaimIT\` construction) is explicitly out of scope for #4878 -- this issue exists so that decision has evidence to work from." \
-              > "${RUNNER_TEMP}/issue-body.md"
-            existing=$(gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP}/issue-body.md" \
-              --label flaky-test --label tech-debt | grep -oE '[0-9]+$')
-          fi
+          # Verifies open + still titled as expected, and exits 1 otherwise. Exiting 1 is the
+          # point: a record that cannot be filed correctly must not be filed somewhere plausible.
+          existing=$(bash .github/scripts/resolve-tracking-issue.sh \
+            --title "$TITLE" --pinned "$LEDGER_ISSUE")
 
           for f in "${RUNNER_TEMP}"/comments/record-*.json; do
             [ -e "$f" ] || continue

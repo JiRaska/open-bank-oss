@@ -31,10 +31,10 @@ import org.junit.jupiter.api.Test
  * `ROLE_OPERATOR` to only the first, which is precisely the state the config comment says is
  * coming ("swarm join/contribute grants are deliberate follow-up charter work").
  *
- * Read the pairs, not the single status. Temporal is disabled in `%test`, so an authorised call
- * cannot reach 201 — it stops at 503 Unavailable. That is the point of the control in each test:
- * 503 means "every authorisation decision in the path accepted this call", 403 means one refused
- * it. Before the fix BOTH members of each pair answered 503 — the asserted identity was believed.
+ * Read the pairs, not the single status. Temporal is disabled in `%test`. An authorised case-open
+ * stops at 503; an authorised collaboration signal reaches the server-owned case lookup and stops
+ * at 404 because this profile created no case row. Both prove the identity gate passed, while 403
+ * proves it refused the asserted identity before either downstream decision.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
@@ -104,7 +104,7 @@ class CaseAssertedIdentityIT {
     @Test
     @TestSecurity(user = "operator-1", roles = ["ROLE_OPERATOR"])
     fun `signal still accepts the agent identity the caller's role IS bound to`() {
-        signal("case-coordinator").statusCode(503)
+        signal("case-coordinator").statusCode(404)
     }
 
     @Test

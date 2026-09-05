@@ -6,8 +6,8 @@
 # PR gate during the pilot: it runs weekly on openbank-batch and on manual
 # dispatch, and its failures create issues rather than blocking merges.
 #
-# v1 scope: openbank-product-catalog only. Money-path services follow once the
-# harness is proven (issue #3348).
+# v1 scope: read-only Product Catalog and Flaky Test Hunter paths. Money-path services follow
+# only once the isolated harness and synthetic-data boundary are proven (issue #3348).
 name: Performance gate
 
 on:
@@ -16,9 +16,12 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Space-separated service modules to test (blank = openbank-product-catalog)"
+        description: "Space-separated service modules to test (blank = declared v1 scope)"
         required: false
-        default: "openbank-product-catalog"
+        # A dispatch input's default is still a non-empty override.  Keeping this empty means
+        # an operator-triggered run measures the same declared Product Catalog + Flaky Test
+        # Hunter denominator as the scheduled run, unless they deliberately narrow it.
+        default: ""
 
 permissions:
   contents: read
@@ -46,7 +49,10 @@ jobs:
           import json, os, pathlib, re
           # The declared v1 scope (ADR-0243, issue #3348). Kept as a named constant so the
           # summary can say what the run was SUPPOSED to measure, not only what it did.
-          DECLARED = ["openbank-product-catalog"]
+          # Both subjects are non-mutating reads booted against disposable PostgreSQL.  Keep
+          # money-path flows out of this GitHub-hosted lane until their isolated target and
+          # synthetic identities exist (perf/scenarios.yaml).
+          DECLARED = ["openbank-product-catalog", "openbank-flaky-test-hunter"]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
           matrix, skipped = [], []
@@ -130,6 +136,9 @@ jobs:
       SERVICE: ${{ matrix.service }}
       PORT: ${{ matrix.port }}
       DB: ${{ matrix.db }}
+      # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
+      # mutable; the digest is the executable supply-chain identity.
+      K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -147,14 +156,11 @@ jobs:
         with:
           cache-read-only: true
 
-      - name: Install k6
+      - name: Resolve pinned k6 runtime
         run: |
           set -euo pipefail
-          K6_VERSION=0.54.0
-          curl -fsSL "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz" \
-            | tar -xz -C /tmp
-          sudo mv "/tmp/k6-v${K6_VERSION}-linux-amd64/k6" /usr/local/bin/k6
-          k6 version
+          docker pull "${K6_IMAGE}"
+          docker run --rm "${K6_IMAGE}" version
 
       - name: Run k6 smoke test
         run: |
@@ -193,8 +199,12 @@ jobs:
             > "perf-reports/${SERVICE}-boot.log" 2>&1 &
           DEV_PID=$!
 
+          # A cold Quarkus dev boot of the Flaky Test Hunter was measured at 188 seconds on
+          # the hosted runner (run 33070206256). The former 180-second probe window killed a
+          # still-starting process and incorrectly published performance as `not-run`. Keep a
+          # finite, visible five-minute ceiling: this is a smoke gate, not an unbounded build.
           UP=0
-          for _ in $(seq 1 90); do
+          for _ in $(seq 1 150); do
             code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health/ready" || true)"
             if [ "$code" = "200" ]; then UP=1; break; fi
             kill -0 "$DEV_PID" 2>/dev/null || break
@@ -222,14 +232,28 @@ jobs:
           echo "==> [${SERVICE}] ${SMOKE_PATH} answered 200 — the probe reaches its subject"
 
           echo "==> [${SERVICE}] running k6 ${SCRIPT}"
-          BASE_URL="http://localhost:${PORT}" \
-            k6 run \
+          docker run --rm \
+              --network host \
+              --user "$(id -u):$(id -g)" \
+              --env "BASE_URL=http://localhost:${PORT}" \
+              --volume "$PWD:/work" \
+              --workdir /work \
+              "${K6_IMAGE}" run \
               --summary-export "perf-reports/${SERVICE}-summary.json" \
               "$SCRIPT" | tee "perf-reports/${SERVICE}-k6.log"
 
           kill "$DEV_PID" 2>/dev/null || true
           pkill -f "quarkusDev" 2>/dev/null || true
           docker rm -f perf-pg >/dev/null 2>&1 || true
+
+      - name: Build performance Test Intelligence envelope
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service "${{ matrix.service }}" \
+            --performance-summary "perf-reports/${{ matrix.service }}-summary.json" \
+            --out "perf-reports/${{ matrix.service }}-run.json"
 
       - name: Upload perf reports
         if: always()
@@ -238,6 +262,18 @@ jobs:
           name: perf-reports-${{ matrix.service }}
           path: perf-reports/
           retention-days: 30
+
+      # The Admin UI deploy collector intentionally reads only immutable, provenance-complete
+      # `test-intelligence-run-*` artifacts. Keep the human-facing report bundle above, but
+      # publish this same versioned envelope under the fleet-wide projection contract too.
+      - name: Upload immutable Test Intelligence performance envelope
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-run-${{ matrix.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: perf-reports/${{ matrix.service }}-run.json
+          retention-days: 30
+          if-no-files-found: error
 
   # ── The alarm (ADR-0243 decision 2, issue #3768) ──────────────────────────────
   # ADR-0243 and this file's own header both promise that an advisory-phase threshold

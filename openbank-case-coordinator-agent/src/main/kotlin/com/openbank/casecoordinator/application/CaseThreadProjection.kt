@@ -6,6 +6,7 @@
 package com.openbank.casecoordinator.application
 
 import com.openbank.casecoordinator.domain.model.CaseRow
+import com.openbank.casecoordinator.domain.model.CaseSignalEvidenceRow
 import com.openbank.casecoordinator.domain.model.CaseSummary
 import com.openbank.casecoordinator.domain.model.CaseThread
 import com.openbank.casecoordinator.domain.model.ContributionRow
@@ -38,11 +39,13 @@ object CaseThreadProjection {
         contributions: List<ContributionRow>,
         proposals: List<ProposalEventRow>,
         loadedAtEpochMs: Long,
+        signalEvidence: List<CaseSignalEvidenceRow> = emptyList(),
     ): CaseThread {
         val entries = buildList {
             add(case.openedEntry())
             contributions.forEach { add(it.threadEntry(case.workflowId)) }
             proposals.forEach { add(it.threadEntry(case.workflowId)) }
+            signalEvidence.forEach { add(it.threadEntry(case.workflowId)) }
         }.sortedBy { it.atEpochMs }
 
         return CaseThread(
@@ -123,8 +126,32 @@ object CaseThreadProjection {
         else -> RuntimeEvidenceStage.EMITTED
     }
 
+    private fun CaseSignalEvidenceRow.threadEntry(workflowId: String): ThreadEntry = ThreadEntry(
+        type = when (stage) {
+            "AUTHORIZED", "DENIED" -> ThreadEntryType.POLICY_DECISION
+            "INVOKED" -> ThreadEntryType.SIGNAL_INVOKED
+            "CONSUMED" -> ThreadEntryType.SIGNAL_CONSUMED
+            else -> ThreadEntryType.CONTRIBUTION_PERSISTED
+        },
+        atEpochMs = observedAtEpochMs,
+        actor = agentId,
+        summary = policyReason,
+        signalId = signalId,
+        capability = capability,
+        rolloutId = rolloutId,
+        runtimeEvidence = RuntimeEvidence(
+            evidenceId = policyDecisionId?.takeIf { it.isNotBlank() } ?: "$signalId:$stage",
+            source = SIGNAL_EVIDENCE_SOURCE,
+            stage = RuntimeEvidenceStage.valueOf(stage),
+            observedAtEpochMs = observedAtEpochMs,
+            correlationId = workflowId,
+            detail = "$capability signal $signalId",
+        ),
+    )
+
     private const val HISTORY_SOURCE = "case-coordinator-postgres-read-model"
     private const val OUTBOX_SOURCE = "case-coordinator-transactional-outbox"
+    private const val SIGNAL_EVIDENCE_SOURCE = "case-coordinator-signal-evidence"
     private const val RETENTION_POLICY = "not-configured"
     private const val COVERAGE_STATUS = "UNKNOWN_RETENTION"
 }

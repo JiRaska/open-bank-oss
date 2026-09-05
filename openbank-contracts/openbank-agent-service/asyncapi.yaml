@@ -99,7 +99,7 @@ components:
         object, not a nested envelope. A key collision lets the fixed envelope field win (`Map +`
         semantics). Only the envelope's own fields are listed below; `event.payload`'s contents
         are call-site-specific and undocumented here.
-      required: [eventId, eventType, aggregateType, aggregateId, actorId, actorType, sourceService, occurredAt, result]
+      required: [eventId, eventType, aggregateType, actorId, actorType, sourceService, occurredAt, result]
       properties:
         eventId:
           type: string
@@ -119,7 +119,12 @@ components:
           description: "`AuditEvent.resourceType`."
         aggregateId:
           type: string
-          description: "`AuditEvent.resourceId`, falling back to `actorId` when the operation has no distinct resource (`resourceId ?: actorId`)."
+          nullable: true
+          description: |
+            `AuditEvent.resourceId`, verbatim — `null` when the operation has no distinct
+            resource. Never substituted with `actorId`: a consumer's own inference chain (or the
+            honest `ABSENT` provenance) is what runs for a resource-less action, not a value from
+            a different dimension under this key (#6479).
         actorId:
           type: string
           description: "`AuditEvent.actorId` — who performed the operation."

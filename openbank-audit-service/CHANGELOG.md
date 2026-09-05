@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.3...audit-service-v0.18.4) (2026-09-03)
+
+
+### Bug Fixes
+
+* send occurredAt on the last four audit-consumed producers that omit it ([#8352](https://github.com/JiRaska/open-bank-oss/issues/8352)) ([#8503](https://github.com/JiRaska/open-bank-oss/issues/8503)) ([146fe87](https://github.com/JiRaska/open-bank-oss/commit/146fe87adaeca4e56fb8da285a57daaaf840cb1d))
+
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.2...audit-service-v0.18.3) (2026-09-02)
+
+
+### Security
+
+* **delegation:** publish durable spend reservation state ([#8247](https://github.com/JiRaska/open-bank-oss/issues/8247)) ([a017aab](https://github.com/JiRaska/open-bank-oss/commit/a017aab1111abaf702cc708f9e2a39cec56c9b1c))
+
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.1...audit-service-v0.18.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **audit:** read aggregateId from the producer envelope ([#6478](https://github.com/JiRaska/open-bank-oss/issues/6478)) ([564cbd3](https://github.com/JiRaska/open-bank-oss/commit/564cbd3aa00094479253fc20b1551fe079de8f23)), closes [#6318](https://github.com/JiRaska/open-bank-oss/issues/6318)
+* **docs:** repair the 7 .mmd diagrams that do not parse ([#6496](https://github.com/JiRaska/open-bank-oss/issues/6496)) ([c1e6ad7](https://github.com/JiRaska/open-bank-oss/commit/c1e6ad7b14887db70ec3365747f2ed06d9ec02db))
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.0...audit-service-v0.18.1) (2026-08-22)
 
 

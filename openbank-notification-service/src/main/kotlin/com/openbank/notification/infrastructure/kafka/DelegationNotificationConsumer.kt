@@ -31,10 +31,10 @@ import java.util.UUID
  *  - `DelegationActivated` -> the **grantor**: their offer was accepted.
  *  - `DelegationDeclined` -> the **grantor**: their offer was turned down.
  *  - `DelegationRevoked` -> the **grantee**: their access just ended.
+ *  - `DelegationSuspended` / `DelegationReinstated` -> **both**: authority changed at the bank.
+ *  - `DelegationRenounced` -> the **grantor**: the grantee ended their access.
  *  - `DelegationExpired` -> **both**: the grant is gone either way.
- *  - Everything else (`DelegationSuspended`, `DelegationReinstated`, `DelegationRenounced`, and any
- *    future/unknown type) is deliberately not notified here — out of this fan-out's stated scope,
- *    not silently dropped by accident; add it as its own reviewed branch when it is in scope.
+ *  - Any future/unknown type is deliberately not notified until its recipient semantics are reviewed.
  *
  * **Delivery reuses the real pipeline, in-process.** Rather than re-implement rendering, the
  * consent gate, push/email preference checks, persistence and the outcome-event write, this builds
@@ -103,8 +103,8 @@ class DelegationNotificationConsumer @Inject constructor(
         val eventType = node.path("eventType").asText("")
         val template = TEMPLATE_BY_EVENT_TYPE[eventType]
         if (template == null) {
-            // Not an error: DelegationSuspended/Reinstated/Renounced and any future type are
-            // in-scope for other consumers of this topic, just not for this fan-out (see class KDoc).
+            // Not an error: future event types stay out until their customer recipient semantics
+            // are deliberately reviewed (see class KDoc).
             log.debugf("delegation event %s not in notification scope, skipping", eventType.ifBlank { "?" })
             return emptyList()
         }
@@ -135,6 +135,7 @@ class DelegationNotificationConsumer @Inject constructor(
                 } else {
                     mapOf("resourceType" to node.path("resourceType").asText(""))
                 },
+                deepLink = "openbank://delegations/$grantId",
                 // The grant id, not a freshly minted one: it is the stable identifier a producer
                 // owns for this business event (ADR-0239 D1), letting a later outcome event be
                 // joined back to the delegation grant that caused it.
@@ -155,6 +156,9 @@ class DelegationNotificationConsumer @Inject constructor(
             "DelegationActivated" to NotificationTemplate.DELEGATION_ACCEPTED,
             "DelegationDeclined" to NotificationTemplate.DELEGATION_DECLINED,
             "DelegationRevoked" to NotificationTemplate.DELEGATION_REVOKED,
+            "DelegationSuspended" to NotificationTemplate.DELEGATION_SUSPENDED,
+            "DelegationReinstated" to NotificationTemplate.DELEGATION_REINSTATED,
+            "DelegationRenounced" to NotificationTemplate.DELEGATION_RENOUNCED,
             "DelegationExpired" to NotificationTemplate.DELEGATION_EXPIRED,
             SPEND_CONFIRMED to NotificationTemplate.DELEGATION_FIRST_USE,
         )
@@ -165,6 +169,9 @@ class DelegationNotificationConsumer @Inject constructor(
             "DelegationActivated" to { grantor, _ -> listOf(grantor) },
             "DelegationDeclined" to { grantor, _ -> listOf(grantor) },
             "DelegationRevoked" to { _, grantee -> listOf(grantee) },
+            "DelegationSuspended" to { grantor, grantee -> listOf(grantor, grantee) },
+            "DelegationReinstated" to { grantor, grantee -> listOf(grantor, grantee) },
+            "DelegationRenounced" to { grantor, _ -> listOf(grantor) },
             "DelegationExpired" to { grantor, grantee -> listOf(grantor, grantee) },
             SPEND_CONFIRMED to { grantor, _ -> listOf(grantor) },
         )

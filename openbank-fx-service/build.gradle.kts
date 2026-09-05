@@ -77,7 +77,26 @@ kover {
                     // CnbResource, FxWorkflowImpl, the sanctions/AML/fraud/ČNB REST-client adapters, the
                     // outbox dispatcher, and the daily ingestion scheduler gained real unit tests. Kept a
                     // few points below the measured figure for headroom, never below the prior floor.
-                    minValue = 65
+                    //
+                    // LOWERED 65 -> 60 on 2026-08-22, then RE-BASELINED 60 -> 30 by #6384.
+                    //
+                    // The 65 and the 60 were both compared against an fx+libs AGGREGATE: every
+                    // service's Kover report used to measure `com.openbank.libs.*` alongside the
+                    // service's own package, and fx's tests exercise a lot of libs code well, so
+                    // the aggregate sat far ABOVE fx alone. That is why #5719 — 13 uncovered lines
+                    // added to libs-runtime's EventRetry, zero fx files touched — moved fx from
+                    // over 65 to 60.504200% and reddened `build (openbank-fx-service)`.
+                    //
+                    // #6384 scopes every service's report to its own sources, so this floor is now
+                    // compared against fx's OWN line coverage. CI measured that on the #5719 branch
+                    // with the same exclusion applied:
+                    //     libs included  60.504200%   <- what the 65/60 floors were compared against
+                    //     libs excluded  30.905700%   <- fx's own line coverage, what 30 guards
+                    // The number drops because it is a DIFFERENT number, not because the gate got
+                    // weaker: a regression in fx's own sources still moves this figure down (proven
+                    // on #6384 by deleting fx's application+infrastructure tests — 78.618100% ->
+                    // 40.056000%, koverVerify rc=1). Ratchet up from here as fx's own tests improve.
+                    minValue = 30
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

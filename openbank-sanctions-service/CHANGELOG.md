@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.1...sanctions-service-v0.11.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **sanctions:** drop EPOCH defaults from SanctionsEntry and entity timestamps ([#8405](https://github.com/JiRaska/open-bank-oss/issues/8405)) ([ade55c6](https://github.com/JiRaska/open-bank-oss/commit/ade55c616772265852edea8c0e9f1b61565604d0))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.0...sanctions-service-v0.11.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **psd2,sanctions:** a null JSON array element is a 400, not a 500 ([#7867](https://github.com/JiRaska/open-bank-oss/issues/7867)) ([#8003](https://github.com/JiRaska/open-bank-oss/issues/8003)) ([28eb8a3](https://github.com/JiRaska/open-bank-oss/commit/28eb8a3dee81237b6f07b5bf9e6e0f4dbe4e8f0f))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.10.1...sanctions-service-v0.11.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.10.0...sanctions-service-v0.10.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.9.2...sanctions-service-v0.10.0) (2026-08-18)
 
 

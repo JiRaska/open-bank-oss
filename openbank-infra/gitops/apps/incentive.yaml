@@ -1,0 +1,33 @@
+# Incentive desired state includes the reviewed workload and its prerequisites. This Application
+# deliberately has no automated sync: the manifest is not evidence that a pod, database, scrape,
+# or traffic path exists. The service has a fail-closed PROMO_CODE_PEPPER startup gate; customer-edge
+# wiring remains a later independently reviewed step. Kafka mTLS and Vault references must not be
+# treated as a live producer or traffic activation until manual sync and observed health complete.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: incentive
+  namespace: argocd
+  annotations:
+    # Machine-readable counterpart to the rollout boundary above. Admin UI discovery must not
+    # create cross-namespace RBAC until this Application is activated and observed healthy.
+    openbank.io/discovery-state: staged
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/incentive
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: incentive
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
