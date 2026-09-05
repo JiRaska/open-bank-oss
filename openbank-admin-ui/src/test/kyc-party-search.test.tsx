@@ -18,8 +18,11 @@ describe('KYC party search', () => {
     const f = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/api/v1/parties/search')) return json({ data: [{ id: PARTY, legalName: 'Oldřich Vaněk', status: 'ACTIVE', kycStatus: 'APPROVED' }] })
-      if (url.endsWith(`/api/v1/kyc/cases/party/${PARTY}`)) return json([{ id: 'case-1', partyId: PARTY, status: 'APPROVED', checks: [], updatedAt: '2026-08-20T10:00:00Z', createdAt: '2026-08-20T09:00:00Z' }])
-      if (url.endsWith('/api/v1/kyc/cases')) return json([])
+      // The party-scoped route answers a single KycCaseResponse (or 404), and the collection route
+      // a KycCasePage — both as openapi.yaml 1.8.0 publishes them (#8163). This mock used to return
+      // a bare array for each, which is neither.
+      if (url.endsWith(`/api/v1/kyc/cases/party/${PARTY}`)) return json({ id: 'case-1', partyId: PARTY, status: 'APPROVED', checks: [], updatedAt: '2026-08-20T10:00:00Z', createdAt: '2026-08-20T09:00:00Z' })
+      if (url.includes('/api/v1/kyc/cases?')) return json({ items: [], total: 0, page: 0, size: 20, statusFilter: null })
       return json({}, 404)
     })
     vi.stubGlobal('fetch', f)
