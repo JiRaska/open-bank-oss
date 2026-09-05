@@ -15,27 +15,6 @@ enum class RewardStatus { QUALIFIED, REWARD_REQUESTED, REWARDED, RETRYABLE, REVE
 
 enum class LedgerOutcome { ACCEPTED, REJECTED, REVERSED }
 
-/**
- * The outcome of handing a [ReferralEvent] to the transport.
- *
- * A skipped/unwired publish MUST NOT share a signal with a real delivery. This is the
- * `PushResult.skipped()` lesson applied on a money path: a boolean `success` that is `true`
- * for "nothing left the process" makes an off-by-default adapter indistinguishable from a
- * working one, and no telemetry anywhere disagrees. Hence a distinct enum constant, and a
- * name for what can actually be established — `HANDED_TO_TRANSPORT`, never `DELIVERED`.
- */
-enum class ReferralPublishOutcome {
-    /** The event was accepted by a real transport. */
-    HANDED_TO_TRANSPORT,
-
-    /** No transport is wired in this build: the event was DROPPED and nothing was sent. */
-    TRANSPORT_NOT_WIRED,
-    ;
-
-    /** True only when something actually left this process. */
-    val isHandedOff: Boolean get() = this == HANDED_TO_TRANSPORT
-}
-
 data class ReferralProgram(
     val id: UUID,
     val name: String,
@@ -79,46 +58,70 @@ data class ReferralReward(
     val rewardedAt: Instant?,
 )
 
+private const val SOURCE_SERVICE = "openbank-referral-service"
+
 sealed class ReferralEvent {
+    /**
+     * A consumer must only project the versioned evidence it understands.  The referral topic is
+     * shared and retained, so inferring a schema from a Kotlin class name would make a later
+     * producer change silently rewrite reporting history.
+     */
+    abstract val schemaVersion: Int
     abstract val eventType: String
     abstract val eventId: UUID
     abstract val occurredAt: Instant
     abstract val programId: UUID
+    abstract val programVersion: Int
     abstract val inviteId: UUID
 
+    /**
+     * The module that emitted this event, stamped on the body rather than left to be derived.
+     *
+     * audit-service resolves attribution strongest-claim-first, and a `sourceService` on the event
+     * body is the strongest claim available — without it every referral audit row is attributed by
+     * derivation from the topic name, which is a convention rather than a statement by the producer.
+     * Declared once on the sealed base so every subclass carries it and no future event type can be
+     * added without it (issues #5256/#6035).
+     */
+    val sourceService: String = SOURCE_SERVICE
+
     data class Qualified(
+        override val schemaVersion: Int = 2,
         override val eventId: UUID,
         override val occurredAt: Instant,
         override val programId: UUID,
+        override val programVersion: Int,
         override val inviteId: UUID,
-        val referrerPartyId: UUID,
-        val refereePartyId: UUID,
         val qualificationEventId: String,
     ) : ReferralEvent() {
-        override val eventType = "Qualified"
+        override val eventType = "QualifiedV2"
     }
 
     data class RewardRequested(
+        override val schemaVersion: Int = 2,
         override val eventId: UUID,
         override val occurredAt: Instant,
         override val programId: UUID,
+        override val programVersion: Int,
         override val inviteId: UUID,
         val rewardReference: String,
         val amount: BigDecimal,
         val currency: String,
     ) : ReferralEvent() {
-        override val eventType = "RewardRequested"
+        override val eventType = "RewardRequestedV2"
     }
 
     data class RewardOutcome(
+        override val schemaVersion: Int = 2,
         override val eventId: UUID,
         override val occurredAt: Instant,
         override val programId: UUID,
+        override val programVersion: Int,
         override val inviteId: UUID,
         val rewardReference: String,
         val outcome: LedgerOutcome,
     ) : ReferralEvent() {
-        override val eventType = "RewardOutcome"
+        override val eventType = "RewardOutcomeV2"
     }
 }
 

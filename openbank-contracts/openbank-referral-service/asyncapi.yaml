@@ -1,21 +1,67 @@
-asyncapi: 2.6.0
+asyncapi: 3.0.0
 info:
   title: Referral lifecycle events
-  version: 1.0.0
+  version: 2.0.0
   description: |
-    CONTRACT ONLY — no producer is wired in this build. The referral service hands every event to
-    UnwiredReferralEventPublisher, which DROPS it and counts it as
-    openbank_referral_events_dropped_total{reason="transport_not_wired"}. Do not build a consumer
-    against these channels expecting traffic until the event-schema slice wires an outbox producer.
+    Referral lifecycle events are committed atomically with referral state to the transactional
+    outbox and relayed at-least-once to `openbank.referral.events`. Consumers must deduplicate by
+    eventId. The reward request remains a contract boundary; no ledger posting adapter is implied.
 channels:
-  referral.qualified.v1:
-    publish: {operationId: referralQualified, message: {$ref: '#/components/messages/Qualified'}}
-  referral.reward.requested.v1:
-    publish: {operationId: referralRewardRequested, message: {$ref: '#/components/messages/RewardRequested'}}
-  referral.reward.outcome.v1:
-    publish: {operationId: referralRewardOutcome, message: {$ref: '#/components/messages/RewardOutcome'}}
+  referralEvents:
+    address: openbank.referral.events
+    messages:
+      QualifiedV2: {$ref: '#/components/messages/QualifiedV2'}
+      RewardRequestedV2: {$ref: '#/components/messages/RewardRequestedV2'}
+      RewardOutcomeV2: {$ref: '#/components/messages/RewardOutcomeV2'}
+operations:
+  publishReferralLifecycleEvent:
+    action: send
+    channel: {$ref: '#/channels/referralEvents'}
+    messages:
+      - {$ref: '#/channels/referralEvents/messages/QualifiedV2'}
+      - {$ref: '#/channels/referralEvents/messages/RewardRequestedV2'}
+      - {$ref: '#/channels/referralEvents/messages/RewardOutcomeV2'}
 components:
   messages:
-    Qualified: {payload: {type: object, required: [eventId, inviteId, qualificationEventId]}}
-    RewardRequested: {payload: {type: object, required: [eventId, inviteId, rewardReference, amount, currency]}}
-    RewardOutcome: {payload: {type: object, required: [eventId, inviteId, rewardReference, outcome]}}
+    QualifiedV2: {payload: {$ref: '#/components/schemas/QualifiedV2'}}
+    RewardRequestedV2: {payload: {$ref: '#/components/schemas/RewardRequestedV2'}}
+    RewardOutcomeV2: {payload: {$ref: '#/components/schemas/RewardOutcomeV2'}}
+  schemas:
+    LifecycleEvidenceV2:
+      type: object
+      required: [schemaVersion, eventType, eventId, occurredAt, programId, programVersion, inviteId]
+      properties:
+        schemaVersion: {const: 2}
+        eventType: {type: string}
+        eventId: {type: string, format: uuid}
+        occurredAt: {type: string, format: date-time}
+        programId: {type: string, format: uuid}
+        programVersion: {type: integer, minimum: 1}
+        inviteId: {type: string, format: uuid}
+    QualifiedV2:
+      allOf:
+        - {$ref: '#/components/schemas/LifecycleEvidenceV2'}
+        - type: object
+          required: [qualificationEventId]
+          properties:
+            eventType: {const: QualifiedV2}
+            qualificationEventId: {type: string, minLength: 1}
+    RewardRequestedV2:
+      allOf:
+        - {$ref: '#/components/schemas/LifecycleEvidenceV2'}
+        - type: object
+          required: [rewardReference, amount, currency]
+          properties:
+            eventType: {const: RewardRequestedV2}
+            rewardReference: {type: string, minLength: 1}
+            amount: {type: number}
+            currency: {type: string, pattern: '^[A-Z]{3}$'}
+    RewardOutcomeV2:
+      allOf:
+        - {$ref: '#/components/schemas/LifecycleEvidenceV2'}
+        - type: object
+          required: [rewardReference, outcome]
+          properties:
+            eventType: {const: RewardOutcomeV2}
+            rewardReference: {type: string, minLength: 1}
+            outcome: {type: string, enum: [ACCEPTED, REJECTED, REVERSED]}

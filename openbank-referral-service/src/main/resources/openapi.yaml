@@ -1,9 +1,31 @@
 openapi: 3.0.3
 info:
   title: OpenBank Referral Service
-  version: 1.0.0
+  version: 1.2.0
 paths:
   /api/v1/referrals/programs:
+    get:
+      summary: List independently published, unexpired referral program revisions for Campaign selection
+      responses:
+        "200":
+          description: Published immutable program references only
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                additionalProperties: false
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, version]
+                      additionalProperties: false
+                      properties:
+                        id: {type: string, format: uuid}
+                        name: {type: string}
+                        version: {type: integer, minimum: 1}
     post:
       summary: Create a draft referral program
       responses: {"201": {description: Created}}
@@ -12,6 +34,24 @@ paths:
       summary: Publish after independent checker approval
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
       responses: {"200": {description: Published}, "409": {description: Conflict}}
+  /api/v1/referrals/programs/{id}:
+    get:
+      summary: Resolve one published referral program revision for a trusted operator
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        "200":
+          description: Published immutable program reference
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, version]
+                additionalProperties: false
+                properties:
+                  id: {type: string, format: uuid}
+                  name: {type: string}
+                  version: {type: integer, minimum: 1}
+        "404": {description: Program is missing, unpublished, or expired}
   /api/v1/referrals/programs/{id}/invites:
     post:
       summary: Issue an opaque invite token

@@ -54,6 +54,20 @@ interface Segment {
   rules: string[]
 }
 
+interface ReferralProgram {
+  id: string
+  name: string
+  version: number
+}
+
+function isReferralProgram(value: unknown): value is ReferralProgram {
+  if (!value || typeof value !== 'object') return false
+  const item = value as Partial<ReferralProgram>
+  return typeof item.id === 'string' && item.id.length > 0 &&
+    typeof item.name === 'string' && item.name.trim().length > 0 &&
+    Number.isInteger(item.version) && (item.version ?? 0) > 0
+}
+
 interface Cadence {
   cadence: string
   humanForm: string
@@ -136,6 +150,7 @@ export default function NewCampaignPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const requestedAudience = searchParams.get('audience')
+  const requestedReferralProgram = searchParams.get('referralProgram')
   const draftId = searchParams.get('draft')
 
   const [name, setName] = useState('')
@@ -146,6 +161,8 @@ export default function NewCampaignPage() {
   const [incentiveOfferRef, setIncentiveOfferRef] = useState<IncentiveOffer['ref'] | null>(null)
   const [incentiveCatalogueState, setIncentiveCatalogueState] = useState<IncentiveCatalogueState>('loading')
   const [segmentSource, setSegmentSource] = useState<'audiences' | 'segments' | null>(null)
+  const [referralPrograms, setReferralPrograms] = useState<ReferralProgram[]>([])
+  const [referralProgramId, setReferralProgramId] = useState('')
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
   const [contentCatalogue, setContentCatalogue] = useState<CampaignTemplate[]>([])
@@ -244,7 +261,18 @@ export default function NewCampaignPage() {
         )
       })
       .catch(() => setIncentiveCatalogueState('unreachable'))
-  }, [])
+    fetch('/api/referral-programs')
+      .then(response => response.json())
+      .then((body: { items?: ReferralProgram[]; state?: string }) => {
+        if (body.state !== 'ok') return
+        const programmes = (body.items ?? []).filter(isReferralProgram)
+        setReferralPrograms(programmes)
+        if (requestedReferralProgram && programmes.some(program => program.id === requestedReferralProgram)) {
+          setReferralProgramId(requestedReferralProgram)
+        }
+      })
+      .catch(() => undefined)
+  }, [requestedReferralProgram])
 
   // The reach is the segment's own preview, run by the service — the same evaluation enrolment runs.
   // A number computed here from a different query would agree with the send only by luck.
@@ -269,6 +297,7 @@ export default function NewCampaignPage() {
       .then(r => r.json())
       .then((d: { campaign?: {
         state?: string; name?: string; goal?: string; segmentRef?: { name: string; version: number }
+        referralProgramRef?: { id: string; name: string; version: number } | null
         steps?: StoredCampaignStep[]; decisions?: Array<{
           sourceStepOrder: number; evaluationDelaySeconds?: number
           confirmedStepOrder: number; notConfirmedStepOrder: number
@@ -288,6 +317,7 @@ export default function NewCampaignPage() {
           setSegment(ref)
           previewReach(ref)
         }
+        setReferralProgramId(campaign.referralProgramRef?.id ?? '')
         if (campaign.steps?.length) {
           // The API permits zero-based and sparse order values. The Studio owns its contiguous
           // card indexes, so map every stored edge through the actual ordered definition instead
@@ -558,6 +588,7 @@ export default function NewCampaignPage() {
         goal: goal.trim(),
         segmentName: segName,
         segmentVersion: Number(segVersion),
+        ...(referralProgramId ? { referralProgramId } : {}),
         ...(stopAfter !== null ? { stopCondition: { maxSendsPerParty: stopAfter } } : {}),
         ...(conversionRule ? { conversionRule } : {}),
         ...(holdoutPercent > 0 ? { holdoutPercent } : {}),
@@ -783,6 +814,30 @@ export default function NewCampaignPage() {
               'The campaign pins the exact published revision. Incentive service owns code reservation and reward value.',
             )}
           </p>
+        </div>
+
+        <div className="campaign-audience-card" data-mgm-selection={referralProgramId || 'none'}>
+          <div className="campaign-section-heading">
+            <span className="campaign-section-number">MGM</span>
+            <div><p>{t('Doporučení', 'Referral')}</p><h2>{t('Připnout schválený program', 'Pin an approved programme')}</h2></div>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {t('Volitelné. Kampaň uloží neměnnou verzi; částku odměny ani kvalifikační pravidlo zde nelze přepsat.', 'Optional. The campaign stores an immutable version; reward and qualification cannot be overridden here.')}
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <button type="button" aria-pressed={referralProgramId === ''} onClick={() => setReferralProgramId('')} className="rounded-xl border p-4 text-left" style={referralProgramId === '' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}>
+              <p className="text-sm font-semibold">{t('Bez MGM programu', 'No MGM programme')}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{t('Běžná komunikační kampaň.', 'A standard communication campaign.')}</p>
+            </button>
+            {referralPrograms.map(program => {
+              const selectedProgram = referralProgramId === program.id
+              return <button key={program.id} type="button" data-referral-program-pick={program.id} aria-pressed={selectedProgram} onClick={() => setReferralProgramId(program.id)} className="rounded-xl border p-4 text-left" style={selectedProgram ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}>
+                <p className="text-sm font-semibold">{program.name} · v{program.version}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{t('Neměnná publikovaná reference; odměnu i kvalifikaci spravuje Referral.', 'Immutable published reference; Referral owns reward and qualification.')}</p>
+              </button>
+            })}
+          </div>
+          {referralPrograms.length === 0 && <Link href="/campaigns/referrals" className="mt-3 inline-flex text-xs font-semibold text-violet-700">{t('Otevřít katalog MGM programů', 'Open MGM programme catalogue')}</Link>}
         </div>
 
         <div className="campaign-entry-card" data-entry-mode={entryMode}>

@@ -43,7 +43,30 @@ quarkus:
   shutdown:
     timeout: 30S
 
+openbank:
+  outbox:
+    dispatch-enabled: true
+
+mp:
+  messaging:
+    outgoing:
+      referral-outbox-out:
+        connector: smallrye-kafka
+        topic: openbank.referral.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+
 "%test":
+  openbank:
+    outbox:
+      dispatch-enabled: false
+  mp:
+    messaging:
+      outgoing:
+        referral-outbox-out:
+          connector: smallrye-in-memory
   quarkus:
     datasource:
       username: openbank

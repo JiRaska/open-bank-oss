@@ -43,6 +43,8 @@ data class CreateCampaignRequest(
      * dead code.
      */
     val steps: List<StepRequest?>,
+    /** Published referral programme UUID; metadata is resolved and pinned server-side. */
+    val referralProgramId: UUID? = null,
     val stopCondition: StopConditionRequest? = null,
     /** ADR-0245 D1: a ConversionCatalog key, or absent to measure no conversion. */
     val conversionRule: String? = null,
@@ -230,6 +232,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             SegmentRef(request.segmentName, request.segmentVersion),
             request.toSteps(),
             createdBy,
+            request.referralProgramId,
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
             request.conversionRule,
             request.holdoutPercent,
@@ -253,6 +256,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
                 id = id,
                 definition = request.toDefinition(),
                 revisedBy = jwt.principalName(),
+                referralProgramId = request.referralProgramId,
             ),
         ).build()
     }.getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }

@@ -501,6 +501,7 @@ rules:
       # Incentive lifecycle producer. The corresponding ExternalSecret is staged without a
       # Deployment, so this narrowly permits ESO to project only this Strimzi-issued client key.
       - incentive-service
+      - referral-service                # ADR-0266: MGM lifecycle producer, ns referral (first ESO Kafka client there)
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1

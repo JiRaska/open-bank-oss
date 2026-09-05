@@ -1,6 +1,10 @@
 package com.openbank.referral.infrastructure.persistence
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.PanacheOutboxEntity
 import com.openbank.referral.application.ReferralService
 import com.openbank.referral.application.port.out.ReferralAuditRepository
 import com.openbank.referral.application.port.out.ReferralInviteRepository
@@ -9,6 +13,7 @@ import com.openbank.referral.application.port.out.ReferralRewardRepository
 import com.openbank.referral.domain.InviteStatus
 import com.openbank.referral.domain.ProgramStatus
 import com.openbank.referral.domain.ReferralConflictException
+import com.openbank.referral.domain.ReferralEvent
 import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralProgram
 import com.openbank.referral.domain.ReferralReward
@@ -18,12 +23,14 @@ import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
+import java.util.function.Supplier
 
 @Entity
 @Table(name = "referral_program")
@@ -85,6 +92,13 @@ class ReferralAuditEntity : PanacheEntityBase() {
     lateinit var occurredAt: Instant
 }
 
+@Entity
+@Table(name = "referral_outbox")
+class ReferralOutboxEntity : PanacheOutboxEntity() {
+    @Column(name = "claimed_at")
+    var claimedAt: Instant? = null
+}
+
 private fun ReferralProgramEntity.toDomain() = ReferralProgram(
     id, name, version, rewardAmount, currency, qualifyingEvent, attributionWindowEndsAt,
     ProgramStatus.valueOf(
@@ -131,6 +145,13 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
     }.awaitSuspending().let { p }
     override suspend fun find(id: UUID) =
         Panache.withSession { find("id", id).firstResult<ReferralProgramEntity>() }.awaitSuspending()?.toDomain()
+    override suspend fun listPublished(at: Instant): List<ReferralProgram> = Panache.withSession {
+        list(
+            "status = ?1 and attributionWindowEndsAt > ?2 order by name asc, version desc",
+            ProgramStatus.PUBLISHED.name,
+            at,
+        )
+    }.awaitSuspending().map { it.toDomain() }
     override suspend fun publish(id: UUID, maker: String, checker: String, at: Instant) = Panache.withTransaction {
         find("id", id).firstResult<ReferralProgramEntity>().map { e ->
             requireNotNull(e)
@@ -184,7 +205,7 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
     }.awaitSuspending()
 }
 
-@ApplicationScoped class PanacheReferralRewardRepository :
+@ApplicationScoped class PanacheReferralRewardRepository(private val objectMapper: ObjectMapper) :
     ReferralRewardRepository,
     PanacheRepository<ReferralRewardEntity> {
     override suspend fun findByInviteAndEvent(i: UUID, e: String) = Panache.withSession {
@@ -196,36 +217,63 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
             r,
         ).firstResult<ReferralRewardEntity>()
     }.awaitSuspending()?.toDomain()
-    override suspend fun create(r: ReferralReward) = Panache.withTransaction {
-        persist(
-            ReferralRewardEntity().apply {
-                id =
-                    r.id
-                inviteId = r.inviteId
-                programId = r.programId
-                referrerPartyId = r.referrerPartyId
-                refereePartyId = r.refereePartyId
-                qualificationEventId =
-                    r.qualificationEventId
-                rewardReference = r.rewardReference
-                amount = r.amount
-                currency = r.currency
-                status =
-                    r.status.name
-                createdAt = r.createdAt
-                requestedAt = r.requestedAt
-            },
-        )
-    }.awaitSuspending().let { r }
-    override suspend fun outcome(ref: String, status: String, at: Instant) = Panache.withTransaction {
-        find("rewardReference", ref).firstResult<ReferralRewardEntity>().map { e ->
-            requireNotNull(e)
-            e.status =
-                status
-            if (status == RewardStatus.REWARDED.name)e.rewardedAt = at
-            e.toDomain()
+    override suspend fun create(r: ReferralReward, events: List<ReferralEvent>) = Panache.withTransaction {
+        val rewardEntity = ReferralRewardEntity().apply {
+            id =
+                r.id
+            inviteId = r.inviteId
+            programId = r.programId
+            referrerPartyId = r.referrerPartyId
+            refereePartyId = r.refereePartyId
+            qualificationEventId =
+                r.qualificationEventId
+            rewardReference = r.rewardReference
+            amount = r.amount
+            currency = r.currency
+            status =
+                r.status.name
+            createdAt = r.createdAt
+            requestedAt = r.requestedAt
+        }
+        Panache.getSession().chain { session ->
+            events.fold(session.persist(rewardEntity)) { persisted, event ->
+                persisted.call(Supplier { session.persist(event.toOutbox(r.id)) })
+            }.replaceWith(r)
         }
     }.awaitSuspending()
+    override suspend fun outcome(ref: String, status: String, at: Instant, event: ReferralEvent) =
+        Panache.withTransaction {
+            find("rewardReference", ref).firstResult<ReferralRewardEntity>().chain { e ->
+                requireNotNull(e)
+                e.status =
+                    status
+                if (status == RewardStatus.REWARDED.name)e.rewardedAt = at
+                val updated = e.toDomain()
+                Panache.getSession().chain { session ->
+                    session.persist(event.toOutbox(updated.id)).replaceWith(updated)
+                }
+            }
+        }.awaitSuspending()
+
+    private fun ReferralEvent.toOutbox(aggregateId: UUID): ReferralOutboxEntity {
+        val message = OutboxMessage(
+            eventId = eventId,
+            aggregateId = aggregateId,
+            eventType = eventType,
+            payload = objectMapper.writeValueAsString(this),
+            createdAt = occurredAt,
+        )
+        return ReferralOutboxEntity().also {
+            it.eventId = message.eventId
+            it.aggregateId = message.aggregateId
+            it.eventType = message.eventType
+            it.payload = message.payload
+            it.status = OutboxStatus.PENDING.name
+            it.synthetic = message.synthetic
+            it.createdAt = message.createdAt
+            it.updatedAt = message.createdAt
+        }
+    }
 }
 
 @ApplicationScoped class PanacheReferralAuditRepository :

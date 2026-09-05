@@ -18,7 +18,7 @@ import {
   ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network, Waypoints, Workflow,
   Megaphone, Radar,
   Target,
-  Share2, Bug,
+  Share2, Bug, Gift,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
@@ -81,6 +81,7 @@ const complianceNav: NavItem[] = [
   { nameCs: 'Spory',              nameEn: 'Disputes',         href: '/disputes',          icon: MessageSquareWarning,  permission: 'compliance:view' },
   { nameCs: 'Customer 360',        nameEn: 'Customer 360',     href: '/customer-360',      icon: Users,                 permission: 'compliance:view' },
   { nameCs: 'Kampaně',            nameEn: 'Campaigns',        href: '/campaigns',         icon: Megaphone,             permission: 'campaign:view' },
+  { nameCs: 'MGM programy',        nameEn: 'MGM Programs',     href: '/campaigns/referrals', icon: Gift,                  permission: 'campaign:view' },
   { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'campaign:view' },
   { nameCs: 'Souhlasy',           nameEn: 'Consents',         href: '/consents',          icon: FileSignature,           permission: 'compliance:view' },
   // ADR-0212 D4: four-eyes activation of the jurisdictional credit compliance packs. Filed under

@@ -540,7 +540,8 @@ describe('campaign studio', () => {
     expect(screen.getByText('Wait for the first verified exposure')).toBeTruthy()
   }, 15000)
 
-  it('submits an opted-in consent fallback as part of the step definition', async () => {
+  it('submits consent fallback and the selected immutable MGM programme', async () => {
+    const referralProgramId = '22222222-2222-2222-2222-222222222222'
     let createBody: Record<string, unknown> | undefined
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (String(url) === '/api/campaigns' && init?.method === 'POST') {
@@ -548,6 +549,14 @@ describe('campaign studio', () => {
         return { ok: true, status: 201, json: async () => ({ state: 'ok', campaign: { id: CAMPAIGN_ID } }) }
       }
       if (String(url).includes('/api/segments')) return { ok: true, status: 200, json: async () => SEGMENTS }
+      if (String(url).includes('/api/referral-programs')) return { ok: true, status: 200, json: async () => ({
+        state: 'ok',
+        items: [{
+          id: referralProgramId,
+          name: 'friends-get-friends',
+          version: 3,
+        }],
+      }) }
       if (String(url).includes('/cadences')) return { ok: true, status: 200, json: async () => CADENCES }
       if (String(url).includes('/triggers')) return { ok: true, status: 200, json: async () => TRIGGERS }
       if (String(url).includes('/templates')) return { ok: true, status: 200, json: async () => TEMPLATES }
@@ -560,6 +569,7 @@ describe('campaign studio', () => {
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Fallback offer' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open more accounts' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
+    fireEvent.click(document.querySelector(`[data-referral-program-pick="${referralProgramId}"]`)!)
     fireEvent.click(document.querySelector('[data-channel-pick="EMAIL"]')!)
     fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'Headline' } })
     fireEvent.change(document.getElementById('var-0-offerText')!, { target: { value: 'Copy' } })
@@ -567,7 +577,10 @@ describe('campaign studio', () => {
     fireEvent.click(document.querySelector('[data-push-fallback="0"] input')!)
     fireEvent.click(screen.getByRole('button', { name: 'Create draft' }))
 
-    await waitFor(() => expect(createBody).toMatchObject({ steps: [{ fallbackToPush: true }] }))
+    await waitFor(() => expect(createBody).toMatchObject({
+      referralProgramId,
+      steps: [{ fallbackToPush: true }],
+    }))
   }, 15000)
 
   /**

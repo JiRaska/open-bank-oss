@@ -9,8 +9,10 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
+import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.notNullValue
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.sql.Timestamp
@@ -41,6 +43,10 @@ class ReferralRestContractIT {
             body("status", equalTo("DRAFT"))
         } Extract { path<String>("id") }
 
+        Given { contentType("application/json") } When { get("/api/v1/referrals/programs/$selfApprovalId") } Then {
+            statusCode(404)
+        }
+
         Given { contentType("application/json") }
             .When { post("/api/v1/referrals/programs/$selfApprovalId/publish") }
             .Then { statusCode(409) }
@@ -57,6 +63,21 @@ class ReferralRestContractIT {
                 body("status", equalTo("PUBLISHED"))
                 body("checker", equalTo("checker@openbank.test"))
             }
+
+        Given { contentType("application/json") } When { get("/api/v1/referrals/programs/$programId") } Then {
+            statusCode(200)
+            body("id", equalTo(programId.toString()))
+            body("version", equalTo(1))
+        }
+
+        val expiredProgramId = UUID.randomUUID()
+        seedDraft(expiredProgramId, Instant.now().minusSeconds(1))
+        Given { contentType("application/json") }
+            .When { post("/api/v1/referrals/programs/$expiredProgramId/publish") }
+            .Then { statusCode(200) }
+        Given { contentType("application/json") } When { get("/api/v1/referrals/programs/$expiredProgramId") } Then {
+            statusCode(404)
+        }
 
         val inviteToken = Given {
             contentType("application/json")
@@ -88,6 +109,8 @@ class ReferralRestContractIT {
             body("rewardReference", notNullValue())
         } Extract { path<String>("rewardReference") }
 
+        assertOutbox(programId, expectedRows = 2)
+
         Given { contentType("application/json") }
             .header("Idempotency-Key", "qualify-replay-$programId")
             .body("""{"eventName":"account.opened","eventId":"event-$programId"}""")
@@ -97,6 +120,9 @@ class ReferralRestContractIT {
                 body("rewardReference", equalTo(rewardReference))
             }
 
+        // Replay returns the original reward and must not enqueue duplicate money-path events.
+        assertOutbox(programId, expectedRows = 2)
+
         Given { contentType("application/json") }
             .header("Idempotency-Key", "invite-$programId")
             .body("""{"referrerPartyId":"$referrer"}""")
@@ -104,7 +130,72 @@ class ReferralRestContractIT {
             .Then { statusCode(409) }
     }
 
-    private fun seedDraft(id: UUID) {
+    @Test
+    fun `published programme catalogue exposes only unexpired immutable references`() {
+        val alpha = UUID.randomUUID()
+        val zeta = UUID.randomUUID()
+        val draft = UUID.randomUUID()
+        val expired = UUID.randomUUID()
+        seedDraft(alpha, name = "catalogue-alpha", version = 2)
+        seedDraft(zeta, name = "catalogue-zeta", version = 1)
+        seedDraft(draft, name = "catalogue-draft", version = 1)
+        seedDraft(expired, Instant.now().minusSeconds(1), name = "catalogue-expired", version = 1)
+
+        listOf(alpha, zeta, expired).forEach { id ->
+            Given { contentType("application/json") } When { post("/api/v1/referrals/programs/$id/publish") } Then {
+                statusCode(200)
+            }
+        }
+
+        Given { contentType("application/json") } When { get("/api/v1/referrals/programs") } Then {
+            statusCode(200)
+            body("items.find { it.id == '%s' }.name".format(alpha), equalTo("catalogue-alpha"))
+            body("items.find { it.id == '%s' }.version".format(alpha), equalTo(2))
+            body("items.find { it.id == '%s' }.name".format(zeta), equalTo("catalogue-zeta"))
+            body("items.find { it.id == '%s' }".format(draft), nullValue())
+            body("items.find { it.id == '%s' }".format(expired), nullValue())
+            body("items[0].rewardAmount", nullValue())
+            body("items[0].qualifyingEvent", nullValue())
+        }
+    }
+
+    private fun assertOutbox(programId: UUID, expectedRows: Int) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "select event_type, status, payload from referral_outbox where aggregate_id in " +
+                    "(select id from referral_reward where program_id = ?) order by event_type",
+            ).use { statement ->
+                statement.setObject(1, programId)
+                val rows = buildList {
+                    statement.executeQuery().use { result ->
+                        while (result.next()) {
+                            add(Triple(result.getString(1), result.getString(2), result.getString(3)))
+                        }
+                    }
+                }
+                assertThat(rows).hasSize(expectedRows)
+                assertThat(rows.map { it.first }).containsExactly(
+                    "QualifiedV2",
+                    "RewardRequestedV2",
+                )
+                assertThat(rows.map { it.second }).containsOnly("PENDING")
+                assertThat(rows.map { it.third }).allMatch { it.contains("\"eventId\"") }
+                assertThat(rows.map { it.third }).allMatch {
+                    it.contains("\"schemaVersion\":2") && it.contains("\"programVersion\":1")
+                }
+                assertThat(rows.map { it.third }).allMatch {
+                    !it.contains("referrerPartyId") && !it.contains("refereePartyId")
+                }
+            }
+        }
+    }
+
+    private fun seedDraft(
+        id: UUID,
+        attributionWindowEndsAt: Instant = Instant.now().plusSeconds(86_400),
+        name: String = "it-${UUID.randomUUID()}",
+        version: Int = 1,
+    ) {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """insert into referral_program
@@ -114,12 +205,12 @@ class ReferralRestContractIT {
                 """.trimIndent(),
             ).use { statement ->
                 statement.setObject(1, id)
-                statement.setString(2, "it-${UUID.randomUUID()}")
-                statement.setInt(3, 1)
+                statement.setString(2, name)
+                statement.setInt(3, version)
                 statement.setBigDecimal(4, BigDecimal.TEN)
                 statement.setString(5, "EUR")
                 statement.setString(6, "account.opened")
-                statement.setTimestamp(7, Timestamp.from(Instant.now().plusSeconds(86_400)))
+                statement.setTimestamp(7, Timestamp.from(attributionWindowEndsAt))
                 statement.setString(8, "DRAFT")
                 statement.setString(9, "maker@openbank.test")
                 statement.setTimestamp(10, Timestamp.from(Instant.now()))

@@ -5,7 +5,6 @@ package com.openbank.referral.application
 
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.referral.application.port.out.ReferralAuditRepository
-import com.openbank.referral.application.port.out.ReferralEventPublisher
 import com.openbank.referral.application.port.out.ReferralInviteRepository
 import com.openbank.referral.application.port.out.ReferralProgramRepository
 import com.openbank.referral.application.port.out.ReferralRewardRepository
@@ -17,7 +16,6 @@ import com.openbank.referral.domain.ReferralEvent
 import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralNotFoundException
 import com.openbank.referral.domain.ReferralProgram
-import com.openbank.referral.domain.ReferralPublishOutcome
 import com.openbank.referral.domain.ReferralReward
 import com.openbank.referral.domain.ReferralValidationException
 import com.openbank.referral.domain.RewardStatus
@@ -40,7 +38,6 @@ class ReferralService(
     private val programs: ReferralProgramRepository,
     private val invites: ReferralInviteRepository,
     private val rewards: ReferralRewardRepository,
-    private val events: ReferralEventPublisher,
     private val audit: ReferralAuditRepository,
     private val clock: Clock,
 ) {
@@ -92,6 +89,26 @@ class ReferralService(
             ?: throw ReferralConflictException("program could not be published")
         audit.append("PROGRAM_PUBLISHED", id, checker, "${published.name}@${published.version}", now)
         return published
+    }
+
+    /**
+     * A Campaign may pin only a published program revision.  This deliberately exposes the
+     * immutable reference, not reward value or invite/customer data, and treats drafts/expired
+     * records exactly like a missing program so an upstream caller cannot infer unpublished work.
+     */
+    suspend fun publishedProgram(id: UUID): ReferralProgram? = programs.find(id)?.takeIf {
+        it.status == ProgramStatus.PUBLISHED && it.attributionWindowEndsAt.isAfter(Instant.now(clock))
+    }
+
+    /**
+     * Read-only Campaign catalogue. It repeats the published/expiry predicate after the repository
+     * query so a stale or alternate adapter cannot disclose a draft or expired programme.
+     */
+    suspend fun publishedPrograms(): List<ReferralProgram> {
+        val now = Instant.now(clock)
+        return programs.listPublished(now).filter {
+            it.status == ProgramStatus.PUBLISHED && it.attributionWindowEndsAt.isAfter(now)
+        }
     }
 
     // ThrowsCount: three distinct guard-clause rejections, each a different machine-readable
@@ -190,35 +207,27 @@ class ReferralService(
             requestedAt = now,
             rewardedAt = null,
         )
-        val created = rewards.create(reward)
-        publishAudited(
+        val qualified =
             ReferralEvent.Qualified(
                 eventId = Ids.randomId(),
                 occurredAt = now,
                 programId = program.id,
+                programVersion = program.version,
                 inviteId = invite.id,
-                referrerPartyId = invite.referrerPartyId,
-                refereePartyId = invite.refereePartyId,
                 qualificationEventId = eventId,
-            ),
-            created.id,
-            actor,
-            now,
-        )
-        publishAudited(
+            )
+        val requested =
             ReferralEvent.RewardRequested(
                 eventId = Ids.randomId(),
                 occurredAt = now,
                 programId = program.id,
+                programVersion = program.version,
                 inviteId = invite.id,
-                rewardReference = created.rewardReference,
-                amount = created.amount,
-                currency = created.currency,
-            ),
-            created.id,
-            actor,
-            now,
-        )
+                rewardReference = reward.rewardReference,
+                amount = reward.amount,
+                currency = reward.currency,
+            )
+        val created = rewards.create(reward, listOf(qualified, requested))
         audit.append("REWARD_REQUESTED", created.id, actor, created.rewardReference, now)
         return created
     }
@@ -226,46 +235,25 @@ class ReferralService(
     /** Contract boundary only: a future ledger adapter is the sole producer of these outcomes. */
     suspend fun applyLedgerOutcome(reference: String, outcome: LedgerOutcome, actor: String): ReferralReward {
         val reward = rewards.findByReference(reference) ?: throw ReferralNotFoundException("reward not found")
+        val program = programs.find(reward.programId) ?: throw ReferralNotFoundException("program not found")
         val now = Instant.now(clock)
         val next = when (outcome) {
             LedgerOutcome.ACCEPTED -> RewardStatus.REWARDED
             LedgerOutcome.REJECTED -> RewardStatus.RETRYABLE
             LedgerOutcome.REVERSED -> RewardStatus.REVERSED
         }
-        val updated = rewards.outcome(reference, next.name, now)
-        publishAudited(
-            ReferralEvent.RewardOutcome(
-                eventId = Ids.randomId(),
-                occurredAt = now,
-                programId = reward.programId,
-                inviteId = reward.inviteId,
-                rewardReference = reference,
-                outcome = outcome,
-            ),
-            updated.id,
-            actor,
-            now,
+        val event = ReferralEvent.RewardOutcome(
+            eventId = Ids.randomId(),
+            occurredAt = now,
+            programId = reward.programId,
+            programVersion = program.version,
+            inviteId = reward.inviteId,
+            rewardReference = reference,
+            outcome = outcome,
         )
+        val updated = rewards.outcome(reference, next.name, now, event)
         audit.append("LEDGER_${outcome.name}", updated.id, actor, reference, now)
         return updated
-    }
-
-    /**
-     * Publishes [event] and records the transport outcome in the audit trail when nothing left the
-     * process. An undelivered money-path event must be visible in the evidentiary record, not only
-     * in a log line — the caller cannot otherwise tell a dropped reward from a delivered one.
-     */
-    private suspend fun publishAudited(event: ReferralEvent, aggregateId: UUID, actor: String, at: Instant) {
-        val outcome = events.publish(event)
-        if (outcome != ReferralPublishOutcome.HANDED_TO_TRANSPORT) {
-            audit.append(
-                "EVENT_NOT_PUBLISHED",
-                aggregateId,
-                actor,
-                "type=${event.eventType} eventId=${event.eventId} outcome=${outcome.name}",
-                at,
-            )
-        }
     }
 
     private fun randomToken(): String {

@@ -131,6 +131,9 @@ spec:
               kubernetes.io/metadata.name: psd2
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: referral
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: sanctions
         - namespaceSelector:
             matchLabels:
