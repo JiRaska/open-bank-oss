@@ -10,11 +10,13 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
 import com.openbank.libs.security.Roles
+import com.openbank.libs.spend.SpendCategory
 import com.openbank.transaction.application.port.`in`.GetTransactionQuery
 import com.openbank.transaction.application.port.`in`.InitiateTransactionCommand
 import com.openbank.transaction.application.port.`in`.ListTransactionsQuery
 import com.openbank.transaction.application.port.`in`.ReverseTransactionCommand
 import com.openbank.transaction.application.port.`in`.TransactionUseCase
+import com.openbank.transaction.domain.model.CounterpartyKey
 import com.openbank.transaction.domain.model.MerchantDescriptor
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
@@ -22,6 +24,7 @@ import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
+import com.openbank.transaction.infrastructure.persistence.repository.TransactionCategoryOverrideRepository
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionSearchQuery
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
@@ -59,6 +62,7 @@ class TransactionResource(
     private val transactionUseCase: TransactionUseCase,
     private val transactionRepository: PanacheTransactionRepository,
     private val merchantCatalog: MerchantCatalogRepository,
+    private val categoryOverrides: TransactionCategoryOverrideRepository,
 ) {
 
     @GET
@@ -78,7 +82,13 @@ class TransactionResource(
         // display-only: `description` is passed through untouched, because disputes and SPAYD are
         // built from the raw acquirer descriptor and must not inherit a prettified name.
         val merchants = merchantCatalog.findByDescriptors(page.data.map { it.description })
-        return Response.ok(page.toResponse(merchants)).build()
+        // The customer's own categorisation of the counterparties on this page. One query for the
+        // page, keyed by account, so it cannot reach rows belonging to a different account.
+        val overrides = categoryOverrides.findFor(
+            accountId,
+            page.data.mapNotNull { CounterpartyKey.of(it.counterpartyName, it.description) },
+        )
+        return Response.ok(page.toResponse(merchants, overrides)).build()
     }
 
     @GET
@@ -330,6 +340,12 @@ data class TransactionResponse(
     val rail: String?,
     val instructionType: String?,
     val merchantCategory: String?,
+    // The category to SHOW. `merchantCategory` keeps its meaning — MCC-derived, a fact about the
+    // card network — and is never overwritten by a customer's opinion; consumers that need the MCC
+    // fact still read it. This field is the resolved answer, and [categorySource] says whose it is,
+    // so a client can offer "you categorised this" with a way to undo.
+    val category: String?,
+    val categorySource: String?,
     // D5 — resolved merchant identity. Absent when the acquirer descriptor is not in the
     // catalogue, which is most of them: absence is what tells the client to render the raw
     // description, and it must never be filled with a guess.
@@ -374,25 +390,46 @@ private fun MerchantCatalogEntity.toResponse() = MerchantResponse(
     },
 )
 
-private fun Transaction.toResponse(merchants: Map<String, MerchantCatalogEntity> = emptyMap()) = TransactionResponse(
-    id = id,
-    referenceNumber = referenceNumber,
-    type = type.name,
-    sourceAccountId = sourceAccountId,
-    targetAccountId = targetAccountId,
-    amount = amount.amount,
-    currencyCode = amount.currency.code,
-    status = status.name,
-    description = description,
-    valueDate = valueDate.toString(),
-    bookingDate = bookingDate.toString(),
-    initiatedAt = initiatedAt.toString(),
-    completedAt = completedAt?.toString(),
-    rail = rail?.name,
-    instructionType = instructionType?.name,
-    merchantCategory = merchantCategory,
-    merchant = MerchantDescriptor.normalise(description)?.let { merchants[it] }?.toResponse(),
-)
+private fun Transaction.toResponse(
+    merchants: Map<String, MerchantCatalogEntity> = emptyMap(),
+    overrides: Map<String, String> = emptyMap(),
+): TransactionResponse {
+    val catalogue = MerchantDescriptor.normalise(description)?.let { merchants[it] }
+    // Unknown ids are dropped rather than shown. A category retired from the shared vocabulary
+    // leaves rows behind, and echoing one back would name a category no client can render or undo.
+    val mine = CounterpartyKey.of(counterpartyName, description)
+        ?.let { overrides[it] }
+        ?.takeIf { SpendCategory.isKnown(it) }
+    val resolved = mine ?: merchantCategory ?: catalogue?.category
+    return TransactionResponse(
+        id = id,
+        referenceNumber = referenceNumber,
+        type = type.name,
+        sourceAccountId = sourceAccountId,
+        targetAccountId = targetAccountId,
+        amount = amount.amount,
+        currencyCode = amount.currency.code,
+        status = status.name,
+        description = description,
+        valueDate = valueDate.toString(),
+        bookingDate = bookingDate.toString(),
+        initiatedAt = initiatedAt.toString(),
+        completedAt = completedAt?.toString(),
+        rail = rail?.name,
+        instructionType = instructionType?.name,
+        merchantCategory = merchantCategory,
+        category = resolved,
+        categorySource = when {
+            resolved == null -> null
+            mine != null -> "CUSTOMER"
+            merchantCategory != null -> "MCC"
+            else -> "CATALOGUE"
+        },
+        merchant = catalogue?.toResponse(),
+    )
+}
 
-private fun CursorPage<Transaction>.toResponse(merchants: Map<String, MerchantCatalogEntity> = emptyMap()) =
-    CursorPage(data = data.map { it.toResponse(merchants) }, pagination = pagination)
+private fun CursorPage<Transaction>.toResponse(
+    merchants: Map<String, MerchantCatalogEntity> = emptyMap(),
+    overrides: Map<String, String> = emptyMap(),
+) = CursorPage(data = data.map { it.toResponse(merchants, overrides) }, pagination = pagination)

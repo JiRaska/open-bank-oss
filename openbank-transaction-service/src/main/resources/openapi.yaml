@@ -10,7 +10,7 @@ info:
   # Minor bump (1.11.0 -> 1.12.0): additive only — GET /approvals (the checker's queue, issue
   # #5679, mirroring sanctions' #3472) plus two additive fields on the PATCH .../approvals/{id}
   # response (makerId, createdAt). No breaking change.
-  version: 1.13.0
+  version: 1.15.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -173,6 +173,125 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TransactionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/transactions/category-overrides:
+    get:
+      tags: [Transactions]
+      summary: Every spend category the customer has set on this account
+      operationId: listCategoryOverrides
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The account's category overrides
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CategoryOverride'
+        '400':
+          description: accountId was not supplied
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/transactions/{transactionId}/category:
+    put:
+      tags: [Transactions]
+      summary: Set the customer's own category for this transaction's counterparty
+      description: >-
+        Categorises the COUNTERPARTY, not the single transaction: naming a landlord once has to
+        hold for next month's rent too. The server derives the counterparty key from the
+        transaction, using the ISO 20022 counterparty name where there is one and the card
+        acquirer descriptor otherwise — which is why this reaches spending no card was involved
+        in, unlike the merchant catalogue. The key is never accepted from the caller: a composed
+        key is a forgeable one, and its normalisation has to stay identical to the catalogue's.
+        `accountId` is required and checked against the transaction rather than inferred, because
+        an internal transfer touches two accounts and only the caller knows which statement it is
+        looking at.
+      operationId: setTransactionCategory
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category]
+              properties:
+                category:
+                  type: string
+                  description: A shared spend-category id, upper-cased by the server before validation.
+      responses:
+        '200':
+          description: The override that is now in force
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryOverride'
+        '400':
+          description: Unknown category, missing accountId, or the transaction is not on that account
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The transaction names no counterparty a category could attach to
+    delete:
+      tags: [Transactions]
+      summary: Remove the customer's category for this transaction's counterparty
+      description: >-
+        Idempotent. Removing a category that was never set is the state the caller asked for, so
+        it answers 204 rather than 404.
+      operationId: clearTransactionCategory
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: No override remains for that counterparty
+        '400':
+          description: Missing accountId, or the transaction is not on that account
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -470,6 +589,23 @@ components:
           type: string
           nullable: true
           description: MCC-derived merchant category for card spend (ADR-0103).
+        category:
+          type: string
+          nullable: true
+          description: >-
+            The category to display. Resolved as: the customer's own category for this
+            counterparty, else `merchantCategory`, else the merchant catalogue's category.
+            `merchantCategory` keeps its MCC meaning and is never overwritten by a customer's
+            choice, so a consumer that needs the card-network fact still reads that field.
+            Absent when nothing categorises the transaction.
+        categorySource:
+          type: string
+          nullable: true
+          enum: [CUSTOMER, MCC, CATALOGUE]
+          description: >-
+            Whose category `category` is. CUSTOMER means the customer set it and can undo it;
+            a client showing an undo affordance keys off this rather than guessing. Absent
+            exactly when `category` is absent.
         merchant:
           $ref: "#/components/schemas/Merchant"
           nullable: true
@@ -480,6 +616,19 @@ components:
             `description` itself is passed through byte-identical whether or not this is present,
             because disputes and SPAYD are built from the raw acquirer text.
 
+    CategoryOverride:
+      type: object
+      required: [counterpartyKey, category]
+      description: >
+        One counterparty on one account, and the category the customer put on it. `counterpartyKey`
+        is the server's normalised form of the counterparty name or acquirer descriptor — it is
+        returned so a client can show and manage the overrides, and is not accepted as input on the
+        write paths.
+      properties:
+        counterpartyKey:
+          type: string
+        category:
+          type: string
     Merchant:
       type: object
       description: >

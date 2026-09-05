@@ -234,6 +234,7 @@ private fun TransactionEntity.toDomain(): com.openbank.transaction.domain.model.
             ?.let { runCatching { com.openbank.libs.domain.payment.InstructionType.valueOf(it) }.getOrNull() },
         merchantCategory = merchantCategory,
         originatingPaymentId = originatingPaymentId,
+        counterpartyName = counterpartyName,
     )
 }
 
@@ -269,4 +270,5 @@ private fun com.openbank.transaction.domain.model.Transaction.toEntity() = Trans
     instructionType = this@toEntity.instructionType?.name
     merchantCategory = this@toEntity.merchantCategory
     originatingPaymentId = this@toEntity.originatingPaymentId
+    counterpartyName = this@toEntity.counterpartyName
 }
