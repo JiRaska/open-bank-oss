@@ -81,9 +81,21 @@ spec:
           patternType: literal
         operations: [Read]
         host: "*"
+      # kyb-events-in (ADR-0284 D6) is granted TWICE on purpose. `onboarding-service-kyb` is the
+      # group the msg-override ConfigMap will set once an image carrying the channel is deployed;
+      # `openbank-onboarding-service` is the fallback group id SmallRye uses until then
+      # (quarkus.application.name). Without the fallback grant the consumer answers
+      # GroupAuthorizationException on every poll in that window — silently, since a consumer that
+      # cannot join a group looks exactly like a topic with nothing on it.
       - resource:
           type: group
           name: onboarding-service-kyb
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-onboarding-service
           patternType: literal
         operations: [Read]
         host: "*"

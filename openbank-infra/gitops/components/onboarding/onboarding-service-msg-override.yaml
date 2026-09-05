@@ -43,6 +43,12 @@ metadata:
     app.kubernetes.io/name: onboarding-service
     app.kubernetes.io/part-of: onboarding
 data:
+  # NOT here yet: kyb-events-in. This ConfigMap is applied by Argo BEFORE auto-deploy bumps the
+  # image, so naming a channel here that the RUNNING image has no connector for is SRMSG00071 —
+  # a hard boot failure, not a degraded consumer (`msg-channel-image-parity` enforces exactly
+  # this ordering). Add the two kyb-events-in lines in a follow-up, once an image carrying the
+  # channel is deployed. Until then the channel runs on the fallback group id
+  # (quarkus.application.name), which the KafkaUser grants Read on for that reason.
   override.properties: |
     config_ordinal=500
     mp.messaging.incoming.party-events-in.group.id=onboarding-service-party
@@ -51,5 +57,3 @@ data:
     mp.messaging.incoming.kyc-events-in.auto.offset.reset=earliest
     mp.messaging.incoming.sca-events-in.group.id=onboarding-service-sca
     mp.messaging.incoming.sca-events-in.auto.offset.reset=earliest
-    mp.messaging.incoming.kyb-events-in.group.id=onboarding-service-kyb
-    mp.messaging.incoming.kyb-events-in.auto.offset.reset=earliest
