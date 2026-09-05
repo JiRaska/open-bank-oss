@@ -568,12 +568,27 @@ change_requirements:
     gate: dotted-mp-messaging-keys
     enforced: advisory
     target_enforce_date: "2026-09-30"   # ADR-0144
-    blocked_on: "16 findings fleet-wide as of 2026-08-08 (#3931), across kyc/sdd/psd2/ledger/
-      onboarding/anacredit — NOT the 1 this line claimed while carrying no date; the claim was never
-      re-measured because an advisory gate's own justification note is not itself gated. The script
-      supports --enforce, so graduating is a one-word change once the findings are cleared — and
-      the right sequencing is #3928 first: widen the ENFORCED check-kafka-dotted-keys.py to the
-      whole class and retire this advisory duplicate, rather than graduating two overlapping gates."
+    # RE-MEASURED 2026-09-05, and this note had gone stale in exactly the way it warns about.
+    # Both issues it sequences on are CLOSED (#3928, #3931), and the count is not 16:
+    # `check-dotted-mp-messaging-keys.sh --enforce` reports 171 occurrences today.
+    #
+    # 171 is not "the debt grew 10x" — the two gates count different things, which IS the point:
+    #   * kafka-dotted-key-ratchet (ENFORCED) baselines today's set as an operational decision
+    #     (#2945) and fails only on a NEW occurrence. It reports clean: 11 baselined, 0 new.
+    #   * dotted-mp-messaging-key-guard (ADVISORY, this rule) has NO baseline at all and counts
+    #     every occurrence, including the ones its enforced sibling deliberately accepted.
+    #
+    # So graduating this on 2026-09-30 would fail the build on 171 occurrences the enforced gate
+    # has already decided to keep. The previous note's recommendation — retire the advisory
+    # duplicate rather than graduate two overlapping gates — is therefore confirmed by
+    # measurement. What is NOT established here is how many of the 171 are genuine defects
+    # rather than the accepted set; that needs a ruling on the Kafka semantics and is the real
+    # work behind this date.
+    blocked_on: "graduating would fail the build on 171 occurrences (measured 2026-09-05) that the
+      ENFORCED sibling kafka-dotted-key-ratchet deliberately baselines (11 entries, 0 new, #2945);
+      this advisory gate has no baseline. #3928 and #3931, which the previous note sequenced on,
+      are both closed. The action is to retire this duplicate, not to flip it — how many of the 171
+      are genuine defects rather than the accepted set is unsettled."
     # Registered here as part of issue #2392: this gate ran advisory with no rules.yaml rule at
     # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
     # itself gated by .github/scripts/check-advisory-gate-registration.py.
