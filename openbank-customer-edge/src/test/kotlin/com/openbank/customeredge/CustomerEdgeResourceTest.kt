@@ -739,7 +739,6 @@ class CustomerEdgeResourceTest {
             "Bob Dluznik",
             "2000145399",
             "0800",
-            "CZK",
         )!!
         val node = mapper.readTree(out)
         assertThat(node.get("debtorAccountNumber").asText()).isEqualTo("19-2000145399")
@@ -768,7 +767,6 @@ class CustomerEdgeResourceTest {
                 "dn",
                 "ca",
                 "cb",
-                "CZK",
             ),
         ).isNull() // no amount
         assertThat(
@@ -781,7 +779,6 @@ class CustomerEdgeResourceTest {
                 "dn",
                 "ca",
                 "cb",
-                "CZK",
             ),
         ).isNull() // no creditorName
     }
@@ -797,7 +794,6 @@ class CustomerEdgeResourceTest {
             "dn",
             "ca",
             "cb",
-            "CZK",
         )!!.let { mapper.readTree(it).get("priority").asText() }
 
         assertThat(build("URGENT")).isEqualTo("URGENT")
@@ -992,8 +988,7 @@ class CustomerEdgeResourceTest {
         val upstream = mockk<UpstreamClient>()
         stubOwnedCzAccount(upstream, caller, acct)
 
-        val resp = paymentResourceFor(upstream, caller)
-            .createDomesticPayment(domesticBody(acct), "key-missing-sca", null)
+        val resp = paymentResourceFor(upstream, caller).createDomesticPayment(domesticBody(acct), null, null)
 
         assertThat(resp.status).isEqualTo(403)
         assertThat(resp.entity.toString()).contains("SCA_REQUIRED")
@@ -1039,7 +1034,7 @@ class CustomerEdgeResourceTest {
             Response.status(409).entity("""{"code":"VALIDATION_ERROR","message":"already consumed"}""").build()
 
         val resp = paymentResourceFor(upstream, caller)
-            .createDomesticPayment(domesticBody(acct), "key-rejected-sca", challengeId.toString())
+            .createDomesticPayment(domesticBody(acct), null, challengeId.toString())
 
         assertThat(resp.status).isEqualTo(403)
         assertThat(resp.entity.toString()).contains("SCA_REJECTED")
