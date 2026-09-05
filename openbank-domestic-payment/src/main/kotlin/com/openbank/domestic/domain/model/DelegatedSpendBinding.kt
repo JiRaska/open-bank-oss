@@ -49,7 +49,7 @@ data class DelegatedSpendReservationSnapshot(
     init {
         require(schemaVersion == SCHEMA_VERSION) { "Unsupported reservation schema version: $schemaVersion" }
         require(aggregateType == AGGREGATE_TYPE) { "Unexpected aggregateType: $aggregateType" }
-        require(sourceService == SOURCE_SERVICE) { "Unexpected sourceService: $sourceService" }
+        require(sourceService == EXPECTED_SOURCE_SERVICE) { "Unexpected sourceService: $sourceService" }
         require(resourceType == ACCOUNT_RESOURCE_TYPE) { "Domestic payment reservation must target ACCOUNT" }
         require(operationType == OPERATION_TYPE) { "Unexpected reservation operationType: $operationType" }
         require(amount > BigDecimal.ZERO) { "Reservation amount must be positive" }
@@ -106,7 +106,7 @@ data class DelegatedSpendReservationSnapshot(
         /** Producer-owned discriminator accepted by the projection; this service does not emit it. */
         const val SOURCE_EVENT_TYPE = "DelegationSpendReservationStateChanged"
         const val AGGREGATE_TYPE = "DelegationSpendReservation"
-        const val SOURCE_SERVICE = "delegation-service"
+        const val EXPECTED_SOURCE_SERVICE = "delegation-service"
         const val ACCOUNT_RESOURCE_TYPE = "ACCOUNT"
         const val OPERATION_TYPE = "DOMESTIC_PAYMENT"
         const val SCHEMA_VERSION = 1L

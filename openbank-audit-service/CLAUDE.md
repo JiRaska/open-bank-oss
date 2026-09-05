@@ -89,3 +89,13 @@
   MANUAL ack.** A missed ack stalls the partition and the audit trail stops dead — worse than the
   under-attribution being fixed. Ack explicitly, in a `finally`, and test it on the path most
   likely to skip it (an unparseable payload).
+- **`source_service` is not a stable key for `lending`, and only for `lending`.** Twenty of the
+  fleet's twenty-one producers emit their module directory name minus `openbank-` (#5256, now
+  enforced by `check-source-service-convention.py`); `openbank-lending-service` deliberately emits
+  `"lending"` while `TopicAttribution` maps `openbank.lending.events` to `"lending-service"`. Six of
+  its nine event types therefore changed spelling mid-stream when #5399 gave them their own
+  `sourceService` on 2026-08-18, and read `unknown` before #4270. Any `GROUP BY source_service`
+  splits that one producer into three aliases. The decision to keep `"lending"` rather than rename
+  and re-split is #5902; the windows, the six event types and the reconciliation query are written
+  down in `openbank-lending-service/CLAUDE.md`. Nothing to fix here — just do not read a
+  `source_service` histogram as a producer census without it.
