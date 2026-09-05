@@ -100,7 +100,16 @@ class ClearingService(
                     createdAt = now,
                     updatedAt = now,
                 )
-                batchRepo.save(emptyBatch)
+                // An empty cycle still RAN, and a consumer that receives nothing cannot tell
+                // "the cycle ran and had nothing to settle" from "the cycle did not run" -- the
+                // two states are the reason this event exists. So the batch is born SETTLED *and*
+                // announced, atomically, exactly as a populated one is.
+                //
+                // `batch.settled` only: NOT the net_settlement.post command the populated path
+                // also emits, because there is no journal to post. Emitting a zero-amount
+                // settlement command would give NetSettlementPostingConsumer work that must not
+                // happen.
+                batchRepo.saveWithEvent(emptyBatch, eventPublisher.batchSettledMessage(emptyBatch))
             } else {
                 val now = OffsetDateTime.now(clock)
                 // For GROSS settlement: every item is a debit from our participant's perspective.

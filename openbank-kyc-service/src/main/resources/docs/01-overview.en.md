@@ -4,7 +4,7 @@
 
 `openbank-kyc-service` is the **case-management system of record for Know Your Customer (KYC) / Customer Due Diligence (CDD)** in the OpenBank platform. It holds:
 
-- **KycCase aggregate** — `partyId`, case status (OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW / APPROVED / REJECTED / EXPIRED), risk level (LOW / MEDIUM / HIGH / VERY_HIGH), due-diligence level (SDD / CDD / EDD), reviewer, expiry, and a list of checks.
+- **KycCase aggregate** — `partyId`, case status (OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW / APPROVED / REJECTED / EXPIRED) (`DOCUMENTS_REQUIRED` is declared but unreachable — no `KycService` operation sets it, see #8535; kept because dropping a value from a published enum is a breaking contract narrowing, #8618), risk level (LOW / MEDIUM / HIGH / VERY_HIGH), due-diligence level (SDD / CDD / EDD), reviewer, expiry, and a list of checks.
 - **KycCheck** — the per-check result inside a case: IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA, each with a status (PENDING / PASSED / FAILED / MANUAL_REVIEW), an optional result note and provider reference.
 - **Compliance enrichment fields** (V2) — source of funds / wealth, business purpose, expected turnover, PEP self-declaration, beneficial owner, screening provider/reference, periodic next-review date and escalation metadata.
 
