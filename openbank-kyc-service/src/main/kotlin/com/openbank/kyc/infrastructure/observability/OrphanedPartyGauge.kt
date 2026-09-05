@@ -117,7 +117,7 @@ class OrphanedPartyGauge(
 
     private fun gauge(r: MeterRegistry, name: String, holder: AtomicLong) {
         Gauge.builder(name, holder) { it.get().toDouble() }
-            .tag("service", SERVICE)
+            .tag("service", METRIC_SERVICE_TAG)
             .strongReference(true)
             .register(r)
     }
@@ -173,7 +173,7 @@ class OrphanedPartyGauge(
     }
 
     private companion object {
-        const val SERVICE = "kyc"
+        const val METRIC_SERVICE_TAG = "kyc"
         const val WORKFLOW_NAME = "kyc-orphaned-party-detection"
         val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
     }
