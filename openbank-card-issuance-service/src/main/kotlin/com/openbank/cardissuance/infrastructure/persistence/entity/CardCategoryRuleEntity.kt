@@ -41,5 +41,5 @@ class CardCategoryRuleEntity : PanacheEntityBase {
     var monthlyLimitMinorUnits: Long? = null
 
     @Column(name = "updated_at", nullable = false)
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 }

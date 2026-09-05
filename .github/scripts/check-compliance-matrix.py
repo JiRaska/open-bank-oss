@@ -245,6 +245,12 @@ def main() -> int:
 
     findings, notices, rows, checked_columns = analyse()
 
+    # The Kotlin corpus every column citation is resolved against. Measured 2026-09-03: with
+    # openbank-ledger-service renamed away this gate stayed green, because a column whose
+    # reader has vanished reads the same as a column that never needed one. Emitting the count
+    # lets run-gates' min_subjects floor tell those apart.
+    gatelib.subjects(sum(1 for _ in kotlin_sources()), "Kotlin sources the citations resolve against")
+
     print(f"compliance-matrix: {rows} rows, {checked_columns} column citations checked")
     for f in findings:
         print(("::error::" if args.enforce else "::warning::") + f)

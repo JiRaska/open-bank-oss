@@ -39,6 +39,10 @@ money-path service, not adjacent.
 - Operator-facing REST endpoints: `@RolesAllowed` (ROLE_OPERATOR/ADMIN).
 - Capitalization and remittance runs are triggered internally (scheduled job), not by an external caller — no unauthenticated inbound trigger surface.
 - Calls to `ledger-service` and `transaction-service` are service-to-service (OIDC client credentials, OPA policy, four-eyes verbs per `rules.yaml`).
+- OPA enforcement is a property of the **service**, not of a manifest: `authz.enforce` defaults to
+  `${AUTHZ_ENFORCE:true}` in `application.yaml` (#3679). The `%test` profile is the single
+  documented exception — no OPA sidecar runs in the test JVM, and the interceptor fails closed
+  (503) on an unreachable PDP.
 
 ## 4. STRIDE
 
@@ -59,6 +63,41 @@ money-path service, not adjacent.
 - **Settlement ack consumer** (`WithholdingRemittanceSettlementConsumer`) trusts the Kafka topic's mTLS/ACL boundary as its authentication; no additional payload-level signature.
 
 ## 6. Change log
+
+- **2026-09-03** — Four-eyes assessment (#8359, ADR-0034 D-criteria as applied in the #938 sweep).
+  Per-verb caller audit: **`interest.create` and `interest.trigger` are now four-eyes-gated** via
+  `rules.yaml: four_eyes.actions`. `interest.create` bundles every operator write on the money path
+  (manual accrue, capitalize → real GL journals, rate-config create → shapes all future accrual
+  amounts, withholding remittance assemble → triggers the real cash leg to the finanční úřad);
+  `interest.trigger` (accrueAll) is the manual mass accrual. Both caller sets are human-only, twice
+  over: `operator-interest-write` excludes `service-account-*` and the `interest_rest_ext.rego`
+  prohibition vetoes the write set for any service account at the allow head; the fleet audit found
+  no M2M writer (agent-service's client is read-only). The accrual/capitalization schedulers and the
+  remittance settlement consumer call the use cases in-process, so the HTTP-layer gate can never
+  pause automation. **`interest.delete` (deactivateRateConfig) NOT gated:** it stops future accrual
+  — reduces money movement (standing-order pause/cancel precedent). `interest.read/list` are reads.
+  Four-eyes enforcement itself remains off fleet-wide (`authz.four-eyes.enforce`, ADR-0155) — the
+  wiring sets the decision flag, nothing pauses yet.
+
+- **2026-09-03** — `authz.enforce` now defaults to **true** in `application.yaml` (#3679). Until
+  now it read `${AUTHZ_ENFORCE:false}`, so enforcement was a property of one gitops manifest
+  rather than of the service: the deployed Rollout sets the variable to `"true"` (since #3695), so
+  the cluster was enforcing, but **any environment that does not set the variable ran this
+  money-path service in advisory mode** — a new cluster, a local run, an ad-hoc container, a
+  restored namespace. In advisory mode `AuthorizeInterceptor` evaluates every `@Authorize`
+  decision, logs the deny at WARN and lets the request through, so the failure is silent: the
+  `prohibition` on service-account writes recorded in the 2026-08-03 entry below is **inert** in
+  any such environment, and so is every other reason in the bundle. This closes that gap at the
+  source. **No new caller, endpoint, network edge or grant** — the change can only ever move a
+  request from allowed-while-denied to denied. Grantability was measured before flipping, since
+  enforcing an action that no reason grants turns it into a 403: all five gated actions
+  (`interest.create/.trigger/.delete/.read/.list`) were evaluated with `opa eval` against the
+  deployed bundle ConfigMap, each probe carrying a must-DENY and a must-ALLOW control, and every
+  one resolves `allow=true` for at least one real principal. `four_eyes_required` is false for all
+  five. Residual: an operator running this service with no OPA sidecar reachable now gets 503
+  rather than an unauthorized success — the intended fail-closed direction, but it makes a missing
+  sidecar a hard outage instead of a silent control bypass. Rollback: set `AUTHZ_ENFORCE=false` in
+  the environment, which needs no code change.
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 

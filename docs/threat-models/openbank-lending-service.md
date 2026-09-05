@@ -154,7 +154,8 @@
     environment.** The bound no-op logged at `debug` and returned `Uni<Unit>`, the Temporal
     adapter's exact success value, so nothing disagreed. Two details make this a distinct entry
     rather than a footnote to the above. First, the *worker* half is not build-time gated
-    (`lending.origination.worker.enabled`), so the deployed pod registered the timers worker and
+    (switched by `openbank.lending.worker.enabled`; named `lending.origination.worker.enabled`
+    at the time of the incident), so the deployed pod registered the timers worker and
     polled the task queue normally the whole time — every observable that a reviewer would reach
     for (worker started, queue exists, pollers healthy, no errors) was green, and the client that
     starts a workflow was simply not in the image. Second, the no-op here reports a distinct
@@ -647,3 +648,15 @@ warning that the code cannot fire would itself never fire.
   the already-stored jurisdiction/product rule document rather than credentials or deployment
   configuration. Integration tests cover both pending and active projections. Rollback: revert the
   response projection and additive OpenAPI schema fields.
+- **2026-09-04** — Issue #8364 PD/LGD calibration governance: risk parameters are now versioned
+  end-to-end. `EclInputs.modelVersion` (validated non-blank, openbank-libs-domain) is bound by
+  `ConservativeRiskParameterSource.MODEL_VERSION` and persisted on every `loan_provisioning` row
+  (new `model_version` column, Flyway V10 — additive, DEFAULT-backfilled, rollback note in the
+  migration). The threat this closes is a silent parameter edit: previously a change to the flat
+  PD/LGD constants would have altered every future provision with no record of which parameter
+  set produced which figure. Now a parameter change is inseparable from a version bump (same
+  commit, review-enforced), the bound version is logged at startup, and the calibration replay
+  harness (`openbank-simulation` `LendingEclCalibrationScenario`) quantifies the balance-sheet
+  impact of a candidate parameter set before it merges. No new endpoint, no authz change, no
+  behavior change to computed values (the defaults themselves are untouched). Rollback: revert
+  the commit; the `model_version` column is additive and unread by pre-change code.

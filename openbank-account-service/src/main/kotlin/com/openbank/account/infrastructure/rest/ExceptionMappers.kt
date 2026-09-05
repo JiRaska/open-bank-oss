@@ -4,14 +4,19 @@
 
 package com.openbank.account.infrastructure.rest
 
+import com.openbank.account.application.port.out.AccountScreeningUnavailableException
 import com.openbank.account.application.usecase.AccountNotEmptyException
 import com.openbank.account.application.usecase.AccountNotFoundException
+import com.openbank.account.application.usecase.AccountOpeningBlockedByScreeningException
 import com.openbank.account.application.usecase.AccountUpdateConflictException
+import com.openbank.account.application.usecase.AuthorizationNotFoundException
+import com.openbank.account.application.usecase.AuthorizationNotOnAccountException
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
+import org.jboss.logging.Logger
 import java.time.Instant
 import java.util.UUID
 
@@ -70,8 +75,133 @@ class AccountNotEmptyExceptionMapper : ExceptionMapper<AccountNotEmptyException>
         .build()
 }
 
+// 404 — revoking an authorization that does not exist, or that exists on a DIFFERENT account.
+//
+// Both types previously had no mapper at all, so they fell through to libs-runtime's
+// GenericExceptionMapper and every miss answered 500 INTERNAL_ERROR. Measured on the
+// authenticated-fuzz lane (#5913, run 33720692606, traceId 0466cbbc-17c8-4dee-b40a-94c5bfdcd5d9):
+//
+//     DELETE /api/v1/accounts/{accountId}/authorizations/{authorizationId}
+//     ERROR [GenericExceptionMapper] Unhandled exception:
+//       AuthorizationNotFoundException: Authorization not found: e3e70682-...
+//
+// A "not found" is the caller's fact, not a server fault. account-service is money-path, so
+// reporting it as 5xx inflates the error budget and buries real faults in the same bucket.
+//
+// A service-local @Provider on the service's own domain type is the pattern libs-runtime's
+// CommonExceptionMappers header sanctions (it names AccountNotFoundExceptionMapper as the
+// example) and the shape the three mappers above and ProposalExceptionMappers already use.
+// Issue #526 forbids the opposite case — a second mapper for a type libs-runtime ALREADY
+// registers (IllegalArgumentException / IllegalStateException / Exception), where the two
+// @Providers collide non-deterministically per request. Neither type here is one of those.
+
+/**
+ * Both mappers answer with a byte-identical body ON PURPOSE.
+ *
+ * `AuthorizationNotOnAccountException` means the id resolves to a real row owned by some other
+ * account. Echoing that — the exception's own message names both ids — would turn this endpoint
+ * into an existence oracle: an operator scoped to account A could tell "this authorization id
+ * exists somewhere" from "this id does not exist" by reading the status or the message. So the
+ * distinction stays in the log, where it is diagnosable, and never reaches the wire. Same
+ * reasoning the sibling account-access endpoint applies to an ownership mismatch.
+ */
+private const val AUTHORIZATION_NOT_FOUND_MESSAGE = "Authorization not found on this account"
+
+private fun authorizationNotFound() = Response.status(Response.Status.NOT_FOUND)
+    .entity(
+        ApiError(
+            traceId = Ids.randomId().toString(),
+            status = 404,
+            code = "AUTHORIZATION_NOT_FOUND",
+            message = AUTHORIZATION_NOT_FOUND_MESSAGE,
+            timestamp = Instant.now(),
+        ),
+    )
+    .build()
+
+@Provider
+class AuthorizationNotFoundExceptionMapper : ExceptionMapper<AuthorizationNotFoundException> {
+    override fun toResponse(exception: AuthorizationNotFoundException): Response = authorizationNotFound()
+}
+
+@Provider
+class AuthorizationNotOnAccountExceptionMapper : ExceptionMapper<AuthorizationNotOnAccountException> {
+    private val log = Logger.getLogger(AuthorizationNotOnAccountExceptionMapper::class.java)
+
+    override fun toResponse(exception: AuthorizationNotOnAccountException): Response {
+        // WARN, not silence: a caller walking authorization ids against an account they hold is
+        // the shape this 404 deliberately hides from them, and the log is the only place left
+        // where the two cases are still distinguishable.
+        log.warnf("authorization/account mismatch on revoke: %s", exception.message)
+        return authorizationNotFound()
+    }
+}
+
 // SelfApprovalNotAllowedMapper / InvalidApprovalStateMapper (403/409) moved to
 // openbank-libs-runtime's CommonExceptionMappers (issue #1394) — a service-local copy of the
 // same exact type would collide non-deterministically with the shared one (issue #526).
+
+// --- Sanctions-screening outcomes (#8512) -----------------------------------------------------
+//
+// Both screening exceptions previously extended a bare RuntimeException with no mapper, so
+// both rendered 500 INTERNAL_ERROR through GenericExceptionMapper. Neither is a server fault:
+// one is an upstream-dependency outage (the gate fails closed, ADR-0032 §C), the other a
+// well-formed request correctly refused by policy. The 500 also logged every routine refusal
+// at ERROR with a full stack trace, inflating a money-path service's error budget.
+//
+// THE TRAP THE ISSUE NAMES, and why these are dedicated mappers rather than a one-word
+// re-parenting to IllegalStateException: libs-runtime's IllegalStateExceptionMapper answers
+// 422 with `message = exception.message`, and AccountOpeningBlockedByScreeningException's
+// message carries the MATCHED SANCTIONS NAME and the partyId. Correct status, free
+// sanctions-list oracle on the wire. These bodies therefore name neither the matched name nor
+// the party; the distinguishing detail goes to WARN (no stack), where compliance already
+// reads it today.
+
+private const val SCREENING_REFUSED_MESSAGE = "Account opening refused by screening policy"
+
+@Provider
+class AccountOpeningBlockedByScreeningExceptionMapper : ExceptionMapper<AccountOpeningBlockedByScreeningException> {
+    private val log = Logger.getLogger(AccountOpeningBlockedByScreeningExceptionMapper::class.java)
+
+    override fun toResponse(exception: AccountOpeningBlockedByScreeningException): Response {
+        // The matched name stays server-side. A caller who could vary the submitted name and
+        // read back whether it matched would have a free sanctions-list oracle (#8512).
+        log.warnf("account opening blocked by screening: %s", exception.message)
+        return Response.status(UNPROCESSABLE_ENTITY)
+            .entity(
+                ApiError(
+                    traceId = Ids.randomId().toString(),
+                    status = UNPROCESSABLE_ENTITY,
+                    code = "ACCOUNT_OPENING_BLOCKED",
+                    message = SCREENING_REFUSED_MESSAGE,
+                    timestamp = Instant.now(),
+                ),
+            )
+            .build()
+    }
+}
+
+@Provider
+class AccountScreeningUnavailableExceptionMapper : ExceptionMapper<AccountScreeningUnavailableException> {
+    private val log = Logger.getLogger(AccountScreeningUnavailableExceptionMapper::class.java)
+
+    override fun toResponse(exception: AccountScreeningUnavailableException): Response {
+        // WARN, not ERROR: an upstream outage is an availability fact the caller can retry,
+        // not a defect in this service. No stack trace — the cause is a connection failure.
+        log.warnf("sanctions screening unavailable, account opening blocked: %s", exception.cause?.message)
+        return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "30")
+            .entity(
+                ApiError(
+                    traceId = Ids.randomId().toString(),
+                    status = Response.Status.SERVICE_UNAVAILABLE.statusCode,
+                    code = "SCREENING_UNAVAILABLE",
+                    message = "Sanctions screening is temporarily unavailable; retry later",
+                    timestamp = Instant.now(),
+                ),
+            )
+            .build()
+    }
+}
 
 private const val UNPROCESSABLE_ENTITY = 422

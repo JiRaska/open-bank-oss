@@ -174,6 +174,17 @@ also be deleted (nothing else in balance-service depends on it).
 
 ## 7. Change log
 
+- **2026-09-04** — Balance domain events now travel through the transactional outbox
+  (`balance_outbox` + `balance-outbox-out`) instead of a direct `@Channel("balance-events-out")`
+  emitter (#8510). The write moved into the repository layer: `HoldRepository.saveWithEvent` /
+  `releaseWithEvent`, `BalanceMovementPortImpl` and `LedgerProjectionPortImpl` persist the event
+  row in the SAME transaction as the state change, so a crash can no longer lose an event after
+  the commit nor announce a mutation that rolled back. The topic (`openbank.balance.events`), the
+  payload bytes and the consumer-visible shape are unchanged — the direct channel was removed so
+  that one topic has exactly one (atomic) writer. **No new caller, endpoint, topic or privilege**;
+  the change strengthens integrity/atomicity of an existing flow. Rollback: revert; the service
+  returns to dual-write publishing.
+
 - **2026-09-02** — Doc correction, no behavior change: §3 and the S1 residual named three controls
   by names that do not exist in the tree. (1) The `@PermitAll` regression guard was credited to
   `BalanceResourceSecurityTest`; that class is in no Kotlin source — the guard is real and is

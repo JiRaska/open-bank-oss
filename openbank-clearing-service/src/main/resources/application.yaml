@@ -47,8 +47,25 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
       verification: none
+  # Client-credentials token for the outbound ledger journal post (ADR-0281) — same service
+  # identity the inbound side authenticates.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: none
   redis:
     hosts: redis://localhost:6379
+  rest-client:
+    # ADR-0281: the net-settlement journal posts to the platform's only ledger ingestion surface.
+    ledger-service:
+      url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+      connect-timeout: 2000
+      read-timeout: 3000
   shutdown:
     timeout: 30S
   log:
@@ -121,6 +138,25 @@ mp:
         topic: openbank.clearing.batch.event
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # ADR-0281: self-consumption of the net_settlement.post command on the service's own topic
+      # (second consumer group). group.id / auto.offset.reset deliberately NOT set as YAML keys
+      # (SmallRye's dotted-key footgun, #686/#703) — group.id falls back to
+      # quarkus.application.name, auto.offset.reset stays `latest` so a fresh deploy does not
+      # replay historical commands and re-post them (harmless — the ledger idempotency key
+      # collapses a replay — but noisy).
+      clearing-net-settlement-in:
+        # #5745: rethrow only helps if the connector PARKS the record — SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel. The DLQ topic is EXPLICIT (the
+        # implicit name derives from the channel name, which repeats across services) and NESTED
+        # (a dotted leaf key is quoted by SmallRye's YAML source and never read, #686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.clearing-service.clearing-net-settlement-in
+        connector: smallrye-kafka
+        topic: openbank.clearing.batch.event
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:

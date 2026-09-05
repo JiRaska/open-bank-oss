@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -196,6 +198,89 @@ def unrecorded_service_testcontainers_resources(root: Path) -> set[str]:
     return resources
 
 
+def performance_projection_errors(deploy: str) -> list[str]:
+    """Keep performance projection delegated to the executable rerun selector."""
+    errors: list[str] = []
+    completed_pages = (
+        "actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100&page=${page}"
+    )
+    if completed_pages not in deploy:
+        errors.append("performance projection does not paginate the completed workflow-run history")
+    for workflow in ("perf-gate.yml", "perf-baseline.yml"):
+        if f"fetch_run_pages {workflow}" not in deploy:
+            errors.append(f"performance projection does not inspect completed {workflow} runs")
+    run_queries = re.findall(r"actions/workflows/[^\s\"']+/runs\?[^\s\"']+", deploy)
+    if any("status=success" in query for query in run_queries):
+        errors.append("performance projection hides failed attempts behind success-only run selection")
+
+    flow = (
+        "SELECTOR=.github/scripts/select-performance-evidence.py",
+        "fetch_artifact_pages()",
+        "actions/runs/${run_id}/artifacts?per_page=100&page=${page}",
+        'python3 "${SELECTOR}" artifact-page-size',
+        "fetch_run_pages()",
+        completed_pages,
+        'python3 "${SELECTOR}" run-page-size',
+        "fetch_run_pages perf-gate.yml",
+        'python3 "${SELECTOR}" runs "${RUN_ARGS[@]}"',
+        "while read -r candidate candidate_started_at candidate_attempt candidate_event; do",
+        "jobs?filter=latest&per_page=100",
+        'python3 "${SELECTOR}" prepare-job',
+        "actions/jobs/${candidate_prepare_job}/logs",
+        'candidate_scope_args=(--scope-log "${candidate_scope_log}")',
+        'python3 "${SELECTOR}" gate',
+        '--event "${candidate_event}"',
+        "--scope-only",
+        'if [ "${candidate_status}" -eq 3 ]; then',
+        'RUN_ID="${candidate}"',
+        'fetch_artifact_pages "${candidate}"',
+        '"${ARTIFACT_ARGS[@]}"',
+        "break",
+        "fetch_run_pages perf-baseline.yml",
+        'python3 "${SELECTOR}" runs --latest "${RUN_ARGS[@]}"',
+        'read -r BASELINE_RUN_ID BASELINE_STARTED_AT BASELINE_ATTEMPT BASELINE_EVENT <<< "${BASELINE_RUN}"',
+        'fetch_artifact_pages "${BASELINE_RUN_ID}"',
+        'python3 "${SELECTOR}" baseline',
+        '--attempt-start "${BASELINE_STARTED_AT}"',
+        '"${ARTIFACT_ARGS[@]}"',
+    )
+    cursor = 0
+    for needle in flow:
+        found = deploy.find(needle, cursor)
+        if found < 0:
+            errors.append("performance projection bypasses authoritative completed-attempt selection")
+            break
+        cursor = found + len(needle)
+    if "exit 0" in deploy.partition("fetch_run_pages perf-baseline.yml")[0]:
+        errors.append("missing performance-gate evidence can suppress independent baseline staging")
+    unknown_barrier = re.compile(
+        r'Could not prove perf-gate run \$\{candidate\} scope; refusing older evidence\."\s*\n\s*break'
+    )
+    if unknown_barrier.search(deploy) is None:
+        errors.append("unknown perf-gate scope can fall through to older green evidence")
+
+    return errors
+
+
+def performance_selector_self_test_error(selector_path: Path) -> str | None:
+    if not selector_path.is_file():
+        return "performance evidence selector is missing"
+    try:
+        result = subprocess.run(
+            [sys.executable, str(selector_path.resolve()), "--self-test"],
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"performance evidence selector self-test could not run: {exc}"
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        return f"performance evidence selector self-test failed: {detail or result.returncode}"
+    return None
+
+
 def check(root: Path) -> list[str]:
     errors: list[str] = []
     schema_file = root / "openbank-libs/governance/test-intelligence-run.schema.json"
@@ -231,6 +316,31 @@ def check(root: Path) -> list[str]:
         if (not diagnostic_url_pattern or re.fullmatch(diagnostic_url_pattern, trusted_diagnostic) is None
                 or re.fullmatch(diagnostic_url_pattern, f"{hostile_run}#artifacts") is not None):
             errors.append("run schema permits diagnostic links outside canonical GitHub run artifacts")
+        test_case = schema.get("$defs", {}).get("testCase", {})
+        test_case_properties = test_case.get("properties", {})
+        if set(test_case_properties.get("state", {}).get("enum", [])) != {"passed", "failed", "skipped"}:
+            errors.append("retry-flaky evidence changed the authoritative testcase state vocabulary")
+        retry_contract = {
+            "retryFlaky": {"const": True},
+            "failedAttemptCount": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "failedAttemptDurationMs": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        }
+        for field, expected in retry_contract.items():
+            actual = test_case_properties.get(field, {})
+            if any(actual.get(key) != value for key, value in expected.items()):
+                errors.append(f"run schema cannot represent safe optional retry-flaky metadata: {field}")
+            if field in test_case.get("required", []):
+                errors.append(f"legacy testcase envelopes now require additive retry metadata: {field}")
+        retry_fields = set(retry_contract)
+        dependencies = test_case.get("dependentRequired", {})
+        if any(set(dependencies.get(field, [])) != retry_fields - {field} for field in retry_fields):
+            errors.append("retry-flaky testcase metadata is not an all-or-nothing optional group")
+        retry_state_rule = {
+            "if": {"properties": {"retryFlaky": {"const": True}}, "required": ["retryFlaky"]},
+            "then": {"properties": {"state": {"const": "passed"}}},
+        }
+        if retry_state_rule not in test_case.get("allOf", []):
+            errors.append("run schema allows retry-flaky metadata to change a testcase verdict")
     except (OSError, json.JSONDecodeError) as exc:
         errors.append(f"run schema unavailable: {exc}")
 
@@ -419,6 +529,14 @@ def check(root: Path) -> list[str]:
         errors.append("mutation projection does not select the latest completed attempt regardless of verdict")
     if "pitest.yml/runs?branch=main&status=success" in deploy:
         errors.append("mutation projection hides failed attempts behind an older successful workflow")
+    performance_stage = deploy.partition("Stage performance evidence from latest complete k6 run")[2].partition(
+        "Collect production-readiness scorecard"
+    )[0]
+    performance_selector_path = root / ".github/scripts/select-performance-evidence.py"
+    errors.extend(performance_projection_errors(performance_stage))
+    selector_self_test_error = performance_selector_self_test_error(performance_selector_path)
+    if selector_self_test_error:
+        errors.append(selector_self_test_error)
     perf_gate = text(root / ".github/workflows/perf-gate.yml")
     perf_baseline = text(root / ".github/workflows/perf-baseline.yml")
     pinned_k6 = "ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79"
@@ -448,6 +566,9 @@ def check(root: Path) -> list[str]:
                    "--browser-report-dir", "playwright-report-${{ github.run_id }}-a${{ github.run_attempt }}"):
         if needle not in ui_workflow:
             errors.append(f"Admin UI test producer is incomplete: {needle}")
+    playwright_config = text(root / "openbank-admin-ui/playwright.config.ts")
+    if "includeRetries: true" not in playwright_config:
+        errors.append("Playwright JUnit omits intra-run retry failures from Test Intelligence evidence")
     deploy_workflow = text(root / ".github/workflows/admin-ui-deploy.yml")
     for needle in ('snapshot_count}" -lt 30', "admin-ui-deploy.yml/runs?branch=main&status=success&per_page=100", "runs/${deploy_run_id}/artifacts?per_page=100", "awk '!seen[$0]++'"):
         if needle not in deploy_workflow:
@@ -456,6 +577,12 @@ def check(root: Path) -> list[str]:
     for needle in ("def browser_diagnostics(", "def trusted_run_url(", '"mayContainSensitiveData": True', '"github-run-authenticated"'):
         if needle not in producer:
             errors.append(f"test producer loses the browser diagnostic privacy contract: {needle}")
+    for needle in ("flakyFailure", "flakyError", "rerunFailure", "rerunError", "def junit_duration_ms(",
+                   "JSON_SAFE_INTEGER_MAX", "def safe_sum_duration_ms(", "total_duration_ms",
+                   '"retryFlaky": True', '"failedAttemptCount"',
+                   '"failedAttemptDurationMs"'):
+        if needle not in producer:
+            errors.append(f"test producer loses bounded Playwright retry-flaky evidence: {needle}")
     for needle in ("const trustedRunUrl =", "const safeRun =", "diagnostics: (run.diagnostics ?? [])", "mayContainSensitiveData: item.mayContainSensitiveData"):
         if needle not in collector:
             errors.append(f"Admin projection loses browser diagnostic metadata: {needle}")
@@ -465,6 +592,22 @@ def check(root: Path) -> list[str]:
         errors.append("Admin UI has no typed Playwright diagnostic artifact")
     if "may contain sensitive browser data" not in tests_page:
         errors.append("Admin UI does not expose the diagnostic privacy warning")
+    for needle in ("function retryFlakyMetadata(item)", "function safeAddNonNegativeIntegers(left, right)",
+                   "function mergeSameRunTestCase(previous, next)", "delete merged.retryFlaky",
+                   "mergedDurationMs !== null", "const latestRunRows =", "const lastState =",
+                   "retryFlakyRows.length > 0",
+                   "failedAttemptCount", "failedAttemptDurationMs", "retryRun"):
+        if needle not in collector:
+            errors.append(f"Admin projection loses direct retry-flaky history: {needle}")
+    if "state: sameCommitTransitions > 0 ? 'flaky' : lastState === 'failed' ? 'failing'" not in collector:
+        errors.append("Admin projection loses deterministic same-commit flake and latest-run failure precedence")
+    for needle in ('status="flaky"', "failed retry attempt(s)", "retryRun"):
+        if needle not in tests_page:
+            errors.append(f"Admin UI does not render direct retry-flaky provenance: {needle}")
+    if "retryRun?:" not in types:
+        errors.append("Admin UI has no typed retry-flaky run provenance")
+    if "item.state === 'skipped' ? 'skipped' : 'stale'" in tests_page:
+        errors.append("Admin UI still mislabels an observed flaky testcase as stale evidence")
     synthetic_route = text(root / "openbank-admin-ui/src/app/api/test-intelligence/route.ts")
     freshness = text(root / "openbank-admin-ui/src/lib/test-intelligence-freshness.ts")
     for needle in ("function enforceRuntimeFreshness", "MAX_FUTURE_SKEW_MS", "observed - Date.now() > MAX_FUTURE_SKEW_MS", "runtimeFreshnessState(item.state, item.observedAt)", "staleEvidence: evidence.filter"):
@@ -645,6 +788,84 @@ def self_test() -> int:
             if not capability_register_errors(root):
                 print(f"self-test failed: {label} was accepted")
                 return 1
+        valid_performance_projection = """
+SELECTOR=.github/scripts/select-performance-evidence.py
+fetch_artifact_pages()
+actions/runs/${run_id}/artifacts?per_page=100&page=${page}
+python3 "${SELECTOR}" artifact-page-size
+fetch_run_pages()
+actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100&page=${page}
+python3 "${SELECTOR}" run-page-size
+fetch_run_pages perf-gate.yml
+python3 "${SELECTOR}" runs "${RUN_ARGS[@]}"
+while read -r candidate candidate_started_at candidate_attempt candidate_event; do
+jobs?filter=latest&per_page=100
+python3 "${SELECTOR}" prepare-job
+actions/jobs/${candidate_prepare_job}/logs
+candidate_scope_args=(--scope-log "${candidate_scope_log}")
+python3 "${SELECTOR}" gate
+--event "${candidate_event}"
+--scope-only
+if [ "${candidate_status}" -eq 3 ]; then
+echo "::warning::Could not prove perf-gate run ${candidate} scope; refusing older evidence."
+break
+RUN_ID="${candidate}"
+fetch_artifact_pages "${candidate}"
+"${ARTIFACT_ARGS[@]}"
+break
+fetch_run_pages perf-baseline.yml
+python3 "${SELECTOR}" runs --latest "${RUN_ARGS[@]}"
+read -r BASELINE_RUN_ID BASELINE_STARTED_AT BASELINE_ATTEMPT BASELINE_EVENT <<< "${BASELINE_RUN}"
+fetch_artifact_pages "${BASELINE_RUN_ID}"
+python3 "${SELECTOR}" baseline
+--attempt-start "${BASELINE_STARTED_AT}"
+"${ARTIFACT_ARGS[@]}"
+"""
+        if performance_projection_errors(valid_performance_projection):
+            print("self-test failed: valid completed performance projection was rejected")
+            return 1
+        broken_performance_projections = {
+            "success-only run selection": valid_performance_projection.replace(
+                "status=completed", "status=success"
+            ),
+            "run history under-fetches reruns": valid_performance_projection.replace(
+                "status=completed&per_page=100", "status=completed&per_page=20"
+            ),
+            "gate suppresses independent baseline": valid_performance_projection.replace(
+                "fetch_run_pages perf-baseline.yml", "exit 0\nfetch_run_pages perf-baseline.yml"
+            ),
+            "gate bypasses latest-view jobs": valid_performance_projection.replace(
+                "jobs?filter=latest&per_page=100", "jobs?per_page=100"
+            ),
+            "gate skips positive override proof": valid_performance_projection.replace(
+                'candidate_scope_args=(--scope-log "${candidate_scope_log}")', "candidate_scope_args=()"
+            ),
+            "gate drops workflow event context": valid_performance_projection.replace(
+                '--event "${candidate_event}"', ""
+            ),
+            "artifacts do not paginate": valid_performance_projection.replace(
+                "actions/runs/${run_id}/artifacts?per_page=100&page=${page}",
+                "actions/runs/${run_id}/artifacts?per_page=100",
+            ),
+            "workflow runs do not paginate": valid_performance_projection.replace(
+                "status=completed&per_page=100&page=${page}",
+                "status=completed&per_page=100",
+            ),
+            "unknown scope scans older green": valid_performance_projection.replace(
+                'Could not prove perf-gate run ${candidate} scope; refusing older evidence."\nbreak',
+                'Could not prove perf-gate run ${candidate} scope; refusing older evidence."\ncontinue',
+            ),
+        }
+        for label, candidate in broken_performance_projections.items():
+            if not performance_projection_errors(candidate):
+                print(f"self-test failed: {label} was accepted")
+                return 1
+    selector_error = performance_selector_self_test_error(
+        Path(__file__).resolve().with_name("select-performance-evidence.py")
+    )
+    if selector_error:
+        print(f"self-test failed: {selector_error}")
+        return 1
     print("test-intelligence ecosystem self-test: red path proven")
     return 0
 
