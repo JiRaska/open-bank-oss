@@ -6,7 +6,6 @@ package com.openbank.lending.infrastructure.rest
 
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.domain.model.ApplicationStateSummary
-import com.openbank.lending.domain.model.DecisionOutcomeSummary
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.domain.identifiers.LoanApplicationId
@@ -181,17 +180,10 @@ class CustomerCreditJourneyResourceTest {
 
         override fun summariseByState(): Uni<List<ApplicationStateSummary>> = Uni.createFrom().item(emptyList())
 
-        override fun findEvaluated(limit: Int): Uni<List<LoanApplication>> =
-            Uni.createFrom().item(rows.filter { it.decidedEngineAt != null }.take(limit))
-
-        override fun summariseDecisions(): Uni<List<DecisionOutcomeSummary>> = Uni.createFrom().item(emptyList())
-
         override fun update(application: LoanApplication): Uni<LoanApplication> = Uni.createFrom().item(application)
 
-        override fun compareAndSetDecision(
-            application: LoanApplication,
-            from: OriginationState,
-        ): Uni<Int> = Uni.createFrom().item(1)
+        override fun compareAndSetDecision(application: LoanApplication, from: OriginationState): Uni<Int> =
+            Uni.createFrom().item(1)
 
         override fun compareAndSetStatus(
             id: LoanApplicationId,

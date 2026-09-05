@@ -35,12 +35,6 @@ interface LoanApplicationRepository {
      */
     fun summariseByState(): Uni<List<ApplicationStateSummary>>
 
-    /** Applications the ADR-0213 engine has evaluated (`decidedEngineAt` set), newest evaluation first. */
-    fun findEvaluated(limit: Int): Uni<List<LoanApplication>>
-
-    /** Book-wide engine outcome × price-band totals, grouped in the database (credit-risk console). */
-    fun summariseDecisions(): Uni<List<DecisionOutcomeSummary>>
-
     /**
      * Blind write of the decision fields. Correct only where the caller is not deciding anything
      * from the value it is overwriting — [compareAndSetStatus] is what an origination transition
@@ -70,10 +64,7 @@ interface LoanApplicationRepository {
      * Returns rows claimed, `0` meaning another actor moved the row on first — same contract, same
      * caller obligation: no evidence event and no workflow signal on a refusal (issue #3850).
      */
-    fun compareAndSetDecision(
-        application: LoanApplication,
-        from: OriginationState,
-    ): Uni<Int>
+    fun compareAndSetDecision(application: LoanApplication, from: OriginationState): Uni<Int>
 
     fun compareAndSetStatus(
         id: LoanApplicationId,
@@ -83,6 +74,22 @@ interface LoanApplicationRepository {
         decisionReason: String?,
         decidedAt: OffsetDateTime?,
     ): Uni<Int>
+}
+
+/**
+ * The credit-risk READ side over applications the ADR-0213 engine has already decided.
+ *
+ * Separate from [LoanApplicationRepository] on purpose: that port is the origination write path
+ * (save, claim a transition, four-eyes decide) and these are reporting queries with no bearing on
+ * an application's lifecycle. Splitting them keeps a reader from acquiring the write surface as a
+ * dependency, and keeps each implementation a coherent size.
+ */
+interface CreditDecisionQueryRepository {
+    /** Applications the engine has evaluated (`decidedEngineAt` set), newest evaluation first. */
+    fun findEvaluated(limit: Int): Uni<List<LoanApplication>>
+
+    /** Book-wide engine outcome × price-band totals, grouped in the database. */
+    fun summariseDecisions(): Uni<List<DecisionOutcomeSummary>>
 }
 
 interface LoanRepository {

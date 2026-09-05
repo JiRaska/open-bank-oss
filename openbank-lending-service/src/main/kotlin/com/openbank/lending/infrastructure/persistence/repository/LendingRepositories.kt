@@ -5,6 +5,7 @@
 package com.openbank.lending.infrastructure.persistence.repository
 
 import com.openbank.lending.application.port.out.CollateralRepository
+import com.openbank.lending.application.port.out.CreditDecisionQueryRepository
 import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanRepository
@@ -81,29 +82,6 @@ class LoanApplicationRepositoryImpl @Inject constructor(
         ).resultList
     }.map { rows -> foldApplicationSummaries(rows) }
 
-    @WithSession
-    override fun findEvaluated(limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->
-        s.createQuery(
-            "FROM LoanApplicationEntity WHERE decidedEngineAt IS NOT NULL ORDER BY decidedEngineAt DESC, id ASC",
-            LoanApplicationEntity::class.java,
-        ).setMaxResults(limit).resultList
-    }.map { it.map(mapper::toDomain) }
-
-    @WithSession
-    override fun summariseDecisions(): Uni<List<DecisionOutcomeSummary>> = sf.withSession { s ->
-        s.createQuery(
-            """
-            SELECT a.decisionOutcome, a.decisionPriceBand, count(a)
-            FROM LoanApplicationEntity a
-            WHERE a.decisionOutcome IS NOT NULL
-            GROUP BY a.decisionOutcome, a.decisionPriceBand
-            """.trimIndent(),
-            Array<Any?>::class.java,
-        ).resultList
-    }.map { rows ->
-        rows.map { r -> DecisionOutcomeSummary(r[0] as String, r[1] as? String, (r[2] as Number).toLong()) }
-    }
-
     private fun mapStatusFilter(status: String): OriginationState =
         OriginationState.entries.firstOrNull { it.name == status }
             ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
@@ -175,26 +153,24 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             .executeUpdate()
     }
 
-    override fun compareAndSetDecision(
-        application: LoanApplication,
-        from: OriginationState,
-    ): Uni<Int> = sf.withTransaction { s ->
-        s.createMutationQuery(DECISION_HQL)
-            .setParameter("to", application.status)
-            .setParameter("decidedBy", application.decidedBy)
-            .setParameter("reason", application.decisionReason)
-            .setParameter("decidedAt", application.decidedAt)
-            .setParameter("outcome", application.decisionOutcome)
-            .setParameter("band", application.decisionPriceBand)
-            .setParameter("reasons", application.decisionReasons)
-            .setParameter("matched", application.decisionMatchedRules)
-            .setParameter("versions", application.policyVersions)
-            .setParameter("hash", application.decisionInputHash)
-            .setParameter("engineAt", application.decidedEngineAt)
-            .setParameter("id", application.id.value)
-            .setParameter("from", from)
-            .executeUpdate()
-    }
+    override fun compareAndSetDecision(application: LoanApplication, from: OriginationState): Uni<Int> =
+        sf.withTransaction { s ->
+            s.createMutationQuery(DECISION_HQL)
+                .setParameter("to", application.status)
+                .setParameter("decidedBy", application.decidedBy)
+                .setParameter("reason", application.decisionReason)
+                .setParameter("decidedAt", application.decidedAt)
+                .setParameter("outcome", application.decisionOutcome)
+                .setParameter("band", application.decisionPriceBand)
+                .setParameter("reasons", application.decisionReasons)
+                .setParameter("matched", application.decisionMatchedRules)
+                .setParameter("versions", application.policyVersions)
+                .setParameter("hash", application.decisionInputHash)
+                .setParameter("engineAt", application.decidedEngineAt)
+                .setParameter("id", application.id.value)
+                .setParameter("from", from)
+                .executeUpdate()
+        }
 
     private companion object {
         /**
@@ -219,6 +195,42 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             "update LoanApplicationEntity " +
                 "set status = :to, decidedBy = :decidedBy, decisionReason = :reason, decidedAt = :decidedAt " +
                 "where id = :id and status = :from"
+    }
+}
+
+/**
+ * The credit-risk read side (`CreditDecisionQueryRepository`). Its own class rather than two more
+ * methods on [LoanApplicationRepositoryImpl]: that one is the origination write path and is already
+ * at detekt's `TooManyFunctions` threshold, and a reporting query has no business sitting next to a
+ * conditional state claim.
+ */
+@ApplicationScoped
+class CreditDecisionQueryRepositoryImpl @Inject constructor(
+    private val sf: Mutiny.SessionFactory,
+    private val mapper: LendingMapper,
+) : CreditDecisionQueryRepository {
+
+    @WithSession
+    override fun findEvaluated(limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->
+        s.createQuery(
+            "FROM LoanApplicationEntity WHERE decidedEngineAt IS NOT NULL ORDER BY decidedEngineAt DESC, id ASC",
+            LoanApplicationEntity::class.java,
+        ).setMaxResults(limit).resultList
+    }.map { it.map(mapper::toDomain) }
+
+    @WithSession
+    override fun summariseDecisions(): Uni<List<DecisionOutcomeSummary>> = sf.withSession { s ->
+        s.createQuery(
+            """
+            SELECT a.decisionOutcome, a.decisionPriceBand, count(a)
+            FROM LoanApplicationEntity a
+            WHERE a.decisionOutcome IS NOT NULL
+            GROUP BY a.decisionOutcome, a.decisionPriceBand
+            """.trimIndent(),
+            Array<Any?>::class.java,
+        ).resultList
+    }.map { rows ->
+        rows.map { r -> DecisionOutcomeSummary(r[0] as String, r[1] as? String, (r[2] as Number).toLong()) }
     }
 }
 

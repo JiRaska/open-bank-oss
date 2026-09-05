@@ -4,7 +4,7 @@
 
 package com.openbank.lending.application.usecase
 
-import com.openbank.lending.application.port.out.LoanApplicationRepository
+import com.openbank.lending.application.port.out.CreditDecisionQueryRepository
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.StarterCreditPolicy
@@ -29,7 +29,7 @@ import java.util.UUID
 
 class CreditRiskInsightServiceTest {
 
-    private val applications = mockk<LoanApplicationRepository>()
+    private val applications = mockk<CreditDecisionQueryRepository>()
     private val loans = mockk<LoanRepository>()
     private val provisioning = mockk<ProvisioningRepository>()
     private val service = CreditRiskInsightService(applications, loans, provisioning, StarterCreditPolicy())

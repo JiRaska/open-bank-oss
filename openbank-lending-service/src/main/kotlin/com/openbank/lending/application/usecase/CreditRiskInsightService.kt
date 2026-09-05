@@ -5,8 +5,8 @@
 package com.openbank.lending.application.usecase
 
 import com.openbank.lending.application.port.`in`.CreditRiskInsightUseCase
+import com.openbank.lending.application.port.out.CreditDecisionQueryRepository
 import com.openbank.lending.application.port.out.CreditPolicyPort
-import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.StarterCreditPolicy
@@ -32,16 +32,16 @@ import java.time.LocalDate
  */
 @ApplicationScoped
 class CreditRiskInsightService(
-    private val applications: LoanApplicationRepository,
+    private val decisions: CreditDecisionQueryRepository,
     private val loans: LoanRepository,
     private val provisioning: ProvisioningRepository,
     private val creditPolicy: CreditPolicyPort,
 ) : CreditRiskInsightUseCase {
 
     override fun decisions(limit: Int): Uni<List<CreditDecisionView>> =
-        applications.findEvaluated(limit.coerceIn(1, MAX_LIMIT)).map { rows -> rows.map(::toView) }
+        decisions.findEvaluated(limit.coerceIn(1, MAX_LIMIT)).map { rows -> rows.map(::toView) }
 
-    override fun summariseDecisions(): Uni<List<DecisionOutcomeSummary>> = applications.summariseDecisions()
+    override fun summariseDecisions(): Uni<List<DecisionOutcomeSummary>> = decisions.summariseDecisions()
 
     override fun portfolio(limit: Int): Uni<List<LoanRiskView>> =
         loans.findRecent(limit.coerceIn(1, MAX_LIMIT)).flatMap { book ->
