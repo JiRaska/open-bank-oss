@@ -23,7 +23,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   Shield, ScanLine, AlertTriangle, ShieldAlert, AlertOctagon, ClipboardCheck,
-  ScrollText, Fingerprint, RefreshCw, ArrowRight, Scale,
+  ScrollText, Fingerprint, RefreshCw, ArrowRight, Scale, Package,
+  Network, TrendingUp, KeyRound,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -205,6 +206,82 @@ async function fetchIdentity(): Promise<Patch> {
   }
 }
 
+async function fetchSbom(): Promise<Patch> {
+  // SBOM drift = image↔GitOps shoda per money-path služba (ADR-0030 D5). 503 znamená
+  // "ještě neproskenováno" — typed unavailable, nikdy falešné OK.
+  const { ok, status, body } = await safeJson('/api/sbom/drift')
+  if (!ok) return unavailable(status === 503 ? 'not_deployed' : status === 401 || status === 403 ? 'unauthorized' : 'unreachable')
+  const services = (body as { services?: Record<string, { status: string; inSync?: boolean }> })?.services ?? {}
+  const entries = Object.values(services)
+  const checked = entries.filter(e => e.status === 'checked')
+  const outOfSync = checked.filter(e => e.inSync === false).length
+  if (checked.length === 0) return unavailable('not_deployed')
+  const ratio = checked.length ? (checked.length - outOfSync) / checked.length : 1
+  return {
+    status: outOfSync > 0 ? 'degraded' : 'ok',
+    score: Math.round(ratio * 100),
+    metricCs: `${outOfSync} mimo sync z ${checked.length} služeb`,
+    metricEn: `${outOfSync} out of sync of ${checked.length} services`,
+  }
+}
+
+// ── ADR-0279 KPI domény: čtou jeden CI-generovaný snapshot (/api/security/kpis) ──
+
+interface KpisSnapshot {
+  netpol?: { available?: boolean; coveragePct?: number; covered?: number; total?: number }
+  freshness?: { available?: boolean; fleetScore?: number; unknownModules?: number }
+  credentials?: { available?: boolean; staticSecrets?: number; withDeadline?: number; overdue?: number }
+}
+
+async function fetchKpis(): Promise<KpisSnapshot | null> {
+  const { ok, body } = await safeJson('/api/security/kpis')
+  if (!ok) return null
+  const env = body as { available?: boolean; kpis?: KpisSnapshot }
+  return env.available && env.kpis ? env.kpis : null
+}
+
+async function fetchSegmentation(): Promise<Patch> {
+  // NetworkPolicy coverage KPI (gate netpol-coverage-kpi): na CNI bez audit módu
+  // je podíl komponent se zvolenou ingress policy = postoj segmentace.
+  const snap = await fetchKpis()
+  const n = snap?.netpol
+  if (!n?.available || n.coveragePct == null) return unavailable('not_deployed')
+  return {
+    status: n.coveragePct < 100 ? 'degraded' : 'ok',
+    score: n.coveragePct,
+    metricCs: `${n.covered}/${n.total} komponent s ingress policy (${n.coveragePct} %)`,
+    metricEn: `${n.covered}/${n.total} components with ingress policy (${n.coveragePct}%)`,
+  }
+}
+
+async function fetchFreshness(): Promise<Patch> {
+  const snap = await fetchKpis()
+  const f = snap?.freshness
+  if (!f?.available || f.fleetScore == null) return unavailable('not_deployed')
+  return {
+    status: f.fleetScore < 60 ? 'degraded' : 'ok',
+    score: f.fleetScore,
+    metricCs: `fleet freshness ${f.fleetScore}/100${f.unknownModules ? ` · ${f.unknownModules} neznámých` : ''}`,
+    metricEn: `fleet freshness ${f.fleetScore}/100${f.unknownModules ? ` · ${f.unknownModules} unknown` : ''}`,
+  }
+}
+
+async function fetchCredentials(): Promise<Patch> {
+  // Long-lived credentials: skóre = podíl statických secretů s rotačním deadlinem;
+  // overdue deadline je critical, ne degraded — prošlá rotace je aktivní dluh.
+  const snap = await fetchKpis()
+  const c = snap?.credentials
+  if (!c?.available || c.staticSecrets == null) return unavailable('not_deployed')
+  const declared = c.withDeadline ?? 0
+  const score = c.staticSecrets ? Math.round((declared / c.staticSecrets) * 100) : 100
+  return {
+    status: (c.overdue ?? 0) > 0 ? 'critical' : declared < c.staticSecrets ? 'degraded' : 'ok',
+    score,
+    metricCs: `${declared}/${c.staticSecrets} statických s deadlinem${c.overdue ? ` · ${c.overdue} po lhůtě` : ''}`,
+    metricEn: `${declared}/${c.staticSecrets} static with a deadline${c.overdue ? ` · ${c.overdue} overdue` : ''}`,
+  }
+}
+
 // ── Stránka ──────────────────────────────────────────────────────────────────
 
 const DOMAIN_DEFS: Array<Omit<Domain, 'status'>> = [
@@ -232,6 +309,18 @@ const DOMAIN_DEFS: Array<Omit<Domain, 'status'>> = [
   { id: 'identity',  icon: Fingerprint,    href: '/identity-cases',
     nameCs: 'Identita & KYC', nameEn: 'Identity & KYC',
     descCs: 'Ověření identity, deduplikace stran', descEn: 'Identity verification, party dedup' },
+  { id: 'sbom',      icon: Package,        href: '/system/inventory',
+    nameCs: 'Supply chain (SBOM)', nameEn: 'Supply Chain (SBOM)',
+    descCs: 'Image↔GitOps drift, inventář komponent, CVE', descEn: 'Image↔GitOps drift, component inventory, CVEs' },
+  { id: 'segmentation', icon: Network,     href: '/security/excellence',
+    nameCs: 'Segmentace sítě', nameEn: 'Network Segmentation',
+    descCs: 'NetworkPolicy coverage KPI — podíl komponent s ingress policy', descEn: 'NetworkPolicy coverage KPI — share of components with ingress policy' },
+  { id: 'freshness', icon: TrendingUp,     href: '/security/excellence',
+    nameCs: 'Čerstvost závislostí', nameEn: 'Dependency Freshness',
+    descCs: 'Fleet skóre 0–100 z catalog pinů vs Maven Central', descEn: 'Fleet score 0–100 from catalog pins vs Maven Central' },
+  { id: 'credentials', icon: KeyRound,     href: '/security/excellence',
+    nameCs: 'Dlouhožijící credentials', nameEn: 'Long-lived Credentials',
+    descCs: 'Statické ExternalSecrets s rotačním deadlinem', descEn: 'Static ExternalSecrets carrying a rotation deadline' },
 ]
 
 export default function SecurityExcellencePage() {
@@ -246,6 +335,8 @@ export default function SecurityExcellencePage() {
     const fetchers: Record<string, () => Promise<Patch>> = {
       posture: fetchPosture, incidents: fetchIncidents, fraud: fetchFraud, aml: fetchAml,
       sanctions: fetchSanctions, approvals: fetchApprovals, audit: fetchAudit, identity: fetchIdentity,
+      sbom: fetchSbom, segmentation: fetchSegmentation, freshness: fetchFreshness,
+      credentials: fetchCredentials,
     }
     // Fan-out paralelně; každá doména se doplní jakmile odpoví (progressive render).
     await Promise.all(Object.entries(fetchers).map(async ([id, fn]) => {
@@ -378,8 +469,8 @@ export default function SecurityExcellencePage() {
 
         <p style={{ marginTop: 20, fontSize: 12, color: 'var(--text-tertiary)' }}>
           {t(
-            'Hub agreguje read-only signály nad specializovanými obrazovkami — žádná z nich není nahrazena; každá karta vede na její detail. Zdroje: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, party-service.',
-            'The hub aggregates read-only signals over the specialised screens — none of them is replaced; every card drills through to its detail. Sources: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, party-service.',
+            'Hub agreguje read-only signály nad specializovanými obrazovkami — žádná z nich není nahrazena; každá karta vede na její detail. Zdroje: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, party-service, /api/sbom/drift.',
+            'The hub aggregates read-only signals over the specialised screens — none of them is replaced; every card drills through to its detail. Sources: /api/security, /api/security/incidents, fraud-service, aml-service, /api/sanctions/approvals, /api/approvals/pending, audit-service, party-service, /api/sbom/drift.',
           )}
         </p>
       </div>
