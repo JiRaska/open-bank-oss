@@ -45,6 +45,12 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // #8352: AuditEventTime — the ONE shared copy of the rule `AuditConsumer.eventTime` applies to
+    // a payload, so this service's own test can assert what its outbox event becomes in the audit
+    // trail (EVENT vs INGEST). Restating the rule locally is what let the two withholding events
+    // ship with no event time at all: a hand-kept second copy of an agreement between modules
+    // moves with the first and keeps passing against a contract neither side honours.
+    testImplementation(project(":openbank-libs-testing"))
 
     // CI infra sweep (#578): isolated PostgreSQL + Valkey(Redis) per test JVM
     // via Testcontainers. Kafka is already in-memory in the IT (no broker).

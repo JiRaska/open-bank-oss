@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.14.0...kyc-service-v0.14.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **kyc:** publish actual case page response ([#8164](https://github.com/JiRaska/open-bank-oss/issues/8164)) ([e5c7f54](https://github.com/JiRaska/open-bank-oss/commit/e5c7f547245c08c17808ebe1820dfd724acb38a4))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.13.0...kyc-service-v0.14.0) (2026-08-24)
 
 

@@ -20,7 +20,6 @@ import com.openbank.sca.application.port.out.OtpStore
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
-import com.openbank.sca.application.port.out.ScaOutboxRepository
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.DeviceDecisionType
 import com.openbank.sca.domain.model.DynamicLinkingData
@@ -33,9 +32,7 @@ import com.openbank.sca.domain.model.SignatureAlgorithm
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
-import io.mockk.just
 import io.mockk.mockk
-import io.mockk.runs
 import io.mockk.slot
 import io.mockk.verify
 import jakarta.persistence.PersistenceException
@@ -65,7 +62,6 @@ class ScaServiceTest {
     private val enrolledDeviceRepository = mockk<EnrolledDeviceRepository>()
     private val decisionStore = mockk<ScaDecisionStore>()
     private val assertionVerifier = mockk<DeviceAssertionVerifier>()
-    private val outboxRepository = mockk<ScaOutboxRepository>(relaxed = true)
     private val objectMapper = ObjectMapper()
     private val metrics = mockk<DomainMetrics>(relaxed = true)
 
@@ -82,7 +78,6 @@ class ScaServiceTest {
             enrolledDeviceRepository = enrolledDeviceRepository,
             decisionStore = decisionStore,
             assertionVerifier = assertionVerifier,
-            outboxRepository = outboxRepository,
             objectMapper = objectMapper,
             metrics = metrics,
             idempotencyTtlSeconds = 300L,
@@ -585,22 +580,20 @@ class ScaServiceTest {
     fun `enroll saves the device credential`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { enrolledDeviceRepository.findByCredentialId("cred-1") } returns null
-        coEvery { enrolledDeviceRepository.save(any()) } answers { firstArg() }
+        coEvery { enrolledDeviceRepository.saveWithOutbox(any(), any()) } answers { firstArg() }
 
         val result = service.enroll(EnrollDeviceCommand(partyId, "cred-1", "pk", SignatureAlgorithm.ES256))
 
         assertThat(result.partyId).isEqualTo(partyId)
         assertThat(result.credentialId).isEqualTo("cred-1")
+        // ONE call, carrying BOTH the device and its event — the atomicity of that pair is
+        // what a mock cannot observe, and is pinned by ScaEnrollOutboxAtomicityIT (#8679).
         coVerify(exactly = 1) {
-            enrolledDeviceRepository.save(
+            enrolledDeviceRepository.saveWithOutbox(
                 match {
                     it.credentialId == "cred-1" &&
                         it.partyId == partyId
                 },
-            )
-        }
-        coVerify(exactly = 1) {
-            outboxRepository.save(
                 match {
                     it.eventType == "DEVICE_ENROLLED" &&
                         it.aggregateId == partyId
@@ -622,9 +615,8 @@ class ScaServiceTest {
     fun `enroll publishes eventType in the payload body, not only the outbox column`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { enrolledDeviceRepository.findByCredentialId("cred-wire") } returns null
-        coEvery { enrolledDeviceRepository.save(any()) } answers { firstArg() }
         val captured = slot<OutboxMessage>()
-        coEvery { outboxRepository.save(capture(captured)) } just runs
+        coEvery { enrolledDeviceRepository.saveWithOutbox(any(), capture(captured)) } answers { firstArg() }
 
         service.enroll(EnrollDeviceCommand(partyId, "cred-wire", "pk", SignatureAlgorithm.ES256))
 
@@ -646,9 +638,8 @@ class ScaServiceTest {
     fun `enroll publishes sourceService in the payload body for AuditConsumer attribution`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { enrolledDeviceRepository.findByCredentialId("cred-attribution") } returns null
-        coEvery { enrolledDeviceRepository.save(any()) } answers { firstArg() }
         val captured = slot<OutboxMessage>()
-        coEvery { outboxRepository.save(capture(captured)) } just runs
+        coEvery { enrolledDeviceRepository.saveWithOutbox(any(), capture(captured)) } answers { firstArg() }
 
         service.enroll(EnrollDeviceCommand(partyId, "cred-attribution", "pk", SignatureAlgorithm.ES256))
 
@@ -665,8 +656,7 @@ class ScaServiceTest {
         val result = service.enroll(EnrollDeviceCommand(partyId, "cred-dup", "pk", SignatureAlgorithm.ES256))
 
         assertThat(result).isEqualTo(existing)
-        coVerify(exactly = 0) { enrolledDeviceRepository.save(any()) }
-        coVerify(exactly = 0) { outboxRepository.save(any()) }
+        coVerify(exactly = 0) { enrolledDeviceRepository.saveWithOutbox(any(), any()) }
     }
 
     @Test
@@ -683,14 +673,14 @@ class ScaServiceTest {
                     )
                 }
             }.isInstanceOf(CredentialAlreadyEnrolledException::class.java)
-            coVerify(exactly = 0) { enrolledDeviceRepository.save(any()) }
+            coVerify(exactly = 0) { enrolledDeviceRepository.saveWithOutbox(any(), any()) }
         }
 
     @Test
     fun `enroll throws CredentialAlreadyEnrolledException on TOCTOU unique-constraint race`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { enrolledDeviceRepository.findByCredentialId("cred-race") } returns null
-        coEvery { enrolledDeviceRepository.save(any()) } throws
+        coEvery { enrolledDeviceRepository.saveWithOutbox(any(), any()) } throws
             PersistenceException("duplicate key violates unique constraint (23505)")
 
         assertThatThrownBy {
@@ -698,7 +688,10 @@ class ScaServiceTest {
                 service.enroll(EnrollDeviceCommand(partyId, "cred-race", "pk", SignatureAlgorithm.ES256))
             }
         }.isInstanceOf(CredentialAlreadyEnrolledException::class.java)
-        coVerify(exactly = 0) { outboxRepository.save(any()) }
+        // The unique violation aborts the ONE transaction that carries both legs, so the event
+        // cannot outlive the failed device insert — a property the two-transaction shape could
+        // not offer (#8679).
+        coVerify(exactly = 1) { enrolledDeviceRepository.saveWithOutbox(any(), any()) }
     }
 
     @Test

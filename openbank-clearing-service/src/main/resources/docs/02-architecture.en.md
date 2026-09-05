@@ -89,7 +89,7 @@ com.openbank.clearing/
 
 - `submit(...)` — creates a `ClearingItem` (status PENDING) with a placeholder batch id `00000000-…`; the real batch is assigned at cycle time. Annotated `@Retry(maxRetries = 3)`.
 - `triggerClearingCycle(rail)` — `@Timeout(30000)`. Loads up to 1000 pending items for the rail; if none, writes an empty SETTLED batch; otherwise creates an IN_CLEARING `ClearingBatch` (NET settlement), sums `totalDebit`, attaches all items (status IN_CLEARING).
-- `settleBatch(batchId)` — loads the batch, sets status SETTLED + `settledAt`, persists, then calls `eventPublisher.publishBatchSettled`.
+- `settleBatch(batchId)` — loads the batch, sets status SETTLED + `settledAt`, then calls `batchRepo.settleWithEvent(batch, items, message)`, which commits the batch, its items and the outbox row in ONE transaction (#8621). The publisher is used only to BUILD the message (`batchSettledMessage`), not to publish it — composing update/saveAll/publish here gave each its own transaction, so a crash after the batch committed SETTLED lost the event permanently.
 - read paths — `getBatch`, `listBatches`, `getItem`, `listItemsByBatch`, `listItemsByPayment`, `getPositions`.
 
 ## Outbox flow
@@ -113,7 +113,7 @@ sequenceDiagram
 
 **Resilience:** `publishWithResilience` is wrapped with `@Bulkhead(1)`, `@CircuitBreaker(threshold 10, ratio 0.5, delay 5s)`, `@Retry(2, delay 200, jitter 100)`, `@Timeout(3000)`. The scheduler swallows exceptions so it never crashes; failed rows are marked FAILED for retry. Outbox status lifecycle: `PENDING → SENT | FAILED`.
 
-> **Note (current state):** `ClearingEventPublisherImpl.publishBatchSettled` / `publishItemCleared` are stubs that return `voidItem()` — the production path is the transactional outbox drained by `ClearingOutboxDispatcher` to `clearing-events-out`. Direct in-line publishing is a documented stub, not the active emission path.
+> **Note (current state):** `ClearingEventPublisherImpl.publishBatchSettled` and `publishItemCleared` are NOT stubs — each writes an outbox row via `Panache.withTransaction { outboxRepo.persistInTransaction(...) }` (lines 41 and 85). The production path is the transactional outbox drained by `ClearingOutboxDispatcher` to `clearing-events-out`. Note that `publishBatchSettled` is no longer on the settle path at all — `settleWithEvent` writes the outbox row inside the batch's own transaction — and `publishItemCleared` has no production caller, so its self-opened transaction is a latent trap rather than a live defect.
 
 ## Components from `openbank-libs`
 

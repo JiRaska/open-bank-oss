@@ -1,0 +1,72 @@
+# Dependency freshness report (ADR-0279 WS3 #15) — the score Dependabot is chasing.
+#
+# Dependabot opens bump PRs every Monday; this lane answers whether we are winning:
+# a fleet freshness score from the direct pins in libs.versions.toml against Maven
+# Central, decomposed per service by catalog-alias usage in each build.gradle.kts.
+# The standing issue `Dependency freshness report` (label deps-freshness) always
+# carries the latest report as its body — one place to watch, no archaeology.
+#
+# Weekly Wednesday 08:41 UTC: after Monday's Dependabot wave and Tuesday's vex-hotfix
+# lane, so the score reflects whatever the week already fixed. Advisory by design —
+# never a PR gate (a third party having a bad day must not wedge the repo), never
+# pushes to main, so main-red-watch does not watch it.
+name: Dependency freshness
+
+on:
+  schedule:
+    - cron: "41 8 * * 3"   # weekly Wednesday 08:41 UTC
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Score only the first N catalog modules (smoke run)"
+        type: number
+        default: 0
+
+permissions:
+  contents: read
+
+jobs:
+  freshness:
+    name: dependency freshness score
+    # Public repo ⇒ hosted runners are free; no cluster access needed (FinOps: hosted-first).
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      issues: write   # create/update the standing report issue
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Script self-test (offline — proves the scoring logic can still fail)
+        run: python3 .github/scripts/deps-freshness.py --self-test
+
+      - name: Compute freshness
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/deps-freshness.py \
+            --json freshness.json --md freshness.md \
+            --limit "${{ inputs.limit || 0 }}"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deps-freshness
+          path: |
+            freshness.json
+            freshness.md
+          retention-days: 90
+
+      - name: Update the standing report issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ISSUE=$(gh issue list --label deps-freshness --state open --limit 1 --json number --jq '.[0].number' || true)
+          if [ -n "$ISSUE" ]; then
+            gh issue edit "$ISSUE" --body-file freshness.md
+            echo "updated standing issue #$ISSUE"
+          else
+            gh issue create --title "Dependency freshness report" \
+              --label deps-freshness --body-file freshness.md
+            echo "opened the standing issue"
+          fi
