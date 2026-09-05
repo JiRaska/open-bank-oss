@@ -427,6 +427,49 @@ spec:
         compression: gzip
 ---
 apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: card-processing-db
+  namespace: payments
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_card_processing
+      owner: openbank
+
+  # WAL archiving to S3 (ADR-0035). Credentials via EKS Pod Identity on the card-processing-db
+  # ServiceAccount — barman reads the SDK chain, no secret. NOTE: an archiver with no
+  # barmanObjectStore is a silent NO-OP that still reports ContinuousArchivingSuccess, so the only
+  # proof this works is listing the objects in the bucket, never reading the condition.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/card-processing-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup
 metadata:
   name: sepa-payment-db-daily
@@ -653,3 +696,16 @@ spec:
   method: barmanObjectStore
   cluster:
     name: card-issuance-db
+
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: card-processing-db-daily
+  namespace: payments
+spec:
+  schedule: "0 40 4 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: card-processing-db
