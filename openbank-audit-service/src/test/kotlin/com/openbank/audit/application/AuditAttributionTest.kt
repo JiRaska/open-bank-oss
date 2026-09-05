@@ -197,6 +197,26 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `sepa-payment's Temporal-path payload is attributed to the producer too`(): Unit = runBlocking {
+        // The sweep above fixed only the non-Temporal path (SepaPaymentEvents.kt, a serialised data
+        // class). SepaPaymentActivitiesImpl builds five payloads BY HAND onto the same topic, and
+        // they carried no `sourceService` at all — so a grep for the quoted key found the fixed
+        // half and a reader of the data class found the other, and neither probe could see the gap.
+        // This is the exact wire shape that publisher now emits (see the producer-side assertion in
+        // SepaPaymentActivitiesImplTest, which reads it off the real built payload).
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"paymentId":"${UUID.randomUUID()}","status":"PROCESSING",""" +
+                """"occurredAt":"2026-03-01T12:34:56Z","sourceService":"sepa-payment"}""",
+            EventAddress(topic = "openbank.sepa.payment.events"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("sepa-payment")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `dispute-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
         // Issue #3994/#5256's dispute-service fix: DisputeService's hand-built outbox payloads
         // (dispute.opened / dispute.resolved / dispute.remediation_requested) and
