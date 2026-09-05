@@ -247,9 +247,27 @@ change_requirements:
     # tierMax, validFrom, validTo, calculationMethod, none of which exist on the request DTO,
     # while the DTO's annualRate, dayCount, effectiveFrom/To, minBalance/maxBalance and
     # rateType are unpublished. Same shape as kyc #5895: a client generated from that document
-    # cannot call the endpoint. So the backlog behind this date is REAL and previously
-    # unmeasured, not a false-positive-rate question. The rule stays advisory until the fleet
-    # number is known from a run with the corrected path.
+    # cannot call the endpoint.
+    #
+    # FLEET NUMBER, measured the same day by building all 52 services that carry an
+    # openapi.yaml (one Gradle invocation, --continue, BUILD SUCCESSFUL in 25m14s) and running
+    # this checker over each generated document:
+    #
+    #   121 request schemas compared    122 findings    17 of 52 services affected
+    #   88 parsed-not-published (a DTO property the spec omits)
+    #   34 published-not-parsed (a spec property no DTO has -- a client sends it, it is ignored)
+    #
+    #   pid 27 · interest 21 · domestic-payment 13 · dispute 12 · standing-order 10 · sca 8 ·
+    #   consent 8 · sepa-payment 6 · clearing 6 · balance 3 · kyc 2 · then 1 each for party,
+    #   lending, document, transaction, sanctions, swift.  35 services are clean.
+    #
+    # MONEY PATH is in the published-not-parsed half, which is the half a client acts on:
+    #   CreateSepaPaymentRequest.currencyCode, .requestedExecutionDate
+    #   CreateDomesticPaymentRequest.currencyCode, .message
+    #   PlaceHoldRequest.expiresAt
+    # each declared in the spec, absent from the DTO -- sent by a generated client and silently
+    # dropped. So the backlog behind this date is REAL and was never a false-positive-rate
+    # question. 122 is the number to burn down; the rule stays advisory until it is near zero.
     #
     # So the blocker is not readiness and not a false-positive rate: flipping this to enforced
     # would graduate a check that examines nothing, and the green would then be load-bearing.
