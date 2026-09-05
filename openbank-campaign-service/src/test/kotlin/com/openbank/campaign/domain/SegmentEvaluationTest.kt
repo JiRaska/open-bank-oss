@@ -197,6 +197,21 @@ class SegmentEvaluationTest {
         assertTrue(where.contains("JSONExtractString(payload, 'partyId') != ''"), "actual: $where")
     }
 
+    /**
+     * The load-bearing property of this rule, and the one worth a test of its own.
+     *
+     * Silver keeps only the LATEST event per aggregate, and of the four account events only
+     * `AccountCreatedEvent` carries `partyId`. So an account that has ever changed status has a
+     * silver row without the link, and a silver-based subquery would omit exactly the parties with
+     * the most account activity — while a fail-closed evaluator renders that as "did not match",
+     * which is indistinguishable from a correct answer. Reading bronze is what avoids it.
+     */
+    /**
+     * An ACCOUNT row whose payload has no `partyId` must not contribute an empty string to the
+     * IN-list: `aggregate_id IN ('')` matches nothing, but it also costs nothing to exclude, and
+     * leaving it in makes the query's intent unreadable. Every account event other than
+     * `AccountCreated` produces exactly such a row.
+     */
     @Test
     fun `segment names are kebab-case`() {
         assertThrows<IllegalArgumentException> {
