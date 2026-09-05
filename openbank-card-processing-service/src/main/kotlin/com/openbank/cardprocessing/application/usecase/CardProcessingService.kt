@@ -31,6 +31,7 @@ import com.openbank.cardprocessing.domain.model.SpendWindow
 import com.openbank.cardprocessing.domain.policy.AuthorizationLifecycle
 import com.openbank.libs.domain.cards.scheme.MerchantDataPort
 import com.openbank.libs.domain.cards.scheme.MerchantDescriptor
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -175,7 +176,10 @@ class CardProcessingService(
     ): CardAuthorization {
         val now = Instant.now(clock)
         return CardAuthorization(
-            id = UUID.randomUUID(),
+            // UUIDv7 (ADR-0106): this is a durable, indexed primary key, and a time-ordered id keeps
+            // inserts local in the index instead of scattering them. `Ids.randomId()` is the other
+            // half of that contract and is for values that must NOT carry a creation time.
+            id = Ids.newId(),
             cardId = command.cardId,
             accountId = ownership.accountId,
             partyId = ownership.partyId,
@@ -331,7 +335,9 @@ class CardProcessingService(
      */
     private fun outboxMessage(aggregateId: UUID, eventType: String, event: CardProcessingEvent): OutboxMessage =
         OutboxMessage(
-            eventId = UUID.randomUUID(),
+            // eventId is left to OutboxMessage's own default, like every other service here: it is a
+            // dedup identity carried as the ce-id header, and minting it at this call site would put
+            // a second opinion about that identity in one more place.
             aggregateId = aggregateId,
             eventType = eventType,
             payload = mapper.writeValueAsString(event),

@@ -158,6 +158,45 @@ class CardIssuanceAuthorizationPactConsumerTest {
         assertThat(decision.category).isNotBlank()
     }
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun cardNotFoundPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no card exists with the unknown id")
+        .uponReceiving("GET a card id card-issuance does not know")
+        .path(UNKNOWN_CARD_PATH)
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(NOT_FOUND)
+        .toPact()
+
+    /**
+     * The negative case (ADR-0279 #3), and why it is a 404 rather than a 401.
+     *
+     * A 401 would be the stronger assertion and it is **not verifiable here**: card-issuance's
+     * provider replay runs under `@TestSecurity`, which authenticates every request in the test, so
+     * an unauthenticated interaction is answered 200 and the contract fails at replay rather than
+     * catching anything. Measured, not assumed — that expectation was written first and the
+     * provider verification reported `expected status of 401 but was 200`.
+     *
+     * A 404 is a real negative the provider genuinely produces, and it is the branch this consumer
+     * depends on: `CardIssuanceAdapter` maps 404 to `null`, which is what turns an unknown card
+     * into a clean 404 from the money path instead of an exception. If card-issuance ever answered
+     * 200 with an empty body for an unknown card, this goes red and the adapter's null branch stops
+     * being dead code.
+     */
+    @Test
+    @PactTestFor(pactMethod = "cardNotFoundPact")
+    fun `an unknown card id is refused with 404, the branch the adapter maps to null`(
+        mockServer: MockServer,
+    ) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get(UNKNOWN_CARD_PATH)
+            .then()
+            .statusCode(NOT_FOUND)
+    }
+
     /**
      * The path the client would really call, recomputed from [CardIssuanceClient]'s annotations,
      * must equal the literal this pact promises card-issuance. A `@Path` edit on the client reddens
@@ -176,6 +215,10 @@ class CardIssuanceAuthorizationPactConsumerTest {
         const val CONSUMER = "openbank-card-processing-service"
         const val PROVIDER = "openbank-card-issuance-service"
         const val OK = 200
+        const val NOT_FOUND = 404
+
+        /** A card id no provider state seeds, so the provider genuinely has nothing to return. */
+        const val UNKNOWN_CARD_ID = "3c3c3c3c-4d4d-4e4e-8f8f-9a9a9a9a9a9a"
         const val PACT_AMOUNT = 2_500
 
         /** Seeded by card-issuance's `a card held by a known party exists` state. */
@@ -186,6 +229,7 @@ class CardIssuanceAuthorizationPactConsumerTest {
         /** LITERAL, retyped from card-issuance's own resources. Never derive these. */
         const val EXPECTED_CARD_PATH = "/api/v1/cards/$PACT_CARD_ID"
         const val EXPECTED_AUTHORIZE_PATH = "/api/v1/cards/$PACT_CARD_ID/authorizations"
+        const val UNKNOWN_CARD_PATH = "/api/v1/cards/$UNKNOWN_CARD_ID"
 
         private fun derived(method: String): String {
             val base = CardIssuanceClient::class.java.getAnnotation(Path::class.java).value
