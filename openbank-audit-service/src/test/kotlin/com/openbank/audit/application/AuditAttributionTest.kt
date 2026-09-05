@@ -554,6 +554,26 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `lending-service's shared-helper event types are attributed to the producer too`(): Unit = runBlocking {
+        // #5399 swept this module's nine per-event payload builders and missed loan.withdrawn and
+        // loan.accelerated — the only two types built by a shared, parameterised helper
+        // (TerminationService.emitDomainEvent), so a reader following the per-event builders never
+        // reached them. This is that helper's wire shape (see TerminationServiceTest, which reads
+        // the key off the payload the production code actually emits).
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"loan.withdrawn","loanId":"${UUID.randomUUID()}",""" +
+                """"partyId":"${UUID.randomUUID()}","occurredAt":"2026-08-09T12:00:00Z",""" +
+                """"sourceService":"lending"}""",
+            EventAddress(topic = "openbank.lending.events"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("lending")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the producer's own claim wins over the topic, and is marked as the producer's`(): Unit = runBlocking {
         // Body-first ordering: this change can only turn a sentinel into a value. It must never
         // re-attribute a row that is already attributed, or customer-edge's 421 correct rows move.
