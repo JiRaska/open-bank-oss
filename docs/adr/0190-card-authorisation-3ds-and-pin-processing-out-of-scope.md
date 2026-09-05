@@ -1,10 +1,10 @@
 ---
 date: 2026-07-24
-decision-status: accepted
+decision-status: superseded
 delivery-status: n-a
 authors: [Jiri Raska]
 supersedes: []
-superseded-by: []
+superseded-by: [0283]
 delivery-repos: []
 tags: [architecture, payments]
 summary: "Card authorisation, 3DS/SCA and PIN processing are out of scope: the platform is a card issuer (registry, lifecycle, synthetic PANs, ADR-0113), not a processor; a real deployment adds a licensed processor behind a rail-style port."
