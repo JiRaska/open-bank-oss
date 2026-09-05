@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.50.0
+  version: 1.51.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1807,7 +1807,11 @@ paths:
           description: >-
             Caller may not debit this account — not the owner and no authorising delegation grant
             (indistinguishable from an expired grant, an over-ceiling amount, or an unknown
-            account, by design), or SCA missing/rejected.
+            account, by design), or SCA missing/rejected. A delegated payment that is inside the
+            per-transaction ceiling but over the grant's cumulative daily/monthly one answers
+            `code: DELEGATED_SPEND_LIMIT_EXCEEDED` (ADR-0249 D3) — the delegate already knows they
+            hold the grant, so naming their own limit is not an oracle; how much headroom remains
+            is deliberately not echoed.
 
   /domestic-payments/{paymentId}:
     get:
@@ -3322,10 +3326,14 @@ paths:
         owns capability validation and verifies that the grantor actually owns the resource.
 
 
-        NOT SUPPORTED: dailyLimit and monthlyLimit. Cumulative ceilings are described by ADR-0232
-        D1/D6 but no service counts spend against a grant, so a body carrying either is rejected
-        with 400 CUMULATIVE_LIMIT_UNSUPPORTED rather than stored as a cap that never applies.
-        perTransactionLimit is the only limit this platform enforces.
+        dailyLimit and monthlyLimit ARE accepted, and are required on a grant carrying
+        ACCOUNT_INITIATE_PAYMENT (ADR-0249 D5). This route used to refuse them with 400
+        CUMULATIVE_LIMIT_UNSUPPORTED on the ground that nothing counted cumulative spend; that
+        premise ended when delegation-service gained the reservation counter (ADR-0249 D3) and the
+        edge began reserving against it before each delegated payment. Keeping the refusal made a
+        payment-capable grant unconstructible — with a ceiling this route refused it and without one
+        the upstream refused it with SPEND_WITHOUT_CEILING — which also left POST /cards/delegated
+        unreachable, since it requires exactly such a grant.
       operationId: offerDelegation
       security:
         - customerOidc: [delegations:write]
@@ -3333,8 +3341,9 @@ paths:
         '201': {description: Grant offered}
         '400':
           description: >-
-            Body is not a JSON object, upstream validation failed, or the body carries
-            dailyLimit/monthlyLimit (response `code: CUMULATIVE_LIMIT_UNSUPPORTED`).
+            Body is not a JSON object, or upstream validation failed — including
+            `code: SPEND_WITHOUT_CEILING` when ACCOUNT_INITIATE_PAYMENT is asked for with no
+            cumulative ceiling.
         '403': {description: grantorPartyId is not the authenticated party, or resource not owned}
 
   /delegations/preview:
@@ -3365,8 +3374,8 @@ paths:
                 approvalPolicy: {type: string, default: SOLO}
                 requiredApprovals: {type: integer}
                 perTransactionLimit: {type: object}
-                dailyLimit: {type: object, description: Currently rejected by the customer channel}
-                monthlyLimit: {type: object, description: Currently rejected by the customer channel}
+                dailyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
+                monthlyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
                 exposure: {type: object}
                 validTo: {type: string, format: date-time}
       responses:

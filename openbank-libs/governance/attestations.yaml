@@ -46,7 +46,7 @@ ledger:
   pentest:       { date: 2026-08-18, ttl_days: 21, by: ci-zap-baseline, ref: https://github.com/JiRaska/open-bank-oss/actions/runs/32173390301 }
 
 consent:
-  pentest:       { date: 2026-07-28, ttl_days: 21, by: ci-schemathesis, ref: https://github.com/JiRaska/open-bank-oss/actions/runs/30340495749 }
+  pentest:       { date: 2026-09-03, ttl_days: 21, by: ci-schemathesis, ops: 14, ref: https://github.com/JiRaska/open-bank-oss/actions/runs/33720692606 }
 
 # --- zbytek zatím prázdný: žádná další M-dimenze není dosvědčena (a to je pravda) ---
 # Pozn. k `by:` u automatizovaných běhů — atestant je scheduled CI lane, ne člověk:

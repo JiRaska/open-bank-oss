@@ -43,6 +43,34 @@ import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
 
+/**
+ * A caller asked for an SCA method this deployment cannot deliver (#8432).
+ *
+ * Today that is only [ScaMethod.TOTP]: `initiate` generated a code and stored it, and then sent it
+ * absolutely nowhere — there is no transport for it. The challenge that came back could never be
+ * satisfied by the customer, so whatever it was authorising (a payment, a consent, a card action)
+ * simply could not proceed. Refusing the request is the honest answer; silently minting a dead
+ * challenge is not.
+ *
+ * This is NOT an authentication bypass and was never one: `ScaChallenge.fail` caps attempts, so an
+ * undelivered code could not be brute-forced within the challenge's life. It is a
+ * denial-of-authorisation path, reachable by anyone who can call `initiate`, because
+ * `preferredMethod` was taken from the request verbatim.
+ */
+class ScaMethodNotDeliverableException(method: ScaMethod) :
+    RuntimeException("SCA method $method cannot be delivered by this deployment")
+
+/**
+ * SCA methods this deployment has no transport for.
+ *
+ * `TOTP` is the whole of it. `PUSH_NOTIFICATION` and `BIOMETRIC` reach the customer's enrolled
+ * device through notification-service; there is no SMS transport in the fleet, and delivering a
+ * one-time code by push to the very device making the request is not a second factor. Adding real
+ * OTP delivery is a security decision, not a wiring job (#8432) — until it is made, the method
+ * stays refused rather than half-working.
+ */
+private val UNDELIVERABLE_METHODS = setOf(ScaMethod.TOTP)
+
 class ScaChallengeNotFoundException(id: UUID) : RuntimeException("SCA challenge not found: $id")
 class ScaChallengeExpiredException(id: UUID) : RuntimeException("SCA challenge expired: $id")
 class ScaChallengeMaxAttemptsException(id: UUID) : RuntimeException("Max attempts exceeded for challenge: $id")
@@ -118,7 +146,11 @@ class ScaService(
 
     override suspend fun initiate(command: InitiateScaCommand): ScaChallenge {
         val now = OffsetDateTime.now(clock)
+        // `preferredMethod` comes straight off the request body, so the caller — not this service —
+        // chose it. Refuse anything with no delivery path before a challenge exists, rather than
+        // saving one nobody can ever complete (#8432).
         val method = command.preferredMethod ?: ScaMethod.PUSH_NOTIFICATION
+        if (method in UNDELIVERABLE_METHODS) throw ScaMethodNotDeliverableException(method)
         val ttlSeconds = 300L
         val idempotencyKey = buildIdempotencyKey(command, method)
 

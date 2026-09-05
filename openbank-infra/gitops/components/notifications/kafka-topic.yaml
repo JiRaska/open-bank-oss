@@ -125,6 +125,27 @@ spec:
 #
 # Longer retention than the source topic, mirroring the sibling DLQs above: a dead-lettered
 # SECURITY-category notification is worth triaging, not merely replaying within a week.
+# #8432: DLQ for the consent-events-in channel. Explicit rather than SmallRye's implicit
+# `dead-letter-topic-consent-events-in`, because campaign-service consumes the same source topic
+# on a channel of the same name — left implicit the two services' dead letters would share one
+# topic and every alert over it would misattribute them.
+#
+# A CR is required, not optional: this cluster does not auto-create topics, so without it the DLQ
+# send itself fails and the consumer wedges on the failure it was meant to park.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.consent.events.notification.dlq
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:

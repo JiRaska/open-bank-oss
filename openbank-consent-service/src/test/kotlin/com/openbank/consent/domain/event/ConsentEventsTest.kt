@@ -6,6 +6,7 @@ package com.openbank.consent.domain.event
 
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.consent.domain.model.Consent
 import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.domain.model.GranteeType
 import com.openbank.consent.domain.model.SuppressionReason
@@ -140,5 +141,71 @@ class ConsentEventsTest {
         val node = objectMapper.readTree(objectMapper.writeValueAsString(event))
         assertThat(node.get("eventType").asText()).isEqualTo("SuppressionRevoked")
         assertThat(node.get("sourceService").asText()).isEqualTo("consent-service")
+    }
+
+    // ─── accountAccess (#8432) ──────────────────────────────────────────────────
+
+    private fun granted(scopes: Set<ConsentScope>) = ConsentGranted(
+        aggregateId = UUID.randomUUID(),
+        partyId = UUID.randomUUID(),
+        granteeId = "tpp-1",
+        granteeType = GranteeType.TPP,
+        scopes = scopes,
+        validTo = OffsetDateTime.parse("2026-11-16T10:00:00Z"),
+        occurredAt = now,
+    )
+
+    private fun revoked(scopes: Set<ConsentScope>) = ConsentRevoked(
+        aggregateId = UUID.randomUUID(),
+        partyId = UUID.randomUUID(),
+        granteeId = "tpp-1",
+        scopes = scopes,
+        reason = "customer request",
+        occurredAt = now,
+    )
+
+    /**
+     * The flag is a computed getter, so it can only reach the wire if Jackson serialises it. If it
+     * ever stops appearing, notification-service fails closed and silently stops telling customers
+     * a third party gained access to their accounts — a defect no consent-service test would
+     * otherwise see.
+     */
+    @Test
+    fun `accountAccess rides the wire on both events`() {
+        listOf(
+            objectMapper.readTree(objectMapper.writeValueAsString(granted(setOf(ConsentScope.ACCOUNTS_READ)))),
+            objectMapper.readTree(objectMapper.writeValueAsString(revoked(setOf(ConsentScope.ACCOUNTS_READ)))),
+        ).forEach { node ->
+            assertThat(node.has("accountAccess")).isTrue()
+            assertThat(node.get("accountAccess").isBoolean).isTrue()
+            assertThat(node.get("accountAccess").booleanValue()).isTrue()
+        }
+    }
+
+    /**
+     * Derived from `Consent.GDPR_ONLY_SCOPES` itself rather than a list repeated here: the point of
+     * computing the flag in this service is that adding a preference scope there cannot turn into a
+     * security push downstream, and a hand-copied list in the test would not prove that.
+     */
+    @Test
+    fun `every GDPR-only scope is a preference, every other scope is account access`() {
+        Consent.GDPR_ONLY_SCOPES.forEach { scope ->
+            assertThat(granted(setOf(scope)).accountAccess)
+                .describedAs("%s is a data-processing preference and must not notify", scope)
+                .isFalse()
+            assertThat(revoked(setOf(scope)).accountAccess).isFalse()
+        }
+        (ConsentScope.entries.toSet() - Consent.GDPR_ONLY_SCOPES).forEach { scope ->
+            assertThat(granted(setOf(scope)).accountAccess)
+                .describedAs("%s grants access to banking data or money and must notify", scope)
+                .isTrue()
+        }
+    }
+
+    /** A mixed set is rejected at creation (ADR-0205 D1), but if one ever formed it is access. */
+    @Test
+    fun `any non-preference scope makes the whole consent account access`() {
+        val mixed = setOf(ConsentScope.MARKETING_COMMS_EMAIL, ConsentScope.ACCOUNTS_READ)
+        assertThat(granted(mixed).accountAccess).isTrue()
     }
 }

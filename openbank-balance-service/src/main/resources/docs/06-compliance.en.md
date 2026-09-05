@@ -8,7 +8,7 @@
 | **AnaCredit** (Reg. EU 2016/867) | reporting of arranged/unarranged overdrafts | per-account `arranged_overdraft_limit`, separate field; feed into the balance-reporting service |
 | **PSD2** | balance read via TPP (AISP) | `consent-service` → `psd2-service` → balance-service GET (role `ROLE_SERVICE_PSD2`) |
 | **GDPR** | account_id is an indirect identifier | no IBAN/name/email; join to party via controlled access |
-| **DORA** | operational resilience | health probes, SLO, runbooks, BootstrapVerifier, audit events |
+| **DORA** | operational resilience | health probes, SLO, runbooks, audit events. `BootstrapVerifier` was listed here and does not exist (#8426) — secrets are held by ESO/OpenBao `secretKeyRef` injection (ADR-0007) |
 
 ## CNB / AnaCredit overdraft
 
@@ -63,6 +63,6 @@ A daily recon job (02:00 UTC) verifies `sum(balances.booked) per account == sum(
 - ✅ AuthZ: `@RolesAllowed` + per-account ownership check via `account-service`
 - ✅ Rate limiting: `libs.web.RateLimitFilter`
 - ✅ TLS: mTLS in-cluster (Istio)
-- ✅ Secrets: BootstrapVerifier
+- ⬜ Secrets: **`BootstrapVerifier` does not exist** — nothing checks for a dev placeholder at startup. Credentials arrive through `secretKeyRef` from ESO/OpenBao (ADR-0007). Configuration, not a control (#8426)
 - ✅ Audit: every state change → audit-service
 - ⚠️ Encryption-at-rest for balance amounts: not implemented (low risk — amounts are themselves non-PII)
