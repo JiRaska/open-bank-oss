@@ -422,3 +422,11 @@ set) apply equally to the new `ledger.approval.decide` action.
   translated into a financial success; an application failure remains an error span and propagates
   unchanged. Rollback: revert the instrumentation and its contract test; no stored financial data,
   schema, caller, endpoint, role, or policy changes.
+- **2026-09-05** — Input validation hardened on the FX revaluation ops trigger
+  (`POST /api/v1/ledger/fx-revaluation`): a malformed `date` is rejected as 400
+  (`IllegalArgumentException` via libs-runtime `CommonExceptionMappers`) where a raw
+  `DateTimeParseException` previously surfaced as 500; a blank date still defaults to today
+  (Europe/Prague). Found by the api-fuzz lane (#8832). No new surface, role, or data flow — same
+  endpoint, same authz (`ROLE_OPERATOR`), tighter input handling. The blank-date 500 the fuzzer saw
+  was harness-environment-only (no fx-service in the single-service lane); loud failure on a down
+  ČNB rate dependency stays by design. Risk class = **availability**. Rollback: revert the guard.
