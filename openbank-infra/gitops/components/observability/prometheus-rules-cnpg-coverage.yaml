@@ -260,6 +260,12 @@ spec:
           expr: vector(1)
           labels:
             namespace: payments
+            cluster: card-processing-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
+            namespace: payments
             cluster: clearing-db
             origin: manifest
         - record: openbank:cnpg_cluster_expected
