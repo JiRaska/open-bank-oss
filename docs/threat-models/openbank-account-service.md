@@ -96,6 +96,23 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-04** — **Inbound REST error surface on account opening**, no new route, caller, edge
+  or privilege. Two sanctions-screening outcomes rendered 500 INTERNAL_ERROR through the generic
+  mapper: an unreachable screening service (the gate fails closed, ADR-0032 §C) and a policy
+  refusal (HIT/REVIEW). They now answer 503 with `Retry-After: 30` and 422 respectively, via two
+  dedicated mappers in `ExceptionMappers.kt`; the routine policy refusal also stops logging at
+  ERROR with a full stack (WARN, no stack), so it no longer consumes this money-path service's
+  5xx error budget. **Security-relevant half — the disclosure the naive fix would have shipped:**
+  re-parenting `AccountOpeningBlockedByScreeningException` to `IllegalStateException` would have
+  fixed the status and put the matched sanctions name plus partyId into the response body
+  (libs-runtime's 422 mapper echoes `exception.message`), handing the caller a sanctions-list
+  oracle. The mapper bodies are fixed strings naming neither; a unit test asserts the matched
+  name and partyId appear nowhere in the body, and that a refusal with a match is
+  indistinguishable from one without. RBAC, OPA and the screening call itself are untouched.
+  **Risk class:** availability/observability plus disclosure hardening; no money mutation and no
+  new principal. Rollback: delete the two mappers and both types fall back to the generic 500
+  mapper. (#8512)
+
 - **2026-09-03** — **Inbound REST error surface on the authorization routes**, no new route, caller,
   edge or privilege. Revoking an authorization that does not exist answered 500 INTERNAL_ERROR; it now
   answers 404, via two service-local mappers (`AuthorizationNotFoundExceptionMapper`,
