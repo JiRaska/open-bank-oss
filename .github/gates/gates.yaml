@@ -200,7 +200,6 @@ gates:
   # it deliberately does not check REACHABILITY — a script invoked from a workflow that
   # never runs still counts as wired. Registering here is what puts them on a PR lane.
   - id: alert-rca-ledger-guards
-    budget_seconds: 15   # one script self-test run
     selftest_exempt: "is-a-test-suite — the run: IS alert-rca-ledger.py --self-test"
     name: "alert-RCA ledger guards (MTTR granularity, recurrence, observation coverage)"
     group: lint
@@ -212,7 +211,6 @@ gates:
       python3 .github/scripts/alert-rca-ledger.py --self-test
 
   - id: standing-critical-digest-guards
-    budget_seconds: 15   # one script self-test run
     selftest_exempt: "is-a-test-suite — the run: IS standing-critical-digest.py --self-test"
     name: "standing-critical digest guards (severity filter, observation envelope)"
     group: lint
@@ -1923,7 +1921,6 @@ gates:
   # 2026-08-20: a money-path prefix, an added `PUT /pulls/{n}/merge`, and a deleted bound each make
   # it exit 1; removing either half of `evaluate` makes the self-test go red.
   - id: agent-bounded-write-surface
-    budget_seconds: 20   # rules.yaml + agent charter scan
     min_subjects: 20   # the money_path_services entries the bound is checked against; 23 today
                         # (2026-08-20). A gate that resolves an empty list would pass everything,
                         # so the floor moves with the list rather than tracking it exactly.
@@ -2569,7 +2566,6 @@ gates:
   # baseline entry pins the (module, value) pair, so lending drifting to a third spelling still
   # fails. ENFORCED.
   - id: source-service-convention
-    budget_seconds: 30   # whole-fleet Kotlin scan
     name: "sourceService == module directory name (issues #5256/#5902, enforced)"
     group: kotlin
     mode: enforced
@@ -4822,7 +4818,6 @@ gates:
   # live admin actor is reported undeclared, and with its bypass_mode pinned to `always`
   # both directions report — red both ways, green only on the shipped declaration.
   - id: ruleset-bypass-actors
-    budget_seconds: 20   # one GitHub API read + compare
     name: "who may bypass main-protection is pinned, and widening it fails a PR (Refs #4828, enforced)"
     group: lint
     mode: enforced
