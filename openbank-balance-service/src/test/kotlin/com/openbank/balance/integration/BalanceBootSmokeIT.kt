@@ -16,8 +16,8 @@ import org.junit.jupiter.api.Test
 /**
  * Boot smoke test guarding the "released-but-never-booted" defect class (issue #2471).
  *
- * balance-service has Postgres (Flyway V1..V8), a Redpanda broker (balance-events-out emitter +
- * ledger-events-in / balance-init-in consumers), and OTel, so CDI wiring is non-trivial.
+ * balance-service has Postgres (Flyway V1..V8), a Redpanda broker (balance-outbox-out
+ * dispatcher + ledger-events-in / balance-init-in consumers), and OTel, so CDI wiring is non-trivial.
  * PostgresRedpandaTestResource spins up isolated containers so no shared infra is needed.
  * The two assertions mirror every other boot smoke in the fleet: readiness probe UP + service-info
  * endpoint reachable (proves the HTTP port config and openbank-libs ServiceInfoResource wiring).

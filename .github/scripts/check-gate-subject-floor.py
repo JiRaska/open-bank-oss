@@ -120,6 +120,10 @@ DEBT_MARKER = "debt — no SUBJECTS= count yet (baselined 2026-08-09, #4339)"
 DEBT = {
     "accounting-clock-gate": DEBT_MARKER,
     "admin-ui-version-sync-guard": DEBT_MARKER,
+    # Diff-scoped like its siblings api-contract-gate / db-migration-gate: the corpus is
+    # "contract test files this PR touched", which is legitimately empty on most PRs —
+    # a floor would fail every PR that touches no contract test.
+    "adversarial-contract-test": DEBT_MARKER,
     "adr-partial-followup": DEBT_MARKER,
     "adr-registry-integrity-check": DEBT_MARKER,
     "advisory-gate-registration": DEBT_MARKER,
@@ -132,6 +136,8 @@ DEBT = {
     "compliance-page-evidence": DEBT_MARKER,
     "configproperty-kotlin-defaults": DEBT_MARKER,
     "critical-alert-egress": DEBT_MARKER,
+    # Diff-scoped: the corpus is "yaml files this PR ADDS", legitimately empty on most PRs.
+    "credential-deadline-ratchet": DEBT_MARKER,
     "db-backup-association-gate": DEBT_MARKER,
     "db-migration-gate": DEBT_MARKER,
     "deploy-drift-declaration": DEBT_MARKER,
@@ -195,6 +201,9 @@ DEBT = {
     "scheduler-cron-syntax": DEBT_MARKER,
     "scheduler-liveness-adoption": DEBT_MARKER,
     "schema-compat-gate": DEBT_MARKER,
+    # Diff-scoped like adversarial-contract-test: the corpus is "files this PR touched",
+    # legitimately empty on a PR that never nears money-path.
+    "security-checklist-money-path": DEBT_MARKER,
     "service-runbook-drift": DEBT_MARKER,
     "single-replica-rollout-strategy": DEBT_MARKER,
     "slo-registry-consistency": DEBT_MARKER,

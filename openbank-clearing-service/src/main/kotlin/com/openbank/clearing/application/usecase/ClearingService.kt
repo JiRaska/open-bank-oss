@@ -148,14 +148,24 @@ class ClearingService(
                 settledAt = now,
                 updatedAt = now,
             )
-            batchRepo.update(settled).flatMap { savedBatch ->
-                // Mark all items in this batch as SETTLED so the reconciliation view is consistent.
-                itemRepo.findByBatchId(batchId).flatMap { items ->
-                    val updatedItems = items.map { it.copy(status = ClearingStatus.SETTLED) }
-                    itemRepo.saveAll(updatedItems).flatMap {
-                        eventPublisher.publishBatchSettled(savedBatch).map { savedBatch }
-                    }
-                }
+            // #8509: ONE transaction for batch + items + outbox rows, owned by the repository
+            // (settleWithEvents) — composing update/saveAll/publish here gave each its own
+            // transaction (measured xmin 750 vs 752) and could lose the settled event on a crash
+            // between commits. The boundary lives in infrastructure so this use case stays
+            // unit-testable without a Vert.x context (the sanctions `saveWithEvent` shape).
+            // ADR-0281: the net_settlement.post command commits in the SAME transaction — a
+            // SETTLED batch always has its settlement-leg intent durable; the actual journal
+            // posting is the consumer's idempotent job.
+            itemRepo.findByBatchId(batchId).flatMap { items ->
+                val updatedItems = items.map { it.copy(status = ClearingStatus.SETTLED) }
+                batchRepo.settleWithEvents(
+                    settled,
+                    updatedItems,
+                    listOf(
+                        eventPublisher.batchSettledMessage(settled),
+                        eventPublisher.netSettlementPostMessage(settled),
+                    ),
+                )
             }
         }
     }

@@ -30,6 +30,8 @@ marketing_resource := {"type": "consent", "id": "party-service:marketing-comms"}
 
 other_resource := {"type": "consent", "id": "some-other-tpp"}
 
+credit_resource := {"type": "consent", "id": "openbank"}
+
 # --- operators/admins: unrestricted, as before ---
 
 test_operator_grants_consent if {
@@ -146,6 +148,54 @@ test_edge_denied_entirely_on_grant if {
 		"principal": edge,
 		"action": "consent.grant",
 		"resource": marketing_resource,
+	}
+}
+
+# --- ADR-0269: the edge's own first-party credit-consent switch (grantee "openbank") ---
+# Found live 2026-09-03: this path had no rule at all before service-consent-m2m-credit,
+# so PUT /credit/consents always 403'd upstream and the customer's toggle never took effect.
+
+test_edge_grants_credit_consent if {
+	"service-consent-m2m-credit" in allowed_reasons with input as {
+		"principal": edge,
+		"action": "consent.grant",
+		"resource": credit_resource,
+	}
+}
+
+test_edge_revokes_credit_consent if {
+	"service-consent-m2m-credit" in allowed_reasons with input as {
+		"principal": edge,
+		"action": "consent.revoke",
+		"resource": credit_resource,
+	}
+}
+
+# The new rule must not widen the edge into a general grantor — a TPP or marketing grantee
+# through the same client identity stays denied, same as before this fix.
+test_edge_still_denied_on_other_grantee_grant if {
+	count(allowed_reasons) == 0 with input as {
+		"principal": edge,
+		"action": "consent.grant",
+		"resource": marketing_resource,
+	}
+}
+
+test_edge_still_denied_on_arbitrary_grantee_grant if {
+	count(allowed_reasons) == 0 with input as {
+		"principal": edge,
+		"action": "consent.grant",
+		"resource": other_resource,
+	}
+}
+
+# Nor does it grant the edge any OTHER credit-resource action (e.g. consent.read/list/validate) —
+# only the two actions the switch actually needs.
+test_edge_still_denied_on_credit_resource_validate if {
+	count(allowed_reasons) == 0 with input as {
+		"principal": edge,
+		"action": "consent.validate",
+		"resource": credit_resource,
 	}
 }
 
