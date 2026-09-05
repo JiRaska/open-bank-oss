@@ -103,6 +103,10 @@ export default function CardCapabilitiesPage() {
   }
 
   const sandboxCount = registry.capabilities.filter(c => sandboxReadyNetworks(c).length > 0).length
+  // A binding named after a network is a vendor adapter; `simulator` is the in-repo one.
+  const vendorBound = registry.capabilities.filter(c =>
+    c.bindings.some(b => registry.networks.some(n => n.id === b)),
+  )
   const portedCount = registry.capabilities.filter(c => c.port !== null).length
 
   return (
@@ -121,14 +125,28 @@ export default function CardCapabilitiesPage() {
       <div className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
         <p>
           <strong>This is not an integration status page.</strong> The <em>Bindings</em> column says
-          what this repository implements — today that is the in-repo simulator for every capability.
-          A network column describes what the <em>network</em> offers and whether its developer
-          sandbox is free to use, not that anything here calls it.
+          what this repository implements. A network column describes what the <em>network</em>{' '}
+          offers and whether its developer sandbox is free to use, not that anything here calls it.
         </p>
         <p className="mt-2">
+          {/* DERIVED, not asserted. This paragraph used to state that every binding was the
+              simulator, which was true when it was written and went stale the moment the first
+              vendor adapter landed — a sentence about the data, sitting next to the data, that
+              nothing kept in step with it. */}
           {portedCount} of {registry.capabilities.length} capabilities have a port; {sandboxCount}{' '}
           have at least one network with a free sandbox, which is where an adapter can be built and
-          exercised without a commercial agreement.
+          exercised without a commercial agreement.{' '}
+          {vendorBound.length > 0 ? (
+            <>
+              A vendor adapter exists for{' '}
+              <strong>{vendorBound.map(c => c.label).join(', ')}</strong>. An adapter with no
+              credential configured reports <code className="rounded bg-slate-100 px-1">NOT_BOUND</code>{' '}
+              and makes no call — which is a different fact from a network being unreachable, and
+              the two are never merged.
+            </>
+          ) : (
+            <>Every binding today is the in-repo simulator.</>
+          )}
         </p>
       </div>
 

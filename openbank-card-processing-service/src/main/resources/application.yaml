@@ -76,6 +76,26 @@ quarkus:
       connect-timeout: 3000
       read-timeout: 10000
       scope: jakarta.inject.Singleton
+    # Visa Developer Platform. mTLS is CONFIGURATION — Quarkus performs the handshake from the
+    # key-store/trust-store below, so there is no crypto in the adapter to get wrong. Both stores
+    # and the API key come from OpenBao; with none of them set the adapter reports NOT_BOUND and
+    # makes no request, which is a state rather than a failure.
+    "visa-api":
+      url: ${VISA_API_URL:https://sandbox.api.visa.com}
+      connect-timeout: 3000
+      read-timeout: 5000
+      scope: jakarta.inject.Singleton
+      key-store: ${VISA_KEYSTORE_PATH:}
+      key-store-password: ${VISA_KEYSTORE_PASSWORD:}
+      trust-store: ${VISA_TRUSTSTORE_PATH:}
+      trust-store-password: ${VISA_TRUSTSTORE_PASSWORD:}
+    # Mastercard Developers. No client-level auth config: it signs each request with OAuth 1.0a,
+    # so the Authorization header is computed per call and cannot come from a static setting.
+    "mastercard-api":
+      url: ${MASTERCARD_API_URL:https://sandbox.api.mastercard.com}
+      connect-timeout: 3000
+      read-timeout: 5000
+      scope: jakarta.inject.Singleton
     "fraud-api":
       # fraud-service is on 8133 in its own namespace. Verified against the Service object, not
       # guessed from the port table — 8110 is sca-service, and a wrong port here would make every
@@ -193,6 +213,26 @@ openbank:
     sandbox-acquirer-enabled: ${CARD_SANDBOX_ACQUIRER_ENABLED:false}
     # card-issuance does not publish a per-card currency yet; stated here rather than hidden.
     default-currency: ${CARD_DEFAULT_CURRENCY:CZK}
+    scheme:
+      # Which network answers a BIN lookup: simulator | visa | mastercard (ADR-0283 D1). This is
+      # the setting that makes "the bank chooses the network" a configuration change rather than a
+      # code change. The default is the simulator because it is the only binding that needs no
+      # commercial agreement — and a configured vendor binding that cannot answer reports its OWN
+      # failure rather than falling back here, so an unconfigured integration can never look like a
+      # working one.
+      bin-lookup: ${CARD_SCHEME_BIN_LOOKUP:simulator}
+      visa:
+        # Absent from this file on purpose, like every other credential: supplied as an environment
+        # variable from OpenBao. An empty value means this environment has no Visa credential, and
+        # the adapter says NOT_BOUND rather than pretending.
+        api-key: ${VISA_API_KEY:}
+      mastercard:
+        consumer-key: ${MASTERCARD_CONSUMER_KEY:}
+        # Base64 of a PKCS#8 RSA private key. A committed key is exactly what the gitleaks gate
+        # exists to stop; with none configured no signer bean is produced at all and the adapter
+        # reports NOT_BOUND.
+        signing-key: ${MASTERCARD_SIGNING_KEY:}
+        base-url: ${MASTERCARD_API_URL:}
 
 # OPA sidecar (ADR-0034). Advisory by default — without this block the AuthorizeInterceptor's
 # enforce=true default turns an unreachable sidecar into a 503 on every @Authorize endpoint.

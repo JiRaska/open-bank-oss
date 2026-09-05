@@ -31,6 +31,7 @@ import com.openbank.cardprocessing.domain.model.CountedSpend
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
 import com.openbank.cardprocessing.domain.model.PresentmentOutcome
 import com.openbank.cardprocessing.domain.model.SpendWindow
+import com.openbank.cardprocessing.infrastructure.scheme.SimulatedSchemeAdapter
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -66,6 +67,10 @@ class CardProcessingServiceTest {
     private val issuer = mockk<CardIssuancePolicyPort>()
     private val ledger = mockk<LedgerPostingPort>()
     private val fraud = mockk<FraudScoringPort>()
+
+    // The simulator, not a mock: the merchant lookup is a real collaborator on this path now, and a
+    // mock would let the fail-open behaviour below pass without the port ever being consulted.
+    private val merchants = SimulatedSchemeAdapter()
     private val metrics = mockk<CardProcessingMetricsPort>(relaxed = true)
     private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
 
@@ -75,6 +80,7 @@ class CardProcessingServiceTest {
         issuerPolicy = issuer,
         ledger = ledger,
         fraud = fraud,
+        merchants = merchants,
         metrics = metrics,
         mapper = mapper,
         clock = clock,

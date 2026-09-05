@@ -29,6 +29,8 @@ import com.openbank.cardprocessing.domain.model.PresentmentOutcome
 import com.openbank.cardprocessing.domain.model.PresentmentRefusal
 import com.openbank.cardprocessing.domain.model.SpendWindow
 import com.openbank.cardprocessing.domain.policy.AuthorizationLifecycle
+import com.openbank.libs.domain.cards.scheme.MerchantDataPort
+import com.openbank.libs.domain.cards.scheme.MerchantDescriptor
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -76,6 +78,7 @@ class CardProcessingService(
     private val issuerPolicy: CardIssuancePolicyPort,
     private val ledger: LedgerPostingPort,
     private val fraud: FraudScoringPort,
+    private val merchants: MerchantDataPort,
     private val metrics: CardProcessingMetricsPort,
     private val mapper: ObjectMapper,
     private val clock: Clock,
@@ -95,7 +98,7 @@ class CardProcessingService(
         }
 
         val decision = decide(command)
-        val authorization = record(command, ownership, decision)
+        val authorization = record(command, ownership, decision, resolveMerchantName(command))
         val saved = repository.save(
             authorization,
             outboxMessage(authorization.id, eventTypeFor(authorization), eventFor(authorization)),
@@ -140,10 +143,35 @@ class CardProcessingService(
         counted = counted,
     )
 
+    /**
+     * Asks the configured card network what the acquirer's descriptor actually names (ADR-0283 D1).
+     *
+     * **Fails open, on purpose.** A merchant name is what the customer reads on a statement, not a
+     * control: if the network cannot answer, the raw descriptor is kept and the authorisation
+     * proceeds unchanged. The opposite choice would let a third-party lookup decline a card
+     * transaction, which is the reverse of the issuer call's fail-CLOSED and for the reverse reason
+     * — that one authorises, this one only labels.
+     *
+     * Nothing is called when the acquirer sent no descriptor: there is nothing to resolve, and a
+     * lookup on an empty string is a request that can only fail.
+     */
+    private suspend fun resolveMerchantName(command: AuthorizationCommand): String? {
+        val descriptor = command.merchantName?.takeIf { it.isNotBlank() } ?: return null
+        val resolved = merchants.identify(
+            MerchantDescriptor(
+                descriptor = descriptor,
+                mcc = command.mcc,
+                countryCode = command.merchantCountry,
+            ),
+        )
+        return resolved.valueOrNull()?.name ?: descriptor
+    }
+
     private fun record(
         command: AuthorizationCommand,
         ownership: CardOwnership,
         decision: IssuerDecision,
+        merchantName: String?,
     ): CardAuthorization {
         val now = Instant.now(clock)
         return CardAuthorization(
@@ -155,7 +183,7 @@ class CardProcessingService(
             currencyCode = command.currencyCode.uppercase(),
             channel = command.channel,
             mcc = command.mcc,
-            merchantName = command.merchantName,
+            merchantName = merchantName,
             merchantCountry = command.merchantCountry,
             status = if (decision.approved) AuthorizationStatus.APPROVED else AuthorizationStatus.DECLINED,
             category = decision.category,
