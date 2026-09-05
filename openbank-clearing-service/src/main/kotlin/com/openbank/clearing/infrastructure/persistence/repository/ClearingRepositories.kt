@@ -41,6 +41,17 @@ class ClearingBatchRepositoryImpl @Inject constructor(
     }
         .flatMap { findById(batch.id).map { it!! } }
 
+    /**
+     * Insert a batch and its outbox message in one transaction — the born-SETTLED empty cycle.
+     * `settleWithEvent(s)` cannot serve it: both `s.find` the batch first and fail with
+     * "Batch not found", since they exist to move an EXISTING batch to SETTLED.
+     */
+    override fun saveWithEvent(batch: ClearingBatch, event: OutboxMessage): Uni<ClearingBatch> =
+        sf.withTransaction { s ->
+            s.persist(mapper.toEntity(batch).also { it.id = batch.id })
+                .flatMap { outboxRepo.persistInTransaction(event) }
+        }.flatMap { findById(batch.id).map { it!! } }
+
     @WithSession
     override fun findById(id: UUID): Uni<ClearingBatch?> =
         sf.withSession { s -> s.find(ClearingBatchEntity::class.java, id) }.map { it?.let(mapper::toDomain) }
