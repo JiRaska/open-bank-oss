@@ -1,0 +1,120 @@
+# Shared vocabulary: is a `gh` / GitHub-API failure TRANSIENT, or is it a real answer?
+#
+# WHY THIS FILE EXISTS
+#   Three implementations of this one question drifted independently:
+#     .github/scripts/gh-retry.sh          `_gh_retry_classify` (ERE, 3-way)
+#     .github/scripts/spot-kill-retry.sh   `is_transient`       (case globs, 2-way)  [#8459 removes this one]
+#     .github/scripts/check-ruleset-context-parity.py  `is_transient` (substrings, 2-way)
+#   Measured over a 31-message corpus (the [cases] section below), the three AGREED on 23
+#   and disagreed on 8. Each of them missed 5 genuinely transient messages, and the missed
+#   SETS were different — no two shared a blind spot except one, which all three missed:
+#
+#     message                                             gh-retry  spot-kill  parity.py
+#     abuse detection mechanism / try again later         MISS      MISS       MISS
+#     dial tcp: lookup api.github.com: no such host       MISS      ok         MISS
+#     could not resolve host: api.github.com              MISS      MISS       ok
+#     connect: network is unreachable                     MISS      MISS       ok
+#     connect: connection refused                         ok        MISS       ok
+#     read: connection reset by peer                      ok        ok         MISS
+#     HTTP 503            (bare, no parentheses)          ok        ok         MISS
+#     gh: Too Many Requests (HTTP 429)                    MISS      ok         ok
+#     error connecting to api.github.com                  ok        MISS       MISS
+#
+#   None of the eight is endpoint-specific. Every one is a transport or quota failure that
+#   looks identical whether the call was `repos/.../rulesets`, `runs/.../jobs` or `run rerun`
+#   — which is why the "the Python one classifies ruleset errors, the shell one classifies
+#   job errors" reading does not survive the measurement, and why the sets are merged here
+#   rather than documented as a deliberate divergence.
+#
+#   What the measurement also found, and what this file must not lose: ALL THREE scored zero
+#   over-retries. Not one of the 11 terminal messages (404, 422, 401, `Resource not
+#   accessible by integration`, `Must have admin rights`) was classified transient by any
+#   implementation. That property is the load-bearing one — for `check-ruleset-context-parity.py`
+#   a widened transient set means a permission denial degrades to UNRESOLVED and the gate goes
+#   GREEN about a misconfiguration of itself — so the [cases] section carries all 11 as
+#   must-stay-FINAL negatives, and both readers assert them in their own self-test.
+#
+# FORMAT
+#   `[section]` headers; one POSIX ERE per line; `#` comments and blank lines ignored.
+#   Patterns are matched CASE-INSENSITIVELY against the failing command's stderr.
+#   Keep to the ERE subset Python's `re` also accepts — alternation, character classes, `.`,
+#   `?`, `*`, grouping. No `\b`, no `\d`, no lookaround: `grep -E` does not have them.
+#
+#   [rate_limit]  a quota answer. `gh-retry.sh` waits for the limit to RESET rather than
+#                 backing off exponentially — a 3x tight retry cannot clear a window measured
+#                 in minutes (#6853). Boolean readers treat it as transient.
+#   [transient]   a transport or server-side failure. Exponential backoff + jitter.
+#   [cases]       the falsification corpus: `<TRANSIENT|FINAL><TAB><message>`. Anything
+#                 matching no pattern in either section is FINAL — retrying a real answer is
+#                 how a deterministic red becomes a flaky-looking one.
+#
+# KNOWN LIMIT, deliberately not fixed here
+#   `timeout` is matched as a bare substring, so `Validation Failed: "timeout" is not a valid
+#   field (HTTP 422)` classifies TRANSIENT. All three implementations have always done this.
+#   Fixing it needs a status-code-aware classifier that still keeps `API rate limit exceeded
+#   (HTTP 403)` transient, i.e. a terminal-status rule that rate-limit patterns outrank — a
+#   different change, with its own inversion risk. It is recorded here so the next reader
+#   does not rediscover it as a surprise.
+
+[rate_limit]
+rate.?limit
+secondary rate
+was submitted too quickly
+abuse detection
+too many requests
+http 429
+
+[transient]
+http 5[0-9][0-9]
+bad gateway
+service unavailable
+gateway timeout
+server error
+connection (reset|refused|timed ?out|timeout)
+error connecting
+could not resolve host
+no such host
+network is unreachable
+tls handshake
+context deadline exceeded
+i/o timeout
+broken pipe
+timed ?out
+timeout
+(^|[^a-z0-9])eof([^a-z0-9]|$)
+
+[cases]
+TRANSIENT	gh: API rate limit exceeded for installation ID 12345. (HTTP 403)
+TRANSIENT	You have exceeded a secondary rate limit and have been temporarily blocked from content creation. Please retry your request again later. (HTTP 403)
+TRANSIENT	You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)
+TRANSIENT	gh: You have triggered an abuse detection mechanism. Please wait a few minutes before you try again. (HTTP 403)
+TRANSIENT	dial tcp 140.82.121.5:443: connect: connection refused
+TRANSIENT	dial tcp: lookup api.github.com: no such host
+TRANSIENT	Get "https://api.github.com/repos/o/r/rulesets": could not resolve host: api.github.com
+TRANSIENT	dial tcp 140.82.121.5:443: connect: network is unreachable
+TRANSIENT	read tcp 10.1.2.3:44444->140.82.121.5:443: read: connection reset by peer
+TRANSIENT	Post "https://api.github.com/graphql": net/http: TLS handshake timeout
+TRANSIENT	Post "https://api.github.com/graphql": EOF
+TRANSIENT	unexpected EOF
+TRANSIENT	gh: Bad gateway (HTTP 502)
+TRANSIENT	HTTP 502 Bad Gateway
+TRANSIENT	HTTP 503
+TRANSIENT	gh: Service unavailable (HTTP 503)
+TRANSIENT	gh: Server Error (HTTP 500)
+TRANSIENT	gh: Too Many Requests (HTTP 429)
+TRANSIENT	error connecting to api.github.com
+TRANSIENT	Get "https://api.github.com/rate_limit": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+TRANSIENT	gh: Gateway Timeout (HTTP 504)
+FINAL	gh: Resource not accessible by integration (HTTP 403)
+FINAL	gh: Must have admin rights to Repository. (HTTP 403)
+FINAL	gh: Not Found (HTTP 404)
+FINAL	HTTP 404 Not Found
+FINAL	gh: Validation Failed (HTTP 422)
+FINAL	gh: Bad credentials (HTTP 401)
+FINAL	gh: This API operation needs the "repo" scope. (HTTP 403)
+FINAL	gh: Requires authentication (HTTP 401)
+FINAL	No commit found for the ref deadbeefcafe (HTTP 404)
+FINAL	Could not resolve to a Repository with the name 'o/r'.
+FINAL	gh: You must verify your email address (HTTP 403)
+FINAL	gh: Reference does not exist (HTTP 422)
+FINAL	branch feofix already has a pull request (HTTP 422)

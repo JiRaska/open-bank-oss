@@ -29,14 +29,14 @@ import org.junit.jupiter.api.extension.ExtendWith
  * (git-pact, ADR-0063) and replayed by `PartyEventPactProviderVerificationTest` in
  * openbank-party-service — the single `@Provider("openbank-party-service")` class in the repo.
  *
- * Why hop 2 and not hop 1: see `AccountHolderNameLookupAdapter`. Both hops are real HTTP, but
+ * Why hop 2 first: see `AccountHolderNameLookupAdapter`. Both hops are real HTTP, but
  * party-service is where the *answer* comes from — a renamed or dropped `legalName`/`tradingName`
  * turns every verification into NO_DATA while every unit test stays green (the port is mocked
- * there). Hop 1 (account-service `GET /api/v1/accounts/iban/{iban}`) is deliberately NOT pinned in
- * this PR: account-service's only `@Provider` class is message-only (`MessageTestTarget`, no
- * Quarkus boot) and its own KDoc records that an HTTP consumer contract would first need it
- * converted to party-service's per-interaction target dispatch. That conversion is provider-side
- * work on a money-path service, not a vop test change.
+ * there). Hop 1 (account-service `GET /api/v1/accounts/iban/{iban}`) was left unpinned at the time
+ * because account-service's only `@Provider` class was message-only (`MessageTestTarget`, no
+ * Quarkus boot), so an HTTP interaction had nowhere to be replayed. That is no longer the case —
+ * `AccountPactFolderProviderVerificationTest` boots Quarkus and dispatches per interaction — and
+ * hop 1 is now pinned by [AccountIbanLookupPactConsumerTest] (#8345).
  *
  * **The expected path is a LITERAL; only the outgoing request is reflected off the client's
  * `@Path`** (CLAUDE.md "Contract tests", measured on #2290). Deriving *both* sides is vacuous: the
@@ -100,6 +100,30 @@ class PartyNameLookupPactConsumerTest {
         val summary = mapper.readValue<PartySummary>(raw)
         assertThat(summary.legalName).isNotBlank()
         assertThat(summary.tradingName).isNotBlank()
+    }
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun rejectsWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a party exists with both a legal name and a trading name")
+        .uponReceiving("GET the party whose name VoP compares against, with no caller identity")
+        .path(EXPECTED_PARTY_PATH)
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "rejectsWithMissingToken")
+    fun `rejects the party lookup with 401 when the caller has no valid identity`(mockServer: MockServer) {
+        assertClientPathMatchesContract()
+
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get(clientDerivedPartyPath())
+            .then()
+            .statusCode(401)
     }
 
     /**

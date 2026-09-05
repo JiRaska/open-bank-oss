@@ -16,17 +16,25 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Self-test the digest and RCA-ledger scripts
+        run: |
+          python3 .github/scripts/standing-critical-digest.py --self-test
+          python3 .github/scripts/alert-rca-ledger.py --self-test
       - name: Render standing-critical digest
         env:
           ALERTMANAGER_URL: ${{ secrets.ALERTMANAGER_URL }}
           ALERTMANAGER_DIGEST_TOKEN: ${{ secrets.ALERTMANAGER_DIGEST_TOKEN }}
           DIGEST_OUTPUT: standing-critical-digest.md
+          # Observation envelope consumed by alert-rca-weekly.yml (ADR-0241 D3).
+          DIGEST_ALERTS_OUTPUT: alert-observation.json
         run: python3 .github/scripts/standing-critical-digest.py
       - name: Upload digest and RCA review artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: standing-critical-digest-${{ github.run_id }}
-          path: standing-critical-digest.md
+          path: |
+            standing-critical-digest.md
+            alert-observation.json
           retention-days: 90
       - name: Publish to on-call Slack
         env:
@@ -40,11 +48,11 @@ jobs:
           with urllib.request.urlopen(request, timeout=20) as response:
               if response.status >= 300: raise SystemExit(f'Slack returned HTTP {response.status}')
           PY
-      - name: Open weekly RCA review issue when criticals stand
+      - name: Open standing-critical chase issue when criticals stand
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if grep -q 'Open criticals: \*\*[1-9]' standing-critical-digest.md; then
-            gh issue create --title "Weekly critical-alert RCA review (${{ github.run_id }})" \
+            gh issue create --title "Standing critical alerts ${{ github.run_id }}" \
               --body-file standing-critical-digest.md
           fi

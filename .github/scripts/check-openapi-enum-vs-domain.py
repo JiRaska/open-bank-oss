@@ -111,8 +111,6 @@ BASELINE: dict[str, str] = {
         "attribution query filters `channel in (PUSH, BANNER)`, so EMAIL is unreturnable.",
     "openbank-campaign-service:DRY_RUN,SENT,SUPPRESSED_CAP,SUPPRESSED_CONSENT,SUPPRESSED_QUIET_HOURS":
         "#5962 — SendOutcome: undeclared CONVERTED/FAILED/SKIPPED_CONDITION/SUPPRESSED_LIST",
-    "openbank-consent-service:ACTIVE,EXPIRED,PENDING,REJECTED,REVOKED":
-        "#5962 — ConsentStatus: spec-only PENDING; undeclared PENDING_SCA/SUPERSEDED",
     "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
         "#5962 — ActionKind: undeclared FX_CONVERSION",
     # MIS-PAIRINGS, surfaced when the scan began including openbank-libs-* (#7984): three
@@ -180,16 +178,12 @@ BASELINE: dict[str, str] = {
     "openbank-pid-service:EXPIRED,PENDING,REJECTED,VERIFIED":
         "#5962 — UpdateKycRequest.kycStatus: the property does not exist; needs a schema fix, "
         "not an enum fix. The `Status` pairing is coincidental.",
-    "openbank-sanctions-service:CNB_DOMESTIC,EU_CONSOLIDATED,FATF_HIGH_RISK,HM_TREASURY,OFAC_SDN,UN_CONSOLIDATED":
-        "#5962 — SanctionsListType: undeclared PEP_GLOBAL",
     "openbank-sepa-payment:COMPLETED,PROCESSING,RECALLED,REJECTED":
         "#5962 — SepaPaymentStatus: spec-only RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
     "openbank-sepa-payment:COMPLETED,PENDING,PROCESSING,RECALLED,REJECTED":
         "#5962 — SepaPaymentStatus: spec-only PENDING/RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
         "#5962 — CloseFailureReason: undeclared NOT_VIABLE",
-    "openbank-swift-service:ACKNOWLEDGED,FAILED,PENDING,REJECTED,SENT,VALIDATED":
-        "#5962 — SwiftStatus: undeclared COMPLETED",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")
