@@ -71,6 +71,15 @@ interface CompaniesHouseRestClient {
         @HeaderParam("Authorization") authorization: String,
         @QueryParam("items_per_page") itemsPerPage: Int,
     ): JsonNode
+
+    /** The Register of People with Significant Control — the UK's beneficial-ownership register. */
+    @GET
+    @Path("/company/{number}/persons-with-significant-control")
+    suspend fun personsWithSignificantControl(
+        @PathParam("number") number: String,
+        @HeaderParam("Authorization") authorization: String,
+        @QueryParam("items_per_page") itemsPerPage: Int,
+    ): JsonNode
 }
 
 /**

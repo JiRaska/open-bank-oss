@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyc-service
     app.kubernetes.io/part-of: kyc
   annotations:
-    openbank.tech/policy-checksum: "2abbba5c4abe5c4f"
+    openbank.tech/policy-checksum: "168aa38df2e6a313"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1489,6 +1489,7 @@ data:
             - kyb.case.reject
             - kyb.case.review.resolve
             - kyb.lookup
+            - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
             - lending.approve
             - lending.collateralDecide
             - lending.collateralRegister
@@ -1571,6 +1572,7 @@ data:
             - kyb.case.read
             - kyb.case.reject
             - kyb.case.review.resolve
+            - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
         ROLE_AUDITOR:
           grant:
             - audit.read
