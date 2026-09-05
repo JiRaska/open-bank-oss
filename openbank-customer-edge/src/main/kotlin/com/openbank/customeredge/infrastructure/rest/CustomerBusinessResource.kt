@@ -57,7 +57,12 @@ class CustomerBusinessResource(
     @Path("/schemes")
     @Blocking
     fun schemes(@QueryParam("country") country: String?): Response {
-        val q = country?.takeIf { it.isNotBlank() }?.let { "?country=${enc(it)}" }.orEmpty()
+        // ISO 3166-1 alpha-2 or nothing. Same reasoning as the invitation token below.
+        val filter = country?.takeIf { it.isNotBlank() }
+        require(filter == null || COUNTRY.matches(filter)) {
+            "country must be an ISO 3166-1 alpha-2 code"
+        }
+        val q = filter?.let { "?country=${enc(it)}" }.orEmpty()
         return upstream.get("$kybServiceUrl$UPSTREAM/schemes$q", human().toString())
     }
 
@@ -132,6 +137,14 @@ class CustomerBusinessResource(
     @Blocking
     fun claim(@PathParam("token") token: String): Response {
         val me = human()
+        // The token is the only caller-supplied value this class ever puts in a URL PATH, so it
+        // is checked for shape before it is used rather than merely encoded. URL-encoding alone
+        // does make injection impossible here (the host is a fixed prefix and UpstreamClient
+        // re-checks the whole URL against the allowed-host regex), but "impossible for two
+        // reasons a reader has to go and find" is what an SSRF finding looks like from outside —
+        // and it is what CodeQL reported. An invitation token is opaque and URL-safe by
+        // construction, so anything else is a malformed request, not a request to forward.
+        require(TOKEN.matches(token)) { "invitation token has an unexpected shape" }
         return upstream.post(
             "$kybServiceUrl$UPSTREAM/invitations/${enc(token)}/claim",
             me.toString(),
@@ -166,5 +179,9 @@ class CustomerBusinessResource(
 
     private companion object {
         const val UPSTREAM = "/api/v1/kyb"
+
+        /** An invitation token is opaque, URL-safe and bounded; anything else is malformed. */
+        val TOKEN = Regex("^[A-Za-z0-9_-]{8,128}$")
+        val COUNTRY = Regex("^[A-Za-z]{2}$")
     }
 }
