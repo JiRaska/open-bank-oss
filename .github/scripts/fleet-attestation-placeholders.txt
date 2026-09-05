@@ -29,3 +29,13 @@
 # contradicts (vop's "no Dockerfile ... absent from auto-deploy's ALL_SERVICES": it has both).
 # The file is deliberately empty of entries; the gate reports 0 allowlisted placeholders and
 # that is the correct reading, not a missing file.
+
+# 2026-09-05, ADR-0283 phase 1 (#8809). card-processing-service is a brand-new service: its
+# manifest has to pin a tag before any image can exist, and no image can exist until the manifest
+# merges and auto-deploy builds one. The tag names a real commit so the deploy-drift watch can
+# resolve it; the IMAGE is absent from ECR, which is the exact class this file is for.
+#
+# REMOVE THIS LINE once auto-deploy has built and pushed the service — at that point the pin
+# moves to the built tag and this entry would suppress nothing, which the gate's
+# --check-placeholders direction fails on.
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-c111ba4dc
