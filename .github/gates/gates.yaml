@@ -188,6 +188,37 @@ gates:
     run: |
       python3 .github/scripts/run-gates.py --self-test
 
+  # Critical-alert RCA ledger guards (ADR-0241 D1/D3, #5869 / #5875). These self-tests
+  # were written and wired ONLY as steps inside the scheduled workflows that use them —
+  # `alert-rca-weekly.yml` (Mondays) and `standing-critical-digest.yml` (daily). Both
+  # workflows fail at their FIRST Alertmanager step because no ALERTMANAGER_* credential
+  # exists (4 of 4 daily runs failed, 2026-08-18..21), so the guards had never executed
+  # anywhere, on any lane, and could not go red on a PR that broke them.
+  #
+  # check-gate-script-registration.py did not catch this and structurally could not: it
+  # scopes itself to `check-*` filenames (these are not), and its own header records that
+  # it deliberately does not check REACHABILITY — a script invoked from a workflow that
+  # never runs still counts as wired. Registering here is what puts them on a PR lane.
+  - id: alert-rca-ledger-guards
+    selftest_exempt: "is-a-test-suite — the run: IS alert-rca-ledger.py --self-test"
+    name: "alert-RCA ledger guards (MTTR granularity, recurrence, observation coverage)"
+    group: lint
+    mode: enforced
+    rationale: "The MTTR granularity refusal and the recurrence guard are the only things stopping ADR-0241 D1/D3 from publishing a number nobody measured, and the coverage outcome is what stops an empty week reporting as a clean one. They were wired only inside a scheduled workflow that has never once succeeded, so they had never run on any lane. Recheck for removal when a durable alert open/close feed exists (#5869) and the MTTR half is no longer a refusal."
+    review_after: "2027-02-21"
+    run: |
+      python3 .github/scripts/alert-rca-ledger.py --self-test
+
+  - id: standing-critical-digest-guards
+    selftest_exempt: "is-a-test-suite — the run: IS standing-critical-digest.py --self-test"
+    name: "standing-critical digest guards (severity filter, observation envelope)"
+    group: lint
+    mode: enforced
+    rationale: "The digest's severity filter and observation envelope are the producer half of the same control; if the envelope shape drifts, the weekly review silently folds nothing and reports a clean week. Same lane gap as its consumer above. Recheck when the digest stops being the ledger's only observation source."
+    review_after: "2027-02-21"
+    run: |
+      python3 .github/scripts/standing-critical-digest.py --self-test
+
   - id: yamllint
     selftest_exempt: "third-party — yamllint's own test suite is not ours to run"
     name: "yamllint"
