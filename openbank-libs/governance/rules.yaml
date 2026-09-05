@@ -267,7 +267,7 @@ change_requirements:
     #   PlaceHoldRequest.expiresAt
     # each declared in the spec, absent from the DTO -- sent by a generated client and silently
     # dropped. So the backlog behind this date is REAL and was never a false-positive-rate
-    # question. 122 is the number to burn down; the rule stays advisory until it is near zero.
+    # question. 122 is the number to burn down (issue #8828); advisory until it is near zero.
     #
     # So the blocker is not readiness and not a false-positive rate: flipping this to enforced
     # would graduate a check that examines nothing, and the green would then be load-bearing.
