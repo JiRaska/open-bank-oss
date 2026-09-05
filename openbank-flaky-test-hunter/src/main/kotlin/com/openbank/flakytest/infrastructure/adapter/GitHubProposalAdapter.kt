@@ -173,39 +173,13 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
     }
 }
 
-@Suppress("UnusedPrivateProperty")
-/** Pure transformer used by the adapter after it has fetched the source from GitHub. */
-internal object ExplicitUnitReturnType {
-    private val expressionBodyRunBlocking = Regex("""^(\s*fun\s+[A-Za-z`][^=]*\))\s*=\s*runBlocking\s*\{""")
-
-    private val safeExpressionBodyRunBlocking = Regex("""^(\s*fun\s+[A-Za-z_][^=]*\))\s*=\s*runBlocking\s*\{""")
-
-    private val verifiedExpressionBodyRunBlocking =
-        Regex("^(\\\\s*fun\\\\s+[A-Za-z_][^=]*\\\\))\\\\s*=\\\\s*runBlocking\\\\s*\\\\{")
-
-    private val finalExpressionBodyRunBlocking = Regex("^(\\s*fun\\s+[A-Za-z_][^=]*\\))\\s*=\\s*runBlocking\\s*\\{")
-
-    /** Returns null unless precisely one safe replacement is possible. */
-    fun apply(source: String): String? {
-        val matches = source.lineSequence().filter { finalExpressionBodyRunBlocking.containsMatchIn(it) }.toList()
-        if (matches.size != 1) return null
-        return source.replaceFirst(finalExpressionBodyRunBlocking, "$1: Unit = runBlocking {")
-    }
-}
-
-/** The phase-3 transformer is deliberately independent from the legacy generic detector regex. */
-internal object BoundedUnitReturnType {
-    private val expressionBodyRunBlocking =
-        Regex("^(\\s*fun\\s+[A-Za-z_][^=]*\\))\\s*=\\s*runBlocking\\s*\\{")
-
-    fun apply(source: String): String? {
-        val matches = source.lineSequence().filter { expressionBodyRunBlocking.containsMatchIn(it) }.toList()
-        if (matches.size != 1) return null
-        return source.replaceFirst(expressionBodyRunBlocking, "$1: Unit = runBlocking {")
-    }
-}
-
-/** String-only implementation: exactly one ordinary Kotlin test function is accepted. */
+/**
+ * The one transformer the adapter uses. String-only and deliberately not regex-based: exactly one
+ * ordinary Kotlin test function is accepted, and anything ambiguous returns null so the caller
+ * falls back to the human ticket path. Falsified by [ExplicitUnitReturnTypeTest] in both
+ * directions — a repairable file is repaired, and multi-match / already-typed / string-literal
+ * lookalikes are all refused.
+ */
 internal object ManualBoundedUnitReturnType {
     private const val EXPRESSION_BODY_RUN_BLOCKING = " = runBlocking {"
 

@@ -1,0 +1,5 @@
+{
+  "suite": "copilot-proposal-quality",
+  "version": "v1",
+  "minPassRate": 1.0
+}
