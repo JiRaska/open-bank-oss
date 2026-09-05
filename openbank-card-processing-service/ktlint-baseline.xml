@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <baseline version="1.0">
     <!--
-      ONE entry, and it is unavoidable rather than debt.
+      TWO entries, one per inbound-port file, and both are unavoidable rather than debt.
 
       `in` is a Kotlin hard keyword, so the hexagonal inbound-port package (ADR-0002) has to be
       written `port.`in`` and ktlint's standard:package-name rule objects to the backticks. Every
@@ -10,9 +10,13 @@
       rule rather than for anything a reader cares about.
 
       Nothing else is baselined here, deliberately: this module was written against the current
-      rule set, so every other finding was fixed rather than frozen.
+      rule set, so every other finding was fixed rather than frozen. A new file in `port.in` needs
+      its own entry — the rule fires per file, not per package.
     -->
     <file name="src/main/kotlin/com/openbank/cardprocessing/application/port/in/CardProcessingUseCases.kt">
+        <error line="7" column="9" source="standard:package-name" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/cardprocessing/application/port/in/CardLifecycleUseCases.kt">
         <error line="7" column="9" source="standard:package-name" />
     </file>
 </baseline>
