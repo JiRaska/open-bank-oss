@@ -84,19 +84,39 @@ sealed class SegmentRule {
     }
 
     /**
-     * Holds at least one account.
+     * Has ever held an account.
      *
-     * UNSUPPORTED: no ACCOUNT event in analytics carries a partyId (0 of 59 bronze rows, measured
-     * 2026-07-31), so the party↔account link does not exist in this layer at all. Supporting this
-     * needs account events to carry the owning party — not a cleverer query.
+     * SUPPORTED SINCE 2026-09-05 (#8792). The reason recorded here previously — "no ACCOUNT event
+     * carries a partyId (0 of 59 bronze rows, measured 2026-07-31)" — was already stale when it
+     * was written. `AccountCreatedEvent` has carried `partyId` since 2026-06-26, five weeks
+     * earlier; `KafkaAccountEventPublisher` serialises the whole event with
+     * `objectMapper.writeValueAsString`, so the field reaches the wire; and analytics-sink's
+     * `PayloadMasker` does not list `partyId` among its PII keys, so it survives into bronze
+     * unmasked. The 59 rows behind that measurement predate the field. A claim about data is a
+     * claim with a shelf life, and nothing re-checked this one.
+     *
+     * READS BRONZE, NOT SILVER, AND THAT IS THE WHOLE CARE IN THIS RULE. Silver keeps only the
+     * LATEST event per (aggregate_type, aggregate_id), and of the four account events only
+     * `AccountCreatedEvent` carries `partyId` — `AccountStatusChanged`, `AccountClosed` and
+     * `SavingsWithdrawalApproved` do not. So an account that has ever changed status has a silver
+     * row with no `partyId` at all, and a silver-based subquery would silently omit exactly the
+     * parties with the most account activity. That is the under-counting failure this rule's own
+     * neighbourhood already records: a fail-closed evaluator renders a missing party as "did not
+     * match", which is indistinguishable from a correct answer. `TenureAtLeastDays` reaches into
+     * bronze for the same reason and says so.
+     *
+     * WHAT IT DOES NOT MEAN: "currently holds an OPEN account". Excluding closed accounts is
+     * expressible — the terminal signals are `event_type = 'AccountClosed'` and a payload
+     * `newStatus` of `CLOSED` — but it is a different predicate and it can only shrink a cohort,
+     * so it belongs in its own rule, verified against a live warehouse rather than reasoned about
+     * from here (#8792).
      */
     data object HasAccount : SegmentRule() {
-        override val unsupportedReason: String =
-            "ACCOUNT events in the analytics layer carry no partyId, so account ownership " +
-                "cannot be resolved (issue #2891)"
-
         override fun toSql(paramPrefix: String, params: MutableMap<String, Any>): String =
-            throw UnsupportedOperationException(unsupportedReason)
+            "(upper(aggregate_type) = 'PARTY' AND aggregate_id IN (" +
+                "SELECT JSONExtractString(payload, 'partyId') FROM openbank_analytics.bronze_events " +
+                "WHERE upper(aggregate_type) = 'ACCOUNT' " +
+                "AND JSONExtractString(payload, 'partyId') != ''))"
     }
 
     /**

@@ -45,6 +45,11 @@ KNOWN_UNCOVERED = {
     "gradle-build-cache": "build infrastructure, not a runtime service",
     "infra-vuln-scanner": "scanner job, no inbound traffic",
     "keycloak-realm-drift": "drift detector job, no inbound traffic",
+    "loyalty": "topic declaration only (the KafkaTopic CR for openbank.loyalty.events) — the "
+               "service has no Deployment anywhere in gitops, so there is no pod for an ingress "
+               "policy to select and gen-network-policies.py, which derives edges from Deployment "
+               "env URLs, would emit nothing. This entry fails the moment the workload lands, "
+               "which is exactly when the policy is needed (#8793).",
     "kyverno": "admission controller — policy covered by its own helm chart",
     "openbao": "secrets backend, hand-authored policies (runbook 0005/0006)",
     "platform": "umbrella dir, hosts no single workload",

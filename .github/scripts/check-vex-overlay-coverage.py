@@ -74,6 +74,11 @@ NO_OVERLAY_YET: dict[str, str] = {
     # gate reported it in the direction that matters -- a declaration outliving its subject --
     # which turned main red for every PR until this landed. That is the check working, not a
     # defect in it: the failure was leaving the baseline out of the PR that made it obsolete.
+    "loyalty-service": "#8830 - released in #8807 and not deployed anywhere, so nothing is exposed "
+                       "today. Its dependency set is the ordinary Quarkus reactive stack and is "
+                       "largely shared with services that already have overlays, but nobody has "
+                       "diffed it yet. Writing dispositions from that assumption rather than from "
+                       "the resolved artifacts is the fabrication this gate's own header refuses.",
     "admin-ui": "#6719 - released component, no triage overlay written yet. Node/Next.js, so none "
                 "of the JVM dependency evidence used for the other three reaches it and there is "
                 "no npm triage material in the repository to write a disposition from.",
