@@ -5,6 +5,7 @@
 package com.openbank.settlement.it
 
 import com.github.tomakehurst.wiremock.WireMockServer
+import com.github.tomakehurst.wiremock.client.WireMock.get
 import com.github.tomakehurst.wiremock.client.WireMock.okJson
 import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
@@ -20,6 +21,12 @@ import java.util.UUID
  * calls actually leave the process (issue #6037). This is the part a mocked port cannot establish:
  * a unit test that mocks `ReverseDebitPort` proves the activity calls *something*, not that a
  * money movement was ever addressed to balance-service.
+ *
+ * Also stands in for `openbank-ledger-service`'s
+ * `GET /api/v1/journals/transaction/{transactionId}` (issue #6410), which is how the ledger
+ * compensation establishes whether a settlement's booking actually reached the general ledger. The
+ * three answers that endpoint can give — a journal, no journal, or no answer at all — are the three
+ * outcomes the compensation has to tell apart, and only a real HTTP stub can produce all three.
  *
  * Also stubs an OIDC token endpoint, because both REST clients carry
  * `OidcClientRequestReactiveFilter` and would otherwise dial the real realm to mint a bearer token.
@@ -37,10 +44,12 @@ class BalanceServiceWireMockResource : QuarkusTestResourceLifecycleManager {
             ),
         )
         stubMovementsAccepted()
+        stubLedgerHasNoJournal()
 
         val base = server.baseUrl()
         return mapOf(
             "quarkus.rest-client.balance-api.url" to base,
+            "quarkus.rest-client.ledger-api.url" to base,
             "quarkus.oidc-client.enabled" to "true",
             "quarkus.oidc-client.auth-server-url" to base,
             "quarkus.oidc-client.discovery-enabled" to "false",
@@ -62,6 +71,8 @@ class BalanceServiceWireMockResource : QuarkusTestResourceLifecycleManager {
 
         private const val CREDIT_PATH = "/api/v1/balances/[^/]+/credit"
         private const val DEBIT_PATH = "/api/v1/balances/[^/]+/debit"
+        private const val JOURNALS_BY_TRANSACTION_PATH = "/api/v1/journals/transaction/[^/]+"
+        private const val JOURNAL_ID = "11111111-1111-1111-1111-111111111111"
 
         fun reset() {
             server.resetRequests()
@@ -72,6 +83,7 @@ class BalanceServiceWireMockResource : QuarkusTestResourceLifecycleManager {
                 ),
             )
             stubMovementsAccepted()
+            stubLedgerHasNoJournal()
         }
 
         /** Both movement verbs succeed, echoing a balance back. */
@@ -95,6 +107,40 @@ class BalanceServiceWireMockResource : QuarkusTestResourceLifecycleManager {
                         .withStatus(422)
                         .withHeader("Content-Type", "application/json")
                         .withBody("""{"title":"Insufficient funds","status":422}"""),
+                ),
+            )
+        }
+
+        /**
+         * The ledger holds a journal for this settlement — the booking landed, so the GL carries
+         * it and a compensation must report LEDGER_REVERSAL_UNSUPPORTED.
+         */
+        fun stubLedgerHasJournal(transactionId: UUID) {
+            val journal = """{"id":"$JOURNAL_ID","transactionId":"$transactionId","status":"POSTED"}"""
+            server.stubFor(
+                get(urlEqualTo("/api/v1/journals/transaction/$transactionId"))
+                    .willReturn(okJson("[$journal]")),
+            )
+        }
+
+        /**
+         * The ledger has never seen this transaction. Note the real endpoint answers `200 []`, not
+         * `404` — an empty array is the "nothing posted" answer, and the compensation depends on
+         * that distinction. Verified against the committed settlement→ledger pact, which the
+         * ledger provider replays.
+         */
+        fun stubLedgerHasNoJournal() {
+            server.stubFor(get(urlPathMatching(JOURNALS_BY_TRANSACTION_PATH)).willReturn(okJson("[]")))
+        }
+
+        /**
+         * The ledger cannot answer. This must NOT be smoothed into "no journal": a 5xx is not a
+         * clean general ledger, it is an unanswered question.
+         */
+        fun stubLedgerLookupUnavailable() {
+            server.stubFor(
+                get(urlPathMatching(JOURNALS_BY_TRANSACTION_PATH)).willReturn(
+                    com.github.tomakehurst.wiremock.client.WireMock.aResponse().withStatus(503),
                 ),
             )
         }

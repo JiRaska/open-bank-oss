@@ -69,7 +69,7 @@ const paymentsNav: NavItem[] = [
   { nameCs: 'SWIFT',             nameEn: 'SWIFT',            href: '/swift',             icon: Globe,     permission: 'payments:view' },
   { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view' },
   { nameCs: 'Clearing',          nameEn: 'Clearing',         href: '/clearing',          icon: Layers,    permission: 'payments:view' },
-  { nameCs: 'Úroky',             nameEn: 'Interest',         href: '/interest',          icon: TrendingUp,permission: 'payments:view' },
+  { nameCs: 'Úroky',             nameEn: 'Interest',         href: '/interest',          icon: TrendingUp,permission: 'interest:view' },
   { nameCs: 'Šablony dokumentů', nameEn: 'Document Templates', href: '/document-templates', icon: FileSignature, permission: 'templates:view' },
 
 ]
@@ -92,6 +92,7 @@ const complianceNav: NavItem[] = [
 const opsNav: NavItem[] = [
   { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'pid:view' },
   { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view' },
+  { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
 
@@ -208,7 +209,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
   }, [])
 
   return (
-    <aside id="admin-sidebar" aria-label={t('Hlavní navigace', 'Main navigation')} className={`${styles.sidebar} ${mobileOpen ? styles.mobileOpen : ''}`}>
+    <aside id="admin-sidebar" tabIndex={-1} aria-label={t('Hlavní navigace', 'Main navigation')} className={`${styles.sidebar} ${mobileOpen ? styles.mobileOpen : ''}`}>
       {/* Brand */}
       <div className={styles.brand}>
         <div className={styles.brandLockup}>

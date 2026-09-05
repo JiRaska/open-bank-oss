@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.27.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.3...account-service-v0.27.4) (2026-09-03)
+
+
+### Bug Fixes
+
+* **account:** entity createdAt/updatedAt defaults EPOCH → Instant.now() ([#8403](https://github.com/JiRaska/open-bank-oss/issues/8403)) ([c1a3953](https://github.com/JiRaska/open-bank-oss/commit/c1a3953bf54da88540b86f30418fedfdd0509a80))
+
+## [0.27.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.2...account-service-v0.27.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* **account:** revoking an unknown authorization answers 404, not 500 ([#8466](https://github.com/JiRaska/open-bank-oss/issues/8466)) ([909dee5](https://github.com/JiRaska/open-bank-oss/commit/909dee547a0bf602792adf60b9df91c28abe55be))
+
+## [0.27.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.1...account-service-v0.27.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **account:** dead-letter into an explicit topic, not the shared implicit one ([#8304](https://github.com/JiRaska/open-bank-oss/issues/8304)) ([4faf359](https://github.com/JiRaska/open-bank-oss/commit/4faf359eb20c990b0a54c9ef79d013ffed4b59c8)), closes [#5752](https://github.com/JiRaska/open-bank-oss/issues/5752)
+
+## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.0...account-service-v0.27.1) (2026-09-02)
+
+
+### Security
+
+* **delegation:** reject stale lifecycle projections ([#8220](https://github.com/JiRaska/open-bank-oss/issues/8220)) ([6537342](https://github.com/JiRaska/open-bank-oss/commit/65373422f3e3c38e266e411f219beaceab407005))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.26.0...account-service-v0.27.0) (2026-08-31)
 
 

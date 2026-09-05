@@ -17,6 +17,25 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ## How to Contribute
 
+### Your first contribution (the 15-minute path)
+
+1. **Pick a [`good-first-issue`](https://github.com/JiRaska/open-bank-oss/labels/good-first-issue).**
+   The set is curated to stay at ≥5 open issues, and each carries a *newcomer context* comment:
+   where the code lives, what the fix shape is, and which repo conventions the PR will be judged
+   against.
+2. **Spin up the dev environment (one command).** Prereqs: Docker Desktop ≥ 4.x, 16 GB RAM.
+   ```bash
+   cd openbank-infra && cp .env.example .env && make up-infra && make up-all && make health-all
+   ```
+   Full detail in [`DEPLOYMENT.md`](DEPLOYMENT.md) §2; to poke the *live* sandbox instead of
+   running anything, use [`docs/QUICKSTART_SANDBOX.md`](docs/QUICKSTART_SANDBOX.md).
+3. **Make the change on a branch** `<type>/<scope>-<summary>`; the commit message *is* the
+   changelog (Conventional Commits, `git commit -s -S`).
+4. **Run the local gate before pushing:** `./gradlew detekt ktlintCheck koverVerify build`
+   (add `:<svc>:quarkusBuild` — CDI wiring failures surface only there).
+5. **Open the PR** — every PR links its issue (`Closes #<n>`), CI is path-scoped, and
+   `/ship-check` runs the same governance gates CI enforces.
+
 ### Reporting bugs
 
 - Open a GitHub issue using the **Bug report** template.
@@ -166,6 +185,15 @@ issue → fork → branch → commit -s -S → push → PR → review → CI gre
 - `security/<scope>-<summary>` — security fix (typically private until disclosed)
 
 `<scope>` = service name without `openbank-` prefix (e.g. `ledger`, `psd2`, `sepa`).
+
+> **Why admin-ui `e2e/` does not trigger a release** (recorded decision, #8354): release-please
+> releases on commit type × touched path, and `openbank-admin-ui/e2e` sits in `exclude-paths`
+> next to `src/test`. That is deliberate: e2e specs verify the *deployed* system (the browser
+> synthetic lane attests the deployed build), they ship no runtime artifact, and releasing the
+> npm package for a test-only change would cut a version whose bits are identical to the
+> previous one. If an e2e change ever ships a behavioural fix to the harness users run locally,
+> say so in the PR and use a `fix(admin-ui)` commit touching a non-excluded path. Do not
+> "fix" the exclusion without reading this note.
 
 ### Commit messages (Conventional Commits)
 

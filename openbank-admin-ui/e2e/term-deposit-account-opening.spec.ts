@@ -14,7 +14,8 @@ test.describe('term-deposit account opening', () => {
     await signInAsOperator(context, baseURL!)
   })
 
-  test('selecting an active term-deposit product fills the account and opens it', async ({ page }) => {
+  test('selecting an active term-deposit product fills the account and opens it once', async ({ page }) => {
+    const accountOpeningPosts: Array<{ idempotencyKey: string; body: Record<string, unknown> }> = []
     await page.route('**/api/svc/product-catalog/api/v1/products?status=ACTIVE', route => route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify([
@@ -29,13 +30,11 @@ test.describe('term-deposit account opening', () => {
       ]),
     }))
     await page.route('**/api/svc/account-service/api/v1/accounts', async route => {
-      expect(route.request().method()).toBe('POST')
-      expect(route.request().postDataJSON()).toMatchObject({
-        partyId,
-        productId,
-        accountType: 'TERM_DEPOSIT',
-        currencyCode: 'CZK',
-        legalName: 'Test Customer',
+      const request = route.request()
+      expect(request.method()).toBe('POST')
+      accountOpeningPosts.push({
+        idempotencyKey: request.headers()['idempotency-key'] ?? '',
+        body: request.postDataJSON() as Record<string, unknown>,
       })
       await route.fulfill({
         status: 201,
@@ -52,8 +51,21 @@ test.describe('term-deposit account opening', () => {
     await expect(page.locator('#account-currency')).toHaveValue('CZK')
 
     await page.locator('#account-legal-name').fill('Test Customer')
-    await page.locator('button[type="submit"]').click()
+    await page.locator('form').evaluate(form => {
+      const accountForm = form as HTMLFormElement
+      accountForm.requestSubmit()
+      accountForm.requestSubmit()
+    })
 
     await expect(page).toHaveURL(`/accounts/${accountId}`)
+    expect(accountOpeningPosts).toHaveLength(1)
+    expect(accountOpeningPosts[0].idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
+    expect(accountOpeningPosts[0].body).toMatchObject({
+      partyId,
+      productId,
+      accountType: 'TERM_DEPOSIT',
+      currencyCode: 'CZK',
+      legalName: 'Test Customer',
+    })
   })
 })

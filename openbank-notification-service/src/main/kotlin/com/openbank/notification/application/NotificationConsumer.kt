@@ -1101,6 +1101,18 @@ class NotificationConsumer @Inject constructor(
                 "Your delegated access was revoked" to
                     "<h2>Access Revoked</h2><p>Delegated access to a <b>${vars.v("resourceType")}</b> " +
                     "granted to you has been revoked. You can no longer act on it.</p>"
+            NotificationTemplate.DELEGATION_SUSPENDED ->
+                "Delegated access was suspended" to
+                    "<h2>Access Suspended</h2><p>Delegated access for a <b>${vars.v("resourceType")}</b> " +
+                    "was temporarily suspended by the bank. It cannot be used while suspended.</p>"
+            NotificationTemplate.DELEGATION_REINSTATED ->
+                "Delegated access was restored" to
+                    "<h2>Access Restored</h2><p>Delegated access for a <b>${vars.v("resourceType")}</b> " +
+                    "was restored by the bank and may be used again within its existing scope and conditions.</p>"
+            NotificationTemplate.DELEGATION_RENOUNCED ->
+                "Delegated access was renounced" to
+                    "<h2>Access Renounced</h2><p>The person who held delegated access to your " +
+                    "<b>${vars.v("resourceType")}</b> ended that access. It is no longer active.</p>"
             NotificationTemplate.DELEGATION_EXPIRED ->
                 "A delegated access grant has expired" to
                     "<h2>Grant Expired</h2><p>A delegated access grant for a <b>${vars.v("resourceType")}</b> " +

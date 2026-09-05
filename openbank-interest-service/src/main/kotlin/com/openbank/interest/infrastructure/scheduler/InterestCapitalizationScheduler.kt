@@ -51,6 +51,13 @@ class InterestCapitalizationScheduler(
     fun runMonthlyCapitalization(): Uni<Void> {
         val toDate = LocalDate.now(clock)
         log.infof("interest capitalization tick starting up to %s", toDate)
+        // observed-by: the `interest-capitalization` workflow-liveness gauge. `recordSuccess()` below runs on the
+        // onItem path only, so a failed tick leaves
+        // `openbank_workflow_last_success_age_seconds{workflow="interest-capitalization"}` climbing and trips
+        // ADR-0237's WorkflowLivenessStale at 2x the monthly interval. Recovering the item is
+        // deliberate rather than lazy: `capitalizeAll` is idempotent per (account, period), so the next tick (or a
+        // manual re-run) fills the gap, and failing the Uni would buy nothing the gauge does not
+        // already say. #5745 section C.
         return capitalizeInterestUseCase.capitalizeAll(toDate)
             .onItem().invoke { count ->
                 log.infof("interest capitalization up to %s capitalized %d pair(s)", toDate, count)

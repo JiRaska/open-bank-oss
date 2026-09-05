@@ -27,23 +27,55 @@ import java.util.UUID
  */
 typealias CallerPartyId = UUID?
 
+interface DelegationCandidate {
+    val callerPartyId: CallerPartyId
+    val grantorPartyId: UUID
+    val granteePartyId: UUID
+    val resourceType: DelegationResourceType
+    val resourceId: UUID
+    val capabilities: Set<DelegationCapability>
+    val approvalPolicy: ApprovalPolicy
+    val requiredApprovals: Int?
+    val perTransactionLimit: Money?
+    val dailyLimit: Money?
+    val monthlyLimit: Money?
+    val exposure: Exposure?
+    val validTo: OffsetDateTime?
+}
+
+data class PreviewDelegationCommand(
+    override val callerPartyId: CallerPartyId,
+    override val grantorPartyId: UUID,
+    override val granteePartyId: UUID,
+    override val resourceType: DelegationResourceType,
+    override val resourceId: UUID,
+    override val capabilities: Set<DelegationCapability>,
+    override val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
+    override val requiredApprovals: Int? = null,
+    override val perTransactionLimit: Money? = null,
+    override val dailyLimit: Money? = null,
+    override val monthlyLimit: Money? = null,
+    override val exposure: Exposure? = null,
+    override val validTo: OffsetDateTime?,
+) : DelegationCandidate
+
 data class OfferDelegationCommand(
-    val callerPartyId: CallerPartyId,
-    val grantorPartyId: UUID,
-    val granteePartyId: UUID,
-    val resourceType: DelegationResourceType,
-    val resourceId: UUID,
-    val capabilities: Set<DelegationCapability>,
-    val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
-    val requiredApprovals: Int? = null,
-    val perTransactionLimit: Money? = null,
-    val dailyLimit: Money? = null,
-    val monthlyLimit: Money? = null,
-    val exposure: Exposure? = null,
-    val validTo: OffsetDateTime?,
+    override val callerPartyId: CallerPartyId,
+    override val grantorPartyId: UUID,
+    override val granteePartyId: UUID,
+    override val resourceType: DelegationResourceType,
+    override val resourceId: UUID,
+    override val capabilities: Set<DelegationCapability>,
+    override val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
+    override val requiredApprovals: Int? = null,
+    override val perTransactionLimit: Money? = null,
+    override val dailyLimit: Money? = null,
+    override val monthlyLimit: Money? = null,
+    override val exposure: Exposure? = null,
+    override val validTo: OffsetDateTime?,
     val grantScaSessionId: UUID,
     val note: String? = null,
-)
+) : DelegationCandidate
 
 /**
  * ADR-0232 D4. [revokedBy] is now derived from the authenticated caller, never from the request:
@@ -72,6 +104,11 @@ data class CheckDelegationCommand(
 
 interface OfferDelegationUseCase {
     suspend fun offer(command: OfferDelegationCommand): DelegationGrant
+}
+
+interface PreviewDelegationUseCase {
+    /** Validates the complete draft without consuming SCA or creating authority. */
+    suspend fun preview(command: PreviewDelegationCommand)
 }
 
 interface RespondDelegationUseCase {

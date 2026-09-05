@@ -106,6 +106,7 @@ class DelegationEventMessagePactConsumerTest {
             newJsonBody { o ->
                 o.stringValue("eventType", "DelegationActivated")
                 o.uuid("aggregateId")
+                o.integerType("lifecycleRevision", 1)
                 o.uuid("grantorPartyId")
                 o.uuid("granteePartyId")
                 o.stringValue("resourceType", "ACCOUNT")
@@ -128,6 +129,7 @@ class DelegationEventMessagePactConsumerTest {
         // Mirrors parseEnvelope + upsert, at the exact paths the consumer reads.
         assertThat(node.path("eventType").asText()).isEqualTo("DelegationActivated")
         assertThat(UUID.fromString(node.path("aggregateId").asText())).isNotNull()
+        assertThat(node.path("lifecycleRevision").asLong()).isEqualTo(1)
         assertThat(UUID.fromString(node.path("grantorPartyId").asText())).isNotNull()
         assertThat(UUID.fromString(node.path("granteePartyId").asText())).isNotNull()
         assertThat(node.path("resourceType").asText()).isEqualTo("ACCOUNT")
@@ -150,6 +152,7 @@ class DelegationEventMessagePactConsumerTest {
             newJsonBody { o ->
                 o.stringValue("eventType", "DelegationRevoked")
                 o.uuid("aggregateId")
+                o.integerType("lifecycleRevision", 2)
                 o.uuid("grantorPartyId")
                 o.uuid("granteePartyId")
                 o.stringValue("resourceType", "ACCOUNT")
@@ -165,6 +168,7 @@ class DelegationEventMessagePactConsumerTest {
         val node = objectMapper.readTree(messages.first().contentsAsBytes())
 
         assertThat(node.path("eventType").asText()).isEqualTo("DelegationRevoked")
+        assertThat(node.path("lifecycleRevision").asLong()).isEqualTo(2)
         // closeById(grantId) is keyed on aggregateId alone — if that field ever moved, every
         // revoke would be a no-op and the grant would stay enforceable.
         assertThat(UUID.fromString(node.path("aggregateId").asText())).isNotNull()

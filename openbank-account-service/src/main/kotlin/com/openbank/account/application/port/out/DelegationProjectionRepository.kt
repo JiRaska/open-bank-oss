@@ -16,6 +16,10 @@ interface DelegationProjectionRepository {
     /** Close the row (revoke/suspend/renounce/expire). Returns false when unknown — still a no-op. */
     suspend fun closeById(grantId: UUID): Boolean
 
+    suspend fun applyActive(grant: DelegatedAccessGrant, lifecycleRevision: Long) = upsertActive(grant)
+
+    suspend fun applyClosed(grantId: UUID, lifecycleRevision: Long?): Boolean = closeById(grantId)
+
     suspend fun findActiveByAccountAndParty(accountId: UUID, partyId: UUID): List<DelegatedAccessGrant>
 
     /** Same lookup restricted to one resource type (ACCOUNT guard vs SAVINGS_GOAL guard). */

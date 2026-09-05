@@ -16,7 +16,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Delegation Service — events
-  version: 1.0.0
+  version: 1.2.0
   description: |
     Domain events emitted when a customer-to-party delegation grant changes state (ADR-0232).
 
@@ -78,6 +78,17 @@ channels:
         $ref: '#/components/messages/DelegationRenounced'
       DelegationExpired:
         $ref: '#/components/messages/DelegationExpired'
+  spendReservationState:
+    address: openbank.delegation.spend-reservation-state
+    title: Delegated domestic-payment reservation state
+    description: |
+      Compacted, single-partition bootstrap stream. Keys are `reservationId:v1` and
+      `reservationId:v2`, so a delayed RESERVED retry cannot compact away terminal evidence.
+      Consumers group by payload reservationId and apply the greatest reservationVersion.
+      Terminal snapshots are ordinary values, never Kafka tombstones.
+    messages:
+      DelegationSpendReservationStateChanged:
+        $ref: '#/components/messages/DelegationSpendReservationStateChanged'
 
 operations:
   publishDelegationEvents:
@@ -90,12 +101,11 @@ operations:
       contract. Configured as `mp.messaging.outgoing.delegation-events-out` in its
       `application.yaml`.
 
-      **Consumers: none in this repository today.** Two are in flight and not yet merged —
-      `openbank-account-service` (#3058, `account_delegation_projection`) and
-      `openbank-card-issuance-service` (#3105, `card_delegation_projection`). Both build a local
-      read model so that enforcing a delegation never requires a synchronous call to
-      delegation-service. When either merges, add it here; a consumer absent from this list is a
-      consumer nobody has agreed to keep compatible.
+      **Consumers:** `openbank-account-service` (`account_delegation_projection`) and
+      `openbank-card-issuance-service` (`card_delegation_projection`). Both build a local enforcement
+      model so authorising a delegated action never requires a synchronous call to this service.
+      Their durable per-grant lifecycle cursors compare `lifecycleRevision`; Kafka delivery order,
+      `occurredAt` and wall-clock arrival are not used as conflict resolution.
     messages:
       - $ref: '#/channels/delegationEvents/messages/DelegationOffered'
       - $ref: '#/channels/delegationEvents/messages/DelegationActivated'
@@ -105,6 +115,16 @@ operations:
       - $ref: '#/channels/delegationEvents/messages/DelegationReinstated'
       - $ref: '#/channels/delegationEvents/messages/DelegationRenounced'
       - $ref: '#/channels/delegationEvents/messages/DelegationExpired'
+  publishSpendReservationState:
+    action: send
+    title: Publish delegated domestic-payment reservation snapshots
+    channel:
+      $ref: '#/channels/spendReservationState'
+    description: |
+      Produced atomically by delegation-service. New DOMESTIC_PAYMENT admission remains
+      default-off until a compatible downstream binding consumer is deployed and healthy.
+    messages:
+      - $ref: '#/channels/spendReservationState/messages/DelegationSpendReservationStateChanged'
 
 components:
   messageTraits:
@@ -129,6 +149,59 @@ components:
               assume each event arrives once.
 
   schemas:
+    spendReservationState:
+      type: object
+      required:
+        - eventId
+        - aggregateId
+        - aggregateType
+        - eventType
+        - version
+        - occurredAt
+        - sourceService
+        - reservationId
+        - delegationId
+        - grantorPartyId
+        - granteePartyId
+        - resourceType
+        - resourceId
+        - amount
+        - currency
+        - idempotencyKeyHash
+        - operationType
+        - state
+        - reservationVersion
+        - createdAt
+        - settledAt
+      properties:
+        eventId: { type: string, format: uuid }
+        aggregateId: { type: string, format: uuid }
+        aggregateType: { type: string, const: DelegationSpendReservation }
+        eventType: { type: string, const: DelegationSpendReservationStateChanged }
+        version: { type: integer, const: 1 }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { type: string, const: delegation-service }
+        reservationId: { type: string, format: uuid }
+        delegationId: { type: string, format: uuid }
+        grantorPartyId: { type: string, format: uuid }
+        granteePartyId: { type: string, format: uuid }
+        resourceType: { type: string, const: ACCOUNT }
+        resourceId: { type: string, format: uuid }
+        amount: { type: number, format: decimal, exclusiveMinimum: 0 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        idempotencyKeyHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: >-
+            Lowercase SHA-256 over UTF-8
+            `openbank.delegation.spend-reservation.idempotency-key.v1\u0000` followed by the raw
+            key. The raw caller text is never published.
+        operationType: { type: string, const: DOMESTIC_PAYMENT }
+        state: { type: string, enum: [RESERVED, CONFIRMED, RELEASED] }
+        reservationVersion: { type: integer, enum: [1, 2] }
+        createdAt: { type: string, format: date-time }
+        settledAt: { type: string, format: date-time, nullable: true }
+
     resourceType:
       type: string
       description: The kind of resource a grant is over.
@@ -155,7 +228,7 @@ components:
       description: |
         Fields every event carries, from `com.openbank.libs.domain.event.DomainEvent`. The payload
         is the serialized event data class itself — there is no wrapper object.
-      required: [eventId, aggregateId, aggregateType, eventType, version, occurredAt]
+      required: [eventId, aggregateId, aggregateType, eventType, version, occurredAt, lifecycleRevision]
       properties:
         eventId:
           type: string
@@ -177,6 +250,17 @@ components:
           type: string
           format: date-time
           description: ISO-8601 instant at which the transition happened, not when it was published.
+        lifecycleRevision:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            Monotonic status-transition revision for this grant. Zero is OFFERED and every legal
+            lifecycle transition increments exactly once. Consumers MUST compare this value with
+            their durable per-grant cursor and apply only a strictly newer event; arrival time and
+            `occurredAt` are not ordering controls. An authority-opening event without this field
+            must fail closed. A revisionless authority-removing event is legacy input and must
+            install an irreversible tombstone until the grant is reconciled or reissued.
     parties:
       type: object
       required: [grantorPartyId, granteePartyId]
@@ -248,6 +332,15 @@ components:
                 event convention (AccountEvents, LedgerEvents).
 
   messages:
+    DelegationSpendReservationStateChanged:
+      name: DelegationSpendReservationStateChanged
+      title: Full current state of a delegated domestic-payment reservation
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/spendReservationState'
+
     DelegationOffered:
       name: DelegationOffered
       title: A grant was offered and awaits the grantee's acceptance

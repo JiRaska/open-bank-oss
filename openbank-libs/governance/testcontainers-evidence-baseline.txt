@@ -16,7 +16,6 @@ openbank-billing-service/src/test/kotlin/com/openbank/billing/it/PostgresRedisTe
 openbank-clearing-service/src/test/kotlin/com/openbank/clearing/it/PostgresRedpandaRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/ConsentPostgresRedisTestResource.kt
 openbank-consent-service/src/test/kotlin/com/openbank/consent/it/PostgresTestResource.kt
-openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/it/RedpandaRedisTestResource.kt
 openbank-domestic-payment/src/test/kotlin/com/openbank/domestic/it/PostgresRedisTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisRedpandaTestResource.kt
 openbank-fraud-service/src/test/kotlin/com/openbank/fraud/it/PostgresRedisTestResource.kt
@@ -30,6 +29,5 @@ openbank-sepa-instant/src/test/kotlin/com/openbank/sepainstant/it/PostgresRedpan
 openbank-sepa-payment/src/test/kotlin/com/openbank/sepa/it/PostgresRedisTestResource.kt
 openbank-settlement-service/src/test/kotlin/com/openbank/settlement/it/PostgresTestResource.kt
 openbank-standing-order-service/src/test/kotlin/com/openbank/standingorder/it/PostgresRedisTestResource.kt
-openbank-statement-service/src/test/kotlin/com/openbank/statement/it/PostgresTestResource.kt
 openbank-swift-service/src/test/kotlin/com/openbank/swift/it/PostgresRedisTestResource.kt
 openbank-vop-service/src/test/kotlin/com/openbank/vop/PostgresTestResource.kt

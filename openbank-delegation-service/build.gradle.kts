@@ -6,6 +6,14 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+tasks.test {
+    // The full module suite boots multiple Quarkus/Testcontainers test profiles and replays the
+    // delegation message Pacts. Gradle's default test heap can OOM before the replay finishes,
+    // making the interactions misleadingly appear as missing. Keep this service aligned with the
+    // account/lending money-path suites, which carry the same measured 2 GiB override.
+    maxHeapSize = "2g"
+}
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
 

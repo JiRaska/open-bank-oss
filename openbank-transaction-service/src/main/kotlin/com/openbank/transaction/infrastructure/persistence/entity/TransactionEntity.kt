@@ -66,7 +66,7 @@ class TransactionEntity : PanacheEntityBase {
     var valueDate: LocalDate = LocalDate.EPOCH
 
     @Column(name = "initiated_at", nullable = false)
-    var initiatedAt: Instant = Instant.EPOCH
+    var initiatedAt: Instant = Instant.now()
 
     @Column(name = "completed_at")
     var completedAt: Instant? = null

@@ -23,11 +23,13 @@ interface RunFlakyTestCheckUseCase {
      * thread for the whole run and make a slow sweep indistinguishable from a hung one. Temporal
      * owns the execution and its history is the durable record.
      *
-     * Idempotent: the workflow id is derived from the trigger and the UTC day, so a pod restart or
-     * a second replica is REJECTED by Temporal rather than starting a duplicate sweep that would
-     * spend the agent's daily LLM budget twice.
+     * Idempotent: the workflow id is derived from the trigger and the UTC day, so a pod restart,
+     * operator retry or second replica is REJECTED by Temporal rather than starting a duplicate
+     * sweep that would spend the agent's daily LLM budget twice. An operator may pin the current
+     * or previous UTC day with a bounded idempotency key; null preserves old clients by selecting
+     * the current UTC day.
      */
-    suspend fun startDetached(trigger: RunTrigger): String
+    suspend fun startDetached(trigger: RunTrigger, idempotencyKey: String? = null): String
 }
 
 interface GetFindingsUseCase {

@@ -130,6 +130,23 @@ mp:
         client.id: domestic-payment-${quarkus.uuid}
         topic: openbank.domestic.payment.events
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # Expand-first delegated-spend projection. It remains inert until an operator separately
+      # enables this consumer after V13/V14 and a compatible image are live. group.id and
+      # auto.offset.reset are intentionally absent until the post-image-pin activation PR adds a
+      # properties ConfigMap; dotted YAML leaves are not visible to Kafka connector config
+      # (#686/#2945), while landing that ConfigMap in this code/image PR fails parity safeguards.
+      delegated-spend-reservation-state-in:
+        enabled: ${DOMESTIC_DELEGATED_SPEND_CONSUMER_ENABLED:false}
+        connector: smallrye-kafka
+        client:
+          id: domestic-payment-delegated-spend-${quarkus.uuid}
+        topic: openbank.delegation.spend-reservation-state
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.domestic-payment.delegated-spend-reservation-state-in
 "%dev":
   quarkus:
     log:
@@ -159,6 +176,14 @@ openbank:
     bic: ${OPENBANK_BIC:OPBKCZ22}
     bank-code: ${OPENBANK_BANK_CODE:2000}
   domestic:
+    # Activation is deliberately split from the consumer above. Backfill/projection can be proven
+    # first; only after the future workload endpoint is enabled may this finalizer be turned on.
+    delegated-spend-finalizer:
+      enabled: ${DOMESTIC_DELEGATED_SPEND_FINALIZER_ENABLED:false}
+      interval: 1m
+      initial-delay: 1m
+      grace-period: PT10M
+      batch-limit: 100
     # #3266: re-screen payments left holding on an unavailable sanctions check. Enabled by default
     # because it only re-runs the designed flow — it re-screens, it never releases.
     screening-redrive:

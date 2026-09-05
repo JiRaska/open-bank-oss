@@ -14,6 +14,7 @@
 // Only the CLUSTER hop is stubbed (page.route intercepts the browser's call to admin-ui's own
 // BFF); the BFF handlers themselves are the real ones running in `next dev`.
 
+import AxeBuilder from '@axe-core/playwright'
 import { test, expect, type Page } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
@@ -155,27 +156,75 @@ test('finds a party through entity resolution and renders its grants', async ({ 
   const seen = await stubBff(page)
   await page.goto('/delegations')
 
+  const education = page.getByRole('region', { name: /Kdo může nad čím dělat co|Who may do what/ })
+  await education.locator('summary').first().click()
+  await expect(education).toContainText(/FOP \/ OSVČ|Sole trader/)
+  await expect(education).toContainText('SME')
+  await expect(education).toContainText(/Korporace|Corporate/)
+  await expect(education).toContainText(/Pouze edukace|Education only/)
+  await expect(education).toContainText(/není aktivní|not active/)
+
   // ADR-0231: the operator types a NAME. There is no UUID field on this screen.
   await page.getByRole('textbox', { name: /Hledat stranu|Search party/ }).fill('Novák')
   await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
 
   await page.getByRole('button', { name: /Jan Novák/ }).click()
 
-  const main = page.locator('main')
-  await expect(main.getByText('Účetní').first()).toBeVisible()
-  await expect(main.getByText('Provozní účet').first()).toBeVisible()
-  await expect(main.getByText('Odvozeno z evidence produktu').first()).toBeVisible()
-  await expect(main.getByText('Vlastnictví se nepřiřazuje').first()).toBeVisible()
-  await expect(main.getByText('Zůstatky').first()).toBeVisible()
-  await expect(main.getByText('Provést platbu').first()).toBeVisible()
-  await expect(main.getByText('5 000 CZK').first()).toBeVisible()
-  await expect(main.getByText('bez limitu').first()).toBeVisible()
-  await expect(main.getByText('ACTIVE').first()).toBeVisible()
+  const effectiveAccess = page.getByRole('region', { name: 'Efektivní přístup klienta' })
+  await expect(effectiveAccess.getByText('Provozní účet').first()).toBeVisible()
+  await expect(effectiveAccess.getByText('Odvozeno z evidence produktu').first()).toBeVisible()
+  await expect(effectiveAccess.getByText('Zůstatky').first()).toBeVisible()
+  await expect(effectiveAccess.getByText('Provést platbu').first()).toBeVisible()
+
+  const granted = page.getByRole('heading', { name: 'Sdíleno touto stranou' }).locator('..')
+  await expect(granted.getByText('Účetní').first()).toBeVisible()
+  await expect(granted.getByText('5 000 CZK').first()).toBeVisible()
+  await expect(granted.getByText('bez limitu').first()).toBeVisible()
+  await expect(granted.getByText('ACTIVE').first()).toBeVisible()
+
+  const roleCatalog = page.getByRole('region', { name: 'Dispoziční role a práva' })
+  await expect(roleCatalog.getByText('Vlastnictví se nepřiřazuje').first()).toBeVisible()
 
   // The grant list came through the console's own BFF route, and party lookup through the
   // shared ADR-0228 facade — not a bespoke search endpoint.
   expect(seen.some(s => s.includes('/api/entities/resolve'))).toBe(true)
   expect(seen.some(s => s === `GET /api/delegations/party/${PARTY}`)).toBe(true)
+})
+
+test('the educational model remains operable at a 320px reflow width', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.route('**/api/delegation-role-presets**', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+  )
+
+  await page.goto('/delegations')
+  const education = page.getByRole('region', { name: /Kdo může nad čím dělat co|Who may do what/ })
+  const guide = page.getByRole('complementary', { name: /Nejdřív porozumět|Understand first/ })
+  await expect(education).toBeVisible()
+  expect(await education.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true)
+  const guideBounds = await guide.boundingBox()
+  expect(guideBounds).not.toBeNull()
+  expect(guideBounds!.x).toBeGreaterThanOrEqual(0)
+  expect(guideBounds!.x + guideBounds!.width).toBeLessThanOrEqual(321)
+
+  await education.locator('summary').first().press('Enter')
+
+  const corporate = education.getByRole('group', { name: /^(Korporace|Corporate)$/ })
+  await expect(corporate).not.toHaveAttribute('open', '')
+  await corporate.locator('summary').press('Enter')
+  await expect(corporate).toHaveAttribute('open', '')
+  await expect(corporate.getByRole('region', { name: /Corporate:.*not active|Korporace:.*není aktivní/ })).toBeVisible()
+
+  const lightScan = await new AxeBuilder({ page }).include('[aria-labelledby="delegation-education-title"]').analyze()
+  expect(lightScan.violations).toEqual([])
+  const lightGuideScan = await new AxeBuilder({ page }).include('aside[aria-label="Understand first. Decide second."]').analyze()
+  expect(lightGuideScan.violations).toEqual([])
+  await page.locator('html').evaluate(element => element.classList.add('dark'))
+  const darkScan = await new AxeBuilder({ page }).include('[aria-labelledby="delegation-education-title"]').analyze()
+  expect(darkScan.violations).toEqual([])
+  const darkGuideScan = await new AxeBuilder({ page }).include('aside[aria-label="Understand first. Decide second."]').analyze()
+  expect(darkGuideScan.violations).toEqual([])
 })
 
 test('a refused direction never renders as "no delegations"', async ({ page }) => {

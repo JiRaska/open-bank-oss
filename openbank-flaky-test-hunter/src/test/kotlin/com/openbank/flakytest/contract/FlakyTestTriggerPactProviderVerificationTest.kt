@@ -37,7 +37,7 @@ class FlakyTestTriggerPactProviderVerificationTest {
     @BeforeEach
     fun before(context: PactVerificationContext) {
         val runCheck = mockk<FlakyTestHunterService>()
-        coEvery { runCheck.startDetached(RunTrigger.OPERATOR_MANUAL) } returns WORKFLOW_ID
+        coEvery { runCheck.startDetached(RunTrigger.OPERATOR_MANUAL, IDEMPOTENCY_KEY) } returns WORKFLOW_ID
         QuarkusMock.installMockForType(runCheck, FlakyTestHunterService::class.java)
         context.target = HttpTestTarget("localhost", port.toInt())
     }
@@ -52,6 +52,7 @@ class FlakyTestTriggerPactProviderVerificationTest {
     }
 
     private companion object {
-        const val WORKFLOW_ID = "flaky-test-check-operator_manual-2026-08-18"
+        const val IDEMPOTENCY_KEY = "flaky-test-hunter-operator-manual-2026-08-18"
+        const val WORKFLOW_ID = "flaky-test-hunter-check-operator_manual-2026-08-18"
     }
 }
