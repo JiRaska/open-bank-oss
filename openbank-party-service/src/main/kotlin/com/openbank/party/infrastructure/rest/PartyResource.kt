@@ -53,6 +53,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
@@ -88,6 +89,65 @@ class PartyResource {
 
     @Inject @io.quarkus.arc.Unremovable
     lateinit var securityIdentity: SecurityIdentity
+
+    /**
+     * The customer channel's M2M identity (ADR-0065). customer-edge validates the data subject's
+     * own JWT (openbank-customers realm) and deliberately does NOT forward it: every upstream hop
+     * carries the edge's own client_credentials token from the operator realm, plus
+     * `X-Customer-Party-Id` resolved from the customer's token (`UpstreamClient` KDoc). So the
+     * `isSelf` branch below — written for a subject-JWT caller — can never be true for a call the
+     * subject actually made, and the edge principal holds neither ROLE_ADMIN nor ROLE_DPO
+     * (`realm-template.json`: `service-account-openbank-edge` carries ROLE_OPERATOR alone). Every
+     * proxied Art. 15 / Art. 20 request was therefore a 403, and the two rights were unreachable
+     * by any data subject (#8421).
+     *
+     * `lateinit` with no Kotlin initializer, matching every `@ConfigProperty` field on
+     * `CustomerEdgeResource`: a Kotlin default here would generate a synthetic constructor that
+     * Arc builds the bean through, and the annotation would never be applied — the field would
+     * silently keep the fallback whatever the environment said (`configproperty-kotlin-defaults`).
+     * The annotation's `defaultValue` is what supplies the fallback, and it always applies, so the
+     * field is never actually uninitialized in a CDI context.
+     */
+    @ConfigProperty(
+        name = "openbank.party.gdpr.customer-edge-principal",
+        defaultValue = DEFAULT_CUSTOMER_EDGE_PRINCIPAL,
+    )
+    lateinit var gdprCustomerEdgePrincipal: String
+
+    /**
+     * Whether this CALLER may exercise a subject's Art. 15 / Art. 20 right on the subject's behalf.
+     * Deliberately takes no request data: the decision rests only on the authenticated principal
+     * and on configuration (CodeQL `java/tainted-permissions-check`; same split as lending-service's
+     * `CustomerCreditJourneyResource.callerIsPermitted`). A blank value refuses every call rather
+     * than admitting any ROLE_OPERATOR holder — real staff carry that role too, so the identity
+     * match is the load-bearing half, exactly as `rest.rego`'s `edge-service-audit-customer`
+     * documents for the sibling privacy-centre route.
+     */
+    private fun callerIsCustomerEdge(): Boolean {
+        // `::x.isInitialized` rather than a Kotlin default: a unit test that builds this resource
+        // by hand sets only the collaborators it exercises, and an uninitialized `lateinit` read
+        // would throw there instead of refusing. In a CDI context `defaultValue` guarantees it is
+        // set, so this branch is unreachable in production and reads as "no principal configured".
+        val permitted = if (this::gdprCustomerEdgePrincipal.isInitialized) gdprCustomerEdgePrincipal else ""
+        return permitted.isNotBlank() && securityIdentity.principal?.name == permitted
+    }
+
+    /**
+     * The subject the (already-authorised) edge is asking for. A query SCOPE, not a permission.
+     * Nullable on purpose: JAX-RS injects `null` for an absent header, and a non-nullable
+     * declaration would make the absent case a 500 before the body ever runs.
+     */
+    private fun headerSubject(partyHeader: String?): UUID? =
+        partyHeader?.trim()?.takeIf { it.isNotEmpty() }?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+
+    /**
+     * The fourth accepted caller shape: the customer edge, asking for the subject it has already
+     * authenticated. The header must name the SAME party as the path, so the edge cannot read a
+     * subject other than the one whose token it validated — the same ownership shape
+     * `uploadDocument` above already applies to a self-registering caller.
+     */
+    private fun edgeActsForSubject(partyHeader: String?, id: UUID): Boolean =
+        callerIsCustomerEdge() && headerSubject(partyHeader) == id
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_API")
@@ -291,16 +351,26 @@ class PartyResource {
     @Path("/{id}/gdpr-export")
     @Authenticated
     @Operation(summary = "Export all PII held for a party — GDPR Art. 15 Right of Access (ADR-0118)")
-    suspend fun exportPartyGdpr(@PathParam("id") id: UUID): Response {
+    suspend fun exportPartyGdpr(
+        @PathParam("id") id: UUID,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) partyHeader: String?,
+    ): Response {
         val isAdmin = securityIdentity.hasRole("ROLE_ADMIN")
         val isDpo = securityIdentity.hasRole("ROLE_DPO")
         val isSelf = jwt?.subject != null && jwt?.subject == partyUseCase.getPartyKeycloakSub(id)
-        if (!isAdmin && !isDpo && !isSelf) return Response.status(Response.Status.FORBIDDEN).build()
+        val byStaffOrSubject = isAdmin || isDpo || isSelf
+        val viaEdge = !byStaffOrSubject && edgeActsForSubject(partyHeader, id)
+        if (!byStaffOrSubject && !viaEdge) return Response.status(Response.Status.FORBIDDEN).build()
         val export = partyUseCase.exportPartyData(id)
         // ADR-0118 / ADR-0086: a subject-access read exposes the full PII set — audit the
         // access itself (Art. 30). Emitted only after a successful fetch; a 404 (party not
         // found) throws before this line, so no SUCCESS event is recorded for a miss.
-        auditGdpr(operation = "party.gdpr-export", partyId = id, gdprArticle = "15")
+        auditGdpr(
+            operation = "party.gdpr-export",
+            partyId = id,
+            gdprArticle = "15",
+            channel = channelOf(isSelf, viaEdge),
+        )
         return Response.ok(export.toResponse()).build()
     }
 
@@ -316,13 +386,23 @@ class PartyResource {
             "Includes transaction history with counterparty IBANs redacted to their bank-code " +
             "prefix (Art. 20(4)). Art. 20(2) direct transmission is not offered (ADR-0204 D4).",
     )
-    suspend fun exportPartyPortability(@PathParam("id") id: UUID): Response {
+    suspend fun exportPartyPortability(
+        @PathParam("id") id: UUID,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) partyHeader: String?,
+    ): Response {
         val isAdmin = securityIdentity.hasRole("ROLE_ADMIN")
         val isDpo = securityIdentity.hasRole("ROLE_DPO")
         val isSelf = jwt?.subject != null && jwt?.subject == partyUseCase.getPartyKeycloakSub(id)
-        if (!isAdmin && !isDpo && !isSelf) return Response.status(Response.Status.FORBIDDEN).build()
+        val byStaffOrSubject = isAdmin || isDpo || isSelf
+        val viaEdge = !byStaffOrSubject && edgeActsForSubject(partyHeader, id)
+        if (!byStaffOrSubject && !viaEdge) return Response.status(Response.Status.FORBIDDEN).build()
         val export = partyUseCase.exportPartyPortabilityData(id)
-        auditGdpr(operation = "party.gdpr-portability-export", partyId = id, gdprArticle = "20")
+        auditGdpr(
+            operation = "party.gdpr-portability-export",
+            partyId = id,
+            gdprArticle = "20",
+            channel = channelOf(isSelf, viaEdge),
+        )
         return Response.ok(export.toResponse()).build()
     }
 
@@ -379,7 +459,12 @@ class PartyResource {
         return Response.ok(merged.toResponse()).build()
     }
 
-    private suspend fun auditGdpr(operation: String, partyId: UUID, gdprArticle: String) {
+    private suspend fun auditGdpr(
+        operation: String,
+        partyId: UUID,
+        gdprArticle: String,
+        channel: String = CHANNEL_STAFF,
+    ) {
         auditPublisher.publish(
             AuditEvent(
                 actorId = jwt?.subject ?: jwt?.name ?: "unknown",
@@ -388,10 +473,17 @@ class PartyResource {
                 resourceType = "party",
                 resourceId = partyId.toString(),
                 result = AuditResult.SUCCESS,
-                payload = mapOf("gdpr_article" to gdprArticle),
+                // `channel` is what keeps the Art. 30 record honest once the edge can call these:
+                // actorId is the edge's service account for every subject-initiated export, so
+                // without it a subject exercising their own right and a staff member reading their
+                // file are indistinguishable in the trail.
+                payload = mapOf("gdpr_article" to gdprArticle, "channel" to channel),
             ),
         )
     }
+
+    private fun channelOf(isSelf: Boolean, viaEdge: Boolean): String =
+        if (isSelf || viaEdge) CHANNEL_SUBJECT else CHANNEL_STAFF
 
     // ─── Mobile self-registration endpoints ───────────────────────────────────────
 
@@ -575,6 +667,29 @@ class PartyResource {
                     ).build()
             }
         return Response.ok(party.toSimpleResponse()).build()
+    }
+
+    companion object {
+        /**
+         * Set by customer-edge's `UpstreamClient.PARTY_HEADER` on every proxied customer call, from
+         * the customer's own validated JWT — never from a client-supplied value.
+         */
+        const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
+
+        /**
+         * `service-account-<clientId>` is deterministic for a Keycloak client_credentials token, and
+         * `rest.rego` already hardcodes this exact string in three rules
+         * (`edge-service-notification`, `edge-service-consent`, `edge-service-audit-customer`).
+         * Defaulted rather than left blank on purpose: a GDPR right that is unreachable unless an
+         * operator remembers an env var reproduces the very defect #8421 reports.
+         */
+        const val DEFAULT_CUSTOMER_EDGE_PRINCIPAL = "service-account-openbank-edge"
+
+        /** Art. 30 record: the subject exercised their own right (self-JWT, or via the edge). */
+        const val CHANNEL_SUBJECT = "subject"
+
+        /** Art. 30 record: a DPO or admin read the subject's file on the subject's behalf. */
+        const val CHANNEL_STAFF = "staff"
     }
 }
 

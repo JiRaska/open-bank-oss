@@ -162,6 +162,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "weekly scheduled sweep — but it is still a pure consumer, so reading the entry "
         "fleet-lint already maintains costs the pool nothing and cannot churn it.",
     ),
+    "pitest.yml::pitest-authz": (
+        "read-only",
+        "Consumer; restores fleet-lint's home. Targeted authz mutation lane (ADR-0279 #7) "
+        "riding the same weekly schedule and cache posture as the matrix job above — a "
+        "pure consumer with no reason to store a per-run entry.",
+    ),
     "pact-drift-check.yml::drift-check": (
         "read-only",
         "Demoted from setup-java. Consumer; regenerates consumer pacts and diffs them, and "

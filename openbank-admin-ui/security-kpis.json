@@ -1,0 +1,25 @@
+{
+  "generatedAt": "2026-09-04T22:08:37.992078+00:00",
+  "netpol": {
+    "available": true,
+    "covered": 59,
+    "total": 73,
+    "coveragePct": 81,
+    "gateGreen": true
+  },
+  "freshness": {
+    "available": true,
+    "fleetScore": 67,
+    "scoredModules": 12,
+    "unknownModules": 15
+  },
+  "credentials": {
+    "available": true,
+    "totalSecrets": 165,
+    "staticSecrets": 158,
+    "withDeadline": 0,
+    "overdue": 0,
+    "undeclared": 158,
+    "overdueFound": false
+  }
+}

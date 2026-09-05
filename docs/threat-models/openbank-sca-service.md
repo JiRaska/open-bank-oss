@@ -58,6 +58,19 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-09-03** — Resolve the four-eyes stalemate via per-action service-account exemptions
+  (#8360, ADR-0280). `device.enroll` and `scaChallenge.consume` are now in
+  `rules.yaml: four_eyes.actions` with `four_eyes.exemptions` naming their verified M2M callers
+  (`service-account-openbank-edge` for both; `service-account-openbank-services` for consume —
+  the delegation grant-accept and document-signing ceremonies, #3734). What becomes gated is the
+  residual HUMAN path: `operator-sca-write` (ops-console enroll-on-behalf, manual challenge
+  consumption) is flagged `four_eyes_required` once `authz.four-eyes.enforce` (ADR-0155) is
+  enabled — until then the flag is computed and carried, and nothing pauses. The exemption trusts
+  the edge client credentials to remain customer-edge's alone; no new privilege class is created
+  beyond what those identities already hold. New `four_eyes_exempt` rule and clauses in
+  `rest.rego` are additive and backward-compatible (a bundle predating the `exemptions` key
+  behaves exactly as before — pinned by rest_test.rego).
+
 - **2026-08-05** — Close the role-only M2M path on the SCA ceremony; widen the shared-client
   identity rule to `scaChallenge.consume` FIRST (#3734). `operator-sca-write` was role-only over
   the whole `scaChallenge.*`/`device.*` families, so both M2M clients (HUMAN-classified,

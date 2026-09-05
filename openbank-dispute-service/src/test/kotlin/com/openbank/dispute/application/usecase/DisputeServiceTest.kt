@@ -329,6 +329,44 @@ class DisputeServiceTest {
         messagesSlot.captured.forEach { AuditEventTime.assertRecordedAsEventTime(it.payload, resolvedAt) }
     }
 
+    /**
+     * #8352: red against `origin/main`, where `dispute.opened` carried `openedAt` and no
+     * `occurredAt` — so every audit row for the moment a customer disputed a payment recorded the
+     * audit consumer's ingest clock instead.
+     *
+     * Both halves are asserted, and the second is the one a rename alone would not have satisfied:
+     * `Dispute.createdAt` is an `OffsetDateTime`, so interpolating it directly renders an offset
+     * form rather than the `Z`-normalised instant the two sibling builders in the same file emit.
+     * `assertRecordedAsEventTime` compares the parsed value, so a payload carrying the right key
+     * with the wrong form fails here rather than downstream.
+     *
+     * The sibling assertion on `openedAt` is not decoration: this change had to be additive, and a
+     * test that only looked at the new key could not tell an addition from a rename.
+     */
+    @Test
+    fun `the opened outbox payload carries the opening instant as the audit event time`() {
+        val request = OpenDisputeRequest(
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.UNAUTHORIZED,
+            amount = BigDecimal("25.00"),
+            transactionDate = today,
+            description = "Unauthorized card payment",
+        )
+        val outbox = slot<List<OutboxMessage>>()
+        every { disputeRepo.save(any(), capture(outbox)) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        service.open(request).await().indefinitely()
+
+        val payload = outbox.captured.single().payload
+        AuditEventTime.assertRecordedAsEventTime(payload, now.toInstant())
+        assertThat(payload)
+            .describedAs("occurredAt is ADDITIVE — openedAt keeps its name, place and form")
+            .contains(""""openedAt":"$now"""")
+    }
+
     private fun <T> requireNonNull(value: T?): T = requireNotNull(value) { "resolvedAt must be set by resolve()" }
 
     @Test

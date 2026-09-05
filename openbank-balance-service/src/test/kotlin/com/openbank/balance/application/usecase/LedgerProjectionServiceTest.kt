@@ -13,18 +13,14 @@ import com.openbank.balance.application.port.`in`.InitializeBalanceCommand
 import com.openbank.balance.application.port.`in`.PlaceHoldCommand
 import com.openbank.balance.application.port.`in`.ReleaseHoldCommand
 import com.openbank.balance.application.port.`in`.SetOverdraftLimitCommand
-import com.openbank.balance.application.port.out.BalanceEventPublisher
 import com.openbank.balance.application.port.out.HoldRepository
 import com.openbank.balance.application.port.out.LedgerProjectionPort
 import com.openbank.balance.domain.model.Balance
-import com.openbank.balance.domain.model.BalanceEvent
-import com.openbank.balance.domain.model.BalanceEventType
 import com.openbank.balance.domain.model.BalanceHold
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -64,42 +60,37 @@ class LedgerProjectionServiceTest {
     fun `apply records the delta and publishes BALANCE_UPDATED`(): Unit = runBlocking {
         val c = change(delta = "100.00")
         val port = FakeProjectionPort(result = balance(c.accountId, "100.00"))
-        val publisher = RecordingPublisher()
         val service = LedgerProjectionService(
             port,
             FakeHoldRepo(),
             NoopBalanceUseCase(),
-            publisher,
             mockk<DomainMetrics>(relaxed = true),
-            java.time.Clock.systemUTC(),
         )
 
         service.apply(c)
 
         assertEquals(c.journalEntryId, port.applied.single().first)
-        val event = publisher.events.single()
-        assertEquals(BalanceEventType.BALANCE_UPDATED, event.eventType)
-        assertEquals(0, event.bookedAmount.compareTo(BigDecimal("100.00")))
+        // The event is the port's job since #8510 (written to balance_outbox in the mutation's own
+        // transaction); the use case's remaining obligation is to pass the actor through.
+        assertEquals("system:balance-service:ledger-projection", port.applied.single().second)
     }
 
     @Test
     fun `apply on a duplicate delivery does not publish and does not re-apply`(): Unit = runBlocking {
         val c = change()
         val port = FakeProjectionPort(result = null) // dedup hit
-        val publisher = RecordingPublisher()
         val service = LedgerProjectionService(
             port,
             FakeHoldRepo(),
             NoopBalanceUseCase(),
-            publisher,
             mockk<DomainMetrics>(relaxed = true),
-            java.time.Clock.systemUTC(),
         )
 
         service.apply(c)
 
-        assertTrue(publisher.events.isEmpty())
-        assertEquals(1, port.applied.size) // port was called (it owns the dedup decision)
+        // Duplicate delivery: the port returned null, the use case publishes nothing itself, and
+        // the port wrote nothing either (it owns both the dedup decision and the event, #8510).
+        assertEquals(1, port.applied.size) // port was called
     }
 
     @Test
@@ -122,9 +113,7 @@ class LedgerProjectionServiceTest {
             FakeProjectionPort(result = balance(c.accountId, "60.00")),
             holdRepo,
             balanceUseCase,
-            RecordingPublisher(),
             mockk<DomainMetrics>(relaxed = true),
-            java.time.Clock.systemUTC(),
         )
 
         service.apply(c)
@@ -135,7 +124,8 @@ class LedgerProjectionServiceTest {
     // --- fakes -------------------------------------------------------------------------------
 
     private class FakeProjectionPort(private val result: Balance?) : LedgerProjectionPort {
-        val applied = mutableListOf<Triple<UUID, UUID, BigDecimal>>()
+        /** (journalEntryId, actorId) pairs the service handed through. */
+        val applied = mutableListOf<Pair<UUID, String>>()
         override suspend fun applyBookedDelta(
             journalEntryId: UUID,
             accountId: UUID,
@@ -143,8 +133,9 @@ class LedgerProjectionServiceTest {
             delta: BigDecimal,
             transactionId: UUID,
             entryDate: LocalDate,
+            actorId: String,
         ): Balance? {
-            applied += Triple(journalEntryId, accountId, delta)
+            applied += (journalEntryId to actorId)
             return result
         }
     }
@@ -157,13 +148,16 @@ class LedgerProjectionServiceTest {
             active.filter { it.referenceId == referenceId && it.releasedAt == null }
         override suspend fun save(hold: BalanceHold): BalanceHold = hold
         override suspend fun update(hold: BalanceHold): BalanceHold = hold
-    }
-
-    private class RecordingPublisher : BalanceEventPublisher {
-        val events = mutableListOf<BalanceEvent>()
-        override suspend fun publish(event: BalanceEvent) {
-            events += event
-        }
+        override suspend fun saveWithEvent(
+            hold: BalanceHold,
+            balance: Balance,
+            event: com.openbank.balance.domain.model.BalanceEvent,
+        ): BalanceHold = hold
+        override suspend fun releaseWithEvent(
+            hold: BalanceHold,
+            balance: Balance,
+            event: com.openbank.balance.domain.model.BalanceEvent,
+        ): BalanceHold = hold
     }
 
     private class NoopBalanceUseCase : BalanceUseCase {

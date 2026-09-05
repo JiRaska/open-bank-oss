@@ -309,6 +309,8 @@ data class ProvisioningSnapshot(
     val stage: Ifrs9Stage,
     val horizon: EclHorizon,
     val expectedCreditLoss: Money,
+    /** The risk-parameter model that produced [expectedCreditLoss] (issue #8364) — flows onto the persisted record. */
+    val modelVersion: String,
 )
 
 /**
@@ -332,6 +334,13 @@ data class LoanProvisioningRecord(
     val stage: Ifrs9Stage,
     val expectedCreditLoss: Money,
     val createdAt: OffsetDateTime,
+    /**
+     * The risk-parameter model version that produced this row's ECL (issue #8364) — the audit
+     * trail half of PD/LGD governance: any parameter change ships with a new version string in
+     * the same commit, so the persisted history shows exactly which periods were provisioned
+     * under which parameter set.
+     */
+    val modelVersion: String,
 )
 
 /** Outcome of one scheduled IFRS 9 provisioning pass over the live book. */
