@@ -234,6 +234,29 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.kyc.events.notification.dlq
+      # #8432: CONSENT_GRANTED / CONSENT_REVOKED, previously declared but never produced.
+      # A third reader of a topic consent-service already publishes through its outbox and
+      # campaign-service already consumes (ConsentNotificationConsumer).
+      consent-events-in:
+        connector: smallrye-kafka
+        # client.id / group.id / auto.offset.reset: same dotted-key YAML bug as above —
+        # set via the gitops ConfigMap instead (issue #686). NOTE this channel's offset reset
+        # is `latest`, unlike the other three: it is a NEW consumer group on a topic that has
+        # been live for months, and `earliest` would replay every historical consent as a fresh
+        # push — telling customers a third party had just been granted access they in fact
+        # granted, and often revoked, long ago.
+        topic: openbank.consent.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # SmallRye's DEFAULT failure-strategy is `fail`, which STOPS the channel. This consumer
+        # swallows poison pills itself, but a failure further down (NotificationConsumer's own
+        # recovery, or the closed variable-schema check) must park rather than wedge every other
+        # notification. The topic is EXPLICIT and in NESTED form: the dotted leaf key
+        # `dead-letter-queue.topic:` would be quoted by SmallRye's YAML source and silently never
+        # read (#686), and the implicit `dead-letter-topic-consent-events-in` default would collide
+        # with campaign-service, which consumes this same topic on a channel of the same name.
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.consent.events.notification.dlq
 
 # ADR-0155 four-eyes, opted into by opsmessage.compose (ADR-0176 D5). Default false, matching
 # every other four-eyes-wired service (lending, balance, sepa-payment, sepa-instant, account) —

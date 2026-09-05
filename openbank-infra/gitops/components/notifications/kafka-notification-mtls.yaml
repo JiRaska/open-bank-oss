@@ -108,6 +108,22 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # #8432: CONSENT_GRANTED / CONSENT_REVOKED (ConsentNotificationConsumer) — a third reader
+      # of the topic campaign-service and audit-service already consume.
+      - resource:
+          type: topic
+          name: openbank.consent.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # #8432: without Write here the DLQ send itself fails and the consumer wedges on the very
+      # failure it was meant to park — the same lockout class as the two DLQ grants above.
+      - resource:
+          type: topic
+          name: openbank.consent.events.notification.dlq
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       - resource:
           type: group
           name: notification-service
@@ -129,6 +145,12 @@ spec:
       - resource:
           type: group
           name: notification-service-delegation
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: notification-service-consent
           patternType: literal
         operations: [Read]
         host: "*"

@@ -112,6 +112,13 @@ jobs:
   retry:
     name: Re-run spot-killed run (once)
     runs-on: ubuntu-latest
+    # A rate-limit wait is now "until the limit resets" (capped at GH_RETRY_MAX_WAIT_SECONDS,
+    # 600s here) rather than a flat 15s, because a 45-second budget cannot outlast an
+    # installation limit whose window is minutes — that is #6853/#7976 and it reproduced on run
+    # 33738356244. Four waits at 600s is ~40 min worst case; this bounds it rather than letting
+    # the job sit for the 360-min default. ubuntu-latest is free on a public repo, so the trade
+    # is a concurrency slot against a reclaimed CI run that otherwise needs a human.
+    timeout-minutes: 50
     # `failure` is admitted here only so the step below can inspect the jobs; the decision to
     # re-run is made there, not by this expression. A job-level `if:` cannot reach the jobs API.
     if: >-
@@ -136,7 +143,13 @@ jobs:
       - name: Fetch the decision script (sparse, default branch)
         uses: actions/checkout@v5
         with:
-          sparse-checkout: .github/scripts/spot-kill-retry.sh
+          # BOTH files: spot-kill-retry.sh `source`s gh-retry.sh, so fetching only the first
+          # gives a job that dies on line 1 with "No such file or directory". A sparse checkout
+          # is a hand-kept list of what the script needs — the failure mode CLAUDE.md warns
+          # about for any gate whose scope is maintained separately from its subject.
+          sparse-checkout: |
+            .github/scripts/spot-kill-retry.sh
+            .github/scripts/gh-retry.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -150,6 +163,14 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          # Cap on a SINGLE wait inside gh-retry.sh. Kept under the job's timeout-minutes above
+          # with room for four of them plus the calls themselves.
+          GH_RETRY_MAX_WAIT_SECONDS: "600"
+          # GH_RETRY_DEAD_LETTER is deliberately NOT set. The library files its own
+          # `ci-dead-letter` issue when a caller has no other way to be heard; this workflow
+          # already has one — `raise-issue` below, which exists for exactly this (#2901) and
+          # writes a far better body. Turning both on would file two issues per incident and
+          # split the signal, which is the #5266/#5285 split-ledger failure in a new place.
         # Exit 0 = a decision was reached (re-run issued, or correctly declined). Exit 1 = the
         # control could not do its job, which routes to raise-issue below. The script's header
         # carries the full rationale, including why an unreadable jobs API is NOT a pass here
@@ -247,12 +268,15 @@ jobs:
           \`GH_REPO\` env — \`.github/scripts/check-gh-repo-context.py\` should have caught it
           at PR time, so check that gate too.
 
-          **If instead the log says \`HTTP 5xx\` / \`Server Error\`, detection worked and only
-          the API call lost.** Since #4595 that call is retried 3x with backoff, so reaching
-          this issue on a 5xx means all three attempts lost — re-run the triggering run by
-          hand and check GitHub's status page. The \`decision=\` line in the retry job's log
-          and step summary says what was examined and what was decided on every path,
-          including the no-op ones.
+          **If instead the log says \`HTTP 5xx\` / \`Server Error\` or a rate limit, detection
+          worked and only the API call lost.** Both calls go through
+          \`.github/scripts/gh-retry.sh\`, which retries a 5xx/connection error with exponential
+          backoff and waits out a rate limit until it RESETS (capped at
+          \`GH_RETRY_MAX_WAIT_SECONDS\`), for \`SPOT_KILL_ATTEMPTS\` attempts — so reaching this
+          issue means every attempt lost across that whole window. Re-run the triggering run by
+          hand and check GitHub's status page. The \`decision=\` line in the retry job's log and
+          step summary says what was examined and what was decided on every path, including the
+          no-op ones, and now names the actual last error rather than \`unknown\`.
 
           Read the step output from **after the last** \`##[endgroup]\`: GitHub prints the
           step's own script into the log header, so grepping the whole log matches strings

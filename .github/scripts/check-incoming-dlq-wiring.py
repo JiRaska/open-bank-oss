@@ -85,13 +85,12 @@ KNOWN_UNWIRED = {
     # remains is a single service on an implicit, channel-derived name. Renaming it is still a live
     # topic migration, and it is card-issuance's to make.
     ("openbank-card-issuance-service", "delegation-events-in"): "pre-#5745 implicit DLQ name; sole writer since #5752 moved account-service off it, but the rename is still a live-topic migration",
-    # NOT the implicit name, and not a rename: fraud-service already sets an EXPLICIT topic
-    # (`openbank.transactions.transaction.initiated.fraud.dlq`) in
-    # components/fraud-service/fraud-service-msg-override.yaml, with a matching [Write, Describe]
-    # ACL in kafka-fraud-mtls.yaml. What it lacks is requirement 5 — no `KafkaTopic` CR exists for
-    # that name anywhere. One CR, no migration; load-bearing because #5715 makes
-    # TransactionSignalConsumer rethrow on this very channel.
-    ("openbank-fraud-service", "transaction-signal"): "explicit topic set in fraud-service-msg-override.yaml; the gap is a missing KafkaTopic CR, not a rename (#5745)",
+    # openbank-fraud-service :: `transaction-signal` is OFF this list. It never was an implicit-name
+    # case: the explicit topic (`openbank.transactions.transaction.initiated.fraud.dlq`) has been set
+    # in components/fraud-service/fraud-service-msg-override.yaml since before #5745, with a matching
+    # [Write, Describe] ACL in kafka-fraud-mtls.yaml. The single missing part was requirement 5, and
+    # the `KafkaTopic` CR now exists in components/kafka/kafka-dlq-topics.yaml. No migration was
+    # involved — nothing had ever been parked in a topic that did not exist.
 }
 
 

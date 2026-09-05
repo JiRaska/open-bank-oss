@@ -64,6 +64,21 @@ OPEN → DOCUMENTS_REQUIRED → UNDER_REVIEW → APPROVED (terminal)
 OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW → EXPIRED   (terminal, time-driven)
 ```
 
+> **Correction, 2026-09-05.** Three gaps between this lifecycle and the code, found together:
+>
+> - **`DOCUMENTS_REQUIRED` was never implemented** (#8535). No operation in `KycService` sets it,
+>   and the service has no concept of a document type or any upload path. Removing it from the
+>   enums and contracts is blocked by two mutually exclusive CI gates (#8618); the dead cockpit
+>   column it fed has been removed, and the `KYC_DOCUMENT_REQUIRED` notification template with it.
+> - **`ESCALATED` was never a KYC case status at all.** The lifecycle diagram drew it with four
+>   transitions; it is not in `KycCaseStatus`. Escalation here is a check in `MANUAL_REVIEW` plus
+>   `due_diligence_level = EDD`, with the case staying `UNDER_REVIEW`; MLRO escalation is a state
+>   of the *AML* case in aml-service (ADR-0032).
+> - **`EXPIRED` was declared and nothing set it** (#8548). `expires_at` was written on every case
+>   and never acted on, and because `uq_kyc_cases_active_party` treats only
+>   `APPROVED`/`REJECTED`/`EXPIRED` as terminal, an abandoned case blocked that party from ever
+>   opening another. Fixed by the daily sweep in #8562.
+
 Terminal states: `APPROVED`, `REJECTED`, `EXPIRED`. A party with an active (non-terminal) case
 cannot have a second case opened (409 Conflict from the operator-facing path; idempotent reuse
 on the event-driven path).

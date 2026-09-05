@@ -71,6 +71,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -102,31 +103,82 @@ class Unreachable(RuntimeError):
     """
 
 
-TRANSIENT_MARKERS = (
-    "api rate limit exceeded",
-    "secondary rate limit",
-    "you have exceeded a secondary rate limit",
-    "was submitted too quickly",
-    "connection refused",
-    "could not resolve host",
-    "network is unreachable",
-    "timeout",
-    "timed out",
-    "eof",
-    "bad gateway",
-    "service unavailable",
-    "server error",
-    "(http 429)",
-    "(http 500)",
-    "(http 502)",
-    "(http 503)",
-    "(http 504)",
-)
+# The vocabulary is NOT defined here. It lives in `gh-transient-patterns.txt`, next to this
+# file, and is read by `.github/scripts/gh-retry.sh` as well — see that file's header for the
+# measurement that produced it. The short version: this module and the shell library each
+# carried a hand-written list, they disagreed on 8 of 31 real `gh` messages, and each missed
+# five transient ones the other caught. The list this module used to hold missed a bare
+# `HTTP 503` (its HTTP markers were all parenthesised, `(http 503)`, so only `gh`'s own
+# phrasing matched) and `connection reset by peer` — and every miss here is a PR turned RED
+# for a reason its diff cannot cause, which is the defect #5896 already cost.
+PATTERNS_FILE = pathlib.Path(__file__).resolve().parent / "gh-transient-patterns.txt"
+
+_PATTERN_CACHE: dict[str, list[re.Pattern]] = {}
 
 
-def is_transient(message: str) -> bool:
+def parse_patterns_file(path: pathlib.Path) -> dict[str, list[str]]:
+    """`[section]` headers, one entry per line, `#` and blanks ignored."""
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot read the shared transient-pattern vocabulary at {path}: {exc}. This is a "
+            f"defect in this gate's own wiring, not a finding about the ruleset."
+        ) from exc
+    out: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in text.splitlines():
+        if line.startswith("[") and line.rstrip().endswith("]"):
+            current = line.strip()[1:-1]
+            out.setdefault(current, [])
+            continue
+        if current is None or not line.strip() or line.lstrip().startswith("#"):
+            continue
+        out[current].append(line.rstrip("\n"))
+    return out
+
+
+def load_patterns(patterns_file: pathlib.Path | None = None) -> list[re.Pattern]:
+    """Compile [rate_limit] + [transient] from the shared vocabulary.
+
+    Raises RuntimeError — NOT Unreachable — when the file cannot be read or a section is
+    empty. That distinction is the whole point: an empty pattern list matches nothing, so
+    every failure would classify as final, and a deleted vocabulary file would read as "no
+    transient failures exist" while each call still returned a plausible boolean. Routing it
+    through RuntimeError makes `main()` render it as `::error::` and stay RED, because it is a
+    misconfiguration of this gate rather than anything about the ruleset.
+    """
+    path = pathlib.Path(patterns_file) if patterns_file else PATTERNS_FILE
+    key = str(path)
+    if key in _PATTERN_CACHE:
+        return _PATTERN_CACHE[key]
+    sections = parse_patterns_file(path)
+    if not sections.get("rate_limit") or not sections.get("transient"):
+        raise RuntimeError(
+            f"transient-pattern vocabulary at {path} has an empty [rate_limit] or "
+            f"[transient] section. Refusing to classify with no patterns: everything would "
+            f"read as a final answer and no failure would ever be retried or reported "
+            f"UNRESOLVED."
+        )
+    pats = sections["rate_limit"] + sections["transient"]
+    _PATTERN_CACHE[key] = [re.compile(x, re.IGNORECASE) for x in pats]
+    return _PATTERN_CACHE[key]
+
+
+def corpus_cases(patterns_file: pathlib.Path | None = None) -> list[tuple[str, str]]:
+    """The [cases] falsification corpus as (want, message), want in {TRANSIENT, FINAL}."""
+    path = pathlib.Path(patterns_file) if patterns_file else PATTERNS_FILE
+    rows = []
+    for raw in parse_patterns_file(path).get("cases", []):
+        want, _, msg = raw.partition("\t")
+        if msg:
+            rows.append((want.strip(), msg))
+    return rows
+
+
+def is_transient(message: str, patterns_file: pathlib.Path | None = None) -> bool:
     """True when a `gh api` failure is about REACHABILITY, not about the ruleset's content."""
-    return any(m in message.lower() for m in TRANSIENT_MARKERS)
+    return any(r.search(message) for r in load_patterns(patterns_file))
 
 
 def gh_api(path: str) -> list | dict:
@@ -241,6 +293,7 @@ def merge_group_gaps(root: pathlib.Path, contexts: list[str]) -> list[str]:
 
 
 def self_test() -> int:
+    import os
     import tempfile
 
     fails = []
@@ -375,16 +428,139 @@ def self_test() -> int:
     if rc != 1 or "::error::" not in out:
         fails.append(f"a permission denial must stay a hard failure: rc={rc}, out={out!r}")
 
-    for msg, want in [
-        ("gh: API rate limit exceeded for installation ... (HTTP 403)", True),
-        ("You have exceeded a secondary rate limit", True),
-        ("dial tcp: connection refused", True),
-        ("Resource not accessible by integration (HTTP 403)", False),
-        ("Must have admin rights to Repository. (HTTP 403)", False),
-        ("Not Found (HTTP 404)", False),
-    ]:
-        if is_transient(msg) is not want:
-            fails.append(f"is_transient({msg!r}): want {want}, got {not want}")
+    # --- the SHARED vocabulary, driven over its own falsification corpus ----------------
+    # These cases used to be six literals written here. They now live in
+    # gh-transient-patterns.txt alongside the patterns and are asserted by BOTH readers, so a
+    # pattern edit that breaks one language cannot be green in the other.
+    ran.append("corpus floor")
+    try:
+        cases = corpus_cases()
+        patterns_text = PATTERNS_FILE.read_text()
+    except (RuntimeError, OSError) as exc:
+        # Reported, not raised: a missing vocabulary is a defect this self-test must NAME,
+        # and a bare traceback out of self_test() buries it under a stack.
+        fails.append(f"corpus: {exc}")
+        cases, patterns_text = [], ""
+    n_final = sum(1 for w, _ in cases if w == "FINAL")
+    # The assertions ARE the subjects. A floor here so that deleting the negatives — the only
+    # half that can prove the classifier still REJECTS anything — cannot read as a pass.
+    if len(cases) < 30 or n_final < 10:
+        fails.append(
+            f"corpus shrank: {len(cases)} cases, {n_final} must-stay-FINAL (want >=30 / >=10)"
+        )
+
+    def corpus_mismatches(patterns_file=None) -> list[str]:
+        bad = []
+        for want, msg in corpus_cases(patterns_file):
+            got = "TRANSIENT" if is_transient(msg, patterns_file) else "FINAL"
+            if got != want:
+                bad.append(f"want {want}, got {got}: {msg}")
+        return bad
+
+    ran.append("corpus: shipped vocabulary classifies every case as documented")
+    if cases:
+        for bad in corpus_mismatches():
+            fails.append(f"corpus: {bad}")
+
+    # NEGATIVE CASE 1 — an over-broad pattern must be REJECTED. Asserting only that the real
+    # file passes is vacuous: a corpus that cannot go red proves nothing about the classifier.
+    # `not accessible` in [transient] is the exact widening this gate must never accept — it
+    # would turn `Resource not accessible by integration` into a green UNRESOLVED, i.e. the
+    # gate reporting success about a permission misconfiguration of itself.
+    with tempfile.TemporaryDirectory() as d:
+        poisoned = pathlib.Path(d) / "poisoned.txt"
+        poisoned.write_text(
+            patterns_text.replace(
+                "[transient]\n", "[transient]\nnot accessible\nnot found\n", 1
+            )
+        )
+        ran.append("negative: an over-broad pattern is rejected")
+        if patterns_text and not corpus_mismatches(poisoned):
+            fails.append(
+                "a vocabulary that classifies `Resource not accessible by integration` as "
+                "transient passed the corpus — the corpus is not testing anything"
+            )
+
+        # NEGATIVE CASE 2 — a DELETED pattern must be caught too. Widening is not the only way
+        # to break this: a narrowed vocabulary stops degrading to UNRESOLVED and reddens PRs
+        # whose diff cannot cause it, which is the failure this whole third state exists for.
+        narrowed = pathlib.Path(d) / "narrowed.txt"
+        narrowed.write_text(
+            "\n".join(
+                ln for ln in patterns_text.splitlines() if ln != "rate.?limit"
+            )
+        )
+        ran.append("negative: a deleted pattern is rejected")
+        if patterns_text and not corpus_mismatches(narrowed):
+            fails.append("removing `rate.?limit` changed no verdict — the corpus is vacuous")
+
+        # NEGATIVE CASE 3 — an unreadable vocabulary must be LOUD. With no patterns loaded
+        # every message classifies as final, so a deleted file would silently mean "no failure
+        # is ever transient" while `is_transient` still returned a plausible boolean at every
+        # call site. It must raise, and as RuntimeError (red), never Unreachable (green).
+        ran.append("negative: an unreadable vocabulary raises, and is not Unreachable")
+        missing = pathlib.Path(d) / "does-not-exist.txt"
+        try:
+            is_transient("HTTP 503", missing)
+            fails.append("a missing vocabulary file must raise, not classify")
+        except Unreachable:
+            fails.append("a missing vocabulary file raised Unreachable — that renders GREEN")
+        except RuntimeError:
+            pass
+        # ...and an empty section is the same defect with the file present.
+        empty = pathlib.Path(d) / "empty-section.txt"
+        empty.write_text("[rate_limit]\n[transient]\n[cases]\n")
+        ran.append("negative: an empty section raises")
+        try:
+            is_transient("HTTP 503", empty)
+            fails.append("an empty [transient] section must raise, not classify")
+        except RuntimeError:
+            pass
+
+    # --- CROSS-LANGUAGE: the shell reader must agree, message for message -----------------
+    # One shared data file removes DATA drift but not ENGINE drift: `gh-retry.sh` greps a
+    # multi-line stderr FILE with `grep -qiE` (so `^`/`$` anchor per LINE) while this module
+    # runs `re.search` over a string (where they anchor at the ends of the whole string). A
+    # pattern such as `(^|[^a-z0-9])eof([^a-z0-9]|$)` can therefore mean two different things
+    # in the two readers, which is precisely the drift this reconciliation is meant to end.
+    shell_lib = pathlib.Path(__file__).resolve().parent / "gh-retry.sh"
+    ran.append("cross-language: gh-retry.sh agrees on every corpus case")
+    if not shell_lib.exists():
+        fails.append(f"cross-language: {shell_lib} is missing — the shell reader is unchecked")
+    elif cases:
+        script = (
+            # `set --` FIRST. This file is sourced, and its self-test block keys off `$1`, so a
+            # caller invoked with `--self-test` in its own argv runs the LIBRARY's cases and
+            # `exit 0`s before the caller's ever start — a green that tested nothing. `bash -c`
+            # passes no operands today, so `$1` is unset and this is safe by accident; adding
+            # one operand later (to parameterise the pattern file, say) would make the hijack
+            # live and silent. Clearing the positional parameters makes it structurally
+            # impossible instead of incidentally absent.
+            "set --;"
+            f"source {shell_lib};"
+            'while IFS= read -r m; do printf "%s\n" "$m" > "$TMPF";'
+            ' _gh_retry_classify "$TMPF"; done'
+        )
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, TMPF=str(pathlib.Path(d) / "err"))
+            proc = subprocess.run(
+                ["bash", "-c", script],
+                input="\n".join(m for _, m in cases) + "\n",
+                capture_output=True, text=True, env=env,
+            )
+        shell_verdicts = proc.stdout.split()
+        if proc.returncode != 0 or len(shell_verdicts) != len(cases):
+            fails.append(
+                f"cross-language: gh-retry.sh returned {len(shell_verdicts)} verdicts for "
+                f"{len(cases)} cases (rc={proc.returncode}, stderr={proc.stderr[:200]!r})"
+            )
+        else:
+            for (want, msg), cls in zip(cases, shell_verdicts, strict=True):
+                got = "FINAL" if cls == "final" else "TRANSIENT"
+                if got != want:
+                    fails.append(f"cross-language: gh-retry.sh says {cls} for {want}: {msg}")
+                if got != ("TRANSIENT" if is_transient(msg) else "FINAL"):
+                    fails.append(f"cross-language: shell/python disagree ({cls}): {msg}")
 
     # The corpus floor lives in main(), so an UNRESOLVED run is not failed by it while a
     # ruleset that really lost its protection still is.
@@ -419,6 +595,10 @@ def main() -> int:
 
     root = pathlib.Path(args.root)
     try:
+        # Up front, not lazily: `is_transient` is only consulted when a `gh api` call FAILS,
+        # so an unreadable vocabulary would sit undetected through every green run and first
+        # surface on the day it is needed — the one day it must not be wrong.
+        load_patterns()
         missing, contexts, n = findings(root, args.repo)
     except Unreachable as exc:
         # THIRD STATE. Not a pass (nothing was compared) and not a failure (the PR's diff
