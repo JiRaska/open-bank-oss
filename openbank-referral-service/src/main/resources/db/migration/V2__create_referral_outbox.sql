@@ -13,8 +13,6 @@ CREATE TABLE referral_outbox (
     attempt_count INTEGER NOT NULL DEFAULT 0,
     sent_at TIMESTAMPTZ,
     last_error TEXT,
-    -- ADR-0252: durable hand-off for the synthetic-origin taint across asynchronous dispatch.
-    synthetic BOOLEAN NOT NULL DEFAULT FALSE,
     claimed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

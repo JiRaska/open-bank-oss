@@ -65,6 +65,18 @@ sealed class ReferralEvent {
     abstract val programId: UUID
     abstract val inviteId: UUID
 
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` (audit-service) as the
+     * strongest (EVENT-sourced) attribution — issues #5256/#6035. Serialised via
+     * `objectMapper.writeValueAsString` in `ReferralService`, so the wire key exists only as
+     * this Kotlin property name (mirrors `FxEvent.sourceService`).
+     */
+    val sourceService: String = SOURCE_SERVICE
+
+    companion object {
+        internal const val SOURCE_SERVICE = "referral-service"
+    }
+
     data class Qualified(
         override val eventId: UUID,
         override val occurredAt: Instant,

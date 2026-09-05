@@ -10,10 +10,13 @@ info:
     openbank.referral.reward-outcome.v1). A consumer can now build against these channels.
 channels:
   referral.qualified.v1:
+    address: openbank.referral.qualified.v1
     publish: {operationId: referralQualified, message: {$ref: '#/components/messages/Qualified'}}
   referral.reward.requested.v1:
+    address: openbank.referral.reward-requested.v1
     publish: {operationId: referralRewardRequested, message: {$ref: '#/components/messages/RewardRequested'}}
   referral.reward.outcome.v1:
+    address: openbank.referral.reward-outcome.v1
     publish: {operationId: referralRewardOutcome, message: {$ref: '#/components/messages/RewardOutcome'}}
 components:
   messages:
