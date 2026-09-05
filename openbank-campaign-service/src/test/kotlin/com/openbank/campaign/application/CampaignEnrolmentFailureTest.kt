@@ -7,6 +7,7 @@ package com.openbank.campaign.application
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
+import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
@@ -120,6 +121,7 @@ class CampaignEnrolmentFailureTest {
         journeys: JourneySignaller,
         selectedCampaign: Campaign = campaign,
         audience: List<UUID> = parties,
+        creditConsent: (UUID) -> Boolean = { true },
     ) = CampaignService(
         campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID): Campaign? = selectedCampaign.takeIf { it.id == id }
@@ -142,6 +144,10 @@ class CampaignEnrolmentFailureTest {
         // loudly if a future change started scheduling from inside the enrol path.
         scheduler = ThrowingScheduler,
         metrics = metrics,
+        consentCheck = object : ConsentCheckPort {
+            override suspend fun hasActiveConsent(partyId: java.util.UUID, scope: String) =
+                if (scope == CampaignProductKind.CREDIT_OFFERS_SCOPE) creditConsent(partyId) else true
+        },
         explicitGraphActivationEnabled = false,
     )
 
@@ -233,4 +239,58 @@ class CampaignEnrolmentFailureTest {
     private fun partyIn(cohort: ExperimentCohort): UUID = generateSequence(1L) { it + 1 }
         .map { UUID(0, it) }
         .first { ExperimentCohort.assign(campaignId, it, 50) == cohort }
+
+    // ── ADR-0269 rule 1 on the scheduled sweep ──────────────────────────────────────────────
+
+    @Test
+    fun `a credit sweep enrols only the parties who switched credit offers on`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+        val consenting = parties.first()
+        val credit = campaign.copy(productKind = CampaignProductKind.UNSECURED)
+
+        service(enrolments, journeys, selectedCampaign = credit, creditConsent = { it == consenting })
+            .enrol(campaignId)
+
+        // Per party, not per campaign: consent belongs to the person. The others qualified for the
+        // segment and are simply not people the bank may offer credit to.
+        assertThat(enrolments.saved.map { it.partyId }).containsExactly(consenting)
+        assertThat(journeys.started).containsExactly(consenting)
+    }
+
+    @Test
+    fun `a credit sweep with no consenting party starts nothing at all`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+        val credit = campaign.copy(productKind = CampaignProductKind.UNSECURED)
+
+        service(enrolments, journeys, selectedCampaign = credit, creditConsent = { false }).enrol(campaignId)
+
+        assertThat(enrolments.saved).isEmpty()
+        assertThat(journeys.started).isEmpty()
+    }
+
+    @Test
+    fun `a non-credit sweep ignores credit consent entirely`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+
+        // campaign is NONE. If this refused, the credit consent would have become a general
+        // marketing switch — the thing ADR-0269 says it is not.
+        service(enrolments, journeys, creditConsent = { false }).enrol(campaignId)
+
+        assertThat(enrolments.saved.map { it.partyId }).containsExactlyElementsOf(parties)
+    }
+
+    @Test
+    fun `an unreadable consent skips the party rather than enrolling them`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+        val credit = campaign.copy(productKind = CampaignProductKind.UNSECURED)
+
+        service(enrolments, journeys, selectedCampaign = credit, creditConsent = { error("consent down") })
+            .enrol(campaignId)
+
+        assertThat(enrolments.saved).isEmpty()
+    }
 }

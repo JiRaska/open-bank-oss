@@ -349,6 +349,17 @@ enum class CampaignProductKind {
 
     /** Whether ADR-0269's credit consent and suppression floor govern this campaign. */
     val isCredit: Boolean get() = this != NONE
+
+    companion object {
+        /**
+         * The consent-service scope a credit campaign requires, named once.
+         *
+         * Two enrolment paths ask this question — the scheduled sweep and the trigger consumer —
+         * and a second spelling of the string would let one of them silently ask about a scope
+         * nobody grants, which reads as "no consent" and looks like the gate working.
+         */
+        const val CREDIT_OFFERS_SCOPE: String = "CREDIT_OFFERS"
+    }
 }
 
 /**
