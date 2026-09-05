@@ -1,0 +1,92 @@
+# -----------------------------------------------------------------------------
+# Copilot proposal-quality eval-pack gate (issue #4463; ADR-0148 evals gate; ADR-0235 archived-per-run).
+#
+# The second of the two scenario packs #4463 asked for — the one evals/README.md deferred when the
+# fraud pack shipped (PR #5105). Like that pack, it asserts on DETERMINISTIC production code
+# (PaymentProposalTool, CardFreezeProposalTool, CopilotPolicyGate), never on model output, so there
+# is nothing to record or replay and the LLM egress path being down does not affect it. See
+# evals/README.md for the split between this mechanism and openbank-libs/governance/evals/ (the
+# ADR-0148 LLM prompt/model replay gate).
+#
+# What this pack adds structurally over the fraud one: a third outcome. The two properties #4463
+# named that this service cannot assert today — SCA proposal-token binding and PSD2 consent scope —
+# are reported as UNAVAILABLE, never as a pass and never as a zero, and a guard test fails the build
+# if either gap closes without the scenario being promoted.
+#
+# Additive to services-ci.yml, which already runs the whole openbank-copilot-service suite on any
+# change under that module. What this workflow adds: archiving the eval pack's JSON report as a
+# build artifact, and a visible status check independent of the full per-module build.
+# -----------------------------------------------------------------------------
+name: Evals - copilot proposal quality
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "openbank-copilot-service/src/main/kotlin/com/openbank/copilot/domain/**"
+      - "openbank-copilot-service/src/main/kotlin/com/openbank/copilot/application/CopilotPolicyGate.kt"
+      - "openbank-copilot-service/src/main/kotlin/com/openbank/copilot/infrastructure/tool/**"
+      - "openbank-copilot-service/src/test/kotlin/com/openbank/copilot/evals/**"
+      - "openbank-copilot-service/src/test/resources/evals/**"
+      - "evals/**"
+      - ".github/workflows/evals-copilot-proposal.yml"
+  pull_request:
+    paths:
+      - "openbank-copilot-service/src/main/kotlin/com/openbank/copilot/domain/**"
+      - "openbank-copilot-service/src/main/kotlin/com/openbank/copilot/application/CopilotPolicyGate.kt"
+      - "openbank-copilot-service/src/main/kotlin/com/openbank/copilot/infrastructure/tool/**"
+      - "openbank-copilot-service/src/test/kotlin/com/openbank/copilot/evals/**"
+      - "openbank-copilot-service/src/test/resources/evals/**"
+      - "evals/**"
+      - ".github/workflows/evals-copilot-proposal.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-copilot-proposal-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+  copilot-proposal-pack:
+    name: copilot-proposal-quality eval pack
+    runs-on: ubuntu-latest # public repo: hosted runners free + unlimited (FinOps: hosted-first)
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          # NEVER write the Actions cache from this job -- restore only (#3299). Same budget
+          # reasoning evals-fraud-review.yml documents: the Gradle cache-writer budget is fixed at
+          # 5 main-push jobs and `fleet-lint` is the designated Linux-X64 writer.
+          cache-read-only: true
+
+      # Pure-JVM application/domain code with zero infra dependency (no DB/Kafka/Redis) — `--tests`
+      # scopes the run to exactly the eval classes so a failure names the regression gate itself,
+      # not an unrelated copilot-service test.
+      - name: Run the copilot-proposal-quality eval pack
+        run: |
+          ./gradlew :openbank-copilot-service:test \
+            --tests "com.openbank.copilot.evals.*" \
+            --console=plain
+
+      - name: Archive the eval report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: copilot-proposal-eval-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: openbank-copilot-service/build/eval-reports/copilot-proposal-quality.json
+          retention-days: 90
+          if-no-files-found: error
