@@ -180,6 +180,18 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
             find("status", status.name).page(page, size).list()
         }.awaitSuspending().map { it.toDomain(objectMapper) }
 
+    /**
+     * See [KycCaseRepository.findExpirableOpenCases]. `expires_at` is nullable on the entity, and a
+     * null one is NOT expirable — a case with no deadline has none to be past.
+     */
+    override suspend fun findExpirableOpenCases(threshold: Instant, limit: Int): List<KycCase> = Panache.withSession {
+        find(
+            "status = ?1 and expiresAt is not null and expiresAt <= ?2 order by expiresAt asc",
+            KycCaseStatus.OPEN.name,
+            threshold,
+        ).page(0, limit).list()
+    }.awaitSuspending().map { it.toDomain(objectMapper) }
+
     override suspend fun countAll(): Long = Panache.withSession { count() }.awaitSuspending()
 
     /** Count cases in a given [status]. Used for funnel KPI tiles (ADR-0068). */

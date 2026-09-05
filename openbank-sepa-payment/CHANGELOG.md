@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.0...sepa-payment-v0.13.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **sepa-payment:** resolve AML case party_id via account-service ([#8505](https://github.com/JiRaska/open-bank-oss/issues/8505)) ([#8631](https://github.com/JiRaska/open-bank-oss/issues/8631)) ([2ea7bcc](https://github.com/JiRaska/open-bank-oss/commit/2ea7bcc98365ea005ab3ed77be7994cac75024c2))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.12.0...sepa-payment-v0.13.0) (2026-08-24)
 
 

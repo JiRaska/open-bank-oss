@@ -30,10 +30,16 @@ com.openbank.libs/
 ├── idempotency/       IdempotencyStore port + Redis-backed implementation
 ├── persistence/
 │   └── outbox/        Generic transactional outbox primitives (entity, dispatcher, ports)
-├── security/          PiiMask, Roles, SecurityContext extensions, BearerTokenClientHeadersFactory, BootstrapVerifier
+├── security/          PiiMask, Roles, SecurityContext extensions, BearerTokenClientHeadersFactory
 ├── util/              BuildInfo (runtime tech-stack snapshot via Gradle stamping)
 └── web/               JAX-RS filters: CorrelationIdFilter, RateLimitFilter, ApiVersionResponseFilter, ServiceInfoResource, ServiceConfigResource
 ```
+
+`security/` does **not** contain a `BootstrapVerifier` — this line used to list one, and that was wrong.
+ADR-0017 prescribes a startup fail-fast guard against dev-placeholder secrets, but it was never written
+(`git grep BootstrapVerifier -- '*.kt'` returns 0), and that ADR's own delivery note says so. Dev
+placeholders are kept out of prod by ESO/OpenBao `secretKeyRef` secret injection (ADR-0007), not by
+anything in this library (#8426).
 
 ## Related documents
 

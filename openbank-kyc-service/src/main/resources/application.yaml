@@ -187,6 +187,19 @@ openbank:
       cron: "${RETENTION_KYC_CRON:0 30 3 * * ?}"
       dry-run: "${RETENTION_KYC_DRY_RUN:false}"
   kyc:
+    # Time-driven exit from OPEN (#8548). Every case is created with expires_at = now + 30 days,
+    # and until this sweep existed nothing ever wrote EXPIRED — so an abandoned case kept
+    # uq_kyc_cases_active_party occupied and its party could never be KYC'd again.
+    #
+    # 03:00 is AFTER onboarding-service's abandoned-registration cleaner (02:00, also 30 days) and
+    # BEFORE kyc retention (03:30), and that order is deliberate: the cleaner suspends the
+    # abandoned party first, then this releases its case, so an operator reactivating the party
+    # from the cockpit can open a fresh one. Sweeping first would take the record out of the
+    # cleaner's KYC_OPEN window and the party would never be suspended at all.
+    expiration:
+      enabled: "${KYC_EXPIRATION_ENABLED:true}"
+      cron: "${KYC_EXPIRATION_CRON:0 0 3 * * ?}"
+      batch-size: "${KYC_EXPIRATION_BATCH_SIZE:500}"
     # Cross-service reconciliation: parties with no KYC case at all (issue #5698). Read-only —
     # it publishes openbank_kyc_orphaned_parties and never opens a case (remediation is a
     # human-gated replay). Hourly; the grace period keeps a party that was created seconds ago,

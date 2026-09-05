@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.1...sanctions-service-v0.11.2) (2026-09-03)
+
+
+### Bug Fixes
+
+* **sanctions:** drop EPOCH defaults from SanctionsEntry and entity timestamps ([#8405](https://github.com/JiRaska/open-bank-oss/issues/8405)) ([ade55c6](https://github.com/JiRaska/open-bank-oss/commit/ade55c616772265852edea8c0e9f1b61565604d0))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.11.0...sanctions-service-v0.11.1) (2026-09-03)
 
 
