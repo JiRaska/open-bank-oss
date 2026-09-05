@@ -47,7 +47,7 @@ import java.time.LocalDate
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 @RegisterRestClient(configKey = "ares")
-@SyntheticTaintExternalBoundary("ARES is a third-party public register (Ministry of Finance CZ) - a synthetic-origin header must not leave the platform, and the register answers a synthetic lookup exactly as a real one")
+@SyntheticTaintExternalBoundary("ARES is a third-party public register; taint must not leave the platform")
 interface AresRestClient {
     @GET
     @Path("/ekonomicke-subjekty/{ico}")

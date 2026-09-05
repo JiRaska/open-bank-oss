@@ -55,8 +55,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kyb-service
-            # First build lands via auto-deploy on the merge that adds openbank-kyb-service to
-            # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
+          # First build lands via auto-deploy on the merge that adds openbank-kyb-service to
+          # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
           image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-26f33679
           imagePullPolicy: IfNotPresent
           ports:

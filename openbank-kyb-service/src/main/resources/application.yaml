@@ -186,7 +186,9 @@ openbank:
 opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
-  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+  # A Duration, not a millisecond Long: see AuthzProducer for why the Kotlin field cannot carry
+  # an initializer, which a primitive would need.
+  timeout: "${OPA_TIMEOUT:PT0.5S}"
 authz:
   # Enforcing by default: the case routes mint an entity party and bind humans to it, and every
   # customer route is scoped by X-Customer-Party-Id from the edge principal (kyb_rest_ext.rego).

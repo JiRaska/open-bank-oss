@@ -43,7 +43,7 @@ import java.time.LocalDate
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 @RegisterRestClient(configKey = "gleif")
-@SyntheticTaintExternalBoundary("GLEIF is a third-party public register - the same external boundary as ARES")
+@SyntheticTaintExternalBoundary("GLEIF is a third-party public register; same boundary as ARES")
 interface GleifRestClient {
     @GET
     @Path("/lei-records/{lei}")
