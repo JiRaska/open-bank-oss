@@ -86,7 +86,10 @@ SELECT
     party_id,
     count()                                    AS events_observed,
     uniqExact(aggregate_id)                    AS aggregates_observed,
-    uniqExactIf(aggregate_id, aggregate_type = 'ACCOUNT')            AS accounts_observed,
+    -- upper() restated at the comparison even though silver_party_events folds it: inheriting a
+    -- fold is an assumption that breaks silently the day the source view changes, which is what the
+    -- aggregate-type-case-fold gate exists to prevent. upper() of an already-folded value is free.
+    uniqExactIf(aggregate_id, upper(aggregate_type) = 'ACCOUNT')      AS accounts_observed,
     uniqExact(aggregate_type)                  AS domains_observed,
     min(occurred_at)                           AS first_seen_at,
     max(occurred_at)                           AS last_seen_at,
