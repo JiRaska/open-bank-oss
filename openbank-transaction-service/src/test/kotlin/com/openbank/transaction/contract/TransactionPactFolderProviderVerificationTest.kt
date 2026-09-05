@@ -111,30 +111,6 @@ class TransactionPactFolderProviderVerificationTest {
         context?.verifyInteraction()
     }
 
-    /**
-     * The negative contract, pinned in THIS class because it is the one that runs on every PR
-     * (ADR-0279 #3): `POST /api/v1/transactions` is `@RolesAllowed(Roles.OPERATOR)` alone, so an
-     * authenticated caller carrying only ROLE_VIEWER must be refused with 403 before the handler
-     * runs. A contract suite that only replays 201s stays green if the provider stops enforcing
-     * authz. This test lives here rather than in the broker twin because that class is
-     * `pactbroker.url`-gated and would skip exactly where the pin is needed.
-     */
-    @Test
-    @TestSecurity(user = "pact-verifier-viewer", roles = ["ROLE_VIEWER"])
-    fun `an authenticated caller without ROLE_OPERATOR is refused with 403`() {
-        Given { this } When {
-            contentType("application/json")
-            body(
-                """{"idempotencyKey":"pact-negative-403","type":"TRANSFER",""" +
-                    """"sourceAccountId":"${UUID.randomUUID()}","targetAccountId":"${UUID.randomUUID()}",""" +
-                    """"amount":1.00,"currencyCode":"CZK"}""",
-            )
-            post("/api/v1/transactions")
-        } Then {
-            statusCode(403)
-        }
-    }
-
     @State("the transaction service is available")
     fun stateServiceAvailable() {
         // TemporalTestResource provides an in-process Temporal server with NoOpPaymentWorkflow
@@ -190,5 +166,38 @@ class TransactionPactFolderProviderVerificationTest {
             occurredAt = java.time.Instant.parse("2026-01-01T00:00:00Z"),
         )
         return objectMapper.writeValueAsString(event)
+    }
+}
+
+/**
+ * The negative contract for the route these pacts cover (ADR-0279 #3):
+ * `POST /api/v1/transactions` is `@RolesAllowed(Roles.OPERATOR)` alone, so an authenticated
+ * caller carrying only ROLE_VIEWER must be refused with 403 before the handler runs. A contract
+ * suite that only replays 201s stays green if the provider stops enforcing authz.
+ *
+ * A class of its own, deliberately: the pact class's `@BeforeEach` takes a
+ * [PactVerificationContext] that only the TestTemplate provider can resolve, so a plain `@Test`
+ * inside it dies with ParameterResolutionException before its body runs. The pin lives in this
+ * file (with the folder twin) rather than in the broker twin because that class is
+ * `pactbroker.url`-gated and would skip exactly where the pin is needed.
+ */
+@QuarkusTest
+@QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
+class TransactionPactNegativeAuthzTest {
+
+    @Test
+    @TestSecurity(user = "pact-verifier-viewer", roles = ["ROLE_VIEWER"])
+    fun `an authenticated caller without ROLE_OPERATOR is refused with 403`() {
+        Given { this } When {
+            contentType("application/json")
+            body(
+                """{"idempotencyKey":"pact-negative-403","type":"TRANSFER",""" +
+                    """"sourceAccountId":"${UUID.randomUUID()}","targetAccountId":"${UUID.randomUUID()}",""" +
+                    """"amount":1.00,"currencyCode":"CZK"}""",
+            )
+            post("/api/v1/transactions")
+        } Then {
+            statusCode(403)
+        }
     }
 }
