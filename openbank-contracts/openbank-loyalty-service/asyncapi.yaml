@@ -1,0 +1,201 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+#
+# WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS;
+# nothing validates its content against what the code actually sends, and no schema is registered
+# in Apicurio. Everything below is DERIVED from `LeafOutboxMessages` (the only builder of an
+# outbox payload), `LeafLedgerRepositoryImpl` (the only writer of an outbox row) and
+# `KafkaLoyaltyOutboxEventPublisher` (the only sender to Kafka). Each claim names its source.
+#
+# NO CONSUMER EXISTS YET, and that is declared rather than implied: this topic is listed in
+# `rules.yaml: event_consumer_liveness.allowlist`. ADR-0282 D4 puts the delivering engines
+# (billing, interest, fx) in a later slice, so a consumer written now would have nothing to do.
+# ADR-0006's own sequencing is producers before consumers (#1916).
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Loyalty Service — Lístek ledger events
+  version: 1.0.0
+  description: |
+    Every entry appended to the Lístek ledger (ADR-0282 D2) is published through a transactional
+    outbox: the ledger row and its outbox row commit in one transaction, so an event exists if and
+    only if the ledger fact does. A Lístek is a closed-loop unit of bank obligation, never money,
+    so no message on this channel carries a monetary amount or a currency.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace. Topic declared in
+      `openbank-infra/gitops/components/messaging/kafka-topic-loyalty-events.yaml`.
+
+channels:
+  loyaltyEvents:
+    address: openbank.loyalty.events
+    title: Lístek ledger events
+    description: |
+      Topic name from `mp.messaging.outgoing.loyalty-outbox-out.topic` in
+      `openbank-loyalty-service/src/main/resources/application.yaml`.
+
+      **Partitioning key: the party id.** `KafkaLoyaltyOutboxEventPublisher` sends with
+      `OutboxKafkaHeaders.partitionKey(entry)` over an `OutboxEntry` whose `aggregateId` is the
+      party (`LeafOutboxMessages` sets `aggregateId = entry.partyId` on every message), so all of
+      one customer's ledger events share a partition and stay ordered relative to each other.
+
+      **Retention: the topic default.** Nothing here is the system of record — the ledger is, in
+      `leaf_ledger_entry` — so a consumer that misses a window rebuilds from the service rather
+      than from the log.
+    messages:
+      leaf-earned:
+        $ref: '#/components/messages/leaf-earned'
+      leaf-benefit-granted:
+        $ref: '#/components/messages/leaf-benefit-granted'
+      leaf-expired:
+        $ref: '#/components/messages/leaf-expired'
+
+operations:
+  publishLeafLedgerEvent:
+    action: send
+    channel:
+      $ref: '#/channels/loyaltyEvents'
+    summary: Emit one ledger entry once its row is durable.
+    description: |
+      Each write path in `LeafLedgerRepositoryImpl` persists the ledger row and the outbox row
+      inside one `Panache.withTransaction`. `LoyaltyOutboxDispatcher`
+      (`@Scheduled(every = "${openbank.outbox.poll-interval:5s}")`) claims rows with
+      `FOR UPDATE SKIP LOCKED`, sends each to this channel and marks it sent only on the Kafka
+      acknowledgement; a send that throws leaves the row for retry with `last_error` recorded,
+      and `OutboxFailurePolicy` moves it to DEAD after repeated failure rather than dropping it.
+    messages:
+      - $ref: '#/channels/loyaltyEvents/messages/leaf-earned'
+      - $ref: '#/channels/loyaltyEvents/messages/leaf-benefit-granted'
+      - $ref: '#/channels/loyaltyEvents/messages/leaf-expired'
+
+components:
+  messages:
+    leaf-earned:
+      name: LeafEarned
+      title: Lístky minted for an achievement
+      contentType: application/json
+      description: |
+        `eventType` on the wire is `LeafEarned.<earnSourceId>`, so a consumer can route on the
+        earn source without parsing the payload. A CAPPED attempt publishes NOTHING: the annual
+        cap refusing an award writes no ledger row, so there is no event for it. That absence is
+        deliberate and is why the refusal has its own metric
+        (`openbank_loyalty_earn_capped_total`) rather than a message here.
+      payload:
+        $ref: '#/components/schemas/LeafLedgerEventPayload'
+    leaf-benefit-granted:
+      name: LeafBenefitGranted
+      title: Lístky burned for a catalogue benefit
+      contentType: application/json
+      description: |
+        `eventType` is `LeafBenefitGranted.<benefitId>`. **`grantStatus: GRANTED` means the
+        benefit is owed and published, never that it was applied** — the delivering engine reports
+        application, and no field in this message is a receipt.
+      payload:
+        $ref: '#/components/schemas/LeafBenefitGrantedPayload'
+    leaf-expired:
+      name: LeafExpired
+      title: An unspent lot reached its expiry
+      contentType: application/json
+      description: |
+        `eventType` is `LeafExpired`. The obligation is released, which is what the daily
+        provisioning journal reads.
+      payload:
+        $ref: '#/components/schemas/LeafExpiredPayload'
+  schemas:
+    LeafLedgerEventPayload:
+      type: object
+      description: |
+        The fields `LeafOutboxMessages.base` puts on every message, plus the earn-specific two.
+      required: [entryId, aggregateType, aggregateId, partyId, entryType, leaves, ruleVersion, correlationEventId, occurredAt, sourceService, actorType, actorId]
+      properties:
+        entryId:
+          type: string
+          format: uuid
+          description: The ledger row's own id.
+        aggregateType:
+          type: string
+          enum: [LEAF_LEDGER]
+        aggregateId:
+          type: string
+          format: uuid
+          description: The party id, and the partition key.
+        partyId:
+          type: string
+          format: uuid
+        entryType:
+          type: string
+          enum: [EARN, BURN, EXPIRE, REVERSE]
+        leaves:
+          type: integer
+          description: |
+            A count of Lístky. Deliberately not a monetary amount: there is no currency field on
+            this or any other message here, because a Lístek has no price in any currency
+            (ADR-0282 D1).
+        ruleVersion:
+          type: string
+          description: |
+            `EarnCatalog.RULE_VERSION` frozen at the moment the entry was decided, so changing a
+            catalogue amount later never reattributes history to a rule that did not decide it.
+        correlationEventId:
+          type: string
+          format: uuid
+          description: |
+            The durable thing this entry is about — the triggering domain event for an EARN, the
+            grant for a BURN, the expiring lot for an EXPIRE. Never a freshly minted id.
+        occurredAt:
+          type: string
+          format: date-time
+        sourceService:
+          type: string
+          enum: [loyalty-service]
+          description: |
+            The producer's own claim, so audit attribution does not fall back to deriving it from
+            the topic name (#5256/#6035).
+        actorType:
+          type: string
+          enum: [SYSTEM]
+        actorId:
+          type: string
+          description: "`EventActor.system(\"loyalty\", \"leaf-ledger\")`."
+        earnSourceId:
+          type: string
+          description: The `LeafEarnSource` id. Present on an EARN message.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When this lot expires. Present on an EARN message.
+    LeafBenefitGrantedPayload:
+      allOf:
+        - $ref: '#/components/schemas/LeafLedgerEventPayload'
+        - type: object
+          required: [grantId, benefitId, grantStatus]
+          properties:
+            grantId:
+              type: string
+              format: uuid
+            benefitId:
+              type: string
+            grantStatus:
+              type: string
+              enum: [RESERVED, GRANTED, RELEASED, REVERSED]
+              description: |
+                GRANTED means owed and published. It is NOT a delivery receipt, and a consumer
+                that treats it as one is asserting something this service cannot observe.
+            grantExpiresAt:
+              type: string
+              format: date-time
+              nullable: true
+    LeafExpiredPayload:
+      $ref: '#/components/schemas/LeafLedgerEventPayload'

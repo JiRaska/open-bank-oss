@@ -72,12 +72,21 @@ class LeafOutboxMessages(private val mapper: ObjectMapper) {
         "ruleVersion" to entry.ruleVersion,
         "correlationEventId" to entry.correlationEventId.toString(),
         "occurredAt" to entry.occurredAt.toString(),
+        // The producer's own claim about who emitted this, and the reason it is spelled
+        // "loyalty-service": audit-service attributes a row by this field when it is present and
+        // by DERIVING it from the topic name when it is not. `audit_entries` is append-only at the
+        // database and `source_service` is chain-hashed into `record_hash`, so a row attributed by
+        // derivation can never be corrected afterwards. The value is the module directory minus
+        // the `openbank-` prefix, which is the spelling TopicAttribution already maps this topic
+        // to — a disagreement would split one producer into two in every group-by (#5256/#6035).
+        "sourceService" to SOURCE_SERVICE,
         EventActor.FIELD_ACTOR_TYPE to EventActor.TYPE_SYSTEM,
         EventActor.FIELD_ACTOR_ID to EventActor.system(SERVICE_NAME, MECHANISM),
     )
 
     private companion object {
         const val AGGREGATE_TYPE = "LEAF_LEDGER"
+        const val SOURCE_SERVICE = "loyalty-service"
         const val SERVICE_NAME = "loyalty"
         const val MECHANISM = "leaf-ledger"
     }
