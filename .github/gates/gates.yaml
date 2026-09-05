@@ -188,6 +188,39 @@ gates:
     run: |
       python3 .github/scripts/run-gates.py --self-test
 
+  # Critical-alert RCA ledger guards (ADR-0241 D1/D3, #5869 / #5875). These self-tests
+  # were written and wired ONLY as steps inside the scheduled workflows that use them —
+  # `alert-rca-weekly.yml` (Mondays) and `standing-critical-digest.yml` (daily). Both
+  # workflows fail at their FIRST Alertmanager step because no ALERTMANAGER_* credential
+  # exists (4 of 4 daily runs failed, 2026-08-18..21), so the guards had never executed
+  # anywhere, on any lane, and could not go red on a PR that broke them.
+  #
+  # check-gate-script-registration.py did not catch this and structurally could not: it
+  # scopes itself to `check-*` filenames (these are not), and its own header records that
+  # it deliberately does not check REACHABILITY — a script invoked from a workflow that
+  # never runs still counts as wired. Registering here is what puts them on a PR lane.
+  - id: alert-rca-ledger-guards
+    budget_seconds: 15   # one script self-test run
+    selftest_exempt: "is-a-test-suite — the run: IS alert-rca-ledger.py --self-test"
+    name: "alert-RCA ledger guards (MTTR granularity, recurrence, observation coverage)"
+    group: lint
+    mode: enforced
+    rationale: "The MTTR granularity refusal and the recurrence guard are the only things stopping ADR-0241 D1/D3 from publishing a number nobody measured, and the coverage outcome is what stops an empty week reporting as a clean one. They were wired only inside a scheduled workflow that has never once succeeded, so they had never run on any lane. Recheck for removal when a durable alert open/close feed exists (#5869) and the MTTR half is no longer a refusal."
+    review_after: "2027-02-21"
+    run: |
+      python3 .github/scripts/alert-rca-ledger.py --self-test
+
+  - id: standing-critical-digest-guards
+    budget_seconds: 15   # one script self-test run
+    selftest_exempt: "is-a-test-suite — the run: IS standing-critical-digest.py --self-test"
+    name: "standing-critical digest guards (severity filter, observation envelope)"
+    group: lint
+    mode: enforced
+    rationale: "The digest's severity filter and observation envelope are the producer half of the same control; if the envelope shape drifts, the weekly review silently folds nothing and reports a clean week. Same lane gap as its consumer above. Recheck when the digest stops being the ledger's only observation source."
+    review_after: "2027-02-21"
+    run: |
+      python3 .github/scripts/standing-critical-digest.py --self-test
+
   - id: yamllint
     selftest_exempt: "third-party — yamllint's own test suite is not ours to run"
     name: "yamllint"
@@ -1874,6 +1907,34 @@ gates:
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
+  # ADR-0031 D9 phase 3 (issue #5281): flaky-test-hunter is the only chartered agent with a real
+  # GitHub write path. The two properties that make that acceptable — the write is confined to one
+  # NON-money-path module's own test tree, and the agent opens a PR but never merges or approves —
+  # held only because a human read a Kotlin constant. Every existing unit test pins that a LEDGER
+  # path is refused, so re-pointing the writer at another service would keep them all green, and
+  # money_path_services is a list that GROWS (settlement, sanctions, sdd and interest were all
+  # added after the fact). This binds the constant to rules.yaml: money_path_services itself
+  # rather than to a second hand-kept copy, and rejects any merge/approve/review-request endpoint
+  # literal in the adapter.
+  #
+  # ENFORCED. Pure python + one file read, <1 s. Falsified by effect against the real adapter on
+  # 2026-08-20: a money-path prefix, an added `PUT /pulls/{n}/merge`, and a deleted bound each make
+  # it exit 1; removing either half of `evaluate` makes the self-test go red.
+  - id: agent-bounded-write-surface
+    budget_seconds: 20   # rules.yaml + agent charter scan
+    min_subjects: 20   # the money_path_services entries the bound is checked against; 23 today
+                        # (2026-08-20). A gate that resolves an empty list would pass everything,
+                        # so the floor moves with the list rather than tracking it exactly.
+    name: "agent bounded GitHub write surface (ADR-0031 D9 phase 3, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "flaky-test-hunter is the only agent with a real GitHub write path; its non-money-path confinement and its inability to merge or approve held only because a human read a Kotlin constant, and money_path_services grows over time."
+    review_after: "2027-02-20"
+    selftest: python3 .github/scripts/check-agent-bounded-write-surface.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-agent-bounded-write-surface.py
+
   - id: agent-model-parity
     name: "agent model-id parity, agents.yaml vs application.yaml (ADR-0031 D5, enforced)"
     group: registry
@@ -2480,6 +2541,48 @@ gates:
   # #2187 ledger tie-out + FX revaluation, fx ČNB ingestion, billing cycle) — none had ever
   # run. It is a gate rather than a doc because the natural test cannot fail: calling the
   # method directly supplies the context the scheduler does not. ENFORCED.
+  # #5256/#5902. `source_service` is the column every audit and analytics query groups by, so a
+  # producer whose self-reported spelling disagrees with the fleet convention (module directory
+  # minus `openbank-`) splits itself off from audit-service's TopicAttribution fallback, which uses
+  # the module name. When such a producer later gains EVENT-sourced attribution its rows change
+  # spelling MID-STREAM and the group-by reports two producers where there is one — which is what
+  # PR #5399 did to lending's six upgraded event types on 2026-08-18.
+  #
+  # It is a gate rather than a doc because the natural probe cannot see it: `grep -c sourceService
+  # src/main` is non-zero for all 21 producers — it matches the field being MENTIONED (KDoc, a data
+  # class property, a consumer reading it back), never the value emitted — and that probe reported
+  # full conformance while lending disagreed at nine write sites. This check resolves the value at
+  # each write site through all four fleet idioms, follows a `const val` within the module, and
+  # refuses to guess an ambiguous one.
+  #
+  # min_subjects is inside the script as well as here, on purpose: the first draft of the regex
+  # could not see `val sourceService: String = SOURCE_SERVICE` and enumerated 17 of 21 producers
+  # while printing a confident OK. Only the floor turned that into a visible number.
+  #
+  # lending is a DECLARED EXCEPTION, not debt (#5902 decided: keep "lending"). The rows it already
+  # wrote are unrewritable by anyone — audit_entries is append-only at the DB and `source_service`
+  # is chain-hashed — so a rename could only add a fourth boundary on top of a split that can never
+  # be repaired. The boundary is documented in openbank-lending-service/CLAUDE.md instead. The
+  # baseline entry pins the (module, value) pair, so lending drifting to a third spelling still
+  # fails. ENFORCED.
+  - id: source-service-convention
+    budget_seconds: 30   # whole-fleet Kotlin scan
+    name: "sourceService == module directory name (issues #5256/#5902, enforced)"
+    group: kotlin
+    mode: enforced
+    min_subjects: 20
+    rationale: >-
+      `source_service` is the column every audit and analytics query groups by, so a producer
+      whose self-reported spelling disagrees with the module name splits itself off from
+      audit-service's topic fallback — and the natural probe cannot see it, because
+      `grep -c sourceService` matches the field being mentioned, never the value emitted
+      (#5256, #5902).
+    review_after: 2027-02-20
+    selftest: python3 .github/scripts/check-source-service-convention.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-source-service-convention.py --root .
+
   - id: no-runblocking-in-a-scheduled-body
     name: "no runBlocking in a @Scheduled body (rules.yaml: scheduled_methods, enforced)"
     group: kotlin
@@ -2798,6 +2901,32 @@ gates:
       python3 .github/scripts/check-libs-annotations-implemented.py .
 
   # ==== api ===================================================================
+
+  # Issue #8351 (ROADMAP M2): "idempotency coverage" had no measured inventory — which
+  # mutating endpoints require an idempotency key existed nowhere as data. This gate parses
+  # every released service's openapi.yaml, classifies each mutating operation
+  # (required-header / required-body — both fleet idioms plus the Berlin Group X-Request-ID —
+  # / optional / absent), prints the full inventory, and enforces the hard rule on the one
+  # class where a retry double-books: money-path (rules.yaml) POST. Today's 94 uncovered
+  # money-path POSTs are shrink-only baselined with per-class reasons; a NEW uncovered one
+  # fails. Writing the gate caught real drift on day one: psd2's v2 PIS spec declared an
+  # X-Idempotency-Key the code never reads (#8772).
+  - id: idempotency-coverage-money-path
+    name: "money-path POST endpoints declare a required idempotency key (#8351, enforced)"
+    group: api
+    mode: enforced
+    budget_seconds: 20   # 52 OpenAPI parses via gatelib cache, measured ~2s
+    rationale: >-
+      A duplicate POST on a money-path endpoint is a double debit; without a ratchet, a new
+      endpoint ships without an idempotency key and nothing objects. The gate also prints the
+      fleet-wide inventory the M2 exit criterion asks for.
+    review_after: 2027-03-05
+    min_subjects: 40   # 52 released services with a spec today (2026-09-05); some slack
+    selftest: python3 .github/scripts/check-idempotency-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-idempotency-coverage.py"]
+    run: |
+      python3 .github/scripts/check-idempotency-coverage.py
 
   # The verification reconciler (.github/scripts/pact-reconcile-verifications.py)
   # dispatches verify-provider.yml with the PACTICIPANT NAME as its `service` input,
@@ -4668,6 +4797,44 @@ gates:
     min_subjects: 3
     run: |
       python3 .github/scripts/check-ruleset-context-parity.py --enforce --repo "${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
+  # Refs #4828, the config half of #4240. The merged-past-red-check watch DETECTS a merge
+  # that went past a failing required check, twice a day, after it is already on main. It
+  # never looks at who is permitted to do that — `main-protection.bypass_actors`, one API
+  # field, today a single entry: RepositoryRole#5 (`admin`), bypass_mode `pull_request`.
+  # That field is editable from repository Settings in two clicks and produces no diff, no
+  # PR and no red check anywhere — the same write-only-control shape #4240 exists for, one
+  # level up. This gate cannot prevent an `--admin`-style override (GitHub evaluates the
+  # bypass at merge time, after every check has reported, so nothing in CI can); it makes a
+  # WIDENING of the surface reviewed instead of ambient. Both directions are checked, since
+  # a declaration that no longer describes anything is how a pinned list stops being a pin.
+  #
+  # Needs NO permission grant and shares ruleset-context-parity's transport: GET
+  # .../rulesets/{id} is world-readable on a public repo and includes bypass_actors. Note
+  # this is NOT the endpoint the runtime watch needs — `rulesets/rule-suites` (the bypass
+  # LOG) is private and rejects fine-grained tokens, which is exactly why the log half
+  # cannot be a PR-blocking gate and this config half can.
+  #
+  # Falsified against the REAL live ruleset, not a fixture: with the declaration emptied the
+  # live admin actor is reported undeclared, and with its bypass_mode pinned to `always`
+  # both directions report — red both ways, green only on the shipped declaration.
+  - id: ruleset-bypass-actors
+    budget_seconds: 20   # one GitHub API read + compare
+    name: "who may bypass main-protection is pinned, and widening it fails a PR (Refs #4828, enforced)"
+    group: lint
+    mode: enforced
+    rationale: >
+      The bypass surface of main-protection is a repository SETTING, not a file: it is edited
+      in the Settings UI, produces no diff and no red check, and is observable only by asking
+      the API. #4828 lists five merges that used it. Pinning the actor set makes a widening —
+      a new bot, a team, or an existing entry flipped to `always` (which additionally permits
+      a direct push to main) — reddens every PR until it is declared in a reviewed commit.
+      Re-examine when the repo gains an org owner or a GitHub App that legitimately needs one.
+    review_after: "2027-02-20"
+    selftest: python3 .github/scripts/check-ruleset-bypass-actors.py --self-test
+    selftest_expect: pass
+    min_subjects: 1   # exactly 1 bypass actor today (2026-08-20)
+    run: |
+      python3 .github/scripts/check-ruleset-bypass-actors.py --enforce --repo "${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 
   # #4716 (Refs #4533). An advisory written as a single `< X` interval misclassifies every
   # dependency with parallel release lines: hibernate-reactive 3.4.2.Final sorts below `< 4.2.1`

@@ -335,6 +335,24 @@ change_requirements:
     gate: schema-compat
     enforced: advisory
     target_enforce_date: "2026-09-15"   # ADR-0144
+    # GRADUATION EVIDENCE, measured 2026-09-05. Replayed check-event-schema-compat.py over the
+    # REAL population — the 20 commits in 90 days touching a file that contains `DomainEvent(`,
+    # found with `git grep -l`, not by path name — and the gate was demonstrably exercised:
+    # 59 event-class property-set changes across DelegationEvents, ConsentEvents and others.
+    # It flagged none, correctly: every delta was an ADDED field, which is backward compatible.
+    # False positives on real history: 0 of 20. Same evidence shape #3438 used before
+    # graduating threat-model-diff.
+    #
+    # Two caveats worth carrying, because the first four attempts at this measurement all
+    # produced clean-looking numbers that meant nothing:
+    #   * it only became meaningful after #8713 fixed a parser blind spot — a KDoc inside a
+    #     constructor parameter list hid the parameter after it, so 15 properties fleet-wide
+    #     were invisible and REMOVING one produced no finding at all;
+    #   * selecting commits by path name (`*Event*.kt`, `*/events/*`) gave 40 commits of which
+    #     ZERO touched an event file. Select the population from the code, never from names.
+    #
+    # NOT evidenced: no commit in the window REMOVED or retyped a field, so those paths rest on
+    # the gate's own --self-test (17 cases), not on history.
     # CI producer is LIVE (advisory): .github/scripts/check-event-schema-compat.py runs in
     # the "Validate manifests" job on every PR — diff-scoped over DomainEvent data classes
     # (removed/renamed props, type changes, non-nullable-no-default additions = replay break,
@@ -568,12 +586,27 @@ change_requirements:
     gate: dotted-mp-messaging-keys
     enforced: advisory
     target_enforce_date: "2026-09-30"   # ADR-0144
-    blocked_on: "16 findings fleet-wide as of 2026-08-08 (#3931), across kyc/sdd/psd2/ledger/
-      onboarding/anacredit — NOT the 1 this line claimed while carrying no date; the claim was never
-      re-measured because an advisory gate's own justification note is not itself gated. The script
-      supports --enforce, so graduating is a one-word change once the findings are cleared — and
-      the right sequencing is #3928 first: widen the ENFORCED check-kafka-dotted-keys.py to the
-      whole class and retire this advisory duplicate, rather than graduating two overlapping gates."
+    # RE-MEASURED 2026-09-05, and this note had gone stale in exactly the way it warns about.
+    # Both issues it sequences on are CLOSED (#3928, #3931), and the count is not 16:
+    # `check-dotted-mp-messaging-keys.sh --enforce` reports 171 occurrences today.
+    #
+    # 171 is not "the debt grew 10x" — the two gates count different things, which IS the point:
+    #   * kafka-dotted-key-ratchet (ENFORCED) baselines today's set as an operational decision
+    #     (#2945) and fails only on a NEW occurrence. It reports clean: 11 baselined, 0 new.
+    #   * dotted-mp-messaging-key-guard (ADVISORY, this rule) has NO baseline at all and counts
+    #     every occurrence, including the ones its enforced sibling deliberately accepted.
+    #
+    # So graduating this on 2026-09-30 would fail the build on 171 occurrences the enforced gate
+    # has already decided to keep. The previous note's recommendation — retire the advisory
+    # duplicate rather than graduate two overlapping gates — is therefore confirmed by
+    # measurement. What is NOT established here is how many of the 171 are genuine defects
+    # rather than the accepted set; that needs a ruling on the Kafka semantics and is the real
+    # work behind this date.
+    blocked_on: "graduating would fail the build on 171 occurrences (measured 2026-09-05) that the
+      ENFORCED sibling kafka-dotted-key-ratchet deliberately baselines (11 entries, 0 new, #2945);
+      this advisory gate has no baseline. #3928 and #3931, which the previous note sequenced on,
+      are both closed. The action is to retire this duplicate, not to flip it — how many of the 171
+      are genuine defects rather than the accepted set is unsettled."
     # Registered here as part of issue #2392: this gate ran advisory with no rules.yaml rule at
     # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
     # itself gated by .github/scripts/check-advisory-gate-registration.py.
@@ -590,15 +623,18 @@ change_requirements:
     require:
       - "a role-only write rule is named operator-<domain>-write, or pins its caller with input.principal.id"
     gate: role-only-write-rule-naming
-    enforced: advisory
-    target_enforce_date: "2026-10-31"   # ADR-0144
-    blocked_on: "8 role-only WRITE rules do not follow the naming convention and are baselined in
-      the script, so nothing will ever propose adding them to shared_m2m_write_prohibition.reasons.
-      The count was 18 in the first revision; re-deriving it empirically (rather than by hand) found
-      10 of those were not reachable by the shared identity at all — they bar service-accounts
-      outright, gate on a role that account does not hold, or are reads. Graduating needs each of
-      the remaining 8 renamed and its real callers confirmed; AUTHZ_ENFORCE is true on most of these
-      services, so registering one without that is a money-path outage, not a test failure."
+    # GRADUATED with a baseline, caught by the mirror direction of check-advisory-gate-registration
+    # (#7941): the gate has run `mode: enforced` while this rule still read advisory with a stale
+    # target date — the permanent-advisory defect ADR-0144 exists to prevent, with a fleet-wide
+    # graduation-check outage armed on the date (#7897).
+    enforced: enforce
+    enforced_since: "2026-09-05"
+    # The enforcement carries a baseline: 8 role-only WRITE rules predate the naming convention and
+    # are baselined in the script (the count was 18 in the first revision; re-deriving empirically
+    # found 10 unreachable by the shared identity — they bar service-accounts outright, gate on a
+    # role it does not hold, or are reads). NEW violations fail; the 8 shrink as each is renamed and
+    # its real callers confirmed — AUTHZ_ENFORCE is true on most of these services, so renaming one
+    # without that confirmation is a money-path outage, not a test failure.
     ci_producer: ".github/scripts/check-operator-write-naming.py"
   new_service_with_outbox:
     # A service that extends AbstractOutboxEntity / uses OutboxDispatcher but does NOT
