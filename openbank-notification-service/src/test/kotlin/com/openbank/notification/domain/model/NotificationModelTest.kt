@@ -33,8 +33,10 @@ class NotificationModelTest {
     fun `NotificationTemplate has all expected templates`() {
         // 22 since #8535 removed KYC_DOCUMENT_REQUIRED: nothing could produce it, because
         // kyc-service had no transition into DOCUMENTS_REQUIRED and no concept of a document type.
-        // +1 for DELEGATION_FIRST_USE (this branch) = 23.
-        assertThat(NotificationTemplate.values()).hasSize(23)
+        // 21 since #8568 removed PASSWORD_RESET: no password flow exists (passkeys/biometrics only;
+        // Keycloak has resetPasswordAllowed=false and no SMTP), so nothing could produce it either.
+        // +1 for DELEGATION_FIRST_USE (this branch) = 22.
+        assertThat(NotificationTemplate.values()).hasSize(22)
         assertThat(NotificationTemplate.values()).contains(
             NotificationTemplate.ACCOUNT_OPENED,
             NotificationTemplate.OTP_CODE,
@@ -135,7 +137,6 @@ class NotificationModelTest {
         )
         assertThat(NotificationTemplate.SCA_APPROVAL.noDeviceFallbackChannel).isNull()
         assertThat(NotificationTemplate.OTP_CODE.noDeviceFallbackChannel).isNull()
-        assertThat(NotificationTemplate.PASSWORD_RESET.noDeviceFallbackChannel).isNull()
         assertThat(NotificationTemplate.MARKETING_PRODUCT_OFFER.noDeviceFallbackChannel).isNull()
         assertThat(NotificationTemplate.TRANSACTION_COMPLETED.noDeviceFallbackChannel).isNull()
     }
