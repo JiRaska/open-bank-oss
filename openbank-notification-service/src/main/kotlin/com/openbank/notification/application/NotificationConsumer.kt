@@ -1053,10 +1053,6 @@ class NotificationConsumer @Inject constructor(
                     "<h2>KYC Rejected</h2><p>We could not verify your identity. Reason: ${vars.v(
                         "reason",
                     )}. Please contact support.</p>"
-            NotificationTemplate.KYC_DOCUMENT_REQUIRED ->
-                "We need a document from you" to
-                    "<h2>Document Required</h2><p>To finish verifying your identity we need your " +
-                    "<b>${vars.v("documentType")}</b>. You can upload it in the OpenBank app.</p>"
             NotificationTemplate.CONSENT_GRANTED ->
                 "Access to your account data was granted" to
                     "<h2>Consent Granted</h2><p>You granted access to your account data " +
@@ -1068,11 +1064,6 @@ class NotificationConsumer @Inject constructor(
             NotificationTemplate.OTP_CODE ->
                 "Your OpenBank verification code" to
                     "<h2>Verification Code</h2><p>Your code is: <b>${vars.v("code")}</b>. Valid for 5 minutes.</p>"
-            NotificationTemplate.PASSWORD_RESET ->
-                "Reset your OpenBank password" to
-                    "<h2>Password Reset</h2><p>Use the link below to set a new password. It expires in 15 minutes " +
-                    "and can be used once. If you did not ask for this, ignore this message and your password stays " +
-                    "unchanged.</p><p><a href=\"${vars.v("resetLink")}\">Reset your password</a></p>"
             NotificationTemplate.WELCOME ->
                 "Welcome to OpenBank" to
                     "<h2>Welcome!</h2><p>Thank you for joining OpenBank, ${vars.v("name")}.</p>"
@@ -1128,11 +1119,13 @@ class NotificationConsumer @Inject constructor(
  * message, since poison payloads are acked. An omitted variable renders empty, as it always has.
  *
  * Escaping happens HERE, not per call site (issue #1382): every one of [renderTemplate]'s ~16
- * reads interpolates straight into an HTML body (or, for `PASSWORD_RESET`'s `resetLink`, an
- * `href="..."` attribute) with zero escaping between a domain-event-supplied variable and the
- * mail actually sent — a `reason`, `documentType`, or `scope` containing markup rendered verbatim
- * in the customer's mail client. Escaping the shared accessor closes every call site in one place
- * instead of relying on each of the 16 to remember it.
+ * reads interpolates straight into an HTML body with zero escaping between a domain-event-supplied
+ * variable and the mail actually sent — a `reason`, `documentType`, or `scope` containing markup
+ * rendered verbatim in the customer's mail client. Escaping the shared accessor closes every call
+ * site in one place instead of relying on each of the 16 to remember it. (The escaper also covers
+ * the attribute-value context: `"` and `'` are escaped, so a variable remains safe if a template
+ * ever interpolates one into an `href="..."` attribute again — the removed PASSWORD_RESET's
+ * `resetLink` was the case that originally forced that, #8568.)
  *
  * Top-level rather than a member so `renderTemplate` reads as copy instead of null-handling — the
  * 16 inline `?: ""` reads it replaces were most of that function's cyclomatic complexity.
