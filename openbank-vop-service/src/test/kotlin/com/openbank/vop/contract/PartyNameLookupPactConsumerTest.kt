@@ -102,6 +102,30 @@ class PartyNameLookupPactConsumerTest {
         assertThat(summary.tradingName).isNotBlank()
     }
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun rejectsWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a party exists with both a legal name and a trading name")
+        .uponReceiving("GET the party whose name VoP compares against, with no caller identity")
+        .path(EXPECTED_PARTY_PATH)
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "rejectsWithMissingToken")
+    fun `rejects the party lookup with 401 when the caller has no valid identity`(mockServer: MockServer) {
+        assertClientPathMatchesContract()
+
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get(clientDerivedPartyPath())
+            .then()
+            .statusCode(401)
+    }
+
     /**
      * The asymmetry that makes this contract falsifiable at the consumer layer: the path the client
      * would really call, recomputed from [PartyServiceClient]'s own annotations, must equal the

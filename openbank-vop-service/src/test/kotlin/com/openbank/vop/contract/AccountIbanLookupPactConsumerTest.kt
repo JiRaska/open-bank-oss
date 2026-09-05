@@ -124,6 +124,30 @@ class AccountIbanLookupPactConsumerTest {
         assertThat(summary.status).isEqualTo("ACTIVE")
     }
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun rejectsWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("an account owned by a known party exists")
+        .uponReceiving("GET the account behind the payee IBAN, with no caller identity")
+        .path(EXPECTED_ACCOUNT_PATH)
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "rejectsWithMissingToken")
+    fun `rejects the account-by-iban lookup with 401 when the caller has no valid identity`(mockServer: MockServer) {
+        assertClientPathMatchesContract()
+
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get(clientDerivedAccountPath())
+            .then()
+            .statusCode(401)
+    }
+
     /**
      * The asymmetry that makes this contract falsifiable at the consumer layer: the path the client
      * would really call, recomputed from [AccountServiceClient]'s own annotations, must equal the
