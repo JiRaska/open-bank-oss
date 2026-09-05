@@ -9,6 +9,7 @@ import com.openbank.campaign.application.usecase.CampaignReferenceNotFoundExcept
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -33,6 +34,13 @@ import java.util.UUID
 data class CreateCampaignRequest(
     val name: String,
     val goal: String,
+    /**
+     * ADR-0269 rule 1, and mandatory on the wire: no Kotlin default, so Jackson's null check on the
+     * constructor parameter rejects a body that omits it rather than quietly inventing NONE.
+     * "Not a credit campaign" has to be said, because the step gate cannot tell an omission from a
+     * denial.
+     */
+    val productKind: CampaignProductKind,
     val segmentName: String,
     val segmentVersion: Int,
     /**
@@ -189,6 +197,7 @@ private fun CreateCampaignRequest.toDecisions(): List<CampaignDecision> = decisi
 private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignDefinition(
     name = name,
     goal = goal,
+    productKind = productKind,
     segmentRef = SegmentRef(segmentName, segmentVersion),
     steps = toSteps(),
     stopCondition = stopCondition?.let { StopCondition(it.maxSendsPerParty) },
@@ -230,6 +239,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             SegmentRef(request.segmentName, request.segmentVersion),
             request.toSteps(),
             createdBy,
+            request.productKind,
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
             request.conversionRule,
             request.holdoutPercent,

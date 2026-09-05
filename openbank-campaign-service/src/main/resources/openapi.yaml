@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.43.0
+  version: 1.44.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -822,12 +822,23 @@ components:
             for inactive, expired, event-driven and manual entries; it is never a zero timestamp.
         endAt: { type: string, format: date-time, nullable: true }
         trigger: { type: string, nullable: true }
+    CampaignProductKind:
+      type: string
+      description: >-
+        ADR-0269 rule 1 — what the campaign is selling, as far as consent is concerned. Mandatory
+        and with no default: "this is not a credit campaign" has to be stated, because the credit
+        step gate cannot tell an omission from a denial. NONE is the non-credit case; the remaining
+        members reuse the origination vocabulary so a campaign and the journey it enrols into
+        cannot disagree about what an unsecured loan is.
+      enum: [NONE, UNSECURED, SECURED, REVOLVING]
     Campaign:
       type: object
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
         goal: { type: string }
+        productKind:
+          $ref: '#/components/schemas/CampaignProductKind'
         segmentRef:
           $ref: '#/components/schemas/SegmentRef'
         steps:
@@ -1026,10 +1037,12 @@ components:
         notConfirmedStepOrder: { type: integer, minimum: 0 }
     CreateCampaignRequest:
       type: object
-      required: [name, goal, segmentName, segmentVersion, steps]
+      required: [name, goal, productKind, segmentName, segmentVersion, steps]
       properties:
         name: { type: string }
         goal: { type: string }
+        productKind:
+          $ref: '#/components/schemas/CampaignProductKind'
         segmentName: { type: string }
         segmentVersion: { type: integer, minimum: 1 }
         steps:
