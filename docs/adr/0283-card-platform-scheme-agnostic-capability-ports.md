@@ -7,7 +7,7 @@ supersedes: [0190]
 superseded-by: []
 delivery-repos: []
 tags: [cards, architecture, payments, ai-agents]
-summary: "The platform becomes a scheme-agnostic card platform: every network capability is a port with an in-repo sandbox simulator and a real adapter behind it, card-processing is a new money-path bounded context, and the bank picks the network per product from one control plane. Supersedes ADR-0190."
+summary: "The platform becomes a scheme-agnostic card platform: each network capability is a port with an in-repo simulator and a real adapter, card-processing is a new money-path context, and the bank picks the network per product."
 followup: "#8808 — phases 1-4 (#8809 card-processing, #8810 Visa/Mastercard adapters, #8811 Card Center, #8812 card AI agents) are unbuilt; phase 0 governance shipped with this ADR"
 ---
 
