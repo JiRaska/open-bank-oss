@@ -114,24 +114,104 @@ class SegmentEvaluationTest {
         assertFalse(where.contains("aggregate_type = 'PARTY'"), "unfolded literal reintroduced — actual: $where")
     }
 
-    /**
-     * The two rules whose data does not exist anywhere in analytics are rejected where the segment is
-     * DEFINED. Rendering them into SQL that ClickHouse refuses is what made #2891 look like an empty
-     * cohort instead of a broken query.
-     */
     @Test
-    fun `rules whose data the analytics layer does not carry are rejected at construction`() {
-        val noAccountLink = assertThrows<IllegalArgumentException> {
-            Segment("has-account", 1, listOf(SegmentRule.HasAccount))
-        }
-        assertTrue(noAccountLink.message!!.contains("partyId"), "actual: ${noAccountLink.message}")
+    fun `HasActiveConsentScope renders a parameterised scope, never interpolated`() {
+        val (where, params) = Segment(
+            "consented",
+            1,
+            listOf(SegmentRule.HasActiveConsentScope("MARKETING_COMMS_EMAIL")),
+        ).toWhereClause()
 
-        val noConsentEvents = assertThrows<IllegalArgumentException> {
-            Segment("consented", 1, listOf(SegmentRule.HasActiveConsentScope("MARKETING_COMMS_EMAIL")))
-        }
-        assertTrue(noConsentEvents.message!!.contains("consent events"), "actual: ${noConsentEvents.message}")
+        assertEquals("MARKETING_COMMS_EMAIL", params["p0_scope"])
+        assertFalse(where.contains("MARKETING_COMMS_EMAIL"), "scope interpolated into SQL — actual: $where")
+        assertTrue(where.contains("{p0_scope:String}"), "actual: $where")
     }
 
+    /**
+     * The opposite source choice from `HasAccount`, and the reason is the question, not a habit.
+     * "Is a consent active" is about CURRENT state, and silver keeps the latest event per
+     * aggregate — so a revoked, superseded or expired consent drops out by construction because
+     * its latest row is no longer a grant. Reading bronze here would match every consent ever
+     * granted, including the ones the customer has since withdrawn.
+     */
+    @Test
+    fun `HasActiveConsentScope reads current state, and only a live grant counts`() {
+        val (where, _) = Segment(
+            "consented",
+            1,
+            listOf(SegmentRule.HasActiveConsentScope("MARKETING_COMMS_PUSH")),
+        ).toWhereClause()
+
+        assertTrue(where.contains("silver_current_state"), "actual: $where")
+        assertFalse(
+            where.contains("bronze_events"),
+            "reads the log, so a revoked consent still matches — actual: $where",
+        )
+        assertTrue(where.contains("event_type = 'ConsentGranted'"), "actual: $where")
+    }
+
+    @Test
+    fun `a mis-shaped consent scope is rejected where the segment is defined`() {
+        for (bad in listOf("marketing_comms_email", "MARKETING COMMS", "", "1MARKETING")) {
+            assertThrows<IllegalArgumentException>("expected '$bad' to be rejected") {
+                SegmentRule.HasActiveConsentScope(bad)
+            }
+        }
+    }
+
+    @Test
+    fun `HasAccount is constructible now that the party link exists in the layer`() {
+        val segment = Segment("has-account", 1, listOf(SegmentRule.HasAccount))
+        val (where, params) = segment.toWhereClause()
+        assertTrue(where.contains("JSONExtractString(payload, 'partyId')"), "actual: $where")
+        // No bind values: the rule carries no caller-supplied value, so there is nothing to
+        // parameterise and nothing that could become SQL.
+        assertTrue(params.isEmpty(), "actual: $params")
+    }
+
+    /**
+     * The load-bearing property of this rule, and the one worth a test of its own.
+     *
+     * Silver keeps only the LATEST event per aggregate, and of the four account events only
+     * `AccountCreatedEvent` carries `partyId`. So an account that has ever changed status has a
+     * silver row without the link, and a silver-based subquery would omit exactly the parties with
+     * the most account activity — while a fail-closed evaluator renders that as "did not match",
+     * which is indistinguishable from a correct answer. Reading bronze is what avoids it.
+     */
+    @Test
+    fun `HasAccount resolves the party link from bronze, never from the latest-state view`() {
+        val (where, _) = Segment("has-account", 1, listOf(SegmentRule.HasAccount)).toWhereClause()
+        assertTrue(where.contains("openbank_analytics.bronze_events"), "actual: $where")
+        assertFalse(where.contains("silver_current_state"), "reads the latest-state view — actual: $where")
+    }
+
+    /**
+     * An ACCOUNT row whose payload has no `partyId` must not contribute an empty string to the
+     * IN-list: `aggregate_id IN ('')` matches nothing, but it also costs nothing to exclude, and
+     * leaving it in makes the query's intent unreadable. Every account event other than
+     * `AccountCreated` produces exactly such a row.
+     */
+    @Test
+    fun `HasAccount excludes account rows that carry no party link`() {
+        val (where, _) = Segment("has-account", 1, listOf(SegmentRule.HasAccount)).toWhereClause()
+        assertTrue(where.contains("JSONExtractString(payload, 'partyId') != ''"), "actual: $where")
+    }
+
+    /**
+     * The load-bearing property of this rule, and the one worth a test of its own.
+     *
+     * Silver keeps only the LATEST event per aggregate, and of the four account events only
+     * `AccountCreatedEvent` carries `partyId`. So an account that has ever changed status has a
+     * silver row without the link, and a silver-based subquery would omit exactly the parties with
+     * the most account activity — while a fail-closed evaluator renders that as "did not match",
+     * which is indistinguishable from a correct answer. Reading bronze is what avoids it.
+     */
+    /**
+     * An ACCOUNT row whose payload has no `partyId` must not contribute an empty string to the
+     * IN-list: `aggregate_id IN ('')` matches nothing, but it also costs nothing to exclude, and
+     * leaving it in makes the query's intent unreadable. Every account event other than
+     * `AccountCreated` produces exactly such a row.
+     */
     @Test
     fun `segment names are kebab-case`() {
         assertThrows<IllegalArgumentException> {
