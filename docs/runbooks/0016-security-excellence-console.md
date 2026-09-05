@@ -24,8 +24,10 @@ obrazovky, které zůstávají autoritativním zdrojem detailu.
 | Čerstvost závislostí | `/api/security/kpis` → `freshness` (`deps-freshness.yml`, ADR-0279 #15) | tato stránka |
 | Dlouhožijící credentials | `/api/security/kpis` → `credentials` (`credential-inventory.yml`, ADR-0279 #18) | tato stránka |
 | DAST pokrytí | `/api/security/kpis` → `fuzz` (`api-fuzz.yml` aggregate → `fuzz-coverage` artifact, ADR-0279 #2) | tato stránka |
+| Čerstvost threat modelů | `/api/security/kpis` → `threatModels` (git historie `docs/threat-models/`, money-path z rules.yaml, ADR-0279 #23) | tato stránka |
+| CVE remediation | `/api/security/kpis` → `mttr` (Dependabot alerts critical+high: open count, oldest age, median fix — SLO S1 proxy, ADR-0279 #23) | tato stránka |
 
-## KPI snapshot — kde se berou čtyři nové domény
+## KPI snapshot — kde se berou nové domény
 
 `/api/security/kpis` servíruje `openbank-admin-ui/security-kpis.json`, CI-generovaný
 snapshot z workflow `security-kpis.yml` (weekly pátek 09:23 UTC, refresh PR při změně),
@@ -33,7 +35,7 @@ který přepočítává čísla **ze stejných gate skriptů** (`check-netpol-co
 `deps-freshness.py`, `credential-inventory.py`) — nikdy z reimplementace, aby se
 konzole a gaty nemohly rozejít. Soubor se vpeče do image buildu (`COPY
 openbank-admin-ui/ ./`); chybějící soubor = `not_deployed`, nikdy falešné OK.
-Každý kolektor degraduje nezávisle — jedna nedostupná doména neshodí ostatní tři.
+Každý kolektor degraduje nezávisle — jedna nedostupná doména neshodí ostatních pět.
 
 Doména **DAST pokrytí** se nepočítá ze skriptu, ale z artefaktu `fuzz-coverage`
 posledního dokončeného běhu `api-fuzz.yml` (nightly 04:17 UTC od ADR-0279 #2):
