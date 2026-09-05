@@ -4,7 +4,7 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Card Processing Service — card money-path events
-  version: 1.1.0
+  version: 1.2.0
   description: |
     What the card money path publishes (ADR-0283 phase 1, #8809): an authorisation decision, the
     clearing presentments against it, and the release of a hold nobody presented against.
@@ -145,6 +145,13 @@ components:
           type: string
           format: date-time
           description: When an unpresented hold is released. A hold that never expires is a permanent freeze.
+        initiatedByAgentId:
+          type: string
+          nullable: true
+          description: >-
+            The agent that initiated this purchase under an AP2 mandate (ADR-0283 D6), or null for a
+            human one. Additive and nullable, so an existing consumer keeps parsing this event
+            unchanged while one that cares can tell agentic spend from a card tap.
         occurredAt: { type: string, format: date-time }
         sourceService: { type: string, enum: [card-processing-service] }
     cardDeclined:
@@ -165,6 +172,13 @@ components:
             issuer could not be reached. The two must never look alike: in a dispute, "the issuer was
             down" and "you turned gambling off" are different facts.
         category: { type: string }
+        initiatedByAgentId:
+          type: string
+          nullable: true
+          description: >-
+            The agent that initiated this purchase under an AP2 mandate (ADR-0283 D6), or null for a
+            human one. Additive and nullable, so an existing consumer keeps parsing this event
+            unchanged while one that cares can tell agentic spend from a card tap.
         occurredAt: { type: string, format: date-time }
         sourceService: { type: string, enum: [card-processing-service] }
     cardCleared:

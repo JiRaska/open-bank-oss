@@ -33,6 +33,7 @@ defined.
        (2) decision       --OIDC------> [card-issuance  POST /cards/{id}/authorizations]
        (3) shadow score   --OIDC------> [fraud-service  POST /fraud/score]        (verdict ignored)
        (4) on clearing    --OIDC------> [transaction-service POST /transactions]  (rail=CARD)
+       (5) agent mandate  --OIDC------> [ap2-service    POST /ap2/verify]  (only when one is presented)
                                                                        |
                                                             [(card_outbox)]--outbox-->[Kafka]
                                                                card.authorised.v1
@@ -45,7 +46,11 @@ defined.
 
 - Every REST endpoint requires an OIDC bearer token and `ROLE_API`, `ROLE_OPERATOR` or `ROLE_ADMIN`,
   plus an `@Authorize` action evaluated by the OPA sidecar (ADR-0034): `cardprocessing.authorize`,
-  `.clear`, `.reverse`, `.read`, and `.simulate` (ROLE_ADMIN only).
+  `.clear`, `.reverse`, `.read`, `.token`, `.dispute`, and `.simulate` (ROLE_ADMIN only).
+- The **agent mandate hop (5)** forwards the ACTING agent's id as `X-Agent-Id`, so ap2-service
+  authorises `verify.mandate` as that agent rather than as this service (ADR-0193, ADR-0283 D6).
+  Attributing it to the bank's own service account would make every agent's calls identical in the
+  audit trail — the one record that says which agent tried to spend.
 - Outbound calls authenticate as the service (`openbank-services` client credentials), because
   card-processing asks about a card the caller does not own.
 - `AUTHZ_ENFORCE=false` today, joining the #3679 advisory cohort. Stated plainly: the OPA decision is
@@ -107,7 +112,30 @@ customer's app, "the issuer was down" and "you turned gambling off" must not loo
 This is the opposite of VoP's deliberate fail-open (ADR-0171) because the two answer different
 questions — VoP warns, this authorises.
 
+**An agent's mandate fails closed the same way, in two distinguishable ways.** When an authorisation
+carries an AP2 mandate (ADR-0283 D6) it is verified against THIS payment before card-issuance is
+asked, and anything but a verified mandate declines:
+
+- `AGENT_MANDATE_REJECTED` — ap2-service answered and the mandate does not authorise this payment.
+  An answer about the agent.
+- `AGENT_MANDATE_UNVERIFIABLE` — nobody answered, the policy denied the verification, or the body
+  was unreadable. Not evidence about the agent at all.
+
+Merging them into one reason would put "the agent exceeded its authority" and "we could not tell"
+behind the same word in a dispute, a metric and the customer's app. The verification is sent the
+ACQUIRER's amount, currency and merchant — never the mandate's own figures, which would ask the
+verifier to compare a value with itself and pass by construction.
+
 ## 5. Residual risks / assumptions
+
+- **The agent mandate hop trusts ap2-service's verdict entirely.** This service does not check the
+  signature, hold a trust list or parse the JOSE encoding — a second verifier would be a second
+  opinion about whether an agent may spend, free to disagree with the first. The consequence is that
+  ap2-service's trust list is part of this path's attack surface (ADR-0193).
+- **The acting agent's identity is self-asserted today.** `agentId` arrives in the authorisation
+  request and is forwarded; per-agent OAuth binding is ADR-0181 phase 2, and until it lands the
+  anonymous stand-in principal is what the policy can grant. The mandate's signature is what
+  actually constrains the spend; the id is attribution, not authentication.
 
 - **No rate limit on the authorisation endpoint.** Acquirer traffic is authenticated and bounded by
   the scheme in reality; in this repository the sandbox is the only caller. A real processor binding

@@ -134,4 +134,13 @@ interface CardProcessingMetricsPort {
     fun ledgerPosting(outcome: PostingOutcome)
 
     fun fraudScoring(outcome: FraudScoringOutcome)
+
+    /**
+     * Agent-initiated authorisations, by what the mandate verification established.
+     *
+     * Three outcomes, because `UNVERIFIABLE` is not a rejection: an agent exceeding its authority
+     * and this bank being unable to tell are opposite operational facts, and a dashboard that
+     * cannot separate them cannot tell a wallet misconfiguration from an ap2-service outage.
+     */
+    fun agentMandate(outcome: MandateOutcome)
 }

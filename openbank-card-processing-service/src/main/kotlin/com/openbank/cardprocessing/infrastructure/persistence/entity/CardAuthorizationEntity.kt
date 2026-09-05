@@ -70,6 +70,9 @@ class CardAuthorizationEntity {
     @Column(name = "network_reference")
     var networkReference: String? = null
 
+    @Column(name = "initiated_by_agent_id")
+    var initiatedByAgentId: String? = null
+
     @Column(name = "idempotency_key")
     lateinit var idempotencyKey: String
 

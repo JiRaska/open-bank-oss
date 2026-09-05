@@ -116,6 +116,7 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
         declineReason = declineReason,
         clearedAmountMinorUnits = clearedAmountMinorUnits,
         networkReference = networkReference,
+        initiatedByAgentId = initiatedByAgentId,
         authorizedAt = authorizedAt,
         expiresAt = expiresAt,
         updatedAt = updatedAt,
@@ -147,6 +148,9 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
         declineReason = a.declineReason
         clearedAmountMinorUnits = a.clearedAmountMinorUnits
         networkReference = a.networkReference
+        // Written once at insert with identity, amount and merchant: which agent acted is a fact
+        // about the moment of authorisation, and a row whose agent can change is not a record of it.
+        initiatedByAgentId = a.initiatedByAgentId
         authorizedAt = a.authorizedAt
         expiresAt = a.expiresAt
         updatedAt = a.updatedAt

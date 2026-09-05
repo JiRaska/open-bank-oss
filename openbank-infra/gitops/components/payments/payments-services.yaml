@@ -2325,6 +2325,13 @@ spec:
                   key: ca.password
             - name: CARD_ISSUANCE_SERVICE_URL
               value: http://card-issuance-service.payments.svc:8118
+            # ap2-service lives in `platform`, not payments (ADR-0037 domain=namespace), and serves
+            # on 8151. Read off its own Service object rather than guessed from the port table.
+            # Reached ONLY when an authorisation carries an AP2 mandate, and an unreachable
+            # ap2-service DECLINES that purchase rather than letting it through unverified — so this
+            # URL being wrong is a decline, never a silent approval.
+            - name: AP2_SERVICE_URL
+              value: http://ap2-service.platform.svc:8151
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             # fraud-service lives in its own `fraud` namespace on 8133 (ADR-0037 domain=namespace),

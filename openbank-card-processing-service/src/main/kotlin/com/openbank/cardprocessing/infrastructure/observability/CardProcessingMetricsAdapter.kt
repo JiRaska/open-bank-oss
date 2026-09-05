@@ -6,6 +6,7 @@ package com.openbank.cardprocessing.infrastructure.observability
 
 import com.openbank.cardprocessing.application.port.out.CardProcessingMetricsPort
 import com.openbank.cardprocessing.application.port.out.FraudScoringOutcome
+import com.openbank.cardprocessing.application.port.out.MandateOutcome
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
@@ -31,6 +32,10 @@ import jakarta.inject.Inject
  *    as three distinct values. **`SKIPPED_DISABLED > 0` is the alert that matters**: an adapter
  *    skipping and reporting nothing wrong is how card spend silently never reaches the books.
  *  - `openbank_card_processing_fraud_scores_total{outcome}` — the same three-way split, shadow only.
+ *  - `openbank_card_processing_agent_mandates_total{outcome}` — VERIFIED / REJECTED / UNVERIFIABLE
+ *    for agent-initiated purchases. **UNVERIFIABLE is the one to alert on**: a rejected mandate is
+ *    the control working, an unverifiable one is this bank unable to establish authority at all,
+ *    and both decline — so a success-versus-failure split cannot tell them apart.
  */
 @ApplicationScoped
 class CardProcessingMetricsAdapter(private val registry: MeterRegistry?) : CardProcessingMetricsPort {
@@ -91,6 +96,16 @@ class CardProcessingMetricsAdapter(private val registry: MeterRegistry?) : CardP
             .tag("service", SERVICE)
             .tag("outcome", outcome.name)
             .description("Shadow fraud scoring attempts for card authorisations, by outcome")
+            .register(r)
+            .increment()
+    }
+
+    override fun agentMandate(outcome: MandateOutcome) {
+        val r = registry ?: return
+        Counter.builder("openbank.card.processing.agent.mandates")
+            .tag("service", SERVICE)
+            .tag("outcome", outcome.name)
+            .description("AP2 mandate verifications for agent-initiated card authorisations, by outcome")
             .register(r)
             .increment()
     }

@@ -5,7 +5,7 @@
 openapi: 3.0.3
 info:
   title: OpenBank Card Processing API
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Card authorisation, holds, clearing and release (ADR-0283 phase 1).
 
@@ -539,6 +539,17 @@ components:
           nullable: true
           description: ISO-3166 alpha-2. Absent is treated as domestic by the issuer policy.
         networkReference:
+        agentMandate:
+          allOf:
+            - $ref: '#/components/schemas/AgentMandate'
+          nullable: true
+          description: >-
+            Present when an AI agent initiated this purchase. The mandate is verified against THIS
+            payment before card-issuance is asked to decide, and anything but a verified mandate
+            DECLINES: `AGENT_MANDATE_REJECTED` when the agent exceeded its authority and
+            `AGENT_MANDATE_UNVERIFIABLE` when the bank could not establish authority at all. The two
+            are separate reasons on purpose — one is a conversation with the customer about a
+            wallet's limits, the other is an incident about a service being down.
           type: string
           nullable: true
           description: The acquirer's own reference, so a reversal can be matched without our id.
@@ -605,6 +616,14 @@ components:
           nullable: true
         networkReference:
           type: string
+        initiatedByAgentId:
+          type: string
+          nullable: true
+          description: >-
+            The agent that initiated this purchase under an AP2 mandate, or null for a human one.
+            Recorded on the authorisation rather than derived later: which agent acted is a fact
+            about the moment of authorisation that no lookup can reconstruct once the mandate has
+            expired, and a dispute about agentic spend turns on it.
           nullable: true
         authorizedAt:
           type: string
@@ -689,6 +708,45 @@ components:
         networkReference:
           type: string
 
+    AgentMandate:
+      type: object
+      description: >-
+        An AP2 mandate presented with an agent-initiated purchase (ADR-0283 D6, ADR-0193). Carried
+        opaquely: this service does not parse the JOSE encoding, does not check the signature and
+        holds no trust list — it forwards these fields to ap2-service and acts on the verdict. A
+        second verifier here would be a second opinion about whether an agent may spend.
+      required: [kind, issuer, subject, signingInput, signatureB64, algorithm, payee, amountCapMinorUnits, currency, expiresAt]
+      properties:
+        kind:
+          type: string
+          enum: [INTENT, CART, PAYMENT]
+        issuer: { type: string }
+        subject:
+          type: string
+          description: The delegated agent, in AP2's model.
+        signingInput:
+          type: string
+          description: The exact string that was signed. For a JWS VC, base64url `header.payload`.
+        signatureB64: { type: string }
+        algorithm:
+          type: string
+          enum: [ES256, ED25519]
+        payee:
+          type: string
+          description: The merchant the mandate is bound to. A purchase elsewhere is outside it.
+        amountCapMinorUnits:
+          type: integer
+          format: int64
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        expiresAt: { type: string, format: date-time }
+        singleUse: { type: boolean, default: false }
+        agentId:
+          type: string
+          nullable: true
+          description: >-
+            The acting agent, forwarded so ap2-service authorises the verification as that agent
+            rather than as this service. Absent falls back to the anonymous stand-in principal until
+            per-agent OAuth binding lands (ADR-0181 phase 2).
     ProvisionTokenRequest:
       type: object
       required: [cardId, requestorId, requestorLabel]

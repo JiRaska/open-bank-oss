@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.cardprocessing.application.port.`in`.AuthorizationCommand
 import com.openbank.cardprocessing.application.port.`in`.CardProcessingUseCase
 import com.openbank.cardprocessing.application.port.`in`.PresentmentCommand
+import com.openbank.cardprocessing.application.port.out.AgentMandatePort
 import com.openbank.cardprocessing.application.port.out.CardAuthorizationRepository
 import com.openbank.cardprocessing.application.port.out.CardIssuancePolicyPort
 import com.openbank.cardprocessing.application.port.out.CardLookupPort
@@ -16,6 +17,7 @@ import com.openbank.cardprocessing.application.port.out.CardProcessingMetricsPor
 import com.openbank.cardprocessing.application.port.out.FraudScoringPort
 import com.openbank.cardprocessing.application.port.out.IssuerDecision
 import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
+import com.openbank.cardprocessing.application.port.out.MandateOutcome
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.domain.event.CardAuthorised
 import com.openbank.cardprocessing.domain.event.CardCleared
@@ -80,6 +82,7 @@ class CardProcessingService(
     private val ledger: LedgerPostingPort,
     private val fraud: FraudScoringPort,
     private val merchants: MerchantDataPort,
+    private val mandates: AgentMandatePort,
     private val metrics: CardProcessingMetricsPort,
     private val mapper: ObjectMapper,
     private val clock: Clock,
@@ -98,7 +101,11 @@ class CardProcessingService(
             "authorisation currency ${command.currencyCode} does not match the card's ${ownership.currencyCode}"
         }
 
-        val decision = decide(command)
+        // The agent's authority is settled BEFORE the issuer is asked, and it is not a second
+        // opinion about the customer's controls: card-issuance decides whether the CARD may be
+        // used, this decides whether the AGENT may use it. A mandate that does not authorise this
+        // payment declines here, so the issuer is never asked to approve spend nobody delegated.
+        val decision = mandateRefusal(command) ?: decide(command)
         val authorization = record(command, ownership, decision, resolveMerchantName(command))
         val saved = repository.save(
             authorization,
@@ -110,6 +117,65 @@ class CardProcessingService(
         // fail an authorisation that has already been decided and committed.
         metrics.fraudScoring(fraud.score(saved).outcome)
         return saved
+    }
+
+    /**
+     * Verifies an agent's mandate, and returns a DECLINE when it does not authorise this payment.
+     *
+     * Null means "carry on" — either no mandate was presented (the ordinary human purchase, which
+     * this path leaves exactly as it was) or the mandate verified.
+     *
+     * ## Why the refusal is shaped like an issuer decision
+     *
+     * It produces an [IssuerDecision], so an agent-mandate decline travels the same path as any
+     * other: a row is written, `card.declined.v1` is published, the acquirer gets a 201 carrying the
+     * reason. An exception would have produced a 500 and left no record that an agent tried — and a
+     * record of the attempt is the thing a dispute about agentic spend turns on.
+     *
+     * ## Two decline reasons, deliberately
+     *
+     * [AGENT_MANDATE_REJECTED] is the agent exceeding its authority. [AGENT_MANDATE_UNVERIFIABLE]
+     * is this bank being unable to tell. They must not look alike to the customer, in a metric or
+     * in a chargeback, which is the same rule that keeps `ISSUER_UNAVAILABLE` out of the policy's
+     * reasons.
+     *
+     * The category is `UNMAPPED` because no issuer was asked and the MCC was never judged — writing
+     * a guessed category onto a declined agent purchase would put a number into the spend counters
+     * that nothing measured.
+     */
+    private suspend fun mandateRefusal(command: AuthorizationCommand): IssuerDecision? {
+        val mandate = command.mandate ?: return null
+        val verification = mandates.verify(
+            mandate = mandate,
+            amountMinorUnits = command.amountMinorUnits,
+            currencyCode = command.currencyCode.uppercase(),
+            // The payee the mandate is measured against is the merchant this acquirer named. A
+            // mandate bound to one merchant must not authorise a purchase at another, and the
+            // merchant name resolved from the network is NOT used here on purpose: the mandate was
+            // signed against what the agent agreed to, not against what a lookup later returned.
+            payee = command.merchantName.orEmpty(),
+            at = Instant.now(clock),
+        )
+        metrics.agentMandate(verification.outcome)
+        return when (verification.outcome) {
+            MandateOutcome.VERIFIED -> null
+            MandateOutcome.REJECTED -> {
+                log.infof(
+                    "agent mandate rejected for card %s: %s",
+                    command.cardId,
+                    verification.failures.joinToString("; ").ifBlank { "no reason given" },
+                )
+                IssuerDecision(approved = false, reason = AGENT_MANDATE_REJECTED, category = UNMAPPED_CATEGORY)
+            }
+            MandateOutcome.UNVERIFIABLE -> {
+                log.warnf(
+                    "agent mandate could not be verified for card %s: %s",
+                    command.cardId,
+                    verification.detail ?: "no detail",
+                )
+                IssuerDecision(approved = false, reason = AGENT_MANDATE_UNVERIFIABLE, category = UNMAPPED_CATEGORY)
+            }
+        }
     }
 
     /**
@@ -194,6 +260,10 @@ class CardProcessingService(
             declineReason = decision.reason.takeUnless { decision.approved },
             clearedAmountMinorUnits = 0,
             networkReference = command.networkReference,
+            // The mandate's SUBJECT is the delegated agent in AP2's model; `agentId` is the id that
+            // authenticated the verification call. Preferring the latter and falling back keeps the
+            // record populated even where the acquirer forwarded no separate id.
+            initiatedByAgentId = command.mandate?.let { it.agentId?.takeIf(String::isNotBlank) ?: it.subject },
             authorizedAt = now,
             expiresAt = now.plus(Duration.ofDays(holdExpiryDays)),
             updatedAt = now,
@@ -217,6 +287,7 @@ class CardProcessingService(
             merchantName = a.merchantName,
             merchantCountry = a.merchantCountry,
             expiresAt = a.expiresAt,
+            initiatedByAgentId = a.initiatedByAgentId,
             occurredAt = a.authorizedAt,
         )
     } else {
@@ -230,6 +301,7 @@ class CardProcessingService(
             channel = a.channel,
             reason = a.declineReason ?: DECLINE_REASON_UNSTATED,
             category = a.category,
+            initiatedByAgentId = a.initiatedByAgentId,
             occurredAt = a.authorizedAt,
         )
     }
@@ -356,6 +428,15 @@ class CardProcessingService(
          * as an explicit value beats writing `null` into a field the customer's screen renders.
          */
         const val DECLINE_REASON_UNSTATED = "UNSTATED"
+
+        /** The agent exceeded the authority its mandate declares — an answer about the agent. */
+        const val AGENT_MANDATE_REJECTED = "AGENT_MANDATE_REJECTED"
+
+        /**
+         * The mandate could not be verified at all. NOT evidence about the agent: ap2-service was
+         * unreachable, denied the call, or answered something unreadable.
+         */
+        const val AGENT_MANDATE_UNVERIFIABLE = "AGENT_MANDATE_UNVERIFIABLE"
     }
 }
 

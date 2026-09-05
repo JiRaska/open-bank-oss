@@ -7,6 +7,7 @@ package com.openbank.cardprocessing.infrastructure.rest
 import com.openbank.cardprocessing.application.port.`in`.AuthorizationCommand
 import com.openbank.cardprocessing.application.port.`in`.CardProcessingUseCase
 import com.openbank.cardprocessing.application.port.`in`.PresentmentCommand
+import com.openbank.cardprocessing.application.port.out.PresentedMandate
 import com.openbank.cardprocessing.domain.model.PresentmentOutcome
 import com.openbank.cardprocessing.domain.model.PresentmentRefusal
 import com.openbank.cardprocessing.infrastructure.rest.dto.AuthorizationListResponse
@@ -67,6 +68,22 @@ class CardProcessingResource(private val useCase: CardProcessingUseCase) {
                 merchantCountry = request.merchantCountry,
                 networkReference = request.networkReference,
                 idempotencyKey = idempotencyKey,
+                mandate = request.agentMandate?.let {
+                    PresentedMandate(
+                        kind = it.kind,
+                        issuer = it.issuer,
+                        subject = it.subject,
+                        signingInput = it.signingInput,
+                        signatureB64 = it.signatureB64,
+                        algorithm = it.algorithm,
+                        payee = it.payee,
+                        amountCapMinorUnits = it.amountCapMinorUnits,
+                        currency = it.currency,
+                        expiresAt = it.expiresAt,
+                        singleUse = it.singleUse,
+                        agentId = it.agentId,
+                    )
+                },
             ),
         )
         // 201 for both outcomes: a decline is a created record of a decision, not a failed request.

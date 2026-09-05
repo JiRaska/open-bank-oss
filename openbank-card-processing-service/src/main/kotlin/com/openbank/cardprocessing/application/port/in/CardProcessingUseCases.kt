@@ -6,6 +6,7 @@
 
 package com.openbank.cardprocessing.application.port.`in`
 
+import com.openbank.cardprocessing.application.port.out.PresentedMandate
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
 import com.openbank.cardprocessing.domain.model.PresentmentOutcome
@@ -22,6 +23,14 @@ data class AuthorizationCommand(
     val merchantCountry: String?,
     val networkReference: String?,
     val idempotencyKey: String,
+    /**
+     * The AP2 mandate an agent presented with this purchase, when one was presented (ADR-0283 D6).
+     *
+     * Null is the ordinary case — a human tapping a card — and changes nothing. Present means the
+     * authorisation is agent-initiated and MUST be inside the mandate's declared authority before
+     * the issuer is even asked.
+     */
+    val mandate: PresentedMandate? = null,
 )
 
 data class PresentmentCommand(

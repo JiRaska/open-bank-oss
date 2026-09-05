@@ -55,6 +55,12 @@ data class CardAuthorised(
     val merchantName: String?,
     val merchantCountry: String?,
     val expiresAt: Instant,
+    /**
+     * The agent that initiated this purchase under an AP2 mandate, or null for a human one
+     * (ADR-0283 D6). Additive and nullable: every existing consumer keeps parsing this event
+     * unchanged, and one that cares can now tell agentic spend from a card tap.
+     */
+    val initiatedByAgentId: String? = null,
     override val occurredAt: Instant,
     override val sourceService: String = SOURCE_SERVICE,
 ) : CardProcessingEvent() {
@@ -86,6 +92,8 @@ data class CardDeclined(
     val channel: PresentmentChannel,
     val reason: String,
     val category: String,
+    /** See [CardAuthorised.initiatedByAgentId]. A decline of agentic spend is the more interesting one. */
+    val initiatedByAgentId: String? = null,
     override val occurredAt: Instant,
     override val sourceService: String = SOURCE_SERVICE,
 ) : CardProcessingEvent() {

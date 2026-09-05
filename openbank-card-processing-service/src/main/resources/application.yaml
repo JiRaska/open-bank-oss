@@ -64,6 +64,17 @@ quarkus:
     tls:
       verification: none
   rest-client:
+    # ap2-service verifies an agent's AP2 mandate (ADR-0193). Reached ONLY when an authorisation
+    # carries one, so an environment with no ap2-service is unaffected by its absence — and when it
+    # is unreachable the adapter answers UNVERIFIABLE, which DECLINES the agent purchase rather than
+    # letting it through on an unread mandate.
+    "ap2-api":
+      url: ${AP2_SERVICE_URL:http://localhost:8151}
+      connect-timeout: 2000
+      # Same budget as the issuer hop and for the same reason: this sits on the acquirer's critical
+      # path, and a timeout here is a decline rather than a hang.
+      read-timeout: 3000
+      scope: jakarta.inject.Singleton
     "card-issuance-api":
       url: ${CARD_ISSUANCE_SERVICE_URL:http://localhost:8118}
       connect-timeout: 2000

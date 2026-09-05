@@ -70,6 +70,15 @@ data class CardAuthorization(
     val clearedAmountMinorUnits: Long,
     /** The acquirer's own reference, echoed back so a reversal can be matched without our id. */
     val networkReference: String?,
+    /**
+     * The agent that initiated this purchase under an AP2 mandate, or null for a human one
+     * (ADR-0283 D6).
+     *
+     * On the AGGREGATE rather than derived at read time, because a dispute about agentic spend turns
+     * on whether an agent was acting and which one — a fact about the moment of authorisation that
+     * no later lookup can reconstruct once the mandate has expired.
+     */
+    val initiatedByAgentId: String? = null,
     val authorizedAt: Instant,
     /** When an uncleared hold is released. A hold that never expires is a permanent freeze. */
     val expiresAt: Instant,

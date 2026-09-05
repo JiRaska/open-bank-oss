@@ -81,6 +81,10 @@ class CardProcessingServiceTest {
         ledger = ledger,
         fraud = fraud,
         merchants = merchants,
+        // No mandate is presented by any test in this class, so the port must never be called. A
+        // relaxed mock would answer and hide a regression where the human path started consulting
+        // it; this one throws.
+        mandates = mockk(),
         metrics = metrics,
         mapper = mapper,
         clock = clock,

@@ -24,6 +24,34 @@ data class AuthorizationRequestDto(
     val merchantName: String? = null,
     val merchantCountry: String? = null,
     val networkReference: String? = null,
+    /**
+     * The AP2 mandate an agent presented with this purchase (ADR-0283 D6). Absent for an ordinary
+     * human purchase, which this path leaves unchanged.
+     */
+    val agentMandate: AgentMandateDto? = null,
+)
+
+/**
+ * A presented AP2 mandate, as the acquirer forwards it.
+ *
+ * Carried opaquely: card-processing does not parse the JOSE encoding, does not check the signature
+ * and holds no trust list. It forwards these fields to ap2-service (ADR-0193) and acts on the
+ * verdict — a second verifier here would be a second opinion about whether an agent may spend.
+ */
+data class AgentMandateDto(
+    val kind: String,
+    val issuer: String,
+    val subject: String,
+    val signingInput: String,
+    val signatureB64: String,
+    val algorithm: String,
+    val payee: String,
+    val amountCapMinorUnits: Long,
+    val currency: String,
+    val expiresAt: Instant,
+    val singleUse: Boolean = false,
+    /** The acting agent, forwarded so ap2-service authorises the call as the agent, not as us. */
+    val agentId: String? = null,
 )
 
 data class PresentmentRequestDto(val amountMinorUnits: Long, val currencyCode: String)
@@ -43,6 +71,8 @@ data class AuthorizationResponseDto(
     val merchantName: String?,
     val merchantCountry: String?,
     val networkReference: String?,
+    /** Null for a human purchase; the acting agent for one made under an AP2 mandate. */
+    val initiatedByAgentId: String?,
     val authorizedAt: Instant,
     val expiresAt: Instant,
 ) {
@@ -64,6 +94,7 @@ data class AuthorizationResponseDto(
             merchantName = a.merchantName,
             merchantCountry = a.merchantCountry,
             networkReference = a.networkReference,
+            initiatedByAgentId = a.initiatedByAgentId,
             authorizedAt = a.authorizedAt,
             expiresAt = a.expiresAt,
         )
