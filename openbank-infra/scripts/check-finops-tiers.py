@@ -160,7 +160,11 @@ def evaluate() -> tuple[list[str], list[str], int]:
     )
     info.append(f"declared: {declared or '{}'}")
     info.append(f"gate enforced: {enforced}")
-    return errors, info, classified
+    # The floored subject count is the DECLARED side, not the union: 23 of the 26 union
+    # members come from money_path_services, which `journey-money-path-accountability`
+    # already floors at 20. A union floor is therefore green through a `declared: {}` wipe —
+    # the exact collapse this gate was written about. Floor the half nothing else watches.
+    return errors, info, len(declared)
 
 
 def self_test() -> int:
@@ -194,10 +198,28 @@ def self_test() -> int:
     # the cases deliberately span 0..3 and disagree with each other.
     if len({c[3] for c in cases}) < 3:
         bad.append("the fixtures no longer span enough distinct counts to catch a constant")
+    # count_subjects() is a one-line union and cannot plausibly drift; the real collapse
+    # mechanism is the line-scanning parsers upstream of it. Drive those over a snippet with a
+    # known answer, or a tightened regex silently empties the count while every case above
+    # still passes (measured: `[A-Za-z0-9_-]+` -> `[A-Za-z0-9]+` gives SUBJECTS=3, self-test green).
+    snippet = (
+        "money_path_services:\n"
+        "  - openbank-ledger-service\n"
+        "  - openbank-sepa-payment  # inline comment\n"
+        "unrelated_key:\n"
+        "  - openbank-not-money-path\n"
+    )
+    got_mp = parse_money_path_services(snippet)
+    want_mp = {"openbank-ledger-service", "openbank-sepa-payment"}
+    mark = "ok  " if got_mp == want_mp else "FAIL"
+    print(f"  {mark} parser: money_path_services from a fixture: want {sorted(want_mp)}, got {sorted(got_mp)}")
+    if got_mp != want_mp:
+        bad.append("parse_money_path_services no longer reads a known-good block")
+
     if bad:
         print(f"\n::error::check-finops-tiers self-test: {', '.join(bad)}")
         return 1
-    print("\nself-test ok: the subject count is falsifiable (4 cases, spanning 0..3)")
+    print("\nself-test ok: subject count falsifiable (4 cases spanning 0..3) + parser held to a fixture")
     return 0
 
 
@@ -234,7 +256,7 @@ def main() -> int:
     # rules.yaml), so run-gates' `min_subjects` floor is the only way it can go red — and the
     # floor can only read this line. Measured 2026-09-05: 26 of 68 services classified, of
     # which just 3 explicitly declared; the script exited 0 and would have exited 0 at zero.
-    print(f"SUBJECTS={subject_count}  # services with a tier (declared + money-path baseline)")
+    print(f"SUBJECTS={subject_count}  # services with an EXPLICIT finops_tiers.declared entry")
     if errors:
         print("\nFindings (advisory — not blocking until the classifier flips the gate to block):")
         for e in errors:
