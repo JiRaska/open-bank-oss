@@ -175,12 +175,46 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             .executeUpdate()
     }
 
+    override fun compareAndSetDecision(
+        application: LoanApplication,
+        from: OriginationState,
+    ): Uni<Int> = sf.withTransaction { s ->
+        s.createMutationQuery(DECISION_HQL)
+            .setParameter("to", application.status)
+            .setParameter("decidedBy", application.decidedBy)
+            .setParameter("reason", application.decisionReason)
+            .setParameter("decidedAt", application.decidedAt)
+            .setParameter("outcome", application.decisionOutcome)
+            .setParameter("band", application.decisionPriceBand)
+            .setParameter("reasons", application.decisionReasons)
+            .setParameter("matched", application.decisionMatchedRules)
+            .setParameter("versions", application.policyVersions)
+            .setParameter("hash", application.decisionInputHash)
+            .setParameter("engineAt", application.decidedEngineAt)
+            .setParameter("id", application.id.value)
+            .setParameter("from", from)
+            .executeUpdate()
+    }
+
     private companion object {
         /**
          * The `and status = :from` clause is the whole point — without it this is [update] with
          * extra steps. Named parameters because `decidedBy`, `decisionReason` and `decidedAt` are
          * all nullable and a positional vararg cannot carry a null.
          */
+        /**
+         * The ASSESSMENT claim. Same conditional `status = :from` guard as [ADVANCE_HQL]; the extra
+         * columns are the ADR-0213 evidence, written in the SAME statement as the transition so a
+         * row can never carry a decided state with no decision behind it.
+         */
+        const val DECISION_HQL =
+            "update LoanApplicationEntity " +
+                "set status = :to, decidedBy = :decidedBy, decisionReason = :reason, decidedAt = :decidedAt, " +
+                "decisionOutcome = :outcome, decisionPriceBand = :band, decisionReasons = :reasons, " +
+                "decisionMatchedRules = :matched, policyVersions = :versions, decisionInputHash = :hash, " +
+                "decidedEngineAt = :engineAt " +
+                "where id = :id and status = :from"
+
         const val ADVANCE_HQL =
             "update LoanApplicationEntity " +
                 "set status = :to, decidedBy = :decidedBy, decisionReason = :reason, decidedAt = :decidedAt " +

@@ -188,6 +188,11 @@ class CustomerCreditJourneyResourceTest {
 
         override fun update(application: LoanApplication): Uni<LoanApplication> = Uni.createFrom().item(application)
 
+        override fun compareAndSetDecision(
+            application: LoanApplication,
+            from: OriginationState,
+        ): Uni<Int> = Uni.createFrom().item(1)
+
         override fun compareAndSetStatus(
             id: LoanApplicationId,
             from: OriginationState,

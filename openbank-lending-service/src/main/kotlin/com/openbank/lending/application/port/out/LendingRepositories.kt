@@ -56,6 +56,25 @@ interface LoanApplicationRepository {
      * The caller must treat `0` as a refusal and must not perform any side effect of the transition
      * — no evidence event, no workflow signal (issue #3850).
      */
+    /**
+     * The ASSESSMENT leg's claim: the same conditional transition as [compareAndSetStatus], plus the
+     * ADR-0213 engine evidence the evaluation produced (outcome, price band, reason codes, matched
+     * rules, pinned table versions, input snapshot hash, evaluation timestamp).
+     *
+     * It exists because [compareAndSetStatus] writes **only** status and the three human decision
+     * fields, so every engine output was computed, returned in the response, emitted as evidence —
+     * and never stored. The columns have existed since `V11__decision_engine_inputs.sql`; nothing
+     * wrote them, so `decision_outcome` was NULL on every row and a reader (the credit-risk console,
+     * a regulator's reconstruction) had only the outbox event to go on.
+     *
+     * Returns rows claimed, `0` meaning another actor moved the row on first — same contract, same
+     * caller obligation: no evidence event and no workflow signal on a refusal (issue #3850).
+     */
+    fun compareAndSetDecision(
+        application: LoanApplication,
+        from: OriginationState,
+    ): Uni<Int>
+
     fun compareAndSetStatus(
         id: LoanApplicationId,
         from: OriginationState,
