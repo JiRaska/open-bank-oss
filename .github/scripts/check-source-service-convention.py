@@ -191,7 +191,19 @@ def module_consts(module: pathlib.Path):
     return consts
 
 
-def _resolve(expr: str, consts):
+def file_consts(path: pathlib.Path):
+    """const name -> set of distinct string values declared in THIS FILE alone."""
+    consts = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if _COMMENT_LINE.match(line):
+            continue
+        m = _CONST_DECL.search(line)
+        if m:
+            consts.setdefault(m.group(1), set()).add(m.group(2))
+    return consts
+
+
+def _resolve(expr: str, consts, own_file_consts=None):
     """(value, None) when the emitted value is knowable, (None, reason) when it is not.
 
     (None, None) means "not a write site" — a RECOGNISED pass-through of somebody else's value.
@@ -222,6 +234,22 @@ def _resolve(expr: str, consts):
         return lit.group(1), None
     ref = _CONST_REF.match(expr) or _INTERPOLATION.match(expr)
     if ref:
+        # A bare identifier in Kotlin resolves to the declaration in its OWN FILE before anything
+        # else, and a `private const val` is file-private besides — so a same-named constant in a
+        # sibling file cannot be what this line reads. Resolving module-wide first reported two
+        # live sites as ambiguous while both were correct: kyc-service declares SERVICE both as a
+        # metric label ("kyc", in OrphanedPartyGauge) and as its event source ("kyc-service", in
+        # KycEvent), and domestic-payment declares SOURCE_SERVICE both for the inbound producer it
+        # VALIDATES ("delegation-service", in DelegatedSpendBinding) and for its own outbound event
+        # ("domestic-payment"). Neither is a naming defect; both were this resolver guessing.
+        #
+        # This preference cannot launder a wrong value: the file's own declaration is what the code
+        # actually emits, so a file declaring the wrong spelling is still flagged even when a
+        # correct constant of the same name exists elsewhere in the module. `openbank-samefile-bad-
+        # service` in the self-test is that negative control.
+        own = (own_file_consts or {}).get(ref.group(1))
+        if own and len(own) == 1:
+            return next(iter(own)), None
         values = consts.get(ref.group(1))
         if not values:
             return None, f"references {ref.group(1)}, which no `const val` in this module declares"
@@ -261,6 +289,7 @@ def scan(root):
         expected = module.name[len(MODULE_PREFIX):]
         consts = None
         for f in sorted((module / "src" / "main").rglob("*.kt")):
+            own_consts = None
             for lineno, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
                 if _COMMENT_LINE.match(line) or "sourceService" not in line:
                     continue
@@ -269,11 +298,13 @@ def scan(root):
                 for expr, already_quoted in exprs:
                     if consts is None:
                         consts = module_consts(module)
+                    if own_consts is None:
+                        own_consts = file_consts(f)
                     if already_quoted:
                         interp = _INTERPOLATION.match(expr.strip())
-                        value, why = _resolve(expr, consts) if interp else (expr, None)
+                        value, why = _resolve(expr, consts, own_consts) if interp else (expr, None)
                     else:
-                        value, why = _resolve(expr, consts)
+                        value, why = _resolve(expr, consts, own_consts)
                     where = f"{f.relative_to(root)}:{lineno}"
                     if value is None:
                         if why is None:
@@ -341,11 +372,33 @@ SELF_TEST_MODULES = {
             "class X { val notTheField = 1 }\n"
         ),
     },
-    # Ambiguous const: two declarations, one value each, same simple name. Must be UNRESOLVED, not
-    # a coin flip — the shape that exists live (fx-service's SERVICE="fx" vs SOURCE_SERVICE).
+    # Ambiguous const: two declarations, one value each, same simple name, and the USE is in a
+    # third file that declares neither. Must be UNRESOLVED, not a coin flip. The use deliberately
+    # sits away from both declarations — once the resolver prefers the referencing file's own
+    # constant, a use next to one of them is no longer ambiguous, and this case must keep testing
+    # the ambiguity rather than quietly becoming a duplicate of the same-file case below.
     "openbank-ambiguous-service": {
-        "A.kt": 'private const val SERVICE = "ambiguous-service"\nval m = mapOf("sourceService" to SERVICE)\n',
+        "A.kt": 'private const val SERVICE = "ambiguous-service"\n',
         "B.kt": 'private const val SERVICE = "something-else"\n',
+        "C.kt": 'val m = mapOf("sourceService" to SERVICE)\n',
+    },
+    # Same simple name declared twice in one module, and the USE sits beside the RIGHT one. This is
+    # the live shape that reddened `main`: kyc-service declares SERVICE as a metric label ("kyc")
+    # in one file and as its event source ("kyc-service") in another, and domestic-payment does the
+    # same with SOURCE_SERVICE for an inbound producer it validates versus its own outbound event.
+    # Kotlin resolves the reference to the declaration in its own file, so both were correct code
+    # and the module-wide lookup was guessing. Must NOT be flagged.
+    "openbank-samefile-service": {
+        "A.kt": 'private const val SERVICE = "samefile-service"\nval m = mapOf("sourceService" to SERVICE)\n',
+        "B.kt": 'private const val SERVICE = "a-metric-label"\n',
+    },
+    # The negative control for that preference, and the reason it is safe. The use sits beside the
+    # WRONG value while a correct constant of the same name exists elsewhere in the module. If
+    # file-scope resolution could be used to launder a wrong spelling, this would pass. It must be
+    # flagged.
+    "openbank-samefile-bad-service": {
+        "A.kt": 'private const val SERVICE = "wrong-spelling"\nval m = mapOf("sourceService" to SERVICE)\n',
+        "B.kt": 'private const val SERVICE = "samefile-bad-service"\n',
     },
     # THE TWO NEGATIVE CONTROLS THAT REPRODUCED THE PASS-THROUGH HOLE.
     # Before the fix each of these produced 0 findings AND 0 producers: the value was unparseable,
@@ -395,6 +448,8 @@ SELF_TEST_EXPECT = {
     "openbank-passthrough-service": False,
     "openbank-prose-only-service": False,
     "openbank-ambiguous-service": True,
+    "openbank-samefile-service": False,
+    "openbank-samefile-bad-service": True,
     "openbank-configprop-service": True,
     "openbank-lowercaseval-service": True,
     "openbank-comparison-service": False,
