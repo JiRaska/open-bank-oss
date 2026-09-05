@@ -235,12 +235,21 @@ change_requirements:
     # compared. Verification note: the word is "compared", not "checked" — grepping the wrong
     # one returns empty across every run and reads as a confirmation while measuring nothing.
     #
-    # What is MEASURED is only that nothing exists at the path the script is given, while
-    # quarkusBuild demonstrably executed with the flag set. The CAUSE is not established, and
-    # one live alternative changes the fix: Quarkus may resolve a relative
-    # store-schema-directory against the augmentation working directory, so the document could
-    # be produced one level away. The extension is present in every named service, so "no
-    # OpenAPI generation at all" is not the explanation.
+    # CAUSE SETTLED 2026-09-05 by running the same command locally (isolated Gradle home,
+    # BUILD SUCCESSFUL in 12m24s): store-schema-directory is relative TO THE SUBPROJECT, not to
+    # the repo root, so "<svc>/build/openapi-generated" wrote to
+    #   openbank-interest-service/openbank-interest-service/build/openapi-generated/openapi.yaml
+    # a directory nothing reads. The document was produced the whole time, one level away.
+    # Fixed in _service-ci.yml by passing "build/openapi-generated".
+    #
+    # FIRST REAL OUTPUT, same run, one service: "2 request schema(s) compared, 21 finding(s)"
+    # — openbank-interest-service publishes InterestRateConfig with ratePercent, tierMin,
+    # tierMax, validFrom, validTo, calculationMethod, none of which exist on the request DTO,
+    # while the DTO's annualRate, dayCount, effectiveFrom/To, minBalance/maxBalance and
+    # rateType are unpublished. Same shape as kyc #5895: a client generated from that document
+    # cannot call the endpoint. So the backlog behind this date is REAL and previously
+    # unmeasured, not a false-positive-rate question. The rule stays advisory until the fleet
+    # number is known from a run with the corrected path.
     #
     # So the blocker is not readiness and not a false-positive rate: flipping this to enforced
     # would graduate a check that examines nothing, and the green would then be load-bearing.
