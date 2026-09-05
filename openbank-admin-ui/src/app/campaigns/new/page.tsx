@@ -287,7 +287,11 @@ export default function NewCampaignPage() {
         }
         setName(campaign.name ?? '')
         setGoal(campaign.goal ?? '')
-        setProductKind(campaign.productKind ?? '')
+        // NONE, not '' — a PERSISTED campaign always has a kind (NOT NULL, backfilled by V19), so a
+        // payload without one is an older response, not an unanswered question. Hydrating it as ''
+        // would mark an existing draft incomplete and quietly disable its save button, which is a
+        // worse failure than the one the empty default guards against on a NEW campaign.
+        setProductKind(campaign.productKind ?? 'NONE')
         if (campaign.segmentRef) {
           const ref = `${campaign.segmentRef.name}@${campaign.segmentRef.version}`
           setSegment(ref)
