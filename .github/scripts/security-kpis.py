@@ -73,6 +73,55 @@ def collect_credentials() -> dict:
             "overdueFound": rc != 0}
 
 
+def collect_fuzz() -> dict:
+    """DAST coverage from the latest api-fuzz run's fuzz-coverage artifact (ADR-0279 #2).
+
+    Reads the artifact the aggregate job uploads — NEVER the job list: a listed leg is
+    not evidence the service was tested (#6492). Degrades to unavailable without a token
+    or when no run has produced the artifact yet (pre-merge of the aggregate job), never
+    invents a number.
+    """
+    import io
+    import os
+    import urllib.request
+    import zipfile
+
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
+    if not token:
+        return {"available": False, "reason": "no GH token"}
+
+    def gh(path: str) -> bytes:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{repo}/{path}",
+            headers={"Authorization": f"Bearer {token}",
+                     "Accept": "application/vnd.github+json"})
+        return urllib.request.urlopen(req, timeout=30).read()
+
+    try:
+        runs = json.loads(gh("actions/workflows/api-fuzz.yml/runs?status=completed&per_page=10"))
+        artifacts = []
+        for run in runs.get("workflow_runs", []):
+            arts = json.loads(gh(f"actions/runs/{run['id']}/artifacts?per_page=100"))
+            hit = [a for a in arts.get("artifacts", [])
+                   if a["name"] == "fuzz-coverage" and not a.get("expired")]
+            if hit:
+                artifacts = hit
+                break
+        if not artifacts:
+            return {"available": False, "reason": "no fuzz-coverage artifact yet"}
+        req = urllib.request.Request(
+            artifacts[0]["archive_download_url"],
+            headers={"Authorization": f"Bearer {token}",
+                     "Accept": "application/vnd.github+json"})
+        blob = urllib.request.urlopen(req, timeout=30).read()
+        cov = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("fuzz-coverage.json"))
+        return {"available": True, "inScope": cov["inScope"], "tested": cov["tested"],
+                "coveragePct": cov["coveragePct"], "totalExercised": cov["totalExercised"],
+                "excludedCount": len(cov.get("excluded", [])),
+                "run": cov.get("run", ""), "runDate": cov.get("generatedAt", "")[:10]}
+    except Exception as exc:  # network/API degradation must not kill the other collectors
+        return {"available": False, "reason": f"fuzz artifact fetch failed: {exc.__class__.__name__}"}
 def self_test() -> int:
     bad = 0
     # The parse regexes must survive the real scripts' output shape — pin them on the
@@ -110,12 +159,13 @@ def main() -> int:
             "netpol": collect_netpol(),
             "freshness": freshness,
             "credentials": collect_credentials(),
+            "fuzz": collect_fuzz(),
         }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(snapshot, indent=2) + "\n")
-    avail = sum(1 for k in ("netpol", "freshness", "credentials") if snapshot[k]["available"])
-    print(f"security-kpis: {avail}/3 collectors available -> {out}")
+    avail = sum(1 for k in ("netpol", "freshness", "credentials", "fuzz") if snapshot[k]["available"])
+    print(f"security-kpis: {avail}/4 collectors available -> {out}")
     return 0
 
 
