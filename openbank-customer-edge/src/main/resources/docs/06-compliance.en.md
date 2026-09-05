@@ -40,10 +40,11 @@ The edge is a **processor pass-through**: it does not store personal data (see [
 
 | Right | Application at the edge |
 |---|---|
-| Access (Art. 15) | `GET /profile`, `GET /accounts`, … return the subject's own data (party-scoped / ownership-enforced) |
+| Access (Art. 15) | `GET /privacy/gdpr-export` returns the full subject-access export (party + KYC + cards, ADR-0118 §6); `GET /profile`, `GET /accounts`, … return the same data piecemeal (party-scoped / ownership-enforced) |
 | Rectification (Art. 16) | upstream (party-service) — the edge does not store profile data |
 | Erasure (Art. 17) | upstream controllers; AMLD overrides where applicable (10 years) — the edge stores nothing |
-| Restriction / Portability / Object | upstream controllers; the edge holds no records |
+| Portability (Art. 20) | `GET /privacy/portability-export` — consent/contract-basis data only, counterparty IBANs redacted per Art. 20(4); Art. 20(2) direct transmission not offered (ADR-0204 D4) |
+| Restriction / Object | upstream controllers; the edge holds no records |
 
 ### Data flows
 

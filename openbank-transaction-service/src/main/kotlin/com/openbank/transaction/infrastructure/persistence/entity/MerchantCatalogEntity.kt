@@ -48,5 +48,5 @@ class MerchantCatalogEntity : PanacheEntityBase {
     var country: String? = null
 
     @Column(name = "updated_at", nullable = false)
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 }

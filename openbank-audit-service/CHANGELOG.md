@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.3...audit-service-v0.18.4) (2026-09-03)
+
+
+### Bug Fixes
+
+* send occurredAt on the last four audit-consumed producers that omit it ([#8352](https://github.com/JiRaska/open-bank-oss/issues/8352)) ([#8503](https://github.com/JiRaska/open-bank-oss/issues/8503)) ([146fe87](https://github.com/JiRaska/open-bank-oss/commit/146fe87adaeca4e56fb8da285a57daaaf840cb1d))
+
 ## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.2...audit-service-v0.18.3) (2026-09-02)
 
 

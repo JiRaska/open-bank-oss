@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.15.0...fx-service-v0.15.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **fx:** drop EPOCH instant defaults from events and rate entities ([#8456](https://github.com/JiRaska/open-bank-oss/issues/8456)) ([d8bd2c0](https://github.com/JiRaska/open-bank-oss/commit/d8bd2c0f141a21e5d555b2ed307139eabc55ee26))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.14.1...fx-service-v0.15.0) (2026-08-31)
 
 

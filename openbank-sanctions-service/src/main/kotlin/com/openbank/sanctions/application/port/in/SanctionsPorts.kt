@@ -11,7 +11,10 @@ data class ScreenEntityCommand(
     val idempotencyKey: String,
     val entityType: EntityType,
     val name: String,
-    val aliases: List<String> = emptyList(),
+    // Nullable element ON PURPOSE (#7867): Jackson null-checks constructor parameters but not
+    // collection elements, so `{"aliases": [null]}` arrives holding a null. Only a nullable
+    // element type lets SanctionsService reject it with a 400 instead of an NPE-driven 500.
+    val aliases: List<String?> = emptyList(),
     val dateOfBirth: String? = null,
     val nationality: String? = null,
     val identifiers: Map<String, String> = emptyMap(),

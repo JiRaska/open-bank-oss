@@ -215,6 +215,7 @@ class AnalyticsAttributionTest {
         occurredAt = Instant.EPOCH,
         sourceService = sourceService,
         schemaVersion = 1,
+        ingestedAt = Instant.now(),
     )
 
     @Test
