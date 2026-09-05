@@ -107,7 +107,9 @@ gates:
     mode: enforced
     rationale: "A synthetic marker forwarded over REST but replaced by a false default at the asynchronous event boundary makes test activity indistinguishable from real banking activity; both schema and writer mapping must survive together."
     review_after: "2027-08-25"
-    min_subjects: 20
+    # 32 shared PanacheOutboxEntity implementations on 2026-09-03 (#4348). The floor moved 20 -> 30
+    # with the corpus glob: at 20 a third of the fleet could vanish from scope and still read green.
+    min_subjects: 30
     selftest: python3 .github/scripts/check-synthetic-outbox-taint.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-synthetic-outbox-taint.py"]
@@ -560,6 +562,47 @@ gates:
         echo "::error::NetworkPolicy drift detected — run openbank-infra/scripts/gen-network-policies.py and commit the result (a new file listed above means a namespace has no committed policy)."
         exit 1
       fi
+
+  # The coverage KPI behind the drift gate (ADR-0279 WS2 #17): drift proves committed ==
+  # generated; this proves how much of the fleet is selected by ANY ingress policy at all.
+  # On the VPC CNI there is no audit mode (runbook 0010) — a pod no policy selects is fully
+  # reachable, so the coverage ratio IS the segmentation posture. Ratchet shape: a component
+  # with no generated policy must be baselined with a reason, and a paid-off baseline entry
+  # fails until removed. Measured at introduction 2026-09-04: 59/73 components (81%).
+  - id: netpol-coverage-kpi
+    name: "NetworkPolicy coverage KPI — generator ingress policy present per component (ADR-0279 #17, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 5   # one directory walk
+    min_subjects: 35   # 73 components measured 2026-09-04; half, so the fleet can shrink without a red
+    rationale: "The CNI has no audit mode, so an unselected pod is silently reachable; the coverage ratio is the only segmentation signal available pre-enforcement and must never regress while #2691 stages the rollout."
+    review_after: "2027-03-04"
+    selftest: python3 .github/scripts/check-netpol-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-netpol-coverage.py"]
+    run: |
+      python3 .github/scripts/check-netpol-coverage.py --root . --enforce
+
+  # ADR-0279 WS4 #18: 158 of 165 fleet ExternalSecrets project a STATIC kv path — a
+  # long-lived credential with no expiry anywhere in the system that serves it. The
+  # weekly credential-inventory lane lists them; this gate stops the list from growing:
+  # a NEW ExternalSecret manifest referencing a static path must carry
+  # `openbank.io/rotation-deadline: YYYY-MM-DD` (future, valid date). Dynamic
+  # `database/creds/…` references are exempt by construction. Diff-scoped, PR-only.
+  - id: credential-deadline-ratchet
+    name: "new static ExternalSecret must declare a rotation deadline (ADR-0279 #18, enforced)"
+    group: gitops
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    budget_seconds: 5   # one git diff + regex over added yaml files
+    rationale: "A static credential with no rotation date is immortal by default; the deadline annotation is the only cheap control that makes its expiry someone's job before the incident does."
+    review_after: "2027-03-04"
+    selftest: python3 .github/scripts/credential-inventory.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/credential-inventory.py"]
+    run: |
+      python3 .github/scripts/credential-inventory.py --enforce-new "${PR_DIFF_BASE}" --today "$(date -u +%F)"
 
   # The drift gate above proves the committed policies match what the generator
   # DERIVES. It cannot say anything about what the generator cannot SEE: a
@@ -2432,6 +2475,29 @@ gates:
     run: |
       python3 .github/scripts/check-no-runblocking-in-scheduled.py
 
+  # Kotlin binds an annotation to the NEXT declaration — a top-level function between
+  # `@Path` and its class silently steals it. RESTEasy then never registers the
+  # resource and every call 404s on a running pod while the bean, the unit tests and
+  # the siblings all look healthy (McpEndpoint, #3371 — admin-ui rendered the healthy
+  # service as "not deployed"). A unit test cannot see a route that was never served,
+  # so this is a gate, not a doc. ENFORCED; clean at introduction.
+  - id: jaxrs-path-not-hijacked-by-toplevel-fun
+    name: "class-level @Path is not stolen by a top-level function (#3371, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 15   # whole-corpus Kotlin scan, measured well under 1s locally
+    rationale: >-
+      Kotlin binds an annotation to the next declaration, so a top-level function placed
+      between @Path and its class steals the annotation; RESTEasy then never registers the
+      resource and the endpoint 404s on a healthy pod, invisible to unit tests (#3371).
+    review_after: 2027-03-05
+    min_subjects: 1080   # 2187 Kotlin main sources measured 2026-09-04; half, so the fleet can shrink without a red
+    selftest: python3 .github/scripts/check-jaxrs-path-hijack.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-jaxrs-path-hijack.py"]
+    run: |
+      python3 .github/scripts/check-jaxrs-path-hijack.py
+
   # Guard the silent Kotlin+JUnit5 footgun: `fun x() = runBlocking { assert }`
   # without `: Unit` infers a non-Unit return → JUnit5 silently skips the test.
   # Bans the bare expression-body form in src/test (the whole fleet is clean as
@@ -2503,6 +2569,32 @@ gates:
     selftest_inputs: [".github/scripts/check-nonnull-jaxrs-params.py"]
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
+
+  # The body-entity arm of the same null-safety class (#7867): Jackson null-checks a data
+  # class's constructor parameters but NOT the ELEMENTS of a collection, so a request DTO's
+  # `List<X>` accepts `[null]` and NPEs at the first dereference — 500 where a 400 belongs.
+  # 23 occurrences are fixed (nullable elements + guards, red-first tests); what remains
+  # reachable is baselined in the script with per-entry reasons (already-correct-400 via a
+  # contains-based guard, or latent stored-wholesale). A NEW occurrence fails; a baseline entry
+  # that no longer occurs is reported too. The self-test pins the must-NOT-flag half (outbound
+  # REST-client interfaces, nullable elements, unreachable DTOs). ENFORCED.
+  - id: null-array-element-ratchet
+    name: "null JSON array element in a request DTO is a 400, not a 500 (issue #7867, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      Jackson null-checks constructor parameters but not collection ELEMENTS, so `[null]`
+      deserialises into a List holding null and NPEs at the first dereference — 500 where a 400
+      belongs. 23 occurrences spread under a green jaxrs-param gate; all fixed with red-first
+      tests, and this ratchet keeps the class from returning.
+    review_after: "2027-03-03"
+    budget_seconds: 40   # ~4s locally over 183 subjects; headroom for runner variance
+    min_subjects: 90   # 183 measured 2026-09-03; half, so the fleet can shrink without a red
+    selftest: python3 .github/scripts/check-null-array-element.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-null-array-element.py"]
+    run: |
+      python3 .github/scripts/check-null-array-element.py --root .
 
   # openbank.outbox.dispatch-enabled guard (the CLAUDE.md "outbox footgun":
   # a service whose OutboxDispatcher actually gates on this flag silently
@@ -3082,6 +3174,28 @@ gates:
     selftest_inputs: [".github/scripts/check-asvs-l3.py"]
     run: |
       python3 .github/scripts/check-asvs-l3.py --enforce --baseline .github/asvs-l3-baseline.txt
+
+  # A contract test that asserts only the happy path proves the provider talks back, not
+  # that it refuses the wrong caller (ADR-0279 WS1 #3). Measured 2026-09-03: 104 of 108
+  # Pact test files fleet-wide carry no negative-auth case at all — the provider could
+  # drop authz enforcement and every contract stays green. Deliberately DIFF-SCOPED on
+  # the PR: a new or changed Pact/contract test file must carry a negative case
+  # (401/403/404 or an unauthorized marker); the 104-file debt is a tracked sweep
+  # (--fleet-report), not a PR blocker. ENFORCED.
+  - id: adversarial-contract-test
+    name: "adversarial contract tests — changed Pact/contract test needs a negative case (ADR-0279, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 10   # one git diff + a regex over the touched files
+    rationale: "A happy-path-only contract test cannot catch a provider that stops enforcing authz — 126 of 132 fleet contract tests measured 2026-09-3 had no negative case; this ratchets the convention on every touched file while the debt sweep runs under #8590."
+    review_after: "2027-03-04"
+    when: pull_request
+    needs_base: required
+    selftest: python3 .github/scripts/check-adversarial-contract-tests.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-adversarial-contract-tests.py"]
+    run: |
+      python3 .github/scripts/check-adversarial-contract-tests.py --since "${PR_DIFF_BASE}"
 
   # The cheapest drift proxy from #2314: the spec's declared dev port must equal the
   # service's quarkus.http.port. The 21 mismatches measured on 2026-07-29 were corrected
@@ -3755,6 +3869,28 @@ gates:
       # count; see hunk_moves_boundary and the gate's --self-test.
       python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}" --enforce
 
+  # ADR-0279 WS4 #26: the PR template's Security checklist is the per-PR security
+  # control, and a checkbox nobody has to tick gets read never. This gate spends the
+  # pause only where a mistake moves money: when the diff touches a money_path_services
+  # directory (the one list from rules.yaml), the PR body must KEEP its
+  # '## Security checklist' section with every box ticked — deleting the section is a
+  # finding, same as leaving it blank, or the fix would be "delete the question".
+  # The boxes' truthfulness is the reviewer's; the control here is the pause itself.
+  - id: security-checklist-money-path
+    name: "money-path PR must tick the Security checklist (ADR-0279 #26, enforced)"
+    group: security
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    budget_seconds: 5   # one git diff + a regex over the PR body
+    rationale: "The security checklist is the fleet's per-PR control and unticked boxes were free; on money-path code the six lines written for exactly that case must be answered, not carried."
+    review_after: "2027-03-04"
+    selftest: python3 .github/scripts/check-security-checklist.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md"]
+    run: |
+      python3 .github/scripts/check-security-checklist.py --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
+
   # ADR-0030 D2, third half (#6037, PR #6048): the coverage gate proves a threat model EXISTS
   # and the diff gate proves it is TOUCHED when a trust boundary moves. Neither reads a single
   # CLAIM, so a model can be present, current, freshly edited — and false. Settlement's R2
@@ -3924,10 +4060,10 @@ gates:
   # a test written from the annotation matches the annotation and passes against a resource
   # that 403s in production — exactly how finrep's stayed green.
   - id: rolesallowed-realm-parity
-    name: "@RolesAllowed ⇒ realm parity (issue #2404, enforced)"
+    name: "@RolesAllowed + hasRole ⇒ realm parity (issues #2404, #8495, enforced)"
     group: security
     mode: enforced
-    min_subjects: 200   # 419 @RolesAllowed sites today (2026-08-09)
+    min_subjects: 200   # 491 role-reference sites today (2026-09-04): 419 @RolesAllowed + hasRole probes (#8495)
     selftest: python3 .github/scripts/check-roles-allowed-realm.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-roles-allowed-realm.py"]
@@ -4760,7 +4896,8 @@ gates:
     selftest: python3 .github/scripts/check-no-epoch-instant-default.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-no-epoch-instant-default.py"]
-    min_subjects: 74    # 37+37 after the document-service burn-down; lower this in each burn-down PR
+    # No min_subjects: the burn-down completed 2026-09-03 with zero occurrences and an empty
+    # baseline, and a floor of 0 states nothing while a positive one can never be met again.
     run: |
       python3 .github/scripts/check-no-epoch-instant-default.py --root .
 

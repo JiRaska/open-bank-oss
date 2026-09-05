@@ -148,10 +148,33 @@ probe_zombie_runs() {
   fi
 
   while [ "$page" -le 10 ]; do
+    # `gh api --jq` takes exactly ONE argument and does NOT accept jq's `--arg`: passing it dies
+    # with "accepts 1 arg(s), received 4". With the old `2>/dev/null` that error was swallowed,
+    # `ids` came back empty, and `[ -z "$ids" ] && break` left the loop on page 1 — so this probe
+    # reported a clean census of zero while 87 wedged runs sat on page 1 alone. That is precisely
+    # the failure this library exists to prevent, in the library itself. The cutoff is interpolated
+    # into the filter instead, and its shape is asserted first so a malformed value cannot become
+    # jq source.
+    case "$cutoff" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) : ;;
+      *) echo "probe_zombie_runs: cutoff $cutoff is not an ISO-8601 UTC instant — refusing to" \
+              "build a jq filter from it" >&2; return 1 ;;
+    esac
+
+    # stderr is captured, never discarded: a failed call must not be indistinguishable from a page
+    # with no wedged runs.
+    local err rc
+    err="$(mktemp)"
     ids="$(gh api "repos/$repo/actions/runs?status=in_progress&per_page=100&page=$page" \
-      --jq --arg cutoff "$cutoff" \
-      '.workflow_runs[] | select(.created_at < $cutoff) | "\(.id)\t\(.created_at)\t\(.name)"' \
-      2>/dev/null)"
+      --jq ".workflow_runs[] | select(.created_at < \"$cutoff\") | \"\\(.id)\\t\\(.created_at)\\t\\(.name)\"" \
+      2>"$err")"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "probe_zombie_runs: gh api failed on page $page (exit $rc): $(head -1 "$err")" >&2
+      rm -f "$err"
+      return 1
+    fi
+    rm -f "$err"
     [ -z "$ids" ] && break
     while IFS=$'\t' read -r id created name; do
       [ -z "$id" ] && continue
@@ -355,10 +378,63 @@ _probe_selftest() {
   _check "probe_utc_cutoff is TZ-invariant within live-clock rounding (skew=${cutoff_skew}s)" \
     "$([ "$cutoff_skew" -le 1 ] && echo 1 || echo 0)"
 
-  # The network probes (probe_pr_failing_checks, probe_zombie_runs) have no hermetic fixture: their
-  # subject is GitHub's own state machine. Declared rather than silently skipped — an unexercised
-  # probe is a third state, and pretending it passed is the failure this file is about.
-  echo "  [note] probe_pr_failing_checks and probe_zombie_runs are network-bound and unexercised here"
+  # --- probe_zombie_runs ------------------------------------------------------------------
+  # These were "network-bound, unexercised" until 2026-09-03, and that gap let the probe ship
+  # broken: it passed jq's `--arg` to `gh api --jq`, which rejects it, and `2>/dev/null` turned the
+  # error into an empty page. It reported ZERO wedged runs while 177 existed. `gh` is a shell
+  # function here, so the whole thing is hermetic — no network, no fixtures on disk.
+  # `gh` is a shell function here, so this is hermetic — no network, no fixtures on disk. The stub
+  # parses argv properly rather than doing string surgery on "$*": a first attempt sliced the filter
+  # out of the joined arguments, mangled it, and jq exited 3 on every call. That mattered less for
+  # what it broke than for what it revealed — BOTH negative assertions passed while every call was
+  # failing, because an absence assertion is satisfied when everything is absent. The
+  # known-positive is the only reason it was caught.
+  gh() {
+    local url="" filter="" body=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        api)   shift ;;
+        --jq)  filter="$2"; shift 2 ;;
+        *)     url="$1"; shift ;;
+      esac
+    done
+    case "$url" in
+      */actions/runs/1/jobs*) body='{"jobs":[{"status":"completed"},{"status":"completed"}]}' ;;
+      */actions/runs/3/jobs*) body='{"jobs":[{"status":"completed"},{"status":"in_progress"}]}' ;;
+      *page=1*) body='{"workflow_runs":[
+        {"id":1,"created_at":"2026-08-09T10:00:00Z","name":"wedged-old"},
+        {"id":2,"created_at":"2099-01-01T00:00:00Z","name":"fresh"},
+        {"id":3,"created_at":"2026-08-09T10:00:00Z","name":"old-but-live"}]}' ;;
+      *) body='{"workflow_runs":[]}' ;;
+    esac
+    printf '%s' "$body" | jq -r "$filter"
+  }
+  if command -v jq >/dev/null 2>&1; then
+    local zr
+    zr="$(probe_zombie_runs owner/repo 24 2>/dev/null)"
+    _check "probe_zombie_runs returns the wedged old run (known-positive)" \
+      "$(printf '%s' "$zr" | grep -q 'wedged-old' && echo 1 || echo 0)"
+    _check "probe_zombie_runs excludes a run newer than the cutoff" \
+      "$(printf '%s' "$zr" | grep -q 'fresh' && echo 0 || echo 1)"
+    # The false positive the probe was burned by: old, but a job is still running — slow and
+    # healthy, and subtracting it would understate real load.
+    _check "probe_zombie_runs excludes an old run with a job still in flight" \
+      "$(printf '%s' "$zr" | grep -q 'old-but-live' && echo 0 || echo 1)"
+  else
+    echo "  [note] probe_zombie_runs fixture cases need jq and were NOT run"
+  fi
+  # No jq needed, and this is the case that would have caught the shipped bug: a failing call must
+  # be distinguishable from a page with nothing on it.
+  gh() { echo "accepts 1 arg(s), received 4" >&2; return 1; }
+  probe_zombie_runs owner/repo 24 >/dev/null 2>&1
+  _check "probe_zombie_runs FAILS loudly when gh errors (never reads as a clean census)" \
+    "$([ "$?" -ne 0 ] && echo 1 || echo 0)"
+  unset -f gh
+
+  # probe_pr_failing_checks remains network-bound with no hermetic fixture: its subject is a live
+  # PR's check rollup. Declared rather than silently skipped — an unexercised probe is a third
+  # state, and pretending it passed is the failure this file is about.
+  echo "  [note] probe_pr_failing_checks is network-bound and unexercised here"
 
   # Counted, never hard-coded: a literal here would keep reporting a full corpus after someone
   # deleted half the cases, which is the exact shape min_subjects exists to catch (#4339).
@@ -368,7 +444,9 @@ _probe_selftest() {
     echo "SELF-TEST FAILED: $failures probe(s) do not behave as documented."
     return 1
   fi
-  echo "SELF-TEST OK: every probe was run against a known-positive AND a known-negative."
+  echo "SELF-TEST OK: $executed assertion(s); every probe exercised here was run against a"
+  echo "  known-positive AND a known-negative. probe_pr_failing_checks is declared unexercised"
+  echo "  above and is NOT covered by that statement."
   return 0
 }
 

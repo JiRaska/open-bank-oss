@@ -183,6 +183,7 @@ full checklist. Maintainers with Claude Code can also run `/ship-check` — it m
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the services fit together (bounded contexts, runtime patterns, deployment)
 - [`DEPLOYMENT.md`](DEPLOYMENT.md) — how it's built, shipped, and run (local Docker, CI/CD, GitOps, infra, runbooks)
+- [`docs/deployment-reference.md`](docs/deployment-reference.md) — evaluator's reference: topology, sizing tiers, cost estimates, and the production delta
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones M1–M7
 - [`docs/adr/README.md`](docs/adr/README.md) — Architecture Decision Records index, with per-decision delivery status (governance lives in 0029–0031 and 0040)
 - [`docs/strategy/`](docs/strategy/) — BIAN mapping, security baseline, compliance matrix, resilience
@@ -197,6 +198,12 @@ full checklist. Maintainers with Claude Code can also run `/ship-check` — it m
 ## Contributing
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+
+New here? The fastest path in: pick a [`good-first-issue`](https://github.com/JiRaska/open-bank-oss/labels/good-first-issue)
+(each carries a newcomer-context comment telling you exactly where to start), spin the stack up with
+one command (`cd openbank-infra && make up-infra && make up-all`), and sanity-check the live sandbox
+via [`docs/QUICKSTART_SANDBOX.md`](docs/QUICKSTART_SANDBOX.md). Target: first green PR in ~15 minutes
+of hands-on time.
 
 OpenBank uses the [Developer Certificate of Origin](https://developercertificate.org/) — every commit must
 be signed off and signed with `git commit -s -S`.
