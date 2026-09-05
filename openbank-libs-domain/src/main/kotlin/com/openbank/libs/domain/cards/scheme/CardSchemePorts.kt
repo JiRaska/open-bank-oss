@@ -87,12 +87,20 @@ interface MerchantDataPort {
 data class NetworkToken(
     val tokenReference: String,
     val last4: String,
-    val status: TokenStatus,
+    val status: NetworkTokenStatus,
     val expiry: LocalDate?,
     val requestorId: String?,
 )
 
-enum class TokenStatus { ACTIVE, SUSPENDED, DELETED }
+/**
+ * A network token's lifecycle state.
+ *
+ * Named for the network token specifically, not `TokenStatus`: this is a SHARED domain library, and
+ * a generic name there collides with every other kind of token a service might model. The values
+ * still overlap several unrelated spec enums by coincidence, which `check-openapi-enum-vs-domain.py`
+ * pairs on — see its BASELINE for the two entries that records.
+ */
+enum class NetworkTokenStatus { ACTIVE, SUSPENDED, DELETED }
 
 /** Who asked for the token — a wallet, a merchant holding a card on file, or the bank's own app. */
 data class TokenRequestor(val requestorId: String, val label: String)
@@ -106,7 +114,7 @@ interface TokenisationPort {
      * Suspend, resume or delete. One method rather than three because the scheme APIs model it as a
      * state change and splitting it would invite a caller to invent a fourth state.
      */
-    suspend fun changeStatus(tokenReference: String, status: TokenStatus): SchemeResult<NetworkToken>
+    suspend fun changeStatus(tokenReference: String, status: NetworkTokenStatus): SchemeResult<NetworkToken>
 }
 
 /**

@@ -26,6 +26,9 @@ import argparse
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import gatelib  # noqa: E402  — run-gates.py reads the SUBJECTS line this emits
+
 try:
     import yaml
 except ImportError as missing:  # pragma: no cover - the fleet always has PyYAML
@@ -153,6 +156,12 @@ def main() -> int:
 
     registry = yaml.safe_load(REGISTRY.read_text(encoding="utf-8"))
     rendered = render(registry)
+
+    # Printed on BOTH paths, including the failure one. A checker that reports its corpus only
+    # when it passes cannot distinguish "found nine capabilities and they matched" from "found
+    # none, so nothing could mismatch" — which is how nine Kotlin gates stayed green over an
+    # empty tree (#4339).
+    gatelib.subjects(len(registry.get("capabilities") or []), "capabilities in the registry")
 
     if args.check:
         if not OUT.is_file():
