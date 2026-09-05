@@ -77,6 +77,12 @@ NO_OVERLAY_YET: dict[str, str] = {
     "admin-ui": "#6719 - released component, no triage overlay written yet. Node/Next.js, so none "
                 "of the JVM dependency evidence used for the other three reaches it and there is "
                 "no npm triage material in the repository to write a disposition from.",
+    "card-processing-service": "#8887 - released in ADR-0283 phase 1 (#8809). The overlay needs a "
+                               "trivy sbom of THIS artifact to triage against; copying the sibling "
+                               "card-issuance statements would assert measurements nobody made "
+                               "about this jar, which this gate's own docstring calls strictly "
+                               "worse than the gap. Written once the first tag produces release "
+                               "evidence, and this entry deleted in the same PR.",
 }
 
 
