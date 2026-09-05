@@ -104,6 +104,15 @@ charters:
       `skills:` list in agents.yaml, executed in an operator's coding-agent session — there is no
       service in this repo that sends a system prompt on its behalf.
 
+  - id: card-scheme-bulletin-agent
+    status: pending
+    reason: >-
+      ADR-0283 phase 4 (#8812). The charter is registered and ships DISABLED because no bulletin
+      feed exists yet, so no prompt has been written: authoring one now would register text that
+      nothing sends, which is the same class of claim as a charter that says it runs while its
+      input does not exist. The prompt is authored in the PR that wires the feed and flips
+      `enabled`, so "it runs" and "there is a prompt" become true in the same change.
+
   - id: mcp-anonymous
     status: not-applicable
     reason: >-
