@@ -28,6 +28,14 @@ interface ClearingBatchRepository {
     fun update(batch: ClearingBatch): Uni<ClearingBatch>
 
     /**
+     * INSERT a batch and its outbox message in one transaction. The settle* methods above cannot
+     * serve this: both `s.find` the batch first and fail with "Batch not found", because they exist
+     * to move an EXISTING batch to SETTLED. An empty clearing cycle has no such prior row -- its
+     * batch is born SETTLED -- so announcing it needs an insert-and-emit, not an update-and-emit.
+     */
+    fun saveWithEvent(batch: ClearingBatch, event: OutboxMessage): Uni<ClearingBatch>
+
+    /**
      * Settle atomically (#8509): the batch state change, the item status flips and the outbox
      * row for `event` commit in ONE transaction. Before this, `ClearingService.settleBatch`
      * composed `update` + `saveAll` + `publishBatchSettled`, each opening its own transaction
