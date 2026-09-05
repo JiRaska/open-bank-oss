@@ -203,6 +203,7 @@ gates:
     selftest_exempt: "is-a-test-suite — the run: IS alert-rca-ledger.py --self-test"
     name: "alert-RCA ledger guards (MTTR granularity, recurrence, observation coverage)"
     group: lint
+    budget_seconds: 20   # 0.2s in CI (run 33956518443), 7.3s through the local runner
     mode: enforced
     rationale: "The MTTR granularity refusal and the recurrence guard are the only things stopping ADR-0241 D1/D3 from publishing a number nobody measured, and the coverage outcome is what stops an empty week reporting as a clean one. They were wired only inside a scheduled workflow that has never once succeeded, so they had never run on any lane. Recheck for removal when a durable alert open/close feed exists (#5869) and the MTTR half is no longer a refusal."
     review_after: "2027-02-21"
@@ -213,6 +214,7 @@ gates:
     selftest_exempt: "is-a-test-suite — the run: IS standing-critical-digest.py --self-test"
     name: "standing-critical digest guards (severity filter, observation envelope)"
     group: lint
+    budget_seconds: 20   # 0.1s in CI (run 33956518443), 3.5s locally
     mode: enforced
     rationale: "The digest's severity filter and observation envelope are the producer half of the same control; if the envelope shape drifts, the weekly review silently folds nothing and reports a clean week. Same lane gap as its consumer above. Recheck when the digest stops being the ledger's only observation source."
     review_after: "2027-02-21"
@@ -1924,6 +1926,7 @@ gates:
                         # so the floor moves with the list rather than tracking it exactly.
     name: "agent bounded GitHub write surface (ADR-0031 D9 phase 3, enforced)"
     group: registry
+    budget_seconds: 20   # 0.8s in CI (run 33956518443), 3.6s locally
     mode: enforced
     rationale: "flaky-test-hunter is the only agent with a real GitHub write path; its non-money-path confinement and its inability to merge or approve held only because a human read a Kotlin constant, and money_path_services grows over time."
     review_after: "2027-02-20"
@@ -2565,6 +2568,7 @@ gates:
   - id: source-service-convention
     name: "sourceService == module directory name (issues #5256/#5902, enforced)"
     group: kotlin
+    budget_seconds: 30   # 0.8s in CI (run 33956518443), 2.7s locally; it walks every module src tree
     mode: enforced
     min_subjects: 20
     rationale: >-
@@ -4790,6 +4794,7 @@ gates:
   - id: ruleset-bypass-actors
     name: "who may bypass main-protection is pinned, and widening it fails a PR (Refs #4828, enforced)"
     group: lint
+    budget_seconds: 30   # 0.7s in CI (run 33956518443); it makes GitHub API calls, so the ceiling covers a slow response
     mode: enforced
     rationale: >
       The bypass surface of main-protection is a repository SETTING, not a file: it is edited

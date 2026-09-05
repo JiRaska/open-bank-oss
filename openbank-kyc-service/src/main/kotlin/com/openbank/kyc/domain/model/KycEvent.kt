@@ -65,8 +65,8 @@ object KycEvents {
             // so it is safe to add net-new. Value matches the fleet's audit convention: the
             // module directory without the `openbank-` prefix, the same spelling
             // `TopicAttribution` already maps `openbank.kyc.events` to and this file's own
-            // `actorId`/`SERVICE` constant already uses for the SYSTEM actor id.
-            "sourceService" to SERVICE,
+            // `actorId`/`SOURCE_SERVICE` constant already uses for the SYSTEM actor id.
+            "sourceService" to SOURCE_SERVICE,
         ),
     )
 
@@ -90,12 +90,19 @@ object KycEvents {
      * person, which is the property that matters.
      */
     private fun actorId(case: KycCase): String = case.reviewedBy?.takeIf { it.isNotBlank() }
-        ?: EventActor.system(SERVICE, "case-lifecycle")
+        ?: EventActor.system(SOURCE_SERVICE, "case-lifecycle")
 
     private fun actorType(case: KycCase): String =
         if (case.reviewedBy.isNullOrBlank()) EventActor.TYPE_SYSTEM else ACTOR_TYPE_REVIEWER
 
-    private const val SERVICE = "kyc-service"
+    /**
+     * This module's own `sourceService`, and the SYSTEM actor id. Named `SOURCE_SERVICE` rather
+     * than `SERVICE` because `OrphanedPartyGauge` declares a metrics-tag `const val SERVICE =
+     * "kyc"` in the same module: two different values behind one simple name make every
+     * reference ambiguous to `check-source-service-convention.py`, which then reports UNRESOLVED
+     * instead of guessing. The VALUE is unchanged — the module directory without the prefix.
+     */
+    private const val SOURCE_SERVICE = "kyc-service"
 
     /**
      * A named human reviewer. Not `OPERATOR`: the audit trail's existing `actorType` vocabulary uses
