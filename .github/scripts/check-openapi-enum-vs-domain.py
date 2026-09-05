@@ -44,18 +44,17 @@ census.
    `openbank-swift-service` SwiftStatus. Raising the threshold is NOT the fix: the last two of
    those six are MIS-pairings against the shared four-eyes vocabulary, see 2.
 
-2. **`kotlin_enums()` walks the SERVICE's own src/main, so a spec enum backed by a shared
-   `openbank-libs-*` enum can never pair, however far it drifts.** 21 spec enums across the fleet
-   are in that state today. The clearest is `[PENDING, APPROVED, REJECTED, EXECUTED]`, which
-   appears in seven service specs as the ADR-0155 four-eyes approval status and is backed by
-   `openbank-libs-domain/.../approval/ApprovalStore.kt: enum class ApprovalStatus`. All seven
-   agree exactly right now — but nothing here is what makes that true. Falsified rather than
-   asserted: feeding `best_match` the swift quartet against the service-only enum map returns
-   `None` both when ApprovalStatus matches and when a value is added to it, while the same call
-   against a service+libs map returns `ApprovalStatus` and reports the added value. Control for
-   that probe: the run asserts the quartet is extracted from the swift spec at all, so a broken
-   extractor cannot masquerade as "no pairing". Consequence: **one value added to a shared libs
-   enum silently drifts seven specs at once, with no signal anywhere.**
+2. **(FIXED, #7984) `kotlin_enums()` used to walk only the SERVICE's own src/main**, so a spec
+   enum backed by a shared `openbank-libs-*` enum could never pair, however far it drifted — 21
+   spec enums were in that state (the seven `[PENDING, APPROVED, REJECTED, EXECUTED]` four-eyes
+   status enums backed by libs-domain's `ApprovalStatus` the clearest). The scan now merges
+   `libs_enums()` under every service's own enums (service-local wins a name collision), which
+   surfaced one REAL drift invisible until then (lending's origination-state list carrying three
+   invented values) and three coincidental customer-edge mis-pairings, all baselined with
+   reasons. What remains true: **pairing is by value overlap, so a large shared enum with a
+   coincidental 2-value overlap can still mis-pair** — name-based pairing (spec schema name ↔
+   enum class name) is the better shape and is deliberately NOT done here; it needs the spec
+   extractor to keep names, a bigger change than the blind-spot fix.
 
 ## Ratchet, not a wall
 
@@ -116,6 +115,17 @@ BASELINE: dict[str, str] = {
         "#5962 — ConsentStatus: spec-only PENDING; undeclared PENDING_SCA/SUPERSEDED",
     "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
         "#5962 — ActionKind: undeclared FX_CONVERSION",
+    # MIS-PAIRINGS, surfaced when the scan began including openbank-libs-* (#7984): three
+    # customer-edge spec enums clear the threshold against shared libs enums on 2-3 coincidental
+    # values. FAILED/PENDING (a screening verdict vs OutboxStatus), APPROVED/REJECTED (a task
+    # lifecycle vs ApprovalStatus) and PENDING/SENT/FAILED (a payment status vs OutboxStatus) are
+    # overlaps of vocabulary, not identity — the same shape as the pid-service entries below.
+    "openbank-customer-edge:FAILED,MANUAL_REVIEW,PASSED,PENDING":
+        "#7984 — mis-pairing: screening verdict shares FAILED/PENDING with libs OutboxStatus.",
+    "openbank-customer-edge:APPROVED,EXPIRED,IN_PROGRESS,NOT_STARTED,REJECTED":
+        "#7984 — mis-pairing: task lifecycle shares APPROVED/REJECTED with libs ApprovalStatus.",
+    "openbank-customer-edge:ACKNOWLEDGED,COMPLETED,FAILED,PENDING,REJECTED,SENT,VALIDATED":
+        "#7984 — mis-pairing: payment status shares FAILED/PENDING/SENT with libs OutboxStatus.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are `RecordDecisionRequest.decision`, and a signer decides SIGNED or DECLINED;
     # PENDING is the state a signer starts in, never one they can submit.
@@ -138,10 +148,19 @@ BASELINE: dict[str, str] = {
     "openbank-ledger-service:CUTOFF,LOCKED,TIED_OUT":
         "#5962 — transitionAccountingDay `{to}`: NOT drift. A deliberate subset of "
         "AccountingDayStatus; OPEN is unreachable as a transition target (no reopen, ADR-0207).",
-    "openbank-lending-service:APPROVED,EXECUTED,PENDING,REJECTED":
-        "#5962 — CollateralStatus: spec-only EXECUTED",
+    # REMOVED 2026-09-03 (#7984): `openbank-lending-service:APPROVED,EXECUTED,PENDING,REJECTED` —
+    # with the libs scan merged in, that quartet EXACTLY matches libs-domain's ApprovalStatus
+    # (the ADR-0155 four-eyes vocabulary it was always meant to publish), so it no longer drifts.
+    # The stale-entry check below enforces the removal.
     "openbank-lending-service:APPROVED,EXECUTED,PROPOSED,REJECTED":
         "Compliance pack ProposalState, not CollateralStatus; value-overlap pairing is ambiguous.",
+    # Surfaced by the libs scan (#7984): the spec's origination-state list is exactly
+    # libs-domain's OriginationState PLUS three invented values (APPROVED/PROPOSED/REJECTED) —
+    # the #5895 shape, invisible until the shared enum could pair. Lending is money-path, so the
+    # spec correction (dropping the three phantom values) goes through its own reviewed change.
+    "openbank-lending-service:APPROVED,ASSESSMENT,AWAITING_SIGNATURE,DECISION_PENDING,DECLINED,DISBURSED,DOCS_REQUIRED,DRAFT,EXPIRED,FOUR_EYES,KYC_PENDING,OFFERED,PROPOSED,READY_TO_DISBURSE,REFLECTION_PERIOD,REJECTED,SIGNED,SUBMITTED,WITHDRAWN":
+        "#7984 — OriginationState: spec advertises APPROVED/PROPOSED/REJECTED, which have never "
+        "existed in the code; real drift, needs a reviewed lending spec fix (money-path).",
     # Also deliberate: the enum is right to flag (INDIVIDUAL has never existed; the DB CHECK is
     # ('NATURAL_PERSON','LEGAL_ENTITY','SOLE_TRADER')), but it sits inside `CreatePartyRequest`,
     # whose declared properties — legalName, tradingName, taxId, dateOfBirth, nationality —
@@ -256,6 +275,7 @@ def best_match(
     """The Kotlin enum sharing the most values with `spec`, if it clears MIN_OVERLAP."""
     best: tuple[str, frozenset[str]] | None = None
     best_n = 0
+    best_size = 0
     for name, vals in domain.items():
         # An exact vocabulary is authoritative. Without this fast path, declaration order can
         # make a shorter enum (for example PocketStatus) tie with a longer superset
@@ -263,11 +283,33 @@ def best_match(
         if vals == spec:
             return name, vals
         n = len(spec & vals)
-        if n > best_n:
-            best, best_n = (name, vals), n
+        # Tie-break on the CLOSER size, not insertion order (#7984): with the libs scan merged
+        # in, a spec subset like {DECLINED, SIGNED} overlaps its real enum (SignerStatus, 2/3)
+        # exactly as much as a large unrelated one (OriginationState, 2/16). Taking the first
+        # in iteration order let the 16-value enum win the tie and then fail the threshold,
+        # un-pairing a deliberate-subset baseline entry. The nearer-sized enum is the better
+        # candidate for "the same vocabulary".
+        size = max(len(spec), len(vals))
+        if (n, -size) > (best_n, -best_size):
+            best, best_n, best_size = (name, vals), n, size
     if best is None or best_n < MIN_SHARED or best_n < MIN_OVERLAP * max(len(spec), len(best[1])):
         return None
     return best
+
+
+def libs_enums(repo: Path) -> dict[str, frozenset[str]]:
+    """Enums declared in the shared `openbank-libs-*` modules.
+
+    #7984: `kotlin_enums()` used to walk only the service's OWN src/main, so a spec enum backed
+    by a shared libs enum (e.g. libs-domain's `ApprovalStatus`, behind seven services' four-eyes
+    status enums) could never pair, however far it drifted — one value added to a shared enum
+    silently drifted every consuming spec at once with no signal. The domain side of the
+    comparison is shared, so the scan root must be too.
+    """
+    out: dict[str, frozenset[str]] = {}
+    for libs_src in sorted(repo.glob("openbank-libs-*/src/main/kotlin")):
+        out.update(kotlin_enums(libs_src))
+    return out
 
 
 def scan(repo: Path) -> tuple[list[tuple[str, str, frozenset[str], str, frozenset[str]]], int]:
@@ -278,12 +320,16 @@ def scan(repo: Path) -> tuple[list[tuple[str, str, frozenset[str], str, frozense
     """
     findings = []
     pairings = 0
+    libs = libs_enums(repo)
     for spec in sorted(repo.glob("openbank-*/src/main/resources/openapi.yaml")):
         service = spec.parts[len(repo.parts)]
         src = repo / service / "src" / "main" / "kotlin"
         if not src.is_dir():
             continue
-        domain = kotlin_enums(src)
+        # Service-local enums WIN on a name collision with libs: the service's own declaration
+        # is what its handlers actually reference; the libs entry under the same name is what
+        # other services see.
+        domain = {**libs, **kotlin_enums(src)}
         if not domain:
             continue
         for values in spec_enums(spec.read_text(encoding="utf-8", errors="replace")):
@@ -307,6 +353,10 @@ def self_test() -> int:
     domain = {
         "CheckType": frozenset({"IDENTITY", "ADDRESS", "PEP_SCREENING", "SANCTIONS_SCREENING", "ADVERSE_MEDIA"}),
         "CaseStatus": frozenset({"OPEN", "UNDER_REVIEW", "APPROVED", "REJECTED"}),
+        # Inserted BEFORE LifecycleStatus so the tie-break case below is lost if insertion
+        # order decides: a 16-value enum sharing exactly two values with it (the #7984 shape —
+        # a libs enum tying a service-local one on overlap count).
+        "HugeUnrelatedStatus": frozenset({"ACTIVE", "DORMANT"} | {f"S{i}" for i in range(14)}),
         "LifecycleStatus": frozenset({"ACTIVE", "DORMANT", "FROZEN", "CLOSED"}),
         "PocketStatus": frozenset({"ACTIVE", "FROZEN", "CLOSED"}),
     }
@@ -330,6 +380,13 @@ def self_test() -> int:
          domain["PocketStatus"], False),
         ("drift in the second enum is still found",
          frozenset({"OPEN", "UNDER_REVIEW", "APPROVED", "DECLINED"}), True),
+        # #7984: a subset tying two enums on overlap COUNT must pair the nearer-sized one —
+        # {ACTIVE, DORMANT} ties LifecycleStatus (2/4) and HugeUnrelatedStatus (2/16), and the
+        # huge one is inserted FIRST, so insertion order alone would pair it and then fail the
+        # threshold, un-pairing a real subset. Flagged=True because the subset genuinely drifts
+        # from LifecycleStatus (omits FROZEN/CLOSED); the point is it pairs AT ALL.
+        ("a subset tying on count pairs the nearer-sized enum, not the first one",
+         frozenset({"ACTIVE", "DORMANT"}), True),
     ]
     failures = 0
     for name, values, must_flag in cases:

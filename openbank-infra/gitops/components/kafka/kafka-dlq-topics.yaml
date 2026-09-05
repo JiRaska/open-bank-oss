@@ -655,3 +655,18 @@ spec:
   config:
     retention.ms: 2592000000
     cleanup.policy: delete
+---
+# openbank-clearing-service :: channel `clearing-net-settlement-in` (ADR-0281)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.clearing-service.clearing-net-settlement-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete

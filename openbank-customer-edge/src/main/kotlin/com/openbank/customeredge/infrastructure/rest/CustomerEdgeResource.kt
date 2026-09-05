@@ -428,6 +428,45 @@ class CustomerEdgeResource(
      * this edge has an M2M credential. This projection is therefore also the single source for
      * the product eligibility check at [openTermDeposit].
      */
+    /**
+     * The customer-facing product catalogue: what this customer may open today.
+     *
+     * Generalises the projection [listTermDepositOffers] already applies to term deposits, for the
+     * same reason and with the same filters — the operator catalogue holds draft, private,
+     * withdrawn and future-dated products, and none of them may become discoverable merely
+     * because this edge holds an M2M credential.
+     *
+     * **Rates are read, never derived.** A savings product prices by balance tier and a term
+     * deposit by its own fixed term, so this endpoint reports the catalogue's numbers and the
+     * shape they came in. It does not flatten tiers into one "from" rate or interpolate a term
+     * curve: the app would then be quoting a price the bank never set. Where a product carries no
+     * rate at all — a current account — the field is absent rather than zero, because 0 % is a
+     * price and "not priced" is not.
+     *
+     * `type` narrows the list; omitted, every discoverable type comes back.
+     */
+    @GET
+    @Path("/products")
+    @Authorize(action = "customer.products.read")
+    @Blocking
+    fun listProductOffers(@QueryParam("type") type: String?): Response {
+        val customer = customer()
+        val requested = type?.takeIf { it.isNotBlank() }?.uppercase()
+        if (requested != null && requested !in CUSTOMER_PRODUCT_TYPES) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity(mapOf("error" to "Unsupported product type"))
+                .build()
+        }
+        val query = requested?.let { "?type=$it&status=ACTIVE" } ?: "?status=ACTIVE"
+        val catalog = upstream.get("$productCatalogUrl/api/v1/products$query", customer.partyId.toString())
+        if (catalog.status != 200) return productCatalogueUnavailable()
+        val products = parseJson(catalog)?.takeIf { it.isArray } ?: return productCatalogueUnavailable()
+        val today = LocalDate.now(clock)
+        val offers = objectMapper.createArrayNode()
+        products.forEach { product -> productOffer(product, today)?.let(offers::add) }
+        return Response.ok(objectMapper.createObjectNode().set<ArrayNode>("items", offers)).build()
+    }
+
     @GET
     @Path("/products/term-deposits")
     @Authorize(action = "customer.products.read")
@@ -1065,6 +1104,63 @@ class CustomerEdgeResource(
         )
     }
 
+    /**
+     * GDPR Art. 15 — right of access. The subject's full PII set, aggregated by party-service
+     * across party, kyc and card-issuance (ADR-0118).
+     *
+     * ## Why this route exists
+     *
+     * party-service has implemented both exports since ADR-0118/ADR-0204 and they were reachable by
+     * nobody: the handler accepts ROLE_ADMIN, ROLE_DPO, or the subject's own JWT, and this edge
+     * forwards none of the three. It validates the customer token in the `openbank-customers` realm
+     * and calls upstream with its OWN client_credentials token from the operator realm, so
+     * party-service saw `sub = service-account-openbank-edge` with ROLE_OPERATOR — not admin, not
+     * DPO, not the subject — and answered 403 to every request a data subject could make. There was
+     * also no route here to make one with: 136 `@Path` declarations and none for either export
+     * (#8421). ADR-0204 D6 left "who gets a button for it" open rather than deciding against it.
+     *
+     * ## Scoping
+     *
+     * Party-scoped by the JWT party — never a client-supplied id — so a customer only ever exports
+     * their own record (no IDOR), the same shape as `/profile` and `/privacy/access-log`.
+     * party-service independently requires that `X-Customer-Party-Id` name the same party as the
+     * path, so a header alone cannot widen the read.
+     *
+     * A distinct action from `customer.portabilityExport.read` below because Art. 15 and Art. 20 are
+     * distinct rights with different output obligations (ADR-0204: Art. 20 excludes Art. 6(1)(c)
+     * legal-obligation data and adds transaction history) — party-service audits them under
+     * different `gdprArticle` codes for exactly that reason, and collapsing them here would undo it.
+     */
+    @GET
+    @Path("/privacy/gdpr-export")
+    @Authorize(action = "customer.gdprExport.read", resource = "")
+    @Blocking
+    fun gdprExport(): Response {
+        val customer = customer()
+        return upstream.get(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/gdpr-export",
+            customer.partyId.toString(),
+        )
+    }
+
+    /**
+     * GDPR Art. 20 — right to data portability. The consent/contract-basis subset only, with
+     * counterparty IBANs redacted per Art. 20(4); Art. 20(2) direct controller-to-controller
+     * transmission is explicitly not offered (ADR-0204 D1/D2/D4). Same scoping and same trust
+     * boundary as [gdprExport].
+     */
+    @GET
+    @Path("/privacy/portability-export")
+    @Authorize(action = "customer.portabilityExport.read", resource = "")
+    @Blocking
+    fun portabilityExport(): Response {
+        val customer = customer()
+        return upstream.get(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/gdpr-portability-export",
+            customer.partyId.toString(),
+        )
+    }
+
     /** The third-party / agent data-access consents granted by the caller. */
     @GET
     @Path("/consents")
@@ -1208,7 +1304,17 @@ class CustomerEdgeResource(
     private fun revokeHeldConsent(partyId: UUID, consentId: String?) {
         if (consentId.isNullOrBlank()) return
         val body = objectMapper.createObjectNode().put("reason", "Revoked by customer").toString()
-        upstream.delete("$consentServiceUrl/api/v1/consents/$consentId?partyId=$partyId", partyId.toString(), body)
+        // granteeId is REQUIRED here, not optional: ConsentResource.revoke binds OPA's
+        // resource.id to it (`#granteeId`, issue #2911 — binding it to the consent UUID instead
+        // made every M2M revoke unconditionally 403). Omitting it left resource.id null, which
+        // service-consent-m2m-credit's `input.resource.id == "openbank"` comparison can never
+        // satisfy — so turning a credit consent switch OFF 403'd exactly like turning it on did
+        // before this fix, just one call further into the flow.
+        upstream.delete(
+            "$consentServiceUrl/api/v1/consents/$consentId?partyId=$partyId&granteeId=$BANK_GRANTEE",
+            partyId.toString(),
+            body,
+        )
     }
 
     private fun projectConsent(c: com.fasterxml.jackson.databind.JsonNode): ObjectNode {
@@ -4864,6 +4970,60 @@ class CustomerEdgeResource(
         }
     }
 
+    /**
+     * Customer-safe projection of one catalogue product, or null when it is not discoverable.
+     *
+     * Carries only what a customer needs to choose: identity, copy, currency, limits, and the
+     * price IN THE SHAPE THE CATALOGUE PRICES IT — `annualRate` for a term deposit (which has one
+     * fixed rate for one fixed term), `interestTiers` for savings (which prices by balance), and
+     * neither for a current account. Internal fields — version history, eligibility segments,
+     * draft state, operator notes — never cross.
+     */
+    private fun productOffer(product: JsonNode, today: LocalDate): ObjectNode? {
+        if (!isDiscoverableProduct(product) || !isCurrentlyValid(product, today)) return null
+        val type = product.path("type").asText()
+        return objectMapper.createObjectNode().apply {
+            put("id", product.path("id").asText())
+            put("code", product.path("code").asText())
+            put("name", product.path("name").asText())
+            put("type", type)
+            put("currency", product.path("currency").asText())
+            product.get("shortDescription")?.takeIf { !it.isNull }?.let { set<JsonNode>("shortDescription", it) }
+            product.get("description")?.takeIf { !it.isNull }?.let { set<JsonNode>("description", it) }
+            product.get("minBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("minBalance", it) }
+            product.get("maxBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("maxBalance", it) }
+            // The monthly account fee, when the catalogue states one. Zero IS a price here — "no
+            // fee, forever" is the current account's whole pitch — so unlike a rate it is copied
+            // even when it is 0.
+            product.get("fee")?.takeIf { !it.isNull }?.let { set<JsonNode>("fee", it) }
+            // Price, in the catalogue's own shape. Never flattened, never interpolated.
+            product.get("termDepositConfig")?.takeIf { it.isObject }?.let { configuration ->
+                put("annualRate", configuration.path("interestRateAnnual").asDouble())
+                set<JsonNode>("term", configuration)
+            }
+            product.get("savingsConfig")?.takeIf { it.isObject }?.let { configuration ->
+                set<JsonNode>("savings", configuration)
+            }
+            set<JsonNode>("termsAndConditions", product.path("termsAndConditions"))
+        }
+    }
+
+    /**
+     * Discoverability, deliberately identical to [isDiscoverableTermDeposit] apart from the type
+     * gate: ACTIVE, public, identifiable, priced in a currency. A product failing any of these is
+     * invisible rather than greyed out — an offer the customer cannot take is not an offer.
+     */
+    private fun isDiscoverableProduct(product: JsonNode): Boolean =
+        product.path("type").asText() in CUSTOMER_PRODUCT_TYPES &&
+            product.path("status").asText() == "ACTIVE" &&
+            product.path("isPublic").asBoolean(false) &&
+            product.path("id").asText().isNotBlank() &&
+            product.path("currency").asText().isNotBlank()
+
+    private fun productCatalogueUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+        .entity(mapOf("error" to "Product catalogue unavailable"))
+        .build()
+
     private fun isDiscoverableTermDeposit(product: JsonNode): Boolean =
         product.path("type").asText() == "TERM_DEPOSIT" &&
             product.path("status").asText() == "ACTIVE" &&
@@ -4901,6 +5061,17 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+
+        /**
+         * The product types a customer may discover and open from the app.
+         *
+         * An allow-list, not a deny-list: MORTGAGE, CREDIT_CARD, OVERDRAFT and INVESTMENT exist in
+         * the catalogue and are deliberately absent — each needs its own suitability and disclosure
+         * journey, and surfacing one here would let the app offer a regulated product with no path
+         * to take it. A new type becomes customer-visible by being added here, on purpose.
+         */
+        internal val CUSTOMER_PRODUCT_TYPES = setOf("CURRENT", "SAVINGS", "TERM_DEPOSIT")
+
         /**
          * The ADR-0269 credit consents, as the app's field name → the consent-service scope.
          *

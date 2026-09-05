@@ -8,18 +8,12 @@ import com.openbank.balance.application.port.`in`.AccountBookedChange
 import com.openbank.balance.application.port.`in`.BalanceUseCase
 import com.openbank.balance.application.port.`in`.LedgerProjectionUseCase
 import com.openbank.balance.application.port.`in`.ReleaseHoldCommand
-import com.openbank.balance.application.port.out.BalanceEventPublisher
 import com.openbank.balance.application.port.out.HoldRepository
 import com.openbank.balance.application.port.out.LedgerProjectionPort
-import com.openbank.balance.domain.model.BalanceEvent
 import com.openbank.balance.domain.model.BalanceEventActors
-import com.openbank.balance.domain.model.BalanceEventType
-import com.openbank.libs.domain.event.EventActor
 import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
-import java.time.Clock
-import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -36,14 +30,15 @@ class LedgerProjectionService(
     private val projectionPort: LedgerProjectionPort,
     private val holdRepo: HoldRepository,
     private val balanceUseCase: BalanceUseCase,
-    private val eventPublisher: BalanceEventPublisher,
     private val metrics: DomainMetrics,
-    private val clock: Clock,
 ) : LedgerProjectionUseCase {
 
     private val log = Logger.getLogger(LedgerProjectionService::class.java)
 
     override suspend fun apply(change: AccountBookedChange) {
+        // The BALANCE_UPDATED event is written by the port impl in the SAME transaction as the
+        // dedup marker and the balance mutation (#8510), only on first application — a duplicate
+        // delivery applies nothing and announces nothing.
         val applied = projectionPort.applyBookedDelta(
             journalEntryId = change.journalEntryId,
             accountId = change.accountId,
@@ -51,6 +46,7 @@ class LedgerProjectionService(
             delta = change.delta,
             transactionId = change.transactionId,
             entryDate = change.entryDate,
+            actorId = BalanceEventActors.LEDGER_PROJECTION,
         )
 
         if (applied == null) {
@@ -70,22 +66,6 @@ class LedgerProjectionService(
         if (applied != null) {
             // ADR-0077 Tier C: count each revaluation (booked delta from ledger projection).
             metrics.balanceRevaluated(change.currency)
-            eventPublisher.publish(
-                BalanceEvent(
-                    eventId = UUID.randomUUID(),
-                    eventType = BalanceEventType.BALANCE_UPDATED,
-                    accountId = change.accountId,
-                    currency = change.currency,
-                    amount = change.delta,
-                    bookedAmount = applied.bookedAmount,
-                    availableAmount = applied.availableAmount,
-                    reservedAmount = applied.reservedAmount,
-                    occurredAt = OffsetDateTime.now(clock),
-                    actorId = BalanceEventActors.LEDGER_PROJECTION,
-                    actorType = EventActor.TYPE_SYSTEM,
-                    sourceService = "balance-service",
-                ),
-            )
         }
     }
 

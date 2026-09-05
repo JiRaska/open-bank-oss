@@ -1,0 +1,94 @@
+# -----------------------------------------------------------------------------
+# Security regression test — a security issue is never closed without a test (ADR-0279 WS1 #5).
+#
+# THE RULE. A PR that closes an issue labeled `security` must touch a test surface
+# (`src/test`, `e2e`, or `*.spec.*`/`*.test.*` anywhere). The defect history in CLAUDE.md
+# is the justification: the recurring security classes (nullable JAX-RS params, silent
+# no-op success, scheduler context loss) each shipped more than once precisely because
+# the fix PR changed only the production code, leaving the next service to rediscover the
+# same hole. A fix without a test is a fix that regresses on schedule.
+#
+# SCOPE, STATED PLAINLY. Only CLOSING keywords (Closes/Fixes/Resolves) bind the rule —
+# `Refs #` is a mention, not a resolution, and demanding a test for a mention would make
+# the gate cry wolf. Only the `security` label is in scope: review-gate labels like
+# `security-review-required` are PR-applied checklist state, not issue types.
+#
+# Lives in its own workflow (not ci.yml) so the `edited` event re-evaluates when the PR
+# body is fixed — same shape as issue-hygiene.yml, whose header documents why.
+#
+# Escape hatch: a security issue that genuinely cannot carry a test (a policy-only fix)
+# is closed by a PR whose body states `no-test-justification: <reason>` on its own line.
+# The justification is text in a permanent record, which is the point — the gate forces
+# the decision to be conscious, not impossible.
+# -----------------------------------------------------------------------------
+name: Security regression test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: security-regression-test-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  security-regression-test:
+    name: security-regression-test
+    # actions/github-script only — no self-hosted-pool dependency.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: A PR closing a `security` issue must touch a test surface
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || "";
+
+            // Closing keywords only — Refs is a mention, not a resolution.
+            const closing = [...body.matchAll(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)]
+              .map(m => Number(m[1]));
+            if (closing.length === 0) {
+              core.info("No closing issue references — rule does not apply.");
+              return;
+            }
+
+            if (/^no-test-justification:\s*\S+/im.test(body)) {
+              core.info("no-test-justification present — conscious escape hatch, passing.");
+              return;
+            }
+
+            const securityIssues = [];
+            for (const n of closing) {
+              const { data: issue } = await github.rest.issues.get({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: n,
+              });
+              if (issue.labels.some(l => (l.name || l) === "security")) securityIssues.push(n);
+            }
+            if (securityIssues.length === 0) {
+              core.info(`Closed issues ${closing.join(", ")} — none labeled 'security'.`);
+              return;
+            }
+
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number,
+              per_page: 100,
+            });
+            const TEST_SURFACE = /src\/test\/|\/e2e\/|\.(spec|test)\.[tj]sx?$/;
+            const touchedTests = files.map(f => f.filename).filter(f => TEST_SURFACE.test(f));
+            if (touchedTests.length > 0) {
+              core.info(`Test surface touched (${touchedTests.length} file(s)); security issue(s) ${securityIssues.join(", ")} close with a regression test.`);
+              return;
+            }
+
+            core.setFailed(
+              `This PR closes security issue(s) ${securityIssues.map(n => "#" + n).join(", ")} but touches no test surface ` +
+              `(src/test/, e2e/, *.spec.*, *.test.*). Add the regression test that would have caught the defect — ` +
+              `or, only if a test genuinely cannot express this fix, state \`no-test-justification: <reason>\` ` +
+              `on its own line in the PR body (ADR-0279, #8590).`
+            );
