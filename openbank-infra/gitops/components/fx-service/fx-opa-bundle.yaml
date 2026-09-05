@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "da6272459463038e"
+    openbank.tech/policy-checksum: "986c378311e422cf"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1269,6 +1269,18 @@ data:
                                                 # force-execute endpoint to maker-checker gate; add a verb here if one is
                                                 # ever added. Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
       - openbank-psd2-service                  # issue #2188 sibling sweep: PaymentInitiationService (PIS) calls
+                                                # transactionClient.initiatePayment for SCT/SCT_INST/domestic/SIPO — it
+                                                # initiates real payments like sdd/standing-order do, consent- and
+                                                # SCA-gated upstream (ADR-0090, ADR-0126). Already treated as money-path
+                                                # by the OPA-bundle converge work (#3422); this makes the list agree.
+                                                # Threat model: docs/threat-models/openbank-psd2-service.md.
+                                                # four-eyes assessed: initiation is TPP-driven under an eIDAS consent with
+                                                # SCA on the debtor — a maker/checker pair does not exist for a
+                                                # customer-consented machine flow; the bank-side actions that WOULD deserve
+                                                # a gate (TPP revocation, consent termination by an operator) are not
+                                                # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
+                                                # joins the #3679 cohort.
+      - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
