@@ -19,20 +19,20 @@ viewer := {"type": "HUMAN", "roles": ["ROLE_VIEWER"], "id": "viewer@openbank.loc
 anonymous := {"type": "ANONYMOUS", "roles": [], "id": ""}
 
 test_operator_may_authorize if {
-	"acquirer-card-processing-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.authorize"}
+	"operator-cardprocessing-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.authorize"}
 }
 
 test_operator_may_clear_and_reverse if {
-	"acquirer-card-processing-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.clear"}
-	"acquirer-card-processing-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.reverse"}
+	"operator-cardprocessing-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.clear"}
+	"operator-cardprocessing-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.reverse"}
 }
 
 test_viewer_may_not_authorize if {
-	not "acquirer-card-processing-write" in rest.allowed_reasons with input as {"principal": viewer, "action": "cardprocessing.authorize"}
+	not "operator-cardprocessing-write" in rest.allowed_reasons with input as {"principal": viewer, "action": "cardprocessing.authorize"}
 }
 
 test_anonymous_may_not_authorize if {
-	not "acquirer-card-processing-write" in rest.allowed_reasons with input as {"principal": anonymous, "action": "cardprocessing.authorize"}
+	not "operator-cardprocessing-write" in rest.allowed_reasons with input as {"principal": anonymous, "action": "cardprocessing.authorize"}
 }
 
 test_viewer_may_read if {

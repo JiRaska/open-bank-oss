@@ -60,7 +60,7 @@ class TransactionLedgerPostingAdapterTest {
     )
 
     @Test
-    fun `a two-decimal currency is posted with two decimals`() = runBlocking {
+    fun `a two-decimal currency is posted with two decimals`(): Unit = runBlocking {
         val sent = slot<InitiateTransactionRequest>()
         coEvery { client.initiate(capture(sent)) } returns TransactionResponse(UUID.randomUUID(), "COMPLETED")
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
@@ -78,7 +78,7 @@ class TransactionLedgerPostingAdapterTest {
     }
 
     @Test
-    fun `a zero-decimal currency is posted whole, not divided by a hundred`() = runBlocking {
+    fun `a zero-decimal currency is posted whole, not divided by a hundred`(): Unit = runBlocking {
         val sent = slot<InitiateTransactionRequest>()
         coEvery { client.initiate(capture(sent)) } returns TransactionResponse(UUID.randomUUID(), "COMPLETED")
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
@@ -93,7 +93,7 @@ class TransactionLedgerPostingAdapterTest {
     }
 
     @Test
-    fun `a disabled adapter reports SKIPPED_DISABLED and calls nothing`() = runBlocking {
+    fun `a disabled adapter reports SKIPPED_DISABLED and calls nothing`(): Unit = runBlocking {
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = false)
 
         val result = adapter.postClearedSpend(authorization("CZK"), 1_000, "clr-3")
@@ -107,7 +107,7 @@ class TransactionLedgerPostingAdapterTest {
     }
 
     @Test
-    fun `a failing transaction-service is FAILED, and the exception does not escape`() = runBlocking {
+    fun `a failing transaction-service is FAILED, and the exception does not escape`(): Unit = runBlocking {
         coEvery { client.initiate(any()) } throws IllegalStateException("connection refused")
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
 

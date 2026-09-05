@@ -11,16 +11,25 @@ import jakarta.enterprise.inject.Produces
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Duration
 
+/**
+ * CONSTRUCTOR injection, not `@ConfigProperty` fields with Kotlin initialisers.
+ *
+ * A field written `@ConfigProperty(...) var x: Long = 500` looks like a default and is a defect: the
+ * initialiser generates a synthetic constructor, Arc builds the bean through it, and the annotation
+ * is never applied — so the field silently keeps the literal whatever the environment says
+ * (`check-configproperty-kotlin-defaults.py`). A primitive cannot be `lateinit`, so the field form
+ * has no correct spelling here at all; a constructor parameter does, and the annotation's own
+ * `defaultValue` is then the only default in play.
+ */
 @ApplicationScoped
-class AuthzProducer {
+class AuthzProducer(
     @ConfigProperty(name = "opa.url", defaultValue = OpaSidecarPolicyDecisionPoint.DEFAULT_BASE_URL)
-    lateinit var opaUrl: String
-
+    private val opaUrl: String,
     @ConfigProperty(name = "opa.path", defaultValue = OpaSidecarPolicyDecisionPoint.DEFAULT_QUERY_PATH)
-    lateinit var opaPath: String
-
+    private val opaPath: String,
     @ConfigProperty(name = "opa.timeout-ms", defaultValue = "500")
-    var opaTimeoutMs: Long = DEFAULT_OPA_TIMEOUT_MS
+    private val opaTimeoutMs: Long,
+) {
 
     @Produces
     @ApplicationScoped
@@ -29,8 +38,4 @@ class AuthzProducer {
         queryPath = opaPath,
         timeout = Duration.ofMillis(opaTimeoutMs),
     )
-
-    private companion object {
-        const val DEFAULT_OPA_TIMEOUT_MS = 500L
-    }
 }

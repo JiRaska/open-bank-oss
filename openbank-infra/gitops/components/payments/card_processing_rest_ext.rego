@@ -37,7 +37,15 @@ import rego.v1
 # The acquirer-facing money path. One rule for the three write actions because they are one caller
 # doing one job — splitting them would suggest they can be granted separately, and no deployment
 # wants an adapter that may authorise but not clear.
-allowed_reasons contains "acquirer-card-processing-write" if {
+#
+# NAMED `operator-<domain>-write`, not `acquirer-...`, and the name is load-bearing rather than
+# cosmetic: `check-operator-write-naming.py` collects rules matching that shape as candidates for
+# `rules.yaml: shared_m2m_write_prohibition.reasons` (GHSA-58jq-9hq3-66jr). A differently-named
+# rule granting on ROLE_OPERATOR is invisible to that sweep, so the shared openbank-services
+# service-account — which carries ROLE_OPERATOR — would reach these actions and nothing would ever
+# propose closing it. The accurate description of the caller is in this comment; the name is what
+# the sweep can see.
+allowed_reasons contains "operator-cardprocessing-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles

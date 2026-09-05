@@ -98,7 +98,7 @@ class CardProcessingServiceTest {
     }
 
     @Test
-    fun `an approved authorisation is held, published and scored in shadow`() = runBlocking {
+    fun `an approved authorisation is held, published and scored in shadow`(): Unit = runBlocking {
         stubOwnership()
         coEvery { repository.findByIdempotencyKey(any()) } returns null
         coEvery { repository.countSpend(cardId, any(), any()) } returns CountedSpend(0, 0, 0)
@@ -128,7 +128,7 @@ class CardProcessingServiceTest {
     }
 
     @Test
-    fun `the spend figures handed to the issuer are the ones this service measured`() = runBlocking {
+    fun `the spend figures handed to the issuer are the ones this service measured`(): Unit = runBlocking {
         stubOwnership()
         coEvery { repository.findByIdempotencyKey(any()) } returns null
         val measured = CountedSpend(
@@ -152,7 +152,7 @@ class CardProcessingServiceTest {
     }
 
     @Test
-    fun `a decline is recorded with the issuer's own reason, not a re-worded one`() = runBlocking {
+    fun `a decline is recorded with the issuer's own reason, not a re-worded one`(): Unit = runBlocking {
         stubOwnership()
         coEvery { repository.findByIdempotencyKey(any()) } returns null
         coEvery { repository.countSpend(cardId, any(), any()) } returns CountedSpend(0, 0, 0)
@@ -172,7 +172,7 @@ class CardProcessingServiceTest {
     }
 
     @Test
-    fun `a repeated idempotency key returns the first authorisation and takes no second hold`() = runBlocking {
+    fun `a repeated idempotency key returns the first authorisation and takes no second hold`(): Unit = runBlocking {
         val existing = mockk<CardAuthorization>()
         coEvery { repository.findByIdempotencyKey("idem-1") } returns existing
 
@@ -185,7 +185,7 @@ class CardProcessingServiceTest {
     }
 
     @Test
-    fun `an unknown card is a 404-shaped failure, not an approval`() = runBlocking {
+    fun `an unknown card is a 404-shaped failure, not an approval`(): Unit = runBlocking {
         coEvery { repository.findByIdempotencyKey(any()) } returns null
         coEvery { cards.lookup(cardId) } returns null
 
@@ -195,7 +195,7 @@ class CardProcessingServiceTest {
     }
 
     @Test
-    fun `a failed ledger posting is reported as FAILED and never as a success`() = runBlocking {
+    fun `a failed ledger posting is reported as FAILED and never as a success`(): Unit = runBlocking {
         val approved = authorization(AuthorizationStatus.APPROVED)
         coEvery { repository.findById(approved.id) } returns approved
         coEvery { repository.save(any(), any(), any()) } answers { firstArg() }
@@ -214,7 +214,7 @@ class CardProcessingServiceTest {
     }
 
     @Test
-    fun `a disabled ledger adapter is counted as SKIPPED_DISABLED, not as POSTED`() = runBlocking {
+    fun `a disabled ledger adapter is counted as SKIPPED_DISABLED, not as POSTED`(): Unit = runBlocking {
         val approved = authorization(AuthorizationStatus.APPROVED)
         coEvery { repository.findById(approved.id) } returns approved
         coEvery { repository.save(any(), any(), any()) } answers { firstArg() }
@@ -232,7 +232,7 @@ class CardProcessingServiceTest {
     }
 
     @Test
-    fun `clearing an unknown authorisation refuses instead of throwing`() = runBlocking {
+    fun `clearing an unknown authorisation refuses instead of throwing`(): Unit = runBlocking {
         val id = UUID.randomUUID()
         coEvery { repository.findById(id) } returns null
 
@@ -244,7 +244,7 @@ class CardProcessingServiceTest {
     }
 
     @Test
-    fun `the expiry sweep releases only the holds it could release`() = runBlocking {
+    fun `the expiry sweep releases only the holds it could release`(): Unit = runBlocking {
         val due = authorization(AuthorizationStatus.APPROVED, expiresAt = now.minusSeconds(60))
         val notDue = authorization(AuthorizationStatus.APPROVED, expiresAt = now.plusSeconds(60))
         coEvery { repository.findExpiredHolds(now, 100) } returns listOf(due, notDue)
@@ -259,7 +259,7 @@ class CardProcessingServiceTest {
     }
 
     @Test
-    fun `a reversal publishes the amount that was actually released`() = runBlocking {
+    fun `a reversal publishes the amount that was actually released`(): Unit = runBlocking {
         val approved = authorization(AuthorizationStatus.APPROVED)
         coEvery { repository.findById(approved.id) } returns approved
         val event = slot<OutboxMessage>()

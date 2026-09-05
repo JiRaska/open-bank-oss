@@ -69,7 +69,6 @@ CREATE TABLE card_outbox (
     status         VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
     attempt_count  INT          NOT NULL DEFAULT 0,
     last_error     TEXT,
-    synthetic      BOOLEAN      NOT NULL DEFAULT FALSE,
     created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
     sent_at        TIMESTAMPTZ,
@@ -78,3 +77,18 @@ CREATE TABLE card_outbox (
 
 CREATE INDEX ix_card_outbox_claim ON card_outbox (status, created_at);
 CREATE INDEX ix_card_outbox_aggregate ON card_outbox (aggregate_id);
+
+-- The id sequence Hibernate actually uses, and it is NOT the one BIGSERIAL creates.
+--
+-- PanacheOutboxEntity extends PanacheEntity, whose @Id is a SEQUENCE generator named
+-- `<table>_SEQ`, so every insert issues `select nextval('card_outbox_SEQ')` — a sequence
+-- BIGSERIAL never makes (it creates `card_outbox_id_seq` and wires it as a column DEFAULT the
+-- ORM does not use). Without this line every outbox write fails with
+-- `relation "card_outbox_seq" does not exist (42P01)`, which surfaces as a 500 on the endpoint
+-- that writes it and cannot be seen by any test that mocks the repository. Same shape and same
+-- fix as card-issuance's V3__hibernate_sequences.sql.
+--
+-- INCREMENT BY 50 matches Hibernate's default pooled allocation. The gaps that leaves in the id
+-- column are the fleet's cheapest forensic signal: a burned block is an insert that was ATTEMPTED,
+-- which separates "never tried" from "tried and lost" without any logging.
+CREATE SEQUENCE IF NOT EXISTS card_outbox_seq INCREMENT BY 50;

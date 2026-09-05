@@ -8,6 +8,7 @@ import com.openbank.cardprocessing.application.port.out.FraudScore
 import com.openbank.cardprocessing.application.port.out.FraudScoringOutcome
 import com.openbank.cardprocessing.application.port.out.FraudScoringPort
 import com.openbank.cardprocessing.domain.model.CardAuthorization
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Consumes
@@ -16,6 +17,7 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
@@ -25,6 +27,7 @@ import java.util.UUID
 @Path("/api/v1/fraud")
 @RegisterRestClient(configKey = "fraud-api")
 @OidcClientFilter
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface FraudServiceClient {
     @POST

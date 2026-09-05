@@ -4,6 +4,7 @@
 
 package com.openbank.cardprocessing.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
@@ -12,12 +13,20 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import java.util.UUID
 
 /**
  * The two things card-processing asks card-issuance for: who owns the card, and may this
  * authorisation go through.
+ *
+ * `SyntheticTaintClientFilter` is registered because this hop is an INTERNAL service, so the
+ * bank-owned synthetic marker must travel with the call (ADR-0252). Without it a synthetic
+ * authorisation would reach card-issuance as ordinary traffic and its movements would land in the
+ * regulatory aggregates as real ones — the whole failure the taint exists to prevent.
+ * `SyntheticTaintExternalBoundary` is the other honest answer and is wrong here: it declares a hop
+ * that leaves the platform.
  *
  * The paths are LITERAL here and literal again in the consumer pact's expectation. Deriving the
  * expectation from this annotation is DRY and vacuous — both sides then move together and the test
@@ -27,6 +36,7 @@ import java.util.UUID
 @Path("/api/v1/cards")
 @RegisterRestClient(configKey = "card-issuance-api")
 @OidcClientFilter
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface CardIssuanceClient {
 

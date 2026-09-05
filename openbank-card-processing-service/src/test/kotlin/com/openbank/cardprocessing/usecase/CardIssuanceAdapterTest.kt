@@ -37,7 +37,7 @@ class CardIssuanceAdapterTest {
     private fun adapter() = CardIssuanceAdapter(client, defaultCurrency = "CZK")
 
     @Test
-    fun `a decision is carried through with the issuer's own decline reason`() = runBlocking {
+    fun `a decision is carried through with the issuer's own decline reason`(): Unit = runBlocking {
         val sent = slot<IssuerAuthorizationRequest>()
         coEvery { client.authorize(cardId, capture(sent)) } returns
             IssuerAuthorizationResponse(approved = false, declineReason = "CATEGORY_BLOCKED", category = "GAMBLING")
@@ -60,7 +60,7 @@ class CardIssuanceAdapterTest {
     }
 
     @Test
-    fun `an unreachable issuer declines, under its own reason`() = runBlocking {
+    fun `an unreachable issuer declines, under its own reason`(): Unit = runBlocking {
         coEvery { client.authorize(any(), any()) } throws
             WebApplicationException(Response.status(SERVICE_UNAVAILABLE).build())
 
@@ -79,7 +79,7 @@ class CardIssuanceAdapterTest {
     }
 
     @Test
-    fun `an unknown card is null rather than an error`() = runBlocking {
+    fun `an unknown card is null rather than an error`(): Unit = runBlocking {
         coEvery { client.getCard(cardId) } throws WebApplicationException(Response.status(NOT_FOUND).build())
 
         assertThat(adapter().lookup(cardId)).isNull()
@@ -87,7 +87,7 @@ class CardIssuanceAdapterTest {
     }
 
     @Test
-    fun `a card without a published currency falls back to the configured issuing currency`() = runBlocking {
+    fun `a card without a published currency falls back to the configured issuing currency`(): Unit = runBlocking {
         val accountId = UUID.randomUUID()
         val partyId = UUID.randomUUID()
         coEvery { client.getCard(cardId) } returns CardSummaryResponse(cardId, accountId, partyId, null, "ACTIVE")

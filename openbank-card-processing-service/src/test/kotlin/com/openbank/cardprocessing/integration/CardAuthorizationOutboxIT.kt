@@ -17,7 +17,6 @@ import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
-import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import org.assertj.core.api.Assertions.assertThat
@@ -75,8 +74,13 @@ class CardAuthorizationOutboxIT {
      * classloader from the test class, so a companion object initialises twice and a randomised
      * value would hand the container one value and the assertion another.
      */
+    // `@Alternative` WITHOUT `@Priority`, and the omission is the point: `@Alternative` +
+    // `@Priority` enables a bean GLOBALLY, for every test in the module, not just the profile that
+    // wanted it. That is how this stub replaced the real use case in the sibling IT and turned
+    // every authorisation into a 422 — a test double leaking across a profile boundary, which
+    // reads exactly like a production defect. The profile's `getEnabledAlternatives()` is the
+    // scoped switch.
     @Alternative
-    @Priority(1)
     @ApplicationScoped
     class StubIssuer :
         CardLookupPort,
