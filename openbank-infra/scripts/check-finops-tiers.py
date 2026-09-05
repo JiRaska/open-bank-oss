@@ -111,8 +111,17 @@ def service_dirs() -> set[str]:
     }
 
 
-def evaluate() -> tuple[list[str], list[str]]:
-    """Return (errors, info)."""
+def count_subjects(declared, money_path_services) -> int:
+    """How many services this check actually reasons about.
+
+    Union, not sum: a service that is both explicitly declared and money-path is one subject.
+    Extracted so the self-test drives the SHIPPED counter rather than a copy of it.
+    """
+    return len(set(declared) | set(money_path_services))
+
+
+def evaluate() -> tuple[list[str], list[str], int]:
+    """Return (errors, info, subject_count)."""
     text = _read_rules()
     money_path = parse_money_path_services(text)
     tiers, declared, enforced = parse_finops_tiers(text)
@@ -142,7 +151,7 @@ def evaluate() -> tuple[list[str], list[str]]:
 
     # money-path inherits T0 via the baseline; union (not sum) so a service that is
     # both explicitly declared and money-path is counted once.
-    classified = len(set(declared) | (money_path & services))
+    classified = count_subjects(declared, money_path & services)
     total = len(services)
     info.append(
         f"tier coverage: {classified}/{total} services classified "
@@ -151,15 +160,58 @@ def evaluate() -> tuple[list[str], list[str]]:
     )
     info.append(f"declared: {declared or '{}'}")
     info.append(f"gate enforced: {enforced}")
-    return errors, info
+    return errors, info, classified
+
+
+def self_test() -> int:
+    """Falsify the SUBJECT COUNT, which is the only thing this gate can go red on.
+
+    The checker is advisory by rules.yaml (`finops_tiers.enforced: advisory`) and returns 0 for
+    every finding, so registering it in gates.yaml buys exactly one thing: run-gates' subject
+    floor, which fails when the declared set collapses. That makes the count — not the findings
+    — the load-bearing output, and a counter that cannot be wrong is a floor that cannot fire.
+
+    Measured 2026-09-05, which is why this exists: 3 of 68 services carry an explicit tier, and
+    the script exits 0 whether that number is 3 or 0. Nothing anywhere would have noticed the
+    difference.
+
+    So: drive count_subjects() over fixtures with a KNOWN answer, including the empty one.
+    """
+    cases = [
+        ("three declared, none money-path", {"a": "T2", "b": "T1", "c": "T0"}, set(), 3),
+        ("declared and money-path union, not sum", {"a": "T0", "b": "T1"}, {"a", "z"}, 3),
+        ("nothing declared, money-path only", {}, {"x", "y"}, 2),
+        ("the collapse case: nothing at all", {}, set(), 0),
+    ]
+    bad = []
+    for label, declared, money_path, want in cases:
+        got = count_subjects(declared, money_path)
+        mark = "ok  " if got == want else "FAIL"
+        print(f"  {mark} {label}: want {want}, got {got}")
+        if got != want:
+            bad.append(label)
+    # A counter that ignores its input would pass every case above by returning a constant, so
+    # the cases deliberately span 0..3 and disagree with each other.
+    if len({c[3] for c in cases}) < 3:
+        bad.append("the fixtures no longer span enough distinct counts to catch a constant")
+    if bad:
+        print(f"\n::error::check-finops-tiers self-test: {', '.join(bad)}")
+        return 1
+    print("\nself-test ok: the subject count is falsifiable (4 cases, spanning 0..3)")
+    return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--report", action="store_true", help="markdown report for the weekly audit")
+    ap.add_argument("--self-test", action="store_true", dest="self_test",
+                    help="prove the subject count can be wrong (see self_test)")
     args = ap.parse_args()
 
-    errors, info = evaluate()
+    if args.self_test:
+        return self_test()
+
+    errors, info, subject_count = evaluate()
 
     if args.report:
         finding = 1 if errors else 0
@@ -178,6 +230,11 @@ def main() -> int:
     print("FinOps workload-tier validator (ADR-0057, declared side) — advisory\n")
     for line in info:
         print(f"  {line}")
+    # The load-bearing output. This checker returns 0 for every finding (advisory per
+    # rules.yaml), so run-gates' `min_subjects` floor is the only way it can go red — and the
+    # floor can only read this line. Measured 2026-09-05: 26 of 68 services classified, of
+    # which just 3 explicitly declared; the script exited 0 and would have exited 0 at zero.
+    print(f"SUBJECTS={subject_count}  # services with a tier (declared + money-path baseline)")
     if errors:
         print("\nFindings (advisory — not blocking until the classifier flips the gate to block):")
         for e in errors:

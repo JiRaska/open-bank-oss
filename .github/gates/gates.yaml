@@ -130,6 +130,24 @@ gates:
     run: |
       python3 .github/scripts/check-gate-observability-declarations.py --enforce
 
+  - id: finops-tier-drift
+    name: "FinOps workload tiers: the declared set has not collapsed (ADR-0057, enforced floor)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20
+    min_subjects: 15
+    review_after: "2027-03-05"
+    rationale: "rules.yaml names this gate but it was in no manifest, so it ran only from finops-lifecycle.yml, where the script returns 0 for every finding by design (advisory until finops_tiers.enforced flips). Measured 2026-09-05: 26 of 68 services carry a tier, just 3 explicitly declared — and the script exits 0 whether that is 3 or 0. Registering it buys exactly one thing, the subject floor: tier CORRECTNESS stays advisory, while the check silently losing its subjects becomes a hard failure."
+    selftest: python3 openbank-infra/scripts/check-finops-tiers.py --self-test
+    selftest_expect: pass
+    run: |
+      # `mode: enforced` here is about the FLOOR, not about findings. The script honours
+      # rules.yaml's `finops_tiers.enforced: advisory` and returns 0 for every finding, so the
+      # only red path is run-gates failing the SUBJECTS= line below min_subjects. That is the
+      # deliberate split: we do not yet enforce that tiers are right, we do enforce that the
+      # checker can still see them.
+      python3 openbank-infra/scripts/check-finops-tiers.py
+
   # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an
