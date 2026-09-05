@@ -1,0 +1,420 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# API-contract version (ADR-0048), independent of version.txt. major == the URL /api/v{N}.
+openapi: 3.0.3
+info:
+  title: OpenBank Card Processing API
+  version: 1.0.0
+  description: |
+    Card authorisation, holds, clearing and release (ADR-0283 phase 1).
+
+    This service decides nothing about whether a card may be used — that is card-issuance's
+    `POST /api/v1/cards/{id}/authorizations` (ADR-0194). What it owns is the money path around that
+    decision: the authoritative spend counters the decision is evaluated against, the hold an
+    approval creates, the clearing presentments against it, and the posting of cleared spend to the
+    books on the `CARD` rail (ADR-0103).
+
+    No PAN or card credential is stored or accepted here. The card is referenced by its
+    card-issuance id, which is what keeps this service outside the cardholder-data environment.
+servers:
+  - url: http://localhost:8157
+    description: Local
+tags:
+  - name: Authorizations
+    description: Authorise, clear, reverse and read card authorisations
+  - name: Sandbox
+    description: The sandbox acquirer — off unless explicitly enabled
+
+paths:
+  /api/v1/card-authorizations:
+    post:
+      tags: [Authorizations]
+      summary: Authorise a card transaction
+      description: |
+        Decides, records and holds. A DECLINE is also a 201: it is a created record of a decision,
+        not a failed request, and answering 4xx would make "the card was refused" indistinguishable
+        from "the request was malformed" for every acquirer and every dashboard.
+      operationId: authorizeCard
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Retry safety. The same key never takes a second hold.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizationRequest'
+      responses:
+        '201':
+          description: The authorisation, approved or declined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Authorization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The card is not known to card-issuance
+
+  /api/v1/card-authorizations/{id}:
+    get:
+      tags: [Authorizations]
+      summary: One authorisation, with its hold and cleared amounts
+      operationId: getCardAuthorization
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationId'
+      responses:
+        '200':
+          description: The authorisation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Authorization'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such authorisation
+
+  /api/v1/card-authorizations/{id}/clearing:
+    post:
+      tags: [Authorizations]
+      summary: Apply a clearing presentment
+      description: |
+        Applies the presented amount and posts it to the books. Partial presentments are supported;
+        cumulative clearing may never exceed the authorised amount.
+      operationId: clearCardAuthorization
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresentmentRequest'
+      responses:
+        '200':
+          description: The authorisation after the presentment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Authorization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Refused'
+
+  /api/v1/card-authorizations/{id}/reversal:
+    post:
+      tags: [Authorizations]
+      summary: Release the remaining hold
+      description: |
+        A partially cleared authorisation may still be reversed — what already cleared stays
+        cleared, and only the unpresented remainder is released.
+      operationId: reverseCardAuthorization
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationId'
+      responses:
+        '200':
+          description: The authorisation after the release
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Authorization'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Refused'
+
+  /api/v1/card-authorizations/card/{cardId}:
+    get:
+      tags: [Authorizations]
+      summary: Authorisations for one card, newest first
+      operationId: listCardAuthorizations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: The authorisations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/sandbox/acquirer/purchase:
+    post:
+      tags: [Sandbox]
+      summary: Present a purchase through the sandbox acquirer
+      description: |
+        Off unless `openbank.card-processing.sandbox-acquirer-enabled` is true, and answers 404 when
+        off — a disabled simulator is indistinguishable from one that was never deployed.
+      operationId: sandboxPurchase
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SandboxPurchaseRequest'
+      responses:
+        '200':
+          description: The outcome of the simulated purchase
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxPurchaseResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The sandbox acquirer is not enabled
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    AuthorizationId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: The request is malformed
+    Forbidden:
+      description: The caller may not perform this action
+    Refused:
+      description: The authorisation is not in a state that accepts this presentment
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Refusal'
+
+  schemas:
+    PresentmentChannel:
+      type: string
+      enum: [CONTACTLESS, ONLINE, ATM, CHIP_AND_PIN]
+
+    AuthorizationStatus:
+      type: string
+      enum: [APPROVED, DECLINED, PARTIALLY_CLEARED, CLEARED, REVERSED, EXPIRED]
+
+    AuthorizationRequest:
+      type: object
+      required: [cardId, amountMinorUnits, currencyCode, channel]
+      properties:
+        cardId:
+          type: string
+          format: uuid
+        amountMinorUnits:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Minor units, as the scheme message carries it. Never a decimal.
+        currencyCode:
+          type: string
+          minLength: 3
+          maxLength: 3
+        channel:
+          $ref: '#/components/schemas/PresentmentChannel'
+        mcc:
+          type: string
+          nullable: true
+        merchantName:
+          type: string
+          nullable: true
+        merchantCountry:
+          type: string
+          nullable: true
+          description: ISO-3166 alpha-2. Absent is treated as domestic by the issuer policy.
+        networkReference:
+          type: string
+          nullable: true
+          description: The acquirer's own reference, so a reversal can be matched without our id.
+
+    PresentmentRequest:
+      type: object
+      required: [amountMinorUnits, currencyCode]
+      properties:
+        amountMinorUnits:
+          type: integer
+          format: int64
+          minimum: 1
+        currencyCode:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    Authorization:
+      type: object
+      required:
+        [id, cardId, accountId, amountMinorUnits, currencyCode, channel, status, category,
+         clearedAmountMinorUnits, heldAmountMinorUnits, authorizedAt, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        cardId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        amountMinorUnits:
+          type: integer
+          format: int64
+        currencyCode:
+          type: string
+        channel:
+          $ref: '#/components/schemas/PresentmentChannel'
+        status:
+          $ref: '#/components/schemas/AuthorizationStatus'
+        category:
+          type: string
+          description: The merchant category card-issuance judged the MCC as.
+        declineReason:
+          type: string
+          nullable: true
+          description: |
+            Present exactly when status is DECLINED. Carries card-issuance's own reason name
+            verbatim, or ISSUER_UNAVAILABLE when the issuer could not be reached — the two must
+            never look alike in a dispute.
+        clearedAmountMinorUnits:
+          type: integer
+          format: int64
+        heldAmountMinorUnits:
+          type: integer
+          format: int64
+          description: Derived (authorised less cleared, zero once released), never stored.
+        merchantName:
+          type: string
+          nullable: true
+        merchantCountry:
+          type: string
+          nullable: true
+        networkReference:
+          type: string
+          nullable: true
+        authorizedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+
+    AuthorizationList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Authorization'
+        count:
+          type: integer
+
+    Refusal:
+      type: object
+      properties:
+        reason:
+          type: string
+          enum:
+            [NOT_HOLDING_FUNDS, AMOUNT_NOT_POSITIVE, EXCEEDS_AUTHORIZED_AMOUNT, CURRENCY_MISMATCH,
+             NOT_YET_EXPIRED]
+        message:
+          type: string
+
+    SandboxPurchaseRequest:
+      type: object
+      required: [cardId, amountMinorUnits, currencyCode, channel]
+      properties:
+        cardId:
+          type: string
+          format: uuid
+        amountMinorUnits:
+          type: integer
+          format: int64
+        currencyCode:
+          type: string
+        channel:
+          $ref: '#/components/schemas/PresentmentChannel'
+        mcc:
+          type: string
+          nullable: true
+        merchantName:
+          type: string
+          nullable: true
+        merchantCountry:
+          type: string
+          nullable: true
+        networkReference:
+          type: string
+          nullable: true
+        clearImmediately:
+          type: boolean
+          default: true
+        clearingAmountMinorUnits:
+          type: integer
+          format: int64
+          nullable: true
+          description: A partial presentment, as a fuel or hospitality merchant would send.
+
+    SandboxPurchaseResponse:
+      type: object
+      properties:
+        authorizationId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/AuthorizationStatus'
+        declineReason:
+          type: string
+          nullable: true
+        clearedAmountMinorUnits:
+          type: integer
+          format: int64
+        networkReference:
+          type: string
