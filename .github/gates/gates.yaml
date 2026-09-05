@@ -4736,6 +4736,43 @@ gates:
     min_subjects: 3
     run: |
       python3 .github/scripts/check-ruleset-context-parity.py --enforce --repo "${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
+  # Refs #4828, the config half of #4240. The merged-past-red-check watch DETECTS a merge
+  # that went past a failing required check, twice a day, after it is already on main. It
+  # never looks at who is permitted to do that — `main-protection.bypass_actors`, one API
+  # field, today a single entry: RepositoryRole#5 (`admin`), bypass_mode `pull_request`.
+  # That field is editable from repository Settings in two clicks and produces no diff, no
+  # PR and no red check anywhere — the same write-only-control shape #4240 exists for, one
+  # level up. This gate cannot prevent an `--admin`-style override (GitHub evaluates the
+  # bypass at merge time, after every check has reported, so nothing in CI can); it makes a
+  # WIDENING of the surface reviewed instead of ambient. Both directions are checked, since
+  # a declaration that no longer describes anything is how a pinned list stops being a pin.
+  #
+  # Needs NO permission grant and shares ruleset-context-parity's transport: GET
+  # .../rulesets/{id} is world-readable on a public repo and includes bypass_actors. Note
+  # this is NOT the endpoint the runtime watch needs — `rulesets/rule-suites` (the bypass
+  # LOG) is private and rejects fine-grained tokens, which is exactly why the log half
+  # cannot be a PR-blocking gate and this config half can.
+  #
+  # Falsified against the REAL live ruleset, not a fixture: with the declaration emptied the
+  # live admin actor is reported undeclared, and with its bypass_mode pinned to `always`
+  # both directions report — red both ways, green only on the shipped declaration.
+  - id: ruleset-bypass-actors
+    name: "who may bypass main-protection is pinned, and widening it fails a PR (Refs #4828, enforced)"
+    group: lint
+    mode: enforced
+    rationale: >
+      The bypass surface of main-protection is a repository SETTING, not a file: it is edited
+      in the Settings UI, produces no diff and no red check, and is observable only by asking
+      the API. #4828 lists five merges that used it. Pinning the actor set makes a widening —
+      a new bot, a team, or an existing entry flipped to `always` (which additionally permits
+      a direct push to main) — reddens every PR until it is declared in a reviewed commit.
+      Re-examine when the repo gains an org owner or a GitHub App that legitimately needs one.
+    review_after: "2027-02-20"
+    selftest: python3 .github/scripts/check-ruleset-bypass-actors.py --self-test
+    selftest_expect: pass
+    min_subjects: 1   # exactly 1 bypass actor today (2026-08-20)
+    run: |
+      python3 .github/scripts/check-ruleset-bypass-actors.py --enforce --repo "${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 
   # #4716 (Refs #4533). An advisory written as a single `< X` interval misclassifies every
   # dependency with parallel release lines: hibernate-reactive 3.4.2.Final sorts below `< 4.2.1`
