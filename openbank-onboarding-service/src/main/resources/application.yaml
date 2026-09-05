@@ -170,6 +170,17 @@ mp:
         topic: openbank.sca.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
+      kyb-events-in:
+        # See the party-events-in comment above for why failure-strategy and an EXPLICIT
+        # dead-letter topic are both required, and why the topic key is nested rather than
+        # written as the dotted leaf `dead-letter-queue.topic:` (#686, #5745, #5751).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.onboarding.kyb-events-in
+        connector: smallrye-kafka
+        topic: openbank.kyb.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
 openbank:
   rate-limit:
     enabled: true

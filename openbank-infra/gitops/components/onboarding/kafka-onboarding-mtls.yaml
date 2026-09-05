@@ -55,6 +55,13 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # kyb events consumer (ADR-0284 D6 — the business funnel projection)
+      - resource:
+          type: topic
+          name: openbank.kyb.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       # consumer groups (one per channel, matching application.yaml group.id)
       - resource:
           type: group
@@ -71,6 +78,12 @@ spec:
       - resource:
           type: group
           name: onboarding-service-sca
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: onboarding-service-kyb
           patternType: literal
         operations: [Read]
         host: "*"
@@ -101,6 +114,16 @@ spec:
       - resource:
           type: topic
           name: openbank.dlq.onboarding.sca-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `kyb-events-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.onboarding.kyb-events-in
           patternType: literal
         operations: [Write, Describe]
         host: "*"

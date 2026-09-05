@@ -51,3 +51,5 @@ data:
     mp.messaging.incoming.kyc-events-in.auto.offset.reset=earliest
     mp.messaging.incoming.sca-events-in.group.id=onboarding-service-sca
     mp.messaging.incoming.sca-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.kyb-events-in.group.id=onboarding-service-kyb
+    mp.messaging.incoming.kyb-events-in.auto.offset.reset=earliest
