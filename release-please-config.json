@@ -411,6 +411,12 @@
       "exclude-paths": [
         "openbank-engagement-service/src/test"
       ]
+    },
+    "openbank-loyalty-service": {
+      "component": "loyalty-service",
+      "exclude-paths": [
+        "openbank-loyalty-service/src/test"
+      ]
     }
   }
 }
