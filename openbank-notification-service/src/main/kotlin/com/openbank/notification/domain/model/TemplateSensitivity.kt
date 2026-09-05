@@ -48,7 +48,6 @@ object TemplateSensitivity {
      */
     val SECRET_TEMPLATES: Set<NotificationTemplate> = setOf(
         NotificationTemplate.OTP_CODE,
-        NotificationTemplate.PASSWORD_RESET,
     )
 
     /** True when [template]'s rendered body embeds an authentication secret. */

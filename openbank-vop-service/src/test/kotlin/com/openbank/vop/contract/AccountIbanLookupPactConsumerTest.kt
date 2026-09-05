@@ -124,29 +124,14 @@ class AccountIbanLookupPactConsumerTest {
         assertThat(summary.status).isEqualTo("ACTIVE")
     }
 
-    @Pact(consumer = CONSUMER, provider = PROVIDER)
-    fun rejectsWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("an account owned by a known party exists")
-        .uponReceiving("GET the account behind the payee IBAN, with no caller identity")
-        .path(EXPECTED_ACCOUNT_PATH)
-        .method("GET")
-        .headers(mapOf("Accept" to "application/json"))
-        .willRespondWith()
-        .status(401)
-        .toPact()
-
-    @Test
-    @PactTestFor(pactMethod = "rejectsWithMissingToken")
-    fun `rejects the account-by-iban lookup with 401 when the caller has no valid identity`(mockServer: MockServer) {
-        assertClientPathMatchesContract()
-
-        given()
-            .baseUri(mockServer.getUrl())
-            .accept("application/json")
-            .get(clientDerivedAccountPath())
-            .then()
-            .statusCode(401)
-    }
+    // NO 401-without-identity pact interaction is recorded here, deliberately: the provider-side
+    // replay boots with a TestAuthMechanism that authenticates EVERY replayed request as
+    // pact-verifier/ROLE_OPERATOR, so a recorded 401/403 expectation can never pass provider
+    // replay — it would be a permanently red interaction (measured: account-service build failed
+    // on exactly this interaction, #8552). The negative case is covered where it can actually run:
+    // account-service's own AccountResourceAuthzTest asserts an anonymous GET on the IBAN lookup
+    // answers 401. The consumer-side behaviour (no token, expect rejection) stays a client
+    // property, not a wire contract.
 
     /**
      * The asymmetry that makes this contract falsifiable at the consumer layer: the path the client
