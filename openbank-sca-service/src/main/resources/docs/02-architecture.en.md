@@ -50,8 +50,10 @@ Pure Kotlin, no framework. Holds the invariants:
 ## Outbox → Kafka flow
 
 ```
-enroll device ──► EnrolledDeviceRepository.save (txn A)
-              └─► ScaOutboxRepository.save(DEVICE_ENROLLED)  (txn B, separate)
+enroll device ──► EnrolledDeviceRepository.saveWithOutbox(device, DEVICE_ENROLLED)
+                    └─ ONE Panache.withTransaction: the device row and its outbox row
+                       commit together or not at all (#8679; both rows share one `xmin`,
+                       asserted by ScaEnrollOutboxAtomicityIT)
 
    every 5s (delayed 5s, SKIP if running):
    ScaOutboxDispatcher.dispatchScheduledBatch()

@@ -64,6 +64,21 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-09-03** — Four-eyes assessment (#8359, ADR-0034 D-criteria as applied in the #938 sweep).
+  Per-verb caller audit: **`interest.create` and `interest.trigger` are now four-eyes-gated** via
+  `rules.yaml: four_eyes.actions`. `interest.create` bundles every operator write on the money path
+  (manual accrue, capitalize → real GL journals, rate-config create → shapes all future accrual
+  amounts, withholding remittance assemble → triggers the real cash leg to the finanční úřad);
+  `interest.trigger` (accrueAll) is the manual mass accrual. Both caller sets are human-only, twice
+  over: `operator-interest-write` excludes `service-account-*` and the `interest_rest_ext.rego`
+  prohibition vetoes the write set for any service account at the allow head; the fleet audit found
+  no M2M writer (agent-service's client is read-only). The accrual/capitalization schedulers and the
+  remittance settlement consumer call the use cases in-process, so the HTTP-layer gate can never
+  pause automation. **`interest.delete` (deactivateRateConfig) NOT gated:** it stops future accrual
+  — reduces money movement (standing-order pause/cancel precedent). `interest.read/list` are reads.
+  Four-eyes enforcement itself remains off fleet-wide (`authz.four-eyes.enforce`, ADR-0155) — the
+  wiring sets the decision flag, nothing pauses yet.
+
 - **2026-09-03** — `authz.enforce` now defaults to **true** in `application.yaml` (#3679). Until
   now it read `${AUTHZ_ENFORCE:false}`, so enforcement was a property of one gitops manifest
   rather than of the service: the deployed Rollout sets the variable to `"true"` (since #3695), so

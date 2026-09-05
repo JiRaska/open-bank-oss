@@ -74,6 +74,23 @@ instruction, but the irreversible debit lives downstream.
 
 ## 6. Change log
 
+- **2026-09-03** — Four-eyes assessment (#8359, ADR-0034 D-criteria as applied in the #938 sweep).
+  Per-verb caller audit over all seven actions: **`sdd.approve` (B2B mandate confirmation) is now
+  four-eyes-gated** via `rules.yaml: four_eyes.actions` — the confirmation authorises every future
+  collection against the debtor, and its caller set is human-only (the edge grant deliberately
+  excludes it; `operator-sdd-write` excludes every `service-account-*`). Exact action, not the
+  `approve` verb: the verb would also flag `lending.approve` (already maker-checker in-app) and pull
+  non-money-path `dispatch.approve` into the grantable gate. **`sdd.authorise` assessed,
+  NOT gated:** it is the bulk authorisation of inbound collections whose designed caller is clearing
+  automation (not built yet — `sdd_rest_ext.rego` header), so gating it today covers no real caller
+  and plants the trap the `four_eyes.verbs` guardrail describes. When that caller ships, the operator
+  authorise-by-hand path gets its own distinct action and that is gated instead.
+  `sdd.create/update/delete` are edge-reachable customer self-service with effect on future debits
+  only — ungateable per the guardrail. Four-eyes enforcement itself remains off fleet-wide
+  (`authz.four-eyes.enforce`, ADR-0155) — the wiring sets the decision flag, nothing pauses yet.
+  Correction: §3's "`AUTHZ_ENFORCE` is `false` — advisory" was stale — flipped to `true` on
+  2026-08-10 (#4427); the `@Authorize` layer is an enforcing control today.
+
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal transaction REST edge through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `accountId` on listMandates and `debitDate` on assessRefund. Both handlers are non-suspend and threw at the method boundary. `debitDate` is the input to the refund-window arithmetic (8-week / 13-month), so a request missing it must be rejected rather than defaulted — an UNPARSEABLE date is a different class and already 400 via `DateTimeExceptionMapper`. No new caller or boundary. Rollback: revert.

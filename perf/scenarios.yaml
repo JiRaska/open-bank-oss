@@ -13,3 +13,10 @@ scenarios:
     safety_boundary: Mutates accounts and ledger journals; run only against an isolated disposable docker-compose stack, never the shared sandbox.
     baseline_report: perf/reports/2026-07-10-money-path-write-benchmark.md
     blocker: A repeatable isolated target and synthetic-data teardown are required before this can become a scheduled run.
+
+  - id: security-abuse-smoke
+    definition: perf/k6/security-abuse-smoke.js
+    execution_mode: manual-local-isolated
+    safety_boundary: Every request is invalid by construction (no valid token, no accepted body, nothing created), so the lane is safe against any stack — the rejection path IS the subject. A 200 or 5xx on any probe is a finding, not a pass.
+    blocker: Requires an auth-ENABLED disposable boot before it can join the scheduled perf gate — the current perf-gate harness boots with quarkus.oidc.enabled=false, which would make every identity probe a false 200. Wiring = a second boot profile in perf-gate.yml (auth on, disposable identity) reusing the same throwaway postgres; tracked in #8590 #4. Validated locally against a stub in both directions (exit 0 on a well-behaved target, exit 99 with breaches counted on a 200-answering one).
+    assertions: no-token and malformed-token probes must 401/403; NUL-byte query param must 400/401/403 (NulByteGuards boundary, never 500); enumeration sweep must 401/403/404 (200 = IDOR) with a latency trend for the timing side-channel; oversized header must 400/401/431.
