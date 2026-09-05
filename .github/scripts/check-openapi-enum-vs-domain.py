@@ -186,8 +186,6 @@ BASELINE: dict[str, str] = {
         "#5962 — SepaPaymentStatus: spec-only PENDING/RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
         "#5962 — CloseFailureReason: undeclared NOT_VIABLE",
-    "openbank-swift-service:ACKNOWLEDGED,FAILED,PENDING,REJECTED,SENT,VALIDATED":
-        "#5962 — SwiftStatus: undeclared COMPLETED",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")
