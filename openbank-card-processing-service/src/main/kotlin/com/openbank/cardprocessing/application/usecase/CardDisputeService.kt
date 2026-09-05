@@ -55,6 +55,23 @@ import java.util.UUID
  * One live case per authorisation. Checked here for the message and enforced by a partial UNIQUE
  * index in the database, because a check in application code alone is a race between two operators
  * pressing the button at once, not a constraint.
+ *
+ * ## Its relationship to openbank-dispute-service, stated because the two are easy to confuse
+ *
+ * `openbank-dispute-service` owns the CUSTOMER's case (ADR-0117): who complained, what evidence was
+ * gathered, which remediation the investigation supports. This service owns the NETWORK's case: the
+ * scheme's own id, its reason code, its respond-by date. They are different objects about the same
+ * money and neither is a copy of the other.
+ *
+ * What is NOT wired, measured on `origin/main` 2026-09-05: `DisputeResolution.CHARGEBACK` in
+ * dispute-service is a label with nothing behind it — that service holds no `networkCaseId`, calls
+ * no scheme, and its domain model has no field for one. So a case can be resolved as "chargeback"
+ * without a chargeback ever being filed with Visa or Mastercard, which is the same shape as the
+ * defect ADR-0283 was written about: a decision recorded and never carried out.
+ *
+ * The join is deliberately NOT modelled here yet. A `bankCaseReference` column that nothing writes
+ * would be a field no code path consumes — a latent trap, not a link — so the wiring is tracked as
+ * its own issue rather than half-built.
  */
 @ApplicationScoped
 class CardDisputeService(
