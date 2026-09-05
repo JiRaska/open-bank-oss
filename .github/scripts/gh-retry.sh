@@ -19,6 +19,11 @@
 #   must fail immediately — retrying it is how a deterministic red becomes a
 #   flaky-looking one.
 #
+# CALLERS (keep this list honest — a library with none is not a control)
+#   .github/scripts/spot-kill-retry.sh — both the jobs-API detection query and `gh run rerun`.
+#   This file shipped in #8371 with ZERO callers and stayed that way while the failure it was
+#   written for kept happening; `grep -rl gh-retry.sh .github/` matched only itself.
+#
 # USAGE (source this file, then wrap the call):
 #     source .github/scripts/gh-retry.sh
 #     gh_retry 5 -- gh api repos/:owner/:repo/rulesets
@@ -37,6 +42,16 @@
 
 GH_RETRY_MAX_WAIT_SECONDS="${GH_RETRY_MAX_WAIT_SECONDS:-900}"  # never sleep past 15 min
 GH_RETRY_DEAD_LETTER="${GH_RETRY_DEAD_LETTER:-0}"
+# The `gh` used by the reset probe below. A caller that drives its own scripted `gh` stub
+# (spot-kill-retry.sh does) MUST be able to point this at that stub, or the probe issues a real
+# network call the stub never scripted — which both leaves the suite non-hermetic and, where the
+# stub counts calls, desynchronises its call counter from its script.
+GH_RETRY_GH_BIN="${GH_RETRY_GH_BIN:-gh}"
+# Optional: a path the LAST attempt's stderr is copied to. `gh_retry` is normally called inside a
+# command substitution, which is a subshell, so a variable it sets cannot reach the caller — a
+# file can. Without this the caller can only report "last: unknown", which is what
+# spot-kill-retry.sh printed on run 33738356244 while holding the rate-limit text all along.
+GH_RETRY_LAST_ERROR_FILE="${GH_RETRY_LAST_ERROR_FILE:-}"
 
 # _gh_retry_classify <stderr-file> -> echoes one of: rate_limit | transient | final
 _gh_retry_classify() {
@@ -53,7 +68,10 @@ _gh_retry_classify() {
 # _gh_retry_reset_wait -> seconds until the core rate limit resets (0 if unknown)
 _gh_retry_reset_wait() {
   local reset now
-  reset=$(gh api rate_limit --jq '.resources.core.reset' 2>/dev/null || echo 0)
+  # A zero cap (tests) clamps the answer to 0 whatever it is, so the probe can only cost a real
+  # network call and, for a caller with a scripted stub, a desynchronised call counter.
+  if [[ "$GH_RETRY_MAX_WAIT_SECONDS" -eq 0 ]]; then echo 0; return 0; fi
+  reset=$("$GH_RETRY_GH_BIN" api rate_limit --jq '.resources.core.reset' 2>/dev/null || echo 0)
   now=$(date +%s)
   if [[ "$reset" =~ ^[0-9]+$ && "$reset" -gt "$now" ]]; then
     echo $(( reset - now ))
@@ -102,6 +120,13 @@ gh_retry() {
     class=$(_gh_retry_classify "$err")
     if [[ "$class" == "final" || $attempt -eq $max ]]; then
       cat "$err" >&2 || true
+      # Survives the subshell a command substitution puts this function in — see the knob above.
+      # An `if` and not `[[ ... ]] && cat`: this file is SOURCED into callers that run under
+      # `set -e`, where a trailing AND-OR list whose left side is false is a footgun not worth
+      # arguing about.
+      if [[ -n "$GH_RETRY_LAST_ERROR_FILE" ]]; then
+        cat "$err" > "$GH_RETRY_LAST_ERROR_FILE" 2>/dev/null || true
+      fi
       if [[ "$class" != "final" ]]; then
         echo "::warning::gh_retry: exhausted $max attempts on transient failures: $*" >&2
         _gh_retry_dead_letter "$@"
@@ -122,7 +147,14 @@ gh_retry() {
 }
 
 # ------------------------------------------------------------------ self-test
-if [[ "${1:-}" == "--self-test" ]]; then
+# `BASH_SOURCE[0] == $0` means EXECUTED, not sourced, and it is load-bearing rather than
+# stylistic. `source x.sh` with no arguments leaves the CALLER's positional parameters in place,
+# so a plain `[[ $1 == --self-test ]]` here fires while running the caller's suite — the sourcing
+# script's `--self-test` runs THIS file's cases and `exit 0`s before the caller's ever start.
+# Measured while wiring the first caller (spot-kill-retry.sh): its 13-case suite printed the five
+# lines below and exited 0, i.e. a green that had tested nothing the caller owns. A library whose
+# whole contract is "source me" cannot key anything off the caller's argv.
+if [[ "${BASH_SOURCE[0]}" == "${0}" && "${1:-}" == "--self-test" ]]; then
   set +e
   tmp=$(mktemp -d)
   export GH_RETRY_MAX_WAIT_SECONDS=0   # tests never actually sleep
@@ -139,21 +171,26 @@ if [[ "${1:-}" == "--self-test" ]]; then
     return 0
   }
   fails=0
+  subjects=0
 
+  subjects=$(( subjects + 1 ))
   rm -f "$tmp/state"; STUB_FAILURES=2 STUB_ERROR="HTTP 502 Bad Gateway"
   out=$(gh_retry 4 -- stub) && [[ "$out" == stub-ok ]] \
     && echo "self-test ok: transient retried to success" || { echo "SELF-TEST FAIL: transient"; fails=1; }
 
+  subjects=$(( subjects + 1 ))
   rm -f "$tmp/state"; STUB_FAILURES=1 STUB_ERROR="HTTP 403: API rate limit exceeded"
   out=$(gh_retry 3 -- stub) && [[ "$out" == stub-ok ]] \
     && echo "self-test ok: rate-limit class retried" || { echo "SELF-TEST FAIL: rate_limit"; fails=1; }
 
+  subjects=$(( subjects + 1 ))
   rm -f "$tmp/state"; STUB_FAILURES=5 STUB_ERROR="HTTP 404 Not Found"
   gh_retry 3 -- stub 2>/dev/null && { echo "SELF-TEST FAIL: final must not succeed"; fails=1; } \
     || { [[ $(cat "$tmp/state" 2>/dev/null || echo 5) == "1" ]] \
          && echo "self-test ok: final fails immediately (1 attempt)" \
          || { echo "SELF-TEST FAIL: final retried"; fails=1; }; }
 
+  subjects=$(( subjects + 1 ))
   rm -f "$tmp/state"; STUB_FAILURES=9 STUB_ERROR="HTTP 503"
   gh_retry 2 -- stub 2>/dev/null \
     && { echo "SELF-TEST FAIL: exhaustion should fail"; fails=1; } \
@@ -162,7 +199,11 @@ if [[ "${1:-}" == "--self-test" ]]; then
          || { echo "SELF-TEST FAIL: exhaustion attempt count"; fails=1; }; }
 
   rm -rf "$tmp"
+  # `SUBJECTS=` is what run-gates.py reads to enforce `min_subjects`. Without it a gate that
+  # declares a floor fails outright — deliberately, so a suite cannot go green about a corpus
+  # that quietly emptied (#4339).
+  echo "SUBJECTS=${subjects}"
   [[ $fails == 0 ]] || exit 1
-  echo "gh-retry self-test: all cases behaved"
+  echo "gh-retry self-test: all $subjects cases behaved"
   exit 0
 fi
