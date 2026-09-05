@@ -88,6 +88,12 @@ BASELINE_UNCOVERED = {
     # asked for its model. The application.yaml entry belongs in the PR that wires the feed and
     # flips `enabled` — adding it now would declare a runtime binding for an agent that cannot run.
     "card-scheme-bulletin-agent": "deepseek-ai/DeepSeek-V3.2",
+    # 2026-09-05, ADR-0283 phase 4 (#8812). Same reason as the sibling above and a different gap:
+    # this charter ships `enabled: false` because the evidence it would assemble is not reachable
+    # (no document store, no persisted 3-D Secure result, dispute-service not wired to the scheme
+    # case — #8869). Nothing authenticates as this id, so CharterRegistry is never asked for its
+    # model; the application.yaml entry belongs in the PR that gives it something to read.
+    "card-dispute-evidence-agent": "deepseek-ai/DeepSeek-V3.2",
 }
 
 
