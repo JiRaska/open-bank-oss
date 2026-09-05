@@ -118,8 +118,13 @@ class LoyaltyResource(
     @Path("/parties/{partyId}/earn")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_API")
     suspend fun earn(@PathParam("partyId") partyId: UUID, request: EarnRequest): Response {
+        // The rejected value is NOT echoed back. CodeQL flags reflecting a client-supplied string
+        // into a response as java/xss, and while this API answers application/json, the rule is
+        // right about the shape rather than about this one content type: an error body is copied
+        // into logs, consoles and support tickets that are not all JSON. Naming the ACCEPTED set
+        // instead is both safe and more useful — a caller learns what to send, not what they sent.
         val source = LeafEarnSource.byId(request.earnSourceId)
-            ?: return badRequest("unknown earn source '${request.earnSourceId}'")
+            ?: return badRequest("unknown earn source; expected one of ${LeafEarnSource.ALL.map { it.id }.sorted()}")
 
         return when (val outcome = earn.earn(partyId, source, request.correlationEventId)) {
             is EarnOutcome.Awarded -> Response.status(Response.Status.CREATED)
@@ -168,8 +173,11 @@ class LoyaltyResource(
                     "availableLeaves" to outcome.available.value,
                 ),
             ).build()
+            // Same reflection rule as the earn path above. CodeQL flagged only that one, but this
+            // is the identical shape, and a fix that leaves its twin in place is the kind that
+            // comes back as a second alert on the next scan.
             is RedemptionOutcome.UnknownBenefit ->
-                badRequest("unknown benefit '${outcome.benefitId}'")
+                badRequest("unknown benefit; expected one of ${BenefitCatalog.ALL.keys.sorted()}")
         }
     }
 
