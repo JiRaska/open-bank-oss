@@ -207,11 +207,11 @@ data class SpendReserved(
      */
     val idempotencyKey: String,
     override val occurredAt: Instant,
+    val sourceService: String = DELEGATION_SOURCE_SERVICE,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "DelegationGrant"
     override val eventType = "SpendReserved"
     override val version = 1L
-    val sourceService: String = DELEGATION_SOURCE_SERVICE
 }
 
 /** The money moved: the headroom stays consumed. Terminal for this reservation. */
@@ -223,11 +223,11 @@ data class SpendConfirmed(
     val amount: EventMoney,
     val settledAt: OffsetDateTime,
     override val occurredAt: Instant,
+    val sourceService: String = DELEGATION_SOURCE_SERVICE,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "DelegationGrant"
     override val eventType = "SpendConfirmed"
     override val version = 1L
-    val sourceService: String = DELEGATION_SOURCE_SERVICE
 }
 
 /** The payment did not happen: the headroom comes back. Terminal for this reservation. */
@@ -239,9 +239,9 @@ data class SpendReleased(
     val amount: EventMoney,
     val settledAt: OffsetDateTime,
     override val occurredAt: Instant,
+    val sourceService: String = DELEGATION_SOURCE_SERVICE,
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "DelegationGrant"
     override val eventType = "SpendReleased"
     override val version = 1L
-    val sourceService: String = DELEGATION_SOURCE_SERVICE
 }
