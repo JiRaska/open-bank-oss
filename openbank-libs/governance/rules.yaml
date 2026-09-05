@@ -218,6 +218,34 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2026-09-30"
     ci_producer: ".github/scripts/check-openapi-request-schema-conformance.py"
+    # MEASURED 2026-09-05 — this gate is a NO-OP today, and its own "Not a finding" wording is
+    # what hides that. It compares the committed openapi.yaml against the schema Quarkus emits
+    # during the build (`-Dquarkus.smallrye-openapi.store-schema-directory`, _service-ci.yml).
+    # That generated document is not being produced. Across three independent CI runs and every
+    # service that built with a committed spec — billing, interest, swift (run 33949966927),
+    # document (33949973656), customer-edge (33949914172) — the script printed
+    #
+    #   ##[notice] <svc>: no generated schema at <svc>/build/openapi-generated/openapi.yaml
+    #              ... Not a finding.
+    #
+    # and returned 0. NOT ONE service printed "N request schema(s) checked". Zero request
+    # schemas have been compared.
+    #
+    # So the blocker is not readiness and not a false-positive rate: flipping this to enforced
+    # would graduate a check that examines nothing, and the green would then be load-bearing.
+    # A missing generated document currently reads identically to a clean service — the same
+    # "could not look" encoded as "looked and found nothing" that check-fleet-attestations.sh
+    # deliberately separates (it exits 2 and says "NOT a verdict"). This script does not.
+    #
+    # The work behind this date is therefore a BUILD fix — find why the Quarkus scanner writes
+    # no document — plus making the missing-document case distinguishable from a clean one.
+    # Only then is a false-positive measurement even meaningful.
+    blocked_on: "the gate is a no-op: the generated schema it compares against is not produced by
+      the build, so it returned 'Not a finding' with 0 request schemas checked on every service
+      that built in runs 33949966927 / 33949973656 / 33949914172 (measured 2026-09-05). Flipping
+      it would enforce a check that examines nothing. Fix the build so Quarkus emits
+      build/openapi-generated/openapi.yaml, and make a missing document distinguishable from a
+      clean service, before this date means anything."
     # openapi_route_conformance (above) is ROUTE SET ONLY — it does not read schemas, so aml's
     # invented request/response fields passed it clean (#2312). This is the request half of that
     # gap, using the document Quarkus itself generates
