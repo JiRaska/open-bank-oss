@@ -12,6 +12,7 @@ import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import type { Customer360 } from '@/app/api/customer-360/[partyId]/route'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
+import { LipaPanel } from '@/components/party/LipaPanel'
 import { DevicesPanel } from '@/components/party/DevicesPanel'
 import { DocumentsPanel } from '@/components/party/DocumentsPanel'
 import { CustomerPortfolioPanel } from '@/components/party/CustomerPortfolioPanel'
@@ -103,6 +104,7 @@ export default function Customer360Page() {
           projected events must not hide an active fraud hold. Those are independent sources and the
           page now degrades independently for each. */}
       {selected && <AdverseStatePanel key={`adverse:${selected.id}`} partyId={selected.id} />}
+      {selected && <LipaPanel key={`lipa:${selected.id}`} partyId={selected.id} />}
       {selected && <CustomerPortfolioPanel key={`portfolio:${selected.id}`} partyId={selected.id} />}
       {selected && <DevicesPanel key={`devices:${selected.id}`} partyId={selected.id} />}
       {selected && <DocumentsPanel key={`documents:${selected.id}`} partyId={selected.id} />}

@@ -66,6 +66,11 @@ export const PERMISSIONS = {
   "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
   // creation and lifecycle transitions are restricted to HUMAN operators/admins.
+  // Lípa (ADR-0282). Read-only in the console by construction: the earn and benefit catalogues
+  // are code, changed through a pull request, so there is no write permission to grant here. An
+  // auditor is included deliberately — the programme's obligation and its cap are exactly what an
+  // audit asks about.
+  "loyalty:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR, ROLES.VIEWER],
   "campaign:view":          [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
   "campaign:create":        [ROLES.ADMIN, ROLES.OPERATOR],
   "campaign:submit":        [ROLES.ADMIN, ROLES.OPERATOR],
@@ -254,6 +259,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360',
     '/docs/compliance', '/docs/bcp',
   ]],
+  ['loyalty:view', ['/loyalty']],
   ['campaign:view', ['/segments']],
   ['campaign:create', ['/segments/new']],
   ['campaign:view', ['/campaigns']],
