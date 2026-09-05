@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-04T22:08:37.992078+00:00",
+  "generatedAt": "2026-09-05T17:09:13.281886+00:00",
   "netpol": {
     "available": true,
     "covered": 59,
@@ -9,9 +9,9 @@
   },
   "freshness": {
     "available": true,
-    "fleetScore": 67,
-    "scoredModules": 12,
-    "unknownModules": 15
+    "fleetScore": 68,
+    "scoredModules": 11,
+    "unknownModules": 16
   },
   "credentials": {
     "available": true,
@@ -21,5 +21,27 @@
     "overdue": 0,
     "undeclared": 158,
     "overdueFound": false
+  },
+  "fuzz": {
+    "available": true,
+    "inScope": 2,
+    "tested": 2,
+    "coveragePct": 100,
+    "totalExercised": 0,
+    "excludedCount": 0,
+    "run": "https://github.com/JiRaska/open-bank-oss/actions/runs/33954836043",
+    "runDate": "2026-09-05"
+  },
+  "threatModels": {
+    "available": true,
+    "moneyPathTotal": 23,
+    "withModel": 23,
+    "missing": [],
+    "staleCount": 0,
+    "oldestDays": 27
+  },
+  "mttr": {
+    "available": false,
+    "reason": "dependabot alerts API answered 403 \u2014 the token lacks access (GITHUB_TOKEN can never read it; set a security-scoped METADATA_REFRESH_PAT)"
   }
 }

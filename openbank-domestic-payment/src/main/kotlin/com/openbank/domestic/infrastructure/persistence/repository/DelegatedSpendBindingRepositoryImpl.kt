@@ -13,6 +13,7 @@ import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DelegatedSpendReservationState
 import com.openbank.domestic.infrastructure.persistence.entity.DelegatedSpendBindingEntity
+import com.openbank.libs.messaging.SyntheticTaintKafkaRail
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
@@ -38,10 +39,18 @@ class DelegatedSpendBindingRepositoryImpl(
             Panache.getSession().flatMap { session ->
                 val canonicalSnapshot = snapshot.canonicalizedSourceTimestamps()
                 val observedAt = Instant.now(clock)
-                insertIfAbsent(session, canonicalSnapshot, observedAt).flatMap { inserted ->
+                // Read INSIDE the transaction chain, not at the call site. The taint arrives on a
+                // Kafka record header and SyntheticTaintKafkaRail turns it into ambient MDC +
+                // OpenTelemetry baggage for the duration of the message; this is the point where
+                // that has to still be true, because this is where the durable row is written.
+                // Reading it here rather than at the consumer is what makes the reactive-context
+                // propagation a tested property instead of an assumption -- see
+                // DelegatedSpendReservationTaintIT.
+                val tainted = SyntheticTaintKafkaRail.currentlyTainted()
+                insertIfAbsent(session, canonicalSnapshot, observedAt, tainted).flatMap { inserted ->
                     lock(session, canonicalSnapshot.reservationId).map { entity ->
                         checkNotNull(entity) { "Reservation projection disappeared after insert" }
-                        applyLocked(entity, canonicalSnapshot, observedAt, inserted > 0)
+                        applyLocked(entity, canonicalSnapshot, observedAt, inserted > 0, tainted)
                     }
                 }
             }
@@ -70,6 +79,10 @@ class DelegatedSpendBindingRepositoryImpl(
                                     eventType = FINALIZED_ABSENT_OUTBOX_EVENT,
                                     payload = eventPublisher.delegatedSpendFinalizedAbsentPayload(binding),
                                     createdAt = finalizedAt,
+                                    // From the PERSISTED column, never from ambient context: this
+                                    // runs on a scheduler, long after the record that carried the
+                                    // taint was acked.
+                                    synthetic = entity.synthetic,
                                 ),
                             ).replaceWithVoid()
                         }
@@ -86,6 +99,7 @@ class DelegatedSpendBindingRepositoryImpl(
         session: Mutiny.Session,
         snapshot: DelegatedSpendReservationSnapshot,
         observedAt: Instant,
+        synthetic: Boolean,
     ): Uni<Int> {
         val terminal = snapshot.reservationState != DelegatedSpendReservationState.RESERVED
         return session.createNativeMutationQuery(INSERT_IF_ABSENT_SQL)
@@ -118,6 +132,7 @@ class DelegatedSpendBindingRepositoryImpl(
             )
             .setParameter("finalizedAt", observedAt.takeIf { terminal })
             .setParameter("observedAt", observedAt)
+            .setParameter("synthetic", synthetic)
             .executeUpdate()
     }
 
@@ -134,6 +149,7 @@ class DelegatedSpendBindingRepositoryImpl(
         incoming: DelegatedSpendReservationSnapshot,
         observedAt: Instant,
         inserted: Boolean,
+        synthetic: Boolean,
     ): ReservationProjectionApplyResult {
         val stored = entity.toDomain().snapshot
         if (!stored.hasSameImmutableTuple(incoming)) {
@@ -141,6 +157,11 @@ class DelegatedSpendBindingRepositoryImpl(
                 "Reservation ${incoming.reservationId} changed its immutable authorization tuple",
             )
         }
+        // Monotonic, and applied before every early return: a duplicate or stale delivery that
+        // carries the taint the first one lacked must still raise it. Never cleared -- an absent
+        // header is "no claim", not "this is real", and clearing would be the unbounded, silent
+        // direction the taint's whole default leans away from.
+        if (synthetic) entity.synthetic = true
         if (inserted) return ReservationProjectionApplyResult.APPLIED
         if (incoming.reservationVersion < stored.reservationVersion) {
             return ReservationProjectionApplyResult.STALE_OR_DUPLICATE
@@ -187,13 +208,13 @@ class DelegatedSpendBindingRepositoryImpl(
                 resource_id, operation_type, amount, currency, idempotency_key_hash, reservation_state,
                 reservation_version, schema_version, aggregate_type, source_service,
                 source_created_at, source_settled_at, source_occurred_at, last_event_id,
-                binding_state, payment_id, observed_at, bound_at, finalized_at, updated_at
+                binding_state, payment_id, observed_at, bound_at, finalized_at, updated_at, synthetic
             ) VALUES (
                 :reservationId, :delegationId, :grantorPartyId, :granteePartyId, :resourceType,
                 :resourceId, :operationType, :amount, :currency, :idempotencyKeyHash, :reservationState,
                 :reservationVersion, :schemaVersion, :aggregateType, :sourceService,
                 :sourceCreatedAt, :sourceSettledAt, :sourceOccurredAt, :lastEventId,
-                :bindingState, NULL, :observedAt, NULL, :finalizedAt, :observedAt
+                :bindingState, NULL, :observedAt, NULL, :finalizedAt, :observedAt, :synthetic
             ) ON CONFLICT (reservation_id) DO NOTHING
         """
 
