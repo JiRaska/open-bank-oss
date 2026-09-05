@@ -1,0 +1,105 @@
+# Known-debt BASELINE for check-idempotency-coverage.py — SHRINK-ONLY (issue #8351, ROADMAP M2).
+#
+# Every entry is a money-path POST whose openapi.yaml declares no REQUIRED idempotency handle
+# (Idempotency-Key / X-Request-ID / X-Idempotency-Key header, or a required idempotencyKey body
+# property). The gate fails on any NEW entry and on any entry that stops being observed, so the
+# list can only shrink. Reasons distinguish the two honest classes: a lifecycle action addressed
+# at an existing resource (a replay re-runs the same state transition and is rejected by the
+# aggregate's state) versus a bare creation POST (a retry genuinely double-creates — the
+# burn-down priority).
+#
+# format: <service> POST <path>  # <reason>
+openbank-account-service POST /api/v1/accounts/{accountId}/authorizations  # creation POST with no idempotency key today — burn-down #8351
+openbank-account-service POST /api/v1/accounts/{accountId}/close  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-account-service POST /api/v1/accounts/{accountId}/freeze  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-account-service POST /api/v1/accounts/{accountId}/pockets  # creation POST with no idempotency key today — burn-down #8351
+openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals  # creation POST with no idempotency key today — burn-down #8351
+openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}/decide  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-account-service POST /api/v1/accounts/{accountId}/unfreeze  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-balance-service POST /api/v1/balances/reconciliation  # creation POST with no idempotency key today — burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/credit  # creation POST with no idempotency key today — burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/debit  # creation POST with no idempotency key today — burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/holds  # creation POST with no idempotency key today — burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/initialize  # creation POST with no idempotency key today — burn-down #8351
+openbank-billing-service POST /api/v1/fees/assess  # creation POST with no idempotency key today — burn-down #8351
+openbank-billing-service POST /api/v1/fees/post  # creation POST with no idempotency key today — burn-down #8351
+openbank-billing-service POST /api/v1/fees/reverse  # creation POST with no idempotency key today — burn-down #8351
+openbank-clearing-service POST /api/v1/clearing/batches/{id}/settle  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-clearing-service POST /api/v1/clearing/cycle/trigger  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-clearing-service POST /api/v1/clearing/submit  # creation POST with no idempotency key today — burn-down #8351
+openbank-consent-service POST /api/v1/consents  # creation POST with no idempotency key today — burn-down #8351
+openbank-consent-service POST /api/v1/consents/{id}/activate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-consent-service POST /api/v1/consents/{id}/reject  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-consent-service POST /api/v1/consents/{id}/validate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-consent-service POST /api/v1/suppressions  # creation POST with no idempotency key today — burn-down #8351
+openbank-consent-service POST /api/v1/suppressions/{id}/revoke  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-delegation-service POST /api/v1/delegation-role-presets  # creation POST with no idempotency key today — burn-down #8351
+openbank-delegation-service POST /api/v1/delegations  # creation POST with no idempotency key today — burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/check  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/preview  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/{id}/accept  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/{id}/decline  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/{id}/reinstate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/{id}/renounce  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/{id}/reservations/{rid}/confirm  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/{id}/reservations/{rid}/release  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-fraud-service POST /api/v1/fraud/score  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-fx-service POST /api/v1/fx/cnb/ingest  # creation POST with no idempotency key today — burn-down #8351
+openbank-interest-service POST /api/v1/interest/accrue  # creation POST with no idempotency key today — burn-down #8351
+openbank-interest-service POST /api/v1/interest/accrue/all  # creation POST with no idempotency key today — burn-down #8351
+openbank-interest-service POST /api/v1/interest/capitalize/{accountId}  # creation POST with no idempotency key today — burn-down #8351
+openbank-interest-service POST /api/v1/interest/rates  # creation POST with no idempotency key today — burn-down #8351
+openbank-interest-service POST /api/v1/interest/withholding/remittances  # creation POST with no idempotency key today — burn-down #8351
+openbank-ledger-service POST /api/v1/journals/replay-booked-changes  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-ledger-service POST /api/v1/journals/{journalId}/reverse  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-ledger-service POST /api/v1/ledger/accounting-days/{businessDate}  # creation POST with no idempotency key today — burn-down #8351
+openbank-ledger-service POST /api/v1/ledger/accounting-days/{businessDate}/transitions/{to}  # creation POST with no idempotency key today — burn-down #8351
+openbank-ledger-service POST /api/v1/ledger/close/{fiscalYear}  # creation POST with no idempotency key today — burn-down #8351
+openbank-ledger-service POST /api/v1/ledger/close/{fiscalYear}/attest  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-ledger-service POST /api/v1/ledger/fx-revaluation  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-ledger-service POST /api/v1/ledger/periods/{type}/{date}  # creation POST with no idempotency key today — burn-down #8351
+openbank-ledger-service POST /api/v1/ledger/periods/{type}/{date}/freeze  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/applications  # creation POST with no idempotency key today — burn-down #8351
+openbank-lending-service POST /api/v1/lending/applications/{id}/advance  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/applications/{id}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/applications/{id}/disburse  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/collateral/{id}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/compliance-packs/proposals  # creation POST with no idempotency key today — burn-down #8351
+openbank-lending-service POST /api/v1/lending/compliance-packs/proposals/{id}/decide  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/intake/applications  # creation POST with no idempotency key today — burn-down #8351
+openbank-lending-service POST /api/v1/lending/intake/quotes  # creation POST with no idempotency key today — burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/accelerate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/collateral  # creation POST with no idempotency key today — burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/forbearance  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/installments/{installmentId}/repay  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/mark-defaulted  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/mark-delinquent  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/reschedule  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/settle  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/settlement-quote  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/termination/decide  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/termination/propose  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/withdrawal  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-lending-service POST /api/v1/lending/loans/{id}/writeoff  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-sanctions-service POST /api/v1/sanctions/lists/refresh-all  # creation POST with no idempotency key today — burn-down #8351
+openbank-sanctions-service POST /api/v1/sanctions/lists/{listType}/refresh  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-sanctions-service POST /api/v1/sanctions/review  # creation POST with no idempotency key today — burn-down #8351
+openbank-sca-service POST /api/v1/sca/challenges  # creation POST with no idempotency key today — burn-down #8351
+openbank-sca-service POST /api/v1/sca/challenges/{id}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-sca-service POST /api/v1/sca/challenges/{id}/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-sca-service POST /api/v1/sca/parties/{partyId}/devices  # creation POST with no idempotency key today — burn-down #8351
+openbank-sdd-service POST /api/v1/sdd/collections/authorise  # creation POST with no idempotency key today — burn-down #8351
+openbank-sdd-service POST /api/v1/sdd/mandates  # creation POST with no idempotency key today — burn-down #8351
+openbank-sdd-service POST /api/v1/sdd/mandates/{id}/cancel  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-sdd-service POST /api/v1/sdd/mandates/{id}/confirm  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-sdd-service POST /api/v1/sdd/mandates/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-sdd-service POST /api/v1/sdd/mandates/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-sepa-instant POST /api/v1/sepa-instant/{paymentId}/recall  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-sepa-payment POST /api/v1/sepa-payments/returns  # creation POST with no idempotency key today — burn-down #8351
+openbank-standing-order-service POST /api/v1/standing-orders  # creation POST with no idempotency key today — burn-down #8351
+openbank-standing-order-service POST /api/v1/standing-orders/{id}/pause  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-standing-order-service POST /api/v1/standing-orders/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-swift-service POST /api/v1/swift/{id}/ack  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-swift-service POST /api/v1/swift/{id}/reject  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-vop-service POST /api/v1/vop/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351

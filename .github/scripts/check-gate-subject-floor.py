@@ -60,6 +60,7 @@ NO_CORPUS = {
     "agent-review-proof-falsifiable",
     "argocd-sync-integrity-unit-test",
     "agent-review-scope-falsifiable",
+    "alert-rca-ledger-guards",
     "auto-deploy-reconcile-probe-unit-test",
     "blocking-counterpart-probe-unit-test",
     "can-i-deploy-block-classifier-unit-test",
@@ -72,6 +73,7 @@ NO_CORPUS = {
     "pact-version-tree-equivalence-unit-test",
     "record-deployment-version-resolver",
     "runtime-conformance-comparators",
+    "standing-critical-digest-guards",
     "supersede-deploy-prs-ancestry",
 
     # SELF-TEST SUITES THAT DO READ THE REAL TREE, and are fail-closed about it. These are the
