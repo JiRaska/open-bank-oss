@@ -228,8 +228,9 @@ data class BalanceEvent(
      * one NULL before.
      *
      * **This is a serialised data class, not a hand-built map** — the wire keys are these Kotlin
-     * property names, so `KafkaBalanceEventPublisher.mapper.writeValueAsString` emits `actorId` and
-     * `actorType` with no literal appearing anywhere in this module. A grep for `"actorId"` over
+     * property names, so the outbox payload's `ObjectMapper.writeValueAsString` (the same call the
+     * pre-#8510 direct emitter made) emits `actorId` and `actorType` with no literal appearing
+     * anywhere in this module. A grep for `"actorId"` over
      * balance-service therefore found nothing before this change and finds nothing after it, which
      * is the exact blind spot that hides half of this fleet's event fields.
      *

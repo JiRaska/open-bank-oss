@@ -21,6 +21,8 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
+    // ADR-0281: service bearer token on the outbound net-settlement journal post to ledger-service.
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.redis.client)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)

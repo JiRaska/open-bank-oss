@@ -232,8 +232,10 @@ spec:
         host: "*"
 ---
 # ── clearing-service (#2665 Tier 1) ─────────────────────────────────────────
-# Produces openbank.clearing.batch.event (net settlement obligations to ledger).
-# No incoming channels; no consumer-group ACL needed.
+# Produces openbank.clearing.batch.event (net settlement obligations to ledger) and — ADR-0281 —
+# self-consumes it on channel `clearing-net-settlement-in` (group.id falls back to
+# quarkus.application.name = openbank-clearing-service) to post the net-settlement journal, with
+# an explicit per-channel DLQ (#5745).
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser
 metadata:
@@ -252,6 +254,24 @@ spec:
       - resource:
           type: topic
           name: openbank.clearing.batch.event
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.clearing.batch.event
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-clearing-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.clearing-service.clearing-net-settlement-in
           patternType: literal
         operations: [Write, Describe]
         host: "*"
