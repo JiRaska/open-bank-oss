@@ -120,6 +120,13 @@ spec:
               value: https://ares.gov.cz/ekonomicke-subjekty-v-be/rest
             - name: GLEIF_BASE_URL
               value: https://api.gleif.org/api/v1
+            # Companies House (GB). Free of charge but key-gated, and no key is configured here
+            # on purpose: this repo carries no credential, and the adapter declines GB_CRN
+            # entirely without one (logging that at STARTUP, not on the first GB lookup), so GB
+            # cases fall back to manual attestation instead of failing. To turn the register on,
+            # add OPENBANK_KYB_COMPANIES_HOUSE_API_KEY from a Secret alongside this URL.
+            - name: COMPANIES_HOUSE_BASE_URL
+              value: https://api.company-information.service.gov.uk
             # Kafka consumer-group override (dotted YAML keys are inert in the deployed pod).
             - name: SMALLRYE_CONFIG_LOCATIONS
               value: /mnt/msg-override/override.properties
