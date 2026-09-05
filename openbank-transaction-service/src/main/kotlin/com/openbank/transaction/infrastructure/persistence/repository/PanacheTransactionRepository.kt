@@ -76,6 +76,20 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
         }.awaitSuspending()
     }
 
+    /**
+     * The most recent non-blank transaction descriptions, newest first, capped at [limit] (#8573).
+     *
+     * Feeds the operator's unmatched-descriptor worklist. Deliberately a bounded window and not a
+     * full scan: normalisation lives in Kotlin, so the anti-join against the catalogue cannot run
+     * in SQL, and an operator wants the frequent ones rather than an exhaustive answer. Returns raw
+     * acquirer descriptors — the caller normalises.
+     */
+    suspend fun recentDescriptions(limit: Int): List<String> = Panache.withSession {
+        find("description is not null and description <> '' order by bookingDate desc, initiatedAt desc")
+            .page(0, limit)
+            .list()
+    }.awaitSuspending().mapNotNull { it.description }
+
     override suspend fun countStuckSagas(olderThan: Instant): Long = Panache.withSession {
         count(
             "status in ?1 and initiatedAt <= ?2",
