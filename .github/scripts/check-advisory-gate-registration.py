@@ -20,6 +20,15 @@
 #   This script closes the loop from the CI side: rules.yaml can no longer be the only place that
 #   knows a gate exists.
 #
+#   THE OTHER DIRECTION (#7941). The loop above starts from an ADVISORY gate, so the only
+#   disagreement it can see is "gate advisory, rule enforced". The mirror — the gate already
+#   BLOCKS while its rule still says `enforced: advisory` with a `target_enforce_date` — was
+#   invisible, because an enforced gate was never enumerated. `cnpg_backup_declared` sat that
+#   way: gates.yaml `mode: enforced`, `verified: 2026-08-16`; rules.yaml `enforced: advisory`,
+#   due 2026-09-15. Besides being the same permanent-advisory defect recorded in the other file,
+#   it arms an outage — on the stale date check-gate-graduation.sh fails every PR in the repo
+#   over a control that has enforced for weeks, which is #7897 exactly.
+#
 # WHAT IT CHECKS
 #   For every advisory governance gate — whether declared in .github/gates/gates.yaml or still
 #   living as a workflow step — the checker it runs (`check-*.py|sh`, `run-evals.py`) must be named
@@ -155,6 +164,36 @@ def advisory_manifest_gates(root: pathlib.Path, errors):
             yield MANIFEST, gate.get("group", "?"), gate.get("id", "?"), script
 
 
+def enforced_manifest_gates(root: pathlib.Path, errors):
+    """Yield (source, group, gate-name, script) for ENFORCED gates in .github/gates/gates.yaml.
+
+    The mirror of advisory_manifest_gates, and the direction this script was missing (#7941).
+    Everything above walks the ADVISORY gates, so the pair it can detect is "gate advisory,
+    rule enforced". The opposite pair — the gate already BLOCKS while its rule still says
+    `enforced: advisory` with a `target_enforce_date` — never entered any loop, because an
+    enforced gate was never enumerated at all.
+
+    That is not the harmless half. A rule left advisory after its producer graduated is the
+    exact failure ADR-0144 exists to prevent, and here it also arms a fleet-wide outage: on the
+    stale `target_enforce_date`, check-gate-graduation.sh fails EVERY PR over a control that has
+    been enforcing for weeks. `cnpg_backup_declared` was in that state — gates.yaml `mode:
+    enforced` and `verified: 2026-08-16`, rules.yaml `enforced: advisory` due 2026-09-15 — and
+    would have repeated #7897 a fortnight later.
+    """
+    f = root / MANIFEST
+    if not f.is_file():
+        return
+    try:
+        doc = yaml.safe_load(f.read_text()) or {}
+    except yaml.YAMLError:
+        return  # advisory_manifest_gates already reported it; do not double-count
+    for gate in doc.get("gates") or []:
+        if gate.get("mode") != "enforced":
+            continue
+        for script in CHECKER_RE.findall(str(gate.get("run") or "")):
+            yield MANIFEST, gate.get("group", "?"), gate.get("id", "?"), script
+
+
 def self_test() -> int:
     """Falsify the rules walker and both advisory-gate discoverers.
 
@@ -250,12 +289,77 @@ def self_test() -> int:
             fails.append("an ENFORCED gate was discovered as advisory — it would then be "
                          "required to carry a target_enforce_date it has no need of")
 
+        # --- the reverse discoverer (#7941) ------------------------------------------------
+        # The mirror of the two assertions above, and the direction this script was blind to.
+        # It must find the ENFORCED gate and must NOT find the advisory one, or the new check
+        # either misses the drift it exists for or re-reports every advisory gate as drifted.
+        enf_found = {script for _s, _g, _i, script in enforced_manifest_gates(root, [])}
+        if ".github/scripts/check-enf.py" not in enf_found:
+            fails.append(f"the enforced manifest gate was not discovered: {sorted(enf_found)}")
+        if ".github/scripts/check-adv.py" in enf_found:
+            fails.append("an ADVISORY gate was discovered as enforced — every advisory gate "
+                         "would then be reported as drifted from its own rule")
+
+        # END TO END, which is what actually matters: the same tree must go RED while the rule
+        # lags its enforced gate, and GREEN once the rule catches up. Asserting only the
+        # discoverer would leave the comparison itself unfalsified — a set of gate names proves
+        # nothing about whether anything is compared to rules.yaml.
+        drift_root = root / "drift"
+        (drift_root / ".github" / "gates").mkdir(parents=True, exist_ok=True)
+        (drift_root / RULES).parent.mkdir(parents=True, exist_ok=True)
+        (drift_root / ".github" / "gates" / "gates.yaml").write_text(
+            "gates:\n"
+            "  - id: enf\n"
+            "    name: an enforced gate\n"
+            "    group: lint\n"
+            "    mode: enforced\n"
+            "    run: |\n"
+            "      python3 .github/scripts/check-enf.py\n"
+        )
+        lagging = (
+            "lagging_rule:\n"
+            "  enforced: advisory\n"
+            '  target_enforce_date: "2026-12-31"\n'
+            '  ci_producer: ".github/scripts/check-enf.py"\n'
+        )
+        caught_up = (
+            "lagging_rule:\n"
+            "  enforced: enforce\n"
+            '  enforced_since: "2026-09-01"\n'
+            '  ci_producer: ".github/scripts/check-enf.py"\n'
+        )
+        import io, contextlib
+
+        def run_against(text):
+            (drift_root / RULES).write_text(text)
+            buf = io.StringIO()
+            argv = sys.argv
+            sys.argv = ["x", "--root", str(drift_root)]
+            try:
+                with contextlib.redirect_stderr(buf), contextlib.redirect_stdout(io.StringIO()):
+                    rc = main()
+            finally:
+                sys.argv = argv
+            return rc, buf.getvalue()
+
+        rc, out = run_against(lagging)
+        if rc != 1:
+            fails.append("a rule still `advisory` while its gate is `mode: enforced` did not "
+                         "fail the check — the drift that armed #7897 goes unreported")
+        elif "BLOCKS today" not in out:
+            fails.append(f"the drift was flagged for the wrong reason: {out.strip()[:200]}")
+        # ...and the SAME tree, one field changed, must go green. Without this the check could
+        # be failing on anything at all and still look correct above.
+        rc, out = run_against(caught_up)
+        if rc != 0:
+            fails.append(f"a rule that caught up to its enforced gate still fails: {out.strip()[:200]}")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: advisory-gate registration is falsifiable (9 cases)")
+    print("self-test ok: advisory-gate registration is falsifiable (13 cases)")
     return 0
 
 
@@ -311,11 +415,33 @@ def main() -> int:
                 f"`target_enforce_date` (ADR-0144 requires one).",
             )
 
+    # --- the reverse direction (#7941) --------------------------------------------------
+    # An ENFORCED gate whose rule still reads `enforced: advisory|planned`. Nothing above can
+    # see this: every loop so far starts from an advisory gate.
+    enforced_checked = 0
+    for _wf, job, name, script in enforced_manifest_gates(root, errors):
+        if script not in producers:
+            continue  # an enforced gate needs no rule; that is not this check's business
+        enforced_checked += 1
+        rule, enforced, has_date = producers[script]
+        if enforced in GRADUATING:
+            errors.append(
+                f"{MANIFEST} :: {job} :: {name} — the gate is `mode: enforced` and BLOCKS today, "
+                f"but rules.yaml `{rule}` still declares `enforced: {enforced}`"
+                + (" with a `target_enforce_date`" if has_date else "")
+                + ". The producer graduated and the rule did not follow it, which is the "
+                "permanent-advisory failure ADR-0144 exists to prevent — and while the stale "
+                "date stands, check-gate-graduation.sh will fail EVERY PR on it the day it "
+                "passes, over a control that already enforces (#7897). Set `enforced: enforce` "
+                "+ `enforced_since:` and drop the date.",
+            )
+
     if errors:
         for e in errors:
             sys.stderr.write(f"::error title=Advisory gate registration::{e}\n")
         sys.stderr.write(
-            f"::error::check-advisory-gate-registration: {len(errors)} unregistered advisory gate(s).\n",
+            f"::error::check-advisory-gate-registration: {len(errors)} gate/rule "
+            f"registration mismatch(es).\n",
         )
         return 1
 
@@ -323,7 +449,8 @@ def main() -> int:
         f"advisory-gate registration: {checked} advisory governance gate(s) checked "
         f"({len(from_manifest)} from {MANIFEST}, {checked - len(from_manifest)} from workflow "
         f"steps) against {len(producers)} rules.yaml ci_producer entr(ies); all registered with "
-        f"a deadline.",
+        f"a deadline. {enforced_checked} enforced gate(s) cross-checked the other way; none is "
+        f"still advisory in rules.yaml.",
     )
     return 0
 

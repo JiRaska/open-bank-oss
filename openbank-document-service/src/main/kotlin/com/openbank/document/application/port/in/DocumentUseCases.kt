@@ -83,8 +83,18 @@ interface DocumentQueryUseCase {
     suspend fun getMetadata(id: UUID): Document?
     suspend fun getContent(id: UUID): ByteArray?
 
-    /** Documents for a party/case — lets the compliance/legal persona browse, not just look up by id. */
+    /**
+     * EVERY document of a party, unbounded — the onboarding-agreement resolution only (see
+     * [com.openbank.document.application.port.out.DocumentRepositoryPort.findByParty]).
+     * The REST browse path must use [listByPartyPaged] (#8082).
+     */
     suspend fun listByParty(partyRef: String): List<Document>
+
+    /** One page of a party's documents, newest first — the compliance/legal browse (#8082). */
+    suspend fun listByPartyPaged(partyRef: String, page: Int, size: Int): List<Document>
+
+    /** Total documents for [partyRef], so a caller can tell a full page from the whole set. */
+    suspend fun countByParty(partyRef: String): Long
 
     /** The document previously issued under [key] (e.g. onboarding idempotency key), or null. */
     suspend fun findByIdempotencyKey(key: String): Document?

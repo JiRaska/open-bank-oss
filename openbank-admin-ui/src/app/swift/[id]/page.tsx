@@ -68,7 +68,7 @@ export default function SwiftDetailPage() {
   useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id])
 
   return (
-    <AuthGuard permission="payments:view">
+    <AuthGuard permission="payment-rails:view">
     <div>
       <PageHeader
         title={message?.messageType ?? t('SWIFT zpráva', 'SWIFT message')}

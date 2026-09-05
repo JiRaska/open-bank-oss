@@ -63,7 +63,7 @@ EBA/GL/2019/04 Sekce 3.3 (ICT bezpečnostní testování) vyžaduje:
 - OIDC vypnuto (interní nástroj; žádná externí attack surface pro bypass autentizace)
 - Network policy: scanner je dosažitelný pouze z admin-ui a cluster-interních služeb
 - Žádná zákaznická data nejsou ukládána ani zpracovávána
-- BootstrapVerifier blokuje dev DB hesla v produkčním profilu
+- ⬜ **`BootstrapVerifier` neexistuje** — dev DB heslo při startu nic neblokuje. Credential se do podu dostane přes `secretKeyRef` z ESO/OpenBao v `security-scanner-service.yaml` (ADR-0007), což je vlastnost konfigurace, ne kontrola v aplikaci (#8426)
 - Služba si stále drží producentskou identitu pro Kafku (KafkaUser + mTLS) pro topic ICT incidentů
 
 ## Audit trail — co skutečně existuje

@@ -63,7 +63,7 @@ EBA/GL/2019/04 Section 3.3 (ICT security testing) requires:
 - OIDC disabled (internal tool; no external attack surface for auth bypass)
 - Network policy: scanner can only be reached from admin-ui and cluster-internal services
 - No customer data stored or processed
-- BootstrapVerifier blocks dev DB passwords in production profile
+- ⬜ **`BootstrapVerifier` does not exist** — nothing blocks a dev DB password at startup. The credential reaches the pod through `secretKeyRef` from ESO/OpenBao in `security-scanner-service.yaml` (ADR-0007), which is a configuration property, not a control in the application (#8426)
 - The service still holds a Kafka producer identity (KafkaUser + mTLS) for the ICT incident topic
 
 ## Audit trail — what actually exists

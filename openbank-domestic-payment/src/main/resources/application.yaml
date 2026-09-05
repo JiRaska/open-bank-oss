@@ -130,6 +130,15 @@ mp:
         client.id: domestic-payment-${quarkus.uuid}
         topic: openbank.domestic.payment.events
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # #8432: TRANSACTION_FAILED for a scheme-rejected payment. A direct emitter rather than a
+      # consumer of this rail's own event topic — the status-changed event carries no amount,
+      # currency or owner party (see KafkaCustomerNotificationPublisher).
+      notification-requests-out:
+        connector: smallrye-kafka
+        client.id: domestic-payment-notifications-${quarkus.uuid}
+        topic: openbank.notification.requests
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
       # Expand-first delegated-spend projection. It remains inert until an operator separately
       # enables this consumer after V13/V14 and a compatible image are live. group.id and

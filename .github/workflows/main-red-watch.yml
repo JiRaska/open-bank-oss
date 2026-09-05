@@ -70,6 +70,7 @@ on:
       - "AI governance snapshot"
       - "API contract post-merge guard"
       - "EU AI Act registry"
+      - "Evals - copilot proposal quality"
       - "Evals - fraud review"
       - "Fleet lint"
       - "Label sync"
