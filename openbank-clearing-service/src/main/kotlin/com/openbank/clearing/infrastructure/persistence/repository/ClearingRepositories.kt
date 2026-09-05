@@ -79,18 +79,21 @@ class ClearingBatchRepositoryImpl @Inject constructor(
     }
 
     /**
-     * #8509: the batch update, the item flips and the outbox row in ONE `sf.withTransaction`.
+     * #8509: the batch update, the item flips and the outbox rows in ONE `sf.withTransaction`.
      * `outboxRepo.persistInTransaction` is a Panache persist, which joins the reactive session
-     * bound to this Vert.x context — so all three writes commit or roll back together. The item
+     * bound to this Vert.x context — so all the writes commit or roll back together. The item
      * merges are `transformToUniAndConcatenate` (one operation at a time per session), mirroring
      * `ClearingItemRepositoryImpl.saveAll`, and `merge` rather than `persist` for the same reason
      * documented there: the items are already persisted, re-attached as detached copies.
+     * ADR-0281 widened `event` to `events` (the `batch.settled` event + the `net_settlement.post`
+     * command) — both rows commit with the state change, so a SETTLED batch always has its
+     * settlement-leg intent durable.
      */
     @WithTransaction
-    override fun settleWithEvent(
+    override fun settleWithEvents(
         batch: ClearingBatch,
         items: List<ClearingItem>,
-        event: OutboxMessage,
+        events: List<OutboxMessage>,
     ): Uni<ClearingBatch> = sf.withTransaction { s ->
         s.find(ClearingBatchEntity::class.java, batch.id).flatMap { e ->
             if (e == null) {
@@ -109,7 +112,11 @@ class ClearingBatchRepositoryImpl @Inject constructor(
                             .onItem().transformToUniAndConcatenate { s.merge(it) }
                             .collect().asList()
                     }
-                    .flatMap { outboxRepo.persistInTransaction(event) }
+                    .flatMap {
+                        Multi.createFrom().iterable(events)
+                            .onItem().transformToUniAndConcatenate { outboxRepo.persistInTransaction(it) }
+                            .collect().asList()
+                    }
                     .map { mapper.toDomain(e) }
             }
         }

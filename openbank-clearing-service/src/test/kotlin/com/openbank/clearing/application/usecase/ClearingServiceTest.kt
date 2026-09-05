@@ -13,6 +13,7 @@ import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.clearing.domain.model.PaymentRail
 import com.openbank.clearing.domain.model.SubmitPaymentRequest
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
@@ -100,8 +101,10 @@ class ClearingServiceTest {
         every { batchRepo.findById(batchId) } returns Uni.createFrom().item(batch)
         every { itemRepo.findByBatchId(batchId) } returns Uni.createFrom().item(items)
         every { eventPublisher.batchSettledMessage(any()) } returns mockk()
+        every { eventPublisher.netSettlementPostMessage(any()) } returns mockk()
+        val eventsSlot: CapturingSlot<List<OutboxMessage>> = slot()
         every {
-            batchRepo.settleWithEvent(capture(updatedSlot), capture(itemsSlot), any())
+            batchRepo.settleWithEvents(capture(updatedSlot), capture(itemsSlot), capture(eventsSlot))
         } returns Uni.createFrom().item(savedBatch)
 
         val result = service.settleBatch(batchId).await().indefinitely()
@@ -110,8 +113,11 @@ class ClearingServiceTest {
         assertThat(updatedSlot.captured.status).isEqualTo(ClearingStatus.SETTLED)
         assertThat(updatedSlot.captured.settledAt).isNotNull()
         assertThat(itemsSlot.captured).allSatisfy { assertThat(it.status).isEqualTo(ClearingStatus.SETTLED) }
+        // ADR-0281: the batch.settled event AND the net_settlement.post command commit together.
+        assertThat(eventsSlot.captured).hasSize(2)
         verify { eventPublisher.batchSettledMessage(any()) }
-        verify { batchRepo.settleWithEvent(any(), any(), any()) }
+        verify { eventPublisher.netSettlementPostMessage(any()) }
+        verify { batchRepo.settleWithEvents(any(), any(), any()) }
     }
 
     @Test
@@ -123,7 +129,7 @@ class ClearingServiceTest {
         assertThatThrownBy { service.settleBatch(batchId).await().indefinitely() }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessage("Batch not found: $batchId")
-        verify(exactly = 0) { batchRepo.settleWithEvent(any(), any(), any()) }
+        verify(exactly = 0) { batchRepo.settleWithEvents(any(), any(), any()) }
         verify(exactly = 0) { eventPublisher.batchSettledMessage(any()) }
     }
 
