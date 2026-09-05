@@ -131,15 +131,14 @@ class CardProcessingService(
         return if (counted == provisional) first else ask(command, counted)
     }
 
-    private suspend fun ask(command: AuthorizationCommand, counted: CountedSpend): IssuerDecision =
-        issuerPolicy.decide(
-            cardId = command.cardId,
-            amountMinorUnits = command.amountMinorUnits,
-            channel = command.channel,
-            mcc = command.mcc,
-            countryCode = command.merchantCountry,
-            counted = counted,
-        )
+    private suspend fun ask(command: AuthorizationCommand, counted: CountedSpend): IssuerDecision = issuerPolicy.decide(
+        cardId = command.cardId,
+        amountMinorUnits = command.amountMinorUnits,
+        channel = command.channel,
+        mcc = command.mcc,
+        countryCode = command.merchantCountry,
+        counted = counted,
+    )
 
     private fun record(
         command: AuthorizationCommand,
@@ -172,37 +171,36 @@ class CardProcessingService(
     private fun eventTypeFor(a: CardAuthorization): String =
         if (a.status == AuthorizationStatus.APPROVED) CardAuthorised.EVENT_TYPE else CardDeclined.EVENT_TYPE
 
-    private fun eventFor(a: CardAuthorization): CardProcessingEvent =
-        if (a.status == AuthorizationStatus.APPROVED) {
-            CardAuthorised(
-                authorizationId = a.id,
-                cardId = a.cardId,
-                accountId = a.accountId,
-                partyId = a.partyId,
-                amountMinorUnits = a.amountMinorUnits,
-                currencyCode = a.currencyCode,
-                channel = a.channel,
-                mcc = a.mcc,
-                category = a.category,
-                merchantName = a.merchantName,
-                merchantCountry = a.merchantCountry,
-                expiresAt = a.expiresAt,
-                occurredAt = a.authorizedAt,
-            )
-        } else {
-            CardDeclined(
-                authorizationId = a.id,
-                cardId = a.cardId,
-                accountId = a.accountId,
-                partyId = a.partyId,
-                amountMinorUnits = a.amountMinorUnits,
-                currencyCode = a.currencyCode,
-                channel = a.channel,
-                reason = a.declineReason ?: DECLINE_REASON_UNSTATED,
-                category = a.category,
-                occurredAt = a.authorizedAt,
-            )
-        }
+    private fun eventFor(a: CardAuthorization): CardProcessingEvent = if (a.status == AuthorizationStatus.APPROVED) {
+        CardAuthorised(
+            authorizationId = a.id,
+            cardId = a.cardId,
+            accountId = a.accountId,
+            partyId = a.partyId,
+            amountMinorUnits = a.amountMinorUnits,
+            currencyCode = a.currencyCode,
+            channel = a.channel,
+            mcc = a.mcc,
+            category = a.category,
+            merchantName = a.merchantName,
+            merchantCountry = a.merchantCountry,
+            expiresAt = a.expiresAt,
+            occurredAt = a.authorizedAt,
+        )
+    } else {
+        CardDeclined(
+            authorizationId = a.id,
+            cardId = a.cardId,
+            accountId = a.accountId,
+            partyId = a.partyId,
+            amountMinorUnits = a.amountMinorUnits,
+            currencyCode = a.currencyCode,
+            channel = a.channel,
+            reason = a.declineReason ?: DECLINE_REASON_UNSTATED,
+            category = a.category,
+            occurredAt = a.authorizedAt,
+        )
+    }
 
     override suspend fun clear(command: PresentmentCommand): PresentmentOutcome {
         val existing = repository.findById(command.authorizationId)
@@ -303,17 +301,14 @@ class CardProcessingService(
      * claims rows in `created_at` order, so a row stamped from a different clock than its neighbours
      * sorts unpredictably (#3272 is the same field, one severity worse).
      */
-    private fun outboxMessage(
-        aggregateId: UUID,
-        eventType: String,
-        event: CardProcessingEvent,
-    ): OutboxMessage = OutboxMessage(
-        eventId = UUID.randomUUID(),
-        aggregateId = aggregateId,
-        eventType = eventType,
-        payload = mapper.writeValueAsString(event),
-        createdAt = Instant.now(clock),
-    )
+    private fun outboxMessage(aggregateId: UUID, eventType: String, event: CardProcessingEvent): OutboxMessage =
+        OutboxMessage(
+            eventId = UUID.randomUUID(),
+            aggregateId = aggregateId,
+            eventType = eventType,
+            payload = mapper.writeValueAsString(event),
+            createdAt = Instant.now(clock),
+        )
 
     companion object {
         const val RELEASE_KIND_REVERSAL = "REVERSAL"

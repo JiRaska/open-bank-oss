@@ -10,7 +10,6 @@ import com.openbank.cardprocessing.application.port.out.CardOwnership
 import com.openbank.cardprocessing.application.port.out.IssuerDecision
 import com.openbank.cardprocessing.domain.model.CountedSpend
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
-import com.openbank.cardprocessing.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -54,7 +53,7 @@ import java.util.UUID
  * replay.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(com.openbank.cardprocessing.it.PostgresTestResource::class)
 @TestProfile(CardAuthorizationOutboxIT.StubbedIssuerProfile::class)
 @TestSecurity(user = "card-processing-it", roles = ["ROLE_OPERATOR"])
 class CardAuthorizationOutboxIT {
@@ -79,7 +78,9 @@ class CardAuthorizationOutboxIT {
     @Alternative
     @Priority(1)
     @ApplicationScoped
-    class StubIssuer : CardLookupPort, CardIssuancePolicyPort {
+    class StubIssuer :
+        CardLookupPort,
+        CardIssuancePolicyPort {
         override suspend fun lookup(cardId: UUID): CardOwnership? =
             if (cardId == KNOWN_CARD) CardOwnership(ACCOUNT, PARTY, "CZK") else null
 

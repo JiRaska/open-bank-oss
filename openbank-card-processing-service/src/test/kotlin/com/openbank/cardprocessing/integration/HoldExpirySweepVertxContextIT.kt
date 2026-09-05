@@ -9,7 +9,6 @@ import com.openbank.cardprocessing.application.port.`in`.CardProcessingUseCase
 import com.openbank.cardprocessing.application.port.`in`.PresentmentCommand
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.PresentmentOutcome
-import com.openbank.cardprocessing.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -42,7 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * `AuthorizationLifecycleTest`'s job, where every branch is reachable without a database.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(com.openbank.cardprocessing.it.PostgresTestResource::class)
 @TestProfile(HoldExpirySweepVertxContextIT.FastSweepProfile::class)
 class HoldExpirySweepVertxContextIT {
 
@@ -75,8 +74,7 @@ class HoldExpirySweepVertxContextIT {
         override suspend fun clear(command: PresentmentCommand): PresentmentOutcome =
             error("not exercised by this test")
 
-        override suspend fun reverse(authorizationId: UUID): PresentmentOutcome =
-            error("not exercised by this test")
+        override suspend fun reverse(authorizationId: UUID): PresentmentOutcome = error("not exercised by this test")
 
         override suspend fun findById(id: UUID): CardAuthorization? = null
 

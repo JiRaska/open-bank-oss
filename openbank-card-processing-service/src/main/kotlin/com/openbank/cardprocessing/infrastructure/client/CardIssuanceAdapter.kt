@@ -35,7 +35,8 @@ class CardIssuanceAdapter(
     @RestClient private val client: CardIssuanceClient,
     @ConfigProperty(name = "openbank.card-processing.default-currency", defaultValue = "CZK")
     private val defaultCurrency: String,
-) : CardLookupPort, CardIssuancePolicyPort {
+) : CardLookupPort,
+    CardIssuancePolicyPort {
 
     private val log = Logger.getLogger(CardIssuanceAdapter::class.java)
 

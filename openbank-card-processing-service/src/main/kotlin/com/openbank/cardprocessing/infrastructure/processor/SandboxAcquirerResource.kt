@@ -119,15 +119,13 @@ data class SandboxPurchaseResponse(
     val networkReference: String,
 ) {
     companion object {
-        fun of(
-            authorization: com.openbank.cardprocessing.domain.model.CardAuthorization,
-            reference: String,
-        ) = SandboxPurchaseResponse(
-            authorizationId = authorization.id,
-            status = authorization.status.name,
-            declineReason = authorization.declineReason,
-            clearedAmountMinorUnits = authorization.clearedAmountMinorUnits,
-            networkReference = reference,
-        )
+        fun of(authorization: com.openbank.cardprocessing.domain.model.CardAuthorization, reference: String) =
+            SandboxPurchaseResponse(
+                authorizationId = authorization.id,
+                status = authorization.status.name,
+                declineReason = authorization.declineReason,
+                clearedAmountMinorUnits = authorization.clearedAmountMinorUnits,
+                networkReference = reference,
+            )
     }
 }

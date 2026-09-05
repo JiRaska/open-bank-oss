@@ -18,8 +18,7 @@ import jakarta.ws.rs.ext.Provider
  */
 @Provider
 class CardNotFoundExceptionMapper : ExceptionMapper<CardNotFoundException> {
-    override fun toResponse(exception: CardNotFoundException): Response =
-        Response.status(Response.Status.NOT_FOUND)
-            .entity(mapOf("error" to "CARD_NOT_FOUND", "message" to exception.message))
-            .build()
+    override fun toResponse(exception: CardNotFoundException): Response = Response.status(Response.Status.NOT_FOUND)
+        .entity(mapOf("error" to "CARD_NOT_FOUND", "message" to exception.message))
+        .build()
 }

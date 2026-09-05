@@ -122,10 +122,7 @@ class CardProcessingResource(private val useCase: CardProcessingUseCase) {
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "cardprocessing.read", resource = "#cardId")
     @Operation(summary = "Authorisations for one card, newest first")
-    suspend fun byCard(
-        @PathParam("cardId") cardId: UUID,
-        @QueryParam("limit") limit: Int?,
-    ): Response {
+    suspend fun byCard(@PathParam("cardId") cardId: UUID, @QueryParam("limit") limit: Int?): Response {
         val page = useCase.findByCard(cardId, (limit ?: DEFAULT_LIMIT).coerceIn(1, MAX_LIMIT))
         return Response.ok(AuthorizationListResponse(page.map(AuthorizationResponseDto::of), page.size)).build()
     }

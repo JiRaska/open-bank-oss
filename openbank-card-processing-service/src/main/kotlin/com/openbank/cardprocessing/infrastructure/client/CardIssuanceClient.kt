@@ -37,10 +37,7 @@ interface CardIssuanceClient {
     @POST
     @Path("/{id}/authorizations")
     @Consumes(MediaType.APPLICATION_JSON)
-    suspend fun authorize(
-        @PathParam("id") id: UUID,
-        request: IssuerAuthorizationRequest,
-    ): IssuerAuthorizationResponse
+    suspend fun authorize(@PathParam("id") id: UUID, request: IssuerAuthorizationRequest): IssuerAuthorizationResponse
 }
 
 /**

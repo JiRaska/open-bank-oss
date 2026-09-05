@@ -27,11 +27,7 @@ interface CardAuthorizationRepository {
      * authorisation request impossible to turn into a second hold. Written once on insert; an
      * update never rewrites it.
      */
-    suspend fun save(
-        authorization: CardAuthorization,
-        event: OutboxMessage,
-        idempotencyKey: String,
-    ): CardAuthorization
+    suspend fun save(authorization: CardAuthorization, event: OutboxMessage, idempotencyKey: String): CardAuthorization
 
     suspend fun findById(id: UUID): CardAuthorization?
 

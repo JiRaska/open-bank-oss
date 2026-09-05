@@ -276,29 +276,27 @@ class CardProcessingServiceTest {
         Unit
     }
 
-    private fun authorization(
-        status: AuthorizationStatus,
-        expiresAt: Instant = now.plusSeconds(3600),
-    ) = CardAuthorization(
-        id = UUID.randomUUID(),
-        cardId = cardId,
-        accountId = accountId,
-        partyId = partyId,
-        amountMinorUnits = 10_000,
-        currencyCode = "CZK",
-        channel = PresentmentChannel.ONLINE,
-        mcc = "5812",
-        merchantName = "Restaurace",
-        merchantCountry = "CZ",
-        status = status,
-        category = "RESTAURANTS",
-        declineReason = null,
-        clearedAmountMinorUnits = 0,
-        networkReference = "acq-42",
-        authorizedAt = now.minusSeconds(120),
-        expiresAt = expiresAt,
-        updatedAt = now.minusSeconds(120),
-    )
+    private fun authorization(status: AuthorizationStatus, expiresAt: Instant = now.plusSeconds(3600)) =
+        CardAuthorization(
+            id = UUID.randomUUID(),
+            cardId = cardId,
+            accountId = accountId,
+            partyId = partyId,
+            amountMinorUnits = 10_000,
+            currencyCode = "CZK",
+            channel = PresentmentChannel.ONLINE,
+            mcc = "5812",
+            merchantName = "Restaurace",
+            merchantCountry = "CZ",
+            status = status,
+            category = "RESTAURANTS",
+            declineReason = null,
+            clearedAmountMinorUnits = 0,
+            networkReference = "acq-42",
+            authorizedAt = now.minusSeconds(120),
+            expiresAt = expiresAt,
+            updatedAt = now.minusSeconds(120),
+        )
 
     @Test
     fun `the spend window is the accounting day, not UTC midnight`() {
