@@ -8,11 +8,13 @@ import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.flags.FeatureDisabledException
+import com.openbank.party.application.port.`in`.PartyMandateRejectedException
 import com.openbank.party.application.port.out.GdprAggregationAuthException
 import com.openbank.party.application.usecase.PartyAlreadyExistsException
 import com.openbank.party.application.usecase.PartyMergeRejectedException
 import com.openbank.party.application.usecase.PartyNotFoundException
 import io.vertx.pgclient.PgException
+import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
@@ -145,3 +147,14 @@ class GdprAggregationAuthMapper : ExceptionMapper<GdprAggregationAuthException> 
         private const val BAD_GATEWAY = 502
     }
 }
+
+/** ADR-0284: a mandate precondition failed (wrong party types, closed party). 422, not 400 — the request is well-formed. */
+@Provider
+class PartyMandateRejectedMapper : ExceptionMapper<PartyMandateRejectedException> {
+    override fun toResponse(e: PartyMandateRejectedException): Response = Response.status(UNPROCESSABLE)
+        .entity(mapOf("error" to "MANDATE_REJECTED", "message" to e.message))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+}
+
+private const val UNPROCESSABLE = 422

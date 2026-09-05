@@ -1,0 +1,232 @@
+quarkus:
+  application:
+    name: openbank-kyb-service
+
+  http:
+    port: 8157
+    test-port: 0
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key,X-Customer-Party-Id
+    header:
+      X-Content-Type-Options:
+        value: nosniff
+      X-Frame-Options:
+        value: DENY
+      Referrer-Policy:
+        value: strict-origin-when-cross-origin
+      Permissions-Policy:
+        value: "geolocation=(), microphone=(), camera=()"
+      Content-Security-Policy:
+        value: "default-src 'self'"
+      Strict-Transport-Security:
+        value: "max-age=31536000; includeSubDomains"
+    limits:
+      max-body-size: 1M
+    idle-timeout: 60S
+    read-timeout: 30S
+
+  datasource:
+    db-kind: postgresql
+    username: openbank
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: vertx-reactive:postgresql://localhost:5432/openbank_kyb
+    jdbc:
+      url: jdbc:postgresql://localhost:5432/openbank_kyb
+
+  flyway:
+    migrate-at-start: true
+    connect-retries: 10
+    connect-retries-interval: 2S
+    locations: db/migration
+
+  hibernate-orm:
+    database:
+      generation: none
+
+  oidc:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+
+  # OUTBOUND M2M for the party-service client (POST /parties, POST /parties/{id}/mandates are
+  # @RolesAllowed). `quarkus.oidc` above validates bearers this service RECEIVES; it mints nothing.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  smallrye-reactive-messaging:
+    kafka:
+      bootstrap-servers: localhost:29092
+
+  shutdown:
+    timeout: 30S
+
+  smallrye-health:
+    root-path: /q/health
+
+  log:
+    level: INFO
+    console:
+      format: '%d{HH:mm:ss} %-5p [%c{3.}] %s%e%n'
+      json: false
+
+  otel:
+    exporter:
+      otlp:
+        endpoint: http://localhost:4317
+    resource:
+      attributes:
+        service.name: openbank-kyb-service
+
+  rest-client:
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 5000
+    # Public registers (ADR-0284 D1). Free, no key. Egress from the pod goes through the NAT
+    # gateway; the NetworkPolicy generator sees these as external edges.
+    ares:
+      url: ${ARES_BASE_URL:https://ares.gov.cz/ekonomicke-subjekty-v-be/rest}
+      connect-timeout: 2000
+      read-timeout: 4000
+    gleif:
+      url: ${GLEIF_BASE_URL:https://api.gleif.org/api/v1}
+      connect-timeout: 2000
+      read-timeout: 4000
+
+  management:
+    enabled: true
+    port: 8090
+    host: 0.0.0.0
+    root-path: /q
+  dev-ui:
+    enabled: false
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      kyb-events-out:
+        connector: smallrye-kafka
+        client.id: kyb-service-${quarkus.uuid}
+        topic: openbank.kyb.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # Entity party reached ACTIVE (KYC + AML gate, ADR-0267) → the business case completes.
+      # `group.id` here is inert in the deployed pod (SmallRye quotes dotted leaf keys) and is
+      # supplied by kyb-service-msg-override.yaml; it is kept for local dev and tests.
+      party-events-in:
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        group.id: kyb-service
+        auto.offset.reset: latest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.kyb.party-events-in
+
+openbank:
+  kyb:
+    # How long a fetched register extract is reused before ARES/GLEIF is asked again.
+    extract-cache-ttl: PT24H
+    timers:
+      # Invited co-signers get half of this to identify themselves before a reminder, all of it
+      # before the case is abandoned; any other open state idles at most case-ttl-days.
+      invitation-ttl-days: 14
+      case-ttl-days: 60
+    # Temporal timers-worker switch (rules.yaml: temporal_worker_switch_naming).
+    worker:
+      enabled: ${KYB_WORKER_ENABLED:true}
+  temporal:
+    # ⚠ BUILD-TIME PROPERTY (lending #6085): TemporalBusinessOnboardingWorkflowAdapter is selected
+    # with @IfBuildProperty, so the DEFAULT per profile decides what ships — a container env var
+    # cannot flip it. Off for local/test; the %prod override below is the value in the image.
+    enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
+    server-url: ${TEMPORAL_FRONTEND_URL:temporal-frontend.temporal.svc.cluster.local:7233}
+    namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-kyb}
+    task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-kyb-onboarding}
+  outbox:
+    # Defaults to false fleet-wide; without this the case lifecycle never leaves kyb_outbox.
+    dispatch-enabled: true
+  rate-limit:
+    enabled: true
+    max-concurrent-requests: 100
+  api:
+    version: "1"
+  build:
+    time: "${BUILD_TIME:unknown}"
+  git:
+    commit: "${GIT_COMMIT:unknown}"
+
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  # Enforcing by default: the case routes mint an entity party and bind humans to it, and every
+  # customer route is scoped by X-Customer-Party-Id from the edge principal (kyb_rest_ext.rego).
+  enforce: "${AUTHZ_ENFORCE:true}"
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+
+"%prod":
+  openbank:
+    temporal:
+      enabled: true
+
+"%dev":
+  quarkus:
+    log:
+      level: DEBUG
+    oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+  authz:
+    enforce: "false"
+  openbank:
+    kyb:
+      worker:
+        enabled: false
+
+"%test":
+  quarkus:
+    datasource:
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5433/openbank_kyb_test
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+    oidc-client:
+      enabled: false
+  authz:
+    enforce: "false"
+  openbank:
+    kyb:
+      # No Temporal frontend in @QuarkusTest: the workflow test drives its own TestWorkflowEnvironment.
+      worker:
+        enabled: false

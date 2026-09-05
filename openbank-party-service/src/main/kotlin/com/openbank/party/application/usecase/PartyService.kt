@@ -25,6 +25,9 @@ import java.util.UUID
 
 private const val RC_KEY_VERSION = 1
 
+/** A party in either terminal state is outside the world a mandate describes (ADR-0284 D3). */
+private val MANDATE_INELIGIBLE = setOf(PartyStatus.CLOSED, PartyStatus.MERGED)
+
 class PartyNotFoundException(id: UUID) : RuntimeException("Party not found: $id")
 class PartyAlreadyExistsException(email: String) : RuntimeException("Party with email already exists: $email")
 class PartyKeycloakSubAlreadyBoundException(sub: String) : RuntimeException("Keycloak sub already registered: $sub")
@@ -42,6 +45,8 @@ class PartyService : PartyUseCase {
     @Inject lateinit var documentFileRepo: PartyDocumentFileRepository
 
     @Inject lateinit var payeeRepo: PartyPayeeRepository
+
+    @Inject lateinit var mandateRepo: PartyMandateRepository
 
     @Inject lateinit var gdprAggregation: GdprAggregationPort
 
@@ -93,6 +98,8 @@ class PartyService : PartyUseCase {
             nationality = cmd.nationality,
             taxId = cmd.taxId,
             registrationNumber = cmd.registrationNumber,
+            legalForm = cmd.legalForm,
+            registrationCountry = cmd.registrationCountry,
             email = cmd.email,
             phone = cmd.phone,
             address = cmd.address,
@@ -183,6 +190,81 @@ class PartyService : PartyUseCase {
     }
 
     override suspend fun getParty(id: UUID): Party = partyRepo.findById(id) ?: throw PartyNotFoundException(id)
+
+    // ── Representation mandates (ADR-0284 D3) ────────────────────────────────────────────────
+
+    override suspend fun grantMandate(cmd: GrantMandateCommand): PartyMandate {
+        val principal = partyRepo.findById(cmd.principalPartyId) ?: throw PartyNotFoundException(cmd.principalPartyId)
+        val agent = partyRepo.findById(cmd.agentPartyId) ?: throw PartyNotFoundException(cmd.agentPartyId)
+        if (principal.partyType == PartyType.INDIVIDUAL) {
+            throw PartyMandateRejectedException(
+                "principal ${principal.id} is an INDIVIDUAL — only a legal entity can be acted for",
+            )
+        }
+        if (agent.partyType != PartyType.INDIVIDUAL) {
+            throw PartyMandateRejectedException(
+                "agent ${agent.id} is a ${agent.partyType} — only a natural person can hold a mandate",
+            )
+        }
+        listOf(agent, principal).firstOrNull { it.status in MANDATE_INELIGIBLE }?.let {
+            throw PartyMandateRejectedException("party ${it.id} is ${it.status} and cannot take part in a mandate")
+        }
+        val now = Instant.now(clock)
+        val existing = mandateRepo.findActive(principal.id, agent.id, cmd.role.name)
+        val mandate = (
+            existing ?: PartyMandate(
+                id = UUID.randomUUID(),
+                principalPartyId = principal.id,
+                agentPartyId = agent.id,
+                role = cmd.role,
+                authority = cmd.authority,
+                source = cmd.source,
+                status = MandateStatus.ACTIVE,
+                evidenceRef = cmd.evidenceRef,
+                validFrom = now,
+                validTo = cmd.validTo,
+                createdAt = now,
+                updatedAt = now,
+            )
+            ).copy(
+            authority = cmd.authority,
+            source = cmd.source,
+            evidenceRef = cmd.evidenceRef ?: existing?.evidenceRef,
+            validTo = cmd.validTo,
+            updatedAt = now,
+        )
+        val event = PartyEvents.mandateGranted(mandate, now, PartyActor.system("party-api"))
+        return if (existing == null) mandateRepo.save(mandate, event) else mandateRepo.update(mandate, event)
+    }
+
+    override suspend fun revokeMandate(cmd: RevokeMandateCommand): PartyMandate {
+        val mandate = mandateRepo.findById(cmd.mandateId)?.takeIf { it.principalPartyId == cmd.principalPartyId }
+            ?: throw PartyNotFoundException(cmd.mandateId)
+        if (mandate.status != MandateStatus.ACTIVE) return mandate
+        val now = Instant.now(clock)
+        val revoked = mandate.copy(
+            status = MandateStatus.REVOKED,
+            revokedAt = now,
+            revokeReason = cmd.reason,
+            updatedAt = now,
+        )
+        return mandateRepo.update(revoked, PartyEvents.mandateRevoked(revoked, now, PartyActor.system("party-api")))
+    }
+
+    override suspend fun listMandates(principalPartyId: UUID): List<PartyMandate> =
+        mandateRepo.findByPrincipal(principalPartyId)
+
+    override suspend fun actingFor(agentPartyId: UUID): List<ActingForProfile> {
+        val now = Instant.now(clock)
+        return mandateRepo.findByAgent(agentPartyId)
+            .filter { it.isActiveAt(now) }
+            .mapNotNull { m ->
+                partyRepo.findById(m.principalPartyId)?.takeIf {
+                    it.status != PartyStatus.CLOSED &&
+                        it.status != PartyStatus.MERGED
+                }?.let { ActingForProfile(it, m) }
+            }
+    }
 
     override suspend fun updateParty(cmd: UpdatePartyCommand): Party {
         val party = partyRepo.findById(cmd.id) ?: throw PartyNotFoundException(cmd.id)

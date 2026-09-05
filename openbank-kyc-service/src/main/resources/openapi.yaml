@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: KYC Service API
-  version: 1.8.0
+  version: 1.9.0
   description: Know Your Customer case management — open cases, run checks, approve/reject.
   license:
     name: Apache-2.0
@@ -117,7 +117,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA]
+            enum: [IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA, REGISTRY_MATCH, REPRESENTATIVE_AUTHORITY, UBO_IDENTIFICATION]
       requestBody:
         required: true
         content:
@@ -366,6 +366,10 @@ components:
         riskLevel:
           type: string
           enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
+        subjectType:
+          type: string
+          description: ADR-0284 D5 — INDIVIDUAL (natural person) or BUSINESS (legal entity; KYB check set).
+          enum: [INDIVIDUAL, BUSINESS]
         assignedTo:
           type: [string, 'null']
         checks:
@@ -401,7 +405,7 @@ components:
           format: uuid
         checkType:
           type: string
-          enum: [IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA]
+          enum: [IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA, REGISTRY_MATCH, REPRESENTATIVE_AUTHORITY, UBO_IDENTIFICATION]
         status:
           type: string
           enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]

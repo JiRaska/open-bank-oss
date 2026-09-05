@@ -65,7 +65,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "8802558fa4fc6972"
+        openbank.tech/policy-checksum: "63f5769df67380c8"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -176,6 +176,9 @@ spec:
             # -> delegation call timed out for as long as this line was missing.
             - name: DELEGATION_SERVICE_URL
               value: http://delegation-service.delegation.svc:8126
+            # ADR-0284: business onboarding proxy + the profile-switch mandate check (via party-service).
+            - name: KYB_SERVICE_URL
+              value: http://kyb-service.kyb.svc:8157
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             - name: DOMESTIC_PAYMENT_SERVICE_URL
