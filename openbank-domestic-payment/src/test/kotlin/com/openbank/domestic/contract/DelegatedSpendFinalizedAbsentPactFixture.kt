@@ -48,7 +48,7 @@ object DelegatedSpendFinalizedAbsentPactFixture {
             reservationVersion = DelegatedSpendReservationSnapshot.RESERVED_VERSION,
             schemaVersion = DelegatedSpendReservationSnapshot.SCHEMA_VERSION,
             aggregateType = DelegatedSpendReservationSnapshot.AGGREGATE_TYPE,
-            sourceService = DelegatedSpendReservationSnapshot.SOURCE_SERVICE,
+            sourceService = DelegatedSpendReservationSnapshot.EXPECTED_SOURCE_SERVICE,
             createdAt = Instant.parse("2026-09-01T12:00:00Z"),
             settledAt = null,
             occurredAt = Instant.parse("2026-09-01T12:00:00Z"),
