@@ -46,9 +46,9 @@
 | Spustit on-demand úplný sken | `POST /api/v1/security/scan` | — (žádný event; report jen přes REST) |
 | Získat nejnovější platformový report | `GET /api/v1/security/report` | — |
 | Získat výsledky pro konkrétní službu | `GET /api/v1/security/services/{name}` | — |
-| Nahlásit nový ICT incident | `POST /api/v1/ict-incidents` | `IctIncidentReported` |
-| Aktualizovat stav incidentu | `PATCH /api/v1/ict-incidents/{id}/status` | `IctIncidentUpdated` |
-| Označit incident jako nahlášený regulátorovi | `POST /api/v1/ict-incidents/{id}/regulatory-report` | `IctIncidentRegulatoryReported` |
+| Nahlásit nový ICT incident | `POST /api/v1/ict-incidents` | `ICT_INCIDENT_REPORTED` |
+| Aktualizovat stav incidentu | `PATCH /api/v1/ict-incidents/{id}/status` | `ICT_INCIDENT_STATUS_CHANGED` |
+| Označit incident jako nahlášený regulátorovi | `POST /api/v1/ict-incidents/{id}/regulatory-report` | `ICT_INCIDENT_REPORTED_TO_REGULATOR` |
 
 ## Kontroly skenu na službu
 

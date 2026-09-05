@@ -82,9 +82,20 @@ caller for every production service's API and management ports within the cluste
 
 2. **Unauthenticated routes not tested**: The scanner checks a hardcoded set of actuator paths.
    A new unauthenticated route introduced in a money-path service that the scanner does not
-   probe would not be detected. Mitigation: the security-contract test (`SecurityContractTest`)
-   enforces that every JAX-RS endpoint is annotated (`@PermitAll` or `@RolesAllowed`) — this
-   is the primary defence; the scanner is a belt-and-suspenders check.
+   probe would not be detected. Mitigation: **partial, and narrower than this entry claimed.**
+   There is no fleet-wide `SecurityContractTest` — no class by that exact name exists, and the
+   invariant is enforced per service by nine hand-written variants
+   (`AccountSecurityContractTest`, `BalanceSecurityContractTest`, `ClearingSecurityContractTest`,
+   `DocumentSecurityContractTest`, `LedgerSecurityContractTest`, `YearCloseSecurityContractTest`,
+   `StandingOrderSecurityContractTest`, `TppRegistrySecurityContractTest`,
+   `TransactionSecurityContractTest`) covering **8 of the 61 modules that expose a JAX-RS
+   resource**. Each of those does enforce the stated invariant for its own service, by reflection
+   over the resource class, so for those 8 the mitigation is real and strong. For the other 53 —
+   including security-scanner itself, which has no such test — nothing enforces it, so the
+   scanner's hardcoded probe set is not a belt-and-suspenders check but the only automated check,
+   and it is exactly the one this residual says is incomplete. Making the invariant fleet-wide (a
+   shared reflective test in `openbank-libs`, or a CI gate over `@Path` classes) is the real
+   mitigation and is not in place.
 
 3. **Management port drift**: If a service begins serving sensitive data on port 8085 (contrary
    to Quarkus management-port design), the scanner has network access to it. Mitigation: existing
@@ -92,6 +103,28 @@ caller for every production service's API and management ports within the cluste
    `SecurityScannerService.scanService`) would flag it.
 
 ## 6. Change log
+
+- **2026-09-03** — Doc correction, no behavior change: §5.2 credited its mitigation to "the
+  security-contract test (`SecurityContractTest`)" enforcing that "**every** JAX-RS endpoint is
+  annotated", and called it "the primary defence". `SecurityContractTest` does not exist as a class —
+  `git grep -nE 'class SecurityContractTest\b' -- '*.kt'` returns nothing — and the name is not a
+  rename of one thing but a family label for nine per-service variants. Measured against the tree:
+  61 modules declare a JAX-RS resource, 8 of them carry such a test. security-scanner is not one of
+  the 8.
+
+  The consequence is specific rather than cosmetic, which is why the residual is rewritten rather
+  than just renamed. §5.2's risk is "a new unauthenticated route in a money-path service the
+  scanner does not probe". The mitigation as written retired that risk by asserting a fleet-wide
+  invariant; the invariant covers 8 modules, so for the remaining 53 the scanner's hardcoded probe
+  list is the only automated check — and the residual exists precisely because that list is
+  incomplete. The mitigation was, for most of the fleet, the thing it was mitigating.
+
+  **What still holds:** for the 8 covered modules the control is real and strong — each test walks
+  its resource class by reflection and fails the build on a `@PermitAll` or an unannotated
+  endpoint, which is how the balance and clearing regression guards referenced in their own threat
+  models work. Nothing here changes the scanner, any service's annotations, or a role. Closing the
+  gap properly means a shared reflective test in `openbank-libs` or a CI gate over `@Path` classes,
+  which is a code change and deliberately not made in a docs commit.
 
 - **2026-06-23** — Initial threat model for the fleet-wide network-reachability grant (PR #1811 fix).
   Scanner previously had no network path to any target — this grant enables the scanner to

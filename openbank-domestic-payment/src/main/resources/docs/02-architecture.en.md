@@ -16,7 +16,7 @@ graph LR
   dp[(domestic-payment-service)]:::svc
   db[(PostgreSQL<br/>openbank_domestic_payments)]
   kafka[(Kafka<br/>openbank.domestic.payment.events)]
-  redis[(Valkey<br/>idempotency)]
+  redis[(Valkey<br/>four-eyes approvals)]
 
   ch -- "POST/GET/PATCH /domestic-payments" --> dp
   admin -- "read + manual transitions" --> dp
@@ -25,7 +25,7 @@ graph LR
 
   dp --> db
   dp -- "outbox → publish" --> kafka
-  dp --> redis
+  dp -- "approval workflow state" --> redis
 
   kafka --> clr
   kafka --> led
@@ -47,22 +47,22 @@ graph TB
     persist[Persistence<br/>DomesticPaymentRepositoryImpl<br/>Hibernate Reactive / Panache]
     outbox[Outbox<br/>DomesticPaymentOutboxDispatcher<br/>polls every 5s, batch 25]
     kafkaPub[Kafka publisher<br/>KafkaDomesticPaymentEventPublisher]
-    idem[Idempotency<br/>libs IdempotencyStore - Redis]
+    idem[Idempotency<br/>normalized request fingerprint]
     sancCli[Sanctions client<br/>SanctionsScreeningAdapter]
     amlCli[AML client<br/>AmlCaseAdapter]
   end
 
   rest --> uc
-  rest --> idem
   uc --> dom
+  uc --> idem
   uc --> persist
+  idem --> persist
   uc --> sancCli
   uc --> amlCli
   persist -.-> db[(PostgreSQL)]
   outbox --> kafkaPub
   outbox -.-> db
   kafkaPub -.-> kafka[(Kafka)]
-  idem -.-> redis[(Valkey)]
   sancCli -.-> sanc[(sanctions-service)]
   amlCli -.-> aml[(aml-service)]
 ```
@@ -90,7 +90,7 @@ com.openbank.domestic/
     ├── persistence/           repository impls, JPA entities, mappers
     ├── outbox/                DomesticPaymentOutboxDispatcher (scheduled, fault-tolerant)
     ├── kafka/                 KafkaDomesticPaymentEventPublisher
-    ├── idempotency/           IdempotencyConfig
+    ├── approval/              ApprovalConfig (Redis-backed four-eyes workflow only)
     ├── client/               SanctionsServiceClient + adapter, AmlServiceClient + adapter
     └── authz/                AuthzProducer (OPA, ADR-0034)
 ```
@@ -168,7 +168,6 @@ sequenceDiagram
 
 | Module | Use here |
 |---|---|
-| `libs.idempotency.IdempotencyStore` | Redis-backed idempotency on create |
 | `libs.persistence.outbox` | outbox entity/repository conventions |
 | `libs.api.error.ApiError` / `ErrorCode` | unified error envelope (404 NOT_FOUND, 409 CONFLICT) |
 | `libs.authz.@Authorize` | OPA-backed authorization on status transition (ADR-0034) |
@@ -181,4 +180,4 @@ sequenceDiagram
 2. **Persist before screen** — the `RECEIVED` row + outbox are committed before the synchronous screening call, so a payment is never lost.
 3. **Fail closed** — a sanctions-service outage holds the payment in `RECEIVED`; it is never auto-released.
 4. **No remote call inside the persistence transaction** — screening and AML-case calls happen between transactions.
-5. **Idempotence at the edge** — `Idempotency-Key` is mandatory on create; replays return the cached response, and the repository also dedupes by idempotency key.
+5. **Durable, actor-bound idempotency** — `Idempotency-Key` is mandatory; Postgres stores its normalized request fingerprint atomically with the payment/outbox, exact replays return that row, and mismatches fail with 409.

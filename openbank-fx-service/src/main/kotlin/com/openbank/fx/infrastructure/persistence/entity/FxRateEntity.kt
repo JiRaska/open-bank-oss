@@ -32,9 +32,9 @@ class FxRateEntity {
 
     var rateType: String = ""
     var source: String = ""
-    var validFrom: Instant = Instant.EPOCH
-    var validTo: Instant = Instant.EPOCH
-    var createdAt: Instant = Instant.EPOCH
+    var validFrom: Instant = Instant.now()
+    var validTo: Instant = Instant.now()
+    var createdAt: Instant = Instant.now()
 }
 
 @Entity
@@ -59,6 +59,6 @@ class FxConversionEntity {
     var feeMinorUnits: Long = 0
     var rateId: UUID = UUID.randomUUID()
     var status: String = ""
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
     var settledAt: Instant? = null
 }

@@ -1,0 +1,38 @@
+# Branch-protection parity (rules.yaml: review; issues #2183, #7970).
+#
+# The review rule is enforced or aspirational in rules.yaml — either way, the
+# declaration must equal the live GitHub ruleset, and the revisit trigger
+# (a second write-access account) must be NOTICED the day it happens, not the
+# next time someone re-reads the comment. Daily, plus on any rules.yaml change.
+name: Branch-protection parity
+
+on:
+  schedule:
+    - cron: "17 5 * * *"   # daily 05:17 UTC, off the top-of-hour congestion
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - openbank-libs/governance/rules.yaml
+      - .github/scripts/check-branch-protection.py
+      - .github/workflows/branch-protection-parity.yml
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    name: Declared review policy == live ruleset
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Gate self-test (a gate that has only ever passed is unfalsified)
+        run: python3 .github/scripts/check-branch-protection.py --self-test
+
+      - name: Compare declaration against live ruleset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 .github/scripts/check-branch-protection.py

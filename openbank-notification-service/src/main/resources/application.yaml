@@ -189,6 +189,25 @@ mp:
         # set via the gitops ConfigMap instead (issue #686).
         topic: openbank.delegation.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # #8432: KYC outcome notifications (KycNotificationConsumer) — a further consumer of the
+      # topic kyc-service's transactional outbox already publishes (openbank.kyc.events).
+      kyc-events-in:
+        connector: smallrye-kafka
+        # client.id / group.id / auto.offset.reset: same dotted-key YAML bug as above —
+        # set via the gitops ConfigMap instead (issue #686).
+        topic: openbank.kyc.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # Poison pills are swallowed in the consumer itself, but a failure further down the
+        # pipeline rethrows — and SmallRye's DEFAULT failure-strategy is `fail`, which STOPS the
+        # channel (#5698/#5745). The DLQ topic name is written in NESTED form, which resolves
+        # correctly through SmallRye's YAML source (the dotted leaf key `dead-letter-queue.topic:`
+        # would be quoted and never read — #686). The matching KafkaTopic CR and the KafkaUser
+        # Write ACL ship in the same change (openbank-infra/gitops/components/notifications);
+        # without them the DLQ send itself fails and the consumer wedges on the very failure the
+        # DLQ was meant to park.
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.kyc.events.notification.dlq
 
 # ADR-0155 four-eyes, opted into by opsmessage.compose (ADR-0176 D5). Default false, matching
 # every other four-eyes-wired service (lending, balance, sepa-payment, sepa-instant, account) —

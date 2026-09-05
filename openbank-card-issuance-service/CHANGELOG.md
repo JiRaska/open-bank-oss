@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.3](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.2...card-issuance-service-v0.26.3) (2026-09-03)
+
+
+### Bug Fixes
+
+* **card-issuance:** Card lifecycle functions and category-rule entity drop EPOCH defaults ([#8396](https://github.com/JiRaska/open-bank-oss/issues/8396)) ([f61a78d](https://github.com/JiRaska/open-bank-oss/commit/f61a78d00e1a7b7e54bc5ed5167726a511396de5)), closes [#8357](https://github.com/JiRaska/open-bank-oss/issues/8357)
+
 ## [0.26.2](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.1...card-issuance-service-v0.26.2) (2026-09-02)
 
 

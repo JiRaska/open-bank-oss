@@ -121,6 +121,22 @@ describe('compliance pack activation console', () => {
     expect(screen.getByText(PENDING[0].contentHash)).toBeInTheDocument()
   })
 
+  it('opens pack details as a labelled modal and restores focus after Escape', async () => {
+    vi.stubGlobal('fetch', mockFetch({ active: { status: 200, body: ACTIVE } }))
+    render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))
+
+    const trigger = await screen.findByRole('button', { name: 'View details' })
+    fireEvent.click(trigger)
+
+    const dialog = screen.getByRole('dialog', { name: /CZ.*CONSUMER_CREDIT.*v1/i })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+  })
+
   it('an empty active list states the enforce-pack consequence, not just "none"', async () => {
     vi.stubGlobal('fetch', mockFetch({}))
     render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))

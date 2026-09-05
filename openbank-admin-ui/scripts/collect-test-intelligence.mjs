@@ -283,6 +283,65 @@ function componentOwners() {
   return { owners, fallback }
 }
 
+function retryFlakyMetadata(item) {
+  if (item?.state !== 'passed' || item.retryFlaky !== true
+      || !Number.isSafeInteger(item.failedAttemptCount) || item.failedAttemptCount < 1
+      || !Number.isSafeInteger(item.failedAttemptDurationMs) || item.failedAttemptDurationMs < 0
+      || !Number.isSafeInteger(item.durationMs) || item.failedAttemptDurationMs > item.durationMs) return null
+  return {
+    retryFlaky: true,
+    failedAttemptCount: item.failedAttemptCount,
+    failedAttemptDurationMs: item.failedAttemptDurationMs,
+  }
+}
+
+function safeAddNonNegativeIntegers(left, right) {
+  if (!Number.isSafeInteger(left) || left < 0 || !Number.isSafeInteger(right) || right < 0
+      || left > Number.MAX_SAFE_INTEGER - right) return null
+  return left + right
+}
+
+function saturatingSumNonNegativeIntegers(values) {
+  let total = 0
+  for (const value of values) {
+    const next = safeAddNonNegativeIntegers(total, value)
+    if (next === null) return Number.MAX_SAFE_INTEGER
+    total = next
+  }
+  return total
+}
+
+function mergeSameRunTestCase(previous, next) {
+  const retryRows = [previous, next].filter(item => item.retryFlaky === true)
+  const mergedDurationMs = safeAddNonNegativeIntegers(previous.durationMs, next.durationMs)
+  const failedAttemptCount = retryRows.reduce(
+    (sum, item) => sum === null ? null : safeAddNonNegativeIntegers(sum, item.failedAttemptCount), 0,
+  )
+  const failedAttemptDurationMs = retryRows.reduce(
+    (sum, item) => sum === null ? null : safeAddNonNegativeIntegers(sum, item.failedAttemptDurationMs), 0,
+  )
+  const merged = {
+    ...previous,
+    ...next,
+    durationMs: mergedDurationMs ?? Math.max(
+      Number.isSafeInteger(previous.durationMs) && previous.durationMs >= 0 ? previous.durationMs : 0,
+      Number.isSafeInteger(next.durationMs) && next.durationMs >= 0 ? next.durationMs : 0,
+    ),
+  }
+  delete merged.retryFlaky
+  delete merged.failedAttemptCount
+  delete merged.failedAttemptDurationMs
+  if (retryRows.length > 0 && mergedDurationMs !== null && failedAttemptCount !== null
+      && failedAttemptDurationMs !== null && failedAttemptDurationMs <= mergedDurationMs) {
+    Object.assign(merged, {
+      retryFlaky: true,
+      failedAttemptCount,
+      failedAttemptDurationMs,
+    })
+  }
+  return merged
+}
+
 function testCaseHistory(currentEnvelopes) {
   const historical = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json'))
     .map(readJson)
@@ -290,9 +349,27 @@ function testCaseHistory(currentEnvelopes) {
     .filter(item => item?.schemaVersion === 1 && item?.run && item?.component && Array.isArray(item.testCases))
   const unique = new Map()
   for (const envelope of envelopes) {
+    const envelopeRows = new Map()
     for (const item of envelope.testCases) {
       const key = `${envelope.component}:${envelope.run.id}:${envelope.run.attempt}:${item.fingerprint}:${item.state}`
-      unique.set(key, { ...item, component: envelope.component, run: envelope.run })
+      const normalized = { ...item }
+      delete normalized.retryFlaky
+      delete normalized.failedAttemptCount
+      delete normalized.failedAttemptDurationMs
+      const retryMetadata = retryFlakyMetadata(item)
+      const observation = {
+        ...normalized,
+        ...(retryMetadata ?? {}),
+        component: envelope.component,
+        run: envelope.run,
+      }
+      const previous = envelopeRows.get(key)
+      envelopeRows.set(key, previous ? mergeSameRunTestCase(previous, observation) : observation)
+    }
+    // A retained snapshot can be the same immutable run as the current envelope. Keep one
+    // observation per run/state after aggregating distinct parameter/project invocations within it.
+    for (const [key, observation] of envelopeRows) {
+      unique.set(key, observation)
     }
   }
   const grouped = new Map()
@@ -303,7 +380,9 @@ function testCaseHistory(currentEnvelopes) {
   }
   const ownership = componentOwners()
   return [...grouped.entries()].map(([fingerprint, rows]) => {
-    rows.sort((a, b) => Date.parse(a.run.observedAt) - Date.parse(b.run.observedAt))
+    rows.sort((a, b) => Date.parse(a.run.observedAt) - Date.parse(b.run.observedAt)
+      || String(a.run.id).localeCompare(String(b.run.id))
+      || Number(a.run.attempt) - Number(b.run.attempt))
     const executed = rows.filter(item => item.state !== 'skipped')
     const failures = executed.filter(item => item.state === 'failed')
     const commitStates = new Map()
@@ -314,18 +393,41 @@ function testCaseHistory(currentEnvelopes) {
     }
     const sameCommitTransitions = [...commitStates.values()].filter(states => states.has('passed') && states.has('failed')).length
     const last = rows.at(-1)
+    const latestRunRows = rows.filter(item => item.component === last.component
+      && String(item.run.id) === String(last.run.id) && Number(item.run.attempt) === Number(last.run.attempt))
+    const latestRunStates = new Set(latestRunRows.map(item => item.state))
+    const lastState = latestRunStates.has('failed') ? 'failed'
+      : latestRunStates.has('passed') ? 'passed' : 'skipped'
+    const latest = latestRunRows.find(item => item.state === lastState) ?? last
+    const retryFlakyRows = executed.filter(item => item.retryFlaky === true)
+    const latestRetryFlaky = retryFlakyRows.at(-1)
+    const wastedDurationMs = saturatingSumNonNegativeIntegers([
+      ...failures.map(item => item.durationMs),
+      ...retryFlakyRows.map(item => item.failedAttemptDurationMs),
+    ])
+    const retryRun = latestRetryFlaky
+      ? safeRun(latestRetryFlaky.run, `retry-flaky:${latest.component}:${fingerprint}`)
+      : undefined
     return {
-      fingerprint, component: last.component, kind: last.kind, classname: last.classname, name: last.name,
+      fingerprint, component: latest.component, kind: latest.kind, classname: latest.classname, name: latest.name,
       // This is a verified path to the test definition, when a JVM report can provide one. It
       // is intentionally not a claimed production dependency or a test-selection recommendation.
-      testDefinitionPath: last.testDefinitionPath ?? null,
-      owner: ownership.owners.get(last.component) ?? ownership.fallback,
-      state: sameCommitTransitions > 0 ? 'flaky' : last.state === 'failed' ? 'failing' : last.state === 'skipped' ? 'skipped' : 'stable',
-      lastState: last.state, observations: rows.length,
+      testDefinitionPath: latest.testDefinitionPath ?? null,
+      owner: ownership.owners.get(latest.component) ?? ownership.fallback,
+      // Preserve the established same-commit transition signal, then let the newest run group
+      // decide terminal precedence independently of testcase array order.
+      state: sameCommitTransitions > 0 ? 'flaky' : lastState === 'failed' ? 'failing' : lastState === 'skipped' ? 'skipped' : retryFlakyRows.length > 0 ? 'flaky' : 'stable',
+      lastState, observations: rows.length,
       failureRate: executed.length ? Math.round(failures.length * 10_000 / executed.length) / 100 : null,
       averageDurationMs: Math.round(rows.reduce((sum, item) => sum + item.durationMs, 0) / rows.length),
-      wastedDurationMs: failures.reduce((sum, item) => sum + item.durationMs, 0),
-      sameCommitTransitions, lastObservedAt: last.run.observedAt,
+      wastedDurationMs,
+      sameCommitTransitions, lastObservedAt: latest.run.observedAt,
+      ...(retryFlakyRows.length > 0 ? {
+        retryFlaky: true,
+        failedAttemptCount: latestRetryFlaky.failedAttemptCount,
+        failedAttemptDurationMs: latestRetryFlaky.failedAttemptDurationMs,
+        ...(retryRun ? { retryRun } : {}),
+      } : {}),
     }
   }).sort((a, b) => {
     const priority = { flaky: 0, failing: 1, skipped: 2, stable: 3 }
