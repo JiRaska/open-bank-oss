@@ -18,14 +18,10 @@
 # shared initiatePayment() then throws Psd2RequestFormatException("Idempotency-Key header is
 # required") BEFORE the store lookup — so this is not a degraded replay guarantee, it rejects
 # the call outright. Both SEPA products are affected.
-openbank-psd2-service name-mismatch POST /open-banking/v2/payments/instant-sepa-credit-transfers
-openbank-psd2-service name-mismatch POST /open-banking/v2/payments/sepa-credit-transfers
 
 # psd2 PIS, the other two products: the handler binds Idempotency-Key and requires it non-blank
 # through the same initiatePayment(), and the published operation declares no idempotency header
 # at all — so a client generated from the contract sends none and is rejected the same way.
-openbank-psd2-service bound-not-published POST /open-banking/v2/payments/domestic-cz
-openbank-psd2-service bound-not-published POST /open-banking/v2/payments/sipo
 
 # sca-service: ScaResource.initiate implements a full Redis replay guard (store get, store save,
 # 300s TTL, X-Idempotency-Replayed on the hit) keyed on Idempotency-Key falling back to
