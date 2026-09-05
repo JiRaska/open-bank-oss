@@ -31,7 +31,9 @@ class NotificationModelTest {
 
     @Test
     fun `NotificationTemplate has all expected templates`() {
-        assertThat(NotificationTemplate.values()).hasSize(23)
+        // 22 since #8535 removed KYC_DOCUMENT_REQUIRED: nothing could produce it, because
+        // kyc-service had no transition into DOCUMENTS_REQUIRED and no concept of a document type.
+        assertThat(NotificationTemplate.values()).hasSize(22)
         assertThat(NotificationTemplate.values()).contains(
             NotificationTemplate.ACCOUNT_OPENED,
             NotificationTemplate.OTP_CODE,
@@ -125,7 +127,6 @@ class NotificationModelTest {
         ).containsExactlyInAnyOrder(
             NotificationTemplate.ACCOUNT_FROZEN,
             NotificationTemplate.KYC_REJECTED,
-            NotificationTemplate.KYC_DOCUMENT_REQUIRED,
             NotificationTemplate.TRANSACTION_FAILED,
         )
         assertThat(NotificationTemplate.SCA_APPROVAL.noDeviceFallbackChannel).isNull()

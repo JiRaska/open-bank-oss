@@ -56,6 +56,10 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // KycCasePageApiContractTest PARSES the committed openapi.yaml (#8163) rather than grepping it.
+    // Unversioned: the Quarkus BOM is already on the test classpath (testImplementation extends
+    // implementation), so the YAML dataformat cannot drift from the runtime's Jackson.
+    testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
     // Shared, secret-free lifecycle evidence collected into the Test Intelligence envelope in CI.
     testImplementation(project(":openbank-libs-testing"))
 }
