@@ -5,14 +5,14 @@
 package com.openbank.cardprocessing.scheme
 
 import com.openbank.cardprocessing.infrastructure.scheme.MastercardOAuthSigner
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 import java.security.KeyPairGenerator
 import java.security.Signature
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Base64
-import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 
 /**
  * OAuth 1.0a signing, verified by CONSTRUCTION rather than by a golden string.

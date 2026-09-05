@@ -61,11 +61,7 @@ class MastercardOAuthSigner(
      * that adds one afterwards invalidates the signature — which is why the adapter builds the URL
      * and the header from the same map.
      */
-    fun authorizationHeader(
-        method: String,
-        url: String,
-        queryParameters: Map<String, String> = emptyMap(),
-    ): String {
+    fun authorizationHeader(method: String, url: String, queryParameters: Map<String, String> = emptyMap()): String {
         val oauthParameters = linkedMapOf(
             "oauth_consumer_key" to consumerKey,
             "oauth_nonce" to nonce(),
@@ -154,10 +150,9 @@ class MastercardOAuthSigner(
          * becoming `%7E`. Every one of them changes the signature, and none of them shows up in a
          * test whose inputs are alphanumeric.
          */
-        fun percentEncode(value: String): String =
-            URLEncoder.encode(value, StandardCharsets.UTF_8)
-                .replace("+", "%20")
-                .replace("*", "%2A")
-                .replace("%7E", "~")
+        fun percentEncode(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8)
+            .replace("+", "%20")
+            .replace("*", "%2A")
+            .replace("%7E", "~")
     }
 }

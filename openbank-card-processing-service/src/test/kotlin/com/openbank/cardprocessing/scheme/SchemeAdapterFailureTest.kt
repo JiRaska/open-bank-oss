@@ -22,13 +22,14 @@ import io.mockk.mockk
 import jakarta.enterprise.inject.Instance
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 import java.security.KeyPairGenerator
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
-import kotlinx.coroutines.runBlocking
-import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
+import java.util.Optional
 
 /**
  * How each vendor adapter classifies what it gets back, and how the router chooses one.
@@ -44,7 +45,7 @@ class SchemeAdapterFailureTest {
     private val mastercardClient = mockk<MastercardSchemeClient>()
     private val clock = Clock.fixed(Instant.parse("2026-09-05T12:00:00Z"), ZoneOffset.UTC)
 
-    private fun visa(apiKey: String = "a-key") = VisaBinLookupAdapter(visaClient, apiKey)
+    private fun visa(apiKey: String = "a-key") = VisaBinLookupAdapter(visaClient, Optional.of(apiKey))
 
     private fun noSigner(): Instance<MastercardOAuthSigner> = mockk {
         every { isResolvable } returns false
@@ -112,7 +113,7 @@ class SchemeAdapterFailureTest {
 
     @Test
     fun `Mastercard without a signing key is NOT_BOUND`(): Unit = runBlocking {
-        val adapter = MastercardBinLookupAdapter(mastercardClient, noSigner(), "https://api.example.com")
+        val adapter = MastercardBinLookupAdapter(mastercardClient, noSigner(), Optional.of("https://api.example.com"))
 
         val result = adapter.lookup("555555") as SchemeResult.Unanswered
 
@@ -122,7 +123,7 @@ class SchemeAdapterFailureTest {
 
     @Test
     fun `Mastercard with a signer but no base URL is also NOT_BOUND`(): Unit = runBlocking {
-        val adapter = MastercardBinLookupAdapter(mastercardClient, signer(), "")
+        val adapter = MastercardBinLookupAdapter(mastercardClient, signer(), Optional.of(""))
 
         assertThat((adapter.lookup("555555") as SchemeResult.Unanswered).failure)
             .isEqualTo(SchemeFailure.NOT_BOUND)
@@ -161,5 +162,5 @@ class SchemeAdapterFailureTest {
         assertThat(result.detail).contains("amex")
     }
 
-    private fun unboundMastercard() = MastercardBinLookupAdapter(mastercardClient, noSigner(), "")
+    private fun unboundMastercard() = MastercardBinLookupAdapter(mastercardClient, noSigner(), Optional.of(""))
 }

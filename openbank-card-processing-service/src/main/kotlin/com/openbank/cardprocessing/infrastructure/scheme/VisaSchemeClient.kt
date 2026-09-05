@@ -34,11 +34,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  */
 @Path("/paai/fundstransfer/v1")
 @RegisterRestClient(configKey = "visa-api")
-@SyntheticTaintExternalBoundary(
-    reason = "Visa is a third party. The ADR-0252 taint marks bank-owned synthetic traffic for our " +
-        "own downstreams; forwarding it here would export an internal marker outside the platform, " +
-        "and Visa has no use for it.",
-)
+@SyntheticTaintExternalBoundary("Visa is a third party; the ADR-0252 taint must not leave the platform")
 @Produces(MediaType.APPLICATION_JSON)
 interface VisaSchemeClient {
 
@@ -51,10 +47,7 @@ interface VisaSchemeClient {
      */
     @GET
     @Path("/binlookup/{bin}")
-    suspend fun binAttributes(
-        @PathParam("bin") bin: String,
-        @HeaderParam("apikey") apiKey: String,
-    ): VisaBinResponse
+    suspend fun binAttributes(@PathParam("bin") bin: String, @HeaderParam("apikey") apiKey: String): VisaBinResponse
 }
 
 /**

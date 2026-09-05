@@ -15,6 +15,7 @@ import jakarta.ws.rs.WebApplicationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
+import java.util.Optional
 
 /**
  * Visa's BIN attributes behind [BinLookupPort] (ADR-0283 phase 2, #8810).
@@ -34,14 +35,18 @@ import org.jboss.logging.Logger
 @ApplicationScoped
 class VisaBinLookupAdapter(
     @RestClient private val client: VisaSchemeClient,
-    @ConfigProperty(name = "openbank.card-processing.scheme.visa.api-key", defaultValue = "")
-    private val apiKey: String,
+    // Optional, not a String with an empty default: application.yaml DEFINES this as `${VISA_API_KEY:}`
+    // and SmallRye reads an empty value as NO value, so a non-Optional injection throws SRCFG00040
+    // at startup and the service never boots — before any check in this class can run (#5844).
+    @ConfigProperty(name = "openbank.card-processing.scheme.visa.api-key")
+    private val apiKey: Optional<String>,
 ) : BinLookupPort {
 
     private val log = Logger.getLogger(VisaBinLookupAdapter::class.java)
 
     override suspend fun lookup(bin: String): SchemeResult<BinAttributes> {
-        if (apiKey.isBlank()) {
+        val key = apiKey.orElse("")
+        if (key.isBlank()) {
             return SchemeResult.Unanswered(
                 SchemeFailure.NOT_BOUND,
                 CardScheme.VISA,
@@ -49,7 +54,7 @@ class VisaBinLookupAdapter(
             )
         }
         return try {
-            val response = client.binAttributes(bin, apiKey)
+            val response = client.binAttributes(bin, key)
             SchemeResult.Answered(
                 BinAttributes(
                     bin = response.binNumber ?: bin,

@@ -13,6 +13,7 @@ import java.security.PrivateKey
 import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Clock
 import java.util.Base64
+import java.util.Optional
 
 /**
  * Produces the Mastercard signer, and only when a credential is actually present.
@@ -33,10 +34,14 @@ import java.util.Base64
  */
 @ApplicationScoped
 class MastercardSignerProducer(
-    @ConfigProperty(name = "openbank.card-processing.scheme.mastercard.consumer-key", defaultValue = "")
-    private val consumerKey: String,
-    @ConfigProperty(name = "openbank.card-processing.scheme.mastercard.signing-key", defaultValue = "")
-    private val signingKeyBase64: String,
+    // Optional on both: application.yaml DEFINES them as empty expansions, and SmallRye reads an
+    // empty value as NO value — a non-Optional injection throws SRCFG00040 at startup, so the
+    // service would fail to boot in every environment that has no Mastercard credential, which is
+    // all of them today (#5844).
+    @ConfigProperty(name = "openbank.card-processing.scheme.mastercard.consumer-key")
+    private val consumerKey: Optional<String>,
+    @ConfigProperty(name = "openbank.card-processing.scheme.mastercard.signing-key")
+    private val signingKeyBase64: Optional<String>,
     private val clock: Clock,
 ) {
 
@@ -45,9 +50,11 @@ class MastercardSignerProducer(
     @Produces
     @ApplicationScoped
     fun signer(): MastercardOAuthSigner? {
-        if (consumerKey.isBlank() || signingKeyBase64.isBlank()) return null
-        val key = parseKey() ?: return null
-        return MastercardOAuthSigner(consumerKey, key, clock)
+        val consumer = consumerKey.orElse("")
+        val encodedKey = signingKeyBase64.orElse("")
+        if (consumer.isBlank() || encodedKey.isBlank()) return null
+        val key = parseKey(encodedKey) ?: return null
+        return MastercardOAuthSigner(consumer, key, clock)
     }
 
     /**
@@ -57,8 +64,8 @@ class MastercardSignerProducer(
      * worth an error line. Not fatal, because a broken vendor credential must not stop the service
      * booting: the card money path does not depend on a BIN lookup.
      */
-    private fun parseKey(): PrivateKey? = try {
-        val der = Base64.getDecoder().decode(signingKeyBase64.filterNot { it.isWhitespace() })
+    private fun parseKey(encodedKey: String): PrivateKey? = try {
+        val der = Base64.getDecoder().decode(encodedKey.filterNot { it.isWhitespace() })
         KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(der))
     } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
         log.errorf(

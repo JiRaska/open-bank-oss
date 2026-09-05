@@ -33,11 +33,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  */
 @Path("/bin-resources")
 @RegisterRestClient(configKey = "mastercard-api")
-@SyntheticTaintExternalBoundary(
-    reason = "Mastercard is a third party. The ADR-0252 taint marks bank-owned synthetic traffic " +
-        "for our own downstreams; forwarding it here would export an internal marker outside the " +
-        "platform, and Mastercard has no use for it.",
-)
+@SyntheticTaintExternalBoundary("Mastercard is a third party; the ADR-0252 taint must not leave the platform")
 @Produces(MediaType.APPLICATION_JSON)
 interface MastercardSchemeClient {
 

@@ -16,6 +16,7 @@ import jakarta.ws.rs.WebApplicationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
+import java.util.Optional
 
 /**
  * Mastercard's BIN lookup behind [BinLookupPort] (ADR-0283 phase 2, #8810).
@@ -33,14 +34,17 @@ import org.jboss.logging.Logger
 class MastercardBinLookupAdapter(
     @RestClient private val client: MastercardSchemeClient,
     private val signers: Instance<MastercardOAuthSigner>,
-    @ConfigProperty(name = "openbank.card-processing.scheme.mastercard.base-url", defaultValue = "")
-    private val baseUrl: String,
+    // Optional for the same reason as the Visa key: an empty yaml expansion is NO value to
+    // SmallRye, and a non-Optional injection stops the service booting (#5844).
+    @ConfigProperty(name = "openbank.card-processing.scheme.mastercard.base-url")
+    private val baseUrl: Optional<String>,
 ) : BinLookupPort {
 
     private val log = Logger.getLogger(MastercardBinLookupAdapter::class.java)
 
     override suspend fun lookup(bin: String): SchemeResult<BinAttributes> {
-        if (!signers.isResolvable || baseUrl.isBlank()) {
+        val url = baseUrl.orElse("")
+        if (!signers.isResolvable || url.isBlank()) {
             return SchemeResult.Unanswered(
                 SchemeFailure.NOT_BOUND,
                 CardScheme.MASTERCARD,
@@ -55,7 +59,7 @@ class MastercardBinLookupAdapter(
             val parameters = mapOf("accountRange" to bin)
             val header = signer.authorizationHeader(
                 method = "GET",
-                url = "$baseUrl$BIN_PATH",
+                url = "$url$BIN_PATH",
                 queryParameters = parameters,
             )
             val response = client.binLookup(bin, header)

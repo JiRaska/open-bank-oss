@@ -41,7 +41,9 @@ import jakarta.enterprise.context.ApplicationScoped
  * untested.
  */
 @ApplicationScoped
-class SimulatedSchemeAdapter : BinLookupPort, MerchantDataPort {
+class SimulatedSchemeAdapter :
+    BinLookupPort,
+    MerchantDataPort {
 
     override suspend fun lookup(bin: String): SchemeResult<BinAttributes> {
         val normalised = bin.trim()
