@@ -22,6 +22,13 @@ data class Segment(val name: String, val version: Int, val rules: List<SegmentRu
         // Fail where the segment is DEFINED, not at enrolment. An unsupported rule used to render
         // SQL that ClickHouse rejected, which the fail-closed evaluator turned into an empty cohort
         // — indistinguishable from "nobody matched" (#2891).
+        //
+        // CURRENTLY UNEXERCISED, and that is worth knowing rather than discovering: since #8792
+        // every rule in the sealed catalogue is supported, so no input can reach this branch and no
+        // test can construct one — `SegmentRule` is sealed precisely so a stand-in cannot be
+        // conjured in a test. The guard is not dead code; it is the landing pad for the next rule
+        // written ahead of its data, and it re-arms the moment one declares `unsupportedReason`.
+        // Nobody should delete it for being green.
         rules.forEach { rule ->
             require(rule.unsupportedReason == null) {
                 "segment rule ${rule::class.simpleName} cannot be evaluated: ${rule.unsupportedReason}"
@@ -84,35 +91,87 @@ sealed class SegmentRule {
     }
 
     /**
-     * Holds at least one account.
+     * Has ever held an account.
      *
-     * UNSUPPORTED: no ACCOUNT event in analytics carries a partyId (0 of 59 bronze rows, measured
-     * 2026-07-31), so the party↔account link does not exist in this layer at all. Supporting this
-     * needs account events to carry the owning party — not a cleverer query.
+     * SUPPORTED SINCE 2026-09-05 (#8792). The reason recorded here previously — "no ACCOUNT event
+     * carries a partyId (0 of 59 bronze rows, measured 2026-07-31)" — was already stale when it
+     * was written. `AccountCreatedEvent` has carried `partyId` since 2026-06-26, five weeks
+     * earlier; `KafkaAccountEventPublisher` serialises the whole event with
+     * `objectMapper.writeValueAsString`, so the field reaches the wire; and analytics-sink's
+     * `PayloadMasker` does not list `partyId` among its PII keys, so it survives into bronze
+     * unmasked. The 59 rows behind that measurement predate the field. A claim about data is a
+     * claim with a shelf life, and nothing re-checked this one.
+     *
+     * READS BRONZE, NOT SILVER, AND THAT IS THE WHOLE CARE IN THIS RULE. Silver keeps only the
+     * LATEST event per (aggregate_type, aggregate_id), and of the four account events only
+     * `AccountCreatedEvent` carries `partyId` — `AccountStatusChanged`, `AccountClosed` and
+     * `SavingsWithdrawalApproved` do not. So an account that has ever changed status has a silver
+     * row with no `partyId` at all, and a silver-based subquery would silently omit exactly the
+     * parties with the most account activity. That is the under-counting failure this rule's own
+     * neighbourhood already records: a fail-closed evaluator renders a missing party as "did not
+     * match", which is indistinguishable from a correct answer. `TenureAtLeastDays` reaches into
+     * bronze for the same reason and says so.
+     *
+     * WHAT IT DOES NOT MEAN: "currently holds an OPEN account". Excluding closed accounts is
+     * expressible — the terminal signals are `event_type = 'AccountClosed'` and a payload
+     * `newStatus` of `CLOSED` — but it is a different predicate and it can only shrink a cohort,
+     * so it belongs in its own rule, verified against a live warehouse rather than reasoned about
+     * from here (#8792).
      */
     data object HasAccount : SegmentRule() {
-        override val unsupportedReason: String =
-            "ACCOUNT events in the analytics layer carry no partyId, so account ownership " +
-                "cannot be resolved (issue #2891)"
-
         override fun toSql(paramPrefix: String, params: MutableMap<String, Any>): String =
-            throw UnsupportedOperationException(unsupportedReason)
+            "(upper(aggregate_type) = 'PARTY' AND aggregate_id IN (" +
+                "SELECT JSONExtractString(payload, 'partyId') FROM openbank_analytics.bronze_events " +
+                "WHERE upper(aggregate_type) = 'ACCOUNT' " +
+                "AND JSONExtractString(payload, 'partyId') != ''))"
     }
 
     /**
      * An ACTIVE consent carrying [scope] exists.
      *
-     * UNSUPPORTED: consent events are not ingested into analytics at all — neither silver nor bronze
-     * holds a CONSENT aggregate. This rule was only ever a cohort-narrowing optimisation: the binding
-     * consent check is the live per-send call in LiveConsentCheckAdapter (ADR-0198), which is
-     * unaffected. A campaign without this rule is not less consent-gated.
+     * **THIS IS NOT THE CONSENT CONTROL, AND MUST NEVER BE TREATED AS ONE.** The binding check is
+     * the live per-send call in `LiveConsentCheckAdapter` (ADR-0198). This rule narrows a cohort so
+     * a send is not attempted against parties who will be refused anyway; a campaign without it is
+     * not one bit less consent-gated, and a campaign WITH it is not one bit more. The distinction
+     * matters concretely: the silver row this reads is a projection with its own lag, so a party
+     * who revoked consent seconds ago can still appear here — and the live check is what stops the
+     * message, not this.
+     *
+     * SUPPORTED SINCE 2026-09-05 (#8792). The reason recorded here previously — "consent events are
+     * not ingested into analytics at all" — was stale when it was written, in the same commit and
+     * the same way as `HasAccount`'s. `openbank.consent.events` has been in analytics-sink's
+     * ingest list since 2026-06-26, five weeks before that claim; `ConsentGranted` and its siblings
+     * declare `aggregateType = "Consent"` and carry `partyId` and `scopes`; and `PayloadMasker`
+     * lists neither, so both survive into bronze unmasked.
+     *
+     * READS SILVER, and that is the opposite choice from [HasAccount] one rule up — deliberately.
+     * "Is a consent active" is a question about CURRENT state, which is exactly what
+     * `silver_current_state` answers: it keeps the latest event per aggregate, so a consent that
+     * was revoked, superseded or expired has a latest row whose `event_type` is no longer
+     * `ConsentGranted` and drops out by construction. `HasAccount` reads bronze because its own
+     * question is historical and its later events drop the field it needs. The two rules differ
+     * because their questions differ, not by accident.
      */
     data class HasActiveConsentScope(val scope: String) : SegmentRule() {
-        override val unsupportedReason: String =
-            "consent events are not ingested into the analytics layer, so consent scopes cannot be " +
-                "resolved there; per-send consent is still enforced live (issue #2891)"
+        init {
+            // Fail where the segment is DEFINED, as the class's other rules do. This catches a
+            // mis-shaped scope (lower case, a space, an empty string); it cannot catch a
+            // well-formed name that consent-service has never heard of, and such a value matches
+            // nobody rather than erroring. `HasActiveConsentScopeProducerPinTest` is what keeps
+            // the two vocabularies honest.
+            require(scope.matches(Regex("[A-Z][A-Z0-9_]*"))) {
+                "consent scope must be a SCREAMING_SNAKE_CASE ConsentScope name, was '$scope'"
+            }
+        }
 
-        override fun toSql(paramPrefix: String, params: MutableMap<String, Any>): String =
-            throw UnsupportedOperationException(unsupportedReason)
+        override fun toSql(paramPrefix: String, params: MutableMap<String, Any>): String {
+            params["${paramPrefix}_scope"] = scope
+            return "(upper(aggregate_type) = 'PARTY' AND aggregate_id IN (" +
+                "SELECT JSONExtractString(payload, 'partyId') " +
+                "FROM openbank_analytics.silver_current_state " +
+                "WHERE upper(aggregate_type) = 'CONSENT' AND event_type = 'ConsentGranted' " +
+                "AND has(JSONExtract(payload, 'scopes', 'Array(String)'), " +
+                "{${paramPrefix}_scope:String})))"
+        }
     }
 }
