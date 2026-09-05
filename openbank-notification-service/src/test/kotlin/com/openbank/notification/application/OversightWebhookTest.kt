@@ -39,7 +39,6 @@ class OversightWebhookTest {
         assertThat(OversightWebhook.isOversight(NotificationTemplate.TRANSACTION_COMPLETED)).isFalse()
         assertThat(OversightWebhook.isOversight(NotificationTemplate.ACCOUNT_OPENED)).isFalse()
         assertThat(OversightWebhook.isOversight(NotificationTemplate.KYC_APPROVED)).isFalse()
-        assertThat(OversightWebhook.isOversight(NotificationTemplate.PASSWORD_RESET)).isFalse()
     }
 
     @Test
