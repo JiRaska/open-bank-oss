@@ -111,6 +111,10 @@ enum class NotificationTemplate(val variables: Set<String>) {
             KYC_REJECTED,
             KYC_DOCUMENT_REQUIRED,
             TRANSACTION_FAILED,
+            // First delegated spend is a security event of the same severity as ACCOUNT_FROZEN:
+            // someone just exercised delegated authority over the grantor's money, and a missing
+            // device must not silence that (the fallback carries no body, only the prompt).
+            DELEGATION_FIRST_USE,
             -> NotificationChannel.EMAIL
             ACCOUNT_OPENED,
             ACCOUNT_CLOSED,

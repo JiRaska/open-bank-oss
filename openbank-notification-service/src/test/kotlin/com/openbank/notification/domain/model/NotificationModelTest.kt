@@ -129,6 +129,7 @@ class NotificationModelTest {
             NotificationTemplate.KYC_REJECTED,
             NotificationTemplate.KYC_DOCUMENT_REQUIRED,
             NotificationTemplate.TRANSACTION_FAILED,
+            NotificationTemplate.DELEGATION_FIRST_USE,
         )
         assertThat(NotificationTemplate.SCA_APPROVAL.noDeviceFallbackChannel).isNull()
         assertThat(NotificationTemplate.OTP_CODE.noDeviceFallbackChannel).isNull()
