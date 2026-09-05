@@ -57,7 +57,7 @@ spec:
         - name: kyb-service
             # First build lands via auto-deploy on the merge that adds openbank-kyb-service to
             # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-bootstrap
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-26f33679
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8157 and management 8090 — both read off the service's own
@@ -73,9 +73,9 @@ spec:
             # application.yaml hardcodes localhost for both; these env vars override it,
             # since an env source outranks application.yaml in SmallRye's ordinal.
             - name: QUARKUS_DATASOURCE_JDBC_URL
-              value: jdbc:postgresql://kyb-db-rw.delegation.svc:5432/openbank_kyb
+              value: jdbc:postgresql://kyb-db-rw.kyb.svc:5432/openbank_kyb
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
-              value: vertx-reactive:postgresql://kyb-db-rw.delegation.svc:5432/openbank_kyb
+              value: vertx-reactive:postgresql://kyb-db-rw.kyb.svc:5432/openbank_kyb
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

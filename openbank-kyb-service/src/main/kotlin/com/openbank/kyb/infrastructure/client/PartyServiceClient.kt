@@ -68,8 +68,11 @@ data class MandateBody(
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
-@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterRestClient(configKey = "party-service")
+// Below @RegisterRestClient deliberately: the taint gate reads the window between that annotation
+// and the interface, and an internal edge must PROPAGATE the synthetic marker rather than declare
+// itself external — an entity party minted for a synthetic case must stay tainted in party-service.
+@RegisterProvider(SyntheticTaintClientFilter::class)
 interface PartyServiceRestClient {
     @POST
     suspend fun createParty(@HeaderParam("Idempotency-Key") idempotencyKey: String, body: CreatePartyBody): PartyCreated

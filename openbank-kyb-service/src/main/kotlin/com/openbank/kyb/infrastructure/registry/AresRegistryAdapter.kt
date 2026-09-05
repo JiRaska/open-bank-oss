@@ -19,6 +19,7 @@ import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
+import com.openbank.libs.web.SyntheticTaintExternalBoundary
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -46,6 +47,7 @@ import java.time.LocalDate
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 @RegisterRestClient(configKey = "ares")
+@SyntheticTaintExternalBoundary("ARES is a third-party public register (Ministry of Finance CZ) - a synthetic-origin header must not leave the platform, and the register answers a synthetic lookup exactly as a real one")
 interface AresRestClient {
     @GET
     @Path("/ekonomicke-subjekty/{ico}")

@@ -16,6 +16,7 @@ import com.openbank.kyb.domain.model.LegalFormClass
 import com.openbank.kyb.domain.model.RegisteredAddress
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.RepresentationRule
+import com.openbank.libs.web.SyntheticTaintExternalBoundary
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -42,6 +43,7 @@ import java.time.LocalDate
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 @RegisterRestClient(configKey = "gleif")
+@SyntheticTaintExternalBoundary("GLEIF is a third-party public register - the same external boundary as ARES")
 interface GleifRestClient {
     @GET
     @Path("/lei-records/{lei}")

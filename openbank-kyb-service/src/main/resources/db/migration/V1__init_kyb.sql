@@ -50,7 +50,6 @@ CREATE TABLE kyb_outbox (
     last_error      TEXT,
     claimed_at      TIMESTAMPTZ,
     sent_at         TIMESTAMPTZ,
-    synthetic       BOOLEAN NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

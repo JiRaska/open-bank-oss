@@ -397,6 +397,8 @@ change_requirements:
     allowlist:
       # openbank.psd2.events left the allowlist in #8510: the producer itself was deleted
       # (the psd2_outbox apparatus had zero writers), so there is no topic left to exempt.
+      - topic: "openbank.kyb.events"
+        reason: "ADR-0284 first slice. The case lifecycle is published for the consumers the ADR names — onboarding-service's business funnel projection (D6 follow-up) and analytics-sink's Customer 360 silver layer (D8) — and neither is built yet, so the topic has a producer and no @Incoming today. NOT the #889 shape of a working publish going nowhere: the operator review queue reads cases over REST (GET /api/v1/kyb/cases?status=MANUAL_REVIEW), so nothing depends on this stream to function. Remove this entry with the first consumer PR."
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "proposal-events"

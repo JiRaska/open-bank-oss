@@ -162,9 +162,11 @@ openbank:
       enabled: ${KYB_WORKER_ENABLED:true}
   temporal:
     # ⚠ BUILD-TIME PROPERTY (lending #6085): TemporalBusinessOnboardingWorkflowAdapter is selected
-    # with @IfBuildProperty, so the DEFAULT per profile decides what ships — a container env var
-    # cannot flip it. Off for local/test; the %prod override below is the value in the image.
-    enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
+    # with @IfBuildProperty, resolved during augmentation and frozen into the image — a container
+    # env var is read at RUNTIME and cannot change it. The DEFAULT here is therefore what ships,
+    # and it is `true` so the built image carries the real adapter, matching the deployment's
+    # OPENBANK_TEMPORAL_ENABLED. %dev and %test turn it off, where there is no Temporal frontend.
+    enabled: ${OPENBANK_TEMPORAL_ENABLED:true}
     server-url: ${TEMPORAL_FRONTEND_URL:temporal-frontend.temporal.svc.cluster.local:7233}
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-kyb}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-kyb-onboarding}
@@ -192,11 +194,6 @@ authz:
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
-"%prod":
-  openbank:
-    temporal:
-      enabled: true
-
 "%dev":
   quarkus:
     log:
@@ -208,6 +205,8 @@ authz:
   authz:
     enforce: "false"
   openbank:
+    temporal:
+      enabled: false
     kyb:
       worker:
         enabled: false
@@ -226,6 +225,8 @@ authz:
   authz:
     enforce: "false"
   openbank:
+    temporal:
+      enabled: false
     kyb:
       # No Temporal frontend in @QuarkusTest: the workflow test drives its own TestWorkflowEnvironment.
       worker:
