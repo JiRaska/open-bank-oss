@@ -1,0 +1,98 @@
+# SLSA build-provenance verification policy (ADR-0030 D4, #8590 #14).
+#
+# Requires every openbank-* image pulled into the cluster to carry a cosign-signed SLSA
+# provenance v0.2 attestation (predicateType https://slsa.dev/provenance/v0.2), produced by
+# `cosign attest --type slsaprovenance --key awskms:///alias/openbank-cosign-signing` in
+# auto-deploy.yml (cosign-attest.sh `cosign_attest_slsa_provenance`).
+#
+# Why a THIRD policy next to verify-openbank-image-signatures and
+# verify-openbank-image-sbom-attestation: the signature proves "this image is ours" and the
+# SBOM attestation proves "we know what is inside it"; neither proves "OUR CI built it from
+# THIS commit". That is the claim an attacker with a stolen ECR push credential (but no
+# GitHub Actions identity) cannot forge — and it is checkable here, at admission, offline
+# against the same KMS trust root. The predicate's invocation.configSource.uri and buildType
+# are pinned in `conditions` so an envelope with a foreign build recipe verifies but FAILS
+# the policy — a signed attestation of the wrong provenance is a finding, not a pass.
+#
+# Separate ClusterPolicy again (the #770 lesson on coupling rules to one
+# validationFailureAction), staged exactly like the SBOM policy:
+#   1. (THIS CHANGE) Audit — every openbank-* image already running lacks the provenance
+#      attestation (auto-deploy.yml starts producing it with this change), so Audit mode
+#      turns the PolicyReport into the redeploy worklist without breaking a single pod.
+#   2. Redeploy the fleet through auto-deploy so every live image carries the provenance
+#      attestation; `kubectl get polr -A` must report 0 fail for this policy against any
+#      openbank-* application pod.
+#   3. Flip validationFailureAction to Enforce per rules.yaml provenance.enforce_criteria.
+#      Same caveat as its siblings: under Enforce a `kubectl rollout undo` to a
+#      pre-provenance revision is REJECTED — rebuild or attest that digest first.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-openbank-image-slsa-provenance
+  annotations:
+    policies.kyverno.io/title: Verify OpenBank image SLSA build provenance (ADR-0030 D4, #8590 #14)
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Requires every openbank-* container image to carry a cosign-signed SLSA provenance
+      v0.2 attestation (KMS public key) whose invocation.configSource pins this repository
+      and whose buildType pins the GitHub Actions buildx recipe. Staged Audit -> Enforce,
+      mirroring verify-openbank-image-sbom-attestation.
+spec:
+  validationFailureAction: Audit
+  background: false
+  webhookTimeoutSeconds: 30
+  failurePolicy: Ignore
+  rules:
+    - name: verify-slsa-provenance
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-*"
+          # Audit-only: do not rewrite the image to its digest or fail the pod.
+          mutateDigest: false
+          verifyDigest: false
+          required: true
+          # useCache: false — the same admission-controller race this fleet already burned
+          # twice on (see verify-sbom-attestation-policy.yaml): a transient ECR credential
+          # failure cached as a real result poisons every later admission for that tag.
+          useCache: false
+          attestations:
+            - predicateType: https://slsa.dev/provenance/v0.2
+              attestors:
+                - count: 1
+                  entries:
+                    # Same trust root as the signature and SBOM policies: public key of the
+                    # AWS KMS signing key alias/openbank-cosign-signing. Rotate together.
+                    - keys:
+                        publicKeys: |-
+                          -----BEGIN PUBLIC KEY-----
+                          MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEASBZ76uZt2fJEJp0RiQx1hnJgbGV
+                          M2Uw+35xUGfcZpBvpA+4nTW5zy2VVZ2JxT++6Gt0wPuUyL7aJpOAvqDvJw==
+                          -----END PUBLIC KEY-----
+                        signatureAlgorithm: sha256
+              conditions:
+                # Kyverno exposes the attestation's PREDICATE directly as the JMESPath context
+                # (the verify-sbom-attestation-policy.yaml `{{ bomFormat }}` lesson: no Data/data
+                # wrapper — that wrapper form ERRORS the check for every correctly-attested image).
+                - all:
+                    # Built from THIS repository…
+                    - key: "{{ invocation.configSource.uri }}"
+                      operator: Equals
+                      value: "git+https://github.com/JiRaska/open-bank-oss"
+                    # …by the pinned build recipe. A foreign buildType — a laptop build, a
+                    # different workflow family — verifies cryptographically and fails HERE.
+                    - key: "{{ buildType }}"
+                      operator: Equals
+                      value: "https://openbank.dev/buildtypes/github-actions-docker-buildx/v1"
+                    # …with an invocation identity recorded at all. The value itself is per-run
+                    # and unguessable from the image, so NotEquals empty is the decidable check;
+                    # per-run binding is the deploy pipeline's job (post-attest verify), not
+                    # admission's.
+                    - key: "{{ metadata.buildInvocationId }}"
+                      operator: NotEquals
+                      value: ""
