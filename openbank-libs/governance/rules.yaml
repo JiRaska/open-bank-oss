@@ -898,7 +898,9 @@ money_path_services:
 #
 # Targets are REFERENCE defaults, not calibrated against real production incident or
 # traffic history — this is a reference implementation with no live customer traffic (same
-# honesty disclosure as the openbank-lending-service PD/LGD placeholders). Revisit once the
+# honesty disclosure as the openbank-lending-service PD/LGD placeholders — those are now
+# governed by the calibration process in openbank-lending-service docs
+# 07-risk-model-calibration, issue #8364). Revisit once the
 # load-benchmark / DR-drill scope of issue #669 produces real numbers.
 slo:
   availability_target: "99.9"           # percent of non-error requests, uniform fleet-wide

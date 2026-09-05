@@ -4,8 +4,10 @@
 
 package com.openbank.account.infrastructure.rest
 
+import com.openbank.account.application.port.out.AccountScreeningUnavailableException
 import com.openbank.account.application.usecase.AccountNotEmptyException
 import com.openbank.account.application.usecase.AccountNotFoundException
+import com.openbank.account.application.usecase.AccountOpeningBlockedByScreeningException
 import com.openbank.account.application.usecase.AccountUpdateConflictException
 import com.openbank.account.application.usecase.AuthorizationNotFoundException
 import com.openbank.account.application.usecase.AuthorizationNotOnAccountException
@@ -138,5 +140,68 @@ class AuthorizationNotOnAccountExceptionMapper : ExceptionMapper<AuthorizationNo
 // SelfApprovalNotAllowedMapper / InvalidApprovalStateMapper (403/409) moved to
 // openbank-libs-runtime's CommonExceptionMappers (issue #1394) — a service-local copy of the
 // same exact type would collide non-deterministically with the shared one (issue #526).
+
+// --- Sanctions-screening outcomes (#8512) -----------------------------------------------------
+//
+// Both screening exceptions previously extended a bare RuntimeException with no mapper, so
+// both rendered 500 INTERNAL_ERROR through GenericExceptionMapper. Neither is a server fault:
+// one is an upstream-dependency outage (the gate fails closed, ADR-0032 §C), the other a
+// well-formed request correctly refused by policy. The 500 also logged every routine refusal
+// at ERROR with a full stack trace, inflating a money-path service's error budget.
+//
+// THE TRAP THE ISSUE NAMES, and why these are dedicated mappers rather than a one-word
+// re-parenting to IllegalStateException: libs-runtime's IllegalStateExceptionMapper answers
+// 422 with `message = exception.message`, and AccountOpeningBlockedByScreeningException's
+// message carries the MATCHED SANCTIONS NAME and the partyId. Correct status, free
+// sanctions-list oracle on the wire. These bodies therefore name neither the matched name nor
+// the party; the distinguishing detail goes to WARN (no stack), where compliance already
+// reads it today.
+
+private const val SCREENING_REFUSED_MESSAGE = "Account opening refused by screening policy"
+
+@Provider
+class AccountOpeningBlockedByScreeningExceptionMapper : ExceptionMapper<AccountOpeningBlockedByScreeningException> {
+    private val log = Logger.getLogger(AccountOpeningBlockedByScreeningExceptionMapper::class.java)
+
+    override fun toResponse(exception: AccountOpeningBlockedByScreeningException): Response {
+        // The matched name stays server-side. A caller who could vary the submitted name and
+        // read back whether it matched would have a free sanctions-list oracle (#8512).
+        log.warnf("account opening blocked by screening: %s", exception.message)
+        return Response.status(UNPROCESSABLE_ENTITY)
+            .entity(
+                ApiError(
+                    traceId = Ids.randomId().toString(),
+                    status = UNPROCESSABLE_ENTITY,
+                    code = "ACCOUNT_OPENING_BLOCKED",
+                    message = SCREENING_REFUSED_MESSAGE,
+                    timestamp = Instant.now(),
+                ),
+            )
+            .build()
+    }
+}
+
+@Provider
+class AccountScreeningUnavailableExceptionMapper : ExceptionMapper<AccountScreeningUnavailableException> {
+    private val log = Logger.getLogger(AccountScreeningUnavailableExceptionMapper::class.java)
+
+    override fun toResponse(exception: AccountScreeningUnavailableException): Response {
+        // WARN, not ERROR: an upstream outage is an availability fact the caller can retry,
+        // not a defect in this service. No stack trace — the cause is a connection failure.
+        log.warnf("sanctions screening unavailable, account opening blocked: %s", exception.cause?.message)
+        return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .header("Retry-After", "30")
+            .entity(
+                ApiError(
+                    traceId = Ids.randomId().toString(),
+                    status = Response.Status.SERVICE_UNAVAILABLE.statusCode,
+                    code = "SCREENING_UNAVAILABLE",
+                    message = "Sanctions screening is temporarily unavailable; retry later",
+                    timestamp = Instant.now(),
+                ),
+            )
+            .build()
+    }
+}
 
 private const val UNPROCESSABLE_ENTITY = 422
