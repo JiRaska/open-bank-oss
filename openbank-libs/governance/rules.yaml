@@ -222,14 +222,25 @@ change_requirements:
     # what hides that. It compares the committed openapi.yaml against the schema Quarkus emits
     # during the build (`-Dquarkus.smallrye-openapi.store-schema-directory`, _service-ci.yml).
     # That generated document is not being produced. Across three independent CI runs and every
-    # service that built with a committed spec — billing, interest, swift (run 33949966927),
+    # service that REACHES the script — one with no committed openapi.yaml is skipped a step
+    # earlier by the workflow's own guard (openbank-simulation, run 33949966927) — billing,
+    # interest, swift (run 33949966927),
     # document (33949973656), customer-edge (33949914172) — the script printed
     #
     #   ##[notice] <svc>: no generated schema at <svc>/build/openapi-generated/openapi.yaml
     #              ... Not a finding.
     #
-    # and returned 0. NOT ONE service printed "N request schema(s) checked". Zero request
-    # schemas have been compared.
+    # and returned 0 BEFORE reaching its count line ("{checked} request schema(s) compared,
+    # {findings} finding(s)"), so no count is emitted at all. Zero request schemas have been
+    # compared. Verification note: the word is "compared", not "checked" — grepping the wrong
+    # one returns empty across every run and reads as a confirmation while measuring nothing.
+    #
+    # What is MEASURED is only that nothing exists at the path the script is given, while
+    # quarkusBuild demonstrably executed with the flag set. The CAUSE is not established, and
+    # one live alternative changes the fix: Quarkus may resolve a relative
+    # store-schema-directory against the augmentation working directory, so the document could
+    # be produced one level away. The extension is present in every named service, so "no
+    # OpenAPI generation at all" is not the explanation.
     #
     # So the blocker is not readiness and not a false-positive rate: flipping this to enforced
     # would graduate a check that examines nothing, and the green would then be load-bearing.
