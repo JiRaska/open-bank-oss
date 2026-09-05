@@ -244,8 +244,14 @@ cosign_attest_slsa_provenance() {
 
   # Bind the verify to THIS run: require our buildInvocationId among the verified envelopes
   # (same append-only .att trap as the SBOM binding above — any-match is not proof).
+  # CASING TRAP (measured against cosign v2.4.3, run 33984244416 + local repro): cosign does
+  # NOT embed the predicate verbatim — it parses it into its Go struct and re-marshals, and
+  # the struct's json tag is `buildInvocationID` (capital D), not the SLSA v0.2 spec spelling
+  # `buildInvocationId`. The envelope therefore carries `buildInvocationID` and a binding on
+  # the spec spelling matches nothing. Accept both spellings.
   if ! printf '%s\n' "$envelopes" | jq -e -s --arg id "$invocation_id" \
-       '[ .[] | try (.payload | @base64d | fromjson | .predicate.metadata.buildInvocationId) catch empty ]
+       '[ .[] | try (.payload | @base64d | fromjson
+          | .predicate.metadata | (.buildInvocationId // .buildInvocationID)) catch empty ]
         | index($id) != null' >/dev/null 2>&1; then
     echo "ERROR: cosign verify-attestation for ${image} verified no envelope carrying this" >&2
     echo "       run's provenance (buildInvocationId=${invocation_id})." >&2
