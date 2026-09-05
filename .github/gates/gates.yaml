@@ -1874,6 +1874,33 @@ gates:
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
+  # ADR-0031 D9 phase 3 (issue #5281): flaky-test-hunter is the only chartered agent with a real
+  # GitHub write path. The two properties that make that acceptable — the write is confined to one
+  # NON-money-path module's own test tree, and the agent opens a PR but never merges or approves —
+  # held only because a human read a Kotlin constant. Every existing unit test pins that a LEDGER
+  # path is refused, so re-pointing the writer at another service would keep them all green, and
+  # money_path_services is a list that GROWS (settlement, sanctions, sdd and interest were all
+  # added after the fact). This binds the constant to rules.yaml: money_path_services itself
+  # rather than to a second hand-kept copy, and rejects any merge/approve/review-request endpoint
+  # literal in the adapter.
+  #
+  # ENFORCED. Pure python + one file read, <1 s. Falsified by effect against the real adapter on
+  # 2026-08-20: a money-path prefix, an added `PUT /pulls/{n}/merge`, and a deleted bound each make
+  # it exit 1; removing either half of `evaluate` makes the self-test go red.
+  - id: agent-bounded-write-surface
+    min_subjects: 20   # the money_path_services entries the bound is checked against; 23 today
+                        # (2026-08-20). A gate that resolves an empty list would pass everything,
+                        # so the floor moves with the list rather than tracking it exactly.
+    name: "agent bounded GitHub write surface (ADR-0031 D9 phase 3, enforced)"
+    group: registry
+    mode: enforced
+    rationale: "flaky-test-hunter is the only agent with a real GitHub write path; its non-money-path confinement and its inability to merge or approve held only because a human read a Kotlin constant, and money_path_services grows over time."
+    review_after: "2027-02-20"
+    selftest: python3 .github/scripts/check-agent-bounded-write-surface.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-agent-bounded-write-surface.py
+
   - id: agent-model-parity
     name: "agent model-id parity, agents.yaml vs application.yaml (ADR-0031 D5, enforced)"
     group: registry
