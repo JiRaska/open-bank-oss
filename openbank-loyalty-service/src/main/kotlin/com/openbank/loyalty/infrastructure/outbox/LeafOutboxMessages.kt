@@ -13,13 +13,22 @@ import com.openbank.loyalty.domain.LeafLedgerEntry
 import jakarta.enterprise.context.ApplicationScoped
 
 /**
- * Builds the wire payload for every ledger event. Separated from the repository so the adapter
- * keeps one job (writing rows in a transaction) and the event vocabulary has one home — the shape
- * of what leaves this service is worth reading in a single file rather than reconstructing from
- * three inline builders.
+ * Builds the wire payload for every ledger event.
  *
- * Every payload carries `actorType=SYSTEM` via [EventActor], the fleet's shared "no person
- * originated this" vocabulary, rather than a locally invented sentinel.
+ * Each message is composed IN FULL at its own call site, with the shared fields repeated rather
+ * than folded into a helper. That is deliberate and it is not a style preference. Nothing
+ * validates a Kafka payload at runtime here — no topic has a registered schema — so
+ * `openbank-contracts/openbank-loyalty-service/asyncapi.yaml` is the only description a consumer
+ * author can read, and `check-event-contract-code-agreement.py` is the only thing that keeps that
+ * description true. It reads the field names out of the construction site, so a payload assembled
+ * from a helper elsewhere in the file yields a PARTIAL key set that reads as a complete one: the
+ * gate would report the shared fields as documented-but-not-sent while the producer sends them
+ * perfectly well. Writing each message whole keeps the check honest, and it also means the wire
+ * shape of one event is readable in one place, which is what the contract documents.
+ *
+ * `buildMap { put(...) }` rather than `mapOf`: it is the fleet idiom for an outbox payload, and it
+ * is the shape that lets the actor attribution use [EventActor]'s shared constants — the canonical
+ * spelling for "no person originated this" — instead of a locally invented string.
  */
 @ApplicationScoped
 class LeafOutboxMessages(private val mapper: ObjectMapper) {
@@ -29,10 +38,22 @@ class LeafOutboxMessages(private val mapper: ObjectMapper) {
         aggregateId = entry.partyId,
         eventType = "LeafEarned.${entry.earnSource?.id}",
         payload = mapper.writeValueAsString(
-            base(entry) + mapOf(
-                "earnSourceId" to entry.earnSource?.id,
-                "expiresAt" to entry.expiresAt?.toString(),
-            ),
+            buildMap {
+                put("entryId", entry.id.toString())
+                put("aggregateType", AGGREGATE_TYPE)
+                put("aggregateId", entry.partyId.toString())
+                put("partyId", entry.partyId.toString())
+                put("entryType", entry.type.name)
+                put("leaves", entry.leaves.value)
+                put("ruleVersion", entry.ruleVersion)
+                put("correlationEventId", entry.correlationEventId.toString())
+                put("occurredAt", entry.occurredAt.toString())
+                put("sourceService", SOURCE_SERVICE)
+                put(EventActor.FIELD_ACTOR_TYPE, EventActor.TYPE_SYSTEM)
+                put(EventActor.FIELD_ACTOR_ID, EventActor.system(SERVICE_NAME, MECHANISM))
+                put("earnSourceId", entry.earnSource?.id)
+                put("expiresAt", entry.expiresAt?.toString())
+            },
         ),
         createdAt = entry.occurredAt,
     )
@@ -42,14 +63,26 @@ class LeafOutboxMessages(private val mapper: ObjectMapper) {
         aggregateId = grant.partyId,
         eventType = "LeafBenefitGranted.${grant.benefitId}",
         payload = mapper.writeValueAsString(
-            base(burn) + mapOf(
-                "grantId" to grant.id.toString(),
-                "benefitId" to grant.benefitId,
+            buildMap {
+                put("entryId", burn.id.toString())
+                put("aggregateType", AGGREGATE_TYPE)
+                put("aggregateId", burn.partyId.toString())
+                put("partyId", burn.partyId.toString())
+                put("entryType", burn.type.name)
+                put("leaves", burn.leaves.value)
+                put("ruleVersion", burn.ruleVersion)
+                put("correlationEventId", burn.correlationEventId.toString())
+                put("occurredAt", burn.occurredAt.toString())
+                put("sourceService", SOURCE_SERVICE)
+                put(EventActor.FIELD_ACTOR_TYPE, EventActor.TYPE_SYSTEM)
+                put(EventActor.FIELD_ACTOR_ID, EventActor.system(SERVICE_NAME, MECHANISM))
+                put("grantId", grant.id.toString())
+                put("benefitId", grant.benefitId)
                 // GRANTED means owed and published, never applied. The delivering engine reports
                 // application; no field here may be read as its receipt.
-                "grantStatus" to grant.status.name,
-                "grantExpiresAt" to grant.expiresAt?.toString(),
-            ),
+                put("grantStatus", grant.status.name)
+                put("grantExpiresAt", grant.expiresAt?.toString())
+            },
         ),
         createdAt = burn.occurredAt,
     )
@@ -58,30 +91,27 @@ class LeafOutboxMessages(private val mapper: ObjectMapper) {
         eventId = Ids.newId(),
         aggregateId = entry.partyId,
         eventType = "LeafExpired",
-        payload = mapper.writeValueAsString(base(entry)),
+        payload = mapper.writeValueAsString(
+            buildMap {
+                put("entryId", entry.id.toString())
+                put("aggregateType", AGGREGATE_TYPE)
+                put("aggregateId", entry.partyId.toString())
+                put("partyId", entry.partyId.toString())
+                put("entryType", entry.type.name)
+                put("leaves", entry.leaves.value)
+                put("ruleVersion", entry.ruleVersion)
+                put("correlationEventId", entry.correlationEventId.toString())
+                put("occurredAt", entry.occurredAt.toString())
+                // audit-service attributes a row by this field when present and DERIVES it from
+                // the topic name when absent. `audit_entries` is append-only at the database and
+                // `source_service` is chain-hashed into `record_hash`, so a row attributed by
+                // derivation can never be corrected (#5256/#6035).
+                put("sourceService", SOURCE_SERVICE)
+                put(EventActor.FIELD_ACTOR_TYPE, EventActor.TYPE_SYSTEM)
+                put(EventActor.FIELD_ACTOR_ID, EventActor.system(SERVICE_NAME, MECHANISM))
+            },
+        ),
         createdAt = entry.occurredAt,
-    )
-
-    private fun base(entry: LeafLedgerEntry): Map<String, Any?> = mapOf(
-        "entryId" to entry.id.toString(),
-        "aggregateType" to AGGREGATE_TYPE,
-        "aggregateId" to entry.partyId.toString(),
-        "partyId" to entry.partyId.toString(),
-        "entryType" to entry.type.name,
-        "leaves" to entry.leaves.value,
-        "ruleVersion" to entry.ruleVersion,
-        "correlationEventId" to entry.correlationEventId.toString(),
-        "occurredAt" to entry.occurredAt.toString(),
-        // The producer's own claim about who emitted this, and the reason it is spelled
-        // "loyalty-service": audit-service attributes a row by this field when it is present and
-        // by DERIVING it from the topic name when it is not. `audit_entries` is append-only at the
-        // database and `source_service` is chain-hashed into `record_hash`, so a row attributed by
-        // derivation can never be corrected afterwards. The value is the module directory minus
-        // the `openbank-` prefix, which is the spelling TopicAttribution already maps this topic
-        // to — a disagreement would split one producer into two in every group-by (#5256/#6035).
-        "sourceService" to SOURCE_SERVICE,
-        EventActor.FIELD_ACTOR_TYPE to EventActor.TYPE_SYSTEM,
-        EventActor.FIELD_ACTOR_ID to EventActor.system(SERVICE_NAME, MECHANISM),
     )
 
     private companion object {

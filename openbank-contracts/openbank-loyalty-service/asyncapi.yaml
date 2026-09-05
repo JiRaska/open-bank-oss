@@ -93,7 +93,7 @@ components:
         deliberate and is why the refusal has its own metric
         (`openbank_loyalty_earn_capped_total`) rather than a message here.
       payload:
-        $ref: '#/components/schemas/LeafLedgerEventPayload'
+        $ref: '#/components/schemas/LeafEarnedPayload'
     leaf-benefit-granted:
       name: LeafBenefitGranted
       title: Lístky burned for a catalogue benefit
@@ -169,13 +169,24 @@ components:
         actorId:
           type: string
           description: "`EventActor.system(\"loyalty\", \"leaf-ledger\")`."
-        earnSourceId:
-          type: string
-          description: The `LeafEarnSource` id. Present on an EARN message.
-        expiresAt:
-          type: string
-          format: date-time
-          description: When this lot expires. Present on an EARN message.
+    LeafEarnedPayload:
+      description: |
+        The shared fields plus the two an EARN message carries. They live here rather than on the
+        shared schema because `check-event-contract-code-agreement.py` flattens `allOf` into one
+        property set per message: a field documented on the shared schema is claimed by every
+        message that references it, and only the earn payload actually sends these two.
+      allOf:
+        - $ref: '#/components/schemas/LeafLedgerEventPayload'
+        - type: object
+          required: [earnSourceId, expiresAt]
+          properties:
+            earnSourceId:
+              type: string
+              description: The `LeafEarnSource` id.
+            expiresAt:
+              type: string
+              format: date-time
+              description: When this lot expires.
     LeafBenefitGrantedPayload:
       allOf:
         - $ref: '#/components/schemas/LeafLedgerEventPayload'
