@@ -118,7 +118,7 @@ sequenceDiagram
 | party `ACTIVE` and `scaEnrolled` | `ACTIVE` |
 | party `ACTIVE` and not enrolled | `SCA_PENDING` |
 | kyc `UNDER_REVIEW` | `KYC_UNDER_REVIEW` |
-| kyc `DOCUMENTS_REQUIRED` | `KYC_DOCUMENTS_REQUIRED` |
+| kyc `DOCUMENTS_REQUIRED` | `KYC_DOCUMENTS_REQUIRED` | <!-- unreachable: kyc never sets this status (#8535) -->
 | kyc `OPEN` or null | `KYC_OPEN` |
 | kyc `REJECTED` or `EXPIRED` | `BLOCKED` |
 | otherwise | `REGISTERED` |

@@ -190,6 +190,33 @@ class ClearingServiceTest {
     }
 
     @Test
+    fun `an empty cycle announces its settlement`() {
+        val batchSlot: CapturingSlot<ClearingBatch> = slot()
+        val eventSlot: CapturingSlot<OutboxMessage> = slot()
+        val settledMessage = mockk<OutboxMessage>()
+
+        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, any()) } returns
+            Uni.createFrom().item(emptyList())
+        every { eventPublisher.batchSettledMessage(capture(batchSlot)) } returns settledMessage
+        every { batchRepo.saveWithEvent(any(), capture(eventSlot)) } answers {
+            Uni.createFrom().item(firstArg<ClearingBatch>())
+        }
+
+        val batch = service.triggerClearingCycle(PaymentRail.SEPA_SCT).await().indefinitely()
+
+        // The cycle RAN. Without an event a consumer cannot tell that from "the cycle did not
+        // run" -- distinguishing those two is why this event exists.
+        assertThat(batch.status).isEqualTo(ClearingStatus.SETTLED)
+        assertThat(batch.itemCount).isEqualTo(0)
+        assertThat(eventSlot.captured).isSameAs(settledMessage)
+        assertThat(batchSlot.captured.status).isEqualTo(ClearingStatus.SETTLED)
+
+        // Announced atomically with the insert, never through the bare save that wrote no event.
+        verify(exactly = 1) { batchRepo.saveWithEvent(any(), any()) }
+        verify(exactly = 0) { batchRepo.save(any()) }
+    }
+
+    @Test
     fun `triggerClearingCycle computes correct netPosition for bilateral settlement`() {
         val amount = BigDecimal("200.00")
         val items = listOf(

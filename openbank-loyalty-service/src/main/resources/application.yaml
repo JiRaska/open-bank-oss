@@ -1,0 +1,92 @@
+quarkus:
+  application:
+    name: openbank-loyalty-service
+  http:
+    port: 8157
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:openbank}
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_loyalty}
+    jdbc:
+      # A literal jdbc url has to be here, not only in the environment: Flyway migrates the
+      # DEFAULT (Agroal/JDBC) datasource, and a service that only boots because the cluster
+      # supplied one cannot start from this repository alone.
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_loyalty}
+  hibernate-orm:
+    database:
+      generation: none
+    # Deliberately NO physical-naming-strategy. Every entity column in this service is named
+    # explicitly, and the two facts belong together — check-entity-column-names.py enforces the
+    # pairing, because the implicit name is right for single-word properties and wrong for
+    # multi-word ones, which is how a class reads as consistent while half its columns do not
+    # exist.
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+  oidc:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8085
+    host: 0.0.0.0
+    root-path: /q
+  shutdown:
+    timeout: 30S
+
+mp:
+  messaging:
+    outgoing:
+      loyalty-outbox-out:
+        connector: smallrye-kafka
+        topic: openbank.loyalty.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+
+openbank:
+  outbox:
+    # Defaults to false in code by house convention. A service with an outbox that leaves this
+    # unset dispatches nothing, forever, with attempt_count stuck at 0 and no error anywhere.
+    dispatch-enabled: true
+    poll-interval: 5s
+    initial-delay: 5s
+  loyalty:
+    expiry-cron: "0 15 2 * * ?"
+    provisioning-cron: "0 30 2 * * ?"
+
+"%test":
+  quarkus:
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_loyalty_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_loyalty_it
+    devservices:
+      enabled: false
+    management:
+      enabled: false
+    oidc:
+      enabled: false
+  mp:
+    messaging:
+      outgoing:
+        loyalty-outbox-out:
+          connector: smallrye-in-memory
