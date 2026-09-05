@@ -2508,6 +2508,24 @@ gates:
   # baselines, and which services actually package registry prompts). The route must read
   # the generated artifact only; a stale snapshot would reintroduce the exact hand-edited
   # drift this refactor removes.
+  # The card capability matrix is DERIVED from openbank-libs/governance/card-capabilities.yaml
+  # (ADR-0283 phase 2, #8810). Without this gate the registry and the published matrix are free to
+  # disagree, and the disagreement is invisible: both files are plausible on their own, and the one
+  # a reader trusts is the rendered table. The registry is also what the Card Center screen renders
+  # from (phase 3), so a drifted matrix means the docs and the operator console tell a bank
+  # different things about which network offers what.
+  - id: card-capability-matrix-drift
+    name: "card capability matrix matches its registry (ADR-0283, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20   # ~0.2s locally; the ceiling covers a cold interpreter on a busy runner
+    review_after: "2027-09-05"
+    rationale: "The matrix is the artifact a bank reads to choose a network per product; the registry is what the code and the Card Center bind to. A hand-editable copy of derived data drifts silently and the reader cannot tell which one is current."
+    selftest: python3 .github/scripts/gen-card-capability-matrix.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/gen-card-capability-matrix.py"]
+    run: python3 .github/scripts/gen-card-capability-matrix.py --check
+
   - id: ai-governance-snapshot-drift
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
     group: registry
