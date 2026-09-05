@@ -45,14 +45,23 @@ interface LlmDiagnosisPort {
     suspend fun proposeFixDiff(finding: DocsTruthFinding, diagnosis: String): String?
 }
 
+/**
+ * Both methods return the URL of a proposal that was actually created, or `null` when none was —
+ * an unwired write path, a missing token, or a refused finding. `null` is the ONLY way to say
+ * "nothing was created": there is deliberately no placeholder-URL return, because a well-formed
+ * string is indistinguishable from a delivered proposal to every consumer (#5897, and the
+ * `UnwiredProposalPort` precedent in `openbank-mcp-service`, #3900).
+ */
 interface GitHubProposalPort {
     /** The one narrow mechanically-fixable case — flipping just the `Delivery-Status:` line when
      * the evidence is unambiguous. Not the primary proposal path: correcting an ADR's substantive
-     * content needs a human who reads both the ADR and the code, not a diff (ADR-0166 Decision). */
-    suspend fun openProposalPr(finding: DocsTruthFinding, fixDiff: String): String
+     * content needs a human who reads both the ADR and the code, not a diff (ADR-0166 Decision).
+     * Returns `null` when no PR was opened. */
+    suspend fun openProposalPr(finding: DocsTruthFinding, fixDiff: String): String?
 
-    /** The primary proposal path: an ADR-status-vs-code drift needing human triage. */
-    suspend fun openTicket(finding: DocsTruthFinding, diagnosis: String): String
+    /** The primary proposal path: an ADR-status-vs-code drift needing human triage. Returns `null`
+     * when no ticket was opened. */
+    suspend fun openTicket(finding: DocsTruthFinding, diagnosis: String): String?
 }
 
 interface FindingRepository {

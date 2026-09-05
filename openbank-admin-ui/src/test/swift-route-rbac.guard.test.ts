@@ -6,7 +6,7 @@ const read = (relative: string) => fs.readFileSync(path.join(process.cwd(), rela
 
 describe('SWIFT read-route RBAC', () => {
   it('keeps list and detail routes aligned with the payments navigation boundary', () => {
-    expect(read('src/app/swift/page.tsx')).toContain('<AuthGuard permission="payments:view">')
-    expect(read('src/app/swift/[id]/page.tsx')).toContain('<AuthGuard permission="payments:view">')
+    expect(read('src/app/swift/page.tsx')).toContain('<AuthGuard permission="payment-rails:view">')
+    expect(read('src/app/swift/[id]/page.tsx')).toContain('<AuthGuard permission="payment-rails:view">')
   })
 })
