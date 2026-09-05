@@ -440,3 +440,12 @@ set) apply equally to the new `ledger.approval.decide` action.
   and by the same `@RolesAllowed`/`@Authorize("ledger.read")` gate the endpoint already had — no
   new role or policy. Rollback: revert; `synthetic` defaults false on existing rows via the
   migration's backfill, so no read observes a changed value for pre-existing data.
+- **2026-09-05** — Input validation hardened on the FX revaluation ops trigger
+  (`POST /api/v1/ledger/fx-revaluation`): a malformed `date` is rejected as 400
+  (`IllegalArgumentException` via libs-runtime `CommonExceptionMappers`) where a raw
+  `DateTimeParseException` previously surfaced as 500; a blank date still defaults to today
+  (Europe/Prague). Found by the api-fuzz lane (#8832). No new surface, role, or data flow — same
+  endpoint, same authz (`ROLE_OPERATOR`), tighter input handling. The blank-date 500 the fuzzer saw
+  was harness-environment-only (no fx-service in the single-service lane); loud failure on a down
+  ČNB rate dependency stays by design. Risk class = **availability**. Rollback: revert the guard.
+

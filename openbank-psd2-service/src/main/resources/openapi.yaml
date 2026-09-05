@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PSD2 Open Banking API
-  version: 2.5.0
+  version: 2.6.0
   description: |
     PSD2-compliant open banking — Account Information Service (AIS) and
     Payment Initiation Service (PIS) for Third Party Providers.
@@ -255,7 +255,7 @@ paths:
           required: true
           schema:
             type: string
-        - name: X-Idempotency-Key
+        - name: Idempotency-Key
           in: header
           required: true
           schema:
@@ -281,7 +281,7 @@ paths:
           required: true
           schema:
             type: string
-        - name: X-Idempotency-Key
+        - name: Idempotency-Key
           in: header
           required: true
           schema:
@@ -307,6 +307,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -324,6 +329,11 @@ paths:
       operationId: pisInitiateSipo
       parameters:
         - name: X-TPP-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
           in: header
           required: true
           schema:

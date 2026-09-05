@@ -52,6 +52,37 @@ class SwiftService(
 
     private val log = Logger.getLogger(SwiftService::class.java)
 
+    /**
+     * The `swift.message.status-changed` envelope, built in ONE place so every transition that
+     * publishes one publishes the same shape. All four call sites — the scheme verdict, the
+     * settlement, and the two operator transitions below — go through here.
+     *
+     * The keys are exactly the ones `docs/asyncapi/openbank-events.yaml`'s
+     * `SwiftMessageEventPayload` declares (plus `sourceService`, the attribution field
+     * `AuditConsumer` reads). `ackRef` and `rejectionReason` are deliberately NOT on the wire:
+     * an earlier revision of that document declared them and the producer never emitted them,
+     * and #8718 is fixed by adding the missing OCCURRENCES of an already-published event, not by
+     * widening its payload. `status` alone carries the transition — `ACKNOWLEDGED` and
+     * `REJECTED` are both already in the document's declared enum, so no consumer sees a value
+     * the contract did not already allow.
+     */
+    private fun statusChangedEvent(message: SwiftMessage) = OutboxMessage(
+        aggregateId = message.id,
+        eventType = SWIFT_MESSAGE_STATUS_CHANGED,
+        payload = objectMapper.writeValueAsString(
+            mapOf(
+                "sourceService" to SOURCE_SERVICE,
+                "swiftMessageId" to message.id.toString(),
+                "paymentSagaRef" to message.transactionReference,
+                "status" to message.status.name,
+                "messageType" to message.messageType.name,
+                "amount" to BigDecimal(message.amountMinorUnits).movePointLeft(2),
+                "currency" to message.currency,
+                "occurredAt" to message.updatedAt.toString(),
+            ),
+        ),
+    )
+
     override suspend fun send(cmd: SendSwiftCommand): SwiftMessage {
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
         val now = Instant.now(clock)
@@ -99,23 +130,7 @@ class SwiftService(
                     updatedAt = now,
                 )
             }
-            val outbox = OutboxMessage(
-                aggregateId = updated.id,
-                eventType = SWIFT_MESSAGE_STATUS_CHANGED,
-                payload = objectMapper.writeValueAsString(
-                    mapOf(
-                        "sourceService" to SOURCE_SERVICE,
-                        "swiftMessageId" to updated.id.toString(),
-                        "paymentSagaRef" to updated.transactionReference,
-                        "status" to updated.status.name,
-                        "messageType" to updated.messageType.name,
-                        "amount" to BigDecimal(updated.amountMinorUnits).movePointLeft(2),
-                        "currency" to updated.currency,
-                        "occurredAt" to updated.updatedAt.toString(),
-                    ),
-                ),
-            )
-            val persisted = repo.saveWithOutbox(updated, outbox)
+            val persisted = repo.saveWithOutbox(updated, statusChangedEvent(updated))
             // ADR-0108: book the funds in transaction-service after scheme ACSC.
             if (persisted.status == SwiftStatus.SENT) settle(persisted) else persisted
         } catch (ex: SchemeGatewayUnavailableException) {
@@ -136,23 +151,7 @@ class SwiftService(
         val outcome = settlementPort.settle(message)
         if (outcome.settled) {
             val completed = message.copy(status = SwiftStatus.COMPLETED, updatedAt = Instant.now(clock))
-            val outbox = OutboxMessage(
-                aggregateId = completed.id,
-                eventType = SWIFT_MESSAGE_STATUS_CHANGED,
-                payload = objectMapper.writeValueAsString(
-                    mapOf(
-                        "sourceService" to SOURCE_SERVICE,
-                        "swiftMessageId" to completed.id.toString(),
-                        "paymentSagaRef" to completed.transactionReference,
-                        "status" to completed.status.name,
-                        "messageType" to completed.messageType.name,
-                        "amount" to BigDecimal(completed.amountMinorUnits).movePointLeft(2),
-                        "currency" to completed.currency,
-                        "occurredAt" to completed.updatedAt.toString(),
-                    ),
-                ),
-            )
-            repo.saveWithOutbox(completed, outbox)
+            repo.saveWithOutbox(completed, statusChangedEvent(completed))
         } else {
             log.warnf(
                 "Settlement skipped for SWIFT message %s (no account UUID); message stays SENT",
@@ -172,25 +171,35 @@ class SwiftService(
     override suspend fun listAll() = repo.listAllMessages()
     override suspend fun listByStatus(status: SwiftStatus) = repo.findByStatus(status)
 
+    /**
+     * #8718: an operator acknowledgement is a status transition like any other, so it writes its
+     * outbox row in the SAME transaction as the state change — `saveWithOutbox`, never `save`.
+     *
+     * It published nothing before, which made the service announce every SCHEME decision and no
+     * OPERATOR one. `audit-service` subscribes to `openbank.payments.swift.event`, so the audit
+     * trail held what the counterparty decided and nothing about what a human here decided —
+     * the wrong way round on a money-path service, since a scheme verdict is reproducible from
+     * the counterparty's own records and an operator's is not.
+     */
     override suspend fun acknowledge(id: UUID, ackRef: String): SwiftMessage {
         val msg = repo.findById(id) ?: error("SWIFT message not found: $id")
-        return repo.save(
-            msg.copy(
-                status = SwiftStatus.ACKNOWLEDGED,
-                ackReceivedAt = Instant.now(clock),
-                updatedAt = Instant.now(clock),
-            ),
+        val now = Instant.now(clock)
+        val acknowledged = msg.copy(
+            status = SwiftStatus.ACKNOWLEDGED,
+            ackReceivedAt = now,
+            updatedAt = now,
         )
+        return repo.saveWithOutbox(acknowledged, statusChangedEvent(acknowledged))
     }
 
+    /** #8718: see [acknowledge] — an operator rejection publishes on the same terms. */
     override suspend fun reject(id: UUID, reason: String): SwiftMessage {
         val msg = repo.findById(id) ?: error("SWIFT message not found: $id")
-        return repo.save(
-            msg.copy(
-                status = SwiftStatus.REJECTED,
-                rejectionReason = reason,
-                updatedAt = Instant.now(clock),
-            ),
+        val rejected = msg.copy(
+            status = SwiftStatus.REJECTED,
+            rejectionReason = reason,
+            updatedAt = Instant.now(clock),
         )
+        return repo.saveWithOutbox(rejected, statusChangedEvent(rejected))
     }
 }

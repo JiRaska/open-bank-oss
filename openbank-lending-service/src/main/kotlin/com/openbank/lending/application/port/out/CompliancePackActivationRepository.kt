@@ -87,7 +87,11 @@ class JpaCompliancePackActivationRepository :
 
     @WithSession
     override fun findByState(state: ProposalState): Uni<List<CompliancePackActivationEntity>> =
-        list("state = ?1 order by proposed_at", state)
+        // `proposedAt`, not `proposed_at`: this is HQL, so the ORDER BY names the ENTITY PROPERTY.
+        // The column name parses fine to the eye and throws `SemanticException: Could not interpret
+        // path expression` at runtime, which is how this endpoint answered 500 on every call from the
+        // day it shipped until the fuzz lane got past authentication (#5913).
+        list("state = ?1 order by proposedAt", state)
 
     @WithSession
     override fun findActivated(): Uni<List<CompliancePackActivationEntity>> = list(

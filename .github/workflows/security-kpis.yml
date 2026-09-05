@@ -28,6 +28,7 @@ jobs:
     permissions:
       contents: write        # push the refresh branch
       pull-requests: write   # open the refresh PR
+      actions: read          # fuzz collector reads the latest api-fuzz run's artifact
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,6 +39,8 @@ jobs:
         run: python3 .github/scripts/security-kpis.py --self-test
 
       - name: Recompute the snapshot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 .github/scripts/security-kpis.py
 
       - name: Open a refresh PR when the snapshot moved

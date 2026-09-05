@@ -15,7 +15,7 @@
 
 | Proměnná | Výchozí | Účel |
 |---|---|---|
-| `POSTGRES_PASSWORD` | `CHANGE_ME_LOCAL_DEV_ONLY` | DB heslo (BootstrapVerifier blokuje placeholdery v prod) |
+| `POSTGRES_PASSWORD` | `CHANGE_ME_LOCAL_DEV_ONLY` | DB heslo. ⬜ Žádný `BootstrapVerifier` neexistuje, takže tento placeholder při startu nic neblokuje (#8426) — v prod hodnota přichází přes `secretKeyRef` z ESO/OpenBao v `lending-service.yaml` (ADR-0007) |
 | `OIDC_CLIENT_SECRET` | `CHANGE_ME_LOCAL_DEV_ONLY` | Keycloak client secret |
 | `QUARKUS_OIDC_AUTH_SERVER_URL` | `http://localhost:8080/realms/openbank` | OIDC issuer |
 | `LEDGER_SERVICE_URL` | `http://localhost:8101` | base REST klienta ledger-service |

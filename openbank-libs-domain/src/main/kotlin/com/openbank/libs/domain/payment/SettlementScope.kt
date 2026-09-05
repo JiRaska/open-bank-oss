@@ -18,10 +18,14 @@ package com.openbank.libs.domain.payment
  * an account of ours to credit — domestic-payment resolves it for in-house transfers and leaves it
  * null when "the money genuinely leaves the bank" (its own words), and sepa-payment, swift-service
  * and sepa-instant never set it at all. Rail is deliberately *not* trusted here: it arrives as a
- * free-form string parsed with `PaymentRail.valueOf(...)` inside a swallowing `runCatching`, and
- * three services currently send values that are not members (`SCT_INST`, `SEPA`, `FX`) and land as
- * null. A guard keyed on `rail == null` would therefore hand same-day booking to genuinely external
- * SEPA payments.
+ * free-form string parsed with `PaymentRail.valueOf(...)` inside a swallowing `runCatching`, so an
+ * unparseable value lands as null and is from then on indistinguishable from "no rail supplied".
+ * Every sender today does send a real member (sepa-payment `SEPA_CT`, sepa-instant `SEPA_INST`,
+ * each from its own `SettlementAdapter`), so that is latent rather than live — but a guard keyed
+ * on `rail == null` would hand same-day booking to genuinely external SEPA payments the day one
+ * stops. `SCT_INST`, `SEPA` and `FX` do occur in those services and are *not* members: they are
+ * fraud-scoring labels on `FraudScoreCommand.rail`, a deliberately free-form field that
+ * fraud-service stores as `String` and never parses. #8699 carries the trace.
  */
 object SettlementScope {
 

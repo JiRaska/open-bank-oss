@@ -138,7 +138,7 @@ class PartyResourceAuditTest {
         coEvery { res.partyUseCase.exportPartyData(partyId) } returns
             PartyGdprExport(sampleParty(), emptyList(), now)
 
-        val response = res.exportPartyGdpr(partyId)
+        val response = res.exportPartyGdpr(partyId, null)
 
         assertThat(response.status).isEqualTo(200)
         assertThat(events).singleElement().satisfies({ e ->

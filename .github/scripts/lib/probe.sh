@@ -180,11 +180,27 @@ probe_zombie_runs() {
       [ -z "$id" ] && continue
       # Still confirmed per run: age alone would also catch a genuinely long-running job, which is
       # slow but healthy and must not be subtracted from a saturation count.
-      if gh api "repos/$repo/actions/runs/$id/jobs" \
+      #
+      # The same two traps as the page call above, and they were left here when that one was fixed.
+      # `2>/dev/null` made a failed jobs call identical to "this run is not wedged", so the run was
+      # dropped from the census silently -- the under-counting direction of the very bug this
+      # function is named after. And `gh api ... | grep -q` reports GREP's status, so even without
+      # the redirect the failure could not be seen: the exit code has to be read off the assignment,
+      # never off the pipeline (the repo's own "measure the exit code, not the pipeline's" rule).
+      local jerr jrc jout
+      jerr="$(mktemp)"
+      jout="$(gh api "repos/$repo/actions/runs/$id/jobs" \
         --jq 'if (.jobs|length) > 0 and (all(.jobs[]; .status == "completed")) then "wedged" else empty end' \
-        2>/dev/null | grep -q wedged; then
-        printf '%s\t%s\t%s\n' "$id" "$created" "$name"
+        2>"$jerr")"
+      jrc=$?
+      if [ "$jrc" -ne 0 ]; then
+        echo "probe_zombie_runs: gh api failed on jobs for run $id (exit $jrc):" \
+             "$(head -1 "$jerr") — refusing to report a partial census" >&2
+        rm -f "$jerr"
+        return 1
       fi
+      rm -f "$jerr"
+      case "$jout" in *wedged*) printf '%s\t%s\t%s\n' "$id" "$created" "$name" ;; esac
     done <<<"$ids"
     page=$((page + 1))
   done
@@ -383,6 +399,7 @@ _probe_selftest() {
   # broken: it passed jq's `--arg` to `gh api --jq`, which rejects it, and `2>/dev/null` turned the
   # error into an empty page. It reported ZERO wedged runs while 177 existed. `gh` is a shell
   # function here, so the whole thing is hermetic — no network, no fixtures on disk.
+
   # `gh` is a shell function here, so this is hermetic — no network, no fixtures on disk. The stub
   # parses argv properly rather than doing string surgery on "$*": a first attempt sliced the filter
   # out of the joined arguments, mangled it, and jq exited 3 on every call. That mattered less for
@@ -401,10 +418,17 @@ _probe_selftest() {
     case "$url" in
       */actions/runs/1/jobs*) body='{"jobs":[{"status":"completed"},{"status":"completed"}]}' ;;
       */actions/runs/3/jobs*) body='{"jobs":[{"status":"completed"},{"status":"in_progress"}]}' ;;
+
+      # A run whose jobs list is EMPTY satisfies `all(.jobs[]; ...)` vacuously — jq's `all` over an
+      # empty array is true — so without the `(.jobs|length) > 0` guard this would be reported
+      # wedged. The guard was written but never falsified until this fixture existed.
+      */actions/runs/4/jobs*) body='{"jobs":[]}' ;;
       *page=1*) body='{"workflow_runs":[
         {"id":1,"created_at":"2026-08-09T10:00:00Z","name":"wedged-old"},
         {"id":2,"created_at":"2099-01-01T00:00:00Z","name":"fresh"},
-        {"id":3,"created_at":"2026-08-09T10:00:00Z","name":"old-but-live"}]}' ;;
+        {"id":3,"created_at":"2026-08-09T10:00:00Z","name":"old-but-live"},
+        {"id":4,"created_at":"2026-08-09T10:00:00Z","name":"old-no-jobs"}]}' ;;
+
       *) body='{"workflow_runs":[]}' ;;
     esac
     printf '%s' "$body" | jq -r "$filter"
@@ -420,6 +444,10 @@ _probe_selftest() {
     # healthy, and subtracting it would understate real load.
     _check "probe_zombie_runs excludes an old run with a job still in flight" \
       "$(printf '%s' "$zr" | grep -q 'old-but-live' && echo 0 || echo 1)"
+
+    _check "probe_zombie_runs excludes an old run whose jobs list is empty (vacuous-all guard)" \
+      "$(printf '%s' "$zr" | grep -q 'old-no-jobs' && echo 0 || echo 1)"
+
   else
     echo "  [note] probe_zombie_runs fixture cases need jq and were NOT run"
   fi
@@ -430,6 +458,36 @@ _probe_selftest() {
   _check "probe_zombie_runs FAILS loudly when gh errors (never reads as a clean census)" \
     "$([ "$?" -ne 0 ] && echo 1 || echo 0)"
   unset -f gh
+
+
+  # The PAGE call and the PER-RUN JOBS call are two separate `gh` invocations, and fixing only the
+  # first leaves the second able to fail silently — it drops the run from the census, which is the
+  # under-counting direction of the same defect. This stub answers the page and fails the jobs call,
+  # so it is red unless BOTH calls surface their failure. It also pins the pipeline trap: while the
+  # jobs call ended in `| grep -q wedged` the status read was grep's, so this case passed even with
+  # the redirect removed.
+  if command -v jq >/dev/null 2>&1; then
+    gh() {
+      local url="" filter=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          api)   shift ;;
+          --jq)  filter="$2"; shift 2 ;;
+          *)     url="$1"; shift ;;
+        esac
+      done
+      case "$url" in
+        */jobs*) echo "HTTP 500" >&2; return 1 ;;
+        *page=1*) printf '%s' '{"workflow_runs":[{"id":1,"created_at":"2026-08-09T10:00:00Z","name":"x"}]}' | jq -r "$filter" ;;
+        *) printf '%s' '{"workflow_runs":[]}' | jq -r "$filter" ;;
+      esac
+    }
+    probe_zombie_runs owner/repo 24 >/dev/null 2>&1
+    _check "probe_zombie_runs FAILS loudly when the per-run JOBS call errors" \
+      "$([ "$?" -ne 0 ] && echo 1 || echo 0)"
+    unset -f gh
+  fi
+
 
   # probe_pr_failing_checks remains network-bound with no hermetic fixture: its subject is a live
   # PR's check rollup. Declared rather than silently skipped — an unexercised probe is a third
