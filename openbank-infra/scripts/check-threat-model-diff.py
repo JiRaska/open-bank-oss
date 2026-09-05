@@ -42,11 +42,14 @@ Modes (ADR-0144 gate graduation):
 from __future__ import annotations
 
 import argparse
+import difflib
 import importlib.util
 import pathlib
 import re
 import subprocess
 import sys
+
+import yaml
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -174,6 +177,73 @@ def hunk_moves_boundary(diff_text: str) -> bool:
     return False
 
 
+def documents_naming(text: str, tokens: set[str]) -> str:
+    """The YAML documents in `text` whose own `metadata.name` names this service.
+
+    WHY THIS EXISTS — a shared manifest is not a per-service one. `payments-services.yaml` carries
+    the Deployment and Service of a dozen services in one file, so a diff that ADDS a new service's
+    Deployment touches a file every other service in it is named by. `hunk_moves_boundary` then sees
+    `env:`, `secretKeyRef:` and `containerPort:` in the added block and reports a trust-boundary
+    change for sepa-payment, domestic-payment and everyone else — none of whose documents changed by
+    a byte.
+
+    Measured on the ADR-0283 phase 1 PR: adding card-processing-service flagged two unrelated
+    money-path services, and the only remedies were editing their threat models to say nothing had
+    changed (a lie, in two documents) or this.
+
+    A file this cannot parse is returned WHOLE, which keeps the old conservative behaviour rather
+    than turning an unparseable manifest into an exemption.
+    """
+    try:
+        docs = list(yaml.safe_load_all(text))
+    except Exception:  # noqa: BLE001 - an unparseable manifest must not become an exemption
+        return text
+    kept = []
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        name = str(((doc.get("metadata") or {}).get("name")) or "")
+        if name and token_in(tokens, name):
+            kept.append(yaml.safe_dump(doc, sort_keys=True))
+    return "\n".join(kept)
+
+
+def own_document_diff(
+    service: str, rel: str, base: str | None, head: str = "HEAD",
+) -> str | None:
+    """A unified diff of only THIS service's documents inside a shared manifest.
+
+    None means the question could not be answered (no base, or a version that cannot be read), and
+    the caller stays conservative — an unanswerable probe is not a clean one.
+
+    The result is fed back through [hunk_moves_boundary] rather than compared for equality: a
+    document can change without moving a boundary, and the generated churn this file already knows
+    about (the pod-roll `policy-checksum`, an auto-deploy image tag) restamps every service's own
+    document at once. Comparing whole documents would re-introduce exactly the noise #3431 removed.
+    """
+    if base is None:
+        return None
+    tokens = gitops_tokens(service)
+    try:
+        before = subprocess.run(
+            ["git", "show", f"{base}:{rel}"], cwd=REPO, capture_output=True, text=True, check=False,
+        )
+        after = subprocess.run(
+            ["git", "show", f"{head}:{rel}"], cwd=REPO, capture_output=True, text=True, check=False,
+        )
+    except OSError:
+        return None
+    if before.returncode != 0 or after.returncode != 0:
+        return None
+    return "\n".join(
+        difflib.unified_diff(
+            documents_naming(before.stdout, tokens).splitlines(),
+            documents_naming(after.stdout, tokens).splitlines(),
+            lineterm="",
+        )
+    )
+
+
 def file_diff(base: str | None, head: str, rel: str) -> str | None:
     """Unified diff of one path, or None when it cannot be inspected."""
     if base is None:
@@ -236,6 +306,11 @@ def gitops_hit(
                 # same contract as yaml_security_keys_changed.
                 return f"{rel} (Deployment/Rollout)"
             if not hunk_moves_boundary(diff_text):
+                return None
+            # A shared manifest carries many services. Narrow to this one's own documents and read
+            # the hunks again — see documents_naming for what that prevents.
+            own_diff = own_document_diff(service, rel, base, head)
+            if own_diff is not None and not hunk_moves_boundary(own_diff):
                 return None
             return f"{rel} (Deployment/Rollout)"
     return None
