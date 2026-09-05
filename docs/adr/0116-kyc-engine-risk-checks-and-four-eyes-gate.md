@@ -67,9 +67,10 @@ OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW → EXPIRED   (terminal, time-driven)
 > **Correction, 2026-09-05.** Three gaps between this lifecycle and the code, found together:
 >
 > - **`DOCUMENTS_REQUIRED` was never implemented** (#8535). No operation in `KycService` sets it,
->   and the service has no concept of a document type or any upload path. Removing it from the
->   enums and contracts is blocked by two mutually exclusive CI gates (#8618); the dead cockpit
->   column it fed has been removed, and the `KYC_DOCUMENT_REQUIRED` notification template with it.
+>   and the service has no concept of a document type or any upload path. The dead cockpit column
+>   it fed and the `KYC_DOCUMENT_REQUIRED` notification template are gone. The status itself stays
+>   declared: removing it from a published enum is a breaking narrowing, not worth a MAJOR for a
+>   value no client can receive (#8618). The docs and the diagram above now mark it unreachable.
 > - **`ESCALATED` was never a KYC case status at all.** The lifecycle diagram drew it with four
 >   transitions; it is not in `KycCaseStatus`. Escalation here is a check in `MANUAL_REVIEW` plus
 >   `due_diligence_level = EDD`, with the case staying `UNDER_REVIEW`; MLRO escalation is a state
