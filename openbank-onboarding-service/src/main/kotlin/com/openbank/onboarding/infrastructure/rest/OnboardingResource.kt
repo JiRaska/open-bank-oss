@@ -36,7 +36,23 @@ class OnboardingResource {
         @QueryParam("size") @DefaultValue("20") size: Int,
         @QueryParam("stage") stageParam: String?,
     ): Response {
-        val stage = stageParam?.uppercase()?.let { runCatching { FunnelStage.valueOf(it) }.getOrNull() }
+        // A filter that cannot be parsed must never widen the result set. `getOrNull()` used to
+        // turn an unrecognised stage into a legal null, and `listRecords` omits the predicate
+        // entirely when the stage is null — so `?stage=KYC_OPEEN` answered 200 with every record,
+        // PII included, for a caller who asked for one stage and mistyped it (#8699).
+        //
+        // Blank is treated as ABSENT, not as unparseable: `?stage=` has always meant "no filter",
+        // and #8699 asks specifically that absent stay distinguishable from unparseable.
+        // `IllegalArgumentException` is mapped to 400 by libs-runtime's shared
+        // `IllegalArgumentExceptionMapper` — no service-local mapper (#526).
+        val stage = stageParam?.takeIf { it.isNotBlank() }?.let { raw ->
+            runCatching { FunnelStage.valueOf(raw.uppercase()) }.getOrElse {
+                throw IllegalArgumentException(
+                    "unknown stage '$raw'; expected one of " +
+                        FunnelStage.entries.joinToString { entry -> entry.name },
+                )
+            }
+        }
         return Response.ok(useCase.listRecords(page, size.coerceIn(1, 100), stage)).build()
     }
 

@@ -42,6 +42,10 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // @TestSecurity: StandingOrderOutboxAtomicityIT (#8353) drives the @RolesAllowed lifecycle
+    // endpoints over real HTTP — the only way to exercise a reactive Panache write, since a bare
+    // @QuarkusTest thread carries no Vert.x context. The existing ITs only hit unsecured routes.
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)

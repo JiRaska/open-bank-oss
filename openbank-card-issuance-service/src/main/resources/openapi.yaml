@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Card Issuance Service API
-  version: 1.8.0
+  version: 1.9.0
   description: Debit/credit card lifecycle — issue, activate, block, suspend, resume, cancel;
     synthetic PAN vault, product-catalog entitlements, and additional-cardholder cards issued
     under a delegation grant (ADR-0249 D1/D2).
