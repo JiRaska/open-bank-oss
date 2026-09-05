@@ -27,6 +27,7 @@ import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.money.CurrencyCode
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
@@ -122,6 +123,9 @@ class AccountPactFolderProviderVerificationTest {
     @Inject
     lateinit var vertx: Vertx
 
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
     /**
      * Bridges reactive Panache into Pact-JVM's synchronous `@State` callback — Pact-JVM invokes
      * `@State` by reflection on the JUnit thread, which has no Vert.x context, so a bare
@@ -162,6 +166,14 @@ class AccountPactFolderProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // #8803: the vop pact's anonymous interaction expects 401, but the class-level
+        // @TestSecurity makes Quarkus' test auth mechanism authenticate EVERY replay as
+        // pact-verifier — an anonymous replay is impossible while a test identity is installed.
+        // Clear it for just this interaction so the replay reaches the endpoint unauthenticated;
+        // QuarkusSecurityTestExtension re-applies @TestSecurity before the next invocation.
+        if (context != null && context.interaction.description.endsWith("no caller identity")) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
     }
 
