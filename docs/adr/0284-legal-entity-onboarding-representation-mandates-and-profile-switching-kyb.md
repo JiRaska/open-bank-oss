@@ -2,7 +2,7 @@
 date: 2026-09-05
 decision-status: proposed
 delivery-status: partial
-followup: "openbank-app — profile switcher + business onboarding screens ship in the app repo; D8 owner-ecosystem hooks (loyalty, 360, catalog overlay, campaign segment) and the D9 agents are the unbuilt tail"
+followup: "#8866 — business funnel projection, the D8 owner-graph hooks and the D9 agents; the app half ships in openbank-app#631"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
