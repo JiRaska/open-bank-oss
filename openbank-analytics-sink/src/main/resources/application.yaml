@@ -47,7 +47,11 @@ quarkus:
 
   rest-client:
     account-service:
-      url: ${ACCOUNT_SERVICE_URL:http://localhost:8102}
+      # 8100 is account-service's own port (its application.yaml `quarkus.http.port`).
+      # balance-service's manifest records 8102 as transaction-service's, and the wrong value there
+      # made every ownership lookup time out — so the local default is written correctly here rather
+      # than relying on the deployed override to hide it.
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
       scope: jakarta.inject.Singleton
 
   oidc:

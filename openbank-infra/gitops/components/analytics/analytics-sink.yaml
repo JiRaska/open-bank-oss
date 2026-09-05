@@ -87,6 +87,24 @@ spec:
             # 'http://localhost:8080/realms/openbank' URL`.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            # OIDC CLIENT (outbound M2M): the INITIAL_LOAD backfill sweeps account-service's
+            # registry with a client_credentials token. Without this it falls back to the
+            # application.yaml default http://localhost:8080, which inside this pod is the SERVICE
+            # ITSELF — the token request 404s and the call goes out bare, giving a 401 that looks
+            # exactly like having no oidc-client block at all. Same shape balance-service records.
+            - name: QUARKUS_OIDC_CLIENT_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-sink-oidc
+                  key: OIDC_CLIENT_SECRET
+                  optional: false
+            # account-service listens on 8100 (its Service exposes http:8100); 8102 is
+            # transaction-service's port, and balance-service's manifest records what that
+            # mistake cost there.
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
             - name: QUARKUS_OTEL_SDK_DISABLED
               value: "true"
             - name: ANALYTICS_SINK_TYPE
