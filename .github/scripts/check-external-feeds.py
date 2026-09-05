@@ -205,6 +205,9 @@ NOT_PROBED = [
     # (1) IDENTIFIERS, not fetch targets. A URL-shaped string nothing dereferences.
     ("https://www.apache.org/licenses/LICENSE-2.0", "SPDX licence identifier in an embedded SQL header; never fetched"),
     ("https://cyclonedx.org/bom", "CycloneDX schema URI in a Kyverno SBOM policy; an identifier the policy matches on"),
+    ("https://slsa.dev/provenance/v0.2", "SLSA predicate-type URI in the Kyverno provenance policy and predicate builder; an identifier the policy matches on"),
+    ("https://github.com/JiRaska/open-bank-oss", "configSource URI inside the SLSA provenance predicate (as git+https://…); an identifier the admission policy pins, never fetched"),
+    ("https://openbank.dev/buildtypes/github-actions-docker-buildx/v1", "SLSA buildType identifier minted by build-slsa-provenance.py and pinned by the Kyverno policy; an identifier, not a host"),
     ("https://git.k8s.io", "upstream source link in a vendored CRD's description text; never fetched"),
     ("https://github.com/thanos-io/thanos/blob", "upstream doc link in a vendored CRD's description text; never fetched"),
     ("https://github.com/kubernetes-sigs/controller-tools/issues", "upstream issue link in a vendored CRD comment; never fetched"),
