@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.17.0
+  version: 1.18.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -1059,7 +1059,11 @@ components:
         The acting principal is the authenticated JWT subject (server-side), never a client-supplied
         field, so only the audit reason is carried in the body.
       properties:
-        reason: { type: string, nullable: true }
+        writtenOffBy:
+          type: string
+        reason:
+          type: string
+          nullable: true
     RescheduleRequest:
       type: object
       description: >-

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PID Service API (Party Identity)
-  version: 1.14.0
+  version: 1.15.0
   description: Party identity data management — create, update, KYC linking, BankID/ROB sync, identity resolution and four-eyes verification cases (ADR-0072).
   license:
     name: Apache-2.0
@@ -890,23 +890,37 @@ components:
   schemas:
     CreatePartyRequest:
       type: object
-      required: [partyType, legalName]
+      required: [partyType]
       properties:
         partyType:
           type: string
           enum: [INDIVIDUAL, LEGAL_ENTITY, SOLE_TRADER]
-        legalName:
+        givenName:
           type: string
-        tradingName:
+        familyName:
           type: string
-        taxId:
-          type: string
-        dateOfBirth:
+        birthdate:
           type: string
           format: date
-        nationality:
+        nationalities:
+          type: array
+          items:
+            type: string
+        verificationSource:
           type: string
-
+          enum: [BANKID, BRANCH_MANUAL, API_UPLOAD, ROB]
+        bankIdSub:
+          type: string
+          nullable: true
+        birthNumberRaw:
+          type: string
+          nullable: true
+        initialRole:
+          type: string
+          enum: [CUSTOMER, EMPLOYEE, ADMIN, AGENT, GUARANTOR, AUTHORIZED_PERSON]
+        onboardingChannel:
+          type: string
+          enum: [BANKID, BRANCH, API, MOBILE_APP]
     UpdateContactRequest:
       type: object
       properties:
@@ -915,20 +929,25 @@ components:
           format: email
         phone:
           type: string
-        address:
-          $ref: '#/components/schemas/AddressDto'
-
+        preferredLanguage:
+          type: string
+          nullable: true
+        dataBoxId:
+          type: string
+          nullable: true
     UpdateKycRequest:
       type: object
-      required: [kycStatus]
       properties:
-        kycStatus:
+        kycLevel:
           type: string
-          enum: [PENDING, VERIFIED, REJECTED, EXPIRED]
-        verifiedAt:
+          enum: [NONE, BASIC, ENHANCED, FULL]
+        amlRiskScore:
           type: string
-          format: date-time
-
+          enum: [LOW, MEDIUM, HIGH, UNACCEPTABLE]
+        pepFlag:
+          type: boolean
+        sanctionsFlag:
+          type: boolean
     ChangeStatusRequest:
       type: object
       required: [status]
@@ -941,15 +960,13 @@ components:
 
     AddRelationshipRequest:
       type: object
-      required: [relatedPartyId, relationshipType]
       properties:
-        relatedPartyId:
+        role:
           type: string
-          format: uuid
-        relationshipType:
+          enum: [CUSTOMER, EMPLOYEE, ADMIN, AGENT, GUARANTOR, AUTHORIZED_PERSON]
+        onboardingChannel:
           type: string
-          enum: [BENEFICIAL_OWNER, AUTHORIZED_SIGNATORY, DIRECTOR, GUARANTOR]
-
+          enum: [BANKID, BRANCH, API, MOBILE_APP]
     AddressDto:
       type: object
       properties:

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -196,14 +196,11 @@ components:
   schemas:
     InitiateScaRequest:
       type: object
-      required: [partyId, challengeType, purpose]
+      required: [partyId, purpose]
       properties:
         partyId:
           type: string
           format: uuid
-        challengeType:
-          type: string
-          enum: [OTP_SMS, OTP_EMAIL, TOTP, PUSH]
         purpose:
           type: string
           # The ScaPurpose enum as the service accepts it. PAYMENT_AUTHORIZATION / CONSENT /
@@ -212,16 +209,22 @@ components:
           enum: [PAYMENT_INITIATION, CONSENT_GRANT, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS,
                  DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
                  SAVINGS_WITHDRAW_APPROVAL]
-        contextData:
-          type: object
-
+        preferredMethod:
+          type: string
+        dynamicLinkingData:
+          type: string
+        redirectUrl:
+          type: string
+          nullable: true
     VerifyScaRequest:
       type: object
-      required: [code]
       properties:
-        code:
+        partyId:
           type: string
-
+          format: uuid
+        otp:
+          type: string
+          nullable: true
     ScaChallengeResponse:
       type: object
       properties:

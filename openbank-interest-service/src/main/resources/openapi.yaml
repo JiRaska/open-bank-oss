@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Interest Service API
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Interest accrual, capitalization, and rate configuration. Capitalization withholds Czech
     final tax on credit interest (§36/§38d ZDP, ADR-0033): CZK interest credited to a resident
@@ -325,6 +325,12 @@ components:
         accountId:
           type: string
           format: uuid
+        productId:
+          type: string
+        balance:
+          type: number
+        currency:
+          type: string
         accrualDate:
           type: string
           format: date
@@ -420,9 +426,14 @@ components:
 
     InterestRateConfig:
       type: object
-      required: [productId, ratePercent, calculationMethod]
+      required: [productId]
       properties:
+        id:
+          type: string
+          format: uuid
         productId:
+          type: string
+        accountId:
           type: string
         currency:
           type: string
@@ -432,19 +443,29 @@ components:
             ISO-4217 currency this rate applies to. Rates are currency-specific; accrual resolves a
             rate only in the accrual's own currency, so an account cannot accrue in a currency it has
             no rate for (issue #1265). Accrual against a currency with no config yields HTTP 422.
-        ratePercent:
-          type: number
-        calculationMethod:
+        rateType:
           type: string
-          enum: [SIMPLE, COMPOUND_DAILY, COMPOUND_MONTHLY]
-        tierMin:
+          enum: [FIXED, VARIABLE, TIERED]
+        annualRate:
           type: number
-        tierMax:
+        minBalance:
           type: number
-        validFrom:
-          type: string
-          format: date
-        validTo:
-          type: string
-          format: date
+        maxBalance:
+          type: number
           nullable: true
+        dayCount:
+          type: string
+          enum: [ACT_365, ACT_360, ACT_ACT, THIRTY_360]
+        effectiveFrom:
+          type: string
+          format: date
+        effectiveTo:
+          type: string
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time

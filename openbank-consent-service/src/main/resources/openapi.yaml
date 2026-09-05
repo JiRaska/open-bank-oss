@@ -5,7 +5,7 @@ info:
   title: Consent Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.9.0
+  version: 1.10.0
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. GET /approvals
     lists pending four-eyes work for checkers; PATCH /approvals/{id} decides an approval paused by
@@ -434,27 +434,37 @@ components:
 
     CreateConsentRequest:
       type: object
-      required: [partyId, granteeId, scopes, expiresAt]
+      required: [partyId, granteeId, scopes]
       properties:
         partyId:
           type: string
           format: uuid
         granteeId:
           type: string
+        granteeType:
+          type: string
+          enum: [TPP, BANK_AGENT, CUSTOMER_AGENT, INTERNAL_SERVICE]
+        granteeName:
+          type: string
         scopes:
           type: array
           items:
             type: string
           example: [accounts:read, transactions:read]
-        expiresAt:
-          type: string
-          format: date-time
-        accountIds:
+        accountIbans:
           type: array
+          nullable: true
           items:
             type: string
-            format: uuid
-
+        validTo:
+          type: string
+          format: date-time
+        redirectUri:
+          type: string
+          nullable: true
+        tppTransactionId:
+          type: string
+          nullable: true
     ConsentResponse:
       type: object
       properties:

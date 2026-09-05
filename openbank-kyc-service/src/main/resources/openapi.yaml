@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: KYC Service API
-  version: 1.8.0
+  version: 1.9.0
   description: Know Your Customer case management — open cases, run checks, approve/reject.
   license:
     name: Apache-2.0
@@ -277,18 +277,11 @@ components:
   schemas:
     OpenCaseRequest:
       type: object
-      required: [partyId, caseType]
+      required: [partyId]
       properties:
         partyId:
           type: string
           format: uuid
-        caseType:
-          type: string
-          enum: [ONBOARDING, PERIODIC_REVIEW, TRIGGERED_REVIEW]
-        riskLevel:
-          type: string
-          enum: [LOW, MEDIUM, HIGH, VERY_HIGH]
-
     UpdateCheckRequest:
       type: object
       required: [status]

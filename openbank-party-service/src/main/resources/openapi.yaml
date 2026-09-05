@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.19 -> 1.20): additive
   # only — GET /api/v1/parties/approvals exposes the existing maker-checker queue and
   # ApprovalResponse gains makerId/createdAt so the checker can understand age and provenance.
-  version: 1.21.0
+  version: 1.22.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -772,6 +772,9 @@ components:
           type: string
         address:
           $ref: '#/components/schemas/AddressDto'
+        id:
+          type: string
+          nullable: true
         consentGdpr:
           type: boolean
           description: >-

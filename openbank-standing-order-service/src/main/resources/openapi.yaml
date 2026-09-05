@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Standing Order Service API
-  version: 1.5.0
+  version: 1.6.0
   description: Recurring payment orders — create, pause, resume, cancel.
   license:
     name: Apache-2.0
@@ -146,9 +146,14 @@ components:
   schemas:
     CreateStandingOrderRequest:
       type: object
-      required: [debtorAccountId, creditorIban, creditorName, amount, currencyCode, frequency, startDate]
+      required: [creditorIban, creditorName, frequency, startDate]
       properties:
-        debtorAccountId:
+        idempotencyKey:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        debitAccountId:
           type: string
           format: uuid
         debtorIban:
@@ -166,13 +171,23 @@ components:
           type: string
         creditorName:
           type: string
-        amount:
-          type: number
-        currencyCode:
+        creditorBic:
+          type: string
+          nullable: true
+        amountMinorUnits:
+          type: integer
+          format: int64
+        currency:
           type: string
         frequency:
           type: string
           enum: [ONCE, DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY]
+        paymentType:
+          type: string
+          enum: [SEPA_CREDIT, DOMESTIC, INTERNAL]
+        remittanceInfo:
+          type: string
+
         startDate:
           type: string
           format: date
@@ -180,9 +195,6 @@ components:
           type: string
           format: date
           nullable: true
-        remittanceInfo:
-          type: string
-
     ApiError:
       type: object
       properties:
