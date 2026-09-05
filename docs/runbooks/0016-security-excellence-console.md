@@ -19,6 +19,20 @@ obrazovky, které zůstávají autoritativním zdrojem detailu.
 | Maker-checker | `/api/approvals/pending` | `/approvals` |
 | Auditní stopa | `audit-service` | `/audit` |
 | Identita & KYC | `party-service` cases | `/identity-cases` |
+| Supply chain (SBOM) | `/api/sbom/drift` (image↔GitOps shoda, ADR-0030 D5) | `/system/inventory` |
+| Segmentace sítě | `/api/security/kpis` → `netpol` (gate `netpol-coverage-kpi`, ADR-0279 #17) | tato stránka |
+| Čerstvost závislostí | `/api/security/kpis` → `freshness` (`deps-freshness.yml`, ADR-0279 #15) | tato stránka |
+| Dlouhožijící credentials | `/api/security/kpis` → `credentials` (`credential-inventory.yml`, ADR-0279 #18) | tato stránka |
+
+## KPI snapshot — kde se berou tři nové domény
+
+`/api/security/kpis` servíruje `openbank-admin-ui/security-kpis.json`, CI-generovaný
+snapshot z workflow `security-kpis.yml` (weekly pátek 09:23 UTC, refresh PR při změně),
+který přepočítává čísla **ze stejných gate skriptů** (`check-netpol-coverage.py`,
+`deps-freshness.py`, `credential-inventory.py`) — nikdy z reimplementace, aby se
+konzole a gaty nemohly rozejít. Soubor se vpeče do image buildu (`COPY
+openbank-admin-ui/ ./`); chybějící soubor = `not_deployed`, nikdy falešné OK.
+Každý kolektor degraduje nezávisle — jedna nedostupná doména neshodí ostatní dvě.
 
 ## Jak číst skóre
 

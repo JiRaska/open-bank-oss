@@ -48,7 +48,7 @@ class JournalEntryEntity : PanacheEntityBase {
     var status: String = "PENDING"
 
     @Column(name = "created_at", nullable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @Column(name = "created_by", nullable = false)
     var createdBy: UUID = UUID.randomUUID()
@@ -131,7 +131,7 @@ class GlAccountEntity : PanacheEntityBase {
     var isEnabled: Boolean = true
 
     @Column(name = "created_at", nullable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 }
 
 @Entity
@@ -148,5 +148,5 @@ class LedgerIdempotencyEntity : PanacheEntityBase {
     var journalEntryDate: LocalDate = LocalDate.EPOCH
 
     @Column(name = "created_at", nullable = false)
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 }
