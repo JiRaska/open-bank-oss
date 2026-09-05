@@ -23,7 +23,6 @@ class HoldNotFoundException(msg: String) : RuntimeException(msg)
 class BalanceService(
     private val balanceRepo: BalanceRepository,
     private val holdRepo: HoldRepository,
-    private val eventPublisher: BalanceEventPublisher,
     private val movementPort: BalanceMovementPort,
     private val clock: Clock,
     private val accountingClock: AccountingClock = AccountingClock.bank(clock),
@@ -32,16 +31,18 @@ class BalanceService(
     // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
     // fixed Clock for deterministic timestamps (ADR-0100 Layer 1) — and get the matching accounting
     // clock for free from the default above, so a fixed Clock fixes the accounting day too.
+    //
+    // No BalanceEventPublisher here since #8510: every event this use case emits is written by the
+    // repository layer in the same transaction as the state change (HoldRepository.saveWithEvent /
+    // releaseWithEvent, BalanceMovementPort), so a service-level publisher would be a dual write.
     @Inject
     constructor(
         balanceRepo: BalanceRepository,
         holdRepo: HoldRepository,
-        eventPublisher: BalanceEventPublisher,
         movementPort: BalanceMovementPort,
     ) : this(
         balanceRepo,
         holdRepo,
-        eventPublisher,
         movementPort,
         Clock.systemUTC(),
     )
@@ -103,8 +104,6 @@ class BalanceService(
             throw InsufficientFundsException(e.message ?: "Insufficient funds")
         }
 
-        balanceRepo.update(updated)
-
         val hold = BalanceHold(
             id = UUID.randomUUID(),
             accountId = cmd.accountId,
@@ -116,9 +115,12 @@ class BalanceService(
             createdAt = OffsetDateTime.now(clock),
             releasedAt = null,
         )
-        val saved = holdRepo.save(hold)
-
-        eventPublisher.publish(
+        // Transactional outbox (#8510): the balance reservation, the hold row and the HOLD_PLACED
+        // event commit in ONE transaction — no event is written for a hold that never landed, and
+        // no hold lands without its event.
+        return holdRepo.saveWithEvent(
+            hold,
+            updated,
             BalanceEvent(
                 eventId = UUID.randomUUID(),
                 eventType = BalanceEventType.HOLD_PLACED,
@@ -134,8 +136,6 @@ class BalanceService(
                 sourceService = "balance-service",
             ),
         )
-
-        return saved
     }
 
     override suspend fun releaseHold(cmd: ReleaseHoldCommand): BalanceHold {
@@ -146,12 +146,12 @@ class BalanceService(
             ?: throw BalanceNotFoundException("Balance not found")
 
         val updated = balance.releaseReservation(hold.amount).copy(updatedAt = OffsetDateTime.now(clock))
-        balanceRepo.update(updated)
-
         val released = hold.copy(releasedAt = OffsetDateTime.now(clock))
-        holdRepo.update(released)
 
-        eventPublisher.publish(
+        // Transactional outbox (#8510): release + balance + HOLD_RELEASED in ONE transaction.
+        holdRepo.releaseWithEvent(
+            released,
+            updated,
             BalanceEvent(
                 eventId = UUID.randomUUID(),
                 eventType = BalanceEventType.HOLD_RELEASED,
@@ -173,61 +173,32 @@ class BalanceService(
 
     override suspend fun credit(cmd: CreditAccountCommand): Balance {
         // Idempotent: a retried credit with the same referenceId returns the same balance and is NOT
-        // re-applied. The BALANCE_UPDATED event is emitted only on the first application, so a replay
+        // re-applied. The BALANCE_UPDATED outbox row is written by the port impl inside the mutation's
+        // own transaction (#8510), and only on the first application — a replay writes nothing, so it
         // never double-counts in downstream projections either.
-        val outcome = movementPort.applyCredit(cmd.accountId, cmd.currency, cmd.referenceId, cmd.amount)
-
-        if (outcome.applied) {
-            eventPublisher.publish(
-                BalanceEvent(
-                    eventId = UUID.randomUUID(),
-                    eventType = BalanceEventType.BALANCE_UPDATED,
-                    accountId = cmd.accountId,
-                    currency = cmd.currency,
-                    amount = cmd.amount,
-                    bookedAmount = outcome.balance.bookedAmount,
-                    availableAmount = outcome.balance.availableAmount,
-                    reservedAmount = outcome.balance.reservedAmount,
-                    occurredAt = OffsetDateTime.now(clock),
-                    actorId = BalanceEventActors.API,
-                    actorType = EventActor.TYPE_SYSTEM,
-                    sourceService = "balance-service",
-                ),
-            )
-        }
-
-        return outcome.balance
+        return movementPort.applyCredit(
+            cmd.accountId,
+            cmd.currency,
+            cmd.referenceId,
+            cmd.amount,
+            BalanceEventActors.API,
+        ).balance
     }
 
     override suspend fun debit(cmd: DebitAccountCommand): Balance {
         // Idempotent (see credit). The overdraft guard runs only on the first application; a duplicate
-        // returns the already-debited balance without re-checking funds or re-emitting an event.
-        val outcome = try {
-            movementPort.applyDebit(cmd.accountId, cmd.currency, cmd.referenceId, cmd.amount)
+        // returns the already-debited balance without re-checking funds or writing a second event.
+        return try {
+            movementPort.applyDebit(
+                cmd.accountId,
+                cmd.currency,
+                cmd.referenceId,
+                cmd.amount,
+                BalanceEventActors.API,
+            ).balance
         } catch (e: IllegalArgumentException) {
             throw InsufficientFundsException(e.message ?: "Insufficient funds")
         }
-
-        if (outcome.applied) {
-            eventPublisher.publish(
-                BalanceEvent(
-                    eventId = UUID.randomUUID(),
-                    eventType = BalanceEventType.BALANCE_UPDATED,
-                    accountId = cmd.accountId,
-                    currency = cmd.currency,
-                    amount = cmd.amount.negate(),
-                    bookedAmount = outcome.balance.bookedAmount,
-                    availableAmount = outcome.balance.availableAmount,
-                    reservedAmount = outcome.balance.reservedAmount,
-                    occurredAt = OffsetDateTime.now(clock),
-                    actorId = BalanceEventActors.API,
-                    actorType = EventActor.TYPE_SYSTEM,
-                    sourceService = "balance-service",
-                ),
-            )
-        }
-
-        return outcome.balance
     }
 
     override suspend fun initializeBalance(cmd: InitializeBalanceCommand): Balance {

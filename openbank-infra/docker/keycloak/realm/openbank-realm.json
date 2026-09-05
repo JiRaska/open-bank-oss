@@ -30,6 +30,10 @@
         "description": "Read-only access"
       },
       {
+        "name": "ROLE_DPO",
+        "description": "Data Protection Officer — GDPR Art. 15/20 export endpoints (ADR-0204); no write actions"
+      },
+      {
         "name": "ROLE_API",
         "description": "Machine-to-machine API access"
       },
