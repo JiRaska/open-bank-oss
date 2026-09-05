@@ -4,6 +4,7 @@
 
 package com.openbank.document.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
 import jakarta.annotation.security.PermitAll
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.DELETE
@@ -45,6 +46,49 @@ class DocumentSecurityContractTest {
                     .describedAs("%s.%s must be @RolesAllowed", resource.simpleName, m.name)
                     .isNotNull()
             }
+        }
+    }
+
+    /**
+     * Every endpoint that reads a specific party's or document's data must also carry `@Authorize`
+     * (#8082).
+     *
+     * `listByParty` shipped with the role gate alone while `getDocument` and `getContent` — which
+     * return strictly LESS, one document rather than a party's whole file — were policy-gated. The
+     * test above could not see it: it asks whether an endpoint is role-gated, and `listByParty`
+     * always was. A role check is not a policy decision, so "is annotated" and "is authorized" are
+     * different questions and only the first had a guard.
+     *
+     * Scoped to the party/document-scoped reads rather than every endpoint, because the template
+     * catalogue routes are deliberately not policy-gated: they expose no party data. Naming them
+     * explicitly is the point — an endpoint added later is absent from this list, and the list is
+     * checked against the resource, so it cannot quietly grow a party-scoped route with no gate.
+     */
+    @Test
+    fun `every party-scoped read carries a policy decision, not only a role check`() {
+        val partyScopedReads = mapOf(
+            "listByParty" to "document.list",
+            "getDocument" to "document.read",
+            "getContent" to "document.readContent",
+        )
+
+        partyScopedReads.forEach { (methodName, expectedAction) ->
+            val method = DocumentResource::class.java.declaredMethods.firstOrNull { it.name == methodName }
+            assertThat(method)
+                .describedAs("DocumentResource.%s must exist — renamed without updating this guard?", methodName)
+                .isNotNull()
+
+            val authorize = method!!.getAnnotation(Authorize::class.java)
+            assertThat(authorize)
+                .describedAs(
+                    "DocumentResource.%s returns party-scoped data and must be @Authorize-gated, " +
+                        "not merely @RolesAllowed",
+                    methodName,
+                )
+                .isNotNull()
+            assertThat(authorize.action)
+                .describedAs("DocumentResource.%s must gate on the agreed action", methodName)
+                .isEqualTo(expectedAction)
         }
     }
 }

@@ -12,7 +12,7 @@ This is a **money-path service** (`rules.yaml: money_path_services`): every chan
 | **AnaCredit (Reg. (EU) 2016/867)** | Granular credit & collateral reporting | `collateral_type` protection categories; loan/party/exposure attributes retained |
 | **AMLD** (Anti-Money Laundering) | Suspicious lending activity, write-off auditability | every cash event + decision emits a domain event to the audit pipeline; AML holds may extend retention |
 | **GDPR** | `party_id` is a pseudonymous reference; operator identities are personal data | no customer name/IBAN/national ID stored; 7-year record retention overrides erasure |
-| **DORA** (Reg. (EU) 2022/2554) | Operational resilience | health probes, BootstrapVerifier, fault-tolerant ledger calls, audit events, SLO, runbooks |
+| **DORA** (Reg. (EU) 2022/2554) | Operational resilience | health probes, fault-tolerant ledger calls, audit events, SLO, runbooks. `BootstrapVerifier` was listed here and does not exist (#8426) — secrets are held by ESO/OpenBao `secretKeyRef` injection (ADR-0007) |
 | **NIS2** | Network & information security | mTLS in-cluster, security headers, JSON audit logging |
 | **CNB credit record-keeping** | Credit-agreement retention | 7-year retention policy (`governance.yaml`) |
 
@@ -161,6 +161,6 @@ Every state-changing operation (disburse, accrue, write-off) emits a domain even
 - Input validation (positive amount, term ≥ 1, rate ≥ 0, haircut `[0,1]`).
 - Idempotent ledger postings (reference = ledger idempotency key) and idempotent accrual pass.
 - Security headers (HSTS, CSP, X-Frame-Options, nosniff); TLS termination at gateway, mTLS in-cluster.
-- Secrets: BootstrapVerifier blocks dev placeholders in prod.
+- ⬜ Secrets: **`BootstrapVerifier` does not exist** — nothing fails startup on a dev placeholder in the prod profile. Credentials arrive through `secretKeyRef` from ESO/OpenBao in `lending-service.yaml` (ADR-0007); that is a configuration property, not a control in the application (#8426).
 - Resilience: fault-tolerant ledger calls (`LedgerCallGuard`), bounded REST timeouts.
 - ⚠️ `RiskParameterSource` / `CreditBureauPort` currently use conservative no-op defaults — a real PD model and bureau integration are tracked roadmap items, not a control regression.

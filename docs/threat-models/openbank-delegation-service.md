@@ -141,6 +141,42 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Change log
 
+- **2026-09-03** — `authz.enforce` now defaults to **true** in `application.yaml` (#3679). Until
+  now it read `${AUTHZ_ENFORCE:false}`, so enforcement was a property of one gitops manifest
+  rather than of the service: the deployed Rollout sets the variable to `"true"`, so the cluster
+  was enforcing, but **any environment that does not set the variable ran this money-path service
+  in advisory mode** — a new cluster, a local run, an ad-hoc container, a restored namespace. In
+  advisory mode `AuthorizeInterceptor` evaluates every `@Authorize` decision, logs the deny at
+  WARN and lets the request through, so the failure is silent — and for this service that means
+  the boundary in row 1 above degrades from a checked door to an observed one: every scoping rule
+  that keeps `edge-service-delegation` off the bank-side `suspend`/`reinstate` actions, and
+  `service-delegation-check` down to a single read-only action, is **inert** there. This closes
+  that gap at the source. **No new caller, endpoint, network edge or grant** — the change can only
+  ever move a request from allowed-while-denied to denied. Grantability was measured before
+  flipping, since enforcing an action that no reason grants turns it into a 403: all 14 gated
+  actions were evaluated with `opa eval` against the deployed bundle ConfigMap, each probe
+  carrying a must-DENY and a must-ALLOW control, and every one resolves `allow=true` for at least
+  one real principal. Residual: an operator running this service with no OPA sidecar reachable now
+  gets 503 rather than an unauthorized success — the intended fail-closed direction, but it makes
+  a missing sidecar a hard outage instead of a silent control bypass. Rollback: set
+  `AUTHZ_ENFORCE=false` in the environment, which needs no code change.
+
+- **2026-09-03** — Four-eyes remains **off**, recorded here because it is a different control from
+  the one above and was verified rather than assumed (#3679). Measured against the deployed
+  bundle, `delegation.revoke` and `delegation.reserve.release` DO evaluate
+  `four_eyes_required=true` — both end in a verb listed in `rules.yaml: four_eyes.verbs`
+  (`revoke`, `release`) and this service is in `money_path_services`; the other twelve actions are
+  false. But **no `ApprovalStore` bean is wired in this service**, so
+  `AuthorizeInterceptor.requireFourEyesOrProceed` takes its `no_approval_store` branch: it logs an
+  error and **proceeds** (ADR-0155 D3 keeps it a no-op rather than failing closed). Flipping
+  `AUTHZ_FOUR_EYES_ENFORCE` today would therefore gate nothing while appearing to gate two
+  money-path actions, which is a worse state than being visibly off. Prerequisite: an
+  `ApprovalStore` of the kind account-, balance- and billing-service carry
+  (`infrastructure/approval/ApprovalConfig.kt`). One decision to take deliberately at that point:
+  `delegation.reserve.release` is a routine customer spending action that matches the `release`
+  verb by accident of naming, so inheriting the money-path default would put a second approver in
+  front of ordinary customer traffic.
+
 - **2026-09-01** — Lifecycle transitions gained database-authoritative monotonic revisions (T17). The migration is expand-compatible with an old producer for acyclic transitions; legacy reinstatement fails closed because only a revision-aware writer can distinguish a repeated SUSPENDED state. The database state machine supplies the revision and the deferred outbox trigger stamps the committed value. Rollout is consumer-first and quiesces writers while immutable V8–V10 apply; producer deployment before revision-aware account/card cursors would publish an ordering fact nobody enforces. Rollback retains the lifecycle migrations when reverting the producer image, because their triggers are the compatibility layer for that old image.
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or authorization bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.

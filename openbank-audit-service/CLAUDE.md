@@ -43,6 +43,32 @@
   replaces. `TopicAttribution` is a verified table whose COVERAGE (not values) is derived from
   `application.yaml`, so a newly subscribed topic fails `TopicAttributionCoverageTest` instead of
   silently defaulting again.
+- **Event time vs ingest time: the per-topic disposition, and why it is HERE and not in the
+  consumer's KDoc** (#8352, sweeping #3883). `AuditConsumer.eventTime` reads `occurredAt` and only
+  `occurredAt`; absent or unparseable ⇒ the row stores the consumer's clock, flagged
+  `occurred_at_source = INGEST`. As of 2026-09-03 the channel subscribes to **27** topics (not the
+  21 of #3883) and every one of them carries a top-level `occurredAt` on every production-reachable
+  event type. Four event types did not until this sweep, and all four had the instant already in
+  hand and simply never projected it onto the wire: `dispute.opened` (had it as `openedAt`),
+  `PARTY_ERASED` (as `erasedAt`, while `PartyEvent.occurredAt` held the same value and fed the
+  outbox row's `createdAt`), and interest-service's `interest.withholding.recorded.v1` /
+  `interest.withholding.remitted.v1` (nothing on the wire; the values are the withholding row's and
+  the remittance batch's own `createdAt`). **No topic on this channel genuinely lacks a business
+  time** — the honest-INGEST case the issue allowed for did not turn out to exist here.
+  Two things about that sweep are the reusable part:
+  - **Enumerate the producing TYPE, never grep the key.** Payloads are built four ways on this
+    channel — a serialised `DomainEvent` subclass (cards, delegation, ledger, consent, account,
+    transaction, balance, domestic-payment, fx, document), a `mapOf`/`ObjectNode` envelope (party,
+    kyc, clearing, sca, swift, sepa-instant, customer-edge, ICT), a raw JSON string template
+    (dispute, statement, lending, sdd, interest, fraud, sepa-payment's Temporal activities), and
+    sanctions' hybrid (serialise the aggregate, then `put` the per-event instant). A grep for
+    `"occurredAt"` sees only the last two families and reports a confident false gap over the first.
+  - **A `has(key)` assertion cannot see the wire form.** `PartyEventEnvelopeContractTest` built its
+    mapper with `findAndRegisterModules()` alone, which leaves `WRITE_DATES_AS_TIMESTAMPS` ON, so
+    every `Instant` in it serialised as the number `1.7866E9` — a shape no consumer of that topic
+    receives, since Quarkus defaults the property to false. Nothing failed, because every time
+    assertion in the file was `json.has(...)`, true of a number as readily as of an ISO-8601 string.
+    Assert the VALUE. The same trap cost #3926 a red run on document-service.
 - **Asking the audit DATABASE which fields producers send measures traffic, not the wire contract —
   and it answers "nothing to recover" with total confidence.** Chasing the actor half of #3994, the
   obvious probe was to enumerate the payload keys of every actor-less row
@@ -63,3 +89,13 @@
   MANUAL ack.** A missed ack stalls the partition and the audit trail stops dead — worse than the
   under-attribution being fixed. Ack explicitly, in a `finally`, and test it on the path most
   likely to skip it (an unparseable payload).
+- **`source_service` is not a stable key for `lending`, and only for `lending`.** Twenty of the
+  fleet's twenty-one producers emit their module directory name minus `openbank-` (#5256, now
+  enforced by `check-source-service-convention.py`); `openbank-lending-service` deliberately emits
+  `"lending"` while `TopicAttribution` maps `openbank.lending.events` to `"lending-service"`. Six of
+  its nine event types therefore changed spelling mid-stream when #5399 gave them their own
+  `sourceService` on 2026-08-18, and read `unknown` before #4270. Any `GROUP BY source_service`
+  splits that one producer into three aliases. The decision to keep `"lending"` rather than rename
+  and re-split is #5902; the windows, the six event types and the reconciliation query are written
+  down in `openbank-lending-service/CLAUDE.md`. Nothing to fix here — just do not read a
+  `source_service` histogram as a producer census without it.

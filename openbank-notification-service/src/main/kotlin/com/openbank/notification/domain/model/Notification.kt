@@ -40,7 +40,6 @@ enum class NotificationTemplate(val variables: Set<String>) {
     TRANSACTION_FAILED(setOf("amount", "currency", "reason")),
     KYC_APPROVED(emptySet()),
     KYC_REJECTED(setOf("reason")),
-    KYC_DOCUMENT_REQUIRED(setOf("documentType")),
     CONSENT_GRANTED(setOf("scope")),
     CONSENT_REVOKED(setOf("scope")),
     OTP_CODE(setOf("code")),
@@ -106,7 +105,6 @@ enum class NotificationTemplate(val variables: Set<String>) {
         get() = when (this) {
             ACCOUNT_FROZEN,
             KYC_REJECTED,
-            KYC_DOCUMENT_REQUIRED,
             TRANSACTION_FAILED,
             -> NotificationChannel.EMAIL
             ACCOUNT_OPENED,
@@ -139,7 +137,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
     val category: NotificationCategory
         get() = when (this) {
             OTP_CODE, PASSWORD_RESET, ACCOUNT_FROZEN, SCA_APPROVAL,
-            KYC_APPROVED, KYC_REJECTED, KYC_DOCUMENT_REQUIRED,
+            KYC_APPROVED, KYC_REJECTED,
             CONSENT_GRANTED, CONSENT_REVOKED,
             DELEGATION_OFFERED, DELEGATION_ACCEPTED, DELEGATION_DECLINED,
             DELEGATION_REVOKED, DELEGATION_SUSPENDED, DELEGATION_REINSTATED,

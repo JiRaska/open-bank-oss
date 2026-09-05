@@ -56,17 +56,18 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 ## 3. Authn / Authz
 
 - Service-to-service callers authenticated (mTLS + OIDC); OPA policy gates credit / debit / hold (ADR-0034).
-- Money-moving endpoints are role-gated: `@RolesAllowed(SERVICE, OPERATOR, ADMIN)` on
-  credit/debit/hold/initialize, supervisor/admin on overdraft-limit override; **no endpoint is
-  `@PermitAll`** (locked by `BalanceResourceSecurityTest`). On top of role gating, every endpoint now
+- Money-moving endpoints are role-gated: `@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)`
+  on credit/debit/hold/initialize, supervisor/admin on overdraft-limit override; **no endpoint is
+  `@PermitAll`** (locked by `BalanceSecurityContractTest`). On top of role gating, every endpoint now
   carries `@Authorize` (OPA, ADR-0034 Phase 5, issue #266) and `AUTHZ_ENFORCE=true` is set in gitops —
   a denied decision now 403s instead of only logging (advisory). **Residual risk:** every verified
   in-repo M2M caller (settlement-service, transaction-service, account-service, statement-service,
   billing-service, agent-service) authenticates as the same `openbank-services` client, so OPA's
   `input.principal` cannot distinguish "settlement-service asking for credit" from "any other
-  ROLE_SERVICE caller asking for credit" — the SERVICE rule is scoped to the action-class the
-  verified callers collectively need (no blanket allow across every balance action), but not to the
-  specific caller. Tightening this needs per-caller identity (mTLS SPIFFE, ADR-0017, or a dedicated
+  caller sharing that client asking for credit" — the identity-scoped `service-balance-m2m` rule
+  (matched on `input.principal.id == "service-account-openbank-services"`) is scoped to the
+  action-class the verified callers collectively need (no blanket allow across every balance
+  action), but not to the specific caller. Tightening this needs per-caller identity (mTLS SPIFFE, ADR-0017, or a dedicated
   OIDC client per caller) — tracked as a follow-up, not solved here.
 - Four-eyes approval-decide endpoint: same role set as the gated actions (`OPERATOR`/`ADMIN`),
   plus a domain-level segregation-of-duties check (checker id != maker id) — see §4a.
@@ -75,7 +76,7 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 
 | # | Element | Threat (STRIDE) | Mitigation | Residual |
 |---|---------|-----------------|------------|----------|
-| S1 | REST/port in | **Spoofing** — unauthenticated caller posts a credit/debit, or forges identity | mTLS + OIDC; reject anonymous; bearer JWT (Keycloak); role-gated mutations; OPA fine-grained authz (ADR-0018/0034) now **enforced** on every balance endpoint | Cannot distinguish SERVICE callers beyond ROLE_SERVICE (see §3 residual risk) |
+| S1 | REST/port in | **Spoofing** — unauthenticated caller posts a credit/debit, or forges identity | mTLS + OIDC; reject anonymous; bearer JWT (Keycloak); role-gated mutations; OPA fine-grained authz (ADR-0018/0034) now **enforced** on every balance endpoint | Cannot distinguish the M2M callers that share the `openbank-services` client identity (see §3 residual risk) |
 | T1 | Cover check | **Tampering** — manipulated request authorizes an unfunded debit / negative balance | Server-side overdraft evaluation against stored limit; available = booked − holds + overdraft; optimistic locking / row versioning; per-currency rows; pure-domain, unit-tested | Low |
 | T2 | Balance rows | **Tampering** — direct DB mutation desynchronizes from ledger | App-only write path; DB creds in Vault (ADR-0017); **Phase A reconciliation** detects drift vs ledger deposit-control per currency | Drift detected, not prevented — by design (projection); Phase D cutover hardens |
 | R1 | Movements | **Repudiation** — actor denies a balance change it applied | AuditEvent per credit/debit/hold; movements carry origin/actor + idempotency key; outbox event with correlation id; reconciliation run timestamped/persisted | Strengthen with signed audit (ADR-0029) — *planned* |
@@ -172,6 +173,33 @@ also be deleted (nothing else in balance-service depends on it).
   maker/checker runbook is reviewed, tracked under issue #413.
 
 ## 7. Change log
+
+- **2026-09-04** — Balance domain events now travel through the transactional outbox
+  (`balance_outbox` + `balance-outbox-out`) instead of a direct `@Channel("balance-events-out")`
+  emitter (#8510). The write moved into the repository layer: `HoldRepository.saveWithEvent` /
+  `releaseWithEvent`, `BalanceMovementPortImpl` and `LedgerProjectionPortImpl` persist the event
+  row in the SAME transaction as the state change, so a crash can no longer lose an event after
+  the commit nor announce a mutation that rolled back. The topic (`openbank.balance.events`), the
+  payload bytes and the consumer-visible shape are unchanged — the direct channel was removed so
+  that one topic has exactly one (atomic) writer. **No new caller, endpoint, topic or privilege**;
+  the change strengthens integrity/atomicity of an existing flow. Rollback: revert; the service
+  returns to dual-write publishing.
+
+- **2026-09-02** — Doc correction, no behavior change: §3 and the S1 residual named three controls
+  by names that do not exist in the tree. (1) The `@PermitAll` regression guard was credited to
+  `BalanceResourceSecurityTest`; that class is in no Kotlin source — the guard is real and is
+  `BalanceSecurityContractTest`, which asserts by reflection that no `BalanceResource` /
+  `ReconciliationResource` endpoint is `@PermitAll` and that every one carries `@RolesAllowed`.
+  (2) The write endpoints were described as `@RolesAllowed(SERVICE, ...)`; the constant is
+  `Roles.API` (`ROLE_API`). `ROLE_SERVICE` is a dead name granted by no realm and defined in no
+  `Roles` constant — it was the M2M role until #2442 made the M2M role real, and the resource,
+  `Roles.kt` and `balance_rest_ext.rego` all say so. (3) The residual risk credited "the SERVICE
+  rule"; the policy has no SERVICE rule and can have none, because `AuthorizeInterceptor` never
+  emits a `SERVICE` principal type — the rule that admits the shared M2M client is
+  `service-balance-m2m`, matched on `input.principal.id`. **The residual risk itself is unchanged
+  and still holds**: all six verified in-repo M2M callers share the `openbank-services` client, so
+  the policy is scoped to an action-class and not to a specific caller. Only the names were wrong.
+  No DB, schema, endpoint or policy change; the mitigations described are all in place.
 
 - **2026-08-26** — The operator approval inbox gains a bounded, read-only
   `GET /api/v1/balances/approvals` edge. It returns pending approval workflow metadata
@@ -293,3 +321,10 @@ also be deleted (nothing else in balance-service depends on it).
   added `assertj` test dep for the guard. Additive DDL only — no new flow/surface/boundary.
   Risk class = **availability** (missing sequence breaks all balance writes), mitigated by
   `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+- **2026-09-05** — Input validation hardened on the reconciliation trigger
+  (`POST /api/v1/balances/reconciliation`): a blank `asOf` now means "omitted" and a malformed one
+  is rejected as 400 (`IllegalArgumentException` via libs-runtime `CommonExceptionMappers`) where a
+  raw `DateTimeParseException` previously surfaced as 500. Found by the api-fuzz lane (#8832).
+  No new surface, role, or data flow — same endpoint, same authz, tighter input handling.
+  Risk class = **availability/information disclosure** (500s on an operator control endpoint).
+  Rollback: revert the guard; no stored data or schema changes.

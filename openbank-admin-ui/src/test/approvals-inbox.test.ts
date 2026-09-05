@@ -395,17 +395,42 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.balance).toBe('ok')
   })
 
-  it('reads the billing queue at all — an unread money-path source must never look empty', async () => {
-    const seen: string[] = []
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
-      seen.push(String(url))
-      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+  it('relays the operator token to the billing contract and preserves its audit provenance', async () => {
+    const seen: Array<{ url: string; authorization: string | null }> = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      seen.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get('authorization'),
+      })
+      const rows = String(url).includes('/api/v1/fees/approvals')
+        ? [{
+            id: 'BL-1',
+            action: 'billing.post',
+            resourceId: 'fee-7',
+            makerId: 'operator.j',
+            createdAt: '2026-07-29T11:57:00Z',
+          }]
+        : []
+      return Promise.resolve(new Response(JSON.stringify(rows), { status: 200 }))
     }))
 
     const body = await (await (await route()).GET()).json()
+    const billingCall = seen.find(call => call.url.includes('/api/v1/fees/approvals'))
 
-    expect(seen.some(u => u.includes('/api/v1/fees/approvals'))).toBe(true)
+    expect(billingCall).toBeDefined()
+    const billingUrl = new URL(billingCall!.url)
+    expect(billingUrl.pathname).toBe('/api/v1/fees/approvals')
+    expect(billingUrl.searchParams.get('limit')).toBe('50')
+    expect(billingCall!.authorization).toBe('Bearer operator-token')
     expect(body.sources.billing).toBe('ok')
+    expect(body.items).toEqual([{
+      id: 'BL-1',
+      domain: 'billing',
+      action: 'billing.post',
+      resourceId: 'fee-7',
+      maker: 'operator.j',
+      proposedAt: '2026-07-29T11:57:00Z',
+    }])
   })
 
   it('degrades to the working half when one queue is down', async () => {

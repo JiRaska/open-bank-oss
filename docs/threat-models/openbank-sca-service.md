@@ -58,6 +58,19 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-09-03** — Resolve the four-eyes stalemate via per-action service-account exemptions
+  (#8360, ADR-0280). `device.enroll` and `scaChallenge.consume` are now in
+  `rules.yaml: four_eyes.actions` with `four_eyes.exemptions` naming their verified M2M callers
+  (`service-account-openbank-edge` for both; `service-account-openbank-services` for consume —
+  the delegation grant-accept and document-signing ceremonies, #3734). What becomes gated is the
+  residual HUMAN path: `operator-sca-write` (ops-console enroll-on-behalf, manual challenge
+  consumption) is flagged `four_eyes_required` once `authz.four-eyes.enforce` (ADR-0155) is
+  enabled — until then the flag is computed and carried, and nothing pauses. The exemption trusts
+  the edge client credentials to remain customer-edge's alone; no new privilege class is created
+  beyond what those identities already hold. New `four_eyes_exempt` rule and clauses in
+  `rest.rego` are additive and backward-compatible (a bundle predating the `exemptions` key
+  behaves exactly as before — pinned by rest_test.rego).
+
 - **2026-08-05** — Close the role-only M2M path on the SCA ceremony; widen the shared-client
   identity rule to `scaChallenge.consume` FIRST (#3734). `operator-sca-write` was role-only over
   the whole `scaChallenge.*`/`device.*` families, so both M2M clients (HUMAN-classified,
@@ -130,3 +143,17 @@ is the **authentication assurance gate** for payments and consent — defeating 
   the stamp is taken when the error object is built, not measured against request start, so it
   does not expose per-request processing duration. Rollback: revert; the field is
   serialisation-only and nothing persists it.
+
+- **2026-09-03** — `initiate` refuses `ScaMethod.TOTP` instead of minting a challenge nobody could
+  ever satisfy (#8432). `preferredMethod` on `POST /api/v1/sca/challenges` comes straight off the
+  request body, and TOTP had no delivery transport at all: a challenge was generated, stored, and
+  the code sent nowhere, so whatever it was meant to authorise — a payment, a consent, a card
+  action — could never proceed. `ScaResource` gained one new response class, no new endpoint: a
+  `ScaMethodNotDeliverableMapper` maps the new `ScaMethodNotDeliverableException` to 422, same
+  status family as an already-documented "valid request, cannot proceed" answer (expired
+  challenge). Risk class = **denial of authorisation**, not an authentication bypass —
+  `ScaChallenge.fail` still caps attempts on any challenge that *is* minted, so an undelivered code
+  was never brute-forceable within its life; the defect was availability of the authorisation
+  path, not its integrity. No new trust boundary: the check runs before a challenge exists, on the
+  same authenticated `initiate` call, against a caller-supplied enum the service already validated.
+  Rollback: revert the commit; TOTP goes back to silently minting a dead challenge.

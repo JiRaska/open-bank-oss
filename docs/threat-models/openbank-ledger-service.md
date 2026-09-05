@@ -270,7 +270,16 @@ set) apply equally to the new `ledger.approval.decide` action.
   Rollback: revert propagation, restoring false on newly written rows.
 
 - **2026-08-24** — Synthetic-journey taint now reaches this service over its existing internal FX REST edge through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or ledger-control bypass. It is the prerequisite for correctly classifying synthetic postings at a later persistence-backed ledger boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
-
+- **2026-08-22** — `POST /api/v1/journals` answered 500, not 400, for a body carrying a `null`
+  element in `lines` (issue #5913): `List<PostJournalLineRequest>` is a compile-time-only non-null
+  promise Jackson does not keep at runtime, so `request.lines.map { it.toCommand() }` threw NPE on
+  the first null element — the same shape CLAUDE.md records for a non-null `@QueryParam`, where the
+  declared type only decides **where** the failure lands, never whether one happens. Fix: the
+  element type becomes nullable and each element is checked with `requireNotNull` carrying its
+  index; libs-runtime maps `IllegalArgumentException` to 400 (no service-local mapper, #526). `400`
+  added to the OpenAPI spec's documented responses for this operation (`info.version` 1.16.0 ->
+  1.17.0). **No new trust boundary, caller, or field** — same endpoint, same shape, an
+  input-validation fix. Rollback: revert; the previous behaviour was a 500 on malformed input.
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a `ledger.reverse`
   four-eyes decision parked at 202 was discoverable only by whoever had been handed its approval
   id out of band — the ceremony completed only if the two operators were already talking, and the
@@ -413,3 +422,11 @@ set) apply equally to the new `ledger.approval.decide` action.
   translated into a financial success; an application failure remains an error span and propagates
   unchanged. Rollback: revert the instrumentation and its contract test; no stored financial data,
   schema, caller, endpoint, role, or policy changes.
+- **2026-09-05** — Input validation hardened on the FX revaluation ops trigger
+  (`POST /api/v1/ledger/fx-revaluation`): a malformed `date` is rejected as 400
+  (`IllegalArgumentException` via libs-runtime `CommonExceptionMappers`) where a raw
+  `DateTimeParseException` previously surfaced as 500; a blank date still defaults to today
+  (Europe/Prague). Found by the api-fuzz lane (#8832). No new surface, role, or data flow — same
+  endpoint, same authz (`ROLE_OPERATOR`), tighter input handling. The blank-date 500 the fuzzer saw
+  was harness-environment-only (no fx-service in the single-service lane); loud failure on a down
+  ČNB rate dependency stays by design. Risk class = **availability**. Rollback: revert the guard.

@@ -134,8 +134,8 @@ quarkus:
     # so the management interface (default :8086) must be folded back in (else /q/health/* 404s).
     management:
       enabled: false
-  lending:
-    origination:
+  openbank:
+    lending:
       # No real Temporal frontend in @QuarkusTest: don't register the timers worker (it would
       # fail boot on Connection refused). Workflow tests drive their own TestWorkflowEnvironment.
       worker:
@@ -163,12 +163,17 @@ openbank:
     # LendingAdapterBindingVerifier refuses to boot if the two ever disagree again.
     #
     # Note this gates only the CLIENT half. OriginationTimersWorkerRegistrar is not build-time
-    # gated (it is switched by lending.origination.worker.enabled), so the deployed pod has been
+    # gated (it is switched by openbank.lending.worker.enabled), so the deployed pod has been
     # polling the task queue all along with nothing ever starting a workflow on it.
     enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
     server-url: ${TEMPORAL_FRONTEND_URL:temporal-frontend.temporal.svc.cluster.local:7233}
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank-lending}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-lending-origination}
+  lending:
+    # Temporal timers-worker switch (temporal-worker-switch-naming convention,
+    # rules.yaml: temporal_worker_switch_naming). Env var name unchanged.
+    worker:
+      enabled: ${LENDING_ORIGINATION_WORKER_ENABLED:true}
 
 # Ledger posting (ADR-0028 D3). `backend=rest` build-time-activates RestLedgerPostingAdapter against
 # ledger-service; left as `none` the @Default no-op stays bound and the service builds/boots offline.
@@ -227,8 +232,6 @@ lending:
     # READY_TO_DISBURSE by the 'sandbox-auto-approval' actor so sandbox e2e runs without an operator.
     # Restart-required. MUST stay false in production — it bypasses the four-eyes gate entirely.
     auto-approve: ${LENDING_ORIGINATION_AUTO_APPROVE:false}
-    worker:
-      enabled: ${LENDING_ORIGINATION_WORKER_ENABLED:true}
     timers:
       offer-validity-days: ${LENDING_OFFER_VALIDITY_DAYS:30}
       docs-sla-days: ${LENDING_DOCS_SLA_DAYS:14}

@@ -517,6 +517,192 @@ capabilities:
     })
   })
 
+  it('projects a direct Playwright retry flake from one passed envelope without changing its verdict', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-retry-flaky-'))
+    dirs.push(repo)
+    write(repo, 'openbank-admin-ui/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-admin-ui/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'retry-42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/retry-42', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-admin-ui',
+      suites: [{ kind: 'e2e', state: 'passed', discovered: 5, executed: 5, passed: 5, failed: 0, skipped: 0, errors: 0, durationMs: 5000 }],
+      testCases: [
+        { fingerprint: '0123456789abcdef01234567', kind: 'e2e', classname: 'flaky.spec.ts', name: 'recovers on retry', state: 'passed', durationMs: 1700, retryFlaky: true, failedAttemptCount: 1, failedAttemptDurationMs: 700 },
+        // A second project/parameter invocation can normalize to the same logical fingerprint.
+        { fingerprint: '0123456789abcdef01234567', kind: 'e2e', classname: 'flaky.spec.ts', name: 'recovers on retry', state: 'passed', durationMs: 300 },
+        // The merge must be order-independent when the stable invocation is emitted first.
+        { fingerprint: 'aaaaaaaaaaaaaaaaaaaaaaaa', kind: 'e2e', classname: 'flaky.spec.ts', name: 'also recovers on retry', state: 'passed', durationMs: 300 },
+        { fingerprint: 'aaaaaaaaaaaaaaaaaaaaaaaa', kind: 'e2e', classname: 'flaky.spec.ts', name: 'also recovers on retry', state: 'passed', durationMs: 1700, retryFlaky: true, failedAttemptCount: 1, failedAttemptDurationMs: 700 },
+        { fingerprint: 'fedcba9876543210fedcba98', kind: 'e2e', classname: 'malformed.spec.ts', name: 'must not invent a flake', state: 'passed', durationMs: 1000, retryFlaky: true, failedAttemptCount: 0, failedAttemptDurationMs: 900 },
+      ],
+      coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.components[0].evidence[0]).toMatchObject({ kind: 'e2e', state: 'passed', counts: { passed: 5, failed: 0 } })
+    expect(report.testCases.find(item => item.fingerprint === '0123456789abcdef01234567')).toMatchObject({
+      state: 'flaky', lastState: 'passed', observations: 1, failureRate: 0,
+      averageDurationMs: 2000, wastedDurationMs: 700, sameCommitTransitions: 0, retryFlaky: true,
+      failedAttemptCount: 1, failedAttemptDurationMs: 700,
+      retryRun: { id: 'retry-42', attempt: 1, commit: 'abcdef012345', workflow: 'CI' },
+    })
+    expect(report.testCases.find(item => item.fingerprint === 'aaaaaaaaaaaaaaaaaaaaaaaa')).toMatchObject({
+      state: 'flaky', lastState: 'passed', observations: 1, failureRate: 0,
+      averageDurationMs: 2000, wastedDurationMs: 700, retryFlaky: true,
+      failedAttemptCount: 1, failedAttemptDurationMs: 700,
+    })
+    expect(report.testCases.find(item => item.fingerprint === 'fedcba9876543210fedcba98')).toMatchObject({
+      state: 'stable', lastState: 'passed', observations: 1, wastedDurationMs: 0,
+    })
+    expect(report.testCases.find(item => item.fingerprint === 'fedcba9876543210fedcba98')).not.toHaveProperty('retryFlaky')
+  })
+
+  it('keeps a newer terminal failure authoritative over older direct retry-flaky evidence', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-retry-then-failed-'))
+    dirs.push(repo)
+    write(repo, 'openbank-admin-ui/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-admin-ui/test-run-history/retry-pass.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'retry-pass', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/retry-pass', observedAt: '2026-08-22T09:00:00Z' },
+      component: 'openbank-admin-ui', suites: [], coverage: null,
+      testCases: [{ fingerprint: '0123456789abcdef01234567', kind: 'e2e', classname: 'flaky.spec.ts', name: 'fails after an earlier retry pass', state: 'passed', durationMs: 900, retryFlaky: true, failedAttemptCount: 1, failedAttemptDurationMs: 300 }],
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    write(repo, 'openbank-admin-ui/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'terminal-fail', attempt: 1, commit: 'fedcba987654', branch: 'main', workflow: 'CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/terminal-fail', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-admin-ui',
+      suites: [{ kind: 'e2e', state: 'failed', discovered: 1, executed: 1, passed: 0, failed: 1, skipped: 0, errors: 0, durationMs: 1000 }],
+      testCases: [{ fingerprint: '0123456789abcdef01234567', kind: 'e2e', classname: 'flaky.spec.ts', name: 'fails after an earlier retry pass', state: 'failed', durationMs: 1000 }],
+      coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.testCases[0]).toMatchObject({
+      state: 'failing', lastState: 'failed', observations: 2, failureRate: 50,
+      wastedDurationMs: 1300, sameCommitTransitions: 0, retryFlaky: true,
+      failedAttemptCount: 1, failedAttemptDurationMs: 300,
+      retryRun: { id: 'retry-pass', attempt: 1, commit: 'abcdef012345', workflow: 'CI' },
+    })
+  })
+
+  it('classifies same-run pass/fail transitions independently of testcase array order', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-transition-order-'))
+    dirs.push(repo)
+    write(repo, 'openbank-admin-ui/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    const failed = (fingerprint: string, name: string) => ({ fingerprint, kind: 'e2e', classname: 'matrix.spec.ts', name, state: 'failed', durationMs: 600 })
+    const passed = (fingerprint: string, name: string) => ({ fingerprint, kind: 'e2e', classname: 'matrix.spec.ts', name, state: 'passed', durationMs: 400 })
+    write(repo, 'openbank-admin-ui/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'matrix-42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/matrix-42', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-admin-ui',
+      suites: [{ kind: 'e2e', state: 'failed', discovered: 4, executed: 4, passed: 2, failed: 2, skipped: 0, errors: 0, durationMs: 2000 }],
+      testCases: [
+        failed('0123456789abcdef01234567', 'failed then passed'),
+        passed('0123456789abcdef01234567', 'failed then passed'),
+        passed('aaaaaaaaaaaaaaaaaaaaaaaa', 'passed then failed'),
+        failed('aaaaaaaaaaaaaaaaaaaaaaaa', 'passed then failed'),
+      ],
+      coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    for (const fingerprint of ['0123456789abcdef01234567', 'aaaaaaaaaaaaaaaaaaaaaaaa']) {
+      expect(report.testCases.find(item => item.fingerprint === fingerprint)).toMatchObject({
+        state: 'flaky', lastState: 'failed', observations: 2, failureRate: 50,
+        wastedDurationMs: 600, sameCommitTransitions: 1,
+      })
+    }
+  })
+
+  it('drops duplicate retry metadata when its same-run aggregate exceeds the safe integer boundary', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-retry-overflow-'))
+    dirs.push(repo)
+    write(repo, 'openbank-admin-ui/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    const retryObservation = {
+      fingerprint: '0123456789abcdef01234567', kind: 'e2e', classname: 'overflow.spec.ts',
+      name: 'keeps aggregates representable', state: 'passed', durationMs: Number.MAX_SAFE_INTEGER,
+      retryFlaky: true, failedAttemptCount: Number.MAX_SAFE_INTEGER,
+      failedAttemptDurationMs: Number.MAX_SAFE_INTEGER,
+    }
+    write(repo, 'openbank-admin-ui/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'retry-overflow', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/retry-overflow', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-admin-ui',
+      suites: [{ kind: 'e2e', state: 'passed', discovered: 2, executed: 2, passed: 2, failed: 0, skipped: 0, errors: 0, durationMs: Number.MAX_SAFE_INTEGER }],
+      testCases: [retryObservation, retryObservation],
+      coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.testCases[0]).toMatchObject({
+      state: 'stable', observations: 1, averageDurationMs: Number.MAX_SAFE_INTEGER, wastedDurationMs: 0,
+    })
+    expect(Number.isSafeInteger(report.testCases[0].averageDurationMs)).toBe(true)
+    expect(report.testCases[0]).not.toHaveProperty('retryFlaky')
+    expect(report.testCases[0]).not.toHaveProperty('failedAttemptCount')
+    expect(report.testCases[0]).not.toHaveProperty('failedAttemptDurationMs')
+  })
+
+  it('saturates cross-run retry waste while retaining the latest valid retry evidence', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-retry-history-overflow-'))
+    dirs.push(repo)
+    write(repo, 'openbank-admin-ui/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    const retryCase = (durationMs: number) => ({
+      fingerprint: '0123456789abcdef01234567', kind: 'e2e', classname: 'overflow.spec.ts',
+      name: 'keeps historical waste representable', state: 'passed', durationMs,
+      retryFlaky: true, failedAttemptCount: 1, failedAttemptDurationMs: durationMs,
+    })
+    write(repo, 'openbank-admin-ui/test-run-history/retry-max.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'retry-max', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/retry-max', observedAt: '2026-08-22T09:00:00Z' },
+      component: 'openbank-admin-ui', suites: [], coverage: null,
+      testCases: [retryCase(Number.MAX_SAFE_INTEGER)],
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    write(repo, 'openbank-admin-ui/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: { id: 'retry-latest', attempt: 1, commit: 'fedcba987654', branch: 'main', workflow: 'CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/retry-latest', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-admin-ui',
+      suites: [{ kind: 'e2e', state: 'passed', discovered: 1, executed: 1, passed: 1, failed: 0, skipped: 0, errors: 0, durationMs: Number.MAX_SAFE_INTEGER - 1 }],
+      testCases: [retryCase(Number.MAX_SAFE_INTEGER - 1)], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+
+    expect(report.testCases[0]).toMatchObject({
+      state: 'flaky', lastState: 'passed', observations: 2,
+      wastedDurationMs: Number.MAX_SAFE_INTEGER, retryFlaky: true,
+      failedAttemptCount: 1, failedAttemptDurationMs: Number.MAX_SAFE_INTEGER - 1,
+      retryRun: { id: 'retry-latest', attempt: 1, commit: 'fedcba987654', workflow: 'CI' },
+    })
+    expect(Number.isSafeInteger(report.testCases[0].wastedDurationMs)).toBe(true)
+  })
+
   it('projects the unreleased simulation tooling envelope instead of reporting missing evidence', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-simulation-'))
     dirs.push(repo)

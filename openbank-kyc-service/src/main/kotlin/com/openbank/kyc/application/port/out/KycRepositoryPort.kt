@@ -76,6 +76,19 @@ interface KycCaseRepository {
     /** Transactional-outbox counterpart of [update] — see [save] with a [KycEvent]. */
     suspend fun update(case: KycCase, event: KycEvent): KycCase
 
+    /**
+     * OPEN cases whose `expires_at` is at or before [threshold], oldest first, capped at [limit].
+     *
+     * Deliberately OPEN only, not every non-terminal status (#8548). A case in `UNDER_REVIEW` has
+     * its mandatory checks recorded and is waiting on a four-eyes decision — expiring it from a
+     * timer would silently clear a compliance decision out of the reviewer's queue, which is a
+     * process choice for a human to make, not a sweep to default.
+     *
+     * [limit] bounds one tick: an unbounded first run over a backlog that has accumulated since the
+     * service was written would load every stale case into memory at once.
+     */
+    suspend fun findExpirableOpenCases(threshold: Instant, limit: Int): List<KycCase>
+
     suspend fun anonymizeByPartyId(partyId: UUID, now: Instant)
 
     /** Deletes KYC cases whose PII was erased and the AML hold period ([cutoff]) has expired (ADR-0118 §5). */

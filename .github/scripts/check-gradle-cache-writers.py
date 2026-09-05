@@ -94,6 +94,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Restores fleet-lint's home and re-downloads only the runtime-only artifacts "
         "`assemble` needs beyond it.",
     ),
+    "evals-copilot-proposal.yml::copilot-proposal-pack": (
+        "read-only",
+        "Scoped to one service's eval test classes (pure-JVM, no infra); resolves a small subset "
+        "of what fleet-lint already restores fleet-wide. Same reasoning as its sibling "
+        "evals-fraud-review.yml below.",
+    ),
     "evals-fraud-review.yml::fraud-review-pack": (
         "read-only",
         "Scoped to one service's test classes; resolves a small subset of what fleet-lint "
@@ -161,6 +167,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "keying argument holds better here than for verification-metadata — this is a "
         "weekly scheduled sweep — but it is still a pure consumer, so reading the entry "
         "fleet-lint already maintains costs the pool nothing and cannot churn it.",
+    ),
+    "pitest.yml::pitest-authz": (
+        "read-only",
+        "Consumer; restores fleet-lint's home. Targeted authz mutation lane (ADR-0279 #7) "
+        "riding the same weekly schedule and cache posture as the matrix job above — a "
+        "pure consumer with no reason to store a per-run entry.",
     ),
     "pact-drift-check.yml::drift-check": (
         "read-only",

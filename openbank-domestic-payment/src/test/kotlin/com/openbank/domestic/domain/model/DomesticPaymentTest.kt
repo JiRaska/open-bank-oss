@@ -33,6 +33,21 @@ class DomesticPaymentTest {
         assertThat(settled.settledAt).isEqualTo(now)
     }
 
+    @Test
+    fun `delegation and reservation form an indivisible pair`() {
+        assertThatThrownBy {
+            payment().copy(delegationId = UUID.randomUUID())
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("must either both be present or both be absent")
+
+        assertThatThrownBy {
+            payment().copy(reservationId = UUID.randomUUID())
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("must either both be present or both be absent")
+    }
+
     private fun payment(status: DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED) = DomesticPayment(
         id = UUID.randomUUID(),
         idempotencyKey = "idem",

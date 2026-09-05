@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.30.0...notification-service-v0.30.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **notification:** KYC outcome notifications get a producer — consume openbank.kyc.events ([#8432](https://github.com/JiRaska/open-bank-oss/issues/8432)) ([#8547](https://github.com/JiRaska/open-bank-oss/issues/8547)) ([e6d3e35](https://github.com/JiRaska/open-bank-oss/commit/e6d3e35be818978324c9508e9d524e6462b1fb05))
+
 ## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.29.2...notification-service-v0.30.0) (2026-09-02)
 
 
