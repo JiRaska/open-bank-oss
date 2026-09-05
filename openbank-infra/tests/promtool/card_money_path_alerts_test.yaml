@@ -1,0 +1,124 @@
+# PromQL unit tests for prometheus-rules-card-money-path.yaml (ADR-0283, #8809/#8810/#8812).
+#
+# Run via openbank-infra/tests/promtool/run.sh, which unwraps `.spec` out of the SHIPPED
+# PrometheusRule CR — these assertions run against the deployed expression, not a copy of it.
+#
+# WHAT THESE ARE FOR. Every alert here watches a state in which the platform looks healthy: a
+# clearing that never reached the books, a token list served from a stale mirror, a chargeback
+# nobody filed. A rule for a silent failure is itself easy to get silently wrong — an expression
+# over a label that is never emitted is valid PromQL, loads cleanly, and never fires. So each test
+# below pairs the firing case with the quiet one that must NOT fire.
+evaluation_interval: 1m
+rule_files:
+  - prometheus-rules-card-money-path.yaml
+
+tests:
+  # 1. A skipped ledger posting fires; a healthy one does not.
+  #
+  # The pair is the test. `SKIPPED_DISABLED` and `POSTED` are values of ONE counter, and an
+  # expression that forgot its label selector would fire on both — which is how an alert about
+  # unbooked money ends up paging on every successful card purchase and gets silenced.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_card_processing_ledger_postings_total{service="card-processing",outcome="SKIPPED_DISABLED"}'
+        values: "0+1x120"
+      - series: 'openbank_card_processing_ledger_postings_total{service="card-processing",outcome="POSTED"}'
+        values: "0+9x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CardClearedButNotPosted
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              domain: payments
+              service: card-processing
+              outcome: SKIPPED_DISABLED
+            exp_annotations:
+              summary: Card spend cleared without reaching the ledger
+              subject_period: continuous
+              description: >-
+                card-processing applied a clearing and the ledger posting was SKIPPED_DISABLED, so the books do not carry the spend. The pod is healthy and no request failed — this is the silent shape ADR-0283 exists to make visible. Check `openbank.card-processing.ledger-posting-enabled` and the transaction-service binding.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+
+  # 2. Postings that are all healthy fire NOTHING. Without this case the rule above could be
+  #    label-blind and every test here would still pass.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_card_processing_ledger_postings_total{service="card-processing",outcome="POSTED"}'
+        values: "0+9x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CardClearedButNotPosted
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: CardLedgerPostingFailing
+        exp_alerts: []
+
+  # 3. Token reads: a MAJORITY from the mirror fires, a minority does not.
+  #
+  # The ratio is what makes this usable. A blip during a network hiccup is normal and must stay
+  # quiet; half an hour of every read being served from the bank's own record is operators looking
+  # at possibly-stale token states without knowing it.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_card_token_reads_total{service="card-processing",source="LOCAL_MIRROR"}'
+        values: "0+9x120"
+      - series: 'openbank_card_token_reads_total{service="card-processing",source="NETWORK"}'
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CardTokenReadsServedFromMirror
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              domain: payments
+            exp_annotations:
+              summary: Most network-token reads are being served from the bank's mirror
+              subject_period: continuous
+              description: >-
+                The tokenisation binding has not answered for half an hour, so operators are seeing the bank's last recorded state rather than the network's. The desk labels every such answer, but a sustained fallback means token states on screen may be stale.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+
+  - interval: 1m
+    input_series:
+      - series: 'openbank_card_token_reads_total{service="card-processing",source="LOCAL_MIRROR"}'
+        values: "0+1x120"
+      - series: 'openbank_card_token_reads_total{service="card-processing",source="NETWORK"}'
+        values: "0+9x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CardTokenReadsServedFromMirror
+        exp_alerts: []
+
+  # 4. Provisioning refused for EVERY attempt fires; a mix does not.
+  #
+  # `refusal="none"` is a provisioned token, so the quiet case below is the one that matters: a
+  # naive "any refusal" rule would fire on a single wallet declining, which is ordinary.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_card_token_provisions_total{service="card-processing",scheme="VISA",refusal="SCHEME_UNAVAILABLE"}'
+        values: "0+3x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CardTokenProvisioningAlwaysRefused
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              domain: payments
+            exp_annotations:
+              summary: Every network-token provisioning attempt is being refused
+              subject_period: continuous
+              description: >-
+                No wallet or merchant token has been minted in the last hour and every attempt was refused. The usual cause is a tokenisation binding configured to a network with no adapter, which answers NOT_BOUND — a deliberate refusal, not an outage.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+
+  - interval: 1m
+    input_series:
+      - series: 'openbank_card_token_provisions_total{service="card-processing",scheme="SIMULATOR",refusal="none"}'
+        values: "0+5x120"
+      - series: 'openbank_card_token_provisions_total{service="card-processing",scheme="VISA",refusal="SCHEME_UNAVAILABLE"}'
+        values: "0+1x120"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CardTokenProvisioningAlwaysRefused
+        exp_alerts: []
