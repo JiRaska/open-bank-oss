@@ -176,7 +176,12 @@ class BalanceRepositoryImpl(private val repo: BalancePanacheRepo) : BalanceRepos
 }
 
 @ApplicationScoped
-class HoldRepositoryImpl(private val repo: HoldPanacheRepo) : HoldRepository {
+class HoldRepositoryImpl(
+    private val repo: HoldPanacheRepo,
+    private val balanceRepo: BalancePanacheRepo,
+    private val outboxRepo: BalanceOutboxRepository,
+    private val mapper: com.fasterxml.jackson.databind.ObjectMapper,
+) : HoldRepository {
 
     override suspend fun findById(holdId: UUID): BalanceHold? = Panache.withSession {
         repo.find("holdId", holdId).firstResult()
@@ -204,6 +209,46 @@ class HoldRepositoryImpl(private val repo: HoldPanacheRepo) : HoldRepository {
             }
             .map { entity -> entity?.toDomain() ?: throw IllegalStateException("Hold not found for update") }
     }.awaitSuspending()
+
+    // Transactional outbox (#8510): hold insert + balance reservation + HOLD_PLACED outbox row in
+    // ONE transaction. Before it, the use case committed the balance and hold first and then
+    // published through a bare emitter — a dual write that could lose the event after the commit
+    // or announce a hold whose transaction rolled back.
+    override suspend fun saveWithEvent(hold: BalanceHold, balance: Balance, event: BalanceEvent): BalanceHold =
+        Panache.withTransaction {
+            applyBalance(balance)
+                .flatMap { repo.persist(hold.toEntity()) }
+                .flatMap { outboxRepo.persistInTransaction(event.toOutboxMessage(mapper)) }
+                .replaceWith(hold)
+        }.awaitSuspending()
+
+    // Transactional outbox (#8510): hold release + balance + HOLD_RELEASED outbox row, one
+    // transaction — the mirror of saveWithEvent.
+    override suspend fun releaseWithEvent(hold: BalanceHold, balance: Balance, event: BalanceEvent): BalanceHold =
+        Panache.withTransaction {
+            applyBalance(balance)
+                .flatMap {
+                    repo.find("holdId", hold.id).firstResult().invoke { entity ->
+                        entity?.releasedAt = hold.releasedAt
+                    }
+                }
+                .flatMap { outboxRepo.persistInTransaction(event.toOutboxMessage(mapper)) }
+                .replaceWith(hold)
+        }.awaitSuspending()
+
+    private fun applyBalance(balance: Balance): io.smallrye.mutiny.Uni<*> =
+        balanceRepo.find("accountId = ?1 and currency = ?2", balance.accountId, balance.currency)
+            .firstResult()
+            .invoke { entity ->
+                if (entity != null) {
+                    entity.bookedAmount = balance.bookedAmount
+                    entity.availableAmount = balance.availableAmount
+                    entity.reservedAmount = balance.reservedAmount
+                    entity.pendingAmount = balance.pendingAmount
+                    entity.arrangedOverdraftLimit = balance.arrangedOverdraftLimit
+                    entity.updatedAt = balance.updatedAt
+                }
+            }
 
     private fun BalanceHoldEntity.toDomain() = BalanceHold(
         id = holdId,

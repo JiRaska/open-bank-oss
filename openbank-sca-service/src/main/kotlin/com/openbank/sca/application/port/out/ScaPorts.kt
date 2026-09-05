@@ -4,6 +4,7 @@
 
 package com.openbank.sca.application.port.out
 
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.EnrolledDevice
 import com.openbank.sca.domain.model.ScaChallenge
@@ -61,7 +62,14 @@ interface NotificationSender {
 /** Durable store of device credentials enrolled to a party (ADR-0021). */
 interface EnrolledDeviceRepository {
 
-    suspend fun save(device: EnrolledDevice): EnrolledDevice
+    /**
+     * Persists [device] and its [outboxMessage] in ONE transaction, so a crash can never leave a
+     * device enrolled with `sca.device_enrolled` lost (#8679). The predecessor `save(device)` was
+     * called next to a separately-transacted `ScaOutboxRepository.save(message)`; measured on
+     * `origin/main`, the device row carried xmin 751 and its outbox row xmin 752 — two writing
+     * transactions. Same shape as `DocumentRepositoryPort`/`FxConversionRepository.saveWithOutbox`.
+     */
+    suspend fun saveWithOutbox(device: EnrolledDevice, outboxMessage: OutboxMessage): EnrolledDevice
 
     suspend fun findByCredentialId(credentialId: String): EnrolledDevice?
 
