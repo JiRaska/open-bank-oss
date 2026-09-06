@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.swift.contract
+package com.openbank.swift.contract.folder
 
 import au.com.dius.pact.provider.PactVerifyProvider
 import au.com.dius.pact.provider.junit5.MessageTestTarget
@@ -30,7 +30,7 @@ import java.util.UUID
  *
  * swift-service is the provider for `pacts/openbank-transaction-service-openbank-swift-service.json`,
  * the `swift.message.status-changed` message contract. Its only verification class was
- * [SwiftMessagePactProviderVerificationTest] — `@PactBroker`-sourced and
+ * `SwiftMessagePactProviderVerificationTest` — `@PactBroker`-sourced and
  * `@EnabledIfSystemProperty(pactbroker.url)`-gated, so it never ran on a pull request and the
  * contract was replayed only after the merge, against whatever the broker happened to hold.
  *
@@ -71,7 +71,23 @@ class SwiftPactFolderProviderVerificationTest {
         // exception during scan"), failing verification with mismatches:[] (a harness crash, not a
         // contract mismatch) — which kept the transaction<->swift edge red after #1938 re-enabled
         // this class (#1348). Every working sibling (account/party/kyc/transaction) scopes the scan.
-        context?.target = MessageTestTarget(listOf("com.openbank.swift.contract"))
+        // Scope the scan to THIS class's own leaf package, which now holds exactly one
+        // @PactVerifyProvider for each description.
+        //
+        // Scoping to the parent `com.openbank.swift.contract` was not enough, and the way it failed
+        // is worth keeping. ClassGraph includes SUB-packages, and the broker twin declared the same
+        // `@PactVerifyProvider` description in that same package — so a scan found TWO candidates
+        // and which one it resolved to was determined by nothing in the code. Measured: a run
+        // resolved to the twin and failed with
+        //   "Could not load method: ...SwiftMessagePactProviderVerificationTest.produceSwiftStatusChanged"
+        // which surfaces as a bare AssertionError out of verifyInteraction() with no mismatch
+        // detail — the shape this test failed with in CI (#8916).
+        //
+        // Identical bodies do NOT make that safe: they make the OUTPUT insensitive to the choice,
+        // not the LOADABILITY. Whichever class is picked has to be loadable at that moment, and
+        // @EnabledIfSystemProperty on the twin gates whether its tests RUN, never whether
+        // ClassGraph sees or loads it.
+        context?.target = MessageTestTarget(listOf("com.openbank.swift.contract.folder"))
     }
 
     @TestTemplate
