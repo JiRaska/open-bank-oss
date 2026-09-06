@@ -384,6 +384,18 @@
   destructive (`gh run rerun`, a deploy, a delete), stub the binary on `PATH` — **and validate
   the stub against a known-positive first**, or a silent passthrough runs the real thing.
 
+- **A new Kafka channel is TWO deploys, not one, and doing it in one is a hard boot failure.**
+  The msg-override ConfigMap that supplies `group.id` / `auto.offset.reset` (the #686 apparatus) is
+  applied by Argo BEFORE auto-deploy bumps the image, so a channel named there that the RUNNING
+  image has no `connector:` for is SRMSG00071 — SmallRye refuses to start, so the whole service
+  stops rather than the one consumer degrading. `msg-channel-image-parity` compares the ConfigMap
+  against the `application.yaml` inside the image that is actually deployed and blocks it at PR
+  time. Order: (1) code + `application.yaml` channel + the ACLs, merge, let the image ship;
+  (2) the ConfigMap lines. In between, the consumer runs on the fallback group id
+  (`quarkus.application.name`), so grant the KafkaUser Read on **both** group names or every poll
+  answers `GroupAuthorizationException` — which is silent, because a consumer that cannot join a
+  group looks exactly like a topic with nothing on it (#8877, #8882).
+
 ### main-protection: the bypass has two halves, and only one had a reader
 - **`rulesets/rule-suites` (the bypass LOG) is private and rejects fine-grained tokens;
   `rulesets/{id}` (the bypass CONFIG) is world-readable.** Same feature, opposite access, and it

@@ -281,3 +281,5 @@ V9.1 openbank-infra/gitops/components/ai-platform/litellm.yaml:153: plaintext ht
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:98: plaintext http:// env value http://tempo.observability.svc:4318
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2327: plaintext http:// env value http://card-issuance-service.payments.svc:8118
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2334: plaintext http:// env value http://ap2-service.platform.svc:8151
+V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:181: plaintext http:// env value http://kyb-service.kyb.svc:8157
+V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:117: plaintext http:// env value http://party-service.party.svc:8111

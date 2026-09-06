@@ -1,0 +1,16 @@
+{
+  "ico": "45274649",
+  "obchodniJmeno": "Příklad s.r.o.",
+  "pravniForma": "112",
+  "sidlo": {
+    "kodStatu": "CZ",
+    "nazevObce": "Praha",
+    "nazevUlice": "Hlavní",
+    "cisloDomovni": 1,
+    "psc": 11000,
+    "textovaAdresa": "Hlavní 1, 110 00 Praha 1"
+  },
+  "datumVzniku": "2010-01-15",
+  "dic": "CZ45274649",
+  "seznamRegistraci": { "stavZdrojeVr": "AKTIVNI", "stavZdrojeRes": "AKTIVNI" }
+}
