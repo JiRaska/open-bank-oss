@@ -261,6 +261,9 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['compliance:view', [
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360',
     '/docs/compliance', '/docs/bcp',
+    // ADR-0286: the warehouse-backed risk reporting surface. Each registry entry also carries
+    // its own permission at the BFF boundary — this prefix only gates the page shell.
+    '/reporting',
   ]],
   ['loyalty:view', ['/loyalty']],
   ['campaign:view', ['/segments']],
