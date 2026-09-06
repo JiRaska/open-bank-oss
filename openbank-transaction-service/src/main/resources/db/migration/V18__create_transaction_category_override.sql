@@ -1,3 +1,8 @@
+-- Rollback: DROP TABLE transaction_category_override; never edit an applied Flyway migration.
+-- Safe to drop: the table is additive and read-only to the rest of the service. Losing it loses
+-- the customers' own categories — irrecoverable, since nothing else records them — but the read
+-- path falls back to merchantCategory and the merchant catalogue, so statements still render.
+--
 -- A customer's own categorisation of their spending, keyed by WHO they paid rather than by which
 -- payment.
 --
