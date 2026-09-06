@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.15 -> 1.16): additive
   # only — GET /journals/approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.17.0
+  version: 1.18.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -229,6 +229,13 @@ paths:
         Aggregates POSTED journal lines per GL account as of the given date (defaults to
         today). The double-entry invariant (sum of debits == sum of credits over the whole GL)
         is reported as `balanced`.
+
+
+        `scope` selects the population (ADR-0252). It defaults to `REAL_ONLY`, so bank-owned
+        synthetic (canary) activity is excluded unless a caller explicitly asks for it — the
+        answer a regulatory reader needs from a caller who did not think about it. The filter is
+        applied per journal entry, so every excluded journal leaves with both of its legs and the
+        `balanced` invariant still holds in each scope. The response echoes the scope it counted.
       operationId: getTrialBalance
       parameters:
         - name: asOf
@@ -236,6 +243,16 @@ paths:
           schema:
             type: string
             format: date
+        - name: scope
+          in: query
+          required: false
+          description: >
+            Population to aggregate. Omitted means REAL_ONLY. An unrecognised value is a 400,
+            not a silent fallback.
+          schema:
+            type: string
+            enum: [REAL_ONLY, SYNTHETIC_ONLY, ALL]
+            default: REAL_ONLY
       responses:
         '200':
           description: Trial balance
@@ -714,6 +731,11 @@ paths:
         Operational read. It returns LINES_V1 evidence for a new FROZEN close, but may recompute
         the current journal for DRAFT/no-close or historical HASH_ONLY closes. Regulatory readers
         MUST use frozen-trial-balance, which fails closed unless immutable LINES_V1 exists.
+
+
+        Bank-owned synthetic (canary) activity is excluded (ADR-0252), and there is deliberately
+        no scope selector here: a regulatory reader must not be able to ask this endpoint for the
+        synthetic population.
       operationId: getPeriodTrialBalance
       parameters:
         - $ref: '#/components/parameters/PeriodTypePath'
@@ -1222,6 +1244,12 @@ components:
         createdAt:
           type: string
           format: date-time
+        synthetic:
+          type: boolean
+          description: >
+            ADR-0252: posted by a bank-owned synthetic (canary) customer. Such an entry is a real,
+            balanced double-entry posting that ran every control; it is excluded from the
+            regulatory aggregates and from nothing else.
 
     JournalPage:
       type: object
@@ -1382,11 +1410,20 @@ components:
 
     TrialBalanceResponse:
       type: object
-      description: Point-in-time GL trial balance (all POSTED activity up to `asOf`).
+      description: >
+        Point-in-time GL trial balance over the POSTED activity up to `asOf` that falls in
+        `scope` (ADR-0252; REAL_ONLY by default).
       properties:
         asOf:
           type: string
           format: date
+        scope:
+          type: string
+          enum: [REAL_ONLY, SYNTHETIC_ONLY, ALL]
+          description: >
+            The population these totals were computed over. Present on the response because a
+            trial balance that does not say what it counted cannot be told apart from one that
+            counted the wrong thing.
         totalDebit:
           type: number
         totalCredit:

@@ -397,6 +397,9 @@ change_requirements:
     allowlist:
       # openbank.psd2.events left the allowlist in #8510: the producer itself was deleted
       # (the psd2_outbox apparatus had zero writers), so there is no topic left to exempt.
+      # openbank.kyb.events left the allowlist here: onboarding-service now consumes it
+      # (BusinessOnboardingEventConsumer, channel kyb-events-in, ADR-0284 D6). The entry said
+      # to remove it with the first consumer PR, and the gate fails on a stale entry too.
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "proposal-events"
@@ -2929,6 +2932,11 @@ authz:
         - ledger.replay
         - ledger.reverse
         - ledger.trigger
+        - kyb.case.list                    # ADR-0284: business onboarding review queue
+        - kyb.case.read
+        - kyb.case.reject
+        - kyb.case.review.resolve
+        - kyb.lookup
         - lending.approve
         - lending.collateralDecide
         - lending.collateralRegister
@@ -2939,6 +2947,9 @@ authz:
         - lending.writeoff
         - party.approval.decide
         - party.consent.update
+        - party.mandate.grant              # ADR-0284 D3: bind a representative to a legal-entity party
+        - party.mandate.read
+        - party.mandate.revoke
         - party.merge
         - party.update
         - sanctions.approval.decide
@@ -3004,6 +3015,10 @@ authz:
       grant:
         - kyc.case.approve
         - kyc.case.reject
+        - kyb.case.list                    # ADR-0284: the KYB review queue is the KYC reviewer's queue
+        - kyb.case.read
+        - kyb.case.reject
+        - kyb.case.review.resolve
     ROLE_AUDITOR:
       grant:
         - audit.read
@@ -3165,6 +3180,9 @@ shared_m2m_matrix_write_grants:
     - interest.create
     - interest.delete
     - interest.trigger
+    - kyb.case.reject
+    - kyb.case.review.resolve
+    - kyb.lookup
     - ledger.create
     - ledger.replay
     - ledger.reverse
@@ -3181,6 +3199,8 @@ shared_m2m_matrix_write_grants:
     - opsmessage.compose
     - party.approval.decide
     - party.consent.update
+    - party.mandate.grant
+    - party.mandate.revoke
     - party.merge
     - party.update
     - sanctions.approval.decide

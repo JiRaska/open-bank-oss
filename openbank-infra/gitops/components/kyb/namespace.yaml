@@ -1,0 +1,13 @@
+# Legal-entity verification / business onboarding domain (ADR-0037: domain = namespace).
+# App plane. Holds kyb-service plus its single-owner CNPG Postgres. kyb-service owns the
+# BusinessOnboardingCase (ADR-0284) — the register-verified, multi-signer onboarding of a
+# sole trader or company — and publishes its lifecycle onto openbank.kyb.events.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kyb
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

@@ -70,6 +70,9 @@ spec:
                   - statements
                   - campaign
                   - lending
+                  # ADR-0284: kyb-service's case-timer worker dials temporal-frontend:7233 at StartupEvent;
+                  # without this the gRPC is DROPPED and the service never boots.
+                  - kyb
                   - finops-agent
                   - devops-agent
                   - control-liveness-sentinel
