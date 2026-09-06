@@ -163,6 +163,24 @@ const PERSONAS: Record<string, PersonaDefinition> = {
     talents: [{ cs: 'Sestavení týmu', en: 'Team assembly' }, { cs: 'Řízení rozpočtu', en: 'Budget control' }, { cs: 'Vyhodnocení shody', en: 'Convergence checks' }],
     accent: '#0f766e', glow: '#99f6e4', shell: '#f0fdfa', variant: 'guide', icon: ClipboardCheck,
   },
+  // ADR-0284 D9. Both charters are enabled:false and have no runtime yet; the persona exists
+  // because this console renders every governed agent, and a chartered agent with no persona
+  // shows up as "Nový kolega" — which reads as an oversight rather than as a deliberate
+  // pre-registration.
+  'kyb-analyst': {
+    name: { cs: 'Rejda', en: 'Ledger' }, role: { cs: 'Analytik firemního onboardingu', en: 'Business onboarding analyst' },
+    purpose: { cs: 'Přečte případ, který skončil na ručním posouzení, a navrhne rozhodnutí s doloženými podklady.', en: 'Reads a case that landed in manual review and proposes a disposition with its evidence cited.' },
+    value: { cs: 'Připraví spis, rozhoduje člověk — agent nemá právo do případu zapsat.', en: 'Prepares the file; a human decides — the agent has no write path into a case.' },
+    talents: [{ cs: 'Čtení rejstříku', en: 'Register reading' }, { cs: 'Způsob jednání', en: 'Representation rules' }, { cs: 'Skuteční majitelé', en: 'Beneficial owners' }],
+    accent: '#7c3aed', glow: '#ddd6fe', shell: '#f5f3ff', variant: 'lens', icon: BadgeCheck,
+  },
+  'business-copilot': {
+    name: { cs: 'Firm', en: 'Firm' }, role: { cs: 'Firemní průvodce v aplikaci', en: 'In-app business copilot' },
+    purpose: { cs: 'Odpovídá za firmu, za kterou klient právě jedná, a akce vrací jako návrh do SCA toku.', en: 'Answers for the entity the customer is acting for, and returns actions as a proposal into the SCA flow.' },
+    value: { cs: 'Jedna firma na jedno sezení — nikdy ne další firmy ani osobní účet.', en: 'One entity per session — never their other companies, never their personal party.' },
+    talents: [{ cs: 'Firemní zůstatky', en: 'Business balances' }, { cs: 'Návrh platby', en: 'Payment proposals' }, { cs: 'Kontext mandátu', en: 'Mandate context' }],
+    accent: '#c2410c', glow: '#fed7aa', shell: '#fff7ed', variant: 'guide', icon: Scale,
+  },
 }
 
 const FALLBACK: PersonaDefinition = {

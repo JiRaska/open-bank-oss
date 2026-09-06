@@ -167,3 +167,23 @@ charters:
     prompts: [system.v1]
     source: openbank-case-coordinator-agent CaseCoordinatorLlmAdapter.SYSTEM_PROMPT
     placeholders: []
+
+  # ADR-0284 D9. Both charters land ahead of their runtime on purpose — bounding an agent's powers
+  # is cheap before the loop exists and expensive after — so neither sends a prompt from this repo
+  # yet. `pending` is the honest status: it is the migration backlog, not a settled exemption, and
+  # it stays a ::warning until the wiring lands.
+  - id: kyb-analyst
+    status: pending
+    reason: >-
+      Charter is enabled:false and no service sends a prompt on its behalf. The disposition-proposal
+      and representation-rule loops are designed in ADR-0284 D9 and unbuilt; the prompt is registered
+      here in the PR that wires them, not before, because a prompt with no caller cannot be reviewed
+      against what it actually does.
+    blocked_by: ADR-0284
+  - id: business-copilot
+    status: pending
+    reason: >-
+      Charter is enabled:false. It extends customer-copilot's ADR-0089 regime with the acting-for
+      entity scope; the prompt lands with the copilot-service change that resolves a business
+      profile, so that the scope rule the charter states and the prompt that states it ship together.
+    blocked_by: ADR-0284

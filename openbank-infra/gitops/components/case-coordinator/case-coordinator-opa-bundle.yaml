@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: case-coordinator-agent
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "9b937d5b40f55452"
+    openbank.tech/policy-checksum: "be29ba3dcc7bf7d4"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -490,6 +490,36 @@ data:
           - money.*
           - gh.pr.*
           - secrets.*
+    - id: kyb-analyst
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - kyb
+          - governance
+        - tier: write_proposal
+          resources:
+          - case-thread
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: business-copilot
+      tools:
+        allow:
+        - query.balance.readonly
+        - query.transaction.readonly
+        - propose.payment
+        - propose.card_freeze
+        - propose.dispute
+        deny:
+        - money.*
+        - gh.pr.*
+        - '*.write'
+        - secrets.read.raw
   case-collaboration.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -563,6 +593,9 @@ data:
       - case.open
       - case.preempt
       - case.synthesize
+    - id: kyb-analyst
+      case_capabilities:
+      - case.join
     grants: []
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/case_collaboration", "agents", "case_collaboration"]}
