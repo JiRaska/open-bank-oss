@@ -20,6 +20,10 @@ import java.io.File
  * green. That is the exact "green about work it never did" shape the replay exists to prevent, and
  * nothing else in CI would notice it.
  *
+ * The interactions this protects are the negative-auth ones — the three "missing or expired token"
+ * cases that expect **401** — so losing one to a filter gap would quietly stop proving that an
+ * unauthenticated money-path debit is refused.
+ *
  * This test is cheap and needs no Quarkus: it reads the committed pacts directly.
  */
 class TransactionPactStateCoverageTest {
@@ -58,5 +62,38 @@ class TransactionPactStateCoverageTest {
                     "TransactionNegativeAuthPactVerificationTest, and verified by neither",
             )
             .isEmpty()
+    }
+
+    /**
+     * The detector above is only worth its runtime if it can fail. A guard that cannot see the
+     * thing it guards against is decoration, so this feeds it a pact whose interaction declares no
+     * state and requires it to be found — and one that declares a state, to be sure the finder is
+     * not simply matching everything.
+     */
+    @Test
+    fun `the stateless-interaction detector finds a stateless interaction and spares a stated one`() {
+        fun statelessIn(json: String): Boolean {
+            val pact: Map<String, Any?> = mapper.readValue(json)
+
+            @Suppress("UNCHECKED_CAST")
+            val interactions = pact["interactions"] as? List<Map<String, Any?>> ?: emptyList()
+            return interactions.any {
+                val states = it["providerStates"] as? List<*>
+                val legacy = it["providerState"] as? String
+                states.isNullOrEmpty() && legacy.isNullOrBlank()
+            }
+        }
+
+        assertThat(statelessIn("""{"interactions":[{"description":"no state at all"}]}"""))
+            .describedAs("a stateless interaction must be detected")
+            .isTrue()
+        assertThat(
+            statelessIn(
+                """{"interactions":[{"description":"stated","providerStates":[{"name":"x"}]}]}""",
+            ),
+        ).describedAs("an interaction that declares a state must not be reported").isFalse()
+        assertThat(
+            statelessIn("""{"interactions":[{"description":"legacy","providerState":"x"}]}"""),
+        ).describedAs("the pre-v3 single-state spelling counts as stated").isFalse()
     }
 }
