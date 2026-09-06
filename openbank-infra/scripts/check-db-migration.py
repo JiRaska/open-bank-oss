@@ -43,6 +43,21 @@ import sys
 
 MIGRATION_RE = re.compile(r"/src/main/resources/db/migration/.+\.sql$")
 
+# The ONE exception to "a rename is an edit of identity": a migration whose version collided
+# with a sibling that reached main first (the flyway-version-commit-order race, #5628) may be
+# renumbered IFF it has never been deployed anywhere — verified per entry by a merge-base check
+# of the pinned image tag against the colliding merge, recorded in the justification. Flyway
+# refuses to boot on two migrations sharing a version, and QUARKUS_FLYWAY_OUT_OF_ORDER does not
+# apply to a same-version collision, so without this exception the gate leaves no legal fix.
+# An entry that ever gets applied to a live database must be REMOVED and the collision resolved
+# by a forward repair migration instead — renaming an applied migration is checksum fraud.
+KNOWN_RENAMES: dict[str, str] = {
+    "openbank-notification-service/src/main/resources/db/migration/V15__notification_deduplication_key.sql":
+        "#8953 (2026-09-06) — V14 collided with V14__synthetic_outbox_taint.sql (#6731, on main "
+        "since 2026-08-24). Renumbered pre-deploy: the pinned notification image sandbox-cf05a32f "
+        "predates the #8334 merge (merge-base verified), so the V14 file was never applied.",
+}
+
 # `-- Rollback` / `--Rollback:` / `-- ROLLBACK -` … the marker, however it is punctuated.
 ROLLBACK_MARKER_RE = re.compile(r"^\s*--\s*rollback\b[:\s-]*(?P<inline>.*)$", re.IGNORECASE)
 COMMENT_LINE_RE = re.compile(r"^\s*--\s?(?P<body>.*)$")
@@ -68,7 +83,13 @@ def changed_migrations(base: str) -> tuple[list[str], list[str]]:
             continue
         # A rename (R) of a migration is an edit of its identity — Flyway keys on the version
         # in the filename, so renaming V3 to V4 is not "adding V4", it is rewriting history.
-        if status.startswith("A"):
+        # The single exception is a KNOWN_RENAMES-baselined pre-deploy renumber after a
+        # same-version collision (see the dict's comment): the rename target is then checked
+        # as an ADDED migration (rollback note still required).
+        if status.startswith("R") and path in KNOWN_RENAMES:
+            print(f"check-db-migration: baselined pre-deploy renumber: {path} — {KNOWN_RENAMES[path]}")
+            added.append(path)
+        elif status.startswith("A"):
             added.append(path)
         else:
             modified.append(path)
