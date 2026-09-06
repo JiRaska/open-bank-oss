@@ -24,7 +24,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-dispute-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "f0be4aa69677c8e8"
+        openbank.tech/policy-checksum: "64615930060486ec"
       labels: {app.kubernetes.io/name: dispute-service, app.kubernetes.io/part-of: dispute}
     spec:
       securityContext:
