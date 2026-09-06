@@ -29,3 +29,11 @@
 # contradicts (vop's "no Dockerfile ... absent from auto-deploy's ALL_SERVICES": it has both).
 # The file is deliberately empty of entries; the gate reports 0 allowlisted placeholders and
 # that is the correct reading, not a missing file.
+
+# openbank-kyb-service, ADR-0284 (#8863). First registration: the tag is this PR's own commit
+# and no build exists for it — the service enters auto-deploy's ALL_SERVICES on the merge that
+# adds it, and the auto-deploy gitops PR then rewrites the pin to the built sha. ABSENT, not
+# unattested: cosign says the image is not in the registry, which is a different bug with a
+# different fix. Remove this line with that gitops PR; the ratchet fails on a stale entry, so
+# it cannot outlive the first real build.
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-26f33679
