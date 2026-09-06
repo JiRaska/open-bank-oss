@@ -13,6 +13,9 @@ import com.openbank.party.application.port.out.GdprAggregationAuthException
 import com.openbank.party.application.usecase.PartyAlreadyExistsException
 import com.openbank.party.application.usecase.PartyMergeRejectedException
 import com.openbank.party.application.usecase.PartyNotFoundException
+import io.quarkus.security.AuthenticationFailedException
+import io.quarkus.security.ForbiddenException
+import io.quarkus.security.UnauthorizedException
 import io.vertx.pgclient.PgException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
@@ -146,6 +149,61 @@ class GdprAggregationAuthMapper : ExceptionMapper<GdprAggregationAuthException> 
     companion object {
         private const val BAD_GATEWAY = 502
     }
+}
+
+// Security-abort responses must be the JSON error envelope like every other error here.
+// Without these mappers Quarkus REST's built-in handling writes the exception MESSAGE as a
+// plain-text entity while the response keeps the resource's negotiated application/json
+// content-type — a 401 whose body is the literal text "Not Authenticated" under a JSON
+// content-type. Any client parsing the error as JSON (and Pact-JVM's matching engine, which
+// plans the body comparison from the content-type) chokes on it: same defect class measured
+// on the anonymous IBAN-lookup pact replay in account-service (#8803); here it breaks the
+// anonymous VoP lookup pact replay (#8875). A user @Provider mapper wins over Quarkus'
+// built-in. These live in the SERVICE, not libs-runtime, on purpose: a shared-library
+// @Provider naming an `io.quarkus.security` type would be loaded by ArC in every consumer,
+// including services without quarkus-security on the classpath — the #6240 boot-failure
+// class, enforced by the provider-type-classpath gate.
+@Provider
+class QuarkusUnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
+    override fun toResponse(exception: UnauthorizedException): Response = Response.status(Response.Status.UNAUTHORIZED)
+        .entity(
+            ApiError(
+                Ids.randomId().toString(),
+                Response.Status.UNAUTHORIZED.statusCode,
+                "UNAUTHORIZED",
+                "Unauthorized",
+                timestamp = Instant.now(),
+            ),
+        ).build()
+}
+
+@Provider
+class QuarkusAuthenticationFailedExceptionMapper : ExceptionMapper<AuthenticationFailedException> {
+    override fun toResponse(exception: AuthenticationFailedException): Response =
+        Response.status(Response.Status.UNAUTHORIZED)
+            .entity(
+                ApiError(
+                    Ids.randomId().toString(),
+                    Response.Status.UNAUTHORIZED.statusCode,
+                    "UNAUTHORIZED",
+                    "Unauthorized",
+                    timestamp = Instant.now(),
+                ),
+            ).build()
+}
+
+@Provider
+class QuarkusForbiddenExceptionMapper : ExceptionMapper<ForbiddenException> {
+    override fun toResponse(exception: ForbiddenException): Response = Response.status(Response.Status.FORBIDDEN)
+        .entity(
+            ApiError(
+                Ids.randomId().toString(),
+                Response.Status.FORBIDDEN.statusCode,
+                "FORBIDDEN",
+                "Forbidden",
+                timestamp = Instant.now(),
+            ),
+        ).build()
 }
 
 /** ADR-0284: a mandate precondition failed (wrong party types, closed party). 422, not 400 — the request is well-formed. */

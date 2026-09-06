@@ -42,11 +42,19 @@ enum class NotificationTemplate(val variables: Set<String>) {
     KYC_REJECTED(setOf("reason")),
     CONSENT_GRANTED(setOf("scope")),
     CONSENT_REVOKED(setOf("scope")),
+
+    // No producer, and deliberately kept: it is the only member of TemplateSensitivity's
+    // SECRET_TEMPLATES, so deleting it as "unproduced" would silently empty the at-rest redaction
+    // guard (#8568). sca-service refuses TOTP outright (#8567) — there is no transport for a code.
     OTP_CODE(setOf("code")),
 
     // No PASSWORD_RESET template (#8568): no password flow exists anywhere in the system —
     // the app authenticates with passkeys/biometrics and Keycloak runs with
     // resetPasswordAllowed=false and no SMTP, so nothing could ever produce one.
+
+    // No producer (#8568). Kept rather than removed because the onboarding moment it would occupy
+    // already carries KYC_APPROVED and then ACCOUNT_OPENED — a third greeting there is a product
+    // decision about REPLACING one of those, not a gap to fill.
     WELCOME(setOf("name")),
 
     /** Decoupled/push SCA — "you have a payment to approve" (#4). [detail] = the human summary. */

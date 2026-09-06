@@ -114,30 +114,79 @@ class SegmentEvaluationTest {
         assertFalse(where.contains("aggregate_type = 'PARTY'"), "unfolded literal reintroduced — actual: $where")
     }
 
+    @Test
+    fun `HasActiveConsentScope renders a parameterised scope, never interpolated`() {
+        val (where, params) = Segment(
+            "consented",
+            1,
+            listOf(SegmentRule.HasActiveConsentScope("MARKETING_COMMS_EMAIL")),
+        ).toWhereClause()
+
+        assertEquals("MARKETING_COMMS_EMAIL", params["p0_scope"])
+        assertFalse(where.contains("MARKETING_COMMS_EMAIL"), "scope interpolated into SQL — actual: $where")
+        assertTrue(where.contains("{p0_scope:String}"), "actual: $where")
+    }
+
     /**
-     * A rule whose data does not exist anywhere in analytics is rejected where the segment is
-     * DEFINED. Rendering it into SQL that ClickHouse refuses is what made #2891 look like an empty
-     * cohort instead of a broken query.
-     *
-     * `HasAccount` used to be in this list and no longer is (#8792): the reason it carried was
-     * already stale when it was written. Consent is still genuinely absent from the layer.
+     * The opposite source choice from `HasAccount`, and the reason is the question, not a habit.
+     * "Is a consent active" is about CURRENT state, and silver keeps the latest event per
+     * aggregate — so a revoked, superseded or expired consent drops out by construction because
+     * its latest row is no longer a grant. Reading bronze here would match every consent ever
+     * granted, including the ones the customer has since withdrawn.
      */
     @Test
-    fun `a rule whose data the analytics layer does not carry is rejected at construction`() {
-        val noConsentEvents = assertThrows<IllegalArgumentException> {
-            Segment("consented", 1, listOf(SegmentRule.HasActiveConsentScope("MARKETING_COMMS_EMAIL")))
+    fun `HasActiveConsentScope reads current state, and only a live grant counts`() {
+        val (where, _) = Segment(
+            "consented",
+            1,
+            listOf(SegmentRule.HasActiveConsentScope("MARKETING_COMMS_PUSH")),
+        ).toWhereClause()
+
+        assertTrue(where.contains("silver_current_state"), "actual: $where")
+        assertFalse(
+            where.contains("bronze_events"),
+            "reads the log, so a revoked consent still matches — actual: $where",
+        )
+        assertTrue(where.contains("event_type = 'ConsentGranted'"), "actual: $where")
+    }
+
+    @Test
+    fun `a mis-shaped consent scope is rejected where the segment is defined`() {
+        for (bad in listOf("marketing_comms_email", "MARKETING COMMS", "", "1MARKETING")) {
+            assertThrows<IllegalArgumentException>("expected '$bad' to be rejected") {
+                SegmentRule.HasActiveConsentScope(bad)
+            }
         }
-        assertTrue(noConsentEvents.message!!.contains("consent events"), "actual: ${noConsentEvents.message}")
     }
 
     @Test
     fun `HasAccount is constructible now that the party link exists in the layer`() {
         val segment = Segment("has-account", 1, listOf(SegmentRule.HasAccount))
         val (where, params) = segment.toWhereClause()
-        assertTrue(where.contains("JSONExtractString(payload, 'partyId')"), "actual: $where")
+        assertTrue(where.contains("aggregate_id IN ("), "renders no membership test — actual: $where")
         // No bind values: the rule carries no caller-supplied value, so there is nothing to
-        // parameterise and nothing that could become SQL.
+        // parameterise and nothing that could become SQL. The SHAPE of the membership test is
+        // pinned by the delegation test below, not here.
         assertTrue(params.isEmpty(), "actual: $params")
+    }
+
+    /**
+     * The property worth a test of its own: this rule must DELEGATE the account-to-party
+     * resolution, not repeat it. `silver_party_accounts` (ADR-0210 D2) is that resolution, and its
+     * own header explains the danger of a second copy — the resolution is the isolation boundary
+     * of the Customer 360, so a caller that widens its private version shows another customer's
+     * accounts. The first version of this rule inlined the same predicate; identical is exactly how
+     * two copies begin.
+     */
+    @Test
+    fun `HasAccount delegates to the shared party-accounts view instead of re-deriving it`() {
+        val (where, _) = Segment("has-account", 1, listOf(SegmentRule.HasAccount)).toWhereClause()
+        assertTrue(where.contains("openbank_analytics.silver_party_accounts"), "actual: $where")
+        assertFalse(
+            where.contains("JSONExtractString(payload, 'partyId')"),
+            "re-derives the resolution the shared view owns — actual: $where",
+        )
+        assertFalse(where.contains("silver_current_state"), "resolves from the latest-state view — actual: $where")
     }
 
     /**
@@ -149,25 +198,12 @@ class SegmentEvaluationTest {
      * the most account activity — while a fail-closed evaluator renders that as "did not match",
      * which is indistinguishable from a correct answer. Reading bronze is what avoids it.
      */
-    @Test
-    fun `HasAccount resolves the party link from bronze, never from the latest-state view`() {
-        val (where, _) = Segment("has-account", 1, listOf(SegmentRule.HasAccount)).toWhereClause()
-        assertTrue(where.contains("openbank_analytics.bronze_events"), "actual: $where")
-        assertFalse(where.contains("silver_current_state"), "reads the latest-state view — actual: $where")
-    }
-
     /**
      * An ACCOUNT row whose payload has no `partyId` must not contribute an empty string to the
      * IN-list: `aggregate_id IN ('')` matches nothing, but it also costs nothing to exclude, and
      * leaving it in makes the query's intent unreadable. Every account event other than
      * `AccountCreated` produces exactly such a row.
      */
-    @Test
-    fun `HasAccount excludes account rows that carry no party link`() {
-        val (where, _) = Segment("has-account", 1, listOf(SegmentRule.HasAccount)).toWhereClause()
-        assertTrue(where.contains("JSONExtractString(payload, 'partyId') != ''"), "actual: $where")
-    }
-
     @Test
     fun `segment names are kebab-case`() {
         assertThrows<IllegalArgumentException> {
