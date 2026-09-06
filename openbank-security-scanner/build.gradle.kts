@@ -61,7 +61,7 @@ kover {
         verify {
             rule {
                 bound {
-                    minValue = 15 // measured 20.2% (98/485) at introduction
+                    minValue = 96 // measured 99.11% LINE (2026-09-07 sweep); was 15 // 20.2% at introduction
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
