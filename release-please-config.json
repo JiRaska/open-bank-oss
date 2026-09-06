@@ -167,6 +167,12 @@
         "openbank-consent-service/src/test"
       ]
     },
+    "openbank-kyb-service": {
+      "component": "kyb-service",
+      "exclude-paths": [
+        "openbank-kyb-service/src/test"
+      ]
+    },
     "openbank-delegation-service": {
       "component": "delegation-service",
       "exclude-paths": [

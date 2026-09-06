@@ -23,8 +23,12 @@ import com.openbank.transaction.domain.model.TransactionType
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.restassured.module.kotlin.extensions.Given
+import io.restassured.module.kotlin.extensions.Then
+import io.restassured.module.kotlin.extensions.When
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
@@ -61,7 +65,9 @@ import java.util.UUID
  *
  * ## Both interaction kinds, one class
  *
- * Six pacts, five HTTP and one message, so the target is chosen per interaction in
+ * The committed pacts are a mix of HTTP and asynchronous-message interactions — today one message
+ * pact (fraud-service's `transaction.initiated`) and HTTP for the rest — so the target is chosen
+ * per interaction rather than once for the class, in
  * [configureTarget] exactly as in the broker twin: a [MessageTestTarget] for the fraud-service
  * `transaction.initiated` contract, an [HttpTestTarget] for the rest. The [MessageTestTarget] is
  * package-scoped on purpose — a classpath-wide ClassGraph scan throws on the JDK 25 toolchain.
@@ -118,6 +124,17 @@ class TransactionPactFolderProviderVerificationTest {
         // only that sourceAccountId parses as a UUID.
     }
 
+    @State("a valid borrower account exists")
+    fun stateValidBorrowerAccountExists() {
+        // lending-service's BorrowerCreditPactConsumerTest (#8345): the loan disbursement CREDIT,
+        // which carries targetAccountId and NO sourceAccountId — hence a state of its own rather
+        // than reusing "a valid source account exists", which would be false about this payload.
+        // Intentionally empty, for the same reason as the state above: initiateTransaction does not
+        // require the account to pre-exist in this test's Postgres, only that the id parses as a
+        // UUID. Declared rather than left implicit because pact-jvm passes SILENTLY over an
+        // unhandled state name, which is how #468's missing states stayed invisible.
+    }
+
     @State("transaction-service is reachable and holds no transactions for the pact account")
     fun stateNoTransactionsForPactAccount() {
         // mcp-service's TransactionListPactConsumerTest (#2255, ADR-0195). Intentionally empty — a
@@ -149,5 +166,38 @@ class TransactionPactFolderProviderVerificationTest {
             occurredAt = java.time.Instant.parse("2026-01-01T00:00:00Z"),
         )
         return objectMapper.writeValueAsString(event)
+    }
+}
+
+/**
+ * The negative contract for the route these pacts cover (ADR-0279 #3):
+ * `POST /api/v1/transactions` is `@RolesAllowed(Roles.OPERATOR)` alone, so an authenticated
+ * caller carrying only ROLE_VIEWER must be refused with 403 before the handler runs. A contract
+ * suite that only replays 201s stays green if the provider stops enforcing authz.
+ *
+ * A class of its own, deliberately: the pact class's `@BeforeEach` takes a
+ * [PactVerificationContext] that only the TestTemplate provider can resolve, so a plain `@Test`
+ * inside it dies with ParameterResolutionException before its body runs. The pin lives in this
+ * file (with the folder twin) rather than in the broker twin because that class is
+ * `pactbroker.url`-gated and would skip exactly where the pin is needed.
+ */
+@QuarkusTest
+@QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
+class TransactionPactNegativeAuthzTest {
+
+    @Test
+    @TestSecurity(user = "pact-verifier-viewer", roles = ["ROLE_VIEWER"])
+    fun `an authenticated caller without ROLE_OPERATOR is refused with 403`() {
+        Given { this } When {
+            contentType("application/json")
+            body(
+                """{"idempotencyKey":"pact-negative-403","type":"TRANSFER",""" +
+                    """"sourceAccountId":"${UUID.randomUUID()}","targetAccountId":"${UUID.randomUUID()}",""" +
+                    """"amount":1.00,"currencyCode":"CZK"}""",
+            )
+            post("/api/v1/transactions")
+        } Then {
+            statusCode(403)
+        }
     }
 }

@@ -7,6 +7,7 @@ package com.openbank.ledger.application.port.`in`
 import com.openbank.ledger.domain.model.ControlAccountTieOut
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
+import com.openbank.ledger.domain.model.LedgerScope
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalance
 import com.openbank.libs.api.pagination.CursorPage
@@ -23,7 +24,11 @@ data class PostJournalCommand(
     val description: String?,
     val lines: List<JournalLineRequest>,
     val postedBy: UUID,
-    /** Trusted inbound synthetic taint, copied only into this posting's durable outbox events. */
+    /**
+     * Trusted inbound synthetic taint (ADR-0252). Recorded on the journal entry itself as well as
+     * on this posting's durable outbox events — the entry is what the regulatory aggregates read,
+     * so a taint that reached only the event stream could not exclude anything (#8615).
+     */
     val synthetic: Boolean = false,
     /**
      * Extra outbox rows to enqueue in the SAME transaction as this posting's own `JournalPosted`
@@ -61,7 +66,11 @@ data class ListJournalsQuery(
     val afterCursor: String? = null,
 )
 
-data class GetTrialBalanceQuery(val asOf: LocalDate)
+/**
+ * [scope] defaults to [LedgerScope.REAL_ONLY]: a caller that does not mention synthetic activity
+ * gets the regulator-safe population, and widening it has to be asked for explicitly (ADR-0252).
+ */
+data class GetTrialBalanceQuery(val asOf: LocalDate, val scope: LedgerScope = LedgerScope.REAL_ONLY)
 
 /**
  * Per-customer deposit-control sub-ledger balances as of a date (ADR-0039 Phase B). Optionally
