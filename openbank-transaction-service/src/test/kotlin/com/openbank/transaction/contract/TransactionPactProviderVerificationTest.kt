@@ -132,6 +132,17 @@ class TransactionPactProviderVerificationTest {
         // No setup needed: the message producer below returns a deterministic payload.
     }
 
+    @State("no valid M2M identity is presented")
+    fun stateNoValidM2mIdentity() {
+        // interest-service's withholding-remittance debit, sdd-service's collection debit and
+        // swift-service's settlement debit all assert that a request with a missing or expired
+        // token is refused with 401 (#8697). Intentionally empty: the pact interaction sends no
+        // (or an invalid) Authorization header, and the resource's security answers 401 on its
+        // own — any setup here could only weaken that. Declared rather than left implicit because
+        // pact-jvm passes SILENTLY over an unhandled state name, which is how #468's missing
+        // states stayed invisible; MissingStateChangeMethod is the loud failure we want.
+    }
+
     @PactVerifyProvider("a transaction.initiated event for fraud screening")
     fun produceTransactionInitiated(): String {
         val event = TransactionInitiatedEvent(

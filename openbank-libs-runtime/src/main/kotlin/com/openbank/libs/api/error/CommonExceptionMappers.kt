@@ -174,6 +174,24 @@ class WebApplicationExceptionMapper : ExceptionMapper<WebApplicationException> {
 }
 
 /**
+ * Anonymous caller refused by `@RolesAllowed` (Quarkus security layer), which never reaches the
+ * JAX-RS application — so without this mapper RESTEasy's default writes the plain-text body
+ * "Not Authenticated" under the endpoint's negotiated `application/json` content type: every
+ * client's JSON parser throws on a body that is not JSON, on the most common error an API has
+ * (measured on transaction-service, 2026-09-06, via the auth-negative pact interactions #8697 —
+ * the provider replay could not even COMPARE the response). Answers the standard JSON envelope,
+ * deliberately without the exception message: "why" is between the caller and the auth server.
+ */
+@Provider
+class UnauthorizedExceptionMapper : ExceptionMapper<io.quarkus.security.UnauthorizedException> {
+    override fun toResponse(exception: io.quarkus.security.UnauthorizedException): Response =
+        Response.status(Response.Status.UNAUTHORIZED)
+            .type(jakarta.ws.rs.core.MediaType.APPLICATION_JSON)
+            .entity(apiError(401, ErrorCode.UNAUTHORIZED.code, "Unauthorized"))
+            .build()
+}
+
+/**
  * Last-resort mapper. Logs the full stack trace and returns a sanitised 500 — never leak
  * internal exception messages to the client, since they may contain SQL fragments,
  * stack traces or PII.

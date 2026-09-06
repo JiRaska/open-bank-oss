@@ -135,6 +135,46 @@ tasks.withType<Test> {
     timeout.set(Duration.ofMinutes(25))
 }
 
+// Auth-negative pact interactions ("...with a missing or expired token", #8697) cannot run in
+// the `test` task: TransactionPactFolderProviderVerificationTest authenticates every request via
+// class-level @TestSecurity, so a "missing token" interaction is unrepresentable and replays as
+// 201 against a contract that says 401. They are verified, unauthenticated, by `pactNegativeTest`
+// below. pact-jvm 4.7.3's JUnit5 provider supports ONLY the `pact.filter.description` filter
+// (measured: no other pact.filter.* string exists in the jar), so the split keys on the
+// interaction description; the two regexes are complements, so every committed interaction is
+// verified by exactly one of the tasks and neither can silently absorb the other's share.
+tasks.named<Test>("test") {
+    systemProperty("pact.filter.description", "^(?!.*with a missing or expired token).*$")
+    // …and the negative class itself belongs exclusively to `pactNegativeTest` — here it would
+    // replay the whole non-negative share of the contracts without their @State handlers.
+    exclude("**/TransactionPactNegativeAuthProviderVerificationTest*")
+}
+
+/**
+ * Replays exactly the auth-negative pact interactions, with NO @TestSecurity, so the request is
+ * genuinely anonymous and the 401 comes from the resource's own @RolesAllowed — the behaviour the
+ * consumer contracts pin. `check` depends on it, so CI cannot go green having verified only the
+ * authenticated share of the contracts.
+ */
+val pactNegativeTest = tasks.register<Test>("pactNegativeTest") {
+    description = "Provider-verifies the auth-negative pact interactions (anonymous caller, 401)."
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    systemProperty("pact.filter.description", "^.*with a missing or expired token$")
+    systemProperty("junit.jupiter.execution.timeout.default", "8m")
+    timeout.set(Duration.ofMinutes(15))
+    filter {
+        includeTestsMatching("*TransactionPactNegativeAuthProviderVerificationTest*")
+    }
+    // Testcontainers per fork; keep the run to a single JVM like the main task's CI lane does.
+    maxParallelForks = 1
+}
+
+tasks.named("check") {
+    dependsOn(pactNegativeTest)
+}
+
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3; fleet rollout #1266). Weekly +
 // manual via pitest.yml, advisory — never a per-PR gate. info.solidsoft.pitest 1.19.0 supports Gradle 9.
 pitest {
