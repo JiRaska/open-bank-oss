@@ -74,22 +74,6 @@ spec:
             - name: management
               containerPort: 8085
           env:
-            # TWO migrations carry version 14. `V14__synthetic_outbox_taint.sql` reached main on
-            # 2026-08-24 (#6731) and `V14__notification_deduplication_key.sql` on 2026-09-06
-            # (24e15de97) — the same number, merged twelve days apart. Once the earlier one is
-            # recorded in `flyway_schema_history`, Flyway refuses the later with
-            # "Detected resolved migration not applied to database: 14" and the pod crashloops on
-            # every boot (issue #5628).
-            #
-            # Renumbering is not available: renaming a migration that has already reached main is
-            # treated as editing it by `check-db-migration.py`, and the checksum rule forbids that
-            # once applied anywhere. So this is the remediation the ordering gate itself prescribes,
-            # and the same one campaign-service and security-scanner already carry.
-            #
-            # Keep it explicit until every environment has recorded both V14s, then remove it in a
-            # separately reviewed cleanup — never let out-of-order migrations become implicit.
-            - name: QUARKUS_FLYWAY_OUT_OF_ORDER
-              value: "true"
             # JDBC leg: Hibernate ORM + Flyway (blocking) onto the CNPG primary.
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://notifications-db-rw.notifications.svc:5432/openbank_notifications
