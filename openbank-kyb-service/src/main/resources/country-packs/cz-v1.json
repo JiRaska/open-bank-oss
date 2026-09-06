@@ -1,0 +1,53 @@
+{
+  "country": "CZ",
+  "version": 1,
+  "effectiveFrom": "2026-09-01",
+  "displayName": { "cs": "Česká republika", "en": "Czech Republic" },
+  "schemes": ["CZ_ICO", "LEI", "EU_VAT"],
+  "registry": {
+    "adapter": "ares",
+    "name": "ARES — Administrativní registr ekonomických subjektů (MF ČR)",
+    "publicSource": "https://ares.gov.cz",
+    "free": true,
+    "listsRepresentatives": true,
+    "listsRepresentationRule": true
+  },
+  "uboRegister": {
+    "name": "Evidence skutečných majitelů",
+    "publicApi": false,
+    "fallback": "SELF_DECLARATION",
+    "threshold": 0.25,
+    "legalBasis": "zákon č. 37/2021 Sb.; AMLD5 Art. 30"
+  },
+  "representationRuleParser": "cz",
+  "legalForms": {
+    "100": "SOLE_TRADER", "101": "SOLE_TRADER", "102": "SOLE_TRADER", "105": "SOLE_TRADER",
+    "106": "SOLE_TRADER", "107": "SOLE_TRADER", "108": "SOLE_TRADER",
+    "111": "PARTNERSHIP", "112": "LIMITED_COMPANY", "113": "PARTNERSHIP", "114": "PARTNERSHIP",
+    "115": "OTHER", "121": "JOINT_STOCK", "141": "OTHER", "145": "OTHER", "151": "OTHER", "161": "OTHER",
+    "205": "COOPERATIVE", "301": "PUBLIC_BODY", "325": "PUBLIC_BODY", "331": "PUBLIC_BODY",
+    "421": "BRANCH", "422": "SOLE_TRADER", "424": "BRANCH",
+    "601": "OTHER", "641": "OTHER", "701": "OTHER", "706": "OTHER", "736": "OTHER", "751": "OTHER",
+    "801": "PUBLIC_BODY", "804": "PUBLIC_BODY", "941": "OTHER", "951": "OTHER", "961": "OTHER", "962": "OTHER",
+    "988": "FOUNDATION", "989": "FOUNDATION"
+  },
+  "legalFormLabels": {
+    "101": { "cs": "OSVČ (živnostenské podnikání)", "en": "Sole trader (trade licence)" },
+    "105": { "cs": "OSVČ (jiné zákony)", "en": "Sole trader (other statutes)" },
+    "112": { "cs": "společnost s ručením omezeným", "en": "Limited liability company (s.r.o.)" },
+    "113": { "cs": "veřejná obchodní společnost", "en": "General partnership (v.o.s.)" },
+    "114": { "cs": "komanditní společnost", "en": "Limited partnership (k.s.)" },
+    "121": { "cs": "akciová společnost", "en": "Joint-stock company (a.s.)" },
+    "205": { "cs": "družstvo", "en": "Cooperative" },
+    "421": { "cs": "odštěpný závod zahraniční osoby", "en": "Branch of a foreign entity" }
+  },
+  "requiredEvidence": {
+    "SOLE_TRADER": ["TRADE_LICENCE_EXTRACT"],
+    "LIMITED_COMPANY": ["REGISTER_EXTRACT", "UBO_DECLARATION"],
+    "JOINT_STOCK": ["REGISTER_EXTRACT", "UBO_DECLARATION", "SHAREHOLDER_STRUCTURE"],
+    "PARTNERSHIP": ["REGISTER_EXTRACT", "UBO_DECLARATION"],
+    "COOPERATIVE": ["REGISTER_EXTRACT", "UBO_DECLARATION"],
+    "OTHER": ["REGISTER_EXTRACT", "UBO_DECLARATION", "POWER_OF_ATTORNEY"]
+  },
+  "amlLegalBasis": "zákon č. 253/2008 Sb. §7–§9 (identifikace a kontrola klienta — právnická osoba, skutečný majitel)"
+}

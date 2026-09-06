@@ -78,6 +78,12 @@ channels:
         $ref: '#/components/messages/DelegationRenounced'
       DelegationExpired:
         $ref: '#/components/messages/DelegationExpired'
+      SpendReserved:
+        $ref: '#/components/messages/SpendReserved'
+      SpendConfirmed:
+        $ref: '#/components/messages/SpendConfirmed'
+      SpendReleased:
+        $ref: '#/components/messages/SpendReleased'
   spendReservationState:
     address: openbank.delegation.spend-reservation-state
     title: Delegated domestic-payment reservation state
@@ -115,6 +121,9 @@ operations:
       - $ref: '#/channels/delegationEvents/messages/DelegationReinstated'
       - $ref: '#/channels/delegationEvents/messages/DelegationRenounced'
       - $ref: '#/channels/delegationEvents/messages/DelegationExpired'
+      - $ref: '#/channels/delegationEvents/messages/SpendReserved'
+      - $ref: '#/channels/delegationEvents/messages/SpendConfirmed'
+      - $ref: '#/channels/delegationEvents/messages/SpendReleased'
   publishSpendReservationState:
     action: send
     title: Publish delegated domestic-payment reservation snapshots
@@ -201,6 +210,82 @@ components:
         reservationVersion: { type: integer, enum: [1, 2] }
         createdAt: { type: string, format: date-time }
         settledAt: { type: string, format: date-time, nullable: true }
+
+    # The D4 audit trail (SpendReserved/SpendConfirmed/SpendReleased). Property names mirror the
+    # serialised data classes in `DelegationEvents.kt` — `check-event-contract-code-agreement.py`
+    # compares both directions, so a renamed Kotlin property fails here until this file follows.
+    spendReserved:
+      type: object
+      required:
+        - eventId
+        - aggregateId
+        - aggregateType
+        - eventType
+        - version
+        - occurredAt
+        - reservationId
+        - grantorPartyId
+        - granteePartyId
+        - amount
+        - idempotencyKey
+        - sourceService
+      properties:
+        eventId: { type: string, format: uuid }
+        aggregateId:
+          type: string
+          format: uuid
+          description: The delegation GRANT id — also the partition key.
+        aggregateType: { type: string, const: DelegationGrant }
+        eventType: { type: string, const: SpendReserved }
+        version: { type: integer, const: 1 }
+        occurredAt: { type: string, format: date-time }
+        reservationId: { type: string, format: uuid }
+        grantorPartyId: { type: string, format: uuid }
+        granteePartyId: { type: string, format: uuid }
+        amount:
+          type: object
+          description: EventMoney — `amount` (decimal) and `currency` (ISO-4217).
+        idempotencyKey:
+          type: string
+          description: >-
+            The caller's key for the spend this reservation backs — the only link from the audit
+            trail to the payment that consumed the headroom. Opaque and caller-chosen; never PII.
+        sourceService: { type: string, const: delegation-service }
+
+    spendSettled:
+      type: object
+      description: Shared payload of SpendConfirmed and SpendReleased — the terminal pair.
+      required:
+        - eventId
+        - aggregateId
+        - aggregateType
+        - eventType
+        - version
+        - occurredAt
+        - reservationId
+        - grantorPartyId
+        - granteePartyId
+        - amount
+        - settledAt
+        - sourceService
+      properties:
+        eventId: { type: string, format: uuid }
+        aggregateId:
+          type: string
+          format: uuid
+          description: The delegation GRANT id — also the partition key.
+        aggregateType: { type: string, const: DelegationGrant }
+        eventType: { type: string, enum: [SpendConfirmed, SpendReleased] }
+        version: { type: integer, const: 1 }
+        occurredAt: { type: string, format: date-time }
+        reservationId: { type: string, format: uuid }
+        grantorPartyId: { type: string, format: uuid }
+        granteePartyId: { type: string, format: uuid }
+        amount:
+          type: object
+          description: EventMoney — `amount` (decimal) and `currency` (ISO-4217).
+        settledAt: { type: string, format: date-time }
+        sourceService: { type: string, const: delegation-service }
 
     resourceType:
       type: string
@@ -340,6 +425,37 @@ components:
         - $ref: '#/components/messageTraits/outboxHeaders'
       payload:
         $ref: '#/components/schemas/spendReservationState'
+
+    # ADR-0249 D4 (#5728) — the spend audit trail. Unlike the state stream above these are
+    # emitted for EVERY operation type, carry the raw (caller-chosen) idempotencyKey rather than
+    # its hash, and are partition-keyed on the GRANT so a reserve and a revoke of the same
+    # authority stay ordered. `aggregateId` is the grant; the reservation is a field.
+    SpendReserved:
+      name: SpendReserved
+      title: Headroom was taken under the grant's ceilings — before the money moves
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/spendReserved'
+
+    SpendConfirmed:
+      name: SpendConfirmed
+      title: The money moved — the headroom stays consumed (terminal)
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/spendSettled'
+
+    SpendReleased:
+      name: SpendReleased
+      title: The payment did not happen — the headroom comes back (terminal)
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/spendSettled'
 
     DelegationOffered:
       name: DelegationOffered
