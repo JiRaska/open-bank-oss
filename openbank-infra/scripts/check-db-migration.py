@@ -54,6 +54,45 @@ def git(*args: str) -> str:
     ).stdout
 
 
+def version_of(path: str) -> "int | None":
+    m = re.search(r"/V(\d+)__", path)
+    return int(m.group(1)) if m else None
+
+
+def resolves_a_duplicate_version(base: str, old_path: str, new_path: str) -> bool:
+    """True when a rename exists ONLY to undo a duplicate version inside one service.
+
+    The rule this narrows is right about the ordinary case and wrong about this one. Its premise
+    is "Flyway checksums an APPLIED migration, so renaming it breaks startup" — but a migration
+    whose version collides with another in the same directory can never have been applied:
+    Flyway refuses to resolve the set (`Found more than one migration with version N`) and the
+    service does not boot. There is no checksum to invalidate, so renumbering is the only fix
+    and it is safe. Measured on notification-service 2026-09-06 (two V14s merged 13 days apart).
+
+    Deliberately narrow, so it cannot become a way to edit history in general: the OLD name's
+    version must still be claimed by a DIFFERENT migration in the same directory at `base`, the
+    new version must be free there, and the file's CONTENT must be untouched by the rename.
+    """
+    old_v, new_v = version_of(old_path), version_of(new_path)
+    if old_v is None or new_v is None or old_v == new_v:
+        return False
+    old_dir, new_dir = old_path.rsplit("/", 1)[0], new_path.rsplit("/", 1)[0]
+    if old_dir != new_dir:
+        return False
+    try:
+        siblings = git("ls-tree", "--name-only", f"{base}:{old_dir}").splitlines()
+    except Exception:
+        return False
+    others = [n for n in siblings if n != old_path.rsplit("/", 1)[1]]
+    collides = any(version_of(f"{old_dir}/{n}") == old_v for n in others)
+    free = all(version_of(f"{old_dir}/{n}") != new_v for n in others)
+    if not (collides and free):
+        return False
+    # Content must be identical — a rename that also edits the SQL is an edit, whatever it
+    # renames. `git diff` between the two blobs is empty for a pure rename.
+    return git("diff", f"{base}:{old_path}", f"HEAD:{new_path}").strip() == ""
+
+
 def changed_migrations(base: str) -> tuple[list[str], list[str]]:
     """Return (added, modified) migration paths in the diff against `base`."""
     added, modified = [], []
@@ -68,6 +107,15 @@ def changed_migrations(base: str) -> tuple[list[str], list[str]]:
             continue
         # A rename (R) of a migration is an edit of its identity — Flyway keys on the version
         # in the filename, so renaming V3 to V4 is not "adding V4", it is rewriting history.
+        # The one exception is a rename that UNDOES a duplicate version; see
+        # resolves_a_duplicate_version for why the checksum premise does not hold there.
+        if status.startswith("R") and len(parts) >= 3 and resolves_a_duplicate_version(
+            base, parts[1], parts[-1],
+        ):
+            print(f"check-db-migration: {path} renumbers a DUPLICATE version — permitted, "
+                  f"because a colliding migration cannot have been applied and so has no "
+                  f"checksum to invalidate.")
+            continue
         if status.startswith("A"):
             added.append(path)
         else:

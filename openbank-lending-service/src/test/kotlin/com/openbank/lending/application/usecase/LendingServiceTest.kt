@@ -1970,6 +1970,23 @@ class LendingServiceTest {
     private fun sourceServiceOf(message: LendingOutboxMessage): String =
         com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload).get("sourceService").asText()
 
+    private fun fieldOf(message: LendingOutboxMessage, field: String): String? =
+        com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload).get(field)?.asText()
+
+    /**
+     * The wire identity of one event (#8893): the sink keys `bronze_events` on
+     * `(aggregate_type, aggregate_id)` and falls back to `partyId` when the payload settles neither,
+     * so asserting the pair is asserting that one borrower's loans stay distinct downstream.
+     */
+    private fun assertLoanIdentity(message: LendingOutboxMessage, loanId: java.util.UUID) {
+        assertThat(fieldOf(message, "aggregateType")).isEqualTo("LOAN")
+        assertThat(fieldOf(message, "aggregateId")).isEqualTo(loanId.toString())
+        val party = fieldOf(message, "partyId")
+        if (party != null) {
+            assertThat(fieldOf(message, "aggregateId")).isNotEqualTo(party)
+        }
+    }
+
     @Test
     fun `loan disbursed carries sourceService on the wire`() {
         val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
@@ -1982,11 +1999,14 @@ class LendingServiceTest {
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
         stubBorrowerCreditSucceeds()
 
-        service.disburse(app.id, "dave").await().indefinitely()
+        val loan = service.disburse(app.id, "dave").await().indefinitely()
 
         val disbursed = emitted.single { it.eventType == "loan.disbursed" }
         assertThat(sourceServiceOf(disbursed)).isEqualTo("lending")
         assertThat(disbursed.payload).contains("\"sourceService\":\"lending\"")
+        // The id comes from the returned aggregate, never from the payload under test.
+        assertLoanIdentity(disbursed, loan.id.value)
+        assertThat(fieldOf(disbursed, "partyId")).isEqualTo(app.partyId.toString())
     }
 
     @Test
@@ -2012,6 +2032,7 @@ class LendingServiceTest {
 
         service.accrueDueInterest(LocalDate.parse("2026-08-01"), 500).await().indefinitely()
 
+        assertLoanIdentity(emitted.single { it.eventType == "loan.interest_accrued" }, loanId.value)
         assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.interest_accrued" }))
             .isEqualTo("lending")
     }
@@ -2042,8 +2063,9 @@ class LendingServiceTest {
         service.writeOff(loanId, WriteOffRequest(writtenOffBy = "carol", reason = "insolvency"))
             .await().indefinitely()
 
-        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.written_off" }))
-            .isEqualTo("lending")
+        val writtenOff = emitted.single { it.eventType == "loan.written_off" }
+        assertThat(sourceServiceOf(writtenOff)).isEqualTo("lending")
+        assertLoanIdentity(writtenOff, loanId.value)
     }
 
     @Test
@@ -2058,8 +2080,9 @@ class LendingServiceTest {
 
         service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
 
-        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.rescheduled" }))
-            .isEqualTo("lending")
+        val rescheduled = emitted.single { it.eventType == "loan.rescheduled" }
+        assertThat(sourceServiceOf(rescheduled)).isEqualTo("lending")
+        assertLoanIdentity(rescheduled, loanId.value)
     }
 
     @Test
@@ -2103,9 +2126,14 @@ class LendingServiceTest {
 
         service.runProvisioningCycle("2026-07", asOf, 500).await().indefinitely()
 
-        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.stage_changed" }))
-            .isEqualTo("lending")
-        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.provisioned" }))
-            .isEqualTo("lending")
+        val stage = emitted.single { it.eventType == "loan.stage_changed" }
+        val provisioned = emitted.single { it.eventType == "loan.provisioned" }
+        assertThat(sourceServiceOf(stage)).isEqualTo("lending")
+        assertThat(sourceServiceOf(provisioned)).isEqualTo("lending")
+        assertLoanIdentity(stage, loanId.value)
+        assertLoanIdentity(provisioned, loanId.value)
+        // `loan.provisioned` carried no party at all before #8893, so an ECL history in the
+        // warehouse could not be attributed to a borrower.
+        assertThat(fieldOf(provisioned, "partyId")).isEqualTo(loan.partyId.toString())
     }
 }
