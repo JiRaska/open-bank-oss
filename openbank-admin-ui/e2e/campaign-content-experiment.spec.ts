@@ -84,6 +84,9 @@ test('authors a measured A/B content experiment and renders its conservative res
   await page.goto('/campaigns/new')
   await page.locator('#c-name').fill('Headline comparison')
   await page.locator('#c-goal').fill('Open more accounts')
+  // Mandatory in the studio since ADR-0269 (#8773): the maker states whether the campaign
+  // sells credit, so the journey through the form has to state it too.
+  await page.locator('#c-product-kind').selectOption('NONE')
   await page.locator('[data-segment="actives@1"]').click()
   // The studio is app-first by default. This scenario deliberately authors the richer e-mail
   // template because both experiment arms exercise its complete variable contract.
