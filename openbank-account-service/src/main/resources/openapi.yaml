@@ -475,7 +475,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED, EXPIRED]
       responses:
         '200':
           description: Proposals
