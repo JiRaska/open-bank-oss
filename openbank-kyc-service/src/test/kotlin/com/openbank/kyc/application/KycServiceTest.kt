@@ -73,7 +73,7 @@ class KycServiceTest {
 
         service.openCase(partyId)
 
-        verify(exactly = 1) { metrics.kycSubmitted("unknown") }
+        verify(exactly = 1) { metrics.kycSubmitted("individual") }
     }
 
     @Test
@@ -87,7 +87,7 @@ class KycServiceTest {
 
         service.approve(caseId, "operator-1")
 
-        verify(exactly = 1) { metrics.kycVerdict("unknown", "approved") }
+        verify(exactly = 1) { metrics.kycVerdict("individual", "approved") }
     }
 
     @Test
@@ -101,7 +101,7 @@ class KycServiceTest {
 
         service.reject(caseId, "operator-1", "documents invalid")
 
-        verify(exactly = 1) { metrics.kycVerdict("unknown", "rejected") }
+        verify(exactly = 1) { metrics.kycVerdict("individual", "rejected") }
     }
 
     @Test
@@ -301,7 +301,7 @@ class KycServiceTest {
             )
         }
         coVerify(exactly = 1) { repo.update(any<KycCase>(), match<KycEvent> { it.eventType == "KYC_CASE_APPROVED" }) }
-        verify(exactly = 1) { metrics.kycVerdict("unknown", "approved") }
+        verify(exactly = 1) { metrics.kycVerdict("individual", "approved") }
     }
 
     @Test
@@ -351,7 +351,7 @@ class KycServiceTest {
             )
         }
         coVerify(exactly = 1) { repo.update(any<KycCase>(), match<KycEvent> { it.eventType == "KYC_CASE_REJECTED" }) }
-        verify(exactly = 1) { metrics.kycVerdict("unknown", "rejected") }
+        verify(exactly = 1) { metrics.kycVerdict("individual", "rejected") }
     }
 
     @Test
@@ -636,4 +636,42 @@ class KycServiceTest {
         performedAt = null,
         createdAt = Instant.now(clock),
     )
+
+    @Test
+    fun `a BUSINESS subject gets the KYB check set and counts as a business submission`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { repo.findActiveByPartyId(partyId) } returns null
+        val saved = io.mockk.slot<KycCase>()
+        coEvery { repo.save(capture(saved), any()) } answers { firstArg() }
+
+        val (case, created) = service.openCaseForParty(partyId, com.openbank.kyc.domain.model.SubjectType.BUSINESS)
+
+        assertThat(created).isTrue()
+        assertThat(case.subjectType).isEqualTo(com.openbank.kyc.domain.model.SubjectType.BUSINESS)
+        assertThat(case.checks.map { it.checkType }).containsExactly(
+            CheckType.REGISTRY_MATCH,
+            CheckType.REPRESENTATIVE_AUTHORITY,
+            CheckType.UBO_IDENTIFICATION,
+            CheckType.SANCTIONS_SCREENING,
+            CheckType.ADVERSE_MEDIA,
+        )
+        assertThat(case.checks.map { it.checkType }).doesNotContain(CheckType.IDENTITY, CheckType.ADDRESS)
+        io.mockk.verify { metrics.kycSubmitted("business") }
+    }
+
+    @Test
+    fun `party type on PARTY_CREATED decides the subject type`() {
+        assertThat(
+            com.openbank.kyc.domain.model.SubjectType.fromPartyType("COMPANY"),
+        ).isEqualTo(com.openbank.kyc.domain.model.SubjectType.BUSINESS)
+        assertThat(
+            com.openbank.kyc.domain.model.SubjectType.fromPartyType("SOLE_TRADER"),
+        ).isEqualTo(com.openbank.kyc.domain.model.SubjectType.BUSINESS)
+        assertThat(
+            com.openbank.kyc.domain.model.SubjectType.fromPartyType("INDIVIDUAL"),
+        ).isEqualTo(com.openbank.kyc.domain.model.SubjectType.INDIVIDUAL)
+        assertThat(
+            com.openbank.kyc.domain.model.SubjectType.fromPartyType(null),
+        ).isEqualTo(com.openbank.kyc.domain.model.SubjectType.INDIVIDUAL)
+    }
 }

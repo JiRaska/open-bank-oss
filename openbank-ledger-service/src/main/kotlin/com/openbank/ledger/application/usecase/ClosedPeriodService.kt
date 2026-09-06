@@ -166,6 +166,10 @@ class ClosedPeriodService(
         return closedPeriodRepository.findRange(query.from, query.to)
     }
 
+    // Real-only by the port's default (ADR-0252 / LedgerScope): this aggregate is frozen into
+    // LINES_V1 evidence and read by finrep-service for FINREP/COREP, so a canary posting inside it
+    // would be a misstatement in a regulatory return. The period endpoints deliberately expose no
+    // scope selector — a regulatory reader must not be able to ask for the synthetic population.
     private suspend fun computeTrialBalance(period: AccountingPeriod) =
         PeriodTrialBalance(period, journalRepository.trialBalanceForPeriod(period.from, period.to))
 

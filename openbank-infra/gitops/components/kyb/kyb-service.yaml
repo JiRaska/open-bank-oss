@@ -1,0 +1,311 @@
+# kyb-service: legal-entity verification and multi-signer business onboarding (ADR-0284).
+# Reactive Postgres datasource + Flyway JDBC migrations against the single-owner CNPG cluster.
+# Produces the case lifecycle onto openbank.kyb.events through the transactional outbox; consumes
+# openbank.party.events to complete a case when its entity party passes the KYC+AML gate. Calls
+# party-service (entity party, mandates) and the public registers ARES / GLEIF over egress.
+# Durable case timers run on Temporal (ADR-0211 shape). OIDC bearer validation points at
+# Keycloak. Reachable only in-cluster via ClusterIP, no ingress — the customer path is
+# customer-edge.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kyb-service
+  namespace: kyb
+  labels:
+    app.kubernetes.io/name: kyb-service
+    app.kubernetes.io/part-of: kyb
+spec:
+  replicas: 1
+  # Terminate-first, deliberately. With the default RollingUpdate (maxSurge 25% -> 1,
+  # maxUnavailable 25% -> 0) a ONE-replica Deployment must schedule the new pod BEFORE it may
+  # stop the old one, so the rollout needs room for two pods — and the old pod is holding exactly
+  # the resources the new one needs. On a cluster with no spare room that is a deadlock the
+  # rollout never escapes: observed 2026-08-03, the SCA-ceremony fix sat Pending for hours behind
+  # its own predecessor while `default` was at its Karpenter CPU limit (48/48) and no node had
+  # 448Mi free.
+  #
+  # The trade is a few seconds of unavailability per deploy. This service has one replica and no
+  # HA, so it is already unavailable for that moment whenever the pod is replaced; what changes is
+  # that the replacement can actually happen. A multi-replica money-path service should NOT copy
+  # this — there, surge is what buys zero-downtime and the capacity to do it is worth having.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kyb-service
+  template:
+    metadata:
+      annotations:
+        # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-kyb-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "aa00ec47963519e1"
+      labels:
+        app.kubernetes.io/name: kyb-service
+        app.kubernetes.io/part-of: kyb
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kyb-service
+          # First build lands via auto-deploy on the merge that adds openbank-kyb-service to
+          # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-26f33679
+          imagePullPolicy: IfNotPresent
+          ports:
+            # HTTP 8157 and management 8090 — both read off the service's own
+            # application.yaml (quarkus.http.port / quarkus.management.port). The
+            # management port is NOT the fleet-common 8085 here; probes below target
+            # 8090 deliberately.
+            - name: http
+              containerPort: 8157
+            - name: management
+              containerPort: 8090
+          env:
+            # Reactive + JDBC (Flyway) legs onto the same CNPG primary. The service's
+            # application.yaml hardcodes localhost for both; these env vars override it,
+            # since an env source outranks application.yaml in SmallRye's ordinal.
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://kyb-db-rw.kyb.svc:5432/openbank_kyb
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://kyb-db-rw.kyb.svc:5432/openbank_kyb
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kyb-db-app
+                  key: password
+            # Kafka: the outbox dispatcher produces the grant lifecycle → Strimzi
+            # bootstrap over mTLS (ADR-0137). The connector reads only
+            # KAFKA_BOOTSTRAP_SERVERS, never a quarkus.* key.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kyb-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
+            # The outbox dispatcher defaults to DISABLED fleet-wide. Without this the
+            # grant lifecycle never leaves the outbox table — no error, attempt_count
+            # stays 0 — and every enforcement projection stays permanently empty, so
+            # delegated access silently never works.
+            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
+              value: "true"
+            # Entity party + representation mandates (ADR-0284 D3).
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8111
+            # Public registers, egress via the NAT gateway. Free, no key (ADR-0284 D1).
+            - name: ARES_BASE_URL
+              value: https://ares.gov.cz/ekonomicke-subjekty-v-be/rest
+            - name: GLEIF_BASE_URL
+              value: https://api.gleif.org/api/v1
+            # Kafka consumer-group override (dotted YAML keys are inert in the deployed pod).
+            - name: SMALLRYE_CONFIG_LOCATIONS
+              value: /mnt/msg-override/override.properties
+            # ADR-0284 durable case timers on Temporal (the ADR-0211 D2 shape). The
+            # temporal-platform-ingress NetworkPolicy must list the kyb namespace, otherwise the
+            # worker's onStart gRPC to temporal-frontend:7233 is DROPPED and the service never
+            # boots. Build-time caveat as lending (#6085): the %prod default in application.yaml
+            # is what selects the adapter; this var only keeps the env consistent with the image.
+            - name: OPENBANK_TEMPORAL_ENABLED
+              value: "true"
+            - name: OPENBANK_TEMPORAL_SERVER_URL
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            - name: TEMPORAL_FRONTEND_URL
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            - name: OPENBANK_TEMPORAL_NAMESPACE
+              value: openbank-kyb
+            # Keycloak runs in `iam`, not `platform`. A wrong host does not fail the boot
+            # (OIDC defers discovery to the first request) — it just makes every
+            # authenticated call fail later with `Name does not resolve`.
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kyb-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            # Idempotency store (libs' Redis-backed IdempotencyStore). A hard boot
+            # dependency: without it the ReactiveRedisDataSource bean is inactive and the
+            # app dies with InactiveBeanException.
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.delegation.svc:6379
+            # OPA sidecar enforced from the first rollout: kyb_rest_ext.rego grants the customer
+            # actions to the edge principal only and the review actions to real staff, and the
+            # shared service identity reaches no kyb.* write by any rule.
+            - name: AUTHZ_ENFORCE
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: 8090
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
+            - name: msg-override
+              mountPath: /mnt/msg-override
+              readOnly: true
+        # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
+        # localhost:8181 (AuthorizeInterceptor default). Bundle mounted read-only from
+        # the kyb-opa-bundle ConfigMap generated by gen-kyb-opa-bundle.sh.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            # `--bundle` is REQUIRED, not decorative: without it OPA loads /bundle as a
+            # plain data directory and merges every YAML into the root data document, so
+            # rules-data.yaml and agents-data.yaml collide and the sidecar dies with
+            # `/bundle/rules-data.yaml: merge error`. In bundle mode the roots declared in
+            # .manifest keep them apart. Mount paths below must match those roots.
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/kyb_rest_ext.rego
+              subPath: kyb_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            # Data files land under the bundle roots declared in .manifest
+            # (`agents`, `rules`) — NOT flat in /bundle, which is what produced the
+            # merge error above.
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: kafka-keystore
+          secret:
+            secretName: kyb-service-kafka-keystore
+            optional: false
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
+            optional: false
+        - name: msg-override
+          configMap:
+            name: kyb-service-msg-override
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: kyb-opa-bundle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kyb-service
+  namespace: kyb
+  labels:
+    app.kubernetes.io/name: kyb-service
+    app.kubernetes.io/part-of: kyb
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kyb-service
+  ports:
+    - name: http
+      port: 8157
+      targetPort: http
+    - name: management
+      port: 8090
+      targetPort: management

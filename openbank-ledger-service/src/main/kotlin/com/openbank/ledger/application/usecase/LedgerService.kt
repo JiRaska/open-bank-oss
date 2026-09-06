@@ -151,6 +151,10 @@ class LedgerService(
             createdAt = clock.instant(),
             createdBy = command.postedBy,
             version = 0L,
+            // ADR-0252: the taint lands on the book of record, not only on the outbox rows below.
+            // The posting itself is unchanged in every other way — same validation, same accounts,
+            // same controls upstream — which is the only reason a canary posting proves anything.
+            synthetic = command.synthetic,
         ).post()
 
         // Cross-check that we actually validated every account that the entry references.
@@ -293,8 +297,11 @@ class LedgerService(
         )
     }
 
-    override suspend fun getTrialBalance(query: GetTrialBalanceQuery): TrialBalance =
-        TrialBalance(asOf = query.asOf, lines = journalRepository.trialBalance(query.asOf))
+    override suspend fun getTrialBalance(query: GetTrialBalanceQuery): TrialBalance = TrialBalance(
+        asOf = query.asOf,
+        lines = journalRepository.trialBalance(query.asOf, query.scope),
+        scope = query.scope,
+    )
 
     override suspend fun getSubLedgerBalances(query: GetSubLedgerBalancesQuery): List<SubLedgerBalance> =
         journalRepository.subLedgerBalances(query.asOf, query.subAccountId)

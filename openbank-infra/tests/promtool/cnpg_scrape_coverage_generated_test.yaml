@@ -71,6 +71,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
@@ -228,6 +230,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
@@ -362,6 +366,8 @@ tests:
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
         values: "1+0x40"

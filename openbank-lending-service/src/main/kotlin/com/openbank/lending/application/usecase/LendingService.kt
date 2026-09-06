@@ -142,7 +142,7 @@ class LendingService @Inject constructor(
             is OriginationTransitionResult.Rejected ->
                 Uni.createFrom().failure(IllegalStateException(result.reason))
             is OriginationTransitionResult.Applied ->
-                claimTransition(existing.status, outcome.recorded.copy(status = result.newState))
+                claimDecision(existing.status, outcome.recorded.copy(status = result.newState))
                     .signalWorkflow()
                     .call { _ -> events.emit(outcome.evidence) }
         }
@@ -167,13 +167,11 @@ class LendingService @Inject constructor(
      * resource already maps (422 on advance, 409 on decide). Nothing downstream of a refusal runs:
      * no evidence event, no workflow signal (issue #3850).
      *
-     * On success the claimed application is returned from memory. `update` returned the re-read
-     * entity, which differs in one respect worth naming: `update` writes only status and the three
-     * decision fields, so the ASSESSMENT leg's engine outputs (`decisionOutcome`, price band, reason
-     * codes, input hash) were never persisted and the re-read blanked them out of the response. That
-     * persistence gap is pre-existing and is NOT fixed here — it needs its own change and its own
-     * test. What changes is only that the response now carries the values the engine computed
-     * instead of nulls.
+     * On success the claimed application is returned from memory.
+     *
+     * This overload writes status and the three HUMAN decision fields only. The ASSESSMENT leg's
+     * engine outputs go through [claimDecision], which writes them in the same statement — see the
+     * note there for why they were previously computed and thrown away.
      */
     private fun claimTransition(from: OriginationState, updated: LoanApplication): Uni<LoanApplication> =
         applications.compareAndSetStatus(
@@ -184,6 +182,34 @@ class LendingService @Inject constructor(
             updated.decisionReason,
             updated.decidedAt,
         ).flatMap { claimed ->
+            if (claimed == 0) {
+                Uni.createFrom().failure(
+                    IllegalStateException(
+                        "Concurrent modification: application ${updated.id} is no longer in $from",
+                    ),
+                )
+            } else {
+                Uni.createFrom().item(updated)
+            }
+        }
+
+    /**
+     * The ASSESSMENT claim: the transition AND the ADR-0213 evidence, in one conditional statement.
+     *
+     * Until this existed the engine's outputs were computed, returned in the response and emitted as
+     * a `credit.decision.evaluated` event — and never stored, because the claim wrote only status and
+     * the three human decision fields. So `decision_outcome` was NULL on every row the engine had
+     * decided, and anything reading the application back (the credit-risk console, a per-loan
+     * reconstruction) saw an application with no decision on it. The columns had been there since
+     * `V11__decision_engine_inputs.sql`. Measured by `CreditRiskConsoleIT`, which drives a real
+     * application through ASSESSMENT and then reads it back over HTTP: before this change the read
+     * returned an empty list.
+     *
+     * Writing them in the SAME statement as the transition is deliberate — two statements could leave
+     * a row in DECISION_PENDING with no decision behind it.
+     */
+    private fun claimDecision(from: OriginationState, updated: LoanApplication): Uni<LoanApplication> =
+        applications.compareAndSetDecision(updated, from).flatMap { claimed ->
             if (claimed == 0) {
                 Uni.createFrom().failure(
                     IllegalStateException(
@@ -257,6 +283,7 @@ class LendingService @Inject constructor(
             append(""""aggregateType":"LOAN_APPLICATION",""")
             append(""""aggregateId":"$id",""")
             append(""""loanApplicationId":"$id",""")
+            append(""""partyId":"${application.partyId}",""")
             append(""""fromState":"$from",""")
             append(""""toState":"${to.name}",""")
             append(""""actorId":"$actor",""")
@@ -666,7 +693,8 @@ class LendingService @Inject constructor(
                                 // event types in this file/OriginationDecisionService/TerminationService — not
                                 // "lending-service" as the topic-fallback table would say (a pre-existing,
                                 // self-consistent naming choice this PR preserves rather than introduces).
-                                payload = """{"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
+                                payload = """{"aggregateType":"LOAN","aggregateId":"${saved.id.value}",""" +
+                                    """"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
                                     """"principal":"${saved.principal}",""" +
                                     """"occurredAt":"${saved.disbursedAt.toInstant()}",""" +
                                     """"sourceService":"lending"}""",
@@ -796,7 +824,8 @@ class LendingService @Inject constructor(
                         // #3914: occurredAt is `accruedAt`, the very instant stamped on the installment by
                         // markAccrued above — the recognition event itself, not the emit.
                         // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                        payload = """{"loanId":"${installment.loanId.value}","installment":${installment.number},""" +
+                        payload = """{"aggregateType":"LOAN","aggregateId":"${installment.loanId.value}",""" +
+                            """"loanId":"${installment.loanId.value}","installment":${installment.number},""" +
                             """"interest":"${installment.interest}","dueDate":"${installment.dueDate}",""" +
                             """"occurredAt":"${accruedAt.toInstant()}",""" +
                             """"sourceService":"lending"}""",
@@ -845,7 +874,8 @@ class LendingService @Inject constructor(
                                 // once into a local so payload and any future reuse cannot disagree.
                                 val writtenOffAt = clock.instant()
                                 // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                                val wPayload = """{"loanId":"${written.id.value}",""" +
+                                val wPayload = """{"aggregateType":"LOAN","aggregateId":"${written.id.value}",""" +
+                                    """"loanId":"${written.id.value}",""" +
                                     """"partyId":"${written.partyId}",""" +
                                     """"writtenOff":"$outstanding",""" +
                                     """"writtenOffBy":"${request.writtenOffBy}",""" +
@@ -1100,7 +1130,8 @@ class LendingService @Inject constructor(
                         // #3914: no rescheduledAt column on Loan; clock at the completed reschedule, same
                         // house convention as write-off above.
                         // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                        payload = """{"loanId":"${updated.id.value}","partyId":"${updated.partyId}",""" +
+                        payload = """{"aggregateType":"LOAN","aggregateId":"${updated.id.value}",""" +
+                            """"loanId":"${updated.id.value}","partyId":"${updated.partyId}",""" +
                             """"newPrincipal":"$newPrincipal",""" +
                             """"newNominalAnnualRate":"${request.newNominalAnnualRate}",""" +
                             """"newTermPeriods":${request.newTermPeriods},""" +
@@ -1355,7 +1386,8 @@ class LendingService @Inject constructor(
         snapshot: ProvisioningSnapshot,
         period: String,
         record: LoanProvisioningRecord,
-    ): String = """{"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
+    ): String = """{"aggregateType":"LOAN","aggregateId":"${loan.id.value}",""" +
+        """"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
         """"previousStage":"${prior.stage}","newStage":"${snapshot.stage}",""" +
         """"daysPastDue":${snapshot.daysPastDue},"period":"$period","asOf":"${snapshot.asOf}",""" +
         """"occurredAt":"${record.createdAt.toInstant()}","sourceService":"lending"}"""
@@ -1367,7 +1399,8 @@ class LendingService @Inject constructor(
         snapshot: ProvisioningSnapshot,
         delta: Money,
         record: LoanProvisioningRecord,
-    ): String = """{"loanId":"${loan.id.value}","period":"$period",""" +
+    ): String = """{"aggregateType":"LOAN","aggregateId":"${loan.id.value}",""" +
+        """"loanId":"${loan.id.value}","partyId":"${loan.partyId}","period":"$period",""" +
         """"stage":"${snapshot.stage}",""" +
         """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
         """"delta":"$delta","occurredAt":"${record.createdAt.toInstant()}",""" +

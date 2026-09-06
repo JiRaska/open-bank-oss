@@ -19,6 +19,7 @@ import com.openbank.ledger.application.port.`in`.ReverseJournalCommand
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
+import com.openbank.ledger.domain.model.LedgerScope
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalance
 import com.openbank.libs.api.pagination.CursorPage
@@ -84,10 +85,20 @@ class LedgerResource(
     @Path("/trial-balance")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "")
-    @Operation(summary = "Trial balance — debit/credit totals per GL account (must net to zero)")
-    suspend fun trialBalance(@QueryParam("asOf") asOf: String?): Response {
+    @Operation(
+        summary = "Trial balance — debit/credit totals per GL account (must net to zero)",
+        description = "scope selects the population (ADR-0252): REAL_ONLY (default), " +
+            "SYNTHETIC_ONLY or ALL. Omitting it excludes bank-owned canary activity, which is the " +
+            "answer a regulatory reader needs; the response echoes the scope it counted.",
+    )
+    suspend fun trialBalance(
+        @QueryParam("asOf") asOf: String?,
+        // Nullable, not @DefaultValue: absent means REAL_ONLY, which LedgerScope.parse owns
+        // alongside the rejection of an unrecognised value (a typo must not silently answer real).
+        @QueryParam("scope") scope: String?,
+    ): Response {
         val date = asOf?.let { LocalDate.parse(it) } ?: LocalDate.now(clock)
-        val trialBalance = ledgerUseCase.getTrialBalance(GetTrialBalanceQuery(date))
+        val trialBalance = ledgerUseCase.getTrialBalance(GetTrialBalanceQuery(date, LedgerScope.parse(scope)))
         return Response.ok(trialBalance.toResponse()).build()
     }
 
@@ -269,6 +280,8 @@ data class JournalEntryResponse(
     val status: String,
     val lines: List<JournalLineResponse>,
     val createdAt: String,
+    /** ADR-0252: posted by a bank-owned canary, so excluded from the regulatory aggregates. */
+    val synthetic: Boolean,
 )
 
 private fun JournalLine.toResponse() = JournalLineResponse(
@@ -293,6 +306,7 @@ private fun JournalEntry.toResponse() = JournalEntryResponse(
     status = status.name,
     lines = lines.map { it.toResponse() },
     createdAt = createdAt.toString(),
+    synthetic = synthetic,
 )
 
 private fun CursorPage<JournalEntry>.toResponse() =
@@ -311,6 +325,8 @@ data class TrialBalanceLineResponse(
 
 data class TrialBalanceResponse(
     val asOf: String,
+    /** Which population these totals were computed over (ADR-0252); REAL_ONLY unless asked. */
+    val scope: String,
     val totalDebit: BigDecimal,
     val totalCredit: BigDecimal,
     val balanced: Boolean,
@@ -337,6 +353,7 @@ private fun SubLedgerBalance.toResponse() = SubLedgerBalanceResponse(
 
 private fun TrialBalance.toResponse() = TrialBalanceResponse(
     asOf = asOf.toString(),
+    scope = scope.name,
     totalDebit = totalDebit,
     totalCredit = totalCredit,
     balanced = isBalanced,

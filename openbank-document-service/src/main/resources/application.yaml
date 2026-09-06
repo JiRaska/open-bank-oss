@@ -228,7 +228,10 @@ mp:
         topic: openbank.accounts.account.created
         group.id: openbank-document-service
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
+        # auto.offset.reset deliberately unset (#8370): the inert dotted YAML key was a config lie --
+        # SmallRye quotes dotted leaf keys, so the connector always ran its default (latest) and the
+        # declared `earliest` never applied. Deleting it makes the file match the running reality; to
+        # rebuild projections, flip it via the msg-override ConfigMap in an announced replay window.
       # ADR-0248: the annual statement of fees is the one template family that still needs an
       # async push trigger (PAD Art. 5 duty — the bank must send it, not wait for the customer).
       # billing-service's own billing-outbox drains ALL its events (fee.post-intent, reversal-intent,
@@ -251,7 +254,10 @@ mp:
         topic: openbank.billing.fee.event
         group.id: openbank-document-service
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
+        # auto.offset.reset deliberately unset (#8370): the inert dotted YAML key was a config lie --
+        # SmallRye quotes dotted leaf keys, so the connector always ran its default (latest) and the
+        # declared `earliest` never applied. Deleting it makes the file match the running reality; to
+        # rebuild projections, flip it via the msg-override ConfigMap in an announced replay window.
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:
