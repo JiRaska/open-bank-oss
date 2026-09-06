@@ -75,6 +75,12 @@ KNOWN_VIOLATIONS: dict[str, str] = {
         "V15 (Stories) deployed before the additive graph migrations V13/V14; "
         "QUARKUS_FLYWAY_OUT_OF_ORDER=true set in components/campaign/campaign-service.yaml, "
         "with its own note to remove once all environments have recorded V13/V14.",
+    "openbank-notification-service/src/main/resources/db/migration/V14__notification_deduplication_key.sql":
+        "Two migrations carry version 14: V14__synthetic_outbox_taint.sql reached main 2026-08-24 "
+        "(#6731) and this one 2026-09-06 (24e15de97). Renumbering is blocked — renaming a migration "
+        "already on main is treated as editing it — so QUARKUS_FLYWAY_OUT_OF_ORDER=true is set in "
+        "components/notifications/notification-service.yaml, with its own note to remove once every "
+        "environment has recorded both V14s.",
 }
 
 
