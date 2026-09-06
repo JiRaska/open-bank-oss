@@ -41,6 +41,7 @@ import {
   Map,
   Megaphone,
   MessageSquareWarning,
+  MessagesSquare,
   Network,
   Package,
   PiggyBank,
@@ -141,6 +142,10 @@ const complianceNav: NavItem[] = [
 const opsNav: NavItem[] = [
   { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'pid:view' },
   { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view' },
+  // ADR-0285 D7 — how the bank speaks, for bots and staff alike. Filed under Ops beside
+  // Notifications (what we send) rather than under the agent cockpit: the audience is the
+  // contact centre and back-office, not agent operators.
+  { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
