@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: vop-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "f845649c3e15f9c4"
+    openbank.tech/policy-checksum: "7412f1a612315baf"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1519,6 +1519,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

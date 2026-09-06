@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: statement-service
     app.kubernetes.io/part-of: statements
   annotations:
-    openbank.tech/policy-checksum: "bf684a6da725c3e7"
+    openbank.tech/policy-checksum: "b6377e06583b3e1c"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1551,6 +1551,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
