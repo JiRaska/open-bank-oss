@@ -257,6 +257,7 @@ class LendingService @Inject constructor(
             append(""""aggregateType":"LOAN_APPLICATION",""")
             append(""""aggregateId":"$id",""")
             append(""""loanApplicationId":"$id",""")
+            append(""""partyId":"${application.partyId}",""")
             append(""""fromState":"$from",""")
             append(""""toState":"${to.name}",""")
             append(""""actorId":"$actor",""")
@@ -666,7 +667,8 @@ class LendingService @Inject constructor(
                                 // event types in this file/OriginationDecisionService/TerminationService — not
                                 // "lending-service" as the topic-fallback table would say (a pre-existing,
                                 // self-consistent naming choice this PR preserves rather than introduces).
-                                payload = """{"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
+                                payload = """{"aggregateType":"LOAN","aggregateId":"${saved.id.value}",""" +
+                                    """"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
                                     """"principal":"${saved.principal}",""" +
                                     """"occurredAt":"${saved.disbursedAt.toInstant()}",""" +
                                     """"sourceService":"lending"}""",
@@ -796,7 +798,8 @@ class LendingService @Inject constructor(
                         // #3914: occurredAt is `accruedAt`, the very instant stamped on the installment by
                         // markAccrued above — the recognition event itself, not the emit.
                         // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                        payload = """{"loanId":"${installment.loanId.value}","installment":${installment.number},""" +
+                        payload = """{"aggregateType":"LOAN","aggregateId":"${installment.loanId.value}",""" +
+                            """"loanId":"${installment.loanId.value}","installment":${installment.number},""" +
                             """"interest":"${installment.interest}","dueDate":"${installment.dueDate}",""" +
                             """"occurredAt":"${accruedAt.toInstant()}",""" +
                             """"sourceService":"lending"}""",
@@ -845,7 +848,8 @@ class LendingService @Inject constructor(
                                 // once into a local so payload and any future reuse cannot disagree.
                                 val writtenOffAt = clock.instant()
                                 // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                                val wPayload = """{"loanId":"${written.id.value}",""" +
+                                val wPayload = """{"aggregateType":"LOAN","aggregateId":"${written.id.value}",""" +
+                                    """"loanId":"${written.id.value}",""" +
                                     """"partyId":"${written.partyId}",""" +
                                     """"writtenOff":"$outstanding",""" +
                                     """"writtenOffBy":"${request.writtenOffBy}",""" +
@@ -1100,7 +1104,8 @@ class LendingService @Inject constructor(
                         // #3914: no rescheduledAt column on Loan; clock at the completed reschedule, same
                         // house convention as write-off above.
                         // Issue #3994/#5256: see the loan.disbursed sourceService comment above.
-                        payload = """{"loanId":"${updated.id.value}","partyId":"${updated.partyId}",""" +
+                        payload = """{"aggregateType":"LOAN","aggregateId":"${updated.id.value}",""" +
+                            """"loanId":"${updated.id.value}","partyId":"${updated.partyId}",""" +
                             """"newPrincipal":"$newPrincipal",""" +
                             """"newNominalAnnualRate":"${request.newNominalAnnualRate}",""" +
                             """"newTermPeriods":${request.newTermPeriods},""" +
@@ -1355,7 +1360,8 @@ class LendingService @Inject constructor(
         snapshot: ProvisioningSnapshot,
         period: String,
         record: LoanProvisioningRecord,
-    ): String = """{"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
+    ): String = """{"aggregateType":"LOAN","aggregateId":"${loan.id.value}",""" +
+        """"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
         """"previousStage":"${prior.stage}","newStage":"${snapshot.stage}",""" +
         """"daysPastDue":${snapshot.daysPastDue},"period":"$period","asOf":"${snapshot.asOf}",""" +
         """"occurredAt":"${record.createdAt.toInstant()}","sourceService":"lending"}"""
@@ -1367,7 +1373,8 @@ class LendingService @Inject constructor(
         snapshot: ProvisioningSnapshot,
         delta: Money,
         record: LoanProvisioningRecord,
-    ): String = """{"loanId":"${loan.id.value}","period":"$period",""" +
+    ): String = """{"aggregateType":"LOAN","aggregateId":"${loan.id.value}",""" +
+        """"loanId":"${loan.id.value}","partyId":"${loan.partyId}","period":"$period",""" +
         """"stage":"${snapshot.stage}",""" +
         """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
         """"delta":"$delta","occurredAt":"${record.createdAt.toInstant()}",""" +
