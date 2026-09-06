@@ -35,6 +35,7 @@ openbank-consent-service POST /api/v1/suppressions  # creation POST with no idem
 openbank-consent-service POST /api/v1/suppressions/{id}/revoke  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegation-role-presets  # creation POST with no idempotency key today — burn-down #8351
 openbank-delegation-service POST /api/v1/delegations  # creation POST with no idempotency key today — burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/approvals/{approvalId}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by terminal proposal state (isIdempotentReplay returns the recorded decision; a conflicting re-decision is a 409); verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/check  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/preview  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/{id}/accept  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351

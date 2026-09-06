@@ -13,6 +13,7 @@ import com.openbank.kyc.domain.model.KycCaseStatus
 import com.openbank.kyc.domain.model.KycCheck
 import com.openbank.kyc.domain.model.KycEvents
 import com.openbank.kyc.domain.model.RiskLevel
+import com.openbank.kyc.domain.model.SubjectType
 import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -78,10 +79,8 @@ class KycService {
 
     @Inject lateinit var clock: Clock
 
-    // A KYC case carries no subject-type dimension yet (no partyType/entityType on KycCase —
-    // it only references a partyId). Emit the metric with a single stable, bounded `type` tag so
-    // the series is still collected; revisit once the case gains an individual|business field.
-    private val caseType = "unknown"
+    /** Bounded `type` tag for the fleet KYC metrics (`individual` | `business`). */
+    private fun caseType(subjectType: SubjectType) = subjectType.name.lowercase()
 
     // Sandbox-only straight-through processing (ADR-0116 §4): when true, a case opened from a
     // PARTY_CREATED event is auto-evaluated (all checks PASSED) and approved, so onboarding
@@ -94,34 +93,34 @@ class KycService {
      * party already has an active case, instead of letting the V5 partial unique index surface an
      * opaque 500. The idempotent reuse-on-retry behaviour lives in [openCaseForParty] (event path).
      */
-    suspend fun openCase(partyId: UUID): KycCase {
+    suspend fun openCase(partyId: UUID, subjectType: SubjectType = SubjectType.INDIVIDUAL): KycCase {
         repo.findActiveByPartyId(partyId)?.let { throw KycCaseConflictException(partyId, it.id) }
-        return createCase(partyId)
+        return createCase(partyId, subjectType)
     }
 
-    /** Insert a fresh OPEN case with the mandatory checks, persist, count and publish. */
-    private suspend fun createCase(partyId: UUID): KycCase {
+    /**
+     * Insert a fresh OPEN case with the subject type's mandatory checks (ADR-0284 D5: a BUSINESS
+     * gets the KYB set — registry match, representative authority, UBO — not an identity scan of
+     * a company), persist, count and publish.
+     */
+    private suspend fun createCase(partyId: UUID, subjectType: SubjectType): KycCase {
         val case = KycCase(
             id = UUID.randomUUID(),
             partyId = partyId,
             status = KycCaseStatus.OPEN,
             riskLevel = RiskLevel.MEDIUM,
             assignedTo = null,
-            checks = listOf(
-                newCheck(CheckType.IDENTITY),
-                newCheck(CheckType.ADDRESS),
-                newCheck(CheckType.PEP_SCREENING),
-                newCheck(CheckType.SANCTIONS_SCREENING),
-            ),
+            checks = subjectType.mandatoryChecks.map { newCheck(it) },
             notes = null,
             reviewedBy = null,
             reviewedAt = null,
             expiresAt = Instant.now(clock).plusSeconds(30 * 24 * 3600),
             createdAt = Instant.now(clock),
             updatedAt = Instant.now(clock),
+            subjectType = subjectType,
         )
         val saved = repo.save(case, KycEvents.caseOpened(case, Instant.now(clock)))
-        metrics.kycSubmitted(caseType)
+        metrics.kycSubmitted(caseType(subjectType))
         return saved
     }
 
@@ -139,10 +138,10 @@ class KycService {
      * Returns a [KycCaseResult] flagging whether a new case was actually created (vs an idempotent
      * reuse) so the consumer can log the two paths distinctly.
      */
-    suspend fun openCaseForParty(partyId: UUID): KycCaseResult {
+    suspend fun openCaseForParty(partyId: UUID, subjectType: SubjectType = SubjectType.INDIVIDUAL): KycCaseResult {
         repo.findActiveByPartyId(partyId)?.let { return KycCaseResult(it, created = false) }
         val opened = try {
-            createCase(partyId)
+            createCase(partyId, subjectType)
         } catch (e: Exception) {
             // A concurrent insert won the uq_kyc_cases_active_party race. Treat as idempotent:
             // re-read and return the existing case. Rethrow only if it failed for another reason.
@@ -318,7 +317,7 @@ class KycService {
             updatedAt = Instant.now(clock),
         )
         val saved = repo.update(updated, KycEvents.caseApproved(updated, Instant.now(clock)))
-        metrics.kycVerdict(caseType, "approved")
+        metrics.kycVerdict(caseType(case.subjectType), "approved")
         return saved
     }
 
@@ -332,7 +331,7 @@ class KycService {
             updatedAt = Instant.now(clock),
         )
         val saved = repo.update(updated, KycEvents.caseRejected(updated, Instant.now(clock)))
-        metrics.kycVerdict(caseType, "rejected")
+        metrics.kycVerdict(caseType(case.subjectType), "rejected")
         return saved
     }
 
@@ -365,7 +364,7 @@ class KycService {
             updatedAt = Instant.now(clock),
         )
         val saved = repo.update(updated, KycEvents.caseApproved(updated, Instant.now(clock)))
-        metrics.kycVerdict(caseType, "approved")
+        metrics.kycVerdict(caseType(case.subjectType), "approved")
         return saved
     }
 
@@ -398,7 +397,7 @@ class KycService {
             updatedAt = Instant.now(clock),
         )
         val saved = repo.update(updated, KycEvents.caseRejected(updated, Instant.now(clock)))
-        metrics.kycVerdict(caseType, "rejected")
+        metrics.kycVerdict(caseType(case.subjectType), "rejected")
         return saved
     }
 

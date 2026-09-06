@@ -139,6 +139,10 @@ openbank:
     sdd-service-url: ${SDD_SERVICE_URL:http://sdd-service.sdd.svc:8129}
     consent-service-url: ${CONSENT_SERVICE_URL:http://consent-service.consent.svc:8106}
     delegation-service-url: ${DELEGATION_SERVICE_URL:http://delegation-service.delegation.svc:8126}
+    # ADR-0284: business onboarding (kyb-service) and the profile switch. acting-for-enabled is
+    # a kill switch for X-Acting-For — off, every request is the personal profile.
+    kyb-service-url: ${KYB_SERVICE_URL:http://kyb-service.kyb.svc:8157}
+    acting-for-enabled: ${ACTING_FOR_ENABLED:true}
     bank-bic: ${OPENBANK_BANK_BIC:OPENCZPPXXX}
     sca-service-url:     ${SCA_SERVICE_URL:http://sca-service.sca.svc:8110}
     party-service-url:   ${PARTY_SERVICE_URL:http://party-service.party.svc:8111}
