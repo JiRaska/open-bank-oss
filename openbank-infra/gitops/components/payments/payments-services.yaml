@@ -2359,6 +2359,13 @@ spec:
               value: "0.1"
             # Advisory first (ADR-0034 Phase 5 convention): @Authorize logs "would DENY" without
             # blocking. Flip to true only after an observation window with a clean advisory report.
+            #
+            # Advisory deliberately (#8470): ADR-0283 phase 1 makes this service money-path, so the
+            # money-path authz-enforce gate reads this value. It stays false because the observation
+            # window above cannot have run — the service does not exist yet, so there is no advisory
+            # report to confirm an empty "would DENY" population. Enforcing on the PR that creates
+            # the service would enforce against a policy nobody has watched decide.
+            # Flip target: 2026-10-05, with the other advisory money-path services.
             - name: AUTHZ_ENFORCE
               value: "false"
           startupProbe:
