@@ -439,6 +439,7 @@ authz:
         - sepaPayment.transitionStatus
         - settlement.create
         - swift.approval.decide
+        - transaction.categorise
         - transaction.create
         - transaction.reverse
         - opsmessage.compose

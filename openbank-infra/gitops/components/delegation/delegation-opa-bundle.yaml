@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "e932439692b173f9"
+    openbank.tech/policy-checksum: "2fa3d6436434bb6f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1537,6 +1537,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
