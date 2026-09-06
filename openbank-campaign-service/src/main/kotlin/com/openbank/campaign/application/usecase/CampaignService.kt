@@ -7,6 +7,7 @@ package com.openbank.campaign.application.usecase
 import com.openbank.campaign.application.port.out.CampaignMetricsPort
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
+import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.EnrolmentAttempt
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.IncentiveOfferRegistry
@@ -18,6 +19,7 @@ import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignProductKind
+import com.openbank.campaign.domain.model.CampaignProductKind.Companion.CREDIT_OFFERS_SCOPE
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -34,6 +36,7 @@ import com.openbank.campaign.domain.model.TriggerCatalog
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Duration
@@ -61,7 +64,11 @@ class CampaignReferenceNotFoundException(message: String) : NoSuchElementExcepti
  * [Campaign.activate] — a domain rule, not a UI convention.
  */
 @ApplicationScoped
-@Suppress("TooManyFunctions") // Lifecycle actions are separate authenticated use cases, not helpers.
+// LongParameterList: nine collaborators, each a distinct outbound port this service genuinely
+// drives (repositories, segments, journeys, scheduler, metrics, consent). Bundling them into a
+// holder would hide which ones a given use case touches and make the CDI graph less honest, for
+// no reduction in real coupling.
+@Suppress("TooManyFunctions", "LongParameterList") // Lifecycle actions are separate use cases, not helpers.
 class CampaignService @Inject constructor(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
@@ -70,6 +77,12 @@ class CampaignService @Inject constructor(
     private val journeys: JourneySignaller,
     private val scheduler: CampaignScheduler,
     private val metrics: CampaignMetricsPort,
+    /**
+     * ADR-0269 rule 1. A live per-call check, never cached (ADR-0195): a cached credit consent
+     * outlives its own revocation, and the whole point of this consent is that switching it off
+     * takes effect at once rather than at the next sweep.
+     */
+    private val consentCheck: ConsentCheckPort,
     /**
      * Explicit graphs remain off until their isolated Temporal worker queue is deployed and proven
      * healthy. Their workflow type never shares a queue with legacy journeys, so a rollback pauses
@@ -169,6 +182,49 @@ class CampaignService @Inject constructor(
             decisions = source.decisions,
             incentiveOfferRef = source.incentiveOfferRef,
         )
+    }
+
+    /**
+     * Whether this sweep passes [partyId] over: already enrolled, or a credit campaign they never
+     * opted into.
+     *
+     * One guard rather than two `continue`s in the loop, and the reasoning lives here rather than
+     * inline. ADR-0269 rule 1 is checked PER PARTY, not once for the campaign, because consent is
+     * a property of the person and not of the journey — a campaign-level check would enrol
+     * everyone or no one.
+     *
+     * Fails CLOSED: an unreadable consent answers "no". The alternative offers credit to someone
+     * whose consent the bank could not read, which is the one outcome this rule exists to prevent,
+     * and a marketing act cannot be taken back once sent.
+     */
+    private suspend fun skipParty(campaign: Campaign, partyId: UUID): Boolean {
+        if (enrolments.findByCampaignAndParty(campaign.id, partyId) != null) return true
+        if (campaign.productKind.isCredit && !hasCreditOffersConsent(partyId)) {
+            metrics.enrolmentRecorded(EnrolmentAttempt.SUPPRESSED_CREDIT_CONSENT)
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Whether [partyId] has switched credit offers on, answering `false` on any failure.
+     *
+     * `runCatching` with cancellation rethrown: swallowing a `CancellationException` here would
+     * turn a cancelled sweep into a business decision that the party has no consent, which is the
+     * safe direction but a lie in the metrics.
+     */
+    // TooGenericExceptionCaught: the point IS every failure — a timeout, a 500, a parse error all
+    // mean the same thing here, that the bank does not know whether it may offer credit, and the
+    // answer to that is always "no". Narrowing this would let some unknown class of fault through
+    // as a grant.
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun hasCreditOffersConsent(partyId: UUID): Boolean = try {
+        consentCheck.hasActiveConsent(partyId, CREDIT_OFFERS_SCOPE)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        log.warnf(e, "credit consent unreadable for party %s; treating as absent", partyId)
+        false
     }
 
     /** Keeps create and draft revision tied to the same reviewed catalogue boundary. */
@@ -298,7 +354,7 @@ class CampaignService @Inject constructor(
         var started = 0
         var failed = 0
         for (partyId in partyIds) {
-            if (enrolments.findByCampaignAndParty(id, partyId) != null) continue
+            if (skipParty(campaign, partyId)) continue
             try {
                 val cohort = ExperimentCohort.assign(campaign.id, partyId, campaign.holdoutPercent)
                 if (cohort == ExperimentCohort.HOLDOUT) {

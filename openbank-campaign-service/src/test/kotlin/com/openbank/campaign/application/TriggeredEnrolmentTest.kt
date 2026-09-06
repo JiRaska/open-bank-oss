@@ -6,6 +6,7 @@ package com.openbank.campaign.application
 
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
@@ -98,6 +99,7 @@ class TriggeredEnrolmentTest {
         journeys: JourneySignaller,
         members: Set<UUID> = setOf(inSegment),
         segmentPresent: Boolean = true,
+        creditConsent: (UUID) -> Boolean = { true },
     ) = TriggeredEnrolmentService(
         campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID) = stored?.takeIf { it.id == id }
@@ -118,6 +120,10 @@ class TriggeredEnrolmentTest {
         },
         journeys = journeys,
         metrics = metrics,
+        consentCheck = object : ConsentCheckPort {
+            override suspend fun hasActiveConsent(partyId: UUID, scope: String): Boolean =
+                if (scope == CampaignProductKind.CREDIT_OFFERS_SCOPE) creditConsent(partyId) else true
+        },
     )
 
     @Test
@@ -234,5 +240,67 @@ class TriggeredEnrolmentTest {
         val outcome = service(null, Enrolments(), Journeys()).enrol(campaignId, inSegment)
 
         assertThat(outcome).isEqualTo(TriggeredEnrolment.CAMPAIGN_GONE)
+    }
+
+    // ── ADR-0269 rule 1 on the trigger path ─────────────────────────────────────────────────
+
+    @Test
+    fun `a credit campaign does not enrol a party who never switched credit offers on`() {
+        val enrolments = Enrolments()
+        val journeys = Journeys()
+        val credit = campaign().copy(productKind = CampaignProductKind.UNSECURED)
+
+        val outcome = runBlocking {
+            service(credit, enrolments, journeys, creditConsent = { false }).enrol(campaignId, inSegment)
+        }
+
+        assertThat(outcome).isEqualTo(TriggeredEnrolment.NO_CREDIT_CONSENT)
+        // The refusal has to reach the journey, not merely the return value: an enrolment row or a
+        // started workflow would mean the party is in the campaign regardless of what we answered.
+        assertThat(enrolments.saved).isEmpty()
+        assertThat(journeys.started).isEmpty()
+    }
+
+    @Test
+    fun `a credit campaign enrols a party who did switch credit offers on`() {
+        val enrolments = Enrolments()
+        val journeys = Journeys()
+        val credit = campaign().copy(productKind = CampaignProductKind.UNSECURED)
+
+        val outcome = runBlocking {
+            service(credit, enrolments, journeys, creditConsent = { true }).enrol(campaignId, inSegment)
+        }
+
+        assertThat(outcome).isEqualTo(TriggeredEnrolment.ENROLLED)
+        assertThat(enrolments.saved).hasSize(1)
+    }
+
+    @Test
+    fun `a non-credit campaign is not gated on credit consent`() {
+        val enrolments = Enrolments()
+        val journeys = Journeys()
+
+        // campaign is NONE. Refusing here would make the credit consent a general marketing switch,
+        // which is exactly what ADR-0269 says it is not.
+        val outcome = runBlocking {
+            service(campaign(), enrolments, journeys, creditConsent = { false }).enrol(campaignId, inSegment)
+        }
+
+        assertThat(outcome).isEqualTo(TriggeredEnrolment.ENROLLED)
+    }
+
+    @Test
+    fun `an unreadable consent refuses the credit enrolment rather than assuming it`() {
+        val enrolments = Enrolments()
+        val journeys = Journeys()
+        val credit = campaign().copy(productKind = CampaignProductKind.UNSECURED)
+
+        val outcome = runBlocking {
+            service(credit, enrolments, journeys, creditConsent = { error("consent-service down") })
+                .enrol(campaignId, inSegment)
+        }
+
+        assertThat(outcome).isEqualTo(TriggeredEnrolment.NO_CREDIT_CONSENT)
+        assertThat(enrolments.saved).isEmpty()
     }
 }

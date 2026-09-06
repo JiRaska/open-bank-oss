@@ -7,6 +7,7 @@ package com.openbank.campaign.application
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
+import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
@@ -145,6 +146,9 @@ class CampaignScheduleLifecycleTest {
             journeys = journeys,
             scheduler = scheduler,
             metrics = mockk(relaxed = true),
+            consentCheck = object : ConsentCheckPort {
+                override suspend fun hasActiveConsent(partyId: java.util.UUID, scope: String) = true
+            },
             explicitGraphActivationEnabled = false,
         )
     }
