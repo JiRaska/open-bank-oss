@@ -235,11 +235,32 @@ def find_violations(
                 key = str(path.relative_to(REPO))
                 if key in KNOWN_VIOLATIONS:
                     used_baseline.add(key)
+                elif version == prev_version:
+                    # A DUPLICATE version, not an ordering problem — and the two need opposite
+                    # fixes. Measured against Flyway 11 with this repo's own migrations: the
+                    # resolver refuses before it reads the database at all, with 'Found more
+                    # than one migration with version N', so the service does not start and
+                    # QUARKUS_FLYWAY_OUT_OF_ORDER (an ordering setting) changes nothing. Saying
+                    # otherwise sends the reader to a workaround that leaves the service dead
+                    # — which is what this message did for openbank-notification-service's two
+                    # V14s (issue #8961).
+                    findings.append(
+                        f"::error file={path.relative_to(REPO)}::{service}: {path.name} and "
+                        f"{prev_path.name} BOTH carry version {version}. Flyway refuses the "
+                        f"whole migration set at startup — 'Found more than one migration with "
+                        f"version {version}' — so the service cannot boot, and "
+                        f"QUARKUS_FLYWAY_OUT_OF_ORDER does NOT help: it governs order, not "
+                        f"duplicates. Renumber whichever of the two has NOT been applied to a "
+                        f"live database to the next free version (check "
+                        f"flyway_schema_history before choosing). db-migration-gate permits "
+                        f"exactly this rename — see resolves_version_collision() in "
+                        f"openbank-infra/scripts/check-db-migration.py.",
+                    )
                 else:
                     findings.append(
                         f"::error file={path.relative_to(REPO)}::{service}: {path.name} "
                         f"(version {version}) reached main AFTER {prev_path.name} (version "
-                        f"{prev_version}) but carries a lower-or-equal version number. Flyway "
+                        f"{prev_version}) but carries a lower version number. Flyway "
                         f"will refuse to apply it once {prev_path.name} or later is already "
                         f"deployed — 'Detected resolved migration not applied to database: "
                         f"{version}' — and crash the service on every boot (issue #5628). If "
@@ -275,6 +296,27 @@ def selftest() -> int:
     if ok_violations:
         print(f"selftest FAIL: monotonically increasing versions wrongly flagged: {ok_violations}")
         return 1
+    # A DUPLICATE version must be named as one. The two cases share a code path and need
+    # opposite fixes, so a message that says "lower-or-equal" and prescribes
+    # QUARKUS_FLYWAY_OUT_OF_ORDER is wrong exactly when the service cannot start (issue #8961).
+    p_dup_early = REPO / "openbank-fake-service" / "V14__a.sql"
+    p_dup_late = REPO / "openbank-fake-service" / "V14__b.sql"
+    dup_violations, _ = find_violations(
+        {"svc": [(p_dup_early, 14), (p_dup_late, 14)]},
+        {p_dup_early: 0, p_dup_late: 1},
+    )
+    if len(dup_violations) != 1 or "BOTH carry version 14" not in dup_violations[0]:
+        print(f"selftest FAIL: a duplicate version must be reported as a duplicate, "
+              f"got {dup_violations}")
+        return 1
+    if "OUT_OF_ORDER does NOT help" not in dup_violations[0]:
+        print("selftest FAIL: the duplicate message must rule out the out-of-order workaround")
+        return 1
+    # ...and the strictly-lower case must keep the ordering remedy, not inherit the new one.
+    if "BOTH carry version" in violations[0] or "OUT_OF_ORDER=true" not in violations[0]:
+        print(f"selftest FAIL: the out-of-order case lost its own remedy: {violations[0]}")
+        return 1
+
     # A path matching a KNOWN_VIOLATIONS key must be counted as baselined, not raised again.
     baselined_path = REPO / next(iter(KNOWN_VIOLATIONS))
     p_before = REPO / "openbank-fake-service-2" / "V1__x.sql"

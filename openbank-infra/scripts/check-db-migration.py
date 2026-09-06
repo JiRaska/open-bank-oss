@@ -54,11 +54,64 @@ def git(*args: str) -> str:
     ).stdout
 
 
+VERSION_RE = re.compile(r"/V(?P<version>\d+)__[^/]+\.sql$")
+
+
+def migration_version(path: str) -> int | None:
+    """The Flyway version encoded in a migration's filename, or None if it carries none."""
+    m = VERSION_RE.search(path)
+    return int(m.group("version")) if m else None
+
+
+def service_of(path: str) -> str:
+    """The owning service directory — the scope a Flyway version has to be unique within."""
+    return path.split("/src/main/resources/db/migration/", 1)[0]
+
+
+def migrations_at(ref: str) -> list[str]:
+    """Every migration path in the tree at `ref`."""
+    out = git("ls-tree", "-r", "--name-only", ref)
+    return [p for p in out.splitlines() if MIGRATION_RE.search(p)]
+
+
+def resolves_version_collision(old_path: str, new_path: str, base_paths: list[str]) -> bool:
+    """True iff renaming `old_path` to `new_path` is the repair for a duplicate Flyway version.
+
+    Two migrations in one service sharing a version is not an ordering problem that
+    QUARKUS_FLYWAY_OUT_OF_ORDER can absorb — measured against Flyway 11 with this repo's own
+    migrations, the resolver refuses before touching the database:
+
+        ERROR: Found more than one migration with version 14
+
+    So the service cannot start at all, and the forward-only rule this gate enforces has no
+    forward: adding V<n+1> leaves the duplicate pair in place. Renumbering one of the two is
+    the only repair, which is why this narrow case is permitted.
+
+    Narrow on purpose, and decidable from the tree alone (no database access, which CI does not
+    have): the OLD version must actually be duplicated in the same service at the PR base, and
+    the NEW version must be free there. A rename that meets neither is still an edit of an
+    applied migration's identity and is still refused.
+    """
+    old_version, new_version = migration_version(old_path), migration_version(new_path)
+    if old_version is None or new_version is None:
+        return False
+    service = service_of(old_path)
+    if service_of(new_path) != service:
+        return False
+    same_service = [
+        p for p in base_paths if service_of(p) == service and p != old_path
+    ]
+    collides = any(migration_version(p) == old_version for p in same_service)
+    new_is_free = all(migration_version(p) != new_version for p in same_service)
+    return collides and new_is_free
+
+
 def changed_migrations(base: str) -> tuple[list[str], list[str]]:
     """Return (added, modified) migration paths in the diff against `base`."""
     added, modified = [], []
     # --diff-filter distinguishes the two requirements: A -> needs a note, M -> forbidden.
     out = git("diff", "--name-status", "--diff-filter=AMR", base, "HEAD")
+    base_paths: list[str] | None = None
     for line in out.splitlines():
         parts = line.split("\t")
         if len(parts) < 2:
@@ -68,6 +121,19 @@ def changed_migrations(base: str) -> tuple[list[str], list[str]]:
             continue
         # A rename (R) of a migration is an edit of its identity — Flyway keys on the version
         # in the filename, so renaming V3 to V4 is not "adding V4", it is rewriting history.
+        # The one exception is a rename that resolves a duplicate version, where leaving the
+        # file alone is what breaks the service; see resolves_version_collision().
+        if status.startswith("R") and len(parts) >= 3:
+            if base_paths is None:
+                base_paths = migrations_at(base)
+            if resolves_version_collision(parts[1], path, base_paths):
+                print(
+                    f"::notice file={path}::Renumbering accepted: {parts[1]} collided with "
+                    f"another migration of the same version in this service, which Flyway "
+                    f"refuses to resolve at startup. Treated as an added migration."
+                )
+                added.append(path)
+                continue
         if status.startswith("A"):
             added.append(path)
         else:
@@ -156,12 +222,44 @@ def self_test() -> int:
         if got != want:
             fails.append(f"MIGRATION_RE({path!r}) = {got}, expected {want}")
 
+    # --- the collision-repair rename ------------------------------------------------------
+    # The rename exception must stay narrow: it exists because a duplicate version stops Flyway
+    # before it reads the database, so "add V<n+1> instead" is not available. A version of this
+    # predicate that answers True for an ordinary rename would silently re-open the exact hole
+    # the forward-only rule closes, and nothing else in CI would notice.
+    svc = "openbank-notification-service/src/main/resources/db/migration"
+    other = "openbank-other-service/src/main/resources/db/migration"
+    base_with_collision = [f"{svc}/V13__a.sql", f"{svc}/V14__taint.sql", f"{svc}/V14__dedup.sql"]
+    base_no_collision = [f"{svc}/V13__a.sql", f"{svc}/V14__taint.sql"]
+
+    for label, old_p, new_p, base_paths, want in (
+        ("a rename resolving a duplicate version is allowed",
+         f"{svc}/V14__dedup.sql", f"{svc}/V15__dedup.sql", base_with_collision, True),
+        # THE DEFECT this must catch: an ordinary renumber, where the forward-only rule applies
+        # and an already-applied migration would silently change identity.
+        ("a rename with no collision is still refused",
+         f"{svc}/V14__taint.sql", f"{svc}/V15__taint.sql", base_no_collision, False),
+        ("renaming onto a version already taken is refused",
+         f"{svc}/V14__dedup.sql", f"{svc}/V13__dedup.sql", base_with_collision, False),
+        ("a collision in a DIFFERENT service does not license this rename",
+         f"{svc}/V14__taint.sql", f"{svc}/V15__taint.sql",
+         [f"{svc}/V14__taint.sql", f"{other}/V14__x.sql", f"{other}/V14__y.sql"], False),
+        ("a cross-service move is refused",
+         f"{svc}/V14__dedup.sql", f"{other}/V15__dedup.sql", base_with_collision, False),
+        ("a migration with no version in its name is refused",
+         f"{svc}/baseline.sql", f"{svc}/V15__baseline.sql", base_with_collision, False),
+    ):
+        got = resolves_version_collision(old_p, new_p, base_paths)
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: db-migration rollback note is falsifiable (15 cases)")
+    print("self-test ok: db-migration rollback note and collision-repair rename "
+          "are falsifiable (21 cases)")
     return 0
 
 
