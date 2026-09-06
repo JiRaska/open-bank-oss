@@ -4034,7 +4034,14 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md"]
     run: |
-      python3 .github/scripts/check-security-checklist.py --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
+      # PR_BODY is github.event.pull_request.body — frozen at the last synchronize event.
+      # Editing the body to add the checklist (the documented remediation) only reached this
+      # gate after an otherwise-pointless empty commit pushed to re-emit the event (measured
+      # 2026-09-06 on #8934: body edited 11:45Z, run at 11:46Z still read the old body).
+      # The live body is the truth the gate means to check; the frozen one is the fallback
+      # when the API is unreachable. One contents-read API call per shard run.
+      LIVE_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .body 2>/dev/null || true)"
+      python3 .github/scripts/check-security-checklist.py --body "${LIVE_BODY:-${PR_BODY}}" --base "${PR_DIFF_BASE}" --enforce
 
   # ADR-0030 D2, third half (#6037, PR #6048): the coverage gate proves a threat model EXISTS
   # and the diff gate proves it is TOUCHED when a trust boundary moves. Neither reads a single
