@@ -27,3 +27,15 @@ test_shared_service_account_gets_no_kyb_reason_from_this_file if {
 	not "operator-kyb-review" in rest.allowed_reasons with input as {"principal": shared, "action": "kyb.case.reject"}
 	not "edge-service-kyb" in rest.allowed_reasons with input as {"principal": shared, "action": "kyb.case.reject"}
 }
+
+# ADR-0284 D5. A beneficial-ownership extract is personal data about third parties who are not the
+# caller: the analyst working the review queue may read it, the customer edge may not. The second
+# case is the one worth a test — it holds only because kyb.ubo.read is absent from an enumerated
+# list, and an enumeration is exactly the thing a later edit widens by accident.
+test_staff_may_read_beneficial_owners if {
+	"operator-kyb-review" in rest.allowed_reasons with input as {"principal": staff, "action": "kyb.ubo.read"}
+}
+
+test_edge_may_not_read_beneficial_owners if {
+	not "edge-service-kyb" in rest.allowed_reasons with input as {"principal": edge, "action": "kyb.ubo.read"}
+}
