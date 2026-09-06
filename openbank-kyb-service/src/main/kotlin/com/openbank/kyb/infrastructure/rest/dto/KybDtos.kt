@@ -9,6 +9,7 @@ import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.Signer
+import com.openbank.kyb.domain.model.UboFinding
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -193,6 +194,72 @@ data class CaseResponse(
             reviewReason = c.reviewReason,
             createdAt = c.createdAt,
             updatedAt = c.updatedAt,
+        )
+    }
+}
+
+/**
+ * One beneficial owner as the register states them (ADR-0284 D5).
+ *
+ * `band` is a band and not a percentage on purpose — see [com.openbank.kyb.domain.model.OwnershipBand].
+ * `natureOfControl` carries the register's own vocabulary verbatim: an analyst deciding whether a
+ * control is ownership or influence needs the words that were filed, not our paraphrase of them.
+ */
+data class BeneficialOwnerResponse(
+    val fullName: String,
+    val dateOfBirth: LocalDate?,
+    val nationality: String?,
+    val countryOfResidence: String?,
+    val band: String,
+    val natureOfControl: List<String>,
+    val notifiedOn: LocalDate?,
+    val corporate: Boolean,
+)
+
+/**
+ * What is known about an entity's beneficial owners right now.
+ *
+ * `source` is the field to read first: REGISTER means a register answered, SELF_DECLARATION means
+ * this jurisdiction has no queryable register and the customer must declare, UNAVAILABLE means a
+ * register exists and could not be reached. An empty `owners` list means something different under
+ * each — which is why `registerStatements` (a filed "no PSC identified") is carried separately
+ * rather than collapsed into the absence.
+ */
+data class UboResponse(
+    val scheme: String,
+    val identifier: String,
+    val source: String,
+    val owners: List<BeneficialOwnerResponse>,
+    val registerStatements: List<String>,
+    val threshold: Double,
+    val registerName: String?,
+    val sourceRef: String?,
+    val requiresDeclaration: Boolean,
+    val fetchedAt: Instant,
+) {
+    companion object {
+        fun from(f: UboFinding) = UboResponse(
+            scheme = f.identifier.scheme.name,
+            identifier = f.identifier.value,
+            source = f.source.name,
+            owners = f.owners.map {
+                BeneficialOwnerResponse(
+                    fullName = it.fullName,
+                    dateOfBirth = it.dateOfBirth,
+                    nationality = it.nationality,
+                    countryOfResidence = it.countryOfResidence,
+                    band = it.band.name,
+                    natureOfControl = it.natureOfControl,
+                    notifiedOn = it.notifiedOn,
+                    corporate = it.corporate,
+                )
+            },
+            registerStatements = f.registerStatements,
+            threshold = f.threshold,
+            registerName = f.registerName,
+            sourceRef = f.sourceRef,
+            requiresDeclaration = f.requiresDeclaration,
+            fetchedAt = f.fetchedAt,
         )
     }
 }
