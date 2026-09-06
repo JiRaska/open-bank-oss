@@ -186,6 +186,7 @@ class OriginationDecisionService(
             append(""""aggregateType":"LOAN_APPLICATION",""")
             append(""""aggregateId":"$id",""")
             append(""""loanApplicationId":"$id",""")
+            append(""""partyId":"${application.partyId}",""")
             append(""""outcome":"${outcomeName(decision)}",""")
             append(""""priceBand":${application.decisionPriceBand?.let { band -> "\"$band\"" } ?: "null"},""")
             append(""""policyVersions":"${application.policyVersions}",""")
