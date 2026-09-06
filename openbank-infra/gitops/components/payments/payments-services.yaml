@@ -2081,6 +2081,14 @@ spec:
             # (AUTHZ_ENFORCE=false, @Authorize logs "would DENY" without blocking) — matches
             # every other service's rollout convention. Flip to true only after an observation
             # window with a clean advisory report.
+            #
+            # Advisory deliberately (#8470): ADR-0283 phase 0 makes this service money-path, so
+            # the money-path authz-enforce gate now reads this value. It stays false because the
+            # observation window above has not run — the card authorisation decision only started
+            # shipping with ADR-0283, so there is no advisory report to confirm an empty
+            # "would DENY" population yet. Flipping on the same PR that declares the service
+            # money-path would enforce against a policy nobody has watched decide.
+            # Flip target: 2026-10-05, with the other three advisory money-path services.
             - name: AUTHZ_ENFORCE
               value: "false"
           startupProbe:
