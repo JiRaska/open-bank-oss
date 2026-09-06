@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: agent-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "11881894fed89256"
+    openbank.tech/policy-checksum: "e6aa8c4ce1453e01"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -506,5 +506,35 @@ data:
           - money.*
           - gh.pr.*
           - secrets.*
+    - id: kyb-analyst
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - kyb
+          - governance
+        - tier: write_proposal
+          resources:
+          - case-thread
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: business-copilot
+      tools:
+        allow:
+        - query.balance.readonly
+        - query.transaction.readonly
+        - propose.payment
+        - propose.card_freeze
+        - propose.dispute
+        deny:
+        - money.*
+        - gh.pr.*
+        - '*.write'
+        - secrets.read.raw
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

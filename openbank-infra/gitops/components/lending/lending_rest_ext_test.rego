@@ -122,3 +122,32 @@ test_shared_no_operator_rule_on_create if {
 		with input as {"principal": shared, "action": "lending.create"}
 		with data.rules as rules_mock
 }
+
+# ── ADR-0269 rule 2: the credit-offer eligibility read (issue #8918) ─────────────────────────
+
+test_shared_service_may_read_credit_offer_eligibility if {
+	"service-credit-offer-eligibility" in rest.allowed_reasons
+		with input as {"principal": shared, "action": "lending.creditOffer.eligibility"}
+		with data.rules as rules_mock
+}
+
+# The rule opens ONE action. The shared client is every backend service at once, so a rule that
+# leaked past its action would hand all of them a lending endpoint they have no business in.
+test_shared_service_gets_nothing_else_from_that_rule if {
+	not "service-credit-offer-eligibility" in rest.allowed_reasons
+		with input as {"principal": shared, "action": "lending.disburse"}
+		with data.rules as rules_mock
+}
+
+test_shared_service_gets_no_read_of_loans_from_that_rule if {
+	not "service-credit-offer-eligibility" in rest.allowed_reasons
+		with input as {"principal": shared, "action": "lending.read"}
+		with data.rules as rules_mock
+}
+
+# And it is scoped to the identity, not to the action alone: the edge does not inherit it.
+test_edge_does_not_inherit_the_eligibility_rule if {
+	not "service-credit-offer-eligibility" in rest.allowed_reasons
+		with input as {"principal": edge, "action": "lending.creditOffer.eligibility"}
+		with data.rules as rules_mock
+}

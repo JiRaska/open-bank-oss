@@ -186,8 +186,8 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "23dba24ee18bde6c",
-      "count": 18,
+      "sha256": "590178960a64ad17",
+      "count": 20,
       "ids": [
         "compliance-officer",
         "ledger-domain-engineer",
@@ -206,12 +206,15 @@
         "docs-truth-agent",
         "authz-policy-auditor",
         "flaky-test-hunter",
-        "case-coordinator"
+        "case-coordinator",
+        "kyb-analyst",
+        "business-copilot"
       ],
       "byPlane": {
         "control": 13,
         "development": 2,
-        "customer": 3
+        "customer": 3,
+        "business": 2
       },
       "defaults": {
         "enforced": "block",
@@ -220,11 +223,11 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "2e54447a89a414ec",
+      "sha256": "9bf2e89c805f3cf0",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 2,
+        "pending": 4,
         "registered": 12
       },
       "idsByStatus": {
@@ -238,7 +241,9 @@
         ],
         "pending": [
           "card-scheme-bulletin-agent",
-          "card-dispute-evidence-agent"
+          "card-dispute-evidence-agent",
+          "kyb-analyst",
+          "business-copilot"
         ],
         "registered": [
           "compliance-officer",
@@ -304,7 +309,9 @@
         ],
         "case-coordinator": [
           "system.v1"
-        ]
+        ],
+        "kyb-analyst": [],
+        "business-copilot": []
       }
     },
     "evals": {
