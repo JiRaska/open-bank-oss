@@ -208,6 +208,19 @@ tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setSchemaVersion("1.5")
 }
 
+// OpenSSF Silver `build_reproducible` (issue #8355): a ZIP/JAR entry embeds each input file's
+// mtime, so two builds of the same commit can produce byte-different artifacts unless that is
+// suppressed. Measured on this project's pinned Gradle 9.7.1: both properties already default to
+// the values set below, and two independent `quarkusBuild` runs of the same commit (separated in
+// wall-clock time, `--no-build-cache --rerun-tasks`) already produce a byte-identical
+// `quarkus-app/` tree. Setting them explicitly turns that from an unpinned Gradle default — which
+// a future Gradle upgrade could silently change — into a declared, auditable property of the
+// build that the OpenSSF assessment can point at.
+tasks.withType<Jar>().configureEach {
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}
+
 // Kover instruments every class that a Quarkus test JVM loads unless told otherwise.
 // Testcontainers is third-party test infrastructure, never part of this module's coverage
 // denominator; attempting to transform its shaded classes has produced invalid frames and a
