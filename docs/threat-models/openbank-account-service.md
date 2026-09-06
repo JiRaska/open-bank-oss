@@ -96,6 +96,26 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-05** — **Inbound REST error surface on the authentication boundary**, no new route,
+  caller, edge or privilege. A security abort (anonymous or under-roled caller hitting a
+  `@RolesAllowed` route) was rendered by Quarkus REST's built-in handling as the raw exception
+  message in a plain-text body under the resource's negotiated `application/json` content-type —
+  a 401 whose body was the literal text `Not Authenticated` while declaring itself JSON, which any
+  JSON-parsing client (and the VoP consumer pact's anonymous-IBAN-lookup replay, #8803) breaks on.
+  Three service-local mappers (`io.quarkus.security` Unauthorized / AuthenticationFailed → 401
+  `UNAUTHORIZED`, Forbidden → 403 `FORBIDDEN`) now answer with the standard `ApiError` envelope and
+  fixed messages. **Security-relevant half:** the fixed message names neither the failure detail
+  nor the underlying mechanism, so the abort leaks strictly less than the raw exception text did;
+  status codes are unchanged, so no client-visible signaling about account or authorization
+  existence moves. The mappers live in the service rather than libs-runtime because a
+  shared-library `@Provider` naming an `io.quarkus.security` type is the #6240 ArC boot-failure
+  class (enforced by the `provider-type-classpath` gate). The anonymous 401 itself is now covered
+  by contract: the VoP pact interaction is replayed with the `@TestSecurity` identity cleared
+  (TestIdentityAssociation), so "no caller identity → 401" is verified, not assumed. RBAC, OPA and
+  authentication itself are untouched. **Risk class:** availability/observability plus disclosure
+  hardening; no money mutation and no new principal. Rollback: delete the three mappers and the
+  aborts fall back to Quarkus' built-in text rendering. (#8803)
+
 - **2026-09-04** — **Inbound REST error surface on account opening**, no new route, caller, edge
   or privilege. Two sanctions-screening outcomes rendered 500 INTERNAL_ERROR through the generic
   mapper: an unreachable screening service (the gate fails closed, ADR-0032 §C) and a policy

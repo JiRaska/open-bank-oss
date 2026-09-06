@@ -13,6 +13,9 @@ import com.openbank.account.application.usecase.AuthorizationNotFoundException
 import com.openbank.account.application.usecase.AuthorizationNotOnAccountException
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.domain.identifiers.Ids
+import io.quarkus.security.AuthenticationFailedException
+import io.quarkus.security.ForbiddenException
+import io.quarkus.security.UnauthorizedException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
@@ -202,6 +205,64 @@ class AccountScreeningUnavailableExceptionMapper : ExceptionMapper<AccountScreen
             )
             .build()
     }
+}
+
+// Security-abort responses must be the JSON error envelope like every other error here.
+// Without these mappers Quarkus REST's built-in handling writes the exception MESSAGE as a
+// plain-text entity while the response keeps the resource's negotiated application/json
+// content-type — a 401 whose body is the literal text "Not Authenticated" under a JSON
+// content-type. Any client parsing the error as JSON (and Pact-JVM's matching engine, which
+// plans the body comparison from the content-type) chokes on it: measured on the anonymous
+// IBAN-lookup pact replay (#8803). A user @Provider mapper wins over Quarkus' built-in.
+// These live in the SERVICE, not libs-runtime, on purpose: a shared-library @Provider naming
+// an `io.quarkus.security` type would be loaded by ArC in every consumer, including services
+// without quarkus-security on the classpath — the #6240 boot-failure class, enforced by the
+// provider-type-classpath gate. Fleet-wide registration is tracked as a follow-up (#8875 is
+// the party-service instance of the same latent defect).
+@Provider
+class QuarkusUnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
+    override fun toResponse(exception: UnauthorizedException): Response = Response.status(Response.Status.UNAUTHORIZED)
+        .entity(
+            ApiError(
+                traceId = Ids.randomId().toString(),
+                status = Response.Status.UNAUTHORIZED.statusCode,
+                code = "UNAUTHORIZED",
+                message = "Unauthorized",
+                timestamp = Instant.now(),
+            ),
+        )
+        .build()
+}
+
+@Provider
+class QuarkusAuthenticationFailedExceptionMapper : ExceptionMapper<AuthenticationFailedException> {
+    override fun toResponse(exception: AuthenticationFailedException): Response =
+        Response.status(Response.Status.UNAUTHORIZED)
+            .entity(
+                ApiError(
+                    traceId = Ids.randomId().toString(),
+                    status = Response.Status.UNAUTHORIZED.statusCode,
+                    code = "UNAUTHORIZED",
+                    message = "Unauthorized",
+                    timestamp = Instant.now(),
+                ),
+            )
+            .build()
+}
+
+@Provider
+class QuarkusForbiddenExceptionMapper : ExceptionMapper<ForbiddenException> {
+    override fun toResponse(exception: ForbiddenException): Response = Response.status(Response.Status.FORBIDDEN)
+        .entity(
+            ApiError(
+                traceId = Ids.randomId().toString(),
+                status = Response.Status.FORBIDDEN.statusCode,
+                code = "FORBIDDEN",
+                message = "Forbidden",
+                timestamp = Instant.now(),
+            ),
+        )
+        .build()
 }
 
 private const val UNPROCESSABLE_ENTITY = 422

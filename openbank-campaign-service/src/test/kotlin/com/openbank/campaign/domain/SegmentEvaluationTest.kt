@@ -163,38 +163,30 @@ class SegmentEvaluationTest {
     fun `HasAccount is constructible now that the party link exists in the layer`() {
         val segment = Segment("has-account", 1, listOf(SegmentRule.HasAccount))
         val (where, params) = segment.toWhereClause()
-        assertTrue(where.contains("JSONExtractString(payload, 'partyId')"), "actual: $where")
+        assertTrue(where.contains("aggregate_id IN ("), "renders no membership test — actual: $where")
         // No bind values: the rule carries no caller-supplied value, so there is nothing to
-        // parameterise and nothing that could become SQL.
+        // parameterise and nothing that could become SQL. The SHAPE of the membership test is
+        // pinned by the delegation test below, not here.
         assertTrue(params.isEmpty(), "actual: $params")
     }
 
     /**
-     * The load-bearing property of this rule, and the one worth a test of its own.
-     *
-     * Silver keeps only the LATEST event per aggregate, and of the four account events only
-     * `AccountCreatedEvent` carries `partyId`. So an account that has ever changed status has a
-     * silver row without the link, and a silver-based subquery would omit exactly the parties with
-     * the most account activity — while a fail-closed evaluator renders that as "did not match",
-     * which is indistinguishable from a correct answer. Reading bronze is what avoids it.
+     * The property worth a test of its own: this rule must DELEGATE the account-to-party
+     * resolution, not repeat it. `silver_party_accounts` (ADR-0210 D2) is that resolution, and its
+     * own header explains the danger of a second copy — the resolution is the isolation boundary
+     * of the Customer 360, so a caller that widens its private version shows another customer's
+     * accounts. The first version of this rule inlined the same predicate; identical is exactly how
+     * two copies begin.
      */
     @Test
-    fun `HasAccount resolves the party link from bronze, never from the latest-state view`() {
+    fun `HasAccount delegates to the shared party-accounts view instead of re-deriving it`() {
         val (where, _) = Segment("has-account", 1, listOf(SegmentRule.HasAccount)).toWhereClause()
-        assertTrue(where.contains("openbank_analytics.bronze_events"), "actual: $where")
-        assertFalse(where.contains("silver_current_state"), "reads the latest-state view — actual: $where")
-    }
-
-    /**
-     * An ACCOUNT row whose payload has no `partyId` must not contribute an empty string to the
-     * IN-list: `aggregate_id IN ('')` matches nothing, but it also costs nothing to exclude, and
-     * leaving it in makes the query's intent unreadable. Every account event other than
-     * `AccountCreated` produces exactly such a row.
-     */
-    @Test
-    fun `HasAccount excludes account rows that carry no party link`() {
-        val (where, _) = Segment("has-account", 1, listOf(SegmentRule.HasAccount)).toWhereClause()
-        assertTrue(where.contains("JSONExtractString(payload, 'partyId') != ''"), "actual: $where")
+        assertTrue(where.contains("openbank_analytics.silver_party_accounts"), "actual: $where")
+        assertFalse(
+            where.contains("JSONExtractString(payload, 'partyId')"),
+            "re-derives the resolution the shared view owns — actual: $where",
+        )
+        assertFalse(where.contains("silver_current_state"), "resolves from the latest-state view — actual: $where")
     }
 
     /**
