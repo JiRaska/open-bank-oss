@@ -315,6 +315,7 @@ class AnalyticsConsumer {
         "KYC_CASE" -> node["kycCaseId"]?.asText()
         "DOCUMENT" -> node["documentId"]?.asText()
         "PASSKEY" -> node["credentialId"]?.asText()
+        "LOAN" -> node["loanId"]?.asText()
         "ACCOUNT" -> node["accountId"]?.asText()
         "PARTY" -> node["partyId"]?.asText()
         else -> null
@@ -349,6 +350,12 @@ class AnalyticsConsumer {
         node.has("kycCaseId") -> "KYC_CASE"
         node.has("documentId") -> "DOCUMENT"
         node.has("credentialId") -> "PASSKEY"
+        // loanId ahead of accountId/partyId (#8893): six of lending-service's nine
+        // `openbank.lending.events` payloads (loan.stage_changed, loan.disbursed,
+        // loan.written_off, loan.rescheduled, loan.interest_accrued, loan.provisioned) omit
+        // aggregateType/aggregateId and most also carry a partyId — testing partyId first would
+        // fold every loan a customer holds into one bronze aggregate keyed by their party id.
+        node.has("loanId") -> "LOAN"
         node.has("accountId") -> "ACCOUNT"
         node.has("partyId") -> "PARTY"
         else -> UNKNOWN

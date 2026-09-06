@@ -1,7 +1,7 @@
 # Kafka mTLS identity + ACLs for analytics-sink (ADR-0022 / ADR-0137 fleet gate).
 #
 # analytics-sink consumes the domain-event stream into the ClickHouse bronze layer. It has ONE
-# incoming channel (analytics-events-in) subscribed to nine topics; it never produces. The broker
+# incoming channel (analytics-events-in) subscribed to ten topics; it never produces. The broker
 # runs allow.everyone.if.no.acl.found=false, so it needs a KafkaUser with Read on each topic + the
 # consumer group (the channel's topic list is the source of truth; keep the ACLs below in step).
 # consumer group. Identity model (ADR-0137): one KafkaUser = one mTLS cert = one principal; the
@@ -65,6 +65,11 @@ spec:
       # that one is written from an anonymous public endpoint and this one only from an
       # authenticated request — the trust levels must not be merged into one stream.
       - resource: { type: topic, name: openbank.credit.funnel.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      # #8893: the post-decision credit lifecycle — decision outcome, application/loan state
+      # transitions, disbursement, accrual, write-off, reschedule, stage change and provisioning.
+      - resource: { type: topic, name: openbank.lending.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
       # ADR-0192 in-app screen feedback (metadata + screenshot object key; never image bytes).
