@@ -53,8 +53,7 @@ class DomesticPaymentDelegationContractTest {
 
     @Test
     fun `reservation consumer contract matches producer and retains only a domain-separated hash`() {
-        val producerSchema = producerAsyncApi.substringAfter("    spendReservationState:")
-            .substringBefore("\n    DelegationSpendReservationStateChanged:")
+        val producerSchema = schemaBlock(producerAsyncApi, "spendReservationState")
         val producerMessage = producerAsyncApi.substringAfter("    DelegationSpendReservationStateChanged:")
         listOf(
             "reservationId",
@@ -118,5 +117,28 @@ class DomesticPaymentDelegationContractTest {
             "IDEMPOTENCY_KEY_REUSED",
             "enum: [409]",
         )
+    }
+
+    /**
+     * The YAML block under a top-level `    <key>:`, ending at the next key of the SAME indent.
+     *
+     * This used to slice from `spendReservationState:` to `DelegationSpendReservationStateChanged:`
+     * — but the first is a schema and the second a MESSAGE hundreds of lines below, so the span
+     * silently swallowed every schema added between them. #8334's `spendReserved:` sits in that
+     * gap and carries the raw caller-chosen `idempotencyKey` by design (ADR-0249 D4), which turned
+     * the `doesNotContain("idempotencyKey:")` guard below red on main against a schema it was never
+     * meant to read. The guard itself was right the whole time: `spendReservationState` publishes
+     * only `idempotencyKeyHash`.
+     *
+     * Anchoring on indentation rather than on whichever schema happens to be the neighbour keeps
+     * that true when the next one lands.
+     */
+    private fun schemaBlock(yaml: String, key: String): String {
+        val marker = "\n    $key:"
+        val start = yaml.indexOf(marker)
+        require(start >= 0) { "schema '$key' not found in the producer AsyncAPI" }
+        val body = yaml.substring(start + marker.length)
+        val end = Regex("\\n {4}\\w+:").find(body)?.range?.first ?: body.length
+        return body.substring(0, end)
     }
 }
