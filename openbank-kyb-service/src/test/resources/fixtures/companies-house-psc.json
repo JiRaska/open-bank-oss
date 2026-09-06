@@ -1,0 +1,36 @@
+{
+  "total_results": 4,
+  "items": [
+    {
+      "name": "SMITH, Jane Elizabeth",
+      "kind": "individual-person-with-significant-control",
+      "nationality": "British",
+      "country_of_residence": "England",
+      "notified_on": "2016-04-06",
+      "date_of_birth": { "month": 5, "year": 1980 },
+      "natures_of_control": [
+        "ownership-of-shares-50-to-75-percent",
+        "voting-rights-25-to-50-percent"
+      ]
+    },
+    {
+      "name": "HOLDINGS EXAMPLE LIMITED",
+      "kind": "corporate-entity-person-with-significant-control",
+      "notified_on": "2019-02-01",
+      "natures_of_control": ["ownership-of-shares-25-to-50-percent"]
+    },
+    {
+      "name": "BROWN, Peter",
+      "kind": "individual-person-with-significant-control",
+      "notified_on": "2016-04-06",
+      "ceased_on": "2019-01-31",
+      "natures_of_control": ["ownership-of-shares-75-to-100-percent"]
+    },
+    {
+      "name": "DOE, Alex",
+      "kind": "individual-person-with-significant-control",
+      "notified_on": "2021-07-01",
+      "natures_of_control": ["right-to-appoint-and-remove-directors"]
+    }
+  ]
+}
