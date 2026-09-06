@@ -5,6 +5,7 @@ package com.openbank.campaign.application
 
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
+import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
@@ -13,6 +14,7 @@ import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -38,6 +40,7 @@ class CampaignDraftRevisionTest {
         id = campaignId,
         name = "Savings nudge",
         goal = "Open a savings account",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("actives", 1),
         steps = listOf(CampaignStep(1, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0)),
         state = CampaignState.DRAFT,
@@ -59,6 +62,7 @@ class CampaignDraftRevisionTest {
             definition = CampaignDefinition(
                 name = "Savings nudge v2",
                 goal = draft.goal,
+                productKind = CampaignProductKind.NONE,
                 segmentRef = draft.segmentRef,
                 steps = draft.steps,
             ),
@@ -72,7 +76,13 @@ class CampaignDraftRevisionTest {
         assertThrows<IllegalArgumentException> {
             service.reviseDraft(
                 id = campaignId,
-                definition = CampaignDefinition(draft.name, draft.goal, draft.segmentRef, draft.steps),
+                definition = CampaignDefinition(
+                    draft.name,
+                    draft.goal,
+                    CampaignProductKind.NONE,
+                    draft.segmentRef,
+                    draft.steps,
+                ),
                 revisedBy = "other@openbank.test",
             )
         }
@@ -134,6 +144,9 @@ class CampaignDraftRevisionTest {
             journeys = mockk<JourneySignaller>(),
             scheduler = mockk<CampaignScheduler>(),
             metrics = mockk(relaxed = true),
+            consentCheck = object : ConsentCheckPort {
+                override suspend fun hasActiveConsent(partyId: java.util.UUID, scope: String) = true
+            },
             explicitGraphActivationEnabled = false,
         )
     }

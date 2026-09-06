@@ -8,6 +8,7 @@ import com.openbank.campaign.application.port.out.CampaignContentExperimentRepos
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.ContentVariantMetrics
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -50,6 +51,7 @@ class CampaignContentExperimentQueryTest {
             id = campaignId,
             name = "content experiment",
             goal = "open an account",
+            productKind = CampaignProductKind.NONE,
             segmentRef = SegmentRef("eligible", 1),
             steps = listOf(
                 CampaignStep(
