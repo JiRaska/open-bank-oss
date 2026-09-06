@@ -317,6 +317,12 @@ class AnalyticsConsumer {
         "PASSKEY" -> node["credentialId"]?.asText()
         "ACCOUNT" -> node["accountId"]?.asText()
         "PARTY" -> node["partyId"]?.asText()
+        // #8792. Kept in lockstep with inferAggregateType above, as this function's KDoc requires:
+        // a type in one without the other yields aggregate_id = "unknown".
+        "CARD" -> node["cardId"]?.asText()
+        "LENDING" -> node["loanId"]?.asText()
+        "STANDING_ORDER" -> node["orderId"]?.asText()
+        "FX" -> node["conversionId"]?.asText()
         else -> null
     } ?: node["accountId"]?.asText() ?: node["partyId"]?.asText()
 
@@ -349,6 +355,21 @@ class AnalyticsConsumer {
         node.has("kycCaseId") -> "KYC_CASE"
         node.has("documentId") -> "DOCUMENT"
         node.has("credentialId") -> "PASSKEY"
+        // #8792: the four domains this phase ingests. They sit ABOVE `accountId`/`partyId` because
+        // their payloads carry those too, and the first match wins — a card issuance carries
+        // cardId, partyId AND accountId, so leaving it below would file it as ACCOUNT while its
+        // sibling CardStatusChanged, which carries only cardId, fell through to the topic and
+        // became CARD. One domain, two aggregate types, split by which fields an event happens to
+        // have.
+        //
+        // Additive by construction, and measured rather than argued: of the 1712 rows in bronze
+        // today, ZERO carry cardId, loanId, orderId or conversionId, so no existing event can be
+        // rebucketed by these lines. That is the property that makes reordering safe here and would
+        // not hold for the entries above.
+        node.has("cardId") -> "CARD"
+        node.has("loanId") -> "LENDING"
+        node.has("orderId") -> "STANDING_ORDER"
+        node.has("conversionId") -> "FX"
         node.has("accountId") -> "ACCOUNT"
         node.has("partyId") -> "PARTY"
         else -> UNKNOWN
