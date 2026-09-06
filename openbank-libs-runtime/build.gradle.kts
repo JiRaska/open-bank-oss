@@ -117,6 +117,10 @@ dependencies {
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
     testImplementation("io.quarkus:quarkus-security:3.33.2")
     testImplementation("org.jboss.resteasy:resteasy-core:6.2.12.Final")
+    // MultipartParser.MalformedMessageException lives in the reactive-server artifact; the
+    // classification test instantiates the real class so the by-name map key can never drift
+    // from the class it names. Already in gradle/verification-metadata.xml (services resolve it).
+    testImplementation("io.quarkus.resteasy.reactive:resteasy-reactive:3.38.0")
     testImplementation("org.jboss.logging:jboss-logging:3.6.2.Final")
     testImplementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
     // Kept in sync with the compileOnly pin above — CVE-2026-40984, issue #5482.

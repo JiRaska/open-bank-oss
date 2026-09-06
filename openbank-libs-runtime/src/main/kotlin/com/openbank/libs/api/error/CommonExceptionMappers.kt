@@ -208,6 +208,14 @@ private val PERSISTENCE_STATUS: Map<String, ErrorCode> = mapOf(
     "org.hibernate.exception.ConstraintViolationException" to ErrorCode.CONFLICT,
     // Raised while DECODING the entity, before any handler sees it.
     "java.io.CharConversionException" to ErrorCode.VALIDATION_ERROR,
+    // A malformed multipart/form-data frame — the caller's encoding, never a server fault.
+    // RESTEasy Reactive's parser raises it before any handler or reader runs; found by fleet
+    // fuzzing on party-service's /parties/{id}/documents/upload answering 500 to a garbage
+    // multipart body (run 34017868446). By name, like everything here: a typed @Provider would
+    // name a resteasy-reactive-server type in its supertype and make ArC load it in consumers
+    // that serve no multipart at all.
+    "org.jboss.resteasy.reactive.server.core.multipart.MultipartParser\$MalformedMessageException" to
+        ErrorCode.VALIDATION_ERROR,
 )
 
 /**
