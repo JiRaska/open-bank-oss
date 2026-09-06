@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.17.0
+  version: 1.19.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -236,6 +236,104 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/LoanStateSummary' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/decisions:
+    get:
+      tags: [Lending]
+      operationId: riskDecisions
+      summary: Engine-evaluated applications with decoded ADR-0213 evidence (newest first)
+      description: >-
+        The credit-risk console's primary read (ADR-0230 D1). Each row is one application the
+        deterministic engine evaluated: outcome, price band, machine-readable reason codes with the
+        rule that fired, matched rule ids, pinned policy versions, input snapshot hash and the
+        affordability ratios the engine read — decoded server-side from the evidence fields the
+        application pins (ADR-0214), never recomputed. Read-only; the console renders decisions and
+        never makes them (ADR-0227 D4).
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+          description: Clamped server-side to 1..1000. A caller wanting the whole history uses the warehouse.
+      responses:
+        '200':
+          description: Newest evaluation first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CreditDecisionView' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/decisions/summary:
+    get:
+      tags: [Lending]
+      operationId: riskDecisionSummary
+      summary: Book-wide engine outcome × price-band totals, grouped in the database
+      description: >-
+        The figure /risk/decisions cannot give (it is capped): how many applications the engine
+        approved, referred and declined over the whole book, per price band. Same reasoning as
+        /applications/summary (issue #3294).
+      responses:
+        '200':
+          description: One entry per (outcome, priceBand) pair
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DecisionOutcomeSummary' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/portfolio:
+    get:
+      tags: [Lending]
+      operationId: riskPortfolio
+      summary: Loans with their latest IFRS 9 provisioning record (null where never assessed)
+      description: >-
+        Stage, DPD bucket, expected credit loss, outstanding balance and the PD/LGD model version
+        that produced them, read back from loan_provisioning (ADR-0028 Phase 3). A loan the
+        scheduled cycle has never assessed carries assessment=null — a real state the console shows
+        as such, never as Stage 1 with zero ECL.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 500 }
+      responses:
+        '200':
+          description: Newest disbursement first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LoanRiskView' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/policy:
+    get:
+      tags: [Lending]
+      operationId: riskPolicy
+      summary: The credit policy bundle the engine evaluates as of a date
+      description: >-
+        Every decision table (exclusion, eligibility, affordability, pricing band) with its rules,
+        version and effective window (ADR-0213 D1). codeSeeded is true while the ADR-0213 D3
+        starter policy is the binding — i.e. before the four-eyes table store D4 describes exists —
+        so a risk committee reading the table knows whether anyone can change it and how.
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: ISO-8601 date; defaults to today. A malformed value is a 400.
+      responses:
+        '200':
+          description: The active bundle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditPolicyView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/applications/recent:
@@ -937,6 +1035,137 @@ components:
         principal:
           type: array
           items: { $ref: '#/components/schemas/MoneyTotal' }
+    DecisionReasonView:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          enum: [INPUT_MISSING, RULE_NOT_EVALUABLE, POLICY_TABLE_MISSING, EXCLUSION_MATCHED, ELIGIBILITY_FAILED, AFFORDABILITY_FAILED, PRICING_BAND_UNMATCHED]
+        ruleId: { type: string, nullable: true }
+    AffordabilityRatios:
+      type: object
+      required: [dsti, dti, dstiIncludingExistingDebt]
+      description: >-
+        dsti is the new installment over verified income — what PolicyAttribute.DSTI carries into
+        the affordability table. dstiIncludingExistingDebt adds existingDebtServiceMonthly (the
+        CNB/EBA total-debt-service definition); it is exposed so the console can show the gap, and
+        is NOT what the engine evaluates today.
+      properties:
+        dsti: { type: number }
+        dti: { type: number }
+        dstiIncludingExistingDebt: { type: number }
+    CreditDecisionView:
+      type: object
+      required: [applicationId, partyId, status, createdAt, requestedAmount, currency, termPeriods, nominalAnnualRate, productKind, engineOutcome, reasons, matchedRuleIds, policyVersions]
+      properties:
+        applicationId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        status: { type: string, description: The current OriginationState. }
+        createdAt: { type: string, format: date-time }
+        requestedAmount: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        termPeriods: { type: integer }
+        nominalAnnualRate: { type: number }
+        jurisdiction: { type: string, nullable: true }
+        productType: { type: string, nullable: true }
+        productKind: { type: string }
+        packVersion: { type: integer, nullable: true }
+        engineOutcome: { type: string, enum: [APPROVE, REFER, DECLINE, UNEVALUATED] }
+        priceBand: { type: string, nullable: true }
+        reasons:
+          type: array
+          items: { $ref: '#/components/schemas/DecisionReasonView' }
+        matchedRuleIds:
+          type: array
+          items: { type: string }
+        policyVersions:
+          type: object
+          additionalProperties: { type: integer }
+          description: Pinned table version per PolicyTableKind name.
+        inputSnapshotHash: { type: string, nullable: true }
+        decidedEngineAt: { type: string, format: date-time, nullable: true }
+        affordability:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/AffordabilityRatios' }]
+        verifiedIncomeMonthly: { type: number, nullable: true }
+        existingDebtServiceMonthly: { type: number, nullable: true }
+        ageYears: { type: integer, nullable: true }
+        residency: { type: string, nullable: true }
+        employmentTenureMonths: { type: integer, nullable: true }
+        humanDecidedBy: { type: string, nullable: true }
+        humanDecisionReason: { type: string, nullable: true }
+        humanDecidedAt: { type: string, format: date-time, nullable: true }
+    DecisionOutcomeSummary:
+      type: object
+      required: [engineOutcome, count]
+      properties:
+        engineOutcome: { type: string, enum: [APPROVE, REFER, DECLINE] }
+        priceBand: { type: string, nullable: true }
+        count: { type: integer, format: int64 }
+    LoanRiskAssessmentView:
+      type: object
+      required: [period, asOf, outstandingBalance, daysPastDue, bucket, stage, expectedCreditLoss, modelVersion]
+      properties:
+        period: { type: string, description: Reporting period key, yyyy-MM. }
+        asOf: { type: string, format: date }
+        outstandingBalance: { type: number }
+        daysPastDue: { type: integer }
+        bucket: { type: string, enum: [CURRENT, DPD_1_30, DPD_31_60, DPD_61_90, DPD_90_PLUS] }
+        stage: { type: string, enum: [STAGE_1, STAGE_2, STAGE_3] }
+        expectedCreditLoss: { type: number }
+        modelVersion: { type: string, description: The PD/LGD parameter set that produced the ECL. }
+    LoanRiskView:
+      type: object
+      required: [loanId, applicationId, partyId, status, principal, currency, nominalAnnualRate, termPeriods, disbursedAt]
+      properties:
+        loanId: { type: string, format: uuid }
+        applicationId: { type: string, format: uuid }
+        partyId: { type: string, format: uuid }
+        status: { type: string }
+        principal: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        nominalAnnualRate: { type: number }
+        termPeriods: { type: integer }
+        disbursedAt: { type: string, format: date-time }
+        assessment:
+          nullable: true
+          allOf: [{ $ref: '#/components/schemas/LoanRiskAssessmentView' }]
+    PolicyRuleView:
+      type: object
+      required: [id, attribute, operator, values, detail]
+      properties:
+        id: { type: string }
+        attribute: { type: string }
+        operator: { type: string, enum: [GT, GTE, LT, LTE, EQ, NEQ, IN, NOT_IN] }
+        threshold: { type: number, nullable: true }
+        values:
+          type: array
+          items: { type: string }
+        band: { type: string, nullable: true }
+        detail: { type: string }
+    PolicyTableView:
+      type: object
+      required: [kind, name, version, effectiveFrom, rules]
+      properties:
+        kind: { type: string, enum: [EXCLUSION, ELIGIBILITY, AFFORDABILITY, PRICING_BAND] }
+        name: { type: string }
+        version: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date, nullable: true }
+        rules:
+          type: array
+          items: { $ref: '#/components/schemas/PolicyRuleView' }
+    CreditPolicyView:
+      type: object
+      required: [asOf, source, codeSeeded, tables]
+      properties:
+        asOf: { type: string, format: date }
+        source: { type: string, description: The CreditPolicyPort binding's class name. }
+        codeSeeded: { type: boolean }
+        tables:
+          type: array
+          items: { $ref: '#/components/schemas/PolicyTableView' }
     CustomerQuoteRequest:
       type: object
       required: [amount, termMonths]

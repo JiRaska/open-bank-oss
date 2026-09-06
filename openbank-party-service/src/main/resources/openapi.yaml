@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.19 -> 1.20): additive
   # only — GET /api/v1/parties/approvals exposes the existing maker-checker queue and
   # ApprovalResponse gains makerId/createdAt so the checker can understand age and provenance.
-  version: 1.21.0
+  version: 1.22.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -287,6 +287,93 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/parties/{id}/mandates:
+    post:
+      tags: [Parties]
+      summary: Grant (or refresh) a representation mandate — agent may act for the entity party {id} (ADR-0284 D3)
+      operationId: grantMandate
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantMandateRequest'
+      responses:
+        '201':
+          description: Mandate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyMandate'
+        '404':
+          description: Principal or agent party not found
+        '422':
+          description: Mandate precondition failed (principal is an INDIVIDUAL, agent is not, a party is CLOSED/MERGED)
+    get:
+      tags: [Parties]
+      summary: Every mandate over the entity party {id}
+      operationId: listMandates
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Mandates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PartyMandate'
+  /api/v1/parties/{id}/mandates/{mandateId}:
+    delete:
+      tags: [Parties]
+      summary: Revoke a mandate
+      operationId: revokeMandate
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+        - name: mandateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Revoked mandate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyMandate'
+        '404':
+          description: No such mandate on this party
+  /api/v1/parties/{id}/acting-for:
+    get:
+      tags: [Parties]
+      summary: Entities the natural person {id} holds an ACTIVE mandate for — the profile switcher's source (ADR-0284 D4)
+      operationId: listActingFor
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Entity parties with the granting mandate
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActingForProfile'
   /api/v1/parties/{id}/payees:
     get:
       tags: [Parties]
@@ -712,6 +799,8 @@ components:
             nationality: { type: string, nullable: true }
             taxId: { type: string, nullable: true }
             registrationNumber: { type: string, nullable: true }
+            registrationCountry: { type: string, nullable: true, description: "ADR-0284: ISO 3166-1 alpha-2 of the register that issued registrationNumber" }
+            legalForm: { type: string, nullable: true, description: "ADR-0284: register legal-form code (ARES pravniForma, ISO 20275 ELF)" }
             email: { type: string }
             phone: { type: string, nullable: true }
             address:
@@ -739,6 +828,70 @@ components:
         scope:
           type: string
           description: What this export does and does not cover.
+    GrantMandateRequest:
+      type: object
+      required: [agentPartyId, role]
+      properties:
+        agentPartyId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [OWNER, LEGAL_REPRESENTATIVE, AUTHORISED_SIGNATORY]
+        authority:
+          type: string
+          enum: [SOLE, JOINT]
+          default: SOLE
+        source:
+          type: string
+          enum: [REGISTRY, POWER_OF_ATTORNEY, MANUAL]
+          default: MANUAL
+        evidenceRef:
+          type: string
+          nullable: true
+        validTo:
+          type: string
+          format: date-time
+          nullable: true
+    PartyMandate:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        principalPartyId: { type: string, format: uuid }
+        agentPartyId: { type: string, format: uuid }
+        role:
+          type: string
+          enum: [OWNER, LEGAL_REPRESENTATIVE, AUTHORISED_SIGNATORY]
+        authority:
+          type: string
+          enum: [SOLE, JOINT]
+        source:
+          type: string
+          enum: [REGISTRY, POWER_OF_ATTORNEY, MANUAL]
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED, EXPIRED]
+        evidenceRef: { type: string, nullable: true }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+        revokeReason: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ActingForProfile:
+      type: object
+      properties:
+        partyId: { type: string, format: uuid }
+        partyType: { type: string }
+        legalName: { type: string }
+        tradingName: { type: string, nullable: true }
+        status: { type: string }
+        kycStatus: { type: string }
+        registrationNumber: { type: string, nullable: true }
+        registrationCountry: { type: string, nullable: true }
+        legalForm: { type: string, nullable: true }
+        mandate:
+          $ref: '#/components/schemas/PartyMandate'
     CreatePartyRequest:
       type: object
       # email is mandatory: a party is uniquely keyed by email (DB unique + not-null),
@@ -764,6 +917,12 @@ components:
           type: string
         registrationNumber:
           type: string
+        registrationCountry:
+          type: string
+          description: ADR-0284. ISO 3166-1 alpha-2 of the register that issued registrationNumber (legal entities).
+        legalForm:
+          type: string
+          description: ADR-0284. Register legal-form code (ARES pravniForma, ISO 20275 ELF) for a legal entity.
         email:
           type: string
           format: email

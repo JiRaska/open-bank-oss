@@ -1,0 +1,45 @@
+# Kafka mTLS identity + ACLs for openbank-kyb-service (ADR-0137 Tier 2).
+#
+# kyb-service PRODUCES openbank.kyb.events (its outbox) and CONSUMES openbank.party.events to
+# learn when an entity party passes the KYC + AML gate (ADR-0267) so the business case can
+# complete. It also WRITES its own dead-letter topic.
+#
+# Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of
+# this service's Kafka traffic. The Strimzi User Operator mints the per-user Secret of the same
+# name in `messaging`; ESO projection into `kyb` is done by kafka-mtls-externalsecrets.yaml.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  name: kyb-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: openbank.kyb.events
+          patternType: literal
+        operations: [Write, Describe]
+      - resource:
+          type: topic
+          name: openbank.party.events
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: topic
+          name: openbank.dlq.kyb.party-events-in
+          patternType: literal
+        operations: [Write, Describe]
+      - resource:
+          type: group
+          name: kyb-service
+          patternType: literal
+        operations: [Read]

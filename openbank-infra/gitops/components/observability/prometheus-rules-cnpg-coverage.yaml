@@ -193,6 +193,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: kyb
+            cluster: kyb-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: kyc
             cluster: kyc-db
             origin: manifest

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: interest-service
     app.kubernetes.io/part-of: interest
   annotations:
-    openbank.tech/policy-checksum: "1a4fb215ea78f570"
+    openbank.tech/policy-checksum: "927783e58f759ddd"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1518,6 +1518,11 @@ data:
             - ledger.replay
             - ledger.reverse
             - ledger.trigger
+            - kyb.case.list                    # ADR-0284: business onboarding review queue
+            - kyb.case.read
+            - kyb.case.reject
+            - kyb.case.review.resolve
+            - kyb.lookup
             - lending.approve
             - lending.collateralDecide
             - lending.collateralRegister
@@ -1528,6 +1533,9 @@ data:
             - lending.writeoff
             - party.approval.decide
             - party.consent.update
+            - party.mandate.grant              # ADR-0284 D3: bind a representative to a legal-entity party
+            - party.mandate.read
+            - party.mandate.revoke
             - party.merge
             - party.update
             - sanctions.approval.decide
@@ -1593,6 +1601,10 @@ data:
           grant:
             - kyc.case.approve
             - kyc.case.reject
+            - kyb.case.list                    # ADR-0284: the KYB review queue is the KYC reviewer's queue
+            - kyb.case.read
+            - kyb.case.reject
+            - kyb.case.review.resolve
         ROLE_AUDITOR:
           grant:
             - audit.read

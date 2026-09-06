@@ -58,6 +58,14 @@ class JournalEntryEntity : PanacheEntityBase {
 
     @Column(name = "reversal_of")
     var reversalOf: UUID? = null
+
+    /**
+     * ADR-0252 synthetic-origin taint (V26). Explicit @Column name on purpose: only six services
+     * set a camel-case physical naming strategy and this is not one of them, so the convention
+     * here is to spell every column out (`check-entity-column-names.py`).
+     */
+    @Column(name = "synthetic", nullable = false)
+    var synthetic: Boolean = false
 }
 
 data class JournalEntryEntityId(val id: UUID = UUID.randomUUID(), val entryDate: LocalDate = LocalDate.EPOCH) :
