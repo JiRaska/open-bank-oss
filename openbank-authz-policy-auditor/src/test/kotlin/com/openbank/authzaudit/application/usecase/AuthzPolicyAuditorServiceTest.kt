@@ -17,18 +17,14 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.mockkStatic
 import io.mockk.slot
 import io.mockk.unmockkAll
 import io.mockk.verify
-import io.temporal.api.common.v1.WorkflowExecution
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
-import io.temporal.workflow.Functions
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -46,6 +42,15 @@ import java.time.ZoneOffset
  */
 class AuthzPolicyAuditorServiceTest {
 
+    // Deliberately NOT covered here: the dedupe (WorkflowExecutionAlreadyStarted) and
+    // start-failure-propagates paths. `WorkflowClient.start` is a static on an INTERFACE and
+    // mockkStatic does not intercept it. Measured, not assumed - with the static "mocked":
+    //   verify(exactly = 0) { stub.runCheck(any()) }  ->  "Calls: 1) runCheck(SCHEDULED)"
+    //   every { WorkflowClient.start(..) } throws ..  ->  "Expecting code to raise a throwable"
+    // i.e. the real static ran and invoked the Func. A dedupe test written against that mock
+    // asserts only the returned id, which is identical whether or not the throw fires, so it goes
+    // green while discriminating nothing. Those paths need a Temporal TestWorkflowEnvironment.
+
     private val workflowClient = mockk<WorkflowClient>()
     private val temporalConfig = mockk<TemporalConfig>()
     private val repository = mockk<FindingRepository>()
@@ -60,6 +65,12 @@ class AuthzPolicyAuditorServiceTest {
 
     @BeforeEach
     fun setUp() {
+        // Stub runCheck for EVERY trigger, not just the one the operator-run test passes. The
+        // detached tests start with SCHEDULED, and an unstubbed call surfaces as
+        // "no answer found for ...runCheck(SCHEDULED)" - which then masquerades as the assertion
+        // failure of whichever test happened to run it. GovernanceAuditorServiceTest, the passing
+        // sibling, stubs its workflow method unconditionally for the same reason.
+        every { stub.runCheck(any()) } returns report()
         every { temporalConfig.taskQueue() } returns "authz-policy-auditor-queue"
         every {
             workflowClient.newWorkflowStub(AuthzPolicyAuditorWorkflow::class.java, capture(options))
@@ -95,45 +106,12 @@ class AuthzPolicyAuditorServiceTest {
     }
 
     @Test
-    fun `startDetached returns the day-scoped id and does not wait for the workflow`() {
-        mockkStatic(WorkflowClient::class)
-        every {
-            WorkflowClient.start(any<Functions.Func<AuthzPolicyReport>>())
-        } returns WorkflowExecution.newBuilder().setWorkflowId("x").setRunId("r").build()
-
+    fun `startDetached scopes the workflow id to the UTC day, so a second pod's cron is a no-op`() {
         val id = runBlocking { service().startDetached(RunTrigger.SCHEDULED) }
 
         assertThat(id).isEqualTo("authz-policy-auditor-check-scheduled-2026-08-02")
         assertThat(options.captured.workflowId).isEqualTo(id)
-        // The point of the detached path: the caller never blocks on runCheck.
-        verify(exactly = 0) { stub.runCheck(any()) }
-        verify(exactly = 1) { WorkflowClient.start(any<Functions.Func<AuthzPolicyReport>>()) }
-    }
-
-    @Test
-    fun `a duplicate start is swallowed and the id is still returned`() {
-        mockkStatic(WorkflowClient::class)
-        every { WorkflowClient.start(any<Functions.Func<AuthzPolicyReport>>()) } throws
-            WorkflowExecutionAlreadyStarted(
-                WorkflowExecution.newBuilder().setWorkflowId("dup").setRunId("r").build(),
-                AuthzPolicyAuditorWorkflow::class.java.simpleName,
-                null,
-            )
-
-        val id = runBlocking { service().startDetached(RunTrigger.SCHEDULED) }
-
-        assertThat(id).isEqualTo("authz-policy-auditor-check-scheduled-2026-08-02")
-    }
-
-    @Test
-    fun `a start failure that is not a duplicate propagates instead of reading as dispatched`() {
-        mockkStatic(WorkflowClient::class)
-        every { WorkflowClient.start(any<Functions.Func<AuthzPolicyReport>>()) } throws
-            IllegalStateException("temporal frontend unreachable")
-
-        assertThatThrownBy { runBlocking { service().startDetached(RunTrigger.SCHEDULED) } }
-            .isInstanceOf(IllegalStateException::class.java)
-            .hasMessageContaining("temporal frontend unreachable")
+        assertThat(options.captured.taskQueue).isEqualTo("authz-policy-auditor-queue")
     }
 
     @Test

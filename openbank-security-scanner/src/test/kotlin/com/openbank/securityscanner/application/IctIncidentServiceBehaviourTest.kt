@@ -5,6 +5,7 @@
 package com.openbank.securityscanner.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.security.application.port.out.IctIncidentRepository
 import com.openbank.securityscanner.domain.IctIncident
 import com.openbank.securityscanner.domain.IncidentCategory
@@ -39,7 +40,13 @@ class IctIncidentServiceBehaviourTest {
 
     private val now = Instant.parse("2026-08-16T10:00:00Z")
     private val clock: Clock = Clock.fixed(now, ZoneOffset.UTC)
-    private val objectMapper = ObjectMapper().findAndRegisterModules()
+    // findAndRegisterModules() alone is NOT the production shape: plain Jackson leaves
+    // WRITE_DATES_AS_TIMESTAMPS enabled, so an Instant goes on the wire as an epoch float
+    // ("1.7868744E9") instead of ISO-8601. Quarkus disables it on the mapper it injects, so the
+    // test mapper has to disable it too or it asserts against a wire format nothing produces.
+    private val objectMapper = ObjectMapper()
+        .findAndRegisterModules()
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     private val repository = mockk<IctIncidentRepository>()
     private val emitter = mockk<Emitter<Record<String, String>>>()
     private val service = IctIncidentService(emitter, objectMapper, clock, repository)

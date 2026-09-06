@@ -19,7 +19,6 @@ import io.mockk.slot
 import io.mockk.unmockkStatic
 import io.temporal.api.common.v1.WorkflowExecution
 import io.temporal.client.WorkflowClient
-import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
 import io.temporal.workflow.Functions
 import kotlinx.coroutines.runBlocking
@@ -37,6 +36,14 @@ import java.time.ZoneOffset
  * away), while `startDetached` builds the per-day id that makes a second pod's cron fire a no-op.
  * Asserting on the returned report alone cannot see either, so these capture the
  * [WorkflowOptions] actually handed to Temporal.
+ *
+ * What is deliberately NOT tested here: the WorkflowExecutionAlreadyStarted (dedupe) path.
+ * `WorkflowClient.start` is a static on an INTERFACE and mockkStatic does not intercept it -
+ * measured, not assumed: with `every { WorkflowClient.start(..) } throws ..` in place the real
+ * static still ran and the Func was invoked for real. A dedupe test written that way asserts only
+ * the returned workflow id, which is the same value whether or not the throw fires, so it passes
+ * against both worlds and discriminates nothing. Covering that path needs a real Temporal
+ * TestWorkflowEnvironment, not a mock.
  */
 class GovernanceAuditorServiceTest {
 
@@ -107,15 +114,6 @@ class GovernanceAuditorServiceTest {
 
         assertThat(service(nextDay).startDetached(RunTrigger.SCHEDULED))
             .isEqualTo("governance-audit-scheduled-2026-07-26")
-    }
-
-    @Test
-    fun `a duplicate start is swallowed and still returns the id, because dedupe is not an error`():
-        Unit = runBlocking {
-        every { WorkflowClient.start(any<Functions.Func<GovernanceAuditReport>>()) } throws
-            WorkflowExecutionAlreadyStarted(WorkflowExecution.getDefaultInstance(), "GovernanceAuditWorkflow", null)
-
-        assertThat(service().startDetached(RunTrigger.SCHEDULED)).isEqualTo("governance-audit-scheduled-2026-07-25")
     }
 
     @Test
