@@ -3955,8 +3955,6 @@ components:
             - {$ref: '#/components/schemas/IncentiveReservation'}
           description: Present only when this account opening committed a campaign incentive.
 
-    # Mirrors openbank-account-service AccountPage (GET /api/v1/accounts is cursor-paginated,
-    # not a bare array).
     AccountAccessEntry:
       type: object
       description: |
@@ -3994,6 +3992,8 @@ components:
           format: uuid
           description: Present for CUSTOMER_DELEGATION — the grant the owner can revoke.
 
+    # Mirrors openbank-account-service AccountPage (GET /api/v1/accounts is cursor-paginated,
+    # not a bare array).
     AccountList:
       type: object
       properties:

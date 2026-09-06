@@ -6,3 +6,1402 @@ info:
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
   version: 1.15.0
+  description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
+  contact:
+    name: OpenBank Platform
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://localhost:8100
+    description: Local development
+tags:
+  - name: Accounts
+    description: Account management
+
+paths:
+  /api/v1/accounts:
+    post:
+      tags: [Accounts]
+      summary: Open a new account
+      operationId: openAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenAccountRequest'
+      responses:
+        '201':
+          description: Account created
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Idempotency-Key already used (replayed)
+          headers:
+            X-Idempotency-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: >
+            Well-formed request refused by policy — e.g. product not eligible
+            (BUSINESS_RULE_VIOLATION) or sanctions screening refused the opening
+            (ACCOUNT_OPENING_BLOCKED). The screening-refusal body deliberately names
+            neither the matched name nor the party (#8512).
+        '503':
+          description: >
+            Sanctions screening temporarily unavailable; the opening gate fails
+            closed (ADR-0032 §C). Safe to retry after the Retry-After interval.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    get:
+      tags: [Accounts]
+      summary: List accounts for a party
+      operationId: listAccounts
+      parameters:
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountPage'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/search:
+    get:
+      tags: [Accounts]
+      summary: Search accounts by IBAN fragment (trigram), cursor-paginated
+      description: >
+        Fuzzy substring match over the account IBAN. The fragment is normalized
+        (spaces stripped, upper-cased); fragments shorter than 2 characters return
+        an empty page. Page size is capped at 50 to bound the enumeration surface.
+      operationId: searchAccounts
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: IBAN fragment (>= 2 chars after normalization)
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 64
+            example: '0800000019'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of matching accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountPage'
+        '400':
+          description: q query parameter is required
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/active:
+    get:
+      tags: [Accounts]
+      summary: List all ACTIVE accounts fleet-wide, cursor-paginated
+      description: >
+        Fleet-wide sweep over ACTIVE accounts (ADR-0143: the "list every billable account"
+        read billing-service's cycle scheduler discovers its batch from). Staff/service roles
+        only — not customer-facing. Page size is capped at 200.
+      operationId: listActiveAccounts
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 200
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of ACTIVE accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountPage'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}:
+    get:
+      tags: [Accounts]
+      summary: Get account by ID
+      operationId: getAccount
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Account detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/accounts/iban/{iban}:
+    get:
+      tags: [Accounts]
+      summary: Get account by IBAN
+      operationId: getAccountByIban
+      parameters:
+        - name: iban
+          in: path
+          required: true
+          schema:
+            type: string
+            example: CZ6550510000001234567890
+      responses:
+        '200':
+          description: Account detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/accounts/{accountId}/balance:
+    get:
+      tags: [Accounts]
+      summary: Get account balance
+      operationId: getAccountBalance
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Balance detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountBalanceResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/close:
+    post:
+      tags: [Accounts]
+      summary: Close an account
+      operationId: closeAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CloseAccountRequest'
+      responses:
+        '200':
+          description: Account closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/freeze:
+    post:
+      tags: [Accounts]
+      summary: Freeze an account
+      operationId: freezeAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FreezeAccountRequest'
+      responses:
+        '200':
+          description: Account frozen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/unfreeze:
+    post:
+      tags: [Accounts]
+      summary: Unfreeze an account
+      operationId: unfreezeAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FreezeAccountRequest'
+      responses:
+        '200':
+          description: Account unfrozen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/savings-goal/delegation/check:
+    get:
+      tags: [Accounts]
+      summary: Whether a party may act on the account's savings goal via delegation
+      description: >-
+        Machine-readable answer to "may this party DEPOSIT / WITHDRAW /
+        PROPOSE_WITHDRAW on this account's savings goal?" (ADR-0232 D3): true when
+        the party owns the account or holds an ACTIVE, in-window SAVINGS_GOAL
+        delegation grant from the local event-fed projection. Savings goals are
+        account metadata (ADR-0153), so the grant keys on the account id. Authorize
+        action `account.read`.
+      operationId: checkSavingsGoalDelegation
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: intent
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [DEPOSIT, WITHDRAW, PROPOSE_WITHDRAW]
+      responses:
+        '200':
+          description: The authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authorized:
+                    type: boolean
+
+  /api/v1/accounts/{accountId}/delegation/payment-authorization:
+    get:
+      tags: [Accounts]
+      summary: Whether a party may initiate a payment of a given amount from the account
+      description: >-
+        The debit-authorization decision the payment path consults before letting a
+        NON-OWNER move money out of a shared account (ADR-0232 D3/D5). True when the
+        party owns the account, holds an active legacy `account_authorizations` row
+        whose own per-transaction limit covers the amount, or holds an ACTIVE,
+        in-window, OWNER-ISSUED delegation grant carrying `ACCOUNT_INITIATE_PAYMENT`
+        whose per-transaction ceiling covers the amount.
+
+
+        Unlike the boolean `/authorizations/check`, this endpoint returns the EVIDENCE:
+        `delegationId` and `grantorPartyId` are what make the resulting payment auditable
+        as a delegated action, and the grant is revocable, so nothing after the fact can
+        reconstruct which one was live when the money moved.
+
+
+        `outcome` distinguishes NO_GRANT from LIMIT_EXCEEDED for the audit record.
+        Callers MUST render every non-authorized outcome as the same opaque refusal on
+        a customer-facing wire, so this never becomes an existence oracle for another
+        party's grants. Authorize action `account.read`.
+      operationId: checkDelegatedPaymentAuthorization
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          description: >-
+            The party initiating the debit. Resolved by the caller from its own
+            authenticated identity — never from a customer-supplied request body.
+          schema:
+            type: string
+            format: uuid
+        - name: amount
+          in: query
+          required: false
+          description: >-
+            Decimal amount. Omit to ask the capability question without the ceiling;
+            a payment about to be submitted MUST supply it, or no per-transaction
+            limit is evaluated.
+          schema:
+            type: string
+        - name: currency
+          in: query
+          required: false
+          description: ISO-4217 code. Required when `amount` is supplied.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorized, outcome]
+                properties:
+                  authorized:
+                    type: boolean
+                  outcome:
+                    type: string
+                    enum:
+                      - OWNER
+                      - LEGACY_AUTHORIZATION
+                      - DELEGATED
+                      - NO_GRANT
+                      - LIMIT_EXCEEDED
+                      - ACCOUNT_NOT_FOUND
+                  delegationId:
+                    type: string
+                    format: uuid
+                    description: Present only when `outcome` is DELEGATED.
+                  grantorPartyId:
+                    type: string
+                    format: uuid
+                    description: Present only when `outcome` is DELEGATED.
+        '400':
+          description: amount supplied without a currency, or not a valid monetary value
+
+  /api/v1/accounts/{accountId}/savings-goal/delegation/proposals:
+    post:
+      tags: [Accounts]
+      summary: Propose a savings-goal withdrawal (delegate maker)
+      description: >-
+        The propose-only flow (ADR-0232 D8): a delegate holding SAVINGS_PROPOSE_WITHDRAW
+        creates a withdrawal proposal. Returns 202 with the proposal and the approvalId
+        of the paired pending approval — the owner's SCA-bound decision is the only
+        path to execution. Authorize action `account.read`.
+      operationId: proposeSavingsWithdrawal
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: >-
+            The caller's validated party, stamped by customer-edge. Authoritative — the caller's
+            identity is never taken from the body or the query string on these endpoints.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposeWithdrawalRequest'
+      responses:
+        '202':
+          description: Proposal created, pending owner approval
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      tags: [Accounts]
+      summary: List withdrawal proposals for the account (the owner's inbox)
+      operationId: listSavingsWithdrawalProposals
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+      responses:
+        '200':
+          description: Proposals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProposalResponse'
+
+  /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}/decide:
+    post:
+      tags: [Accounts]
+      summary: Owner decides a withdrawal proposal (SCA-bound)
+      description: >-
+        The owner approves or rejects with their own SCA challenge (purpose
+        SAVINGS_WITHDRAW_APPROVAL, bound to the owner). The challenge is CONSUMED here, so it is
+        single-use: one challenge authorises exactly one decision. It need not already be
+        COMPLETED — a decoupled challenge (PUSH_NOTIFICATION / BIOMETRIC) is PENDING while holding
+        a signature-verified device decision, and consume is what promotes and spends it. An
+        approval flips the proposal to APPROVED and emits SavingsWithdrawalApproved — the
+        executable instruction for the payments path. Authorize action `account.authorize`.
+      operationId: decideSavingsWithdrawalProposal
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: proposalId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: >-
+            The caller's validated party, stamped by customer-edge. Authoritative — the caller's
+            identity is never taken from the body or the query string on these endpoints.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideProposalRequest'
+      responses:
+        '200':
+          description: The decided proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: >-
+            The proposal's approval window has closed. The SCA challenge is NOT consumed in this
+            case, so the owner's second factor is not burnt on a decision that cannot succeed.
+
+  /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}:
+    delete:
+      tags: [Accounts]
+      summary: Delegate cancels their own PENDING proposal
+      operationId: cancelSavingsWithdrawalProposal
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: proposalId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: >-
+            The caller's validated party, stamped by customer-edge. Authoritative — the caller's
+            identity is never taken from the body or the query string on these endpoints.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The cancelled proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposalResponse'
+
+  /api/v1/accounts/{accountId}/goal:
+    put:
+      tags: [Accounts]
+      summary: Set or replace the account's savings goal (ADR-0153)
+      operationId: updateSavingsGoal
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavingsGoalRequest'
+      responses:
+        '200':
+          description: Goal set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags: [Accounts]
+      summary: Clear the account's savings goal (ADR-0153)
+      operationId: clearSavingsGoal
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Goal cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/nickname:
+    patch:
+      tags: [Accounts]
+      summary: Set or clear the account's customer-chosen display label
+      operationId: renameAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameAccountRequest'
+      responses:
+        '200':
+          description: Nickname set or cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations:
+    get:
+      tags: [Accounts]
+      summary: List account authorizations
+      operationId: listAccountAuthorizations
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Authorizations granted on the account
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuthorizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Accounts]
+      summary: Grant an account authorization
+      operationId: grantAccountAuthorization
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantAuthorizationRequest'
+      responses:
+        '201':
+          description: Authorization granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations/effective:
+    get:
+      tags: [Accounts]
+      summary: Everyone who can act on the account, from both authorization stores
+      description: |
+        The account owner's transparency view. Unlike `/authorizations`, which returns only the
+        `account_authorizations` table, this unifies BOTH stores the payment guard consults —
+        bank mandates and customer delegation grants — so an owner is not shown a half-truth
+        about who can take money out.
+
+        Customer-facing through the customer-edge, which stamps the validated caller party in
+        `X-Customer-Party-Id`. When that header is present the caller MUST own the account;
+        a mismatch returns 404, and an unknown account returns an empty list, so neither
+        response distinguishes "not yours" from "does not exist".
+      operationId: listEffectiveAccountAccess
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: X-Customer-Party-Id
+          in: header
+          required: false
+          description: Caller party stamped by the customer-edge; enforces owner-only when present.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Effective access entries, owner first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountAccessResponse'
+        '404':
+          description: Account not found, or not owned by the customer-scoped caller
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations/check:
+    get:
+      tags: [Accounts]
+      summary: Check whether a party holds an active account role
+      operationId: checkAccountAuthorization
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: role
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/AuthorizationRole'
+      responses:
+        '200':
+          description: Authorization decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorized]
+                properties:
+                  authorized:
+                    type: boolean
+        '400':
+          description: partyId or role is missing or malformed
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/authorizations/{authorizationId}:
+    delete:
+      tags: [Accounts]
+      summary: Revoke an account authorization
+      operationId: revokeAccountAuthorization
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: authorizationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeAuthorizationRequest'
+      responses:
+        '200':
+          description: Revoked authorization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >
+            No such authorization on this account. Returned both when the authorization id does
+            not exist and when it exists on a DIFFERENT account, with an identical body, so the
+            endpoint cannot be used to probe which authorization ids exist (#5913). Before this
+            was documented the same two cases answered 500.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/v1/accounts/{accountId}/pockets:
+    get:
+      tags: [Accounts]
+      summary: List currency pockets of an account
+      operationId: listCurrencyPockets
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Active and historical currency pockets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Accounts]
+      summary: Add a currency pocket to an account
+      operationId: addCurrencyPocket
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPocketRequest'
+      responses:
+        '201':
+          description: Currency pocket created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/pockets/resolve:
+    get:
+      tags: [Accounts]
+      summary: Resolve the pocket used to settle a payment currency
+      operationId: resolveCurrencyPocket
+      security:
+        - bearerAuth: [ROLE_API, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: currency
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+        - name: policy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [REJECT, AUTO_CREATE, CONVERT_TO_PRIMARY]
+            default: CONVERT_TO_PRIMARY
+      responses:
+        '200':
+          description: Pocket routing decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketResolutionResponse'
+        '400':
+          description: Currency or policy is missing or malformed
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/{accountId}/pockets/{currency}:
+    delete:
+      tags: [Accounts]
+      summary: Close a non-primary currency pocket
+      operationId: closeCurrencyPocket
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+        - name: currency
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+      responses:
+        '200':
+          description: Closed currency pocket
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/approvals:
+    get:
+      tags: [Accounts]
+      summary: List pending account approvals, oldest first
+      description: >-
+        PENDING maker-checker approvals for account lifecycle actions, oldest first. This is the
+        read side consumed by the unified approval inbox; deciding remains on
+        PATCH /api/v1/accounts/approvals/{id}. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending account approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/accounts/approvals/{id}:
+    patch:
+      tags: [Accounts]
+      summary: Approve or reject a pending four-eyes approval for a account lifecycle (ADR-0155)
+      description: >-
+        Decides an approval the platform's maker-checker gate paused. The checker is taken from the
+        authenticated principal, never from the body, and the store rejects a checker equal to the
+        maker. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: decideApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve:
+                  type: boolean
+                  description: true approves the pending action, false rejects it.
+      responses:
+        '200':
+          description: The decided approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    accountId:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    UnprocessableEntity:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: >
+        Denied by OPA policy (ADR-0034 Phase 5, issue #266). Enforced once
+        AUTHZ_ENFORCE=true — the request was authenticated (RBAC passed) but the
+        fine-grained account.* policy decision denied it.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    AuthorizationRole:
+      type: string
+      enum: [FULL_ACCESS, PAYMENT_ONLY, READ_ONLY, CARD_HOLDER]
+
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    GrantAuthorizationRequest:
+      type: object
+      required: [partyId, role, validFrom, grantedBy]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/AuthorizationRole'
+        dailyLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        transactionLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+          nullable: true
+        grantedBy:
+          type: string
+          format: uuid
+
+    RevokeAuthorizationRequest:
+      type: object
+      required: [revokedBy, reason]
+      properties:
+        revokedBy:
+          type: string
+          format: uuid
+        reason:
+          type: string
+
+    AccountAccessResponse:
+      type: object
+      description: |
+        One party's effective ability to act on the account. Carries the party id and nothing else
+        identifying — the caller resolves a display name from a party the customer already knows,
+        so this cannot turn an account id into a person's details.
+      required: [partyId, source, canInitiatePayments, capabilities]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [OWNER, BANK_MANDATE, CUSTOMER_DELEGATION]
+          description: |
+            Which store the entry came from. OWNER is the account holder; BANK_MANDATE is an
+            operator-set `account_authorizations` row; CUSTOMER_DELEGATION is a grant the customer
+            issued themselves and can revoke.
+        canInitiatePayments:
+          type: boolean
+          description: Whether this entry, on its own, permits a debit today.
+        capabilities:
+          type: array
+          items:
+            type: string
+        perTransactionLimit:
+          type: string
+          description: |
+            This entry's own ceiling, when it has one. Absent means the entry carries no ceiling of
+            its own — NOT that it is unlimited, since account and product limits still apply.
+        perTransactionLimitCurrency:
+          type: string
+        validFrom:
+          type: string
+        validTo:
+          type: string
+        grantId:
+          type: string
+          format: uuid
+          description: Present for CUSTOMER_DELEGATION — the grant the owner can revoke.
+
+    AuthorizationResponse:
+      type: object
+      required: [id, accountId, partyId, role, validFrom, status, grantedBy, grantedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/AuthorizationRole'
+        dailyLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        transactionLimit:
+          allOf:
+            - $ref: '#/components/schemas/Money'
+          nullable: true
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED, REVOKED, EXPIRED]
+        grantedBy:
+          type: string
+          format: uuid
+        grantedAt:
+          type: string
+          format: date-time
+
+    AddPocketRequest:
+      type: object
+      required: [currencyCode]
+      properties:
+        currencyCode:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    PocketResponse:
+      type: object
+      required: [id, accountId, currencyCode, isPrimary, status, openedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        currencyCode:
+          type: string
+        isPrimary:
+          type: boolean
+        status:
+          type: string
+          enum: [ACTIVE, FROZEN, CLOSED]
+        openedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    PocketListResponse:
+      type: object
+      required: [pockets]
+      properties:
+        pockets:
+          type: array
+          items:
+            $ref: '#/components/schemas/PocketResponse'
+
+    PocketResolutionResponse:
+      type: object
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+          enum: [USE_EXISTING, CREATE_NEW, CONVERT_TO_PRIMARY, REJECTED]
+        pocketCurrency:
+          type: string
+          nullable: true
+        convertFrom:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes account approval. makerId identifies who requested the gated action; the
+        shared ApprovalStore requires a different authenticated principal to decide it.
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+          description: The gated account action this approval was raised for.
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          description: Request time; pending approvals expire after 24 hours.
+        decidedBy:
+          type: string
+          nullable: true
+
+    OpenAccountRequest:
+      type: object
+      required: [partyId, productId, accountType, currencyCode, legalName]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+        accountType:
+          type: string
+          enum: [CURRENT, SAVINGS, LOAN, ESCROW, TERM_DEPOSIT]
+        currencyCode:
+          type: string
+          example: CZK
+        legalName:
+          type: string
+          description: Legal name of the account holder for sanctions screening (ADR-0032 §C).
+
+    CloseAccountRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    FreezeAccountRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    AccountResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountNumber:
+          type: string
+        accountType:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+        currencyCode:
+          type: string
+        status:
+          type: string
+          enum: [PENDING_ACTIVATION, ACTIVE, DORMANT, FROZEN, CLOSED]
+        openedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        goalName:
+          type: string
+          nullable: true
+        goalTargetMinorUnits:
+          type: integer
+          format: int64
+          nullable: true
+        goalTargetDate:
+          type: string
+          format: date
+          nullable: true
+        nickname:
+          type: string
+          nullable: true
+
+    RenameAccountRequest:
+      type: object
+      properties:
+        nickname:
+          type: string
+          nullable: true
+          maxLength: 60
+
+    ProposeWithdrawalRequest:
+      type: object
+      required: [amountMinor, currency]
+      properties:
+        amountMinor: { type: integer, format: int64, minimum: 1 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        note: { type: string }
+    DecideProposalRequest:
+      type: object
+      required: [approve, scaSessionId]
+      properties:
+        approve: { type: boolean }
+        scaSessionId: { type: string, format: uuid }
+    ProposalResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        delegatePartyId: { type: string, format: uuid }
+        amountMinor: { type: integer, format: int64 }
+        currency: { type: string }
+        note: { type: string }
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, CANCELLED, EXPIRED]
+        approvalId: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: >-
+            When the proposal's approval window closes. A proposal past this instant cannot be
+            approved even while its stored status still reads PENDING — the decision path checks
+            the window directly, so it does not depend on the expiry sweep having already run.
+    SavingsGoalRequest:
+      type: object
+      required: [name, targetMinorUnits]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        targetMinorUnits:
+          type: integer
+          format: int64
+        targetDate:
+          type: string
+          format: date
+          nullable: true
+
+    AccountBalanceResponse:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        availableBalance:
+          type: number
+        currentBalance:
+          type: number
+        reservedBalance:
+          type: number
+        pendingBalance:
+          type: number
+        currencyCode:
+          type: string
+        lastUpdatedAt:
+          type: string
+          format: date-time
+
+    AccountPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountResponse'
+        pagination:
+          $ref: '#/components/schemas/CursorPagination'
+
+    CursorPagination:
+      type: object
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        traceId:
+          type: string
