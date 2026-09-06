@@ -81,6 +81,7 @@ spec:
       - kyc
       - ledger
       - lending
+      - kyb
       - notifications
       - onboarding
       - party
