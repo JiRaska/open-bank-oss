@@ -224,6 +224,24 @@ what the catalogue may hold.
   `rail` books same-day per `SettlementScope` (#5225); the amount and target account are entirely
   determined by lending-service's own disbursement flow, not caller-suppliable beyond that.
   Rollback: drop the `namespaceSelector` entry for `lending`.
+- **2026-08-16** — Four-eyes approval bound to the request, not the maker (#4754). `transaction.reverse`
+  and `transaction.sweep` are both `four_eyes_required` (rules.yaml `four_eyes.verbs`), and both carried
+  `@Authorize(action = ..., resource = "")`. `AuthorizeInterceptor` stamps a `PendingApproval` with
+  `query.resource?.id` — with an empty resource string every approval for that action was created and
+  matched at `resourceId = null`, so a checker's approval to reverse transaction A satisfied a DIFFERENT
+  reversal of transaction B by the same maker (and, for sweep, a different account pair for a different
+  amount). This is exactly the "resourceId must match the CURRENT request" guarantee §4a documents for
+  the approval-decide endpoint — the guarantee held there, and did not hold at the two endpoints that
+  create the approval in the first place, since a wildcard resource never gave the interceptor a real
+  resourceId to bind to. `transaction.reverse` -> `#transactionId`; `transaction.sweep` ->
+  `#request.idempotencyKey` (not `mergeReference`: one merge reference covers every account pair swept in
+  a merge, so binding to it would let an approval for one pocket satisfy the sweep of another; the
+  idempotency key is per-request unique and is what the maker replays on the `X-Approval-Id` retry).
+  Verified by `MergeSweepApprovalBindingIT` (real HTTP, `@TestSecurity`), asserting both that a
+  mismatched approval is rejected and that the correct one still resolves. No behavior change while
+  `authz.four-eyes.enforce=false` (default, per §4a and §4b above) — this corrects the binding the
+  mechanism uses once enforcement is turned on, same rollout gate as the rest of §4a/§4b. Rollback: revert.
+
 - **2026-08-07** — Merchant enrichment (D5). `GET /api/v1/transactions` answers an optional `merchant` object (clean name, logo, category, shop geo) resolved from the new `merchant_catalog` table via an exact match on the normalised acquirer descriptor. STRIDE supplement in §4c. No new endpoint, caller, role or Kafka topic. Three properties are load-bearing rather than incidental: matching is **exact** (fuzzy matching would hand one merchant's identity and coordinates to a similarly-named other, which is a fabrication with a trust cost, not a UX nicety); the field is `NON_NULL`, so a transaction with no catalogue entry produces a body byte-identical to before (serialising `"merchant": null` is a wire change for every existing consumer and did in fact fail the sepa-payment Pact verification); and `description` is passed through untouched, because disputes and SPAYD are built from the raw acquirer text and must never inherit a prettified name. Geo is null for card-not-present merchants, with a CHECK constraint keeping lat/lon both-or-neither so a half-filled row cannot render as a pin at 0°. Rollback: revert.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `accountId` on listTransactions. Listing "transactions for an account" with no account is a malformed request; the null reached `ListTransactionsQuery` and answered 500. The sibling searchTransactions endpoint already declares `accountId` nullable by design (search is deliberately multi-criteria) and is untouched. No new caller or boundary; `@RolesAllowed` and `@Authorize(action = "transaction.list")` are unchanged and still run first. Rollback: revert.

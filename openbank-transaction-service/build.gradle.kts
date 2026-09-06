@@ -133,6 +133,22 @@ tasks.withType<Test> {
     // openbank-transaction-service/build/test-results/`. A cancelled job produces no report at
     // all, so the cost is not just the runner slot — it is that nothing survives to diagnose from.
     timeout.set(Duration.ofMinutes(25))
+
+    // Gradle's default test-JVM heap is 512m, which this module never overrode. That was
+    // survivable while it had one or two @QuarkusTestProfile classes; MergeSweepApprovalBindingIT's
+    // FourEyesProfile is now another distinct profile forcing its OWN Quarkus boot in the same
+    // forked JVM, alongside the module's Testcontainers-backed ITs, Redis/Temporal/Kafka clients,
+    // WireMock, and MockK-based unit tests — the exact multi-Quarkus-boot-per-JVM shape
+    // account-service and lending-service already hit and fixed the same way. In the full-module
+    // run that manifested as `java.lang.OutOfMemoryError` late in the suite (observed directly in a
+    // Kafka consumer heartbeat thread), which reads misleadingly downstream: client-side calls that
+    // happen to be mid-flight during the GC thrash trip their own read-timeout as a
+    // `SocketTimeoutException` (MergeSweepApprovalBindingIT's two four-eyes steps, both fast and
+    // fully stubbed in isolation), while the OOMing non-daemon Kafka consumer thread keeps the JVM
+    // alive well past that until this task's own 25-minute timeout above force-kills it.
+    //
+    // Deliberately per-module rather than a fleet default — see account-service's identical comment.
+    maxHeapSize = "2g"
 }
 
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3; fleet rollout #1266). Weekly +
