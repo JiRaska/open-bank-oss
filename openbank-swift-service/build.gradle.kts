@@ -76,9 +76,15 @@ tasks.withType<Test> {
     // died in the same minute — `OutOfMemoryError: Java heap space` across ClassGraph-worker /
     // vert.x-eventloop / Finalizer threads ~3 minutes into the suite, after which the JVM hung
     // in GC until the 45-minute job timeout (#8781) or the pact verification Timed out
-    // downstream of the GC storm (#8697). Same 2g ceiling account/lending/product-catalog
-    // already run with; a ceiling, not an allocation.
-    maxHeapSize = "2g"
+    // downstream of the GC storm (#8697). 2g (the account/lending/product-catalog ceiling)
+    // proved NOT enough: measured 2026-09-06 the suite OOM'd at 2g on three consecutive CI
+    // attempts of one unchanged commit (PR #8942, run 34032738729) — OutOfMemoryError across
+    // ClassGraph-worker / vert.x-eventloop / Finalizer / HttpClient threads ~6 minutes in,
+    // surfacing as SwiftPactFolderProviderVerificationTest "Uncaught exception during scan"
+    // (the scan is just the allocation that trips the exhausted heap, not the cause). Raised
+    // to 3g; a ceiling, not an allocation. A duplicate `maxHeapSize = "2g"` further down this
+    // block (added independently by #8796 for the same #8916 defect) was consolidated here.
+    maxHeapSize = "3g"
 
     // CI hang #3 (#2320) is GONE — measured, not assumed. `SwiftBootSmokeIT` used to hang 37+ min
     // at Quarkus boot on the runner pool (`@DisabledIfEnvironmentVariable` is evaluated AFTER
@@ -101,18 +107,6 @@ tasks.withType<Test> {
     // runner until the 45-minute fleet job timeout takes the whole matrix down with it — the
     // failure mode that caused the exclusion in the first place. Fail fast, not fail wide.
     systemProperty("junit.jupiter.execution.timeout.default", "8m")
-
-    // Test-worker heap: Gradle's 512 MiB default is not enough for this module's CI lane.
-    // The suite boots several @QuarkusTest instances plus Testcontainers (Postgres) in one
-    // worker, and on the shared runner pool the test JVM dies with OutOfMemoryError roughly
-    // six minutes in — measured 2026-09-06 on five consecutive runs of one unchanged commit
-    // (PR #8796, Services CI run 33990777002): three of the seven swift-lane attempts OOM'd
-    // before the pact suite even ran, and the crippled JVM then dragged the job into the
-    // 45-minute matrix timeout (issue #8916). Same defect and same per-module fix as
-    // account/lending (2g) and product-catalog (1536m) above; deliberately NOT a fleet-wide
-    // bump in build-logic, per the same comment there: nothing measures test heap across the
-    // ~50 modules, so a global raise is an unmeasured ratchet.
-    maxHeapSize = "2g"
 
     // Pact rootDir + Pact Broker property forwarding centralised into
     // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
