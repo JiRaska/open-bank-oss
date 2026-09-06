@@ -6,7 +6,7 @@ package com.openbank.transaction.infrastructure.rest
 
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
-import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
+import com.openbank.transaction.infrastructure.persistence.repository.TransactionDescriptorRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -25,7 +25,7 @@ import java.time.Instant
 class MerchantCatalogResourceTest {
 
     private lateinit var catalog: MerchantCatalogRepository
-    private lateinit var transactions: PanacheTransactionRepository
+    private lateinit var transactions: TransactionDescriptorRepository
     private lateinit var resource: MerchantCatalogResource
 
     @BeforeEach
