@@ -39,6 +39,7 @@ class TransactionPactStateCoverageTest {
 
         val stateless = pacts.flatMap { file ->
             val pact: Map<String, Any?> = mapper.readValue(file)
+
             @Suppress("UNCHECKED_CAST")
             val interactions = pact["interactions"] as? List<Map<String, Any?>> ?: emptyList()
             interactions
