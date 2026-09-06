@@ -1399,7 +1399,39 @@ provenance:
   # uncovered services; cf. the #770 image-signature Enforce revert.)
   enforced: advisory
   target_enforce_date: "2026-09-30"   # ADR-0144
-  blocked_on: "all four enforce_criteria below must hold; see that list for the specific gap"
+  # MEASURED 2026-09-05, criterion by criterion. Two of the four already hold and this record
+  # said neither did; the other two cannot be met by waiting, because nothing measures them.
+  #
+  #   1. every service's latest release carries a green evidence bundle — NOT MEASURED, and
+  #      not measurABLE as things stand: verify-release-evidence.yml verifies ONE tag per week
+  #      (schedule default: "the newest release"). The 2026-08-31 run verified exactly
+  #      fx-service-v0.14.1. A weekly single-tag check never becomes a fleet statement, however
+  #      long it runs. Fleet coverage needs a different producer.
+  #   2. fleet-attestation green — SATISFIED. Locally the script exits 2 (0 verified, 64 could
+  #      not be checked) purely because cosign/KMS are absent, and it says so itself: "Exit 2 =
+  #      'could not run', NOT a verdict." In CI it prints
+  #      "FLEET ATTESTATION GATE: PASS — every declared openbank-* image is attested"
+  #      (run 33952524397). Do not read the local exit code as a fleet verdict.
+  #   3. kyverno SBOM-attestation rule Audit -> Enforce — ALREADY DONE, and this line describing
+  #      it as "one line once criteria 1-2 hold" is two months stale. Live in the cluster:
+  #      `kubectl get clusterpolicy verify-openbank-image-sbom-attestation` reports Enforce,
+  #      Ready, age 60d.
+  #   4. "the advisory gate has run clean for an observation window" — THE GATE DOES NOT EXIST.
+  #      `provenance` appears in no entry of .github/gates/gates.yaml and no workflow invokes a
+  #      provenance checker. A condition on the behaviour of a gate that was never built has no
+  #      truth value; it cannot be satisfied by waiting. Same shape as the finops_tiers gap
+  #      (#8799), one level up: there rules.yaml named a gate missing from the manifest, here it
+  #      predicates graduation on one that was never named at all.
+  #
+  # So the honest state is 2 of 4 met, 1 unmeasurable with today's producers, and 1 vacuous.
+  # 2026-09-30 cannot be met by waiting; it needs a fleet-coverage producer for criterion 1 and
+  # either a real gate or a rewritten criterion 4.
+  blocked_on: "measured 2026-09-05: criteria 2 (fleet-attestation, PASSES in CI run 33952524397)
+    and 3 (kyverno rule live in Enforce, Ready 60d) ALREADY HOLD — this record said neither did.
+    Criterion 1 is not measurable as things stand (verify-release-evidence.yml checks one tag per
+    week, not fleet coverage), and criterion 4 is vacuous: no `provenance` gate exists in
+    gates.yaml or any workflow, so 'the advisory gate has run clean' has no subject. The date
+    needs a fleet-coverage producer and a rewritten or implemented criterion 4, not more time."
   enforce_criteria:
     - "every deployable service's latest release carries a verify-release-evidence-green bundle (admin-ui excepted until it has a non-Gradle SBOM source)"
     - "the fleet-attestation gate passes: .github/scripts/check-fleet-attestations.sh is GREEN against origin/main (see fleet_attestation_gate below) -- this is a HARD precondition, not a judgement call"
