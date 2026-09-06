@@ -533,11 +533,13 @@ jobs:
             api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
               | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
           done \
+            | head -"${MAX_ENVELOPES}" \
             | while read -r artifact_id artifact_name; do
-                [ "${DOWNLOADED_THIS_RUN}" -lt "${MAX_ENVELOPES}" ] || break
                 [ -n "${artifact_id}" ] || continue
                 # Diff-forward: skip any artifact id the cache already staged, whatever its
-                # current expiry state — the staged envelope outlives the artifact.
+                # current expiry state — the staged envelope outlives the artifact. The
+                # candidate list above is still bounded at MAX_ENVELOPES BEFORE any download;
+                # this skip is why steady state downloads a handful, not the bound.
                 grep -qx "${artifact_id}" openbank-admin-ui/test-run-history/.staged-ids && continue
                 archive="/tmp/${artifact_name}.zip"
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
@@ -549,7 +551,6 @@ jobs:
                 [ -n "${envelope}" ] || continue
                 unzip -p "${archive}" "${envelope}" > "openbank-admin-ui/test-run-history/${artifact_name}.json"
                 echo "${artifact_id}" >> openbank-admin-ui/test-run-history/.staged-ids
-                DOWNLOADED_THIS_RUN=$((DOWNLOADED_THIS_RUN + 1))
               done
           echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) downloaded this build."
 
