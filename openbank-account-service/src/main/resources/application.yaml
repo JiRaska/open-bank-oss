@@ -186,7 +186,10 @@ mp:
         connector: smallrye-kafka
         topic: openbank.party.events
         group.id: openbank-account-service
-        auto.offset.reset: earliest
+        # auto.offset.reset deliberately unset (#8370): the inert dotted YAML key was a config lie --
+        # SmallRye quotes dotted leaf keys, so the connector always ran its default (latest) and the
+        # declared `earliest` never applied. Deleting it makes the file match the running reality; to
+        # rebuild projections, flip it via the msg-override ConfigMap in an announced replay window.
         # A projection failure that survives PartyEventConsumer's bounded retry is nacked here
         # rather than swallowed. dead-letter-queue routes that record to the DLQ topic and lets
         # the consumer keep moving — so a transient dependency outage parks the event for replay
@@ -220,7 +223,10 @@ mp:
         connector: smallrye-kafka
         topic: openbank.delegation.events
         group.id: openbank-account-service
-        auto.offset.reset: earliest
+        # auto.offset.reset deliberately unset (#8370): the inert dotted YAML key was a config lie --
+        # SmallRye quotes dotted leaf keys, so the connector always ran its default (latest) and the
+        # declared `earliest` never applied. Deleting it makes the file match the running reality; to
+        # rebuild projections, flip it via the msg-override ConfigMap in an announced replay window.
         # Explicit + nested for the reasons spelled out on party-events-in above. This channel is
         # the one where the collision was not hypothetical: card-issuance-service also consumes
         # `delegation-events-in`, so both services were writing their dead letters into the single

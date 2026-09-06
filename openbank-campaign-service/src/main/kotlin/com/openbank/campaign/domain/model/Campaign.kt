@@ -18,6 +18,12 @@ import java.util.UUID
 data class CampaignDefinition(
     val name: String,
     val goal: String,
+    /**
+     * Mandatory: no default, so a maker cannot omit it and a caller cannot forget to pass it.
+     * `goal` is free text and cannot carry this — a gate keyed on prose fails open on a typo, a
+     * translation, or a maker who writes "Q4 cash push" instead of "loan".
+     */
+    val productKind: CampaignProductKind,
     val segmentRef: SegmentRef,
     val steps: List<CampaignStep>,
     val stopCondition: StopCondition? = null,
@@ -51,6 +57,8 @@ data class Campaign(
     val id: UUID,
     val name: String,
     val goal: String,
+    /** See [CampaignProductKind]. Fixed once the draft leaves DRAFT — [revise] is draft-only. */
+    val productKind: CampaignProductKind,
     val segmentRef: SegmentRef,
     val steps: List<CampaignStep>,
     val stopCondition: StopCondition? = null,
@@ -138,6 +146,10 @@ data class Campaign(
         return copy(
             name = definition.name,
             goal = definition.goal,
+            // Revisable only because this method already refuses anything but a DRAFT. Once a
+            // campaign is submitted for approval the kind is frozen, so the consent governing the
+            // parties it enrols cannot change under them mid-flight.
+            productKind = definition.productKind,
             segmentRef = definition.segmentRef,
             steps = definition.steps.sortedBy { it.order },
             stopCondition = definition.stopCondition,
@@ -307,6 +319,48 @@ enum class ContentVariant {
 }
 
 enum class CampaignState { DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED }
+
+/**
+ * What a campaign is selling, as far as consent is concerned (ADR-0269 rule 1).
+ *
+ * MANDATORY on every campaign and deliberately NOT nullable. A nullable field would make "this is
+ * not a credit campaign" and "nobody said what this is" the same value, and the whole reason the
+ * field exists is that the credit step gate must be able to tell them apart — the same three-valued
+ * discipline `CourtRegisterSignalState` keeps on the lending side.
+ *
+ * The credit members reuse the origination vocabulary (`CreditProductKind` in openbank-libs-domain)
+ * rather than inventing a parallel one: a campaign for an unsecured loan and the journey it enrols
+ * into must not be able to disagree about what an unsecured loan is.
+ */
+enum class CampaignProductKind {
+    /** Not a credit campaign. The overwhelming majority, and an explicit statement rather than a gap. */
+    NONE,
+
+    /** Cash loan. */
+    UNSECURED,
+
+    /** Mortgage or car loan. */
+    SECURED,
+
+    /** Overdraft, credit card, instalment limit. */
+    REVOLVING,
+
+    ;
+
+    /** Whether ADR-0269's credit consent and suppression floor govern this campaign. */
+    val isCredit: Boolean get() = this != NONE
+
+    companion object {
+        /**
+         * The consent-service scope a credit campaign requires, named once.
+         *
+         * Two enrolment paths ask this question — the scheduled sweep and the trigger consumer —
+         * and a second spelling of the string would let one of them silently ask about a scope
+         * nobody grants, which reads as "no consent" and looks like the gate working.
+         */
+        const val CREDIT_OFFERS_SCOPE: String = "CREDIT_OFFERS"
+    }
+}
 
 /**
  * One journey step: a catalogue template with declared variables, delivered on a channel after a

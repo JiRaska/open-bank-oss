@@ -21,8 +21,13 @@ import org.junit.jupiter.api.Test
 class LendingSecurityTest {
 
     @Test
-    fun `no LendingResource endpoint is @PermitAll`() {
-        val methods = LendingResource::class.java.declaredMethods.filter { m ->
+    fun `no LendingResource endpoint is @PermitAll`() = assertNoPermitAll(LendingResource::class.java)
+
+    @Test
+    fun `no CreditRiskResource endpoint is @PermitAll`() = assertNoPermitAll(CreditRiskResource::class.java)
+
+    private fun assertNoPermitAll(resource: Class<*>) {
+        val methods = resource.declaredMethods.filter { m ->
             m.getAnnotation(GET::class.java) != null ||
                 m.getAnnotation(POST::class.java) != null ||
                 m.getAnnotation(PUT::class.java) != null ||

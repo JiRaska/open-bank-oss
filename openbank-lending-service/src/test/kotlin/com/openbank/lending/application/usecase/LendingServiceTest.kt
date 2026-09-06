@@ -124,6 +124,9 @@ class LendingServiceTest {
     private fun stubClaim(claimed: Int = 1) {
         every { applications.compareAndSetStatus(any(), any(), any(), any(), any(), any()) } returns
             Uni.createFrom().item(claimed)
+        // The ASSESSMENT leg claims through the decision-carrying overload instead, so both must be
+        // stubbed for a walk that crosses that state.
+        every { applications.compareAndSetDecision(any(), any()) } returns Uni.createFrom().item(claimed)
     }
 
     private fun verifyClaims(times: Int) =
@@ -242,6 +245,18 @@ class LendingServiceTest {
         assertThat(result.decisionPriceBand).isEqualTo("PRIME")
         assertThat(result.decisionInputHash).hasSize(64)
         assertThat(evidenceSlot.map { it.eventType }).contains("credit.decision.evaluated")
+
+        // The claim must carry the evidence into the database, not just into the response. Until
+        // `compareAndSetDecision` existed the ASSESSMENT leg claimed through `compareAndSetStatus`,
+        // which writes neither outcome nor price band, so every engine column stayed NULL while
+        // these very assertions passed against the in-memory copy.
+        val claimed = slot<LoanApplication>()
+        verify(exactly = 1) { applications.compareAndSetDecision(capture(claimed), OriginationState.ASSESSMENT) }
+        assertThat(claimed.captured.decisionOutcome).isEqualTo("APPROVE")
+        assertThat(claimed.captured.decisionPriceBand).isEqualTo("PRIME")
+        assertThat(claimed.captured.decisionInputHash).isEqualTo(result.decisionInputHash)
+        assertThat(claimed.captured.decidedEngineAt).isNotNull()
+        verify(exactly = 0) { applications.compareAndSetStatus(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

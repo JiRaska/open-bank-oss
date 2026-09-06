@@ -152,6 +152,17 @@ class UpstreamClientTest {
     }
 
     @Test
+    fun `post preserves upstream idempotency replay evidence`() {
+        withServer(
+            responseHeaders = mapOf(UpstreamClient.IDEMPOTENCY_REPLAY_HEADER to "true"),
+        ) { client, baseUrl, _ ->
+            val response = client.post("$baseUrl/reservations", "party-9", "{}", "stable-key")
+
+            assertThat(response.getHeaderString(UpstreamClient.IDEMPOTENCY_REPLAY_HEADER)).isEqualTo("true")
+        }
+    }
+
+    @Test
     fun `post with extraHeaders forwards them and applies them after the standard headers`() {
         withServer { client, baseUrl, requests ->
             client.post(
@@ -227,6 +238,7 @@ class UpstreamClientTest {
         tokenResponse: String = """{"access_token":"test-token","expires_in":300}""",
         docBytes: ByteArray? = null,
         docContentType: String = "application/json",
+        responseHeaders: Map<String, String> = emptyMap(),
         block: (UpstreamClient, String, List<CapturedRequest>) -> Unit,
     ) {
         tokenHits.set(0)
@@ -252,6 +264,7 @@ class UpstreamClientTest {
                     ),
                 )
             }
+            responseHeaders.forEach { (name, value) -> exchange.responseHeaders.add(name, value) }
             respond(exchange, 200, "application/json", "{}".toByteArray(Charsets.UTF_8))
         }
         server.start()
