@@ -116,6 +116,30 @@ class DelegationNotificationConsumerTest {
     }
 
     @Test
+    fun `first confirmed delegated spend notifies only the grantor with a stable deduplication key`() {
+        consumer.consume(
+            eventPayload("SpendConfirmed").dropLast(1) +
+                ",\"sourceService\":\"delegation-service\",\"reservationId\":\"${UUID.randomUUID()}\"}",
+        ).subscribe().with({}, {})
+
+        val req = capturedRequests().single()
+        assertThat(req.partyId).isEqualTo(grantorPartyId)
+        assertThat(req.template).isEqualTo(NotificationTemplate.DELEGATION_FIRST_USE)
+        assertThat(req.variables).isEmpty()
+        assertThat(req.correlationId).isEqualTo(grantId)
+        assertThat(req.deduplicationKey).isEqualTo(grantId)
+    }
+
+    @Test
+    fun `first confirmed spend from another source is rejected`() {
+        consumer.consume(
+            eventPayload("SpendConfirmed").dropLast(1) + ",\"sourceService\":\"other-service\"}",
+        ).subscribe().with({}, {})
+
+        verify(exactly = 0) { notificationConsumer.consume(any()) }
+    }
+
+    @Test
     fun `bank suspension and reinstatement notify both parties`() {
         for (type in listOf("DelegationSuspended", "DelegationReinstated")) {
             consumer.consume(eventPayload(type)).subscribe().with({}, {})

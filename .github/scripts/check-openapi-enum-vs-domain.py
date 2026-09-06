@@ -111,6 +111,13 @@ BASELINE: dict[str, str] = {
         "attribution query filters `channel in (PUSH, BANNER)`, so EMAIL is unreturnable.",
     "openbank-campaign-service:DRY_RUN,SENT,SUPPRESSED_CAP,SUPPRESSED_CONSENT,SUPPRESSED_QUIET_HOURS":
         "#5962 — SendOutcome: undeclared CONVERTED/FAILED/SKIPPED_CONDITION/SUPPRESSED_LIST",
+    # NOT drift — a DELIBERATE SUBSET (#5962). Delegation lifecycle approvals persist ONLY
+    # PROPOSED/REJECTED/EXECUTED: decide is atomic (DelegationLifecycleApprovalService
+    # PERSISTED_STATES), so the shared ProposalState's transient APPROVED would claim a decision
+    # without the side effect, and no withdraw operation exists (WITHDRAWN unreachable).
+    "openbank-delegation-service:EXECUTED,PROPOSED,REJECTED":
+        "#5962 — lifecycle approval state: deliberate subset of libs ProposalState; decide is "
+        "atomic, APPROVED/WITHDRAWN are unpersistable by construction.",
     "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
         "#5962 — ActionKind: undeclared FX_CONVERSION",
     # MIS-PAIRINGS, surfaced when the scan began including openbank-libs-* (#7984): three

@@ -6,6 +6,7 @@ package com.openbank.lending.application.port.out
 
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
+import com.openbank.lending.domain.model.DecisionOutcomeSummary
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanInstallment
@@ -49,6 +50,22 @@ interface LoanApplicationRepository {
      * The caller must treat `0` as a refusal and must not perform any side effect of the transition
      * — no evidence event, no workflow signal (issue #3850).
      */
+    /**
+     * The ASSESSMENT leg's claim: the same conditional transition as [compareAndSetStatus], plus the
+     * ADR-0213 engine evidence the evaluation produced (outcome, price band, reason codes, matched
+     * rules, pinned table versions, input snapshot hash, evaluation timestamp).
+     *
+     * It exists because [compareAndSetStatus] writes **only** status and the three human decision
+     * fields, so every engine output was computed, returned in the response, emitted as evidence —
+     * and never stored. The columns have existed since `V11__decision_engine_inputs.sql`; nothing
+     * wrote them, so `decision_outcome` was NULL on every row and a reader (the credit-risk console,
+     * a regulator's reconstruction) had only the outbox event to go on.
+     *
+     * Returns rows claimed, `0` meaning another actor moved the row on first — same contract, same
+     * caller obligation: no evidence event and no workflow signal on a refusal (issue #3850).
+     */
+    fun compareAndSetDecision(application: LoanApplication, from: OriginationState): Uni<Int>
+
     fun compareAndSetStatus(
         id: LoanApplicationId,
         from: OriginationState,
@@ -57,6 +74,22 @@ interface LoanApplicationRepository {
         decisionReason: String?,
         decidedAt: OffsetDateTime?,
     ): Uni<Int>
+}
+
+/**
+ * The credit-risk READ side over applications the ADR-0213 engine has already decided.
+ *
+ * Separate from [LoanApplicationRepository] on purpose: that port is the origination write path
+ * (save, claim a transition, four-eyes decide) and these are reporting queries with no bearing on
+ * an application's lifecycle. Splitting them keeps a reader from acquiring the write surface as a
+ * dependency, and keeps each implementation a coherent size.
+ */
+interface CreditDecisionQueryRepository {
+    /** Applications the engine has evaluated (`decidedEngineAt` set), newest evaluation first. */
+    fun findEvaluated(limit: Int): Uni<List<LoanApplication>>
+
+    /** Book-wide engine outcome × price-band totals, grouped in the database. */
+    fun summariseDecisions(): Uni<List<DecisionOutcomeSummary>>
 }
 
 interface LoanRepository {
@@ -71,6 +104,9 @@ interface LoanRepository {
     /** Per-status totals across the whole loan book (issue #3294). See the note on
      *  [LoanApplicationRepository.summariseByState]. */
     fun summariseByState(): Uni<List<LoanStateSummary>>
+
+    /** Every loan regardless of status, newest disbursement first. Capped by the caller. */
+    fun findRecent(limit: Int): Uni<List<Loan>>
 }
 
 interface InstallmentRepository {
@@ -113,4 +149,7 @@ interface ProvisioningRepository {
     fun findByLoanAndPeriod(loanId: LoanId, period: String): Uni<LoanProvisioningRecord?>
 
     fun save(record: LoanProvisioningRecord): Uni<LoanProvisioningRecord>
+
+    /** The latest persisted record per loan — one row per loan that has ever been assessed. */
+    fun findLatestPerLoan(): Uni<List<LoanProvisioningRecord>>
 }

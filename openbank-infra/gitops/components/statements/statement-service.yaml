@@ -35,7 +35,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-statement-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "8750604dc2d69c71"
+        openbank.tech/policy-checksum: "fc0119e85008ebc1"
       labels:
         app.kubernetes.io/name: statement-service
         app.kubernetes.io/part-of: statements
@@ -54,7 +54,7 @@ spec:
           # Kyverno's verify-openbank-image-sbom-attestation policy blocked every pod
           # (Deployment stuck at 0/1) → the EoM close / Closings screen read "not
           # responding". sandbox-a407c3ae is the #706 main build with a valid attestation.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-ab83fe6e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-statement-service:sandbox-f328ebdf
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

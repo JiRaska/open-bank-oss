@@ -246,6 +246,33 @@ class NotificationConsumerIT {
         assertThat(notificationIdFor(partyId)?.version()).isEqualTo(7)
     }
 
+    @Test
+    fun `same durable first-use fact is persisted only once across redelivery`() {
+        val partyId = UUID.randomUUID()
+        val grantId = UUID.randomUUID()
+        val request = NotificationRequest(
+            partyId = partyId,
+            channel = NotificationChannel.PUSH,
+            template = NotificationTemplate.DELEGATION_FIRST_USE,
+            recipient = partyId.toString(),
+            variables = emptyMap(),
+            correlationId = grantId,
+            deduplicationKey = grantId,
+        )
+
+        consumeAndAwait(request)
+        // One logical request legitimately persists TWO rows on first delivery: the original PUSH
+        // (FAILED — no device) and its generic EMAIL fallback (#7463). The deduplication key's
+        // guarantee is that a redelivery adds NOTHING, so assert stability plus the uniqueness of
+        // the dedup-keyed fact itself, not a total that couples this test to the fallback path.
+        val rowsAfterFirstDelivery = countFor(partyId)
+        consumeAndAwait(request)
+
+        assertThat(countFor(partyId)).isEqualTo(rowsAfterFirstDelivery)
+        assertThat(notificationsFor(partyId).count { it.deduplicationKey == grantId }).isEqualTo(1)
+        assertThat(correlationIdFor(partyId)).isEqualTo(grantId)
+    }
+
     /**
      * The redaction must bite at the storage boundary and nowhere earlier: the customer still
      * receives the real OTP, the database never holds it. Asserting both halves in one test is

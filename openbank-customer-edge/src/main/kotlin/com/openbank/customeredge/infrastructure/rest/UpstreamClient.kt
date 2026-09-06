@@ -126,6 +126,7 @@ class UpstreamClient {
 
     companion object {
         const val PARTY_HEADER = "X-Customer-Party-Id"
+        const val IDEMPOTENCY_REPLAY_HEADER = "X-Idempotency-Replayed"
         private const val TOKEN_REFRESH_BUFFER_SECONDS = 60L
         private val JSON = com.fasterxml.jackson.databind.ObjectMapper()
     }
@@ -198,6 +199,17 @@ class UpstreamClient {
             ?: error("Token endpoint response missing access_token")
         val expiresIn = tree.get("expires_in")?.asLong() ?: 300L
         return token to expiresIn
+    }
+
+    /** Preserve the one response header that is durable evidence rather than proxy metadata. */
+    private fun jsonResponse(response: HttpResponse<String>): Response {
+        val builder = Response.status(response.statusCode())
+            .entity(response.body())
+            .type(MediaType.APPLICATION_JSON)
+        response.headers().firstValue(IDEMPOTENCY_REPLAY_HEADER).ifPresent { replayed ->
+            builder.header(IDEMPOTENCY_REPLAY_HEADER, replayed)
+        }
+        return builder.build()
     }
 
     fun get(url: String, partyId: String): Response = try {
@@ -399,7 +411,7 @@ class UpstreamClient {
             .timeout(Duration.ofMillis(requestTimeoutMs))
             .POST(HttpRequest.BodyPublishers.ofString(body)).build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
-        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
+        jsonResponse(r)
     } catch (e: Exception) {
         Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")
@@ -427,7 +439,7 @@ class UpstreamClient {
             .POST(HttpRequest.BodyPublishers.ofString(body))
         extraHeaders.forEach { (k, v) -> builder.header(k, v) }
         val r = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
-        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
+        jsonResponse(r)
     } catch (e: Exception) {
         Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
         Response.status(502).entity("""{"error":"upstream unavailable"}""")

@@ -148,6 +148,39 @@ object PartyEvents {
         ),
     )
 
+    /**
+     * ADR-0284 D3. Aggregate = the PRINCIPAL (entity) party: a consumer projecting "who may act
+     * for this company" keys on it, and the customer edge invalidates its acting-for cache on it.
+     */
+    fun mandateGranted(mandate: PartyMandate, at: Instant, actor: PartyActor): PartyEvent =
+        mandateEvent("PARTY_MANDATE_GRANTED", mandate, at, actor)
+
+    fun mandateRevoked(mandate: PartyMandate, at: Instant, actor: PartyActor): PartyEvent =
+        mandateEvent("PARTY_MANDATE_REVOKED", mandate, at, actor)
+
+    private fun mandateEvent(eventType: String, mandate: PartyMandate, at: Instant, actor: PartyActor): PartyEvent =
+        PartyEvent(
+            eventType = eventType,
+            aggregateId = mandate.principalPartyId,
+            occurredAt = at,
+            envelope = linkedMapOf(
+                "eventType" to eventType,
+                "partyId" to mandate.principalPartyId,
+                "mandateId" to mandate.id,
+                "agentPartyId" to mandate.agentPartyId,
+                "role" to mandate.role,
+                "authority" to mandate.authority,
+                "source" to mandate.source,
+                "status" to mandate.status,
+                "validFrom" to mandate.validFrom,
+                "validTo" to mandate.validTo,
+                "occurredAt" to at,
+                EventActor.FIELD_ACTOR_ID to actor.id,
+                EventActor.FIELD_ACTOR_TYPE to actor.type,
+                "sourceService" to SOURCE_SERVICE,
+            ),
+        )
+
     private fun lifecycle(eventType: String, party: Party, at: Instant, actor: PartyActor): PartyEvent = PartyEvent(
         eventType = eventType,
         aggregateId = party.id,
