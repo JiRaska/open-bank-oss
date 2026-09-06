@@ -91,7 +91,7 @@ kover {
                     // untested surfaces are the new crypto/render adapters (PdfBoxPadesSealAdapter,
                     // HttpPdfRenderAdapter, ScaVerificationAdapter); raising this floor via adapter
                     // tests is a tracked follow-up, not required to ship this increment.
-                    minValue = 20
+                    minValue = 83
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

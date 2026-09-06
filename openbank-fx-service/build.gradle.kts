@@ -96,7 +96,7 @@ kover {
                     // weaker: a regression in fx's own sources still moves this figure down (proven
                     // on #6384 by deleting fx's application+infrastructure tests — 78.618100% ->
                     // 40.056000%, koverVerify rc=1). Ratchet up from here as fx's own tests improve.
-                    minValue = 30
+                    minValue = 80
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
