@@ -153,6 +153,12 @@ class EnrolmentTriggerConsumer(
             TriggeredEnrolment.NOT_IN_SEGMENT,
             TriggeredEnrolment.ALREADY_ENROLLED,
             TriggeredEnrolment.NOT_ACTIVE,
+            // ADR-0269 rule 1. A settled answer, not a fault: the party qualified and the bank is
+            // not allowed to say so. Logged at the same level as the other ordinary outcomes and
+            // ACKED — a nack would redeliver the record forever against a consent that only the
+            // customer can change, and retrying a refusal is not how it becomes an enrolment. The
+            // count lives in the SUPPRESSED_CREDIT_CONSENT metric, not in this log line.
+            TriggeredEnrolment.NO_CREDIT_CONSENT,
             ->
                 log.debugf("Trigger %s: campaign=%s party=%s -> %s", trigger, campaignId, partyId, outcome)
             // These two mean the definition is broken rather than the party unqualified.
