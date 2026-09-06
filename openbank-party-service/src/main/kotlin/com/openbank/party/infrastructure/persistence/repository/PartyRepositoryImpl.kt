@@ -231,6 +231,8 @@ class PartyRepositoryImpl(
         it.nationality = nationality
         it.taxId = taxId
         it.registrationNumber = registrationNumber
+        it.legalForm = legalForm
+        it.registrationCountry = registrationCountry
         it.email = email
         it.phone = phone
         it.phoneHash = PhoneDirectory.hash(phone)
@@ -259,6 +261,7 @@ class PartyRepositoryImpl(
         classification = PartyClassification.valueOf(classification), status = PartyStatus.valueOf(status),
         legalName = legalName, tradingName = tradingName, dateOfBirth = dateOfBirth,
         nationality = nationality, taxId = taxId, registrationNumber = registrationNumber,
+        legalForm = legalForm, registrationCountry = registrationCountry,
         email = email, phone = phone, discoverable = discoverable, kycStatus = KycStatus.valueOf(kycStatus),
         address = if (addressLine1 !=
             null

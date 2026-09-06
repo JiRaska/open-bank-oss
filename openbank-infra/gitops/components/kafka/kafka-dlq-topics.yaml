@@ -700,3 +700,18 @@ spec:
   config:
     retention.ms: 2592000000
     cleanup.policy: delete
+---
+# openbank-onboarding-service :: channel `kyb-events-in` (ADR-0284 D6)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.onboarding.kyb-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete

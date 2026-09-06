@@ -1,0 +1,20 @@
+# Consumer-group + offset-reset for kyb-service's party-events channel (ADR-0284).
+#
+# WHY A CONFIGMAP AND NOT application.yaml: SmallRye Config's YAML source quotes any leaf map key
+# containing a literal dot, so `group.id:` under `mp.messaging.incoming.<channel>:` registers as
+# `…<channel>."group.id"` and the Kafka connector never finds it — silently using its own
+# default. A properties-format override with config_ordinal=500 is the working shape
+# (openbank-transaction-service is the worked example).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kyb-service-msg-override
+  namespace: kyb
+  labels:
+    app.kubernetes.io/name: kyb-service
+    app.kubernetes.io/part-of: kyb
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.party-events-in.group.id=kyb-service
+    mp.messaging.incoming.party-events-in.auto.offset.reset=latest

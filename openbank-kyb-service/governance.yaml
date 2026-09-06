@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: identity
+primaryDatastore: PostgreSQL
+databaseName: openbank_kyb
+dataLineageRole: both
+dataClassification: confidential
+retentionPolicy: 5 years
+evidenceExported: true
+lineage:
+  upstream:
+    - serviceName: party-service
+      relationType: topic
+      description: consumes openbank.party.events to learn when an entity party is activated
+  downstream:
+    - serviceName: party-service
+      relationType: api
+      description: creates the entity party and its representation mandates via PartyServiceClient
+databaseLineage:
+  ownedDatabases:
+    - openbank_kyb
+  dependentDatabases: []
