@@ -170,6 +170,23 @@ mp:
         topic: openbank.sca.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
+      kyb-events-in:
+        # See the party-events-in comment above for why failure-strategy and an EXPLICIT
+        # dead-letter topic are both required, and why the topic key is nested rather than
+        # written as the dotted leaf `dead-letter-queue.topic:` (#686, #5745, #5751).
+        # This channel is NOT yet in the msg-override ConfigMap, unlike its three siblings: that
+        # file is applied before the image is bumped, so naming a channel there that the running
+        # image cannot serve is SRMSG00071, a hard boot failure (`msg-channel-image-parity`).
+        # Until the follow-up adds it, the deployed consumer runs on the fallback group id
+        # (quarkus.application.name) with auto.offset.reset at the Kafka default — acceptable only
+        # because this topic is new and carries no backlog. Both group ids are granted Read.
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.onboarding.kyb-events-in
+        connector: smallrye-kafka
+        topic: openbank.kyb.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
 openbank:
   rate-limit:
     enabled: true

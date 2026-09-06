@@ -1,0 +1,652 @@
+openapi: 3.1.0
+info:
+  title: OpenBank KYB Service API
+  version: 1.0.0
+  description: |
+    Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
+    verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
+    the onboarding case derives its signer requirement from the register's representation rule and
+    binds each identity-verified signer to the entity party as a representation mandate.
+    Customer routes are reached through the customer edge with `X-Customer-Party-Id`.
+servers:
+  - url: http://localhost:8157
+tags:
+  - name: KYB
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/kyb/schemes:
+    get:
+      tags: [KYB]
+      summary: Identifier schemes an applicant from a country may enter
+      operationId: listSchemes
+      parameters:
+        - name: country
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 2
+      responses:
+        '200':
+          description: Schemes the country pack (ADR-0284 D2) accepts, national first then cross-border
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  country:
+                    type: [string, 'null']
+                  pack:
+                    type: [object, 'null']
+                    properties:
+                      version:
+                        type: integer
+                      registry:
+                        type: string
+                      uboFallback:
+                        type: string
+                  schemes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Scheme'
+  /api/v1/kyb/lookup:
+    post:
+      tags: [KYB]
+      summary: Look a business identifier up in its public register
+      operationId: lookupEntity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupRequest'
+      responses:
+        '200':
+          description: Normalised register extract
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryExtract'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/RegistryUnavailable'
+  /api/v1/kyb/cases:
+    post:
+      tags: [KYB]
+      summary: Start a business onboarding case
+      operationId: startCase
+      parameters:
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartCaseRequest'
+      responses:
+        '201':
+          description: Case created (REGISTRY_VERIFIED or MANUAL_REVIEW)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/RegistryUnavailable'
+    get:
+      tags: [KYB]
+      summary: Cases a party is involved in, or the operator review queue by status
+      operationId: listCases
+      parameters:
+        - $ref: '#/components/parameters/customerPartyId'
+        - name: partyId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/CaseStatus'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Cases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/kyb/cases/{id}:
+    get:
+      tags: [KYB]
+      summary: One case; 404 for a customer who is neither initiator nor signer
+      operationId: getCase
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/initiator:
+    post:
+      tags: [KYB]
+      summary: The initiator states which listed representative they are
+      operationId: matchInitiator
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MatchInitiatorRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/cosigners:
+    post:
+      tags: [KYB]
+      summary: Invite listed representatives to co-sign
+      operationId: inviteCosigners
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteCosignersRequest'
+      responses:
+        '200':
+          description: Case with invitation tokens (initiator view)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/invitations/{token}/claim:
+    post:
+      tags: [KYB]
+      summary: An invited representative binds their own verified party to the case
+      operationId: claimInvitation
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimInvitationRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/sign:
+    post:
+      tags: [KYB]
+      summary: Record one signer's completed signature ceremony
+      operationId: signCase
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/kyb/cases/{id}/abandon:
+    post:
+      tags: [KYB]
+      summary: The initiator abandons the case
+      operationId: abandonCase
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - $ref: '#/components/parameters/customerPartyId'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/review/resolve:
+    post:
+      tags: [KYB]
+      summary: Operator confirms a manually attested extract or power of attorney
+      operationId: resolveReview
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveReviewRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/cases/{id}/reject:
+    post:
+      tags: [KYB]
+      summary: Operator rejects the case
+      operationId: rejectCase
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    caseId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    customerPartyId:
+      name: X-Customer-Party-Id
+      in: header
+      required: false
+      description: The authenticated customer, stamped by the customer edge. Required on customer routes.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Validation failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The caller is not the party the route is scoped to
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: The transition is not valid in the case's current state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RegistryUnavailable:
+      description: The public register could not be reached
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: [string, 'null']
+    IdentifierScheme:
+      type: string
+      enum: [CZ_ICO, SK_ICO, PL_NIP, PL_KRS, DE_HRB, AT_FN, GB_CRN, FR_SIREN, NL_KVK, LEI, EUID, EU_VAT, DUNS]
+    LegalFormClass:
+      type: string
+      enum: [SOLE_TRADER, LIMITED_COMPANY, JOINT_STOCK, PARTNERSHIP, COOPERATIVE, FOUNDATION, PUBLIC_BODY, BRANCH, OTHER]
+    EntityStatus:
+      type: string
+      enum: [ACTIVE, DISSOLVED, IN_LIQUIDATION, INSOLVENT, UNKNOWN]
+    RepresentationMode:
+      type: string
+      enum: [SOLE, JOINT_ALL, JOINT_N, UNKNOWN]
+    CaseStatus:
+      type: string
+      enum: [IDENTIFIER_ENTERED, REGISTRY_VERIFIED, INITIATOR_MATCHED, AWAITING_COSIGNERS, READY_TO_SIGN, SIGNED, ACTIVE, MANUAL_REVIEW, REJECTED, ABANDONED]
+    SignerStatus:
+      type: string
+      enum: [INVITED, IDENTIFIED, SIGNED, DECLINED]
+    Scheme:
+      type: object
+      properties:
+        scheme:
+          $ref: '#/components/schemas/IdentifierScheme'
+        country:
+          type: [string, 'null']
+        displayName:
+          type: string
+        checksum:
+          type: boolean
+        example:
+          type: string
+    DeclaredEntity:
+      type: object
+      required: [legalName, countryCode]
+      properties:
+        legalName:
+          type: string
+        countryCode:
+          type: string
+        legalFormClass:
+          $ref: '#/components/schemas/LegalFormClass'
+        addressLine1:
+          type: [string, 'null']
+        city:
+          type: [string, 'null']
+        postalCode:
+          type: [string, 'null']
+    LookupRequest:
+      type: object
+      required: [scheme, identifier]
+      properties:
+        scheme:
+          $ref: '#/components/schemas/IdentifierScheme'
+        identifier:
+          type: string
+        declared:
+          $ref: '#/components/schemas/DeclaredEntity'
+    StartCaseRequest:
+      type: object
+      required: [scheme, identifier, initiatorPartyId]
+      properties:
+        scheme:
+          $ref: '#/components/schemas/IdentifierScheme'
+        identifier:
+          type: string
+        initiatorPartyId:
+          type: string
+          format: uuid
+        declared:
+          $ref: '#/components/schemas/DeclaredEntity'
+    MatchInitiatorRequest:
+      type: object
+      required: [claimedName]
+      properties:
+        representativeIndex:
+          type: [integer, 'null']
+        claimedName:
+          type: string
+        dateOfBirth:
+          type: [string, 'null']
+          format: date
+    InviteCosignersRequest:
+      type: object
+      required: [representativeIndexes]
+      properties:
+        representativeIndexes:
+          type: array
+          items:
+            type: integer
+    ClaimInvitationRequest:
+      type: object
+      properties:
+        partyId:
+          type: string
+          format: uuid
+    SignRequest:
+      type: object
+      required: [signatureRef]
+      properties:
+        signatureRef:
+          type: string
+    ResolveReviewRequest:
+      type: object
+      required: [requiredSignatures]
+      properties:
+        requiredSignatures:
+          type: integer
+          minimum: 1
+    RejectRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 10
+    Representative:
+      type: object
+      properties:
+        index:
+          type: integer
+        fullName:
+          type: string
+        dateOfBirth:
+          type: [string, 'null']
+          format: date
+        body:
+          type: [string, 'null']
+        role:
+          type: [string, 'null']
+        since:
+          type: [string, 'null']
+          format: date
+    RegistryExtract:
+      type: object
+      properties:
+        scheme:
+          $ref: '#/components/schemas/IdentifierScheme'
+        identifier:
+          type: string
+        country:
+          type: [string, 'null']
+        legalName:
+          type: string
+        legalFormCode:
+          type: [string, 'null']
+        legalFormClass:
+          $ref: '#/components/schemas/LegalFormClass'
+        status:
+          $ref: '#/components/schemas/EntityStatus'
+        registeredAddress:
+          type: [object, 'null']
+          properties:
+            line1:
+              type: [string, 'null']
+            city:
+              type: [string, 'null']
+            postalCode:
+              type: [string, 'null']
+            countryCode:
+              type: string
+        incorporatedOn:
+          type: [string, 'null']
+          format: date
+        taxId:
+          type: [string, 'null']
+        representatives:
+          type: array
+          items:
+            $ref: '#/components/schemas/Representative'
+        representationRule:
+          type: object
+          properties:
+            mode:
+              $ref: '#/components/schemas/RepresentationMode'
+            requiredSigners:
+              type: [integer, 'null']
+            sourceText:
+              type: [string, 'null']
+        source:
+          type: string
+        sourceRef:
+          type: [string, 'null']
+        verification:
+          type: string
+          enum: [VERIFIED, UNVERIFIED]
+        fetchedAt:
+          type: string
+          format: date-time
+    Signer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        representativeIndex:
+          type: [integer, 'null']
+        fullName:
+          type: string
+        partyId:
+          type: [string, 'null']
+          format: uuid
+        status:
+          $ref: '#/components/schemas/SignerStatus'
+        isInitiator:
+          type: boolean
+        invitedAt:
+          type: [string, 'null']
+          format: date-time
+        identifiedAt:
+          type: [string, 'null']
+          format: date-time
+        signedAt:
+          type: [string, 'null']
+          format: date-time
+        invitationToken:
+          type: [string, 'null']
+          description: Present only in the initiator's view.
+    Case:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/CaseStatus'
+        scheme:
+          $ref: '#/components/schemas/IdentifierScheme'
+        identifier:
+          type: string
+        country:
+          type: [string, 'null']
+        initiatorPartyId:
+          type: string
+          format: uuid
+        entityPartyId:
+          type: [string, 'null']
+          format: uuid
+        requiredSignatures:
+          type: [integer, 'null']
+        signedCount:
+          type: integer
+        extract:
+          oneOf:
+            - $ref: '#/components/schemas/RegistryExtract'
+            - type: 'null'
+        signers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Signer'
+        reviewReason:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time

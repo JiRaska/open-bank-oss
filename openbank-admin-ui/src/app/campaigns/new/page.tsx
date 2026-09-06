@@ -140,6 +140,9 @@ export default function NewCampaignPage() {
 
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
+  // ADR-0269 rule 1. No pre-selection: the maker states what this campaign sells, because
+  // a default would answer the credit step gate's question on their behalf.
+  const [productKind, setProductKind] = useState<'' | 'NONE' | 'UNSECURED' | 'SECURED' | 'REVOLVING'>('')
   const [segment, setSegment] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
   const [incentiveOffers, setIncentiveOffers] = useState<IncentiveOffer[]>([])
@@ -268,7 +271,8 @@ export default function NewCampaignPage() {
     fetch(`/api/campaigns/${encodeURIComponent(draftId)}`)
       .then(r => r.json())
       .then((d: { campaign?: {
-        state?: string; name?: string; goal?: string; segmentRef?: { name: string; version: number }
+        state?: string; name?: string; goal?: string; productKind?: 'NONE' | 'UNSECURED' | 'SECURED' | 'REVOLVING'
+        segmentRef?: { name: string; version: number }
         steps?: StoredCampaignStep[]; decisions?: Array<{
           sourceStepOrder: number; evaluationDelaySeconds?: number
           confirmedStepOrder: number; notConfirmedStepOrder: number
@@ -283,6 +287,11 @@ export default function NewCampaignPage() {
         }
         setName(campaign.name ?? '')
         setGoal(campaign.goal ?? '')
+        // NONE, not '' — a PERSISTED campaign always has a kind (NOT NULL, backfilled by V19), so a
+        // payload without one is an older response, not an unanswered question. Hydrating it as ''
+        // would mark an existing draft incomplete and quietly disable its save button, which is a
+        // worse failure than the one the empty default guards against on a NEW campaign.
+        setProductKind(campaign.productKind ?? 'NONE')
         if (campaign.segmentRef) {
           const ref = `${campaign.segmentRef.name}@${campaign.segmentRef.version}`
           setSegment(ref)
@@ -499,7 +508,7 @@ export default function NewCampaignPage() {
     (entryMode === 'TRIGGER' && trigger !== '')
   const pinnedIncentiveUnavailable = incentiveOfferRef !== null &&
     !incentiveOffers.some(offer => offer.ref.id === incentiveOfferRef.id)
-  const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 &&
+  const ready = name.trim() !== '' && goal.trim() !== '' && productKind !== '' && segment !== '' && steps.length > 0 &&
     contentCatalogueState === 'ok' && !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null) &&
     !pinnedIncentiveUnavailable
   // A campaign is an experience across surfaces, not a list of transport rows. Keep this compact
@@ -556,6 +565,7 @@ export default function NewCampaignPage() {
       body: JSON.stringify({
         name: name.trim(),
         goal: goal.trim(),
+        productKind,
         segmentName: segName,
         segmentVersion: Number(segVersion),
         ...(stopAfter !== null ? { stopCondition: { maxSendsPerParty: stopAfter } } : {}),
@@ -671,6 +681,33 @@ export default function NewCampaignPage() {
             value={goal}
             onChange={e => setGoal(e.target.value)}
           />
+          <label
+            htmlFor="c-product-kind"
+            className="block"
+            style={{ marginTop: '0.75rem', fontSize: '0.85rem', opacity: 0.8 }}
+          >
+            {t('Nabízí tato kampaň úvěr?', 'Does this campaign offer credit?')}
+          </label>
+          <select
+            id="c-product-kind"
+            aria-label={t('Typ úvěrového produktu', 'Credit product kind')}
+            className="input w-full"
+            style={{ marginTop: '0.25rem' }}
+            value={productKind}
+            onChange={e => setProductKind(e.target.value as typeof productKind)}
+          >
+            <option value="">{t('Vyberte…', 'Choose…')}</option>
+            <option value="NONE">{t('Ne — neúvěrová kampaň', 'No — not a credit campaign')}</option>
+            <option value="UNSECURED">{t('Ano — spotřebitelský úvěr', 'Yes — unsecured loan')}</option>
+            <option value="SECURED">{t('Ano — zajištěný úvěr (hypotéka, auto)', 'Yes — secured loan (mortgage, car)')}</option>
+            <option value="REVOLVING">{t('Ano — revolvingový (kontokorent, karta)', 'Yes — revolving (overdraft, card)')}</option>
+          </select>
+          <p style={{ marginTop: '0.35rem', fontSize: '0.78rem', opacity: 0.65 }}>
+            {t(
+              'Úvěrová kampaň se doručí jen klientům, kteří si nabídky úvěru sami zapnuli.',
+              'A credit campaign is delivered only to customers who switched credit offers on themselves.',
+            )}
+          </p>
         </div>
 
         <div className="campaign-audience-card">
@@ -1165,7 +1202,7 @@ export default function NewCampaignPage() {
           <span className="text-xs text-muted-foreground">
             {incomplete
               ? t('Některý krok má nevyplněné hodnoty.', 'A step still has empty values.')
-              : t('Vyplňte název, cíl a publikum.', 'Fill in the name, goal and audience.')}
+              : t('Vyplňte název, cíl, typ produktu a publikum.', 'Fill in the name, goal, product kind and audience.')}
           </span>
         )}
         {reach !== null && (

@@ -6,17 +6,20 @@ package com.openbank.campaign.application.usecase
 
 import com.openbank.campaign.application.port.out.CampaignMetricsPort
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.EnrolmentAttempt
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
+import com.openbank.campaign.domain.model.CampaignProductKind.Companion.CREDIT_OFFERS_SCOPE
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.CancellationException
 import org.jboss.logging.Logger
 import java.time.Instant
 import java.util.UUID
@@ -38,6 +41,8 @@ class TriggeredEnrolmentService(
     private val segmentEvaluation: SegmentEvaluationPort,
     private val journeys: JourneySignaller,
     private val metrics: CampaignMetricsPort,
+    /** ADR-0269 rule 1: live, uncached credit consent (ADR-0195), same as the scheduled sweep. */
+    private val consentCheck: ConsentCheckPort,
 ) {
 
     private val log = Logger.getLogger(TriggeredEnrolmentService::class.java)
@@ -49,6 +54,18 @@ class TriggeredEnrolmentService(
      * make a trigger a way around the versioned-segment rule (ADR-0201 D1) that nobody reviewing
      * the campaign definition would see.
      */
+    // TooGenericExceptionCaught: see CampaignService.hasCreditOffersConsent — every failure means
+    // the same thing, that the bank cannot tell whether it may offer credit, and that answer is "no".
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun hasCreditOffersConsent(partyId: UUID): Boolean = try {
+        consentCheck.hasActiveConsent(partyId, CREDIT_OFFERS_SCOPE)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        log.warnf(e, "credit consent unreadable for party %s; treating as absent", partyId)
+        false
+    }
+
     suspend fun enrol(campaignId: UUID, partyId: UUID): TriggeredEnrolment {
         val campaign = campaigns.findById(campaignId) ?: return TriggeredEnrolment.CAMPAIGN_GONE
         if (campaign.state != CampaignState.ACTIVE) return TriggeredEnrolment.NOT_ACTIVE
@@ -61,6 +78,14 @@ class TriggeredEnrolmentService(
         val segment = segments.load(campaign.segmentRef.name, campaign.segmentRef.version)
             ?: return TriggeredEnrolment.SEGMENT_GONE
         if (!segmentEvaluation.matches(segment, partyId)) return TriggeredEnrolment.NOT_IN_SEGMENT
+
+        // ADR-0269 rule 1, the same gate the scheduled sweep applies. Both doors or neither: a
+        // trigger is just a different reason to enrol, and a credit campaign that refused the
+        // sweep while accepting a product event would deliver credit marketing to someone who
+        // never asked to see it. Fails closed — an unreadable consent answers "no".
+        if (campaign.productKind.isCredit && !hasCreditOffersConsent(partyId)) {
+            return TriggeredEnrolment.NO_CREDIT_CONSENT
+        }
 
         // Same order as the sweep, for the same reason (#2953): start the journey first, persist on
         // success. The reverse order costs the party forever, because the committed row makes
@@ -112,6 +137,12 @@ private fun com.openbank.campaign.domain.model.Campaign.journeyType(): JourneyTy
  */
 enum class TriggeredEnrolment {
     ENROLLED,
+
+    /**
+     * ADR-0269 rule 1: a credit campaign, and this party has not switched credit offers on.
+     * Distinct from NOT_IN_SEGMENT — the party qualifies, the bank is simply not allowed to say so.
+     */
+    NO_CREDIT_CONSENT,
     ALREADY_ENROLLED,
     NOT_IN_SEGMENT,
     NOT_ACTIVE,
