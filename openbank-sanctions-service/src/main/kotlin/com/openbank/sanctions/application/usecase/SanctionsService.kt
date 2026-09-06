@@ -20,12 +20,41 @@ class SanctionsService(
     private val clock: Clock,
 ) : SanctionsUseCase {
 
-    /** Map optional listTypes strings from the command to enum values.
-     *  Unknown strings are silently dropped; null/empty → all known list types. */
-    private fun resolveTargetLists(cmd: ScreenEntityCommand): List<SanctionsListType> = cmd.listTypes
-        ?.mapNotNull { raw -> runCatching { SanctionsListType.valueOf(raw) }.getOrNull() }
-        ?.takeIf { it.isNotEmpty() }
-        ?: SanctionsListType.entries
+    /**
+     * Map optional listTypes strings from the command to enum values.
+     * Null/empty → all known list types; an unrecognised name is a 400, never a silent drop.
+     *
+     * It used to `mapNotNull`, and that is a compliance defect rather than a tidy-up (#8699).
+     * A caller screening against `["OFAC_SDN", "EU_CONSOLIDTED"]` had the misspelled list
+     * dropped, kept a non-empty list, and received a screening result — `CLEAR`, typically —
+     * computed **without ever consulting the EU list**. Nothing anywhere said so: the response is
+     * a normal 201, `checkedLists` records only what was actually checked rather than what was
+     * asked for, and no metric or log distinguished a partial screen from a complete one.
+     *
+     * The all-unrecognised case was the opposite and equally wrong: `takeIf { isNotEmpty() }`
+     * fell through to every list, so a caller who asked for one list and mistyped it screened
+     * against all seven — the same "an unparseable filter widens" shape as the query filters in
+     * this sweep, and a result whose scope no caller chose.
+     *
+     * ABSENT stays distinguishable from UNPARSEABLE, as #8699 asks by name: a null or empty
+     * `listTypes` still means "all enabled lists", and only a value that was supplied and cannot
+     * be parsed is rejected. Parsing stays case-SENSITIVE, exactly as before — accepting `ofac_sdn`
+     * where only `OFAC_SDN` used to work would widen what the endpoint accepts, which is a
+     * separate decision this change deliberately does not make.
+     *
+     * `IllegalArgumentException` maps to 400 via libs-runtime's shared mapper (#526) — the same
+     * route the `aliases[i]` guard in [screen] already relies on.
+     */
+    private fun resolveTargetLists(cmd: ScreenEntityCommand): List<SanctionsListType> {
+        val requested = cmd.listTypes?.filterNot { it.isBlank() }.orEmpty()
+        if (requested.isEmpty()) return SanctionsListType.entries
+        val known = SanctionsListType.entries.joinToString(", ") { it.name }
+        return requested.map { raw ->
+            runCatching { SanctionsListType.valueOf(raw) }.getOrElse {
+                throw IllegalArgumentException("unknown sanctions list type '$raw'; expected one of $known")
+            }
+        }
+    }
 
     /**
      * Query [SanctionsEntryRepository] using pg_trgm similarity for each name in the command.

@@ -238,6 +238,7 @@ locals {
     # backups" has no judgement left to exercise, so advisory just made it mergeable. The gate
     # is now enforced.
     delegation = { namespace = "delegation", sa = "delegation-db" }
+    kyb        = { namespace = "kyb", sa = "kyb-db" }
     # Added by #3555 with their barmanObjectStore + ScheduledBackup in the same change — the two
     # clusters that still declared NO backup at all, out of 55. Both are `instances: 1`, so they
     # had neither a replica nor a recovery point: a lost EBS volume was total data loss.

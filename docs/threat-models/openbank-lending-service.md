@@ -660,3 +660,21 @@ warning that the code cannot fire would itself never fire.
   impact of a candidate parameter set before it merges. No new endpoint, no authz change, no
   behavior change to computed values (the defaults themselves are untouched). Rollback: revert
   the commit; the `model_version` column is additive and unread by pre-change code.
+
+## 10. Credit-risk read surface (ADR-0230 D1, ADR-0213 D4) — STRIDE supplement
+
+`CreditRiskResource` adds four read-only endpoints under `/api/v1/lending/risk`
+(`decisions`, `decisions/summary`, `portfolio`, `policy`) for the admin-ui credit-risk console
+and notebook export. No mutation: the console renders decisions and never makes them
+(ADR-0227 D4 keeps disposal in the approval inbox). What changes the trust picture is the
+**breadth of one read**: a single call returns every evaluated applicant's affordability inputs
+(income, existing debt service, age, residency) and the book-wide stage/ECL picture.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **I**nfo disclosure | A role outside the credit desk reads every applicant's income and the whole book's impairment | Class-level `@RolesAllowed("ROLE_CREDIT_RISK","ROLE_COMPLIANCE","ROLE_LENDING_OFFICER","ROLE_ADMIN")` — the same set that may read the ADR-0214 evidence bundle, narrower than the class-level roles on `LendingResource`'s `GET /loans/{id}`; OPA `@Authorize(lending.list / lending.read)` on every method; `LendingSecurityTest` asserts no `@PermitAll` on this class too. `CreditRiskConsoleIT` refuses `ROLE_CUSTOMER` on all four paths. |
+| **I**nfo disclosure | Bulk export of PII via `limit` | Clamped server-side to 1..1000 (`CreditRiskInsightService.MAX_LIMIT`); the endpoint is a console read, not a data feed — the warehouse (ADR-0022) is the sanctioned bulk path once the lending topic is wired to the sink (tracked). |
+| **T**ampering | The console shows a ratio or outcome the engine did not evaluate | Views are decoded from the pinned evidence columns (`decision_*`, `policy_versions`, `decision_input_hash`) and from `loan_provisioning`, never recomputed; the affordability ratios call the ASSESSMENT leg's own `OriginationDecisionService.affordabilityRatios`, so a console figure and an engine figure cannot diverge. The total-DSTI figure (`dstiIncludingExistingDebt`) is labelled as **not** what the engine reads. |
+| **R**epudiation | "Which policy produced this?" | Every row carries the pinned table versions and input hash; `/policy` reports `codeSeeded=true` while `StarterCreditPolicy` is the binding, so a reader knows the tables cannot have been changed without a reviewed commit. |
+| **D**oS | Repeated book-wide reads | Two `GROUP BY` aggregates and two capped, indexed reads (`decided_engine_at`, `disbursed_at`, `(loan_id, period)`); no joins over installments. Same rate-limit posture as the other reads. |
+| **S**poofing / **E**oP | n/a | No write path; no identity is taken from the request. |
