@@ -56,6 +56,30 @@ SELFTEST_BAD = '''class FooPactConsumerTest {
     fun `returns the list`() { /* expects 200 */ }
 }'''
 
+# A `/contract/` file that never talks to a provider cannot express this gate's subject. The
+# rationale above is about authz: "the provider can stop enforcing authz entirely and every Pact
+# stays green". A test that asserts the SHAPE OF A PUBLISHED DOCUMENT — an asyncapi.yaml or an
+# openapi.yaml read as text — has no caller, no identity and no status code, so demanding a 401
+# of it can only be satisfied by writing one that tests nothing. Measured on
+# DomesticPaymentDelegationContractTest (#8977): zero HTTP calls, and the finding told it to add
+# an expectation it has no request to attach to.
+#
+# Pact-NAMED files stay in scope unconditionally — that is the population the debt was counted
+# over, and a pact test drives a provider even when the only marker is its name. A `/contract/`
+# file joins them when it actually exercises one.
+EXERCISES_PROVIDER = re.compile(
+    r"au\.com\.dius\.pact|io\.restassured|RestAssured|MockServer|PactDsl|"
+    r"@Provider\b|@PactFolder|@PactBroker|statusCode\(|\bgiven\(\)"
+)
+PACT_NAMED = re.compile(r"Pact[^/]*Test\.kt$")
+
+
+def in_scope(path: Path) -> bool:
+    """Pact-named always; a /contract/ file only when it drives a provider."""
+    if PACT_NAMED.search(str(path)):
+        return True
+    return bool(EXERCISES_PROVIDER.search(path.read_text(encoding="utf-8", errors="replace")))
+
 
 def changed_contract_files(since: str) -> list[Path]:
     res = subprocess.run(
@@ -75,9 +99,15 @@ def fleet_report() -> int:
         ["git", "ls-files", "*Pact*Test.kt", "*/contract/*Test.kt"],
         capture_output=True, text=True, check=True,
     )
-    files = sorted(set(res.stdout.splitlines()))
+    all_files = sorted(set(res.stdout.splitlines()))
+    # Count the debt over the population the gate would actually enforce on. A document-shape
+    # contract test can never satisfy the rule, so listing it as debt overstates a backlog nobody
+    # can pay down — and the fleet number is what the sweep is scoped from.
+    out_of_scope = [f for f in all_files if not in_scope(Path(f))]
+    files = [f for f in all_files if f not in set(out_of_scope)]
     debt = [f for f in files if not is_adversarial(Path(f))]
-    print(f"adversarial-contract: {len(files)} contract test file(s), "
+    print(f"adversarial-contract: {len(files)} contract test file(s) in scope "
+          f"({len(out_of_scope)} document-shape, excluded), "
           f"{len(files) - len(debt)} adversarial, {len(debt)} happy-path-only (fleet debt, #8590 #3)")
     for f in debt:
         print(f"  debt: {f}")
@@ -96,6 +126,24 @@ def _self_test() -> int:
                      (False, "x/FooTest.kt"), (False, "x/contract/Foo.kt")]:
         if bool(CONTRACT_FILE.search(name)) != ok:
             print(f"self-test FAIL: file match {name}"); bad += 1
+    # Scope: a happy-path PACT file stays a finding; a document-shape /contract/ file is skipped;
+    # a /contract/ file that DOES drive a provider is still held to the negative case.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        doc = root / "DocShapeContractTest.kt"
+        doc.write_text('class DocShapeContractTest { fun `spec omits the raw key`() '
+                       '{ assertThat(yaml).doesNotContain("idempotencyKey:") } }')
+        http = root / "HttpContractTest.kt"
+        http.write_text('class HttpContractTest { fun `creates`() '
+                        '{ RestAssured.given().post("/x") } }')
+        named = root / "FooPactConsumerTest.kt"
+        named.write_text(SELFTEST_BAD)
+        for path, want, label in [(doc, False, "document-shape file must be out of scope"),
+                                  (http, True, "provider-driving /contract/ file stays in scope"),
+                                  (named, True, "Pact-named file stays in scope")]:
+            if in_scope(path) != want:
+                print(f"self-test FAIL: {label}"); bad += 1
     print("adversarial-contract self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0
 
@@ -113,6 +161,10 @@ def main() -> int:
 
     findings = 0
     for path in changed_contract_files(args.since):
+        if not in_scope(path):
+            print(f"  skip: {path} (document-shape contract test — no provider interaction "
+                  f"to reject, so no negative status exists to assert)")
+            continue
         if is_adversarial(path):
             print(f"  ok: {path}")
         else:
