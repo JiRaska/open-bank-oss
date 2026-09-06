@@ -9,7 +9,7 @@ import com.openbank.libs.security.Roles
 import com.openbank.transaction.domain.model.MerchantDescriptor
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
-import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
+import com.openbank.transaction.infrastructure.persistence.repository.TransactionDescriptorRepository
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
@@ -51,7 +51,7 @@ import java.time.Instant
 @Tag(name = "Merchant catalogue", description = "Operator maintenance of merchant enrichment data")
 class MerchantCatalogResource(
     private val catalog: MerchantCatalogRepository,
-    private val transactions: PanacheTransactionRepository,
+    private val transactions: TransactionDescriptorRepository,
 ) {
 
     @GET
