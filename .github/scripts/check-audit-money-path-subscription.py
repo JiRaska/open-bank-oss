@@ -191,13 +191,36 @@ def subscribed_topics(repo: pathlib.Path) -> set[str]:
     return _topic_values(gatelib.load_yaml(app_yaml), "incoming")
 
 
+# The topic -> producing-module table lives in openbank-libs-domain so audit-service and
+# analytics-sink read the SAME rows; it used to sit in audit's own EventAttribution.kt, which let
+# analytics derive a different (and sometimes non-existent) name from the topic segment.
+TOPIC_PRODUCERS_SRC = (
+    "openbank-libs-domain/src/main/kotlin/com/openbank/libs/analytics/TopicProducers.kt"
+)
+
+
 def attributed_topics(repo: pathlib.Path) -> set[str]:
-    """Keys of `TopicAttribution.TOPIC_TO_SERVICE`, read as `"<topic>" to "<service>"` pairs."""
-    src = repo / AUDIT_SERVICE / "src" / "main" / "kotlin" / "com" / "openbank" / "audit" / "application" / "EventAttribution.kt"
+    """Keys of `TopicProducers.TOPIC_TO_SERVICE`, read as `"<topic>" to "<service>"` pairs."""
+    src = repo / TOPIC_PRODUCERS_SRC
+    # NOT `return set()`. An unreadable table makes every produced topic look unattributed, which is
+    # 21 confident findings about code that is fine — and the mirror-image bug, a presence check
+    # that reads clean because it found nothing, is the same defect with the sign flipped. A probe
+    # that cannot see its subject must say so.
     if not src.is_file():
-        return set()
+        raise SystemExit(
+            f"::error::{TOPIC_PRODUCERS_SRC} not found — the topic/producer table moved or was "
+            "renamed. This check cannot attribute anything without it; fix the path rather than "
+            "reading its findings."
+        )
     text = gatelib.read_text(src)
-    return set(re.findall(r'"(openbank\.[A-Za-z0-9._-]+)"\s+to\s+"', text))
+    topics = set(re.findall(r'"(openbank\.[A-Za-z0-9._-]+)"\s+to\s+"', text))
+    if not topics:
+        raise SystemExit(
+            f"::error::{TOPIC_PRODUCERS_SRC} exists but contains no `\"topic\" to \"service\"` "
+            "pairs — the table's shape changed and this check would report every topic as "
+            "unattributed."
+        )
+    return topics
 
 
 def audit_read_acl_topics(repo: pathlib.Path) -> set[tuple[str, str]]:

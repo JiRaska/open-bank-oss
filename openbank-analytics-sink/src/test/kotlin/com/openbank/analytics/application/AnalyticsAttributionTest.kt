@@ -54,7 +54,12 @@ class AnalyticsAttributionTest {
 
         assertThat(env.aggregateType).isEqualTo("PASSKEY")
         assertThat(env.eventType).isEqualTo("sca.device.enrolled")
-        assertThat(env.sourceService).isEqualTo("openbank-sca-service")
+        // The value is the module directory name WITHOUT the `openbank-` prefix — the convention
+        // `check-source-service-convention.py` enforces on producers, so the topic fallback now
+        // agrees with what a producer would stamp itself. This assertion previously pinned
+        // `openbank-sca-service`, which was the old derivation's output and a spelling no producer uses;
+        // bronze_events holds both for balance and transaction, with the boundary on 2026-08-18.
+        assertThat(env.sourceService).isEqualTo("sca-service")
         assertThat(env.aggregateId).isEqualTo("MFkwEwYHKoZIzj0CAQ")
     }
 
@@ -67,7 +72,7 @@ class AnalyticsAttributionTest {
 
         assertThat(env.aggregateType).isEqualTo("DOCUMENT")
         assertThat(env.eventType).isEqualTo("document.generated")
-        assertThat(env.sourceService).isEqualTo("openbank-document-service")
+        assertThat(env.sourceService).isEqualTo("document-service")
     }
 
     @Test
@@ -82,7 +87,7 @@ class AnalyticsAttributionTest {
         )
 
         assertThat(env.aggregateType).isEqualTo("DOCUMENT")
-        assertThat(env.sourceService).isEqualTo("openbank-document-service")
+        assertThat(env.sourceService).isEqualTo("document-service")
     }
 
     @Test

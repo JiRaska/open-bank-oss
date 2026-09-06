@@ -67,6 +67,21 @@ spec:
       - resource: { type: topic, name: openbank.credit.funnel.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
+      # ADR-0282 phase 1 (#8792): the card, lending, standing-order and FX streams. An ACL missing
+      # here is not a red pod — the consumer retries the authorization failure forever and the
+      # topics simply never arrive, which is #2598/#2629's exact shape.
+      - resource: { type: topic, name: openbank.cards.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.lending.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.standing-orders.order.event, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.fx.conversion.completed, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
       # ADR-0192 in-app screen feedback (metadata + screenshot object key; never image bytes).
       - resource: { type: topic, name: openbank.feedback.events, patternType: literal }
         operations: [Read, Describe]
