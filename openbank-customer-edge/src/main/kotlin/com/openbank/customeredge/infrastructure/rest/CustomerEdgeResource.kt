@@ -110,6 +110,14 @@ class CustomerEdgeResource(
     @Inject
     lateinit var partyMergeResolver: PartyMergeResolver
 
+    // ADR-0284 D4: profile switching. Field-injected for the same LongParameterList reason as the
+    // merge resolver above; every test that constructs this resource by hand sets it explicitly.
+    @Inject
+    lateinit var actingForResolver: ActingForResolver
+
+    @jakarta.ws.rs.core.Context
+    lateinit var requestHeaders: jakarta.ws.rs.core.HttpHeaders
+
     @Inject
     lateinit var creditFunnel: com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 
@@ -5045,7 +5053,29 @@ class CustomerEdgeResource(
         // with the surviving id — otherwise a merged customer sees an empty bank (no accounts,
         // no loans, no KYC case) while their data sits under the survivor. Fail-open: on any
         // upstream trouble the resolver hands back `claimed` unchanged. See PartyMergeResolver.
-        return CustomerIdentity(partyMergeResolver.resolve(claimed))
+        val human = partyMergeResolver.resolve(claimed)
+        // ADR-0284 D4: `X-Acting-For: <entityPartyId>` switches every downstream call to a legal
+        // entity the human holds an ACTIVE mandate for — verified against party-service and
+        // FAIL-CLOSED (403), the opposite of the merge resolver above: an unverified switch would
+        // show someone else's company, an unhonoured merge only shows the customer less.
+        val actingFor = if (this::requestHeaders.isInitialized) {
+            requestHeaders.getHeaderString(
+                ACTING_FOR_HEADER,
+            )
+        } else {
+            null
+        }
+        // `isInitialized`: tests that build this resource by hand set only what they exercise; in
+        // a CDI context both are always injected, so a missing resolver never reaches production.
+        val effective = if (this::actingForResolver.isInitialized) {
+            actingForResolver.resolve(
+                human,
+                actingFor,
+            )
+        } else {
+            human
+        }
+        return CustomerIdentity(effective)
     }
 
     private sealed interface ActivePartyResult {
@@ -5748,6 +5778,9 @@ class CustomerEdgeResource(
          */
         internal fun resolvePartyIdClaim(partyIdClaim: String?, sub: String?): String? =
             partyIdClaim?.takeIf { it.isNotBlank() } ?: sub?.takeIf { it.isNotBlank() }
+
+        /** ADR-0284 D4: the profile-switch header. Honoured only through [ActingForResolver]. */
+        const val ACTING_FOR_HEADER = "X-Acting-For"
     }
 
     private fun forbidden(message: String): Response = Response.status(403)

@@ -23,6 +23,8 @@ servers:
 
 tags:
   - name: Reference
+  - name: Profiles
+  - name: Business
   - name: Accounts
   - name: Term deposits
   - name: Balances
@@ -3383,6 +3385,236 @@ paths:
         '400': {description: Invalid draft or a constraint the customer channel cannot enforce}
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
+
+  /profiles:
+    get:
+      tags: [Profiles]
+      summary: The profiles the signed-in human can switch to — personal plus one per business mandate (ADR-0284 D4)
+      description: >-
+        Always keyed off the token, never off X-Acting-For, so a client can always find its way back to
+        the personal profile. The personal entry carries `hasProducts` so a business-only customer is
+        offered their first account instead of an empty home. Every other route honours
+        `X-Acting-For: <business partyId>` (fail-closed 403 without an active mandate).
+      operationId: listProfiles
+      security:
+        - customerOidc: [profile:read]
+      responses:
+        '200':
+          description: Profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind: { type: string, enum: [PERSONAL, BUSINESS] }
+                        partyId: { type: string, format: uuid }
+                        partyType: { type: string }
+                        displayName: { type: string, nullable: true }
+                        legalName: { type: string, nullable: true }
+                        status: { type: string, nullable: true }
+                        kycStatus: { type: string, nullable: true }
+                        hasProducts: { type: boolean }
+                        registrationNumber: { type: string, nullable: true }
+                        registrationCountry: { type: string, nullable: true }
+                        legalForm: { type: string, nullable: true }
+                        role: { type: string, nullable: true }
+                        authority: { type: string, nullable: true }
+
+  /business/schemes:
+    get:
+      tags: [Business]
+      summary: Business identifier schemes for a country, from its country pack (ADR-0284 D2)
+      operationId: listBusinessSchemes
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: country
+          in: query
+          schema: { type: string }
+      responses:
+        '200': {description: Schemes}
+
+  /business/lookup:
+    post:
+      tags: [Business]
+      summary: Look a business identifier up in its public register — the onboarding entry screen, creates nothing
+      operationId: lookupBusiness
+      security:
+        - customerOidc: [profile:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheme, identifier]
+              properties:
+                scheme: { type: string }
+                identifier: { type: string }
+                declared: { type: object }
+      responses:
+        '200': {description: Register extract}
+        '400': {description: Malformed identifier (format or check digit)}
+        '404': {description: No register record}
+        '503': {description: Register unavailable}
+
+  /business/onboarding:
+    post:
+      tags: [Business]
+      summary: Start a business onboarding case; the initiator is the token's human
+      operationId: startBusinessOnboarding
+      security:
+        - customerOidc: [profile:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheme, identifier]
+              properties:
+                scheme: { type: string }
+                identifier: { type: string }
+                declared: { type: object }
+      responses:
+        '201': {description: Case}
+        '403': {description: Body names another initiator}
+    get:
+      tags: [Business]
+      summary: Cases the caller initiated or is a signer on
+      operationId: listBusinessOnboarding
+      security:
+        - customerOidc: [profile:read]
+      responses:
+        '200': {description: Cases}
+
+  /business/onboarding/{id}:
+    get:
+      tags: [Business]
+      summary: One case the caller is involved in
+      operationId: getBusinessOnboarding
+      security:
+        - customerOidc: [profile:read]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': {description: Case}
+        '404': {description: Not involved}
+
+  /business/onboarding/{id}/initiator:
+    post:
+      tags: [Business]
+      summary: The initiator states which listed representative they are
+      operationId: matchBusinessInitiator
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                representativeIndex: { type: integer, nullable: true }
+                claimedName: { type: string }
+                dateOfBirth: { type: string, format: date, nullable: true }
+      responses:
+        '200': {description: Case}
+
+  /business/onboarding/{id}/cosigners:
+    post:
+      tags: [Business]
+      summary: Invite listed representatives to co-sign; returns invitation tokens to the initiator
+      operationId: inviteBusinessCosigners
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                representativeIndexes:
+                  type: array
+                  items: { type: integer }
+      responses:
+        '200': {description: Case}
+        '409': {description: Not enough signers for the representation rule}
+
+  /business/onboarding/{id}/sign:
+    post:
+      tags: [Business]
+      summary: Record the caller's completed signature ceremony on the case
+      operationId: signBusinessOnboarding
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signatureRef]
+              properties:
+                signatureRef: { type: string }
+      responses:
+        '200': {description: Case}
+
+  /business/onboarding/{id}/abandon:
+    post:
+      tags: [Business]
+      summary: The initiator abandons the case
+      operationId: abandonBusinessOnboarding
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': {description: Case}
+
+  /business/invitations/{token}/claim:
+    post:
+      tags: [Business]
+      summary: An invited co-signer, now identity-verified as themselves, binds their party to the case
+      operationId: claimBusinessInvitation
+      security:
+        - customerOidc: [profile:write]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': {description: Case}
+        '404': {description: No open invitation}
+        '409': {description: Already claimed or the person is already a signer}
 
   /delegations/shared-by-me:
     get:
