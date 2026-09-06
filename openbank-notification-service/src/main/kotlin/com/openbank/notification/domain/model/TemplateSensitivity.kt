@@ -45,10 +45,21 @@ object TemplateSensitivity {
      * Membership is decided by one question: *if a bank operator read this body, could
      * they use it to act as the customer?* Add a template here the moment its rendered
      * form carries a code, token, link with an embedded token, or password.
+     *
+     * **`OTP_CODE` is the last member, and removing it would empty this set (#8568).** It has no
+     * producer — sca-service refuses `ScaMethod.TOTP` outright (#8567), because nothing in the
+     * fleet can deliver a code and a push to the device that asked for it is not a second factor.
+     * That makes it look like the "declared but never produced" templates removed in #8834 and
+     * #8857, and it is not: an empty `SECRET_TEMPLATES` turns [isSecret] permanently false and
+     * [bodyForStorage] into the identity function, so the FIRST secret-bearing template anyone
+     * adds later would be stored in cleartext by default. The redaction rule would be off and
+     * nothing would say so.
+     *
+     * So this entry is load-bearing while unused, and stays until either a real second channel
+     * exists or a deliberate decision retires the mechanism with it.
      */
     val SECRET_TEMPLATES: Set<NotificationTemplate> = setOf(
         NotificationTemplate.OTP_CODE,
-        NotificationTemplate.PASSWORD_RESET,
     )
 
     /** True when [template]'s rendered body embeds an authentication secret. */

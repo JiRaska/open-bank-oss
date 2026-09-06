@@ -27,7 +27,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-psd2-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "9b7bc02317e4abd7"
+        openbank.tech/policy-checksum: "e6d8134bae05c5a8"
       labels: {app.kubernetes.io/name: psd2-service, app.kubernetes.io/part-of: psd2}
     spec:
       securityContext:
@@ -38,7 +38,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: psd2-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-psd2-service:sandbox-ab83fe6e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-psd2-service:sandbox-90771f5e
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8107}
@@ -127,6 +127,8 @@ spec:
             # log (openbank.authz.decisions, outcome=deny enforced=false) before the enforce
             # flip — a separate, deliberate follow-up per the rules.yaml AUTHZ_ENFORCE
             # guardrail. The app default is `true`, so this explicit `false` is load-bearing.
+            # Dated per #8470: flip target 2026-10-05, once the decision log shows an empty
+            # "would DENY" population for real eIDAS-authenticated TPP traffic.
             - name: AUTHZ_ENFORCE
               value: "false"
           startupProbe: {tcpSocket: {port: management}, initialDelaySeconds: 10, periodSeconds: 5, failureThreshold: 30}

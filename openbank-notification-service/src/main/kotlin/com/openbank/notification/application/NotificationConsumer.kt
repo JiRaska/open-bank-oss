@@ -58,6 +58,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
+import java.sql.SQLException
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -81,6 +82,12 @@ class NotificationConsumer @Inject constructor(
 ) {
 
     companion object {
+        /** Name of the notifications deduplication partial unique index, a stable duplicate discriminator. */
+        const val NOTIFICATION_DEDUPLICATION_CONSTRAINT = "uq_notifications_deduplication_key"
+
+        /** Postgres SQLState for unique_violation, as surfaced by the reactive pg client. */
+        const val SQLSTATE_UNIQUE_VIOLATION = "23505"
+
         /**
          * Generic, PII-free push body (ADR-0135 §3, issue #1182). Lock-screen-visible push
          * payloads must never carry the transaction amount, account number, or any PII — the
@@ -341,11 +348,13 @@ class NotificationConsumer @Inject constructor(
             // rendered secret to the delivery adapters, so the customer receives it as usual.
             it.body = TemplateSensitivity.bodyForStorage(req.template, body)
             it.correlationId = req.correlationId
+            it.deduplicationKey = req.deduplicationKey
             it.status = "PENDING"
             it.createdAt = Instant.now(clock)
         }
-        return Panache.withTransaction { notificationRepo.persist(entity) }
-            .chain { _ ->
+        return persistOnce(entity, req.deduplicationKey)
+            .chain { persisted ->
+                if (!persisted) return@chain Uni.createFrom().voidItem()
                 // Consent gate BEFORE the channel dispatch (ADR-0198 D4, issue #2369). Deliberately
                 // NOT a per-channel check: the defect the issue names is precisely that gating lived
                 // inside the channel branches, so PUSH got a (default-true) check and EMAIL got none,
@@ -366,6 +375,40 @@ class NotificationConsumer @Inject constructor(
             // this can neither leak customer data nor break notification dispatch.
             .call { _ -> publishOversight(req) }
     }
+
+    /**
+     * A security event may be redelivered indefinitely. A database uniqueness fact, rather than
+     * Kafka offset timing, is the authority that says its customer notification already exists.
+     */
+    private fun persistOnce(entity: NotificationEntity, deduplicationKey: UUID?): Uni<Boolean> =
+        Panache.withTransaction { notificationRepo.persist(entity) }
+            .replaceWith(true)
+            .onFailure()
+            .recoverWithUni { failure ->
+                if (deduplicationKey != null && failure.isDeduplicationConflict()) {
+                    log.debugf("Skipping duplicate notification fact %s", deduplicationKey)
+                    Uni.createFrom().item(false)
+                } else {
+                    Uni.createFrom().failure(failure)
+                }
+            }
+
+    /**
+     * Hibernate Reactive adapts the Vert.x PgException into a PLAIN [java.sql.SQLException]
+     * (sqlState 23505, the server message naming the constraint) beneath its
+     * ConstraintViolationException — never the pgjdbc [PSQLException] this check used to
+     * require, so every redelivery of a dedup-keyed request rethrew and was nacked instead of
+     * skipped. #8334 shipped the path with its test structurally invisible: the duplicate-V14
+     * Flyway collision failed boot, so CI reported those tests as skipped, not failed. The
+     * constraint name must appear in the message so an unrelated unique violation on this
+     * table is not swallowed as a dedup skip.
+     */
+    private fun Throwable.isDeduplicationConflict(): Boolean = generateSequence(this) { it.cause }
+        .filterIsInstance<SQLException>()
+        .any {
+            it.sqlState == SQLSTATE_UNIQUE_VIOLATION &&
+                it.message?.contains(NOTIFICATION_DEDUPLICATION_CONSTRAINT) == true
+        }
 
     private fun publishOversight(req: NotificationRequest): Uni<Void> {
         if (!OversightWebhook.isOversight(req.template)) return Uni.createFrom().voidItem()
@@ -1064,11 +1107,6 @@ class NotificationConsumer @Inject constructor(
             NotificationTemplate.OTP_CODE ->
                 "Your OpenBank verification code" to
                     "<h2>Verification Code</h2><p>Your code is: <b>${vars.v("code")}</b>. Valid for 5 minutes.</p>"
-            NotificationTemplate.PASSWORD_RESET ->
-                "Reset your OpenBank password" to
-                    "<h2>Password Reset</h2><p>Use the link below to set a new password. It expires in 15 minutes " +
-                    "and can be used once. If you did not ask for this, ignore this message and your password stays " +
-                    "unchanged.</p><p><a href=\"${vars.v("resetLink")}\">Reset your password</a></p>"
             NotificationTemplate.WELCOME ->
                 "Welcome to OpenBank" to
                     "<h2>Welcome!</h2><p>Thank you for joining OpenBank, ${vars.v("name")}.</p>"
@@ -1113,6 +1151,10 @@ class NotificationConsumer @Inject constructor(
                 "A delegated access grant has expired" to
                     "<h2>Grant Expired</h2><p>A delegated access grant for a <b>${vars.v("resourceType")}</b> " +
                     "has reached the end of its validity period and is no longer active.</p>"
+            NotificationTemplate.DELEGATION_FIRST_USE ->
+                "Delegated access was used for a payment" to
+                    "<h2>Delegated Access Used</h2><p>A person you authorised used delegated access " +
+                    "for a confirmed payment. Open the OpenBank app to review your delegated access.</p>"
         }
 }
 
@@ -1124,11 +1166,13 @@ class NotificationConsumer @Inject constructor(
  * message, since poison payloads are acked. An omitted variable renders empty, as it always has.
  *
  * Escaping happens HERE, not per call site (issue #1382): every one of [renderTemplate]'s ~16
- * reads interpolates straight into an HTML body (or, for `PASSWORD_RESET`'s `resetLink`, an
- * `href="..."` attribute) with zero escaping between a domain-event-supplied variable and the
- * mail actually sent — a `reason`, `documentType`, or `scope` containing markup rendered verbatim
- * in the customer's mail client. Escaping the shared accessor closes every call site in one place
- * instead of relying on each of the 16 to remember it.
+ * reads interpolates straight into an HTML body with zero escaping between a domain-event-supplied
+ * variable and the mail actually sent — a `reason`, `documentType`, or `scope` containing markup
+ * rendered verbatim in the customer's mail client. Escaping the shared accessor closes every call
+ * site in one place instead of relying on each of the 16 to remember it. (The escaper also covers
+ * the attribute-value context: `"` and `'` are escaped, so a variable remains safe if a template
+ * ever interpolates one into an `href="..."` attribute again — the removed PASSWORD_RESET's
+ * `resetLink` was the case that originally forced that, #8568.)
  *
  * Top-level rather than a member so `renderTemplate` reads as copy instead of null-handling — the
  * 16 inline `?: ""` reads it replaces were most of that function's cyclomatic complexity.

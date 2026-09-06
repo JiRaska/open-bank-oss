@@ -13,6 +13,7 @@ import {
   AlertOctagon,
   ArrowLeftRight,
   Banknote,
+  BarChart3,
   Bell,
   Bluetooth,
   BookOpen,
@@ -58,6 +59,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Smartphone,
+  Store,
   Target,
   TrendingUp,
   Users,
@@ -93,6 +95,7 @@ const coreNav: NavItem[] = [
 
 const revenueNav: NavItem[] = [
   { nameCs: 'Úvěry',        nameEn: 'Lending',      href: '/lending',      icon: TrendingUp,    permission: 'payments:view' },
+  { nameCs: 'Kreditní riziko', nameEn: 'Credit risk', href: '/lending/risk', icon: ShieldAlert, permission: 'lending:risk:view' },
   { nameCs: 'Poplatky',     nameEn: 'Fees',         href: '/fees',         icon: Receipt,         permission: 'payments:view' },
 ]
 
@@ -114,6 +117,7 @@ const paymentsNav: NavItem[] = [
   { nameCs: 'FX',                nameEn: 'FX',               href: '/fx',                icon: DollarSign,permission: 'payments:view' },
   { nameCs: 'SWIFT',             nameEn: 'SWIFT',            href: '/swift',             icon: Globe,     permission: 'payment-rails:view' },
   { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view' },
+  { nameCs: 'Obchodníci',        nameEn: 'Merchants',        href: '/merchants',         icon: Store,     permission: 'transactions:view' },
   { nameCs: 'Clearing',          nameEn: 'Clearing',         href: '/clearing',          icon: Layers,    permission: 'payment-rails:view' },
   { nameCs: 'Úroky',             nameEn: 'Interest',         href: '/interest',          icon: TrendingUp,permission: 'interest:view' },
   { nameCs: 'Šablony dokumentů', nameEn: 'Document Templates', href: '/document-templates', icon: FileSignature, permission: 'templates:view' },
@@ -133,6 +137,8 @@ const complianceNav: NavItem[] = [
   { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view' },
   { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view' },
   { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view' },
+  // ADR-0286: warehouse-backed risk reporting via the governed query registry + embedded Grafana.
+  { nameCs: 'Reporting (DWH)',    nameEn: 'Reporting (DWH)',  href: '/reporting',         icon: BarChart3,             permission: 'compliance:view' },
 ]
 
 const opsNav: NavItem[] = [

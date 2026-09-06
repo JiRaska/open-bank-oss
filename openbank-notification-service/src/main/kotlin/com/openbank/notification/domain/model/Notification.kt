@@ -42,8 +42,19 @@ enum class NotificationTemplate(val variables: Set<String>) {
     KYC_REJECTED(setOf("reason")),
     CONSENT_GRANTED(setOf("scope")),
     CONSENT_REVOKED(setOf("scope")),
+
+    // No producer, and deliberately kept: it is the only member of TemplateSensitivity's
+    // SECRET_TEMPLATES, so deleting it as "unproduced" would silently empty the at-rest redaction
+    // guard (#8568). sca-service refuses TOTP outright (#8567) — there is no transport for a code.
     OTP_CODE(setOf("code")),
-    PASSWORD_RESET(setOf("resetLink")),
+
+    // No PASSWORD_RESET template (#8568): no password flow exists anywhere in the system —
+    // the app authenticates with passkeys/biometrics and Keycloak runs with
+    // resetPasswordAllowed=false and no SMTP, so nothing could ever produce one.
+
+    // No producer (#8568). Kept rather than removed because the onboarding moment it would occupy
+    // already carries KYC_APPROVED and then ACCOUNT_OPENED — a third greeting there is a product
+    // decision about REPLACING one of those, not a gap to fill.
     WELCOME(setOf("name")),
 
     /** Decoupled/push SCA — "you have a payment to approve" (#4). [detail] = the human summary. */
@@ -86,6 +97,9 @@ enum class NotificationTemplate(val variables: Set<String>) {
 
     /** A grant's validity window ended on its own; sent to both parties (DelegationExpired). */
     DELEGATION_EXPIRED(setOf("resourceType")),
+
+    /** The grantor's delegated authority was used for a confirmed payment for the first time. */
+    DELEGATION_FIRST_USE(emptySet()),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -106,6 +120,10 @@ enum class NotificationTemplate(val variables: Set<String>) {
             ACCOUNT_FROZEN,
             KYC_REJECTED,
             TRANSACTION_FAILED,
+            // First delegated spend is a security event of the same severity as ACCOUNT_FROZEN:
+            // someone just exercised delegated authority over the grantor's money, and a missing
+            // device must not silence that (the fallback carries no body, only the prompt).
+            DELEGATION_FIRST_USE,
             -> NotificationChannel.EMAIL
             ACCOUNT_OPENED,
             ACCOUNT_CLOSED,
@@ -114,7 +132,6 @@ enum class NotificationTemplate(val variables: Set<String>) {
             CONSENT_GRANTED,
             CONSENT_REVOKED,
             OTP_CODE,
-            PASSWORD_RESET,
             WELCOME,
             SCA_APPROVAL,
             MARKETING_PRODUCT_OFFER,
@@ -136,12 +153,12 @@ enum class NotificationTemplate(val variables: Set<String>) {
      */
     val category: NotificationCategory
         get() = when (this) {
-            OTP_CODE, PASSWORD_RESET, ACCOUNT_FROZEN, SCA_APPROVAL,
+            OTP_CODE, ACCOUNT_FROZEN, SCA_APPROVAL,
             KYC_APPROVED, KYC_REJECTED,
             CONSENT_GRANTED, CONSENT_REVOKED,
             DELEGATION_OFFERED, DELEGATION_ACCEPTED, DELEGATION_DECLINED,
             DELEGATION_REVOKED, DELEGATION_SUSPENDED, DELEGATION_REINSTATED,
-            DELEGATION_RENOUNCED, DELEGATION_EXPIRED,
+            DELEGATION_RENOUNCED, DELEGATION_EXPIRED, DELEGATION_FIRST_USE,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
@@ -183,6 +200,11 @@ data class NotificationRequest(
      * meaningless to the producer, which is the only party that can join it back to its own row.
      */
     val correlationId: UUID? = null,
+    /**
+     * Optional durable idempotency key for a producer-owned business fact. Unlike
+     * [correlationId], a duplicate key deliberately produces no second notification row or send.
+     */
+    val deduplicationKey: UUID? = null,
     /** Optional bank-owned app route for a PUSH tap; never a template variable. */
     val deepLink: String? = null,
     /**

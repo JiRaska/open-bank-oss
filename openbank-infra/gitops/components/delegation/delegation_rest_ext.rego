@@ -44,6 +44,31 @@ allowed_reasons contains "operator-delegation-write" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	startswith(input.action, "delegation.")
+    not startswith(input.action, "delegation.approval.")
+}
+
+# Durable lifecycle approvals are enumerated rather than inheriting the broad delegation prefix:
+# this is the bank-side capability boundary that eventually replaces direct console writes.
+# The mutation handlers also carry a default-false application gate; OPA remains authoritative
+# about WHO may reach the read/propose/decide verbs once that gate is deliberately enabled.
+allowed_reasons contains "operator-delegation-approval" if {
+    input.principal.type == "HUMAN"
+    not startswith(input.principal.id, "service-account-")
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    role in input.principal.roles
+    input.action in {
+        "delegation.approval.read",
+        "delegation.approval.propose",
+        "delegation.approval.decide",
+    }
+}
+
+# Base rest.rego's operator-read-any sees the shared backend identity as HUMAN + ROLE_OPERATOR and
+# would otherwise admit `delegation.approval.read`. Veto the whole approval family for every
+# service account at the allow head; an extra allow reason can never bypass this.
+prohibited if {
+    startswith(input.principal.id, "service-account-")
+    startswith(input.action, "delegation.approval.")
 }
 
 # The customer-edge proxying the customer's own sharing screens (ADR-0232 D6). The edge

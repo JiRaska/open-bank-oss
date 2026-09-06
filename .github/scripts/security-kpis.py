@@ -218,29 +218,71 @@ def collect_fuzz() -> dict:
 
     try:
         runs = json.loads(gh("actions/workflows/api-fuzz.yml/runs?status=completed&per_page=10"))
-        artifacts = []
-        for run in runs.get("workflow_runs", []):
+
+        def download(artifact: dict) -> dict:
+            req = urllib.request.Request(
+                artifact["archive_download_url"],
+                headers={"Authorization": f"Bearer {token}",
+                         "Accept": "application/vnd.github+json"})
+            # Cross-host redirect must not carry the GitHub token — see _no_auth_redirect_opener.
+            try:
+                blob = _no_auth_redirect_opener().open(req, timeout=30).read()
+            except Exception as urllib_exc:
+                # Fallback for tokens/edges where the stripped-redirect dance still fails
+                # (observed with the workflow GITHUB_TOKEN on run 33972808389): the `gh` CLI is
+                # preinstalled on the runner and handles the 302 correctly. `gh api …/zip` writes
+                # the archive bytes to stdout.
+                import shutil
+                import subprocess
+                ghbin = shutil.which("gh")
+                if not ghbin:
+                    raise
+                out = subprocess.run(
+                    [ghbin, "api", f"repos/{repo}/actions/artifacts/{artifact['id']}/zip"],
+                    capture_output=True, timeout=60,
+                    env={**os.environ, "GH_TOKEN": token}, check=False)
+                if out.returncode != 0 or not out.stdout:
+                    raise urllib_exc
+                blob = out.stdout
+            return json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("fuzz-coverage.json"))
+
+        # The LATEST run's artifact is not automatically the coverage measurement: a dispatch
+        # with a `services:` override fuzzes a hand-picked subset, and reporting 2/2 = 100 %
+        # about it reads as fleet coverage (measured 2026-09-05, run 33954836043 — an override
+        # probe for the date-param fixes displaced the weekly fleet number on the hub).
+        # Walk runs newest-first and take the first NON-override artifact; an old artifact
+        # without the flag predates the flag and every scheduled run derives the full set,
+        # so it counts as a measurement. Cap the walk: each candidate costs a download.
+        cov = None
+        skipped_overrides = 0
+        for run in runs.get("workflow_runs", [])[:10]:
             arts = json.loads(gh(f"actions/runs/{run['id']}/artifacts?per_page=100"))
             hit = [a for a in arts.get("artifacts", [])
                    if a["name"] == "fuzz-coverage" and not a.get("expired")]
-            if hit:
-                artifacts = hit
-                break
-        if not artifacts:
-            return {"available": False, "reason": "no fuzz-coverage artifact yet"}
-        req = urllib.request.Request(
-            artifacts[0]["archive_download_url"],
-            headers={"Authorization": f"Bearer {token}",
-                     "Accept": "application/vnd.github+json"})
-        # Cross-host redirect must not carry the GitHub token — see _no_auth_redirect_opener.
-        blob = _no_auth_redirect_opener().open(req, timeout=30).read()
-        cov = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("fuzz-coverage.json"))
-        return {"available": True, "inScope": cov["inScope"], "tested": cov["tested"],
-                "coveragePct": cov["coveragePct"], "totalExercised": cov["totalExercised"],
-                "excludedCount": len(cov.get("excluded", [])),
-                "run": cov.get("run", ""), "runDate": cov.get("generatedAt", "")[:10]}
+            if not hit:
+                continue
+            cand = download(hit[0])
+            if cand.get("override"):
+                skipped_overrides += 1
+                continue
+            cov = cand
+            break
+        if cov is None:
+            return {"available": False,
+                    "reason": f"no non-override fuzz-coverage artifact yet "
+                              f"({skipped_overrides} override run(s) skipped)"}
+        out = {"available": True, "inScope": cov["inScope"], "tested": cov["tested"],
+               "coveragePct": cov["coveragePct"], "totalExercised": cov["totalExercised"],
+               "excludedCount": len(cov.get("excluded", [])),
+               "run": cov.get("run", ""), "runDate": cov.get("generatedAt", "")[:10]}
+        if skipped_overrides:
+            out["note"] = (f"{skipped_overrides} newer override-scoped run(s) skipped — "
+                           "an override probes a hand-picked subset, not the fleet")
+        return out
     except Exception as exc:  # network/API degradation must not kill the other collectors
-        return {"available": False, "reason": f"fuzz artifact fetch failed: {exc.__class__.__name__}"}
+        import urllib.error
+        detail = f"HTTP {exc.code}" if isinstance(exc, urllib.error.HTTPError) else exc.__class__.__name__
+        return {"available": False, "reason": f"fuzz artifact fetch failed: {detail}"}
 def self_test() -> int:
     bad = 0
     # The parse regexes must survive the real scripts' output shape — pin them on the

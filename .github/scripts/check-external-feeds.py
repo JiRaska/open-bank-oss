@@ -193,6 +193,14 @@ NOT_PROBED = [
     ("https://s3.eu-north-1.amazonaws.com", "AWS endpoint, reached with SigV4 credentials"),
     ("https://kc.open-bank.tech/realms/openbank-customers", "our own Keycloak realm, covered by its own probes"),
     ("https://pid.open-bank.tech", "our own PID issuer, covered by its own probes"),
+    # ADR-0284 public business registers. Both are PER-ENTITY lookup APIs, not documents: there is
+    # no URL to fetch without an identifier, so a shape probe would have to invent a company to ask
+    # about and would then be asserting that company's continued existence rather than the feed's
+    # health. Failure is loud where it happens — RegistryUnavailableException answers 503 and the
+    # onboarding case lands in MANUAL_REVIEW rather than degrading to self-declaration, which is
+    # the property `kyb.registry.lookups{outcome="unavailable"}` counts.
+    ("https://ares.gov.cz/ekonomicke-subjekty-v-be/rest", "ARES per-IČO lookup API (kyb-service); no fixed document, and an outage becomes MANUAL_REVIEW, never a silent pass"),
+    ("https://api.gleif.org/api/v1", "GLEIF per-LEI lookup API (kyb-service); same shape as ARES above"),
     # --- gitops corpus (#6242). Everything below became visible when CORPUS_GLOBS gained
     # `openbank-infra/gitops/**/*.yaml`. Each entry is stale-checked in BOTH directions by
     # check_drift: an entry whose URL leaves the tree fails just as loudly as an undeclared URL.
@@ -200,6 +208,9 @@ NOT_PROBED = [
     # (1) IDENTIFIERS, not fetch targets. A URL-shaped string nothing dereferences.
     ("https://www.apache.org/licenses/LICENSE-2.0", "SPDX licence identifier in an embedded SQL header; never fetched"),
     ("https://cyclonedx.org/bom", "CycloneDX schema URI in a Kyverno SBOM policy; an identifier the policy matches on"),
+    ("https://slsa.dev/provenance/v0.2", "SLSA predicate-type URI in the Kyverno provenance policy and predicate builder; an identifier the policy matches on"),
+    ("https://github.com/JiRaska/open-bank-oss", "configSource URI inside the SLSA provenance predicate (as git+https://…); an identifier the admission policy pins, never fetched"),
+    ("https://openbank.dev/buildtypes/github-actions-docker-buildx/v1", "SLSA buildType identifier minted by build-slsa-provenance.py and pinned by the Kyverno policy; an identifier, not a host"),
     ("https://git.k8s.io", "upstream source link in a vendored CRD's description text; never fetched"),
     ("https://github.com/thanos-io/thanos/blob", "upstream doc link in a vendored CRD's description text; never fetched"),
     ("https://github.com/kubernetes-sigs/controller-tools/issues", "upstream issue link in a vendored CRD comment; never fetched"),
