@@ -37,6 +37,23 @@ quarkus:
   # (ADR-0022). Its store of record is the analytics warehouse, written through the
   # AnalyticsSink port. The default LoggingAnalyticsSink needs no external system, so the
   # service boots and is testable with zero infra.
+  # M2M credentials for the registry sweep the INITIAL_LOAD backfill uses. The endpoint requires a
+  # staff or service role, so an anonymous caller is refused; the filter renews the token itself.
+  oidc-client:
+    auth-server-url: http://localhost:8080/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+
+  rest-client:
+    account-service:
+      # 8100 is account-service's own port (its application.yaml `quarkus.http.port`).
+      # balance-service's manifest records 8102 as transaction-service's, and the wrong value there
+      # made every ownership lookup time out — so the local default is written correctly here rather
+      # than relying on the deployed override to hide it.
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      scope: jakarta.inject.Singleton
+
   oidc:
     auth-server-url: http://localhost:8080/realms/openbank
     client-id: openbank-services
@@ -153,6 +170,11 @@ mp:
 "%test":
   quarkus:
     oidc:
+      enabled: false
+    # The registry sweep's M2M client must be off in tests for the same reason the resource server
+    # is: there is no Keycloak, and an oidc-client left enabled tries to reach one at startup, which
+    # fails every @QuarkusTest in the module — including the ones that never touch a backfill.
+    oidc-client:
       enabled: false
     management:
       enabled: false

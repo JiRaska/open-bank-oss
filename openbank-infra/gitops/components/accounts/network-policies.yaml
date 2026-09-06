@@ -44,6 +44,9 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: analytics
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: balances
         - namespaceSelector:
             matchLabels:

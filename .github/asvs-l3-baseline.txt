@@ -56,6 +56,12 @@ V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:113: plaintext http:/
 V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:122: plaintext http:// env value http://sanctions-service.sanctions.svc:8123
 V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:130: plaintext http:// env value http://party-service.party.svc:8111
 V9.1 openbank-infra/gitops/components/anacredit/anacredit-service.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
+# analytics-sink -> account-service (#8792/#2891). The INITIAL_LOAD backfill sweeps the account
+# registry to seed ownership for accounts that pre-date the event stream. In-cluster hop, plaintext
+# for the same reason as the other 200+ lines here; retiring it is the mesh-mTLS work (Layer 1).
+# The token it carries is NOT plaintext-dependent: it is an OIDC client_credentials bearer minted
+# against Keycloak, and the call is refused without it (optional:false on the secret ref).
+V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:107: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:143: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:153: plaintext http:// env value http://product-catalog.accounts.svc:8104
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:155: plaintext http:// env value http://balance-service.balances.svc:8103
