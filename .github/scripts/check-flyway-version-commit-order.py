@@ -91,6 +91,41 @@ def migration_files(root: pathlib.Path) -> list[tuple[pathlib.Path, int]]:
     return out
 
 
+def duplicate_versions(files_by_service: dict[str, list[tuple[pathlib.Path, int]]]) -> list[str]:
+    """Two migrations sharing one version inside one service — always fatal, never baselined.
+
+    This is a DIFFERENT defect from the out-of-order shape the rest of this gate measures, and
+    the remedy is different too. `QUARKUS_FLYWAY_OUT_OF_ORDER=true` permits applying a LOWER
+    version after a higher one has been applied; it does nothing about two files CLAIMING the
+    same version, because Flyway keys its schema history by version and refuses to resolve the
+    set at all — `FlywayException: Found more than one migration with version N`. The service
+    then does not boot, so there is no partial state and no baseline that could make it
+    acceptable. The only fix is to renumber, and renumbering is safe exactly because the
+    collision prevented application: no checksum exists in any schema history to invalidate.
+
+    Measured 2026-09-06: notification-service carried V14__synthetic_outbox_taint.sql (#6731)
+    and V14__notification_deduplication_key.sql (#8334) — merged 13 days apart, from branches
+    that never saw each other. Git reports no conflict for two differently-named files, so
+    nothing before this said a word.
+    """
+    out = []
+    for service, files in sorted(files_by_service.items()):
+        by_version: dict[int, list[str]] = {}
+        for path, version in files:
+            by_version.setdefault(version, []).append(path.name)
+        for version, names in sorted(by_version.items()):
+            if len(names) > 1:
+                out.append(
+                    f"::error::{service}: {len(names)} migrations claim version {version} "
+                    f"({', '.join(sorted(names))}). Flyway keys its schema history by version and "
+                    f"refuses the whole set — 'Found more than one migration with version "
+                    f"{version}' — so the service does not boot. Renumber the one that reached "
+                    f"main LAST to the next free version; QUARKUS_FLYWAY_OUT_OF_ORDER does not "
+                    f"help here and no KNOWN_VIOLATIONS entry can excuse it.",
+                )
+    return out
+
+
 def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, int], str]:
     """{path: position in origin/main's history, lower = earlier} for the commit that first
     ADDED each path (git log --diff-filter=A, oldest add if a path was ever removed+re-added).
@@ -280,8 +315,32 @@ def selftest() -> int:
         print(f"selftest FAIL: a KNOWN_VIOLATIONS entry was not recognised as baselined "
               f"(findings={baseline_violations}, used={baseline_used}).")
         return 1
+    # Duplicate versions inside one service: fatal, and NOT excusable by KNOWN_VIOLATIONS. The
+    # negative case matters as much — two services may each own a V1 without colliding.
+    dup = duplicate_versions({"svc": [(REPO / "openbank-x" / "V14__a.sql", 14),
+                                      (REPO / "openbank-x" / "V14__b.sql", 14)]})
+    if len(dup) != 1:
+        print(f"selftest FAIL: a duplicate version inside one service was not flagged: {dup}")
+        return 1
+    same_version_two_services = duplicate_versions({
+        "svc-a": [(REPO / "openbank-a" / "V1__x.sql", 1)],
+        "svc-b": [(REPO / "openbank-b" / "V1__y.sql", 1)],
+    })
+    if same_version_two_services:
+        print(f"selftest FAIL: two services each owning V1 wrongly flagged: "
+              f"{same_version_two_services}")
+        return 1
+    baselined_dup = duplicate_versions({
+        "svc": [(REPO / next(iter(KNOWN_VIOLATIONS)), 13),
+                (REPO / "openbank-x" / "V13__other.sql", 13)],
+    })
+    if not baselined_dup:
+        print("selftest FAIL: a duplicate version was silenced by KNOWN_VIOLATIONS — it must "
+              "not be, because Flyway refuses the set regardless of any gitops flag.")
+        return 1
     print("selftest OK: flags the #5628 shape (later commit, lower version), spares "
-          "monotonically increasing versions, recognises a baselined KNOWN_VIOLATIONS entry.")
+          "monotonically increasing versions, recognises a baselined KNOWN_VIOLATIONS entry, "
+          "and flags a duplicate version that no baseline may excuse.")
     return 0
 
 
@@ -313,7 +372,11 @@ def main() -> int:
         gatelib.subjects(0, "migrations ordered")
         return 1
 
-    findings, used_baseline = find_violations(files_by_service, order)
+    # Duplicate versions first: they are fatal on their own, decidable without history, and
+    # not excusable by the baseline the ordering half uses.
+    findings = duplicate_versions(files_by_service)
+    order_findings, used_baseline = find_violations(files_by_service, order)
+    findings += order_findings
 
     for key in sorted(set(KNOWN_VIOLATIONS) - used_baseline):
         findings.append(
