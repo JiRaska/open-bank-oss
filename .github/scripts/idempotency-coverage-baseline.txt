@@ -90,8 +90,8 @@ openbank-sca-service POST /api/v1/sca/challenges  # creation POST with no idempo
 openbank-sca-service POST /api/v1/sca/challenges/{id}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sca-service POST /api/v1/sca/challenges/{id}/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sca-service POST /api/v1/sca/parties/{partyId}/devices  # creation POST with no idempotency key today — burn-down #8351
-openbank-sdd-service POST /api/v1/sdd/collections/authorise  # creation POST with no idempotency key today — burn-down #8351
-openbank-sdd-service POST /api/v1/sdd/mandates  # creation POST with no idempotency key today — burn-down #8351
+openbank-sdd-service POST /api/v1/sdd/collections/authorise  # natural-key idempotency on (mandateId, UMR, dueDate) — ADR-0285 exception; authorise replay-guarded since #8351
+openbank-sdd-service POST /api/v1/sdd/mandates  # natural-key idempotency on (creditorId, UMR) — ADR-0285 exception; burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/cancel  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/confirm  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351

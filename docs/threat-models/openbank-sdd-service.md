@@ -74,6 +74,12 @@ instruction, but the irreversible debit lives downstream.
 
 ## 6. Change log
 
+- **2026-09-06** — Replay-safe collection authorisation (#8351, ADR-0285). `SddMandateService.authorise`
+  now short-circuits when the instruction's `dueDate` equals the mandate's `lastCollectionDate`: a
+  retried authorise of the same collection replays the stored policy decision with no `save` and no
+  outbox append. The collection's downstream dedup key (`so-sdd-{mandateId}-{umr}-{dueDate}`) was
+  already the natural idempotency key; this removes the double side effect upstream of it. No new
+  caller, endpoint or privilege. Rollback: revert.
 - **2026-09-03** — Four-eyes assessment (#8359, ADR-0034 D-criteria as applied in the #938 sweep).
   Per-verb caller audit over all seven actions: **`sdd.approve` (B2B mandate confirmation) is now
   four-eyes-gated** via `rules.yaml: four_eyes.actions` — the confirmation authorises every future
