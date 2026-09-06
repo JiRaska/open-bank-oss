@@ -57,8 +57,8 @@ import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
+import org.hibernate.exception.ConstraintViolationException
 import org.jboss.logging.Logger
-import org.postgresql.util.PSQLException
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -390,9 +390,25 @@ class NotificationConsumer @Inject constructor(
                 }
             }
 
+    /**
+     * True when this failure is the deduplication index rejecting a redelivery.
+     *
+     * The type matters and was wrong: this service persists through Hibernate REACTIVE, whose
+     * driver is the Vert.x PostgreSQL client, not JDBC. A unique-violation therefore never
+     * arrives as `org.postgresql.util.PSQLException` — Hibernate reports
+     * `HHH000247: SQLState: 23505` and the cause chain carries a plain `java.sql.SQLException`.
+     * A `filterIsInstance<PSQLException>()` over that chain matches nothing, so the conflict was
+     * rethrown, the message was nacked instead of acked, and the redelivery that this whole
+     * mechanism exists to absorb became a delivery failure.
+     *
+     * `org.hibernate.exception.ConstraintViolationException` is the fleet's own vocabulary for
+     * this (openbank-libs-runtime's CommonExceptionMappers use it) and it carries the constraint
+     * name, which is what distinguishes "this exact redelivery" from any other unique violation
+     * — a check on SQLState 23505 alone would swallow unrelated conflicts as successful skips.
+     */
     private fun Throwable.isDeduplicationConflict(): Boolean = generateSequence(this) { it.cause }
-        .filterIsInstance<PSQLException>()
-        .any { it.serverErrorMessage?.constraint == NOTIFICATION_DEDUPLICATION_CONSTRAINT }
+        .filterIsInstance<ConstraintViolationException>()
+        .any { it.constraintName == NOTIFICATION_DEDUPLICATION_CONSTRAINT }
 
     private fun publishOversight(req: NotificationRequest): Uni<Void> {
         if (!OversightWebhook.isOversight(req.template)) return Uni.createFrom().voidItem()
