@@ -61,6 +61,9 @@ test('authors a recurring campaign from the service cadence catalogue', async ({
   await page.goto('/campaigns/new')
   await page.locator('#c-name').fill('Recurring welcome')
   await page.locator('#c-goal').fill('Engage new customers')
+  // Mandatory in the studio since ADR-0269 (#8773): the maker states whether the campaign
+  // sells credit, so the journey through the form has to state it too.
+  await page.locator('#c-product-kind').selectOption('NONE')
   await page.locator('[data-segment="actives@1"]').click()
   // Scheduling is channel-agnostic; keep this regression on e-mail so it still proves the full
   // template payload while the product's default remains app-first PUSH.
