@@ -263,6 +263,13 @@ class NotificationConsumerIT {
         consumeAndAwait(request)
         consumeAndAwait(request)
 
+        // TEMPORARY DIAGNOSTIC (not for commit): the assertion below says 2 rows exist, which can
+        // only happen if the partial unique index never applied. Print what the database actually
+        // holds so the next step is measured rather than guessed.
+        val rows = notificationsFor(partyId)
+        println("DIAG rows=" + rows?.size)
+        rows?.forEach { println("DIAG row dedup=" + it.deduplicationKey + " corr=" + it.correlationId) }
+
         assertThat(countFor(partyId)).isEqualTo(1L)
         assertThat(correlationIdFor(partyId)).isEqualTo(grantId)
     }
