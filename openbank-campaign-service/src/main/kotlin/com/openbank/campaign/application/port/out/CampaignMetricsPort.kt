@@ -93,6 +93,17 @@ enum class SendHandoffOutcome {
 /** How a journey step resolved when no delivery was attempted. A bounded set — safe as a tag. */
 enum class StepResolution {
     SUPPRESSED_CONSENT,
+
+    /**
+     * ADR-0269 rule 2: the party consented to credit offers and the distress floor refused anyway
+     * — arrears, an overdrawn balance, a hardship arrangement, an insolvency marker.
+     *
+     * Its own value rather than folding into SUPPRESSED_CONSENT. Those two are opposite facts about
+     * the customer: one chose not to hear from us, the other is someone we chose not to speak to.
+     * A single number cannot answer "how many people did we decline to offer credit to, and why",
+     * and that is exactly what a conduct review asks — and what the ADR's own success measure needs.
+     */
+    SUPPRESSED_CREDIT_DISTRESS,
     SUPPRESSED_CAP,
     SUPPRESSED_QUIET_HOURS,
     SUPPRESSED_LIST,

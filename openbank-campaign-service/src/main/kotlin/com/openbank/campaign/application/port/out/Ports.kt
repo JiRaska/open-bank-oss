@@ -386,3 +386,35 @@ interface CampaignScheduler {
     /** Removes the schedule entirely. Called when a campaign closes; safe when none exists. */
     fun delete(campaignId: UUID)
 }
+
+/**
+ * ADR-0269 rule 2: may the bank surface an unprompted credit offer to this party RIGHT NOW?
+ *
+ * Separate from [ConsentCheckPort] because it answers a different question. Consent asks whether
+ * the customer agreed to hear about credit; this asks whether telling them is harmful today —
+ * arrears, an overdrawn balance, a hardship arrangement, an insolvency marker. A customer can
+ * consent and still be someone the bank must not market credit to, which is the whole of rule 2.
+ *
+ * Consulted at DELIVERY, not at enrolment. A journey runs for days, so a party enrolled while
+ * healthy can be in arrears by the third step — an enrolment-time answer expires the moment it is
+ * given, and unlike consent there is no revocation signal to terminate the journey mid-flight.
+ */
+fun interface CreditOfferGatePort {
+    /**
+     * True when an offer may be surfaced, false when the floor refuses.
+     *
+     * Throws [CreditOfferGateUnavailableException] when it cannot answer at all. That distinction
+     * is not pedantry and it is the same one this codebase already draws for the contact gate:
+     * "a gate outage is retriable infrastructure state, never a customer-policy suppression."
+     * Folding an outage into `false` would write a distress suppression against a party who may be
+     * perfectly healthy, burn the step permanently instead of retrying it, and corrupt the one
+     * metric that has to answer "how many people did we decline to offer credit to, and why".
+     *
+     * Nothing is sent in either case — the difference is whether the journey may try again.
+     */
+    suspend fun mayOffer(partyId: UUID): Boolean
+}
+
+/** The credit floor could not be reached. Retriable infrastructure state, not a policy answer. */
+class CreditOfferGateUnavailableException(message: String, cause: Throwable? = null) :
+    RuntimeException(message, cause)
