@@ -209,6 +209,7 @@ V9.1 openbank-infra/gitops/components/document-service/document-service-service.
 V9.1 openbank-infra/gitops/components/release-steward/release-steward.yaml:58: plaintext http:// env value http://litellm.ai-platform.svc:4000
 V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:100: plaintext http:// env value http://consent-service.consent.svc:8106
 V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:103: plaintext http:// env value http://clickhouse.analytics.svc:8123
+V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:147: plaintext http:// env value http://lending-service.lending.svc:8126
 V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:62: plaintext http:// env value http://keda-add-ons-http-interceptor-proxy.keda:8080
 V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:68: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/billing/billing-service.yaml:70: plaintext http:// env value http://balance-service.balances.svc:8103

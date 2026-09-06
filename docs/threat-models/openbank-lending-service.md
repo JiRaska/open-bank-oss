@@ -507,8 +507,17 @@ than the underlying facts and a real one.
 | **R**epudiation | The bank cannot show why a customer was or was not marketed to | `policyVersion` is in the response, so a decision can be tied to the decision-table version that produced it (ADR-0213). The reason code is contract, not a log line. |
 | **D**oS / availability | A large campaign sweep multiplies one DB read plus one analytics profile call per party | Real and unsolved here: this slice reduces the volume by moving the check to delivery rather than enrolment, but not the unit cost. Caching would need an explicit freshness bound, because a stale "not in distress" outlives the arrears that ended it — the harmful direction. Recorded in #8918 rather than inherited by accident. |
 
-**Not modelled here:** the caller's side. campaign-service consuming this route is a separate change
-with its own threat surface, and is deliberately not in this slice.
+**Update (#8918 part 2): the caller now exists.** campaign-service consumes this route before every
+credit send, which turns a declared-but-unused surface into a live cross-namespace ingress edge —
+`campaign` was added to this namespace's allowed ingress by `gen-network-policies.py`.
+
+What that changes, and what it does not:
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **I**nformation disclosure | A second namespace can now reach an endpoint that states whether a named party is in arrears | The edge is declared, generated and reviewable rather than ambient — an undeclared caller is still DROPPED by the same policy. The blast radius is unchanged in kind: the shared `openbank-services` principal already made this readable by any backend service, which is the limitation recorded above, not one this edge introduces. |
+| **D**oS / availability | A campaign sweep drives call volume into lending | Reduced, not solved: the check sits at DELIVERY rather than enrolment, so the volume is what is actually being sent today rather than everyone in a segment. Unit cost (one DB read + one analytics call per party) is unchanged and is recorded in #8918. |
+| **T**ampering | A lending outage is read by the caller as permission to market | campaign-service raises rather than answering "not allowed": an outage is retriable infrastructure state, never a customer-policy suppression, so nothing is sent AND nothing is recorded as a distress refusal. |
 
 ## 10. Change log
 

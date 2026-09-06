@@ -8,6 +8,7 @@ import com.openbank.campaign.application.port.out.BannerPlacementPort
 import com.openbank.campaign.application.port.out.BannerPlacementRequest
 import com.openbank.campaign.application.port.out.CampaignMetricsPort
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.CreditOfferGatePort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.NotificationSendRequest
@@ -50,7 +51,15 @@ import java.util.UUID
  * rethrows so the Temporal activity retries instead of terminating a journey on a transient blip.
  */
 @ApplicationScoped
-@Suppress("TooManyFunctions") // One method per activity declared by CampaignJourneyActivities.
+// TooManyFunctions: one method per activity declared by CampaignJourneyActivities.
+// LongParameterList: nine collaborators, each a distinct outbound port this class genuinely drives
+// (repositories, the contact gate, two transports, metrics, the ADR-0269 credit floor) plus the
+// dry-run switch. Bundling them into a holder would hide which ports a given delivery path touches
+// and make the CDI graph less honest, for no reduction in real coupling.
+//
+// ONE annotation, not two: a second @Suppress on the same declaration replaces the first rather
+// than adding to it, so the split version silently stopped suppressing TooManyFunctions.
+@Suppress("TooManyFunctions", "LongParameterList")
 open class CampaignJourneyActivitiesImpl(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
@@ -59,6 +68,13 @@ open class CampaignJourneyActivitiesImpl(
     private val notificationSend: NotificationSendPort,
     private val bannerPlacement: BannerPlacementPort,
     private val metrics: CampaignMetricsPort,
+    /**
+     * ADR-0269 rule 2. Consulted HERE, in the send path, rather than at enrolment: a journey runs
+     * for days, so a party enrolled while healthy can be in arrears by the third step. Consent has
+     * no such hole — its revocation is signalled into the running workflow — but distress has no
+     * equivalent signal, so an enrolment-time answer would expire the moment it was given.
+     */
+    private val creditOfferGate: CreditOfferGatePort,
     /**
      * When true, a step runs every gate and then stops short of the transport: nothing is emitted to
      * notification-service on any channel, and the send log records DRY_RUN.
@@ -149,6 +165,13 @@ open class CampaignJourneyActivitiesImpl(
             enrolments.findByCampaignAndParty(campaignId, partyId)?.contentVariant
         } else {
             null
+        }
+        // Before ANY delivery attempt for this step, and therefore before the push fallback too: a
+        // customer the distress floor refuses must not receive the fallback either. Checked per
+        // step rather than once per journey because the answer changes underneath a running one.
+        if (campaign.productKind.isCredit && !creditOfferGate.mayOffer(partyId)) {
+            sendLog.record(Ids.newId(), campaignId, partyId, stepOrder, SendOutcome.SUPPRESSED_CREDIT_DISTRESS)
+            return resolved(StepResolution.SUPPRESSED_CREDIT_DISTRESS, StepOutcome.SUPPRESSED)
         }
         return deliverEligibleStep(
             StepDeliveryContext(campaign, step, campaignId, partyId, stepOrder, contentVariant),

@@ -9,6 +9,7 @@ import com.openbank.campaign.application.port.out.BannerPlacementRequest
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.CreditOfferGatePort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.NotificationSendRequest
@@ -217,6 +218,7 @@ class CampaignJourneyActivitiesTest {
                 notificationSend,
                 bannerPlacement,
                 metrics,
+                CreditOfferGatePort { true },
                 dryRun = false,
             )
     }
