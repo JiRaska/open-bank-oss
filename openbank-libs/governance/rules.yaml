@@ -3194,6 +3194,8 @@ shared_m2m_matrix_write_grants:
     - lending.repay
     - lending.reschedule
     - lending.writeoff
+    - merchant.delete
+    - merchant.update
     - opsmessage.approval.decide
     - opsmessage.compose
     - party.approval.decide
