@@ -11,4 +11,7 @@ agents:
   - case.open
   - case.preempt
   - case.synthesize
+- id: kyb-analyst
+  case_capabilities:
+  - case.join
 grants: []

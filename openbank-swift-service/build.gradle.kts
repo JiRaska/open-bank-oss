@@ -76,9 +76,15 @@ tasks.withType<Test> {
     // died in the same minute — `OutOfMemoryError: Java heap space` across ClassGraph-worker /
     // vert.x-eventloop / Finalizer threads ~3 minutes into the suite, after which the JVM hung
     // in GC until the 45-minute job timeout (#8781) or the pact verification Timed out
-    // downstream of the GC storm (#8697). Same 2g ceiling account/lending/product-catalog
-    // already run with; a ceiling, not an allocation.
-    maxHeapSize = "2g"
+    // downstream of the GC storm (#8697). 2g (the account/lending/product-catalog ceiling)
+    // proved NOT enough: measured 2026-09-06 the suite OOM'd at 2g on three consecutive CI
+    // attempts of one unchanged commit (PR #8942, run 34032738729) — OutOfMemoryError across
+    // ClassGraph-worker / vert.x-eventloop / Finalizer / HttpClient threads ~6 minutes in,
+    // surfacing as SwiftPactFolderProviderVerificationTest "Uncaught exception during scan"
+    // (the scan is just the allocation that trips the exhausted heap, not the cause). Raised
+    // to 3g; a ceiling, not an allocation. A duplicate `maxHeapSize = "2g"` further down this
+    // block (added independently by #8796 for the same #8916 defect) was consolidated here.
+    maxHeapSize = "3g"
 
     // CI hang #3 (#2320) is GONE — measured, not assumed. `SwiftBootSmokeIT` used to hang 37+ min
     // at Quarkus boot on the runner pool (`@DisabledIfEnvironmentVariable` is evaluated AFTER
