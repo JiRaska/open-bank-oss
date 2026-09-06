@@ -10,7 +10,7 @@ info:
   # Minor bump (1.11.0 -> 1.12.0): additive only — GET /approvals (the checker's queue, issue
   # #5679, mirroring sanctions' #3472) plus two additive fields on the PATCH .../approvals/{id}
   # response (makerId, createdAt). No breaking change.
-  version: 1.13.0
+  version: 1.14.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -242,6 +242,96 @@ paths:
         '422':
           description: Transaction is not in COMPLETED status and cannot be reversed
 
+  # #8573: operator maintenance of the merchant enrichment catalogue. Additive and
+  # operator-only — nothing here is proxied by customer-edge.
+  /api/v1/merchants:
+    get:
+      tags: [Merchant catalogue]
+      summary: List catalogue entries, most recently updated first
+      operationId: listMerchants
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, default: 0}
+        - name: size
+          in: query
+          schema: {type: integer, default: 50, maximum: 200}
+      responses:
+        '200':
+          description: One page of catalogue entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/MerchantAdmin'}
+                  total: {type: integer, format: int64}
+  /api/v1/merchants/unmatched:
+    get:
+      tags: [Merchant catalogue]
+      summary: Most frequent acquirer descriptors with no catalogue entry
+      description: >-
+        The operator worklist. Reads a bounded window of recent transaction descriptions,
+        normalises them the way the lookup does, drops the ones already in the catalogue and ranks
+        what is left by how many transactions carried it. Bounded rather than exhaustive on
+        purpose: normalisation is not expressible in SQL, and the value is in the top of the list.
+      operationId: listUnmatchedDescriptors
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, default: 25, maximum: 200}
+        - name: scan
+          in: query
+          description: How many recent descriptions to consider.
+          schema: {type: integer, default: 2000, maximum: 20000}
+      responses:
+        '200':
+          description: Unmatched descriptors, most frequent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    descriptorKey: {type: string}
+                    occurrences: {type: integer}
+  /api/v1/merchants/{descriptorKey}:
+    put:
+      tags: [Merchant catalogue]
+      summary: Create or replace a catalogue entry
+      description: >-
+        Idempotent by key. The path value is normalised on the way in, so pasting a raw acquirer
+        descriptor writes the row the lookup will actually hit.
+      operationId: upsertMerchant
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MerchantUpsert'}
+      responses:
+        '200': {description: Entry replaced}
+        '201': {description: Entry created}
+        '400': {description: Key normalises to nothing, cleanName missing, or only one coordinate}
+    delete:
+      tags: [Merchant catalogue]
+      summary: Remove a catalogue entry
+      operationId: deleteMerchant
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '204': {description: Entry removed}
+        '404': {description: No entry under that key}
   /api/v1/transactions/approvals:
     get:
       tags: [Transactions]
@@ -329,6 +419,33 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    MerchantAdmin:
+      type: object
+      description: A catalogue entry as an operator sees it. Public business data only.
+      properties:
+        descriptorKey: {type: string}
+        cleanName: {type: string}
+        logoUrl: {type: string, nullable: true}
+        category: {type: string, nullable: true}
+        lat: {type: number, format: double, nullable: true}
+        lon: {type: number, format: double, nullable: true}
+        city: {type: string, nullable: true}
+        country: {type: string, nullable: true}
+        updatedAt: {type: string, format: date-time}
+    MerchantUpsert:
+      type: object
+      required: [cleanName]
+      description: >-
+        Public business data only — a trading name, a logo, a shop location. Coordinates are both
+        or neither; a half-populated pair is refused rather than becoming a pin at latitude 0.
+      properties:
+        cleanName: {type: string}
+        logoUrl: {type: string, nullable: true}
+        category: {type: string, nullable: true}
+        lat: {type: number, format: double, nullable: true}
+        lon: {type: number, format: double, nullable: true}
+        city: {type: string, nullable: true}
+        country: {type: string, nullable: true}
     ApprovalResponse:
       type: object
       description: >-

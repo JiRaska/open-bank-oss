@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "63f5769df67380c8"
+    openbank.tech/policy-checksum: "d1ffa3a66e986c1d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1076,6 +1076,10 @@ data:
             - ledger.read
             - lending.list
             - lending.read
+            # #8573: the merchant enrichment catalogue an operator maintains. Read is here rather
+            # than relying on the generic operator ".read" rule so the worklist route is granted
+            # explicitly, the same way every other list action in this matrix is.
+            - merchant.list
             - notification.list
             - notification.read
             # ADR-0224 D3 (E2E #2750): the staff OBO channel's MCP read tools — the capabilities
@@ -1152,6 +1156,11 @@ data:
             - lending.repay
             - lending.reschedule
             - lending.writeoff
+            # #8573: maintaining the merchant enrichment catalogue. Public business data only — a
+            # trading name, a logo, a shop location — never anything customer-derived, and not
+            # reachable through customer-edge.
+            - merchant.delete
+            - merchant.update
             - party.approval.decide
             - party.consent.update
             - party.mandate.grant              # ADR-0284 D3: bind a representative to a legal-entity party

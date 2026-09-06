@@ -2859,6 +2859,10 @@ authz:
         - ledger.read
         - lending.list
         - lending.read
+        # #8573: the merchant enrichment catalogue an operator maintains. Read is here rather
+        # than relying on the generic operator ".read" rule so the worklist route is granted
+        # explicitly, the same way every other list action in this matrix is.
+        - merchant.list
         - notification.list
         - notification.read
         # ADR-0224 D3 (E2E #2750): the staff OBO channel's MCP read tools — the capabilities
@@ -2935,6 +2939,11 @@ authz:
         - lending.repay
         - lending.reschedule
         - lending.writeoff
+        # #8573: maintaining the merchant enrichment catalogue. Public business data only — a
+        # trading name, a logo, a shop location — never anything customer-derived, and not
+        # reachable through customer-edge.
+        - merchant.delete
+        - merchant.update
         - party.approval.decide
         - party.consent.update
         - party.mandate.grant              # ADR-0284 D3: bind a representative to a legal-entity party
@@ -3185,6 +3194,8 @@ shared_m2m_matrix_write_grants:
     - lending.repay
     - lending.reschedule
     - lending.writeoff
+    - merchant.delete
+    - merchant.update
     - opsmessage.approval.decide
     - opsmessage.compose
     - party.approval.decide
