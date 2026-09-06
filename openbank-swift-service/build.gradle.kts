@@ -68,6 +68,23 @@ dependencies {
 // probe's answer first.
 // Pact: write generated consumer contracts to pacts/ and forward broker config.
 tasks.withType<Test> {
+    // Gradle's default test-JVM heap is 512m. This module exceeded it: on 2026-09-06 the CI job
+    // OOMed four minutes in, at the moment the pact consumer test starts its mock server
+    // (`JUnit5MockServerSupport`), then thrashed for forty minutes until the job was cancelled —
+    // thirteen `OutOfMemoryError` lines and not one failing assertion, so the job reads as a
+    // cancellation rather than as a memory fault. The earlier reading of the same defect was
+    // `SwiftPactFolderProviderVerificationTest` blowing its 8-minute budget: with the heap
+    // exhausted the verification only advances between full GCs, so it either overruns or dies.
+    // Locally, where the heap is not the constraint, the same test finishes in ~5-6 minutes, which
+    // is why this passes on a laptop and fails in CI on branches that never touch this service.
+    //
+    // `openbank-account-service` and `openbank-lending-service` already carry this override for
+    // the same failure, and account's comment sets the rule: a second OOMing module is the signal
+    // to raise the default in build-logic and to count the Quarkus boots per module. swift is the
+    // third, so that threshold is met — but a fleet default is a 50-module change and belongs in
+    // its own PR with those counts, not here (#8919).
+    maxHeapSize = "2g"
+
     // CI hang #3 (#2320) is GONE — measured, not assumed. `SwiftBootSmokeIT` used to hang 37+ min
     // at Quarkus boot on the runner pool (`@DisabledIfEnvironmentVariable` is evaluated AFTER
     // Quarkus starts QuarkusTestResource containers, quarkusio/quarkus#21555), so a blanket
