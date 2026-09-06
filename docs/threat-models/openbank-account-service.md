@@ -24,13 +24,14 @@ that is balance-service).
                                                                 +--> [sanctions-service] (OIDC M2M, sync, ADR-0032)
                                                                 |
                                                                 +--> [product-catalog] (OIDC M2M read, sync, fail-open, ADR-0158)
+[analytics-sink INITIAL_LOAD] --OIDC M2M read--> (GET /api/v1/accounts/active) --> [account-service]
 [Kafka party events] --in--> [account-service PartyEventConsumer] --activate--> [account-service]
                                                                 |
                                                                 +--M2M client_credentials (ROLE_OPERATOR)--> [transaction-service POST /api/v1/transactions]   (welcome bonus, sandbox-only)
 ```
 
 - **External entities:** operators/admins (human, OIDC via Keycloak), downstream consumers of account events, party-service (event source).
-- **Trust boundaries:** UI↔service (mTLS + OIDC + OPA authz, ADR-0034); service↔Postgres; service↔Kafka (outbox + party-events-in); **service↔transaction-service (outbound M2M, new — welcome-bonus grant)**; **account-service↔sanctions-service** (new, OIDC M2M, ADR-0032 §C); **account-service↔product-catalog** (OIDC M2M read, ADR-0158 — fail-**open**, a deliberately different posture from the sanctions gate: an unreachable product catalogue is reference-data unavailability, not a compliance risk, and must never block account opening).
+- **Trust boundaries:** UI↔service (mTLS + OIDC + OPA authz, ADR-0034); service↔Postgres; service↔Kafka (outbox + party-events-in); **analytics-sink↔account-service (INBOUND M2M read, new — the ADR-0143 fleet sweep `GET /api/v1/accounts/active`)**; **service↔transaction-service (outbound M2M, new — welcome-bonus grant)**; **account-service↔sanctions-service** (new, OIDC M2M, ADR-0032 §C); **account-service↔product-catalog** (OIDC M2M read, ADR-0158 — fail-**open**, a deliberately different posture from the sanctions gate: an unreachable product catalogue is reference-data unavailability, not a compliance risk, and must never block account opening).
 - **Assets:** account identity, IBAN, freeze/closure state, ownership linkage, **the oidc-client M2M secret** (grants ROLE_OPERATOR on the money path).
 
 ## 3. Authn/Authz
@@ -95,6 +96,35 @@ not change any existing request's outcome until explicitly flipped.
   it is a strict improvement over the prior state of no guard at all.
 
 ## 6. Change log
+
+- **2026-09-06** — **New INBOUND reader on the fleet sweep**, no new route and no new privilege.
+  `openbank-analytics-sink` now calls the existing `GET /api/v1/accounts/active` (ADR-0143's
+  staff/service sweep, already used by billing-service's cycle scheduler) with an OIDC
+  client_credentials token, to seed the account-to-party key for accounts that pre-date the event
+  stream (#8792/#2891 — 88 accounts hold a `party_id`, the warehouse had it for 19).
+  `accounts/network-policies.yaml` gains the `analytics` namespace as an ingress source, which is
+  the change this entry exists for.
+
+  **What widens.** The set of namespaces that may reach this service's REST port grows by one, and
+  that namespace now holds a credential (`analytics-sink-oidc`) minted from the SHARED
+  `openbank-services` realm client — the same client several services already carry, so this adds a
+  holder rather than a new grant. Compromise of the analytics namespace therefore reaches the same
+  endpoints that client could already reach from elsewhere; it does not reach anything new. The
+  secret ref is `optional: false` on purpose: a credential allowed to be missing sends
+  UNAUTHENTICATED requests instead of failing, and the resulting 401 is indistinguishable from
+  having no client configured at all (#2929).
+
+  **What does not widen.** The sweep is READ-only and returns the same `AccountResponse` the
+  endpoint already served — no new field, and no route added. The projection analytics builds from
+  it is written straight to the warehouse sink and is **never republished to Kafka**, so
+  `AccountCreated` — a discriminator balance-service, document-service, statement-service and
+  campaign-service read verbatim — does not reach them; a backfill that republished would re-create
+  balances and re-issue documents for 66 accounts.
+
+  **Residual.** The transport is plaintext in-cluster (`http://account-service.accounts.svc:8100`),
+  baselined under ASVS V9.1 exactly as the identical edge from payments, customer-edge and party
+  already is; retiring the class is the mesh-mTLS work, not this change. The bearer does not depend
+  on the transport.
 
 - **2026-09-04** — **Inbound REST error surface on account opening**, no new route, caller, edge
   or privilege. Two sanctions-screening outcomes rendered 500 INTERNAL_ERROR through the generic
