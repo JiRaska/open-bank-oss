@@ -216,6 +216,9 @@ describe('campaign studio', () => {
     await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Recurring welcome' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Keep new customers engaged' } })
+    // Mandatory since ADR-0269 (#8773): the form cannot be submitted until the maker says
+    // whether this campaign sells credit, so the test has to say it too.
+    fireEvent.change(document.getElementById('c-product-kind')!, { target: { value: 'NONE' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
     fireEvent.click(document.querySelector('[data-channel-pick="EMAIL"]')!)
     fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'Welcome' } })
@@ -250,6 +253,9 @@ describe('campaign studio', () => {
     await waitFor(() => expect(screen.getByRole('option', { name: /welcome-reward@2/ })).toBeTruthy())
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Rewarded welcome' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open current accounts' } })
+    // Mandatory since ADR-0269 (#8773): the form cannot be submitted until the maker says
+    // whether this campaign sells credit, so the test has to say it too.
+    fireEvent.change(document.getElementById('c-product-kind')!, { target: { value: 'NONE' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
     fireEvent.change(document.getElementById('c-incentive')!, { target: { value: INCENTIVES.items[0].ref.id } })
     fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'Welcome' } })
@@ -369,6 +375,9 @@ describe('campaign studio', () => {
     await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Two headlines' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open more accounts' } })
+    // Mandatory since ADR-0269 (#8773): the form cannot be submitted until the maker says
+    // whether this campaign sells credit, so the test has to say it too.
+    fireEvent.change(document.getElementById('c-product-kind')!, { target: { value: 'NONE' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
     fireEvent.click(document.querySelector('[data-channel-pick="EMAIL"]')!)
     fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'A headline' } })
@@ -559,6 +568,9 @@ describe('campaign studio', () => {
     await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Fallback offer' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open more accounts' } })
+    // Mandatory since ADR-0269 (#8773): the form cannot be submitted until the maker says
+    // whether this campaign sells credit, so the test has to say it too.
+    fireEvent.change(document.getElementById('c-product-kind')!, { target: { value: 'NONE' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
     fireEvent.click(document.querySelector('[data-channel-pick="EMAIL"]')!)
     fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'Headline' } })

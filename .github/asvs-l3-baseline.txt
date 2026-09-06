@@ -285,3 +285,5 @@ V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1160: plai
 V9.1 openbank-infra/gitops/components/fx-service/fx-service.yaml:89: plaintext http:// env value http://fraud-service.fraud.svc:8133
 V9.1 openbank-infra/gitops/components/ai-platform/litellm.yaml:153: plaintext http:// env value http://langfuse.ai-platform.svc:3000
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:98: plaintext http:// env value http://tempo.observability.svc:4318
+V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:181: plaintext http:// env value http://kyb-service.kyb.svc:8157
+V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:117: plaintext http:// env value http://party-service.party.svc:8111

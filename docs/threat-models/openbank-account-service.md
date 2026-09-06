@@ -125,6 +125,25 @@ not change any existing request's outcome until explicitly flipped.
   baselined under ASVS V9.1 exactly as the identical edge from payments, customer-edge and party
   already is; retiring the class is the mesh-mTLS work, not this change. The bearer does not depend
   on the transport.
+- **2026-09-05** — **Inbound REST error surface on the authentication boundary**, no new route,
+  caller, edge or privilege. A security abort (anonymous or under-roled caller hitting a
+  `@RolesAllowed` route) was rendered by Quarkus REST's built-in handling as the raw exception
+  message in a plain-text body under the resource's negotiated `application/json` content-type —
+  a 401 whose body was the literal text `Not Authenticated` while declaring itself JSON, which any
+  JSON-parsing client (and the VoP consumer pact's anonymous-IBAN-lookup replay, #8803) breaks on.
+  Three service-local mappers (`io.quarkus.security` Unauthorized / AuthenticationFailed → 401
+  `UNAUTHORIZED`, Forbidden → 403 `FORBIDDEN`) now answer with the standard `ApiError` envelope and
+  fixed messages. **Security-relevant half:** the fixed message names neither the failure detail
+  nor the underlying mechanism, so the abort leaks strictly less than the raw exception text did;
+  status codes are unchanged, so no client-visible signaling about account or authorization
+  existence moves. The mappers live in the service rather than libs-runtime because a
+  shared-library `@Provider` naming an `io.quarkus.security` type is the #6240 ArC boot-failure
+  class (enforced by the `provider-type-classpath` gate). The anonymous 401 itself is now covered
+  by contract: the VoP pact interaction is replayed with the `@TestSecurity` identity cleared
+  (TestIdentityAssociation), so "no caller identity → 401" is verified, not assumed. RBAC, OPA and
+  authentication itself are untouched. **Risk class:** availability/observability plus disclosure
+  hardening; no money mutation and no new principal. Rollback: delete the three mappers and the
+  aborts fall back to Quarkus' built-in text rendering. (#8803)
 
 - **2026-09-04** — **Inbound REST error surface on account opening**, no new route, caller, edge
   or privilege. Two sanctions-screening outcomes rendered 500 INTERNAL_ERROR through the generic
@@ -590,3 +609,16 @@ monotonically increasing `lifecycleRevision`. A revisionless close remains accep
 permanent legacy tombstone; a revisionless activate/reinstate is ignored. This deliberately favors
 temporary unavailability during a consumer-first rolling upgrade over resurrecting revoked access.
 Recovery from a legacy tombstone is a newly issued grant, never replaying the same grant id.
+
+- **2026-09-06** — **Owner-only transparency view over both authorization stores** (ADR-0232,
+  `GET /api/v1/accounts/{accountId}/authorizations/effective`). Read-only projection of the same
+  two stores (`account_authorizations`, delegation grants) and the same active/validity filters the
+  payment guard consults, so the view cannot drift from enforcement. When the customer-edge stamps
+  `X-Customer-Party-Id`, ownership is re-checked here (defence in depth); a mismatch answers 404 and
+  an unknown account answers an empty list, so no response distinguishes "not yours" from "does not
+  exist" — no account-id existence oracle. Payload carries party ids only: no names, contact details
+  or grant labels, so the endpoint cannot be used to turn an account id into a person. The
+  customer-edge route is owner-only; a delegate may read the account but not this list.
+  **Risk class:** confidentiality (bounded to party ids of parties the owner already transacts
+  with); no money mutation, no new principal, no new service-to-service edge. Rollback: remove the
+  route; enforcement is unchanged because the guard never reads this projection.

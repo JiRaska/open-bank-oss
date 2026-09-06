@@ -970,6 +970,449 @@ data:
     WHERE b.synthetic = 0
       AND b.occurred_at <= {t:DateTime64(3, 'UTC')}
     GROUP BY upper(b.aggregate_type), b.aggregate_id;
+  12-party-event-profile.sql: |
+    -- SPDX-License-Identifier: Apache-2.0
+    -- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+    -- See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+    --
+    -- The per-party event profile ADR-0282 phase 1 asks for (issue #8792).
+    --
+    -- WHAT WAS ACTUALLY MISSING. ADR-0210 put Customer 360 in the silver layer, and V5 gave the
+    -- account-to-party key one definition. What no object gave one definition to is the question one
+    -- level up: WHICH ROWS BELONG TO A PARTY. The Customer 360 BFF answers it inline, in TypeScript,
+    -- on every request — `payload.partyId = P` OR an ACCOUNT/TRANSACTION row whose aggregate_id is one
+    -- of P's accounts — then pulls up to 5000 rows and folds them in the route handler.
+    --
+    -- That predicate IS the isolation boundary, in the same sense V5's header means it: a caller that
+    -- widens its own copy shows another customer's events. V5 collapsed one such copy and the route's
+    -- own comment records the lesson ("a resolution with two definitions has two answers"), but the
+    -- scoping around the view stayed behind in the caller. `silver_party_events` is that scoping, named
+    -- once, so a second consumer — the Lipa earn evaluation, the segment DSL, the AI advisor — inherits
+    -- the boundary instead of re-deriving it.
+    --
+    -- WHY silver_current_state AND NOT bronze. Deliberately the same source the Customer 360 route
+    -- reads today, so this view is a refactor of an existing answer rather than a new one with a
+    -- different meaning. Silver is the latest event per (aggregate_type, aggregate_id): a profile built
+    -- on it describes current state, which is what a 360 view is for. Anything needing the full history
+    -- (cash-flow medians, cadence) must read bronze, and V10's monthly-flows view already does exactly
+    -- that — the two are different questions, not two answers to one.
+    --
+    -- THE ACCOUNT LEG READS V5, WHICH READS BRONZE, AND THAT ASYMMETRY IS LOAD-BEARING. An account's
+    -- latest silver row is typically a status or balance event carrying no partyId, so resolving the
+    -- account key from silver would drop exactly the parties with the most account activity. V5 already
+    -- makes that choice and states it; this view inherits it by delegating rather than repeating it.
+    --
+    -- WHAT IT DELIBERATELY DOES NOT DO. It computes no financial-health measure, no segment membership
+    -- and no score. ADR-0220 D5's rule applies to this phase: a rewards programme rendered from
+    -- fabricated profiles is worse than a missing feature. Every column below is a count or a timestamp
+    -- that is directly observable in the rows; nothing is imputed for a party with thin data, and a
+    -- party with no events has no row here rather than a row of zeros.
+    -- ─────────────────────────────────────────────────────────────────────────────
+
+    CREATE OR REPLACE VIEW openbank_analytics.silver_party_events AS
+    SELECT
+        JSONExtractString(s.payload, 'partyId') AS party_id,
+        -- Folded once here so no downstream view repeats it. silver_current_state already upper()s its
+        -- output; the fold is restated rather than assumed, because a caller that inherits case-folding
+        -- by accident breaks the day the source view changes and nothing says why.
+        upper(s.aggregate_type)                 AS aggregate_type,
+        s.aggregate_id,
+        s.event_id,
+        s.event_type,
+        s.occurred_at,
+        s.source_service,
+        s.payload
+    FROM openbank_analytics.silver_current_state AS s
+    WHERE JSONExtractString(s.payload, 'partyId') != ''
+
+    UNION ALL
+
+    -- The account leg: rows the party owns through an account rather than through a payload key. The
+    -- `NOT IN` on the payload key is what keeps the union disjoint — without it a TRANSACTION row that
+    -- carries BOTH a partyId and an owned account id appears twice, and every count below doubles for
+    -- exactly the best-instrumented events.
+    SELECT
+        pa.party_id                             AS party_id,
+        upper(s.aggregate_type)                 AS aggregate_type,
+        s.aggregate_id,
+        s.event_id,
+        s.event_type,
+        s.occurred_at,
+        s.source_service,
+        s.payload
+    FROM openbank_analytics.silver_current_state AS s
+    INNER JOIN openbank_analytics.silver_party_accounts AS pa
+        ON pa.account_id = s.aggregate_id
+    WHERE upper(s.aggregate_type) IN ('ACCOUNT', 'TRANSACTION')
+      AND JSONExtractString(s.payload, 'partyId') = '';
+
+    -- ─────────────────────────────────────────────────────────────────────────────
+    -- The profile itself: the fold the Customer 360 route performs per request, computed once.
+    --
+    -- The per-domain breakdown is a SECOND view (one row per party per domain) rather than a column per
+    -- domain, because the domain set is open: a newly ingested topic must widen the profile without a
+    -- migration, and a fixed column list would report zero for a domain that merely had no column yet.
+    -- That is the sentinel-default failure shape — indistinguishable from a real zero.
+    -- ─────────────────────────────────────────────────────────────────────────────
+    CREATE OR REPLACE VIEW openbank_analytics.gold_party_event_profile AS
+    SELECT
+        party_id,
+        count()                                    AS events_observed,
+        uniqExact(aggregate_id)                    AS aggregates_observed,
+        -- upper() restated at the comparison even though silver_party_events folds it: inheriting a
+        -- fold is an assumption that breaks silently the day the source view changes, which is what the
+        -- aggregate-type-case-fold gate exists to prevent. upper() of an already-folded value is free.
+        uniqExactIf(aggregate_id, upper(aggregate_type) = 'ACCOUNT')      AS accounts_observed,
+        uniqExact(aggregate_type)                  AS domains_observed,
+        min(occurred_at)                           AS first_seen_at,
+        max(occurred_at)                           AS last_seen_at,
+        -- Recency in days, computed here so every consumer agrees on the clock. NOT seeded from a
+        -- sentinel: a party with no events has no row at all, so there is no boot-time value that could
+        -- read as decades of staleness the way a registration-time gauge does.
+        dateDiff('day', max(occurred_at), now())   AS days_since_last_event,
+        arraySort(groupUniqArray(aggregate_type))  AS domains
+    FROM openbank_analytics.silver_party_events
+    GROUP BY party_id;
+
+    -- One row per (party, domain): the `byDomain` map the Customer 360 route builds in the handler,
+    -- including the latest event per domain that the route derives from row order. argMax rather than
+    -- "the first row of a DESC scan", because the ordering guarantee is a property of the query the
+    -- caller happens to write, and this must hold for every caller.
+    CREATE OR REPLACE VIEW openbank_analytics.gold_party_domain_activity AS
+    SELECT
+        party_id,
+        aggregate_type,
+        count()                                                   AS events_observed,
+        argMax(event_type, occurred_at)                           AS last_event_type,
+        max(occurred_at)                                          AS last_occurred_at
+    FROM openbank_analytics.silver_party_events
+    GROUP BY party_id, aggregate_type;
+  13-settled-transactions.sql: |
+    -- SPDX-License-Identifier: Apache-2.0
+    -- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+    -- See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+    --
+    -- The post-settlement transaction fact ADR-0282 phase 1 asks for (issue #8792).
+    --
+    -- WHAT THE ISSUE SAID, AND WHAT THE WAREHOUSE SAYS. #8792 states that the only transaction fact in
+    -- analytics is the initiated event, that it carries no rail, and that it is emitted before the money
+    -- moves. Measured 2026-09-05, two of those three are no longer true: THREE transaction event kinds
+    -- are ingested — TransactionInitiated (63), TransactionCompleted (47), TransactionFailed (13) — and
+    -- the initiated payload does carry `rail`, alongside amount, currencyCode, instructionType, type,
+    -- source/target account and initiatedByPartyId.
+    --
+    -- WHAT IS ACTUALLY MISSING IS THE OPPOSITE SHAPE. The post-settlement event EXISTS and is
+    -- content-free: TransactionCompleted carries only a referenceNumber. So "did it settle" and "what
+    -- settled" live in two different events, and every consumer that wants a settled amount has to know
+    -- to join them. Nothing did, which is why the fact read as absent.
+    --
+    -- Both events are keyed by the transaction's own aggregate_id, so the join is exact rather than
+    -- heuristic. Verified before writing this: all 47 completed transactions join back to an initiated
+    -- event carrying an amount, 47 of 47.
+    --
+    -- SETTLEMENT TIME COMES FROM THE COMPLETED EVENT, THE ECONOMICS FROM THE INITIATED ONE. Mixing them
+    -- is the whole point: a fact stamped with the initiation time would put a payment in the wrong day
+    -- and, for a month-boundary settlement, the wrong reporting period. occurred_at throughout, never
+    -- ingested_at — a backfill must land in the period it happened.
+    --
+    -- WHAT IS STILL GENUINELY MISSING, AND IS NOT PAPERED OVER HERE. Category, MCC and merchant are
+    -- absent from every transaction payload and cannot be derived: no view can invent them, and this one
+    -- does not try. `rail` is present but reads UNKNOWN for 55 of 63 initiated events, so it is a
+    -- declared field with no producer filling it — a column that exists and lies is worse than one that
+    -- is missing, so `rail` is surfaced verbatim rather than defaulted, and a consumer can see UNKNOWN
+    -- for what it is. Those three fields plus a populated rail are the producer change that remains.
+    --
+    -- NEVER THE COUNTERPARTY NAME AND NEVER THE FREE-TEXT MESSAGE. #8792 requires the enrichment to be
+    -- designed minimal rather than filtered afterwards, and this view selects a closed column list: no
+    -- `payload` passthrough, so a field added to the event later cannot arrive here by accident.
+    -- ─────────────────────────────────────────────────────────────────────────────
+
+    CREATE OR REPLACE VIEW openbank_analytics.silver_settled_transactions AS
+    SELECT
+        c.aggregate_id                                          AS transaction_id,
+        c.occurred_at                                           AS settled_at,
+        toStartOfMonth(c.occurred_at)                           AS settled_month,
+        toDecimal64OrNull(JSONExtractString(i.payload, 'amount'), 2) AS amount,
+        JSONExtractString(i.payload, 'currencyCode')            AS currency_code,
+        JSONExtractString(i.payload, 'type')                    AS transaction_type,
+        JSONExtractString(i.payload, 'instructionType')         AS instruction_type,
+        -- Surfaced verbatim. UNKNOWN is what the producer wrote, and it must stay distinguishable from
+        -- a rail this view failed to read.
+        JSONExtractString(i.payload, 'rail')                    AS rail,
+        JSONExtractString(i.payload, 'sourceAccountId')         AS source_account_id,
+        JSONExtractString(i.payload, 'targetAccountId')         AS target_account_id,
+        JSONExtractString(i.payload, 'initiatedByPartyId')      AS initiated_by_party_id,
+        i.occurred_at                                           AS initiated_at
+    FROM
+    (
+        SELECT aggregate_id, occurred_at
+        FROM openbank_analytics.bronze_events
+        WHERE upper(aggregate_type) = 'TRANSACTION' AND event_type = 'TransactionCompleted'
+    ) AS c
+    INNER JOIN
+    (
+        SELECT aggregate_id, occurred_at, payload
+        FROM openbank_analytics.bronze_events
+        WHERE upper(aggregate_type) = 'TRANSACTION' AND event_type = 'TransactionInitiated'
+    ) AS i
+        ON i.aggregate_id = c.aggregate_id;
+
+    -- ─────────────────────────────────────────────────────────────────────────────
+    -- Per-party settled spend, from the account side rather than the initiator side.
+    --
+    -- WHY NOT initiated_by_party_id. It is populated on 50 of 63 initiated events, so keying on it
+    -- silently drops a fifth of the traffic — and drops it as "this party spent less", which is the
+    -- flattering direction and therefore the dangerous one for anything that rewards behaviour.
+    -- Ownership through V5's account key covers every transaction with a known account, and both legs
+    -- are unioned so an internal transfer between two of the customer's own accounts appears as both,
+    -- exactly as V10's monthly flows already treats it.
+    -- ─────────────────────────────────────────────────────────────────────────────
+    CREATE OR REPLACE VIEW openbank_analytics.gold_party_settled_spend AS
+    SELECT
+        party_id,
+        settled_month,
+        countIf(direction = 'OUT')                 AS outbound_count,
+        sumIf(amount, direction = 'OUT')           AS outbound_amount,
+        countIf(direction = 'IN')                  AS inbound_count,
+        sumIf(amount, direction = 'IN')            AS inbound_amount,
+        uniqExact(transaction_id)                  AS settled_transactions
+    FROM
+    (
+        SELECT pa.party_id AS party_id, t.settled_month, t.amount, t.transaction_id, 'OUT' AS direction
+        FROM openbank_analytics.silver_settled_transactions AS t
+        INNER JOIN openbank_analytics.silver_party_accounts AS pa ON pa.account_id = t.source_account_id
+
+        UNION ALL
+
+        SELECT pa.party_id AS party_id, t.settled_month, t.amount, t.transaction_id, 'IN' AS direction
+        FROM openbank_analytics.silver_settled_transactions AS t
+        INNER JOIN openbank_analytics.silver_party_accounts AS pa ON pa.account_id = t.target_account_id
+    )
+    GROUP BY party_id, settled_month;
+  14-credit-lifecycle.sql: |
+    -- SPDX-License-Identifier: Apache-2.0
+    -- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+    -- See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+    --
+    -- The credit-lifecycle marts (#8893): what the ADR-0213 engine decided, and how the loan book is
+    -- staged under IFRS 9 over time.
+    --
+    -- WHAT THE WAREHOUSE HELD BEFORE THIS. Nothing about credit. `openbank.lending.events` is not in the
+    -- analytics-sink subscription, so none of the eleven lending event types has ever reached bronze.
+    -- The only credit rows are V11's funnel, which is the CUSTOMER-JOURNEY stream (consent, quote,
+    -- application started/abandoned) and carries no decision, no stage and no exposure — it says so in
+    -- its own header. So a vintage curve, a roll rate, a stage-migration matrix or a PD backtest was not
+    -- merely hard, it had no source.
+    --
+    -- THESE VIEWS ARE THEREFORE WRITTEN AHEAD OF THEIR DATA, AND RETURN ZERO ROWS UNTIL THE
+    -- SUBSCRIPTION LANDS. That is deliberate and it is the safe half: a view over an absent
+    -- aggregate_type is empty, whereas subscribing first would start writing rows that #8928 had not yet
+    -- made keyable. Sequence is subscription LAST — see the warning below.
+    --
+    -- WHY THE PRODUCER CHANGE COMES FIRST (#8928). `AnalyticsConsumer` resolves aggregate_type from the
+    -- payload, then an inference, then the TOPIC — and `openbank.lending.events` yields LENDING for every
+    -- type alike. It then resolves the id via `idForType(type, node)`, which has no LENDING branch and
+    -- falls through to `?: accountId ?: partyId`. Six of the eleven lending types carried partyId and
+    -- named no identity, so each would have landed keyed by the BORROWER: `bronze_events` is
+    -- ORDER BY (aggregate_type, aggregate_id, event_id) and `silver_current_state` groups by that pair,
+    -- so every loan of one borrower would collapse into a single aggregate. #8928 makes each event name
+    -- `aggregateType` = LOAN (or LOAN_APPLICATION) and its own `aggregateId`; these views read those
+    -- values and would silently mis-aggregate without it.
+    --
+    -- SYNTHETIC ACTIVITY IS EXCLUDED (V9 / ADR-0252). The synthetic customer fleet exercises real credit
+    -- journeys in production, so an unfiltered decision rate would be a blend of the bank's applicants
+    -- and the bank's own probes. Every view here filters `synthetic = 0`, the same defence V9 applied to
+    -- the baseline aggregates.
+    --
+    -- occurred_at THROUGHOUT, NEVER ingested_at. A backfill or a replayed dead letter must land in the
+    -- period it happened; keying on ingest would move a decision into the month it was re-read.
+    --
+    -- PII POSTURE. These views select a closed column list. `party_id` is a pseudonymous internal
+    -- identifier and is the only personal datum here; income, existing debt service, age, residency and
+    -- employment tenure are NOT on the wire and are not derivable from it. `reasons` and
+    -- `matched_rule_ids` are machine-readable policy codes, not free text. No `payload` passthrough, so
+    -- a field added to a lending event later cannot arrive in a mart by accident.
+    -- ─────────────────────────────────────────────────────────────────────────────
+
+    -- Every engine evaluation, one row each. The decision evidence ADR-0214 pins on the application, as
+    -- columns rather than as a JSON blob a reader has to re-parse per query.
+    CREATE OR REPLACE VIEW openbank_analytics.silver_credit_decisions AS
+    SELECT
+        aggregate_id                                          AS loan_application_id,
+        JSONExtractString(payload, 'partyId')                 AS party_id,
+        occurred_at                                           AS decided_at,
+        toStartOfDay(occurred_at)                             AS decided_day,
+        toStartOfMonth(occurred_at)                           AS decided_month,
+        JSONExtractString(payload, 'outcome')                 AS outcome,
+        JSONExtractString(payload, 'priceBand')               AS price_band,
+        -- Semicolon-free CSV as the producer writes it: "CODE:ruleId,CODE:-".
+        JSONExtractString(payload, 'reasons')                 AS reasons,
+        JSONExtractString(payload, 'matchedRuleIds')          AS matched_rule_ids,
+        JSONExtractString(payload, 'policyVersions')          AS policy_versions,
+        JSONExtractString(payload, 'inputSnapshotHash')       AS input_snapshot_hash,
+        JSONExtractInt(payload, 'packVersion')                AS pack_version
+    FROM openbank_analytics.bronze_events
+    WHERE upper(aggregate_type) = 'LOAN_APPLICATION'
+      AND event_type = 'credit.decision.evaluated'
+      AND synthetic = 0;
+
+    -- Outcome mix per day. The headline the credit-risk console shows as a trend, over the whole history
+    -- rather than the console's capped window.
+    CREATE OR REPLACE VIEW openbank_analytics.gold_credit_decision_outcomes AS
+    SELECT
+        decided_day                                    AS day,
+        countIf(outcome = 'APPROVE')                   AS approved,
+        countIf(outcome = 'REFER')                     AS referred,
+        countIf(outcome = 'DECLINE')                   AS declined,
+        count()                                        AS evaluated,
+        uniqExact(party_id)                            AS parties_evaluated,
+        countIf(outcome = 'APPROVE' AND price_band = 'PRIME')    AS approved_prime,
+        countIf(outcome = 'APPROVE' AND price_band = 'STANDARD') AS approved_standard
+    FROM openbank_analytics.silver_credit_decisions
+    GROUP BY day;
+
+    -- The adverse-action Pareto: which reason code, and which rule, refuses most.
+    --
+    -- A decision carries its reasons as one CSV cell, so the row is exploded here rather than in every
+    -- query that asks. A fragment is "CODE:ruleId" with "-" for a reason no single rule produced.
+    CREATE OR REPLACE VIEW openbank_analytics.gold_credit_decision_reasons AS
+    SELECT
+        decided_month                                                  AS month,
+        outcome,
+        splitByChar(':', reason)[1]                                    AS reason_code,
+        if(splitByChar(':', reason)[2] IN ('', '-'), '', splitByChar(':', reason)[2]) AS rule_id,
+        count()                                                        AS occurrences,
+        uniqExact(loan_application_id)                                 AS applications
+    FROM openbank_analytics.silver_credit_decisions
+    ARRAY JOIN splitByChar(',', reasons) AS reason
+    WHERE reason != ''
+    GROUP BY month, outcome, reason_code, rule_id;
+
+    -- Which policy version decided what. A policy change is only defensible if its before-and-after is
+    -- visible, and `policy_versions` is the pinned table set for that exact evaluation.
+    CREATE OR REPLACE VIEW openbank_analytics.gold_credit_policy_versions AS
+    SELECT
+        decided_month            AS month,
+        policy_versions,
+        pack_version,
+        countIf(outcome = 'APPROVE')  AS approved,
+        countIf(outcome = 'REFER')    AS referred,
+        countIf(outcome = 'DECLINE')  AS declined,
+        count()                       AS evaluated,
+        min(decided_at)               AS first_seen,
+        max(decided_at)               AS last_seen
+    FROM openbank_analytics.silver_credit_decisions
+    GROUP BY month, policy_versions, pack_version;
+
+    -- ─────────────────────────────────────────────────────────────────────────────
+    -- The loan book: disbursement as the vintage anchor, staging as the outcome.
+    -- ─────────────────────────────────────────────────────────────────────────────
+
+    -- One row per disbursed loan. This is the dimension the stage and ECL facts join to, and the reason
+    -- `loan.interest_accrued` needs no party of its own (#8928): the loan carries it.
+    CREATE OR REPLACE VIEW openbank_analytics.silver_loans AS
+    SELECT
+        aggregate_id                                             AS loan_id,
+        JSONExtractString(payload, 'partyId')                    AS party_id,
+        occurred_at                                              AS disbursed_at,
+        toStartOfMonth(occurred_at)                              AS vintage_month,
+        JSONExtractString(payload, 'principal')                  AS principal_raw
+    FROM openbank_analytics.bronze_events
+    WHERE upper(aggregate_type) = 'LOAN'
+      AND event_type = 'loan.disbursed'
+      AND synthetic = 0;
+
+    -- Every IFRS 9 stage transition. The migration matrix a risk committee asks for is a GROUP BY over
+    -- this: previous_stage x new_stage per period.
+    CREATE OR REPLACE VIEW openbank_analytics.silver_loan_stage_transitions AS
+    SELECT
+        aggregate_id                                       AS loan_id,
+        JSONExtractString(payload, 'partyId')              AS party_id,
+        occurred_at                                        AS changed_at,
+        JSONExtractString(payload, 'period')               AS period,
+        JSONExtractString(payload, 'previousStage')        AS previous_stage,
+        JSONExtractString(payload, 'newStage')             AS new_stage,
+        JSONExtractInt(payload, 'daysPastDue')             AS days_past_due
+    FROM openbank_analytics.bronze_events
+    WHERE upper(aggregate_type) = 'LOAN'
+      AND event_type = 'loan.stage_changed'
+      AND synthetic = 0;
+
+    -- Stage migration per reporting period. Deliberately keyed on the period the PROVISIONING CYCLE
+    -- stamped, not on the month the event landed: a cycle run late still belongs to its own period.
+    CREATE OR REPLACE VIEW openbank_analytics.gold_loan_stage_migration AS
+    SELECT
+        period,
+        previous_stage,
+        new_stage,
+        count()                    AS transitions,
+        uniqExact(loan_id)         AS loans,
+        uniqExact(party_id)        AS parties,
+        -- A cure is as interesting as a deterioration, and a matrix that only counts one direction
+        -- reads as a book that never recovers.
+        countIf(new_stage > previous_stage) AS deteriorations,
+        countIf(new_stage < previous_stage) AS cures
+    FROM openbank_analytics.silver_loan_stage_transitions
+    GROUP BY period, previous_stage, new_stage;
+
+    -- Expected credit loss per cycle. `delta` is what the ledger posted; `expectedCreditLoss` is the
+    -- level the loan sits at. Both are kept: a period's movement and its closing position answer
+    -- different questions, and summing deltas to reconstruct a level is how rounding drift enters.
+    CREATE OR REPLACE VIEW openbank_analytics.silver_loan_provisioning AS
+    SELECT
+        aggregate_id                                                     AS loan_id,
+        JSONExtractString(payload, 'partyId')                            AS party_id,
+        JSONExtractString(payload, 'period')                             AS period,
+        occurred_at                                                      AS provisioned_at,
+        JSONExtractString(payload, 'stage')                              AS stage,
+        toDecimal64OrNull(JSONExtractString(payload, 'expectedCreditLoss'), 2) AS expected_credit_loss,
+        toDecimal64OrNull(JSONExtractString(payload, 'delta'), 2)        AS ecl_delta
+    FROM openbank_analytics.bronze_events
+    WHERE upper(aggregate_type) = 'LOAN'
+      AND event_type = 'loan.provisioned'
+      AND synthetic = 0;
+
+    -- ECL by period and stage. The coverage ratio a reader wants is ecl / exposure, and exposure is NOT
+    -- on this event — so it is not computed here rather than divided by something approximate. The
+    -- exposure column is the producer gap this view leaves visible instead of papering over.
+    CREATE OR REPLACE VIEW openbank_analytics.gold_loan_provisioning_by_stage AS
+    SELECT
+        period,
+        stage,
+        uniqExact(loan_id)          AS loans,
+        sum(expected_credit_loss)   AS expected_credit_loss,
+        sum(ecl_delta)              AS ecl_movement
+    FROM openbank_analytics.silver_loan_provisioning
+    GROUP BY period, stage;
+
+    -- The vintage curve: loans grouped by the month they were disbursed, against the worst stage each
+    -- has reached since. A loan with no stage event has never migrated, which is Stage 1 by definition
+    -- of the producer — but it is reported as `never_migrated` rather than asserted as Stage 1, because
+    -- "no event" and "an event saying Stage 1" are different facts and only one of them was measured.
+    CREATE OR REPLACE VIEW openbank_analytics.gold_loan_vintage AS
+    SELECT
+        l.vintage_month                                        AS vintage_month,
+        count()                                                AS loans,
+        countIf(worst_stage = '')                              AS never_migrated,
+        countIf(worst_stage = 'STAGE_2')                       AS reached_stage_2,
+        countIf(worst_stage = 'STAGE_3')                       AS reached_stage_3,
+        countIf(max_dpd > 90)                                  AS ever_90_plus_dpd
+    FROM
+    (
+        SELECT loan_id, party_id, vintage_month
+        FROM openbank_analytics.silver_loans
+    ) AS l
+    LEFT JOIN
+    (
+        SELECT
+            loan_id,
+            max(new_stage)      AS worst_stage,
+            max(days_past_due)  AS max_dpd
+        FROM openbank_analytics.silver_loan_stage_transitions
+        GROUP BY loan_id
+    ) AS s
+        ON s.loan_id = l.loan_id
+    GROUP BY vintage_month;
 kind: ConfigMap
 metadata:
   name: clickhouse-init

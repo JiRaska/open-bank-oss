@@ -42,6 +42,12 @@ class PartyEntity : PanacheEntity() {
     @Column(name = "registration_number")
     var registrationNumber: String? = null
 
+    @Column(name = "legal_form")
+    var legalForm: String? = null
+
+    @Column(name = "registration_country")
+    var registrationCountry: String? = null
+
     @Column(name = "email", nullable = false, unique = true)
     lateinit var email: String
 
@@ -167,4 +173,50 @@ class PartyDocumentFileEntity {
 
     @Column(name = "uploaded_at", nullable = false)
     lateinit var uploadedAt: java.time.Instant
+}
+
+@Entity
+@Table(name = "party_mandates")
+class PartyMandateEntity : PanacheEntity() {
+    @Column(name = "mandate_id", nullable = false, unique = true)
+    lateinit var mandateId: UUID
+
+    @Column(name = "principal_party_id", nullable = false)
+    lateinit var principalPartyId: UUID
+
+    @Column(name = "agent_party_id", nullable = false)
+    lateinit var agentPartyId: UUID
+
+    @Column(name = "role", nullable = false)
+    lateinit var role: String
+
+    @Column(name = "authority", nullable = false)
+    lateinit var authority: String
+
+    @Column(name = "source", nullable = false)
+    lateinit var source: String
+
+    @Column(name = "status", nullable = false)
+    lateinit var status: String
+
+    @Column(name = "evidence_ref")
+    var evidenceRef: String? = null
+
+    @Column(name = "valid_from", nullable = false)
+    lateinit var validFrom: Instant
+
+    @Column(name = "valid_to")
+    var validTo: Instant? = null
+
+    @Column(name = "revoked_at")
+    var revokedAt: Instant? = null
+
+    @Column(name = "revoke_reason", columnDefinition = "TEXT")
+    var revokeReason: String? = null
+
+    @Column(name = "created_at", nullable = false)
+    lateinit var createdAt: Instant
+
+    @Column(name = "updated_at", nullable = false)
+    lateinit var updatedAt: Instant
 }

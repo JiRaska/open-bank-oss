@@ -102,28 +102,42 @@ class PartyNameLookupPactConsumerTest {
         assertThat(summary.tradingName).isNotBlank()
     }
 
+    // NO 401-without-identity pact interaction is recorded here, deliberately: the provider-side
+    // replay boots with a TestAuthMechanism that authenticates EVERY replayed request as
+    // pact-verifier/ROLE_OPERATOR, so a recorded 401/403 expectation can never pass provider
+    // replay — it would be a permanently red interaction (same failure class as the account-side
+    // hop, #8552). The negative case is covered where it can actually run: party-service's own
+    // resource authz test asserts an anonymous lookup answers 401. The consumer-side behaviour
+    // (no token, expect rejection) stays a client property, not a wire contract.
+
+    /**
+     * The negative case (ADR-0279 #3), in the one shape the provider replay CAN serve: a party id
+     * nobody holds is a DIFFERENT PATH, so the provider distinguishes it from the 200 interaction
+     * and answers 404 under the same TestAuthMechanism that makes a recorded 401 unreachable.
+     * Enumeration resistance is a real contract — "not found" must not become an empty party.
+     */
     @Pact(consumer = CONSUMER, provider = PROVIDER)
-    fun rejectsWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("a party exists with both a legal name and a trading name")
-        .uponReceiving("GET the party whose name VoP compares against, with no caller identity")
-        .path(EXPECTED_PARTY_PATH)
+    fun unknownPartyPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no party exists for the id")
+        .uponReceiving("GET a party id the bank does not hold")
+        .path(UNKNOWN_PARTY_PATH)
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
-        .status(401)
+        .status(404)
         .toPact()
 
     @Test
-    @PactTestFor(pactMethod = "rejectsWithMissingToken")
-    fun `rejects the party lookup with 401 when the caller has no valid identity`(mockServer: MockServer) {
+    @PactTestFor(pactMethod = "unknownPartyPact")
+    fun `a party id the bank does not hold is a 404, not an empty party`(mockServer: MockServer) {
         assertClientPathMatchesContract()
 
         given()
             .baseUri(mockServer.getUrl())
             .accept("application/json")
-            .get(clientDerivedPartyPath())
+            .get("/api/v1/parties/$UNKNOWN_PARTY_ID")
             .then()
-            .statusCode(401)
+            .statusCode(404)
     }
 
     /**
@@ -152,6 +166,10 @@ class PartyNameLookupPactConsumerTest {
          * + `@GET @Path("/{id}")`). Never derive this from the client — see the class KDoc.
          */
         const val EXPECTED_PARTY_PATH = "/api/v1/parties/$PACT_PARTY_ID"
+
+        /** No state seeds this one — that IS the state. A well-formed id no party carries. */
+        const val UNKNOWN_PARTY_ID = "00000000-0000-4000-8000-000000000001"
+        const val UNKNOWN_PARTY_PATH = "/api/v1/parties/$UNKNOWN_PARTY_ID"
 
         fun clientDerivedPartyPath(): String {
             val base = PartyServiceClient::class.java.getAnnotation(Path::class.java).value
