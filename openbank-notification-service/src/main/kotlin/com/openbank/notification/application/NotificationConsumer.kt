@@ -45,6 +45,7 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.Mail
 import io.quarkus.mailer.reactive.ReactiveMailer
 import io.smallrye.mutiny.Uni
+import io.vertx.pgclient.PgException
 import io.smallrye.mutiny.coroutines.asUni
 import io.vertx.core.Vertx
 import jakarta.annotation.PostConstruct
@@ -57,8 +58,8 @@ import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
+import org.hibernate.exception.ConstraintViolationException
 import org.jboss.logging.Logger
-import org.postgresql.util.PSQLException
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -390,9 +391,33 @@ class NotificationConsumer @Inject constructor(
                 }
             }
 
-    private fun Throwable.isDeduplicationConflict(): Boolean = generateSequence(this) { it.cause }
-        .filterIsInstance<PSQLException>()
-        .any { it.serverErrorMessage?.constraint == NOTIFICATION_DEDUPLICATION_CONSTRAINT }
+    /**
+     * True only for the deduplication index — never for any other unique violation, because
+     * recovering a different conflict would silently drop a notification nobody meant to skip.
+     *
+     * It reads the constraint from what the REACTIVE stack actually throws. The first version of
+     * this guard matched `org.postgresql.util.PSQLException`, which this service never sees: it
+     * runs on Hibernate Reactive over the Vert.x PG client, so the chain is
+     * `ConstraintViolationException` (from `SqlClientConnection.convertException`) wrapping
+     * `io.vertx.pgclient.PgException` — the JDBC driver is not in it at all. The filter therefore
+     * matched nothing, the recovery never ran, and every redelivered notification failed as if the
+     * duplicate were a real fault. Nothing caught it because the test that covers this path could
+     * not run: the same PR shipped a duplicate Flyway version that stopped the service booting, so
+     * its integration tests were reported as SKIPPED (#8964).
+     *
+     * The message fallback is last and still names the constraint, for the case where Hibernate
+     * converts without carrying the name through.
+     */
+    private fun Throwable.isDeduplicationConflict(): Boolean =
+        generateSequence(this) { it.cause }.any { cause ->
+            when (cause) {
+                is PgException -> cause.constraint == NOTIFICATION_DEDUPLICATION_CONSTRAINT
+                is ConstraintViolationException ->
+                    cause.constraintName == NOTIFICATION_DEDUPLICATION_CONSTRAINT ||
+                        NOTIFICATION_DEDUPLICATION_CONSTRAINT in cause.message.orEmpty()
+                else -> false
+            }
+        }
 
     private fun publishOversight(req: NotificationRequest): Uni<Void> {
         if (!OversightWebhook.isOversight(req.template)) return Uni.createFrom().voidItem()
