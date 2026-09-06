@@ -52,6 +52,9 @@ class OutboxDeadLetterAlertNamingTest {
     private val alertRules = mapOf(
         "card-issuance" to File("../openbank-infra/gitops/components/payments/prometheus-rules.yaml"),
         "billing" to File("../openbank-infra/gitops/components/billing/prometheus-rules-billing.yaml"),
+        // ADR-0283 phase 1: the card money path binds the same gauge, and its DEAD rows are
+        // money that moved with nobody told. Same file as card-issuance — both are payments.
+        "card-processing" to File("../openbank-infra/gitops/components/payments/prometheus-rules.yaml"),
     )
 
     @Test
