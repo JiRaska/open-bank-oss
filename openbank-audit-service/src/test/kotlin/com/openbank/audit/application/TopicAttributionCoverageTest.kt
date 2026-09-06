@@ -17,15 +17,19 @@ import java.io.File
  * external facts is fine — it can only go stale by being noticed — but only if something fails
  * when it does. This is that something.
  *
- * Both directions are asserted on purpose. A missing entry means a newly subscribed topic silently
- * defaults to `"unknown"`, which is the original defect returning. A surplus entry means the table
- * still claims a topic nobody consumes, which is how a stale fact survives long enough to be
- * trusted.
+ * A missing entry means a newly subscribed topic silently defaults to `"unknown"`, which is the
+ * original defect returning. That direction is asserted here, against THIS service's subscription.
+ *
+ * The other direction — no surplus entry claiming a topic nobody consumes — moved to
+ * `TopicProducersCoverageTest` in openbank-libs-domain when the table became shared (#8792). It
+ * still holds, but "nobody" now means neither audit-service nor analytics-sink, and only a test
+ * that can see both configs can say that. Asserting it here would fail on every row that exists for
+ * the other consumer, which is not staleness.
  */
 class TopicAttributionCoverageTest {
 
     @Test
-    fun `every subscribed topic has a verified producer, and every mapped topic is subscribed`() {
+    fun `every subscribed topic has a verified producer`() {
         val subscribed = subscribedTopics()
 
         // Guard the probe itself: if the parse silently returned nothing, both assertions below
@@ -36,7 +40,7 @@ class TopicAttributionCoverageTest {
 
         assertThat(TopicAttribution.mappedTopics)
             .describedAs("TopicAttribution must name a producer for every topic audit-service consumes")
-            .containsExactlyInAnyOrderElementsOf(subscribed)
+            .containsAll(subscribed)
     }
 
     /**
