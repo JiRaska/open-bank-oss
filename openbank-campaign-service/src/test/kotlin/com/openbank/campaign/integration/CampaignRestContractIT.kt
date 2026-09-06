@@ -90,13 +90,13 @@ class CampaignRestContractIT {
     }
 
     private fun draftBody(name: String, segmentName: String = "actives") = """
-        {"name":"$name","goal":"prove the HTTP contract","segmentName":"$segmentName","segmentVersion":1,
+        {"name":"$name","goal":"prove the HTTP contract","productKind":"NONE","segmentName":"$segmentName","segmentVersion":1,
          "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                    "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
     """.trimIndent()
 
     private fun draftBodyWithIncentive(name: String, ref: IncentiveOfferRef) = """
-        {"name":"$name","goal":"prove immutable incentive selection","segmentName":"actives","segmentVersion":1,
+        {"name":"$name","goal":"prove immutable incentive selection","productKind":"NONE","segmentName":"actives","segmentVersion":1,
          "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                    "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
          "incentiveOfferRef":{"id":"${ref.id}","name":"${ref.name}","version":${ref.version}}}
@@ -439,29 +439,33 @@ class CampaignRestContractIT {
             connection.prepareStatement(
                 """
                 INSERT INTO campaigns (
-                    id, name, goal, segment_name, segment_version, steps_json, holdout_percent,
-                    state, created_by, created_at, updated_at,
+                    id, name, goal, product_kind, segment_name, segment_version, steps_json,
+                    holdout_percent, state, created_by, created_at, updated_at,
                     incentive_offer_id, incentive_offer_name, incentive_offer_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { statement ->
                 statement.setObject(1, campaignId)
                 statement.setString(2, "interaction validation fixture")
                 statement.setString(3, "prove private ownership validation")
-                statement.setString(4, "actives")
-                statement.setInt(5, 1)
-                statement.setString(6, FIXTURE_STEPS_JSON)
-                statement.setInt(7, 0)
-                statement.setString(8, "ACTIVE")
-                statement.setString(9, "fixture")
-                statement.setObject(10, OffsetDateTime.now())
+                // The column is NOT NULL with no database default, on purpose: a direct insert has
+                // to state the kind rather than inherit a silent "not credit". This fixture is a
+                // non-credit campaign, so it says so.
+                statement.setString(4, "NONE")
+                statement.setString(5, "actives")
+                statement.setInt(6, 1)
+                statement.setString(7, FIXTURE_STEPS_JSON)
+                statement.setInt(8, 0)
+                statement.setString(9, "ACTIVE")
+                statement.setString(10, "fixture")
                 statement.setObject(11, OffsetDateTime.now())
-                statement.setObject(12, incentiveOfferRef?.id)
-                statement.setString(13, incentiveOfferRef?.name)
+                statement.setObject(12, OffsetDateTime.now())
+                statement.setObject(13, incentiveOfferRef?.id)
+                statement.setString(14, incentiveOfferRef?.name)
                 if (incentiveOfferRef == null) {
-                    statement.setNull(14, java.sql.Types.INTEGER)
+                    statement.setNull(15, java.sql.Types.INTEGER)
                 } else {
-                    statement.setInt(14, incentiveOfferRef.version)
+                    statement.setInt(15, incentiveOfferRef.version)
                 }
                 statement.executeUpdate()
             }
@@ -694,7 +698,7 @@ class CampaignRestContractIT {
     @Test
     fun `a step can be created on PUSH and reads back as PUSH`() {
         val body = """
-            {"name":"push-${UUID.randomUUID()}","goal":"prove PUSH is reachable over HTTP",
+            {"name":"push-${UUID.randomUUID()}","goal":"prove PUSH is reachable over HTTP","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER_PUSH","channel":"PUSH",
                        "variables":{"offerTitle":"T"},"delaySeconds":0}]}
@@ -732,7 +736,7 @@ class CampaignRestContractIT {
     @Test
     fun `a template that renders on EMAIL is rejected on a PUSH step`() {
         val body = """
-            {"name":"mismatch-${UUID.randomUUID()}","goal":"prove the invariant reaches HTTP",
+            {"name":"mismatch-${UUID.randomUUID()}","goal":"prove the invariant reaches HTTP","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER","channel":"PUSH",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
@@ -767,7 +771,7 @@ class CampaignRestContractIT {
     @Test
     fun `two decision paths can name the same explicit source step`() {
         val body = """
-            {"name":"decision-${UUID.randomUUID()}","goal":"prove an explicit decision source survives HTTP",
+            {"name":"decision-${UUID.randomUUID()}","goal":"prove an explicit decision source survives HTTP","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "steps":[
                {"order":1,"template":"MARKETING_PRODUCT_OFFER",
@@ -806,7 +810,7 @@ class CampaignRestContractIT {
     @Test
     fun `an explicit decision graph survives the campaign HTTP contract`() {
         val body = """
-            {"name":"graph-${UUID.randomUUID()}","goal":"prove an explicit graph survives HTTP",
+            {"name":"graph-${UUID.randomUUID()}","goal":"prove an explicit graph survives HTTP","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "steps":[
                {"order":1,"template":"MARKETING_PRODUCT_OFFER",
@@ -869,7 +873,7 @@ class CampaignRestContractIT {
     @Test
     fun `holdout is durable and its experiment compares two independently counted cohorts`() {
         val body = """
-            {"name":"experiment-${UUID.randomUUID()}","goal":"measure incremental account opening",
+            {"name":"experiment-${UUID.randomUUID()}","goal":"measure incremental account opening","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,"conversionRule":"ACCOUNT_OPENED","holdoutPercent":20,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
@@ -914,7 +918,7 @@ class CampaignRestContractIT {
     @Test
     fun `a campaign can be created with a cadence and reads it back`() {
         val body = """
-            {"name":"cron-${UUID.randomUUID()}","goal":"prove the cadence round trip",
+            {"name":"cron-${UUID.randomUUID()}","goal":"prove the cadence round trip","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "schedule":{"cadence":"WEEKLY_MONDAY_MORNING","endAt":"2026-12-31T00:00:00Z"},
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
@@ -951,7 +955,7 @@ class CampaignRestContractIT {
     @Test
     fun `an unknown cadence is rejected rather than stored`() {
         val body = """
-            {"name":"badcron-${UUID.randomUUID()}","goal":"prove the catalogue rejects free text",
+            {"name":"badcron-${UUID.randomUUID()}","goal":"prove the catalogue rejects free text","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "schedule":{"cadence":"*/5 * * * *"},
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
@@ -1081,7 +1085,7 @@ class CampaignRestContractIT {
     @Test
     fun `a campaign can declare a trigger and reads it back`() {
         val body = """
-            {"name":"trig-${UUID.randomUUID()}","goal":"prove the trigger round trip",
+            {"name":"trig-${UUID.randomUUID()}","goal":"prove the trigger round trip","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,"trigger":"ACCOUNT_OPENED",
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
@@ -1115,7 +1119,7 @@ class CampaignRestContractIT {
     @Test
     fun `an unknown trigger is rejected rather than stored`() {
         val body = """
-            {"name":"badtrig-${UUID.randomUUID()}","goal":"prove the catalogue rejects invented triggers",
+            {"name":"badtrig-${UUID.randomUUID()}","goal":"prove the catalogue rejects invented triggers","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,"trigger":"CUSTOMER_SNEEZED",
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
@@ -1150,7 +1154,7 @@ class CampaignRestContractIT {
     @Test
     fun `a path experiment keeps both declared arms and exposes its empty measurement`() {
         val body = """
-            {"name":"ab-${UUID.randomUUID()}","goal":"prove A/B content round trip",
+            {"name":"ab-${UUID.randomUUID()}","goal":"prove A/B content round trip","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,"conversionRule":"ACCOUNT_OPENED",
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"A","offerText":"A copy","ctaText":"Go"},
@@ -1193,7 +1197,7 @@ class CampaignRestContractIT {
     @Test
     fun `a mobile-first push step keeps its closed app destination over the HTTP contract`() {
         val body = """
-            {"name":"push-${UUID.randomUUID()}","goal":"savings activation",
+            {"name":"push-${UUID.randomUUID()}","goal":"savings activation","productKind":"NONE",
              "segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER_PUSH","channel":"PUSH",
                        "variables":{"offerTitle":"Savings"},"mobileDestination":"SAVINGS","delaySeconds":0}]}
@@ -1299,13 +1303,47 @@ class CampaignRestContractIT {
     }
 
     /**
+     * ADR-0269 rule 1 on the wire: an omitted product kind is NONE, and NONE is not credit.
+     *
+     * This started as the opposite test — that an omitted kind is REFUSED — and the api-contract
+     * gate rejected that design: a newly required request property is breaking and would demand
+     * /api/v2. What is pinned instead is the property that actually protects the customer, and it
+     * is the stronger half anyway: a client that never heard of this field cannot produce a
+     * campaign that delivers credit marketing. The failure direction is "no credit campaign", not
+     * "credit campaign to someone who never asked".
+     *
+     * The requirement that a HUMAN state it is enforced in admin-ui, which offers no
+     * pre-selection — a UI guard, pinned by its own test, not by this one.
+     */
+    @Test
+    fun `a create body that omits the product kind is a non-credit campaign, never an unstated one`() {
+        val body = """
+            {"name":"it-no-kind-${UUID.randomUUID()}","goal":"absent kind reads as non-credit",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},
+                       "delaySeconds":0}]}
+        """.trimIndent()
+
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("productKind", org.hamcrest.Matchers.equalTo("NONE"))
+        }
+    }
+
+    /**
      * The template catalogue rejects by construction, but the operator only benefits if the reason
      * survives the trip out through the exception mapper — "400" alone does not say what to change.
      */
     @Test
     fun `an unknown template is a 400 whose message names the template`() {
         val body = """
-            {"name":"it-bad-template","goal":"must fail","segmentName":"actives","segmentVersion":1,
+            {"name":"it-bad-template","goal":"must fail","productKind":"NONE","segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"WINBACK_CS","variables":{},"delaySeconds":0}]}
         """.trimIndent()
 
@@ -1323,7 +1361,7 @@ class CampaignRestContractIT {
     @Test
     fun `a variable the template does not declare is a 400 that names the variable`() {
         val body = """
-            {"name":"it-bad-variable","goal":"must fail","segmentName":"actives","segmentVersion":1,
+            {"name":"it-bad-variable","goal":"must fail","productKind":"NONE","segmentName":"actives","segmentVersion":1,
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go","bodyHtml":"<b>no</b>"},
                        "delaySeconds":0}]}
@@ -1346,7 +1384,7 @@ class CampaignRestContractIT {
             contentType("application/json")
             body(
                 """
-                {"name":"it-stop-condition","goal":"prove the HTTP contract","segmentName":"actives","segmentVersion":1,
+                {"name":"it-stop-condition","goal":"prove the HTTP contract","productKind":"NONE","segmentName":"actives","segmentVersion":1,
                  "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                            "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],
                  "stopCondition":{"maxSendsPerParty":2}}
@@ -1393,7 +1431,7 @@ class CampaignRestContractIT {
             contentType("application/json")
             body(
                 """
-                {"name":"null-step-${UUID.randomUUID()}","goal":"reject a null array element",
+                {"name":"null-step-${UUID.randomUUID()}","goal":"reject a null array element","productKind":"NONE",
                  "segmentName":"actives","segmentVersion":1,
                  "steps":[null]}
                 """.trimIndent(),
@@ -1411,7 +1449,7 @@ class CampaignRestContractIT {
             contentType("application/json")
             body(
                 """
-                {"name":"null-decision-${UUID.randomUUID()}","goal":"reject a null array element",
+                {"name":"null-decision-${UUID.randomUUID()}","goal":"reject a null array element","productKind":"NONE",
                  "segmentName":"actives","segmentVersion":1,
                  "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                            "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}],

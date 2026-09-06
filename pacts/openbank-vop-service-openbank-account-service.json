@@ -52,10 +52,10 @@
       }
     },
     {
-      "description": "GET the account behind the payee IBAN, with no caller identity",
+      "description": "GET the account behind an IBAN the bank does not hold",
       "providerStates": [
         {
-          "name": "an account owned by a known party exists"
+          "name": "no account exists for the IBAN"
         }
       ],
       "request": {
@@ -63,10 +63,10 @@
           "Accept": "application/json"
         },
         "method": "GET",
-        "path": "/api/v1/accounts/iban/CZ6508000000192000145399"
+        "path": "/api/v1/accounts/iban/CZ6508000000192000145981"
       },
       "response": {
-        "status": 401
+        "status": 404
       }
     }
   ],

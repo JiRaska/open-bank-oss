@@ -33,32 +33,27 @@ CONTRACT_FILE = re.compile(r"(Pact|/contract/)[^/]*Test\.kt$")
 # A negative-auth signal anywhere in the file: an expected 401/403/404 status, or an
 # unauthorized marker in a provider-state/test name. 404 counts: for an id the caller may
 # not see, "not found" IS the correct negative contract (enumeration resistance).
-#
-# 404 AND NOT_FOUND WERE MISSING FROM THIS PATTERN UNTIL #8809 — the comment above has said
-# since the gate was written that 404 counts, and the regex did not contain it. So the gate
-# demanded a 401 or a 403 from every changed contract test, including the ones where neither
-# is producible: a provider verification test that replays under `@TestSecurity` is always
-# authenticated, so its only honest negative case is a 404 for an id the provider does not
-# know. Two card-issuance verification tests were in exactly that position — the negative case
-# existed, was replayed, and the gate could not see it.
-#
-# The self-test now pins both halves, so the pattern and the documented rule cannot drift apart
-# again: a 404-only file must pass, and a 200-only file must still fail.
+# 404 was in the comment above, in the error message this gate prints, and in NEITHER the pattern
+# nor the self-test — so a contract whose negative case is a 404 was reported as happy-path-only
+# and told to add the very thing it already had (#8889). A comment is not a control; the pattern
+# is. `NOT_FOUND` and `notFound` come with it because a provider replay expresses the same case as
+# a state name rather than a literal status.
 NEGATIVE = re.compile(
     r"\b(401|403|404)\b|UNAUTHORIZED|FORBIDDEN|NOT_FOUND|Unauthorized|unauthorized|"
-    r"rejectsUnauthenticated|missingToken|expiredToken"
+    r"notFound|rejectsUnauthenticated|missingToken|expiredToken"
 )
 
 SELFTEST_OK = '''class FooPactConsumerTest {
     fun `rejects when token is missing`() { /* expects 401 */ }
 }'''
+
+# The 404 half, which the pattern did not cover until #8889: an id the caller may not see is
+# correctly a "not found", and a provider replay states it as a case name rather than a status.
+SELFTEST_OK_404 = '''class FooPactConsumerTest {
+    fun `an id the bank does not hold is a 404`() { /* expects 404 */ }
+}'''
 SELFTEST_BAD = '''class FooPactConsumerTest {
     fun `returns the list`() { /* expects 200 */ }
-}'''
-
-# The case the pattern used to miss: authenticated throughout, negative by NOT-FOUND.
-SELFTEST_NOT_FOUND = '''class FooPactConsumerTest {
-    fun `an id the provider does not know`() { /* expects 404 */ }
 }'''
 
 
@@ -93,11 +88,10 @@ def _self_test() -> int:
     bad = 0
     if not NEGATIVE.search(SELFTEST_OK):
         print("self-test FAIL: negative case not detected"); bad += 1
+    if not NEGATIVE.search(SELFTEST_OK_404):
+        print("self-test FAIL: a 404 negative case not detected"); bad += 1
     if NEGATIVE.search(SELFTEST_BAD):
         print("self-test FAIL: happy path misread as adversarial"); bad += 1
-    if not NEGATIVE.search(SELFTEST_NOT_FOUND):
-        print("self-test FAIL: a 404-only negative case is not detected, "
-              "though the rule above says 404 counts"); bad += 1
     for ok, name in [(True, "x/contract/FooPactConsumerTest.kt"), (True, "x/FooPactTest.kt"),
                      (False, "x/FooTest.kt"), (False, "x/contract/Foo.kt")]:
         if bool(CONTRACT_FILE.search(name)) != ok:
