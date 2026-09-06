@@ -148,6 +148,17 @@ class TransactionPactFolderProviderVerificationTest {
         // No setup needed: the message producer below returns a deterministic payload.
     }
 
+    @State("no valid M2M identity is presented")
+    fun stateNoValidM2mIdentity() {
+        // interest-service's withholding-remittance debit, sdd-service's collection debit and
+        // swift-service's settlement debit all assert that a request with a missing or expired
+        // token is refused with 401 (#8697). Intentionally empty: the pact interaction sends no
+        // (or an invalid) Authorization header, and the resource's security answers 401 on its
+        // own — any setup here could only weaken that. Declared rather than left implicit because
+        // pact-jvm passes SILENTLY over an unhandled state name, which is how #468's missing
+        // states stayed invisible; MissingStateChangeMethod is the loud failure we want.
+    }
+
     @PactVerifyProvider("a transaction.initiated event for fraud screening")
     fun produceTransactionInitiated(): String {
         val event = TransactionInitiatedEvent(
@@ -199,5 +210,25 @@ class TransactionPactNegativeAuthzTest {
         } Then {
             statusCode(403)
         }
+    }
+
+    @Test
+    fun `an anonymous caller is refused with 401`() {
+        // The auth-negative pact interactions (#8697) contract on exactly this: no valid M2M
+        // identity ⇒ 401, answered by the resource's own security with no identity installed.
+        val response = Given { this } When {
+            contentType("application/json")
+            body(
+                """{"idempotencyKey":"pact-negative-401","type":"TRANSFER",""" +
+                    """"sourceAccountId":"${UUID.randomUUID()}","targetAccountId":"${UUID.randomUUID()}",""" +
+                    """"amount":1.00,"currencyCode":"CZK"}""",
+            )
+            post("/api/v1/transactions")
+        }
+        response.then().statusCode(401)
+            .contentType(io.restassured.http.ContentType.JSON)
+            // libs-runtime's UnauthorizedExceptionMapper: the standard envelope, so a client's
+            // JSON parser never meets the plain-text "Not Authenticated" the default wrote.
+            .body("code", org.hamcrest.Matchers.equalTo("UNAUTHORIZED"))
     }
 }
