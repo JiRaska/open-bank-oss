@@ -23,6 +23,7 @@ import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
@@ -96,6 +97,9 @@ class PartyPactFolderProviderVerificationTest {
     @Inject
     lateinit var vertx: Vertx
 
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
 
     /**
@@ -137,7 +141,26 @@ class PartyPactFolderProviderVerificationTest {
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
         // context is null on the @IgnoreNoPactsToVerify dummy invocation — skip gracefully.
-        context?.verifyInteraction()
+        if (context == null) return
+        // #8875: the anonymous VoP interaction must be replayed WITHOUT the class-level
+        // @TestSecurity identity, or the provider never executes the 401 branch the contract
+        // asserts. QuarkusSecurityTestExtension re-applies @TestSecurity before the next
+        // invocation, so clearing it here cannot leak into the authenticated interactions.
+        if (context.interaction.description.endsWith("no caller identity")) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
+        context.verifyInteraction()
+    }
+
+    /**
+     * Serves the NEGATIVE interaction of the VoP pact: a party id the bank does not hold must
+     * answer 404, not an empty party. The absence IS the state — nothing is seeded, and the id in
+     * the pact is one no other state creates — but a handler still has to exist, because pact-jvm
+     * fails on an unknown state string before it issues the request at all (#8889).
+     */
+    @State("no party exists for the id")
+    fun noPartyForId() {
+        // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
     }
 
     @State("a party has been created")

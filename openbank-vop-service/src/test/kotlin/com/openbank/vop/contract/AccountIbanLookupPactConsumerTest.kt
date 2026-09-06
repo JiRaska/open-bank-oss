@@ -134,24 +134,20 @@ class AccountIbanLookupPactConsumerTest {
     // property, not a wire contract.
 
     /**
-     * The negative case, and why it is a **404 rather than a 401**.
+     * The negative case (ADR-0279 #3), in the one shape the provider replay CAN serve. The comment
+     * above explains why a 401 cannot be recorded here; what it leaves is a contract with no
+     * negative interaction at all, which is the thing the adversarial-contract gate exists to
+     * prevent — and that gate is currently satisfied by the word "401" appearing in that comment.
      *
-     * A 401 here could never pass the provider replay. `AccountPactFolderProviderVerificationTest`
-     * is a `@QuarkusTest` whose requests are authenticated by construction, so the provider answers
-     * 200 to the very request this pact says must be refused — measured on `main` as
-     * `expected status of 401 but was 200`, red since the pact was committed and invisible because
-     * path-scoped CI does not rebuild account-service when only `pacts/` changes (#8552).
-     *
-     * "Not found" is the negative this hop can actually assert, and it is the one that matters to
-     * the caller: `AccountHolderNameLookupAdapter` turns an unknown IBAN into NO_DATA, a *valid*
-     * Verification of Payee answer, so a route that started answering 200-with-nulls instead of 404
-     * would be indistinguishable from a real "we hold no name for this IBAN" in every log and
-     * metric. Pinning the 404 is what stops that.
+     * An IBAN the bank does not hold is a DIFFERENT PATH, so the provider distinguishes it from
+     * the 200 interaction and answers 404 under the same TestAuthMechanism that makes 401
+     * unreachable. Enumeration resistance is a real contract: "not found" must not become an empty
+     * account object.
      */
     @Pact(consumer = CONSUMER, provider = PROVIDER)
-    fun rejectsUnknownIban(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("no account exists for the unknown IBAN")
-        .uponReceiving("GET the account behind an IBAN account-service does not know")
+    fun unknownIbanPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no account exists for the IBAN")
+        .uponReceiving("GET the account behind an IBAN the bank does not hold")
         .path(UNKNOWN_ACCOUNT_PATH)
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
@@ -160,14 +156,14 @@ class AccountIbanLookupPactConsumerTest {
         .toPact()
 
     @Test
-    @PactTestFor(pactMethod = "rejectsUnknownIban")
-    fun `answers 404 for an IBAN account-service does not know`(mockServer: MockServer) {
+    @PactTestFor(pactMethod = "unknownIbanPact")
+    fun `an IBAN the bank does not hold is a 404, not an empty account`(mockServer: MockServer) {
         assertClientPathMatchesContract()
 
         given()
             .baseUri(mockServer.getUrl())
             .accept("application/json")
-            .get(clientDerivedPathFor(UNKNOWN_IBAN))
+            .get("/api/v1/accounts/iban/$UNKNOWN_IBAN")
             .then()
             .statusCode(404)
     }
@@ -209,27 +205,24 @@ class AccountIbanLookupPactConsumerTest {
         const val EXPECTED_ACCOUNT_PATH = "/api/v1/accounts/iban/$PACT_IBAN"
 
         /**
-         * A valid IBAN — correct mod-97 check digits — that no provider state seeds, so the route
-         * genuinely answers 404.
-         *
-         * Deliberately NOT a malformed string, and the difference is measurable rather than
-         * theoretical: the first draft of this constant had wrong check digits and the provider
-         * replay answered **400, not 404**, because validation rejects it long before the lookup.
-         * A malformed IBAN tests the validator; this one tests the lookup, and only the second is
-         * the case VoP's caller depends on.
+         * No state seeds this one — that IS the state. Two constraints shape it, each learned by
+         * tripping over it: the mod-97 check digits are REAL (a made-up IBAN makes account-service
+         * answer 400, not 404, because it never reaches the lookup, and a negative case must fail
+         * for the reason it claims to test), and it stays inside the demo range .gitleaks.toml
+         * safelists (CZ6508000000192000145\\d{3}) — gitleaks cannot tell a fixture from a customer
+         * account, which is why that safelist is a range. Of the eleven suffixes in the range with
+         * valid check digits, ...399 is the seeded account and this is not.
          */
-        const val UNKNOWN_IBAN = "CZ7155000000001234567890"
+        const val UNKNOWN_IBAN = "CZ6508000000192000145981"
         const val UNKNOWN_ACCOUNT_PATH = "/api/v1/accounts/iban/$UNKNOWN_IBAN"
 
-        fun clientDerivedAccountPath(): String = clientDerivedPathFor(PACT_IBAN)
-
-        fun clientDerivedPathFor(iban: String): String {
+        fun clientDerivedAccountPath(): String {
             val base = AccountServiceClient::class.java.getAnnotation(Path::class.java).value
             val method = AccountServiceClient::class.java.methods
                 .single { it.name == "getAccountByIban" }
                 .getAnnotation(Path::class.java)
                 .value
-            return (base + method).replace("{iban}", iban)
+            return (base + method).replace("{iban}", PACT_IBAN)
         }
     }
 }

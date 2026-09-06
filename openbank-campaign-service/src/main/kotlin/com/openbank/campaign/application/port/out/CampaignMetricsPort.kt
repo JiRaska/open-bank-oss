@@ -126,4 +126,14 @@ enum class EnrolmentAttempt {
 
     /** The attempt threw. The sweep counts it per party and moves on rather than aborting the batch. */
     FAILED,
+
+    /**
+     * ADR-0269 rule 1: a credit campaign, and this party has not switched `CREDIT_OFFERS` on.
+     *
+     * Its own value rather than folding into FAILED or a generic consent bucket. "How many people
+     * did we decline to offer credit to, and why" has to be answerable from the metrics — the
+     * ADR's own success measure is the share of offers shown without a prior customer action, and
+     * that cannot be computed from a counter that also holds database errors and marketing opt-outs.
+     */
+    SUPPRESSED_CREDIT_CONSENT,
 }
