@@ -53,8 +53,14 @@ class DomesticPaymentDelegationContractTest {
 
     @Test
     fun `reservation consumer contract matches producer and retains only a domain-separated hash`() {
+        // Window ends at the NEXT 4-space-indented schema key, not at the messages section:
+        // #8334 inserted the spendReserved/spendSettled audit schemas between
+        // spendReservationState and the DelegationSpendReservationStateChanged message, so a
+        // message-anchored window sweeps in their raw `idempotencyKey:` and fails the very
+        // assertion below that exists to keep the raw key OUT of the reservation-state schema.
+        // Bound the window by the schema block's own indent instead — order-independent.
         val producerSchema = producerAsyncApi.substringAfter("    spendReservationState:")
-            .substringBefore("\n    DelegationSpendReservationStateChanged:")
+            .substringBefore(Regex("\n    \\S"))
         val producerMessage = producerAsyncApi.substringAfter("    DelegationSpendReservationStateChanged:")
         listOf(
             "reservationId",
