@@ -37,6 +37,7 @@ import com.openbank.notification.domain.model.PushSendOutcome
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.PartyContactClient
 import com.openbank.notification.infrastructure.client.PartyMergeResolver
+import com.openbank.notification.infrastructure.persistence.NotificationDeduplication
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
@@ -58,7 +59,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import org.postgresql.util.PSQLException
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -82,8 +82,8 @@ class NotificationConsumer @Inject constructor(
 ) {
 
     companion object {
-        /** Name of V14's partial unique index, retained as a stable duplicate discriminator. */
-        const val NOTIFICATION_DEDUPLICATION_CONSTRAINT = "uq_notifications_deduplication_key"
+        /** Name of the partial unique index, retained as a stable duplicate discriminator. */
+        const val NOTIFICATION_DEDUPLICATION_CONSTRAINT = NotificationDeduplication.CONSTRAINT
 
         /**
          * Generic, PII-free push body (ADR-0135 §3, issue #1182). Lock-screen-visible push
@@ -390,9 +390,7 @@ class NotificationConsumer @Inject constructor(
                 }
             }
 
-    private fun Throwable.isDeduplicationConflict(): Boolean = generateSequence(this) { it.cause }
-        .filterIsInstance<PSQLException>()
-        .any { it.serverErrorMessage?.constraint == NOTIFICATION_DEDUPLICATION_CONSTRAINT }
+    private fun Throwable.isDeduplicationConflict(): Boolean = NotificationDeduplication.isConflict(this)
 
     private fun publishOversight(req: NotificationRequest): Uni<Void> {
         if (!OversightWebhook.isOversight(req.template)) return Uni.createFrom().voidItem()
