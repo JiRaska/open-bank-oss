@@ -1,0 +1,86 @@
+# Rebuild-and-compare (issue #8355, OpenSSF Silver build_reproducible).
+#
+# OpenSSF Silver asks for bit-for-bit reproducibility to be VERIFIED, not assumed. This lane
+# builds the same commit of one representative money-path service twice — two independent clean
+# checkouts — and compares SHA-256 over every file of the fast-jar tree. A mismatch is not a
+# bare checksum dump: the report lists WHICH zip entries drifted (zipinfo), so the remaining
+# non-determinism (build-metadata, augmentation order) can be chased down one entry at a time.
+#
+# Advisory by design: weekly, never a PR gate, never pushes to main. Gradle normalizes jar
+# entry timestamps and file order fleet-wide (openbank.quarkus-service.gradle.kts); this job is
+# the evidence that the normalization holds end-to-end for the Quarkus augmentation output too.
+name: Reproducible build verify
+
+on:
+  schedule:
+    - cron: "17 5 * * 6"   # weekly Saturday 05:17 UTC — off-peak, clear of the weekday wave
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Module to verify (Gradle project path tail)"
+        type: string
+        default: "openbank-ledger-service"
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild-compare:
+    name: build twice, compare SHA-256
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SERVICE: ${{ inputs.service || 'openbank-ledger-service' }}
+    steps:
+      - name: Checkout (build A)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: build-a
+
+      - name: Checkout (build B)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: build-b
+
+      - name: Set up Temurin 21 + 25 (fleet toolchain convention from _service-ci.yml)
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - name: Build A
+        working-directory: build-a
+        run: ./gradlew ":${SERVICE}:quarkusBuild" --no-daemon --console=plain -q
+
+      - name: Build B (independent checkout, shared dependency cache is fine — inputs, not outputs)
+        working-directory: build-b
+        run: ./gradlew ":${SERVICE}:quarkusBuild" --no-daemon --console=plain -q
+
+      - name: Compare SHA-256 of every output file
+        run: |
+          set -euo pipefail
+          (cd build-a/"${SERVICE}"/build/quarkus-app && find . -type f -print0 | sort -z | xargs -0 sha256sum) > a.sums
+          (cd build-b/"${SERVICE}"/build/quarkus-app && find . -type f -print0 | sort -z | xargs -0 sha256sum) > b.sums
+          if diff -u a.sums b.sums > sums.diff; then
+            echo "REPRODUCIBLE: $(wc -l < a.sums) files identical across two clean builds of ${SERVICE} @ ${GITHUB_SHA}" | tee report.md
+            exit 0
+          fi
+          echo "NOT REPRODUCIBLE — drifted files:" | tee report.md
+          grep -E "^[+-][0-9a-f]" sums.diff | awk '{print $NF}' | sort -u | tee -a report.md
+          echo "" | tee -a report.md
+          echo "### zipinfo diff of the drifted jars" | tee -a report.md
+          for f in $(grep -E "^[+-][0-9a-f]" sums.diff | awk '{print $NF}' | sort -u | grep '\.jar$'); do
+            echo "#### $f" | tee -a report.md
+            diff <(zipinfo -l "build-a/${SERVICE}/build/quarkus-app/$f" 2>/dev/null) \
+                 <(zipinfo -l "build-b/${SERVICE}/build/quarkus-app/$f" 2>/dev/null) | head -50 | tee -a report.md || true
+          done
+          exit 1
+
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: reproducible-build-report
+          path: report.md

@@ -7,6 +7,7 @@ package com.openbank.ledger.application.port.out
 import com.openbank.ledger.domain.model.ControlAccountTieOut
 import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.JournalEntry
+import com.openbank.ledger.domain.model.LedgerScope
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalanceLine
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -64,19 +65,38 @@ interface JournalRepository {
         outbox: List<OutboxMessage>,
     ): JournalEntry
 
-    suspend fun trialBalance(asOf: LocalDate): List<TrialBalanceLine>
+    /**
+     * Cumulative-to-date trial balance.
+     *
+     * [scope] selects the population (ADR-0252 phase 1). It defaults to
+     * [LedgerScope.REAL_ONLY] — the regulator-safe answer for a caller who did not think about
+     * synthetic activity at all — and the filter is applied per ENTRY, so each excluded journal
+     * leaves with both of its legs and the debit == credit invariant is preserved.
+     */
+    suspend fun trialBalance(asOf: LocalDate, scope: LedgerScope = LedgerScope.REAL_ONLY): List<TrialBalanceLine>
 
     /**
      * Per-GL-account debit/credit totals over POSTED journal lines whose entry_date falls in
      * [from, to] (inclusive) — the fiscal-period aggregation behind the entity-level year close
-     * (ADR-0078 D5). Read-only; no schema involved beyond the existing journal tables.
+     * (ADR-0078 D5) and the statutory period freeze. Read-only; no schema involved beyond the
+     * existing journal tables. [scope] as in [trialBalance]: real-only unless asked otherwise,
+     * which is what keeps canary postings out of the frozen evidence and out of FINREP.
      */
-    suspend fun trialBalanceForPeriod(from: LocalDate, to: LocalDate): List<TrialBalanceLine>
+    suspend fun trialBalanceForPeriod(
+        from: LocalDate,
+        to: LocalDate,
+        scope: LedgerScope = LedgerScope.REAL_ONLY,
+    ): List<TrialBalanceLine>
 
     /**
      * Per-customer deposit-control sub-ledger balances as of a date, optionally for a single
      * customer account. Aggregates POSTED journal lines that carry a sub_account_id (ADR-0039
      * Phase B), grouped by (sub_account_id, base_currency).
+     *
+     * Deliberately carries no [LedgerScope]: this is a reconciliation against the balance
+     * read-model, not a regulatory aggregate. A synthetic customer's booked balance is genuinely
+     * owed to that synthetic customer and is applied by the downstream projection, so filtering it
+     * out of one side of the tie-out would manufacture a break rather than prevent a misstatement.
      */
     suspend fun subLedgerBalances(asOf: LocalDate, subAccountId: UUID?): List<SubLedgerBalance>
 
