@@ -129,7 +129,10 @@ mp:
         connector: smallrye-kafka
         topic: openbank.party.events
         group.id: openbank-aml-service
-        auto.offset.reset: earliest
+        # auto.offset.reset deliberately unset (#8370): the inert dotted YAML key was a config lie --
+        # SmallRye quotes dotted leaf keys, so the connector always ran its default (latest) and the
+        # declared `earliest` never applied. Deleting it makes the file match the running reality; to
+        # rebuild projections, flip it via the msg-override ConfigMap in an announced replay window.
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":

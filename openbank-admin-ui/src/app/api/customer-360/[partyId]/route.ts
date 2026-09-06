@@ -80,32 +80,28 @@ async function chQuery(sql: string): Promise<Record<string, unknown>[]> {
  * which is ADR-0210 D2's account→party resolution — owned by the `silver_party_accounts` view, not
  * by this route.
  *
- * ISOLATION IS THE LOAD-BEARING PROPERTY. Both arms filter on this party: the direct arm on
- * JSONExtractString(payload,'partyId'), the indirect arm on aggregate_id IN (that party's account
- * ids). If the indirect arm were ever widened, this route would show another customer's
- * transactions — which is why `customer-360.test.ts` asserts isolation, not just assembly.
+ * ISOLATION IS THE LOAD-BEARING PROPERTY, AND IT IS NO LONGER SPELLED OUT HERE. Both arms — the
+ * direct one on JSONExtractString(payload,'partyId') and the indirect one through the party's
+ * account ids — now live in `silver_party_events` (V12__party_event_profile.sql), which carries the
+ * party key on every row. This route filters that view to one party and nothing else. V5 collapsed
+ * the account→party resolution to one definition and this route's own comment recorded why; the
+ * scoping AROUND that resolution stayed behind in the caller, and this is the same collapse one
+ * level up. `customer-360.test.ts` still asserts isolation, now against a single WHERE.
  */
 function scopedRowsSql(partyId: string): string {
-  // Ownership resolution is NOT restated here. `silver_party_accounts` (V5__party_accounts.sql) is
-  // the ADR-0210 D2 view — "materialises as a ClickHouse view alongside the existing silver views"
-  // — and this route reads it rather than re-deriving it, for the same reason the ADR rejects
-  // querying bronze directly: a resolution with two definitions has two answers, and this one IS
-  // the isolation boundary. It carries the `upper()` fold and the empty-partyId guard, and it reads
-  // bronze rather than silver because an account's latest event is typically BALANCE_UPDATED, which
-  // carries no partyId. The CTE that used to live here shipped the whole of that reasoning inside
-  // one caller (issue #4511).
+  // Neither the ownership resolution NOR the scoping around it is restated here. V5's
+  // `silver_party_accounts` owns the account→party key; `silver_party_events` (V12) owns which rows
+  // belong to a party, applying both arms and de-duplicating a row that satisfies both. The two
+  // arms used to be an OR written out in this string, which made this caller a second definition of
+  // the isolation boundary — the exact hazard V5's header names, one level up (issues #4511, #8792).
   //
-  // What stays here is only the party scoping: every reference to the view is filtered to THIS
-  // party, which is what `customer-360.test.ts` asserts. A reference without that WHERE is the leak.
+  // Measured against the sandbox warehouse before the swap: the view and this route's former OR
+  // agree for all 20 parties, max |delta| 0. Dropping the view's de-duplication guard inflates one
+  // party by one event, so the agreement is a property of the guard and not of thin data.
   return `
     SELECT aggregate_type, aggregate_id, event_type, occurred_at, payload
-    FROM ${DB}.silver_current_state
-    WHERE JSONExtractString(payload, 'partyId') = '${partyId}'
-       OR (upper(aggregate_type) IN ('TRANSACTION', 'ACCOUNT')
-           AND aggregate_id IN (
-             SELECT account_id FROM ${DB}.silver_party_accounts
-             WHERE party_id = '${partyId}'
-           ))
+    FROM ${DB}.silver_party_events
+    WHERE party_id = '${partyId}'
     ORDER BY occurred_at DESC
     LIMIT 5000
   `

@@ -82,7 +82,7 @@ describe('Customer 360 isolation (ADR-0210 D2)', () => {
     await expect(res.json()).resolves.toMatchObject({ available: false, partyId: PARTY })
   })
 
-  it('scopes BOTH resolution arms to the requested party', async () => {
+  it('scopes the query to exactly one party, with no arm written out here', async () => {
     const seen = stubClickHouse([])
     const { GET } = await import('@/app/api/customer-360/[partyId]/route')
     await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
@@ -90,18 +90,20 @@ describe('Customer 360 isolation (ADR-0210 D2)', () => {
     expect(seen).toHaveLength(1)
     const sql = seen[0]
 
-    // Direct arm: events that carry partyId.
-    expect(sql).toContain(`JSONExtractString(payload, 'partyId') = '${PARTY}'`)
-    // Indirect arm: transactions and accounts, reached ONLY through this party's accounts.
-    expect(sql).toContain('silver_party_accounts')
-    expect(sql).toMatch(/upper\(aggregate_type\) IN \('TRANSACTION', 'ACCOUNT'\)/)
+    // One view carries both arms and the party key. This route's only job is the WHERE.
+    expect(sql).toContain('silver_party_events')
     // EVERY reference to the view must be party-scoped — an unscoped one is the leak. Asserted over
-    // all occurrences rather than the first, so adding a second (unscoped) join goes red.
-    const refs = sql.split('silver_party_accounts').slice(1)
+    // all occurrences rather than the first, so adding a second (unscoped) read goes red.
+    const refs = sql.split('silver_party_events').slice(1)
     expect(refs.length).toBeGreaterThan(0)
     for (const after of refs) {
       expect(after.slice(0, 80)).toMatch(new RegExp(`WHERE party_id = '${PARTY}'`))
     }
+    // The arms themselves must NOT be restated here — that is what made this route a second
+    // definition of the isolation boundary.
+    expect(sql).not.toContain(`JSONExtractString(payload, 'partyId') = '${PARTY}'`)
+    expect(sql).not.toContain('silver_party_accounts')
+    expect(sql).not.toMatch(/IN \('TRANSACTION', 'ACCOUNT'\)/)
     // Type comparisons must be case-folded: bronze stores PARTY/ACCOUNT uppercase, and comparing
     // against lowercase literals matched nothing while looking like "this party has no accounts".
     expect(sql).not.toMatch(/aggregate_type = '[a-z]+'/)
@@ -114,16 +116,18 @@ describe('Customer 360 isolation (ADR-0210 D2)', () => {
   // inline CTE in this route instead (#4511) — a definition living in one caller, which is what the
   // ADR rejects for the silver reduction and matters more here, because this resolution IS the
   // isolation boundary. Nothing could see that drift: the route was correct, tested and green.
-  it('resolves ownership through the shared view, never by re-deriving it (D2)', async () => {
+  it('resolves ownership through the shared views, never by re-deriving them (D2)', async () => {
     const seen = stubClickHouse([])
     const { GET } = await import('@/app/api/customer-360/[partyId]/route')
     await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
     const sql = seen[0]
 
-    // The route reads the view and does NOT restate the ownership filter — no second definition.
+    // No second definition of anything: not the log, not the account key, not the scoping.
     expect(sql).not.toContain('bronze_events')
+    expect(sql).not.toContain('silver_current_state')
     expect(sql).not.toMatch(/aggregate_type\) = 'ACCOUNT'/)
     expect(sql).not.toContain('WITH ')
+    expect(sql).not.toContain('JSONExtractString')
   })
 
   it('the D2 view exists in the DDL of record and carries the guards the route relies on', () => {
@@ -154,6 +158,39 @@ describe('Customer 360 isolation (ADR-0210 D2)', () => {
     // The columns the route selects on.
     expect(ddl).toMatch(/AS party_id/)
     expect(ddl).toMatch(/AS account_id/)
+  })
+
+  it('the V12 scoping view exists in the DDL of record and keeps both arms disjoint', () => {
+    // Same reason as the V5 pin above: this route's correctness now rests on an object defined in
+    // another module, and that dependency has no compiler behind it.
+    const file = readFileSync(
+      path.join(
+        process.cwd(),
+        '../openbank-analytics-sink/src/main/resources/clickhouse/V12__party_event_profile.sql',
+      ),
+      'utf-8',
+    )
+    const ddl = file.split('\n').filter((l) => !l.trimStart().startsWith('--')).join('\n')
+
+    expect(ddl).toContain('openbank_analytics.silver_party_events')
+    // The columns this route selects. A view that dropped one would fail at request time only.
+    for (const col of ['party_id', 'aggregate_type', 'aggregate_id', 'event_type', 'occurred_at', 'payload']) {
+      expect(ddl).toContain(col)
+    }
+    // Both arms are present: the payload key, and the account join through V5.
+    expect(ddl).toMatch(/JSONExtractString\(s\.payload, 'partyId'\) != ''/)
+    expect(ddl).toContain('openbank_analytics.silver_party_accounts')
+    // THE DISJOINTNESS GUARD. Without it a row carrying both a partyId and an owned account id is
+    // counted twice, and every downstream count inflates for exactly the best-instrumented events.
+    // Measured on the sandbox: removing this line inflates one party of twenty by one event, so the
+    // guard is doing work on real data rather than being defensive about a case that cannot arise.
+    expect(ddl).toMatch(/JSONExtractString\(s\.payload, 'partyId'\) = ''/)
+    // CREATE OR REPLACE, not IF NOT EXISTS: the latter is a no-op on a warehouse that already has
+    // the object, which is how an edit looks applied in git and does nothing in ClickHouse.
+    expect(ddl).toContain('CREATE OR REPLACE VIEW')
+    // It reduces silver, not bronze: this is a current-state view, and the history questions belong
+    // to V10's monthly flows. A view reading both would answer neither question consistently.
+    expect(ddl).toContain('openbank_analytics.silver_current_state')
   })
 
   it('rejects a non-UUID partyId before it reaches ClickHouse (injection boundary)', async () => {
