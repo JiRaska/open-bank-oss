@@ -54,11 +54,68 @@ def git(*args: str) -> str:
     ).stdout
 
 
+VERSION_RE = re.compile(r"/(V(?P<num>\d+))__[^/]+\.sql$")
+
+
+def migration_version(path: str) -> str | None:
+    """The Flyway version in a migration path (`V14__x.sql` -> `14`), or None."""
+    m = VERSION_RE.search(path)
+    return m.group("num") if m else None
+
+
+def rename_resolves_duplicate(
+    old_path: str, new_path: str, status: str, sibling_versions: list[str]
+) -> bool:
+    """True iff this rename is a pure renumber that unblocks a DUPLICATE Flyway version.
+
+    Renaming a committed migration is normally forbidden — Flyway keys on the version in the
+    filename, so it rewrites history. There is exactly one case where forbidding it is wrong,
+    and the other gate is the one that says so: when two migrations reach main carrying the
+    SAME version, `check-migration-version-regress` tells you to "renumber it to the next free
+    version", and this gate then refuses the only remedy it was offered. Two enforced gates
+    that contradict each other leave the service unbootable and no legal way out (#5628).
+
+    The exception is deliberately as narrow as it can be made, because each condition is what
+    stops it becoming a general licence to edit migrations:
+
+      - `R100` — git's own byte-identical similarity score. The content is untouched, so this
+        is a renumber and cannot smuggle in an edit; an R099 rename is still refused.
+      - same directory — a service's Flyway history is per-service, so a "collision" only
+        means anything within one migration folder.
+      - the OLD version genuinely collides at base (appears more than once). Without this,
+        any migration could be renumbered at will.
+      - the NEW version is free at base. Renaming onto another occupied version just moves
+        the collision.
+
+    Not machine-checkable, and therefore not claimed here: whether the migration has already
+    been applied to a live database. If it has, renaming it is wrong no matter what this
+    returns, and the caller has to know that.
+    """
+    if status != "R100":
+        return False
+    if old_path.rsplit("/", 1)[0] != new_path.rsplit("/", 1)[0]:
+        return False
+    old_v, new_v = migration_version(old_path), migration_version(new_path)
+    if old_v is None or new_v is None:
+        return False
+    return sibling_versions.count(old_v) > 1 and new_v not in sibling_versions
+
+
+def sibling_versions_at(base: str, path: str) -> list[str]:
+    """Every Flyway version in `path`'s migration directory, as it stands at `base`."""
+    directory = path.rsplit("/", 1)[0]
+    try:
+        listing = git("ls-tree", "--name-only", base, f"{directory}/")
+    except subprocess.CalledProcessError:
+        return []
+    return [v for v in (migration_version(p) for p in listing.splitlines()) if v]
+
+
 def changed_migrations(base: str) -> tuple[list[str], list[str]]:
     """Return (added, modified) migration paths in the diff against `base`."""
     added, modified = [], []
     # --diff-filter distinguishes the two requirements: A -> needs a note, M -> forbidden.
-    out = git("diff", "--name-status", "--diff-filter=AMR", base, "HEAD")
+    out = git("diff", "--name-status", "--find-renames=100%", "--diff-filter=AMR", base, "HEAD")
     for line in out.splitlines():
         parts = line.split("\t")
         if len(parts) < 2:
@@ -68,7 +125,21 @@ def changed_migrations(base: str) -> tuple[list[str], list[str]]:
             continue
         # A rename (R) of a migration is an edit of its identity — Flyway keys on the version
         # in the filename, so renaming V3 to V4 is not "adding V4", it is rewriting history.
-        if status.startswith("A"):
+        # The one exception is a pure renumber that resolves a duplicate version; see
+        # rename_resolves_duplicate for why each of its conditions is load-bearing.
+        if status.startswith("R") and len(parts) >= 3:
+            old_path = parts[1]
+            if rename_resolves_duplicate(
+                old_path, path, status, sibling_versions_at(base, old_path)
+            ):
+                print(
+                    f"check-db-migration: {old_path} -> {path} permitted: byte-identical "
+                    f"renumber resolving a duplicate Flyway version. This is only correct if "
+                    f"the migration has NOT been applied to any live database."
+                )
+                continue
+            modified.append(path)
+        elif status.startswith("A"):
             added.append(path)
         else:
             modified.append(path)
@@ -156,12 +227,45 @@ def self_test() -> int:
         if got != want:
             fails.append(f"MIGRATION_RE({path!r}) = {got}, expected {want}")
 
+    # --- the duplicate-version rename exception -------------------------------------------
+    # Each case removes ONE condition and asserts the exception closes. An exception that
+    # cannot be made to say "no" is a hole, not a carve-out.
+    D = "openbank-x/src/main/resources/db/migration"
+
+    def rn(label, old, new, status, siblings, want):
+        got = rename_resolves_duplicate(old, new, status, siblings)
+        if got != want:
+            fails.append(f"rename {label}: expected {want}, got {got}")
+
+    rn("a byte-identical renumber off a duplicate version is permitted",
+       f"{D}/V14__dedup.sql", f"{D}/V15__dedup.sql", "R100", ["13", "14", "14"], True)
+    rn("an edited rename is refused — R099 is not a pure renumber",
+       f"{D}/V14__dedup.sql", f"{D}/V15__dedup.sql", "R099", ["13", "14", "14"], False)
+    rn("a rename with no collision is refused — nothing to resolve",
+       f"{D}/V14__dedup.sql", f"{D}/V15__dedup.sql", "R100", ["13", "14"], False)
+    rn("renaming onto an occupied version is refused — it moves the collision",
+       f"{D}/V14__dedup.sql", f"{D}/V15__dedup.sql", "R100", ["14", "14", "15"], False)
+    rn("a cross-service rename is refused — Flyway history is per service",
+       f"{D}/V14__dedup.sql",
+       "openbank-y/src/main/resources/db/migration/V15__dedup.sql", "R100", ["14", "14"], False)
+    rn("a non-versioned filename is refused rather than guessed at",
+       f"{D}/baseline.sql", f"{D}/V15__dedup.sql", "R100", ["14", "14"], False)
+
+    for path, want in (
+        (f"{D}/V14__dedup.sql", "14"),
+        (f"{D}/V7__x.sql", "7"),
+        (f"{D}/README.md", None),
+    ):
+        got = migration_version(path)
+        if got != want:
+            fails.append(f"migration_version({path!r}) = {got!r}, expected {want!r}")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: db-migration rollback note is falsifiable (15 cases)")
+    print("self-test ok: rollback note + duplicate-version rename exception are falsifiable (24 cases)")
     return 0
 
 

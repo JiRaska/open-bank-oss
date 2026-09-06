@@ -325,6 +325,13 @@ change_requirements:
     # it sits next to the migration forever, where whoever rolls it back is already looking.
     # The gate also covers the "forward" half of the requirement above — editing an
     # already-committed migration is a finding, since Flyway checksums the whole file.
+    # ONE exception, added 2026-09-06 (#5628): a byte-identical rename (git R100) that moves a
+    # migration off a DUPLICATE version onto a free one. Without it this gate and
+    # check-flyway-version-commit-order contradict each other — that gate's remedy for two
+    # migrations sharing a version is "renumber it", which this gate then refused as an edit,
+    # leaving the service unbootable with no legal fix. Every condition of the carve-out is
+    # falsified in check-db-migration.py --self-test; it does not and cannot know whether the
+    # migration already reached a live database, which is the human's call.
     # Flipping to enforced = pass --enforce in ci.yml (one-line change).
     ci_producer: "openbank-infra/scripts/check-db-migration.py"
   event_change:
