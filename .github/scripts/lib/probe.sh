@@ -9,7 +9,7 @@
 #   A probe fails by reporting CLEAN. That is the whole problem: a broken linter invocation, a
 #   date parsed in the wrong zone, a column index that shifted — none of them error, all of them
 #   return a plausible nothing, and nothing downstream can tell "found no problem" from "could not
-#   look". Seven measured instances in this repo, all of which printed a green answer:
+#   look". Eight measured instances in this repo, all of which printed a green answer:
 #
 #     * `find <dir> -newermt "-60 minutes"` is ALWAYS empty on BSD/macOS (no GNU relative dates).
 #       An actively-committing worktree was reported idle.
@@ -27,6 +27,10 @@
 #       an `[ -n "$out" ]` branch printed "(empty = clean)".
 #     * counting `in_progress` workflow runs to judge CI saturation counts 189 runs whose jobs all
 #       completed and whose run record never transitioned.
+#     * `git rev-list -1 --before=2026-08-09 <ref>` fills the bare date with the CURRENT TIME OF DAY,
+#       so a date-pinned baseline lands INSIDE the window and answers differently every hour. The
+#       same command text returned three different baselines in one session; the period report built
+#       on it published +24 and +66 where the truth was +28 and +77.
 #
 # THE RULE THIS FILE ENCODES
 #   Before trusting a probe's silence, run it against a known-positive. Every function here ships
@@ -133,6 +137,65 @@ probe_utc_cutoff() {
   local hours="$1"
   date -u -v-"${hours}"H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
     || date -u -d "${hours} hours ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------------------------
+# probe_commit_before_utc <iso8601-with-Z> [ref] [-C <dir>] -> the newest commit SHA strictly
+# before that instant, on stdout; non-zero (and silent on stdout) if it cannot be established.
+#
+# `--before=2026-08-09` does NOT mean midnight. Git's approxidate fills a bare date with the
+# CURRENT TIME OF DAY, so the cutoff walks forward as the day does and the answer changes between
+# two runs of identical command text. Measured 2026-09-06 at local 16:33 in this repo:
+#
+#     --before=2026-08-09               -> a commit at 2026-08-09T16:30:51+02:00  (inside the window)
+#     --before="2026-08-09 00:00"       -> local midnight, not UTC
+#     --before=2026-08-09T00:00:00Z     -> correct
+#
+# A report built on the bare form drifted its own baseline across one session (ADR 242 -> 246 -> 248,
+# gates 122 -> 133 -> 140), published every delta wrong, and "corrected" a previous report that had
+# been right. So this probe takes an explicit zoned instant and, before answering, VERIFIES that the
+# commit it found really does precede the cutoff — a baseline nobody can see is a baseline nobody
+# should trust. `--first-parent` keeps the answer on the mainline rather than on a merged side branch
+# whose commit dates can straddle the boundary. Note `--until` is INCLUSIVE of the instant given,
+# so the probe asks for one second earlier: a commit landing exactly on the boundary belongs to the
+# window, not to the baseline.
+probe_commit_before_utc() {
+  local cutoff="$1" ref="${2:-origin/main}" dir="."
+  if [ "${3:-}" = "-C" ]; then dir="${4:-.}"; fi
+
+  case "$cutoff" in
+    *T*Z) : ;;
+    *)
+      echo "probe_commit_before_utc: cutoff '$cutoff' is not an explicit UTC instant" \
+           "(want 2026-08-09T00:00:00Z) — a bare date resolves to the current time of day" >&2
+      return 2
+      ;;
+  esac
+
+  # `--until` is INCLUSIVE: a commit whose date equals the cutoff to the second is kept, which for
+  # a "state as of the start of the window" baseline is off by one commit. Measured against a
+  # fixture holding a commit exactly at the boundary — the fail-closed check below caught it. Ask
+  # for one second earlier instead of hand-waving that an exact hit "won't happen".
+  local cutoff_s prev_s prev_iso sha
+  cutoff_s="$(probe_utc_epoch "$cutoff")"
+  [ -n "$cutoff_s" ] || { echo "probe_commit_before_utc: cannot parse cutoff '$cutoff'" >&2; return 2; }
+  prev_s=$((cutoff_s - 1))
+  prev_iso="$(date -u -r "$prev_s" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+              || date -u -d "@$prev_s" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  [ -n "$prev_iso" ] || { echo "probe_commit_before_utc: cannot format the cutoff" >&2; return 2; }
+
+  sha="$(git -C "$dir" rev-list -1 --until="$prev_iso" --first-parent "$ref" 2>/dev/null)"
+  [ -n "$sha" ] || { echo "probe_commit_before_utc: no commit before $cutoff on $ref" >&2; return 1; }
+
+  # Fail closed rather than hand back a baseline from inside the window.
+  local commit_s
+  commit_s="$(git -C "$dir" show -s --format=%ct "$sha" 2>/dev/null)"
+  if [ -z "$commit_s" ] || [ -z "$cutoff_s" ] || [ "$commit_s" -ge "$cutoff_s" ]; then
+    echo "probe_commit_before_utc: $sha is not before $cutoff — refusing to report a baseline" \
+         "that would silently include the window it is supposed to exclude" >&2
+    return 1
+  fi
+  echo "$sha"
 }
 
 probe_zombie_runs() {
@@ -324,7 +387,7 @@ _probe_selftest() {
   (
     cd "$origin" || exit 1
     git init -q -b main .
-    git -c user.email=probe@example.com -c user.name=probe commit -q --allow-empty -m init
+    git -c user.email=probe@example.com -c user.name=probe -c commit.gpgsign=false commit -q --allow-empty -m init
     git branch probe-present
   ) >/dev/null 2>&1
   git clone -q "$origin" "$clone" >/dev/null 2>&1
@@ -496,6 +559,78 @@ _probe_selftest() {
 
   # Counted, never hard-coded: a literal here would keep reporting a full corpus after someone
   # deleted half the cases, which is the exact shape min_subjects exists to catch (#4339).
+  # --- probe_commit_before_utc (the bare-date baseline drift) --------------------------
+  # Hermetic fixture: 48 hourly EMPTY commits across 2026-08-08 and 2026-08-09, all in UTC, so a
+  # 9-hour timezone shift necessarily selects a different one. The cutoff is 2026-08-09T00:00:00Z
+  # and the only correct answer is the commit at 2026-08-08T23:00:00Z.
+  local crepo
+  crepo="$(mktemp -d)"
+  (
+    cd "$crepo" || exit 1
+    git init -q -b main .
+    git config user.email probe@example.invalid
+    git config user.name "probe selftest"
+    # A developer machine sets commit.gpgsign=true globally; inheriting it here makes the fixture
+    # block on pinentry locally while passing on CI, which is the opposite of hermetic.
+    git config commit.gpgsign false
+    git config tag.gpgsign false
+    local h d
+    for d in 08 09; do
+      for h in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23; do
+        GIT_AUTHOR_DATE="2026-08-${d}T${h}:00:00Z" GIT_COMMITTER_DATE="2026-08-${d}T${h}:00:00Z" \
+          git commit -q --allow-empty -m "c 2026-08-${d}T${h}:00Z"
+      done
+    done
+  ) >/dev/null 2>&1
+
+  local want_subject picked picked_subject
+  want_subject="c 2026-08-08T23:00Z"
+  picked="$(TZ=UTC probe_commit_before_utc "2026-08-09T00:00:00Z" main -C "$crepo")"
+  picked_subject="$(git -C "$crepo" show -s --format=%s "$picked" 2>/dev/null)"
+  _check "probe_commit_before_utc picks the last commit before the cutoff (got '$picked_subject')" \
+    "$([ "$picked_subject" = "$want_subject" ] && echo 1 || echo 0)"
+
+  # The fixture holds a commit at exactly 2026-08-09T00:00:00Z. `--until` would keep it (it is
+  # inclusive), which is off by one commit for a baseline; this case is why the probe asks for one
+  # second earlier, and it caught that during development rather than in a published report.
+  _check "probe_commit_before_utc excludes a commit landing exactly ON the cutoff" \
+    "$([ "$picked_subject" != "c 2026-08-09T00:00Z" ] && echo 1 || echo 0)"
+
+  # TZ-invariance is the property the bug actually violated: the answer must not depend on where
+  # the machine thinks it is, nor on what time of day the probe happens to run.
+  local picked_tokyo
+  picked_tokyo="$(TZ=Asia/Tokyo probe_commit_before_utc "2026-08-09T00:00:00Z" main -C "$crepo")"
+  _check "probe_commit_before_utc is TZ-invariant" \
+    "$([ "$picked_tokyo" = "$picked" ] && echo 1 || echo 0)"
+
+  # THE vacuity control. If the broken form happened to agree across those two zones, the case
+  # above would prove nothing — so assert that this fixture can actually SEE the trap.
+  local bare_utc bare_tokyo
+  bare_utc="$(cd "$crepo" && TZ=UTC git rev-list -1 --before=2026-08-09 main 2>/dev/null)"
+  bare_tokyo="$(cd "$crepo" && TZ=Asia/Tokyo git rev-list -1 --before=2026-08-09 main 2>/dev/null)"
+  _check "the bare-date form IS zone-dependent (the trap is reproduced, not assumed)" \
+    "$([ -n "$bare_utc" ] && [ "$bare_utc" != "$bare_tokyo" ] && echo 1 || echo 0)"
+
+  # And the defect itself: under UTC the bare date resolves to 2026-08-09 at the current time of
+  # day, so it returns a commit from INSIDE the window it was meant to exclude.
+  local bare_s cutoff_s2
+  bare_s="$(git -C "$crepo" show -s --format=%ct "$bare_utc" 2>/dev/null)"
+  cutoff_s2="$(probe_utc_epoch "2026-08-09T00:00:00Z")"
+  _check "the bare-date form lands INSIDE the window (bare=$(git -C "$crepo" show -s --format=%s "$bare_utc" 2>/dev/null))" \
+    "$([ -n "$bare_s" ] && [ "$bare_s" -ge "$cutoff_s2" ] && echo 1 || echo 0)"
+
+  # The probe must refuse a bare date outright rather than quietly resolving it.
+  local rejected=0
+  probe_commit_before_utc "2026-08-09" main -C "$crepo" >/dev/null 2>&1 || rejected=1
+  _check "probe_commit_before_utc REJECTS a bare date instead of guessing a time of day" "$rejected"
+
+  # Fail closed when no commit precedes the cutoff, rather than returning the oldest one.
+  local none_out none_status=0
+  none_out="$(probe_commit_before_utc "2020-01-01T00:00:00Z" main -C "$crepo" 2>/dev/null)" || none_status=1
+  _check "probe_commit_before_utc fails closed when nothing precedes the cutoff" \
+    "$([ "$none_status" = "1" ] && [ -z "$none_out" ] && echo 1 || echo 0)"
+  rm -rf "$crepo"
+
   echo "SUBJECTS=$executed  # self-test assertions executed"
 
   if [ "$failures" -gt 0 ]; then
