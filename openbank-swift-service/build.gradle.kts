@@ -68,6 +68,18 @@ dependencies {
 // probe's answer first.
 // Pact: write generated consumer contracts to pacts/ and forward broker config.
 tasks.withType<Test> {
+    // Gradle's default test-JVM heap is 512m (the account-service comment at
+    // openbank-account-service/build.gradle.kts documents it and asks to be told when a second
+    // module OOMs — this is that signal). swift-service's suite boots Quarkus repeatedly AND
+    // runs SwiftPactFolderProviderVerificationTest, which loads every pact naming this service
+    // as provider into the same fork. Measured 2026-09-06: two unrelated PRs (#8781, #8697)
+    // died in the same minute — `OutOfMemoryError: Java heap space` across ClassGraph-worker /
+    // vert.x-eventloop / Finalizer threads ~3 minutes into the suite, after which the JVM hung
+    // in GC until the 45-minute job timeout (#8781) or the pact verification Timed out
+    // downstream of the GC storm (#8697). Same 2g ceiling account/lending/product-catalog
+    // already run with; a ceiling, not an allocation.
+    maxHeapSize = "2g"
+
     // CI hang #3 (#2320) is GONE — measured, not assumed. `SwiftBootSmokeIT` used to hang 37+ min
     // at Quarkus boot on the runner pool (`@DisabledIfEnvironmentVariable` is evaluated AFTER
     // Quarkus starts QuarkusTestResource containers, quarkusio/quarkus#21555), so a blanket
