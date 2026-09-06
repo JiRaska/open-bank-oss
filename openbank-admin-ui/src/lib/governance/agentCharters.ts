@@ -8,7 +8,7 @@
 // (/api/iaops/agents/[agentId]) can reuse the same parsing without a second source
 // of truth for "what does agents.yaml actually say".
 
-import { promises as fs } from 'fs'
+import { existsSync, promises as fs } from 'fs'
 import path from 'path'
 import { parse as parseYaml } from 'yaml'
 
@@ -28,8 +28,15 @@ function normalizeToolList(items: unknown[]): string[] {
 }
 
 function agentsFile(): string {
-  return process.env.OPENBANK_AGENTS_FILE
-    ?? path.resolve(process.cwd(), 'agents.yaml')
+  // Explicit override, set in the image (Dockerfile: OPENBANK_AGENTS_FILE=/app/agents.yaml).
+  if (process.env.OPENBANK_AGENTS_FILE) return process.env.OPENBANK_AGENTS_FILE
+  // Image-baked copy next to the standalone server.
+  const baked = path.resolve(process.cwd(), 'agents.yaml')
+  if (existsSync(baked)) return baked
+  // Local dev and vitest: the source of truth one level up in the repo tree. Without this the
+  // registry reads as UNAVAILABLE outside the image — the same fallback compliance.ts already
+  // makes for compliance-controls.yaml, which sits in that very directory.
+  return path.resolve(process.cwd(), '..', 'openbank-libs', 'governance', 'agents.yaml')
 }
 
 interface ParsedAgents {
