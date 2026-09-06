@@ -61,6 +61,9 @@ kind: ExternalSecret
 metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
+    # ADR-0279 #18: Strimzi-issued client keystore. The User Operator renews the cert; this is the date by which
+    # the projection must be re-checked if it has not.
+    openbank.io/rotation-deadline: "2027-09-06"
   name: referral-service-kafka-keystore
   namespace: referral
 spec:
@@ -83,6 +86,8 @@ kind: ExternalSecret
 metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
+    # ADR-0279 #18: Cluster CA truststore projection, same renewal path as the keystore above.
+    openbank.io/rotation-deadline: "2027-09-06"
   name: kafka-cluster-ca-truststore
   namespace: referral
 spec:
