@@ -25,7 +25,16 @@ data class CreateStandingOrderRequest(
     val remittanceInfo: String?,
     val startDate: LocalDate,
     val endDate: LocalDate?,
-)
+) {
+    init {
+        // Jackson fills a MISSING primitive with 0 (no MissingKotlinParameterException —
+        // the JVM-default trap), so "amount present and positive" cannot be delegated to
+        // deserialization: an omitted amountMinorUnits would silently create a 0-amount
+        // standing order. libs-runtime maps IllegalArgumentException to 400, which makes
+        // the spec's `required: [amountMinorUnits]` true in effect.
+        require(amountMinorUnits > 0) { "amountMinorUnits must be positive" }
+    }
+}
 
 data class StandingOrderResponse(
     val id: UUID,
