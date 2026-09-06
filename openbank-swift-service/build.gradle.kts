@@ -102,6 +102,18 @@ tasks.withType<Test> {
     // failure mode that caused the exclusion in the first place. Fail fast, not fail wide.
     systemProperty("junit.jupiter.execution.timeout.default", "8m")
 
+    // Test-worker heap: Gradle's 512 MiB default is not enough for this module's CI lane.
+    // The suite boots several @QuarkusTest instances plus Testcontainers (Postgres) in one
+    // worker, and on the shared runner pool the test JVM dies with OutOfMemoryError roughly
+    // six minutes in — measured 2026-09-06 on five consecutive runs of one unchanged commit
+    // (PR #8796, Services CI run 33990777002): three of the seven swift-lane attempts OOM'd
+    // before the pact suite even ran, and the crippled JVM then dragged the job into the
+    // 45-minute matrix timeout (issue #8916). Same defect and same per-module fix as
+    // account/lending (2g) and product-catalog (1536m) above; deliberately NOT a fleet-wide
+    // bump in build-logic, per the same comment there: nothing measures test heap across the
+    // ~50 modules, so a global raise is an unmeasured ratchet.
+    maxHeapSize = "2g"
+
     // Pact rootDir + Pact Broker property forwarding centralised into
     // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
     // (ADR-0250 Phase 2, issue #4414) — the timeout above and the CI-only jvmArgs below are the
