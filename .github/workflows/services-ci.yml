@@ -269,6 +269,35 @@ jobs:
                   CHANGED="$CHANGED $m"
                 fi
               done
+              # A changed pact builds BOTH sides, exactly as the main-push path above already
+              # does. Without this the PR path attributes files ONLY by `^<module>/`, so a
+              # pact-only PR matched no module, built nothing, and merged green — then broke the
+              # PROVIDER's build on main, where nobody is watching a service they did not touch.
+              # That is #8697: three consumer pacts gained a "no valid M2M identity is presented"
+              # interaction, transaction-service had no such provider state, and main went red
+              # with the causing PR long merged (issue #8984).
+              # Derivation matches the push path (split on the LAST '-openbank-'). A consumer that
+              # is not a Gradle module is skipped rather than failing the scoping: openbank-admin-ui
+              # authors four of the committed pacts and builds in its own workflow. A PROVIDER that
+              # does not resolve to a module is not skippable — it is the side that verifies — so
+              # that falls back to the full fleet, the safe direction this detector always takes.
+              while IFS= read -r f; do
+                [ -z "$f" ] && continue
+                base=$(basename "$f" .json)
+                case "$base" in
+                  *-openbank-*) ;;
+                  *) echo "Pact ${f} does not carry a '<consumer>-openbank-<provider>' name -> full-fleet."
+                     CHANGED="$ALL"; break ;;
+                esac
+                prov="openbank-${base##*-openbank-}"
+                cons="${base%-openbank-*}"
+                if ! grep -qE "(^| )${prov}( |\$)" <<< " $ALL "; then
+                  echo "Pact ${f} names provider ${prov}, which is not a module -> full-fleet."
+                  CHANGED="$ALL"; break
+                fi
+                CHANGED="$CHANGED $prov"
+                if grep -qE "(^| )${cons}( |\$)" <<< " $ALL "; then CHANGED="$CHANGED $cons"; fi
+              done <<< "$(grep -E '^pacts/.*\.json$' <<< "$FILES_CODE" || true)"
               # DST harness dependency edge (ADR-0115). openbank-simulation validates money-path
               # invariants against the ledger/balance/transaction domains, but this detector is
               # per-directory, NOT dependency-aware: a change to one of those services would build
