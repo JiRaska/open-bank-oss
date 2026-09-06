@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: consent-service
     app.kubernetes.io/part-of: consent
   annotations:
-    openbank.tech/policy-checksum: "3eff9eeb942c5e73"
+    openbank.tech/policy-checksum: "e7c6677c7b46f4a1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1623,6 +1623,7 @@ data:
             - kyb.case.reject
             - kyb.case.review.resolve
             - kyb.lookup
+            - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
             - lending.approve
             - lending.collateralDecide
             - lending.collateralRegister
@@ -1705,6 +1706,7 @@ data:
             - kyb.case.read
             - kyb.case.reject
             - kyb.case.review.resolve
+            - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
         ROLE_AUDITOR:
           grant:
             - audit.read
