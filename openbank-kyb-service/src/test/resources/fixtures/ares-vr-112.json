@@ -1,0 +1,41 @@
+{
+  "icoId": "45274649",
+  "zaznamy": [
+    {
+      "rejstrik": "VR",
+      "primarniZaznam": true,
+      "spisovaZnacka": [ { "soud": "Městský soud v Praze", "oddil": "C", "vlozka": "12345" } ],
+      "obchodniJmeno": [ { "hodnota": "Příklad s.r.o.", "datumZapisu": "2010-01-15" } ],
+      "stavSubjektu": "AKTIVNI",
+      "insolvence": [],
+      "statutarniOrgany": [
+        {
+          "typOrganu": "STATUTARNI_ORGAN",
+          "nazevOrganu": "jednatelé",
+          "clenoveOrganu": [
+            {
+              "fyzickaOsoba": { "jmeno": "Jana", "prijmeni": "Nováková", "titulPredJmenem": "Ing.", "datumNarozeni": "1980-05-05" },
+              "clenstvi": { "clenstvi": { "vznikClenstvi": "2015-01-01" }, "funkce": { "nazev": "jednatel" } },
+              "datumZapisu": "2015-01-10"
+            },
+            {
+              "fyzickaOsoba": { "jmeno": "Petr", "prijmeni": "Svoboda", "datumNarozeni": "1975-03-03" },
+              "clenstvi": { "clenstvi": { "vznikClenstvi": "2012-06-01", "zanikClenstvi": "2019-12-31" }, "funkce": { "nazev": "jednatel" } },
+              "datumZapisu": "2012-06-10",
+              "datumVymazu": "2020-01-05"
+            },
+            {
+              "fyzickaOsoba": { "jmeno": "Eva", "prijmeni": "Dvořáková", "datumNarozeni": "1988-11-11" },
+              "clenstvi": { "clenstvi": { "vznikClenstvi": "2020-01-01" }, "funkce": { "nazev": "jednatel" } },
+              "datumZapisu": "2020-01-05"
+            }
+          ],
+          "zpusobJednani": [
+            { "hodnota": "Za společnost jedná každý jednatel samostatně.", "datumZapisu": "2010-01-15", "datumVymazu": "2020-01-05" },
+            { "hodnota": "Za společnost jednají vždy dva jednatelé společně.", "datumZapisu": "2020-01-05" }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: clearing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "301904d01a6bee30"
+    openbank.tech/policy-checksum: "e488792b88ace2ec"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1542,6 +1542,11 @@ data:
             - ledger.replay
             - ledger.reverse
             - ledger.trigger
+            - kyb.case.list                    # ADR-0284: business onboarding review queue
+            - kyb.case.read
+            - kyb.case.reject
+            - kyb.case.review.resolve
+            - kyb.lookup
             - lending.approve
             - lending.collateralDecide
             - lending.collateralRegister
@@ -1552,6 +1557,9 @@ data:
             - lending.writeoff
             - party.approval.decide
             - party.consent.update
+            - party.mandate.grant              # ADR-0284 D3: bind a representative to a legal-entity party
+            - party.mandate.read
+            - party.mandate.revoke
             - party.merge
             - party.update
             - sanctions.approval.decide
@@ -1617,6 +1625,10 @@ data:
           grant:
             - kyc.case.approve
             - kyc.case.reject
+            - kyb.case.list                    # ADR-0284: the KYB review queue is the KYC reviewer's queue
+            - kyb.case.read
+            - kyb.case.reject
+            - kyb.case.review.resolve
         ROLE_AUDITOR:
           grant:
             - audit.read

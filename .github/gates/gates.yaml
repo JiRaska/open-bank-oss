@@ -4191,6 +4191,26 @@ gates:
     run: |
       python3 .github/scripts/check-authz-pdp-parity.py . --enforce
 
+  # The converse of the sidecar-parity gate above (issue #8470): that one stops an enforcing
+  # service running without a PDP; this one stops a money-path service running WITHOUT enforcing.
+  # 16 of 23 money-path services have a fail-open code default, so a manifest that omits (or
+  # loses) AUTHZ_ENFORCE silently downgrades authorization with a healthy pod. The three
+  # deliberately-advisory services are allowlisted only while their manifest repeats the
+  # justification and the flip date — a bare `value: "false"` flags.
+  - id: authz-enforce-money-path
+    rationale: "A money-path service whose deployed manifest leaves authz in advisory mode accepts requests its policy would deny; the default must be enforce, with every advisory exception argued in the manifest itself (#8470)."
+    review_after: "2026-10-05"
+    budget_seconds: 30   # 1.1s locally over 23 services + gitops walk
+    min_subjects: 23   # the money_path_services list the gate asserts over; an empty list would pass vacuously
+    name: "money-path services enforce authz in the deployed manifest (enforced, #8470)"
+    group: security
+    mode: enforced
+    selftest: python3 .github/scripts/check-authz-enforce-money-path.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-authz-enforce-money-path.py"]
+    run: |
+      python3 .github/scripts/check-authz-enforce-money-path.py . --enforce
+
   # @RolesAllowed ⇒ realm parity (issue #2404). The JWT-role half of the check above: a role
   # name that exists in no realm never matches, so the endpoint answers 403 to every caller,
   # silently and forever. finrep's FINREP/COREP shipped that way (#2403), and 39 sites across
