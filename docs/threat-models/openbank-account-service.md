@@ -580,3 +580,16 @@ monotonically increasing `lifecycleRevision`. A revisionless close remains accep
 permanent legacy tombstone; a revisionless activate/reinstate is ignored. This deliberately favors
 temporary unavailability during a consumer-first rolling upgrade over resurrecting revoked access.
 Recovery from a legacy tombstone is a newly issued grant, never replaying the same grant id.
+
+- **2026-09-06** — **Owner-only transparency view over both authorization stores** (ADR-0232,
+  `GET /api/v1/accounts/{accountId}/authorizations/effective`). Read-only projection of the same
+  two stores (`account_authorizations`, delegation grants) and the same active/validity filters the
+  payment guard consults, so the view cannot drift from enforcement. When the customer-edge stamps
+  `X-Customer-Party-Id`, ownership is re-checked here (defence in depth); a mismatch answers 404 and
+  an unknown account answers an empty list, so no response distinguishes "not yours" from "does not
+  exist" — no account-id existence oracle. Payload carries party ids only: no names, contact details
+  or grant labels, so the endpoint cannot be used to turn an account id into a person. The
+  customer-edge route is owner-only; a delegate may read the account but not this list.
+  **Risk class:** confidentiality (bounded to party ids of parties the owner already transacts
+  with); no money mutation, no new principal, no new service-to-service edge. Rollback: remove the
+  route; enforcement is unchanged because the guard never reads this projection.

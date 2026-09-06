@@ -315,6 +315,7 @@ jobs:
       # that need them are set here rather than in the manifest.
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_BODY: ${{ github.event.pull_request.body }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
       BASE_REF: ${{ github.base_ref || github.ref_name }}
       # `gh` needs GH_TOKEN; the job-level `permissions: contents: read` above is what
       # scopes it. check-msg-channel-image-parity.py reads a file at an arbitrary historical
