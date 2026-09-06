@@ -64,32 +64,31 @@ class CreditOfferEligibilityResource(private val eligibility: CreditOfferEligibi
     @Path("/eligibility/{partyId}")
     @Authorize(action = "lending.creditOffer.eligibility", resource = "")
     @Operation(summary = "Whether an UNPROMPTED credit offer may be surfaced to this party")
-    fun eligibility(@PathParam("partyId") partyId: UUID): Uni<Response> =
-        CoroutineScope(Dispatchers.Unconfined).async {
-            // 200 for both outcomes, on purpose. "You may not offer" is a successful answer to the
-            // question asked, not a client error — and a caller that has to distinguish a refusal
-            // from a transport failure by status code will eventually get it wrong in the
-            // permissive direction. The reason lives in the body; the absence of a body is the
-            // failure.
-            when (val decision = eligibility.evaluate(partyId, OfferSurface.PUSH)) {
-                is CreditOfferDecision.Allowed -> Response.ok(
-                    mapOf(
-                        "allowed" to true,
-                        "reasonCode" to null,
-                        "policyVersion" to decision.policyVersion,
-                    ),
-                ).build()
+    fun eligibility(@PathParam("partyId") partyId: UUID): Uni<Response> = CoroutineScope(Dispatchers.Unconfined).async {
+        // 200 for both outcomes, on purpose. "You may not offer" is a successful answer to the
+        // question asked, not a client error — and a caller that has to distinguish a refusal
+        // from a transport failure by status code will eventually get it wrong in the
+        // permissive direction. The reason lives in the body; the absence of a body is the
+        // failure.
+        when (val decision = eligibility.evaluate(partyId, OfferSurface.PUSH)) {
+            is CreditOfferDecision.Allowed -> Response.ok(
+                mapOf(
+                    "allowed" to true,
+                    "reasonCode" to null,
+                    "policyVersion" to decision.policyVersion,
+                ),
+            ).build()
 
-                is CreditOfferDecision.Suppressed -> Response.ok(
-                    mapOf(
-                        // The code is part of the contract, not a log line: a caller has to be able
-                        // to count "declined for arrears" separately from "never opted in", and a
-                        // conduct review will ask for exactly that split.
-                        "allowed" to false,
-                        "reasonCode" to decision.code.name,
-                        "policyVersion" to decision.policyVersion,
-                    ),
-                ).build()
-            }
-        }.asUni()
+            is CreditOfferDecision.Suppressed -> Response.ok(
+                mapOf(
+                    // The code is part of the contract, not a log line: a caller has to be able
+                    // to count "declined for arrears" separately from "never opted in", and a
+                    // conduct review will ask for exactly that split.
+                    "allowed" to false,
+                    "reasonCode" to decision.code.name,
+                    "policyVersion" to decision.policyVersion,
+                ),
+            ).build()
+        }
+    }.asUni()
 }

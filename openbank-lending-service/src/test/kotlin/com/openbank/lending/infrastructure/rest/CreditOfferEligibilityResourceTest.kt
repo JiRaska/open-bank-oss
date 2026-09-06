@@ -43,18 +43,17 @@ class CreditOfferEligibilityResourceTest {
         complete = true,
     )
 
-    private fun resource(consent: Boolean, signals: BorrowerDistressSignals = healthy) =
-        CreditOfferEligibilityResource(
-            CreditOfferEligibilityService(
-                consent = object : CreditOffersConsentPort {
-                    override suspend fun hasCreditOffersConsent(partyId: UUID) = consent
-                },
-                distress = object : BorrowerDistressPort {
-                    override suspend fun signalsFor(partyId: UUID) = signals
-                },
-                clock = clock,
-            ),
-        )
+    private fun resource(consent: Boolean, signals: BorrowerDistressSignals = healthy) = CreditOfferEligibilityResource(
+        CreditOfferEligibilityService(
+            consent = object : CreditOffersConsentPort {
+                override suspend fun hasCreditOffersConsent(partyId: UUID) = consent
+            },
+            distress = object : BorrowerDistressPort {
+                override suspend fun signalsFor(partyId: UUID) = signals
+            },
+            clock = clock,
+        ),
+    )
 
     @Suppress("UNCHECKED_CAST")
     private fun body(consent: Boolean, signals: BorrowerDistressSignals = healthy): Map<String, Any?> =
