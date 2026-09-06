@@ -59,8 +59,11 @@ class DomesticPaymentDelegationContractTest {
         // message-anchored window sweeps in their raw `idempotencyKey:` and fails the very
         // assertion below that exists to keep the raw key OUT of the reservation-state schema.
         // Bound the window by the schema block's own indent instead — order-independent.
-        val producerSchema = producerAsyncApi.substringAfter("    spendReservationState:")
-            .substringBefore(Regex("\n    \\S"))
+        val afterSchemaKey = producerAsyncApi.substringAfter("    spendReservationState:")
+        val producerSchema = afterSchemaKey.substring(
+            0,
+            Regex("\n    \\S").find(afterSchemaKey)?.range?.first ?: afterSchemaKey.length,
+        )
         val producerMessage = producerAsyncApi.substringAfter("    DelegationSpendReservationStateChanged:")
         listOf(
             "reservationId",
