@@ -58,7 +58,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import org.postgresql.util.PSQLException
+import java.sql.SQLException
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -82,8 +82,11 @@ class NotificationConsumer @Inject constructor(
 ) {
 
     companion object {
-        /** Name of V14's partial unique index, retained as a stable duplicate discriminator. */
+        /** Name of the notifications deduplication partial unique index, a stable duplicate discriminator. */
         const val NOTIFICATION_DEDUPLICATION_CONSTRAINT = "uq_notifications_deduplication_key"
+
+        /** Postgres SQLState for unique_violation, as surfaced by the reactive pg client. */
+        const val SQLSTATE_UNIQUE_VIOLATION = "23505"
 
         /**
          * Generic, PII-free push body (ADR-0135 §3, issue #1182). Lock-screen-visible push
@@ -390,9 +393,22 @@ class NotificationConsumer @Inject constructor(
                 }
             }
 
+    /**
+     * Hibernate Reactive adapts the Vert.x PgException into a PLAIN [java.sql.SQLException]
+     * (sqlState 23505, the server message naming the constraint) beneath its
+     * ConstraintViolationException — never the pgjdbc [PSQLException] this check used to
+     * require, so every redelivery of a dedup-keyed request rethrew and was nacked instead of
+     * skipped. #8334 shipped the path with its test structurally invisible: the duplicate-V14
+     * Flyway collision failed boot, so CI reported those tests as skipped, not failed. The
+     * constraint name must appear in the message so an unrelated unique violation on this
+     * table is not swallowed as a dedup skip.
+     */
     private fun Throwable.isDeduplicationConflict(): Boolean = generateSequence(this) { it.cause }
-        .filterIsInstance<PSQLException>()
-        .any { it.serverErrorMessage?.constraint == NOTIFICATION_DEDUPLICATION_CONSTRAINT }
+        .filterIsInstance<SQLException>()
+        .any {
+            it.sqlState == SQLSTATE_UNIQUE_VIOLATION &&
+                it.message?.contains(NOTIFICATION_DEDUPLICATION_CONSTRAINT) == true
+        }
 
     private fun publishOversight(req: NotificationRequest): Uni<Void> {
         if (!OversightWebhook.isOversight(req.template)) return Uni.createFrom().voidItem()

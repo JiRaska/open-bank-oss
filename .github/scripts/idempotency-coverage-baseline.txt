@@ -98,7 +98,6 @@ openbank-sdd-service POST /api/v1/sdd/mandates/{id}/resume  # lifecycle/action e
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sepa-instant POST /api/v1/sepa-instant/{paymentId}/recall  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sepa-payment POST /api/v1/sepa-payments/returns  # creation POST with no idempotency key today — burn-down #8351
-openbank-standing-order-service POST /api/v1/standing-orders  # creation POST with no idempotency key today — burn-down #8351
 openbank-standing-order-service POST /api/v1/standing-orders/{id}/pause  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-standing-order-service POST /api/v1/standing-orders/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-swift-service POST /api/v1/swift/{id}/ack  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
