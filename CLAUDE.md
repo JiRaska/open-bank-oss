@@ -35,7 +35,13 @@ ADR-0029):
    from the OpenAPI diff (`oasdiff`), never forced equal to the release version.
 4. **DB change ⇒ Flyway migration + rollback note. Event change ⇒ schema versioned backward-compatibly.**
    **Config change ⇒ no duplicate YAML keys** in `application.yaml` — SmallRye/SnakeYAML keep only the
-   *last* of a repeated mapping key and silently drop the rest (CI enforces this).
+   *last* of a repeated mapping key and silently drop the rest (CI enforces this). The same trap
+   reaches `.github/gates/gates.yaml` and every YAML a gate parses with `yaml.safe_load`, and there
+   it is worse: **a guard that READS a document cannot be the thing that notices the document is
+   malformed.** Two PRs added `budget_seconds` to the same five gates within an hour on 2026-09-05;
+   `gate-observability-declarations` read the duplicate, saw a budget, called it declared and passed,
+   while `yamllint` reddened `main` for the whole queue. `check-duplicate-yaml-keys.sh` now covers
+   that path too.
 5. **Test the new behavior.** Coverage is ratchet-only (never lower); money-path services aim higher.
 6. **Derived data is never hand-edited.** Catalog, coverage, and the governance manifest are
    CI-generated — edit the source, not the artifact.
