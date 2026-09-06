@@ -483,6 +483,33 @@ therefore fail-**open** while reading as fail-closed.
 `init` gate does not run until first use, which for a rarely-exercised path can be never — the
 warning that the code cannot fire would itself never fire.
 
+## 9e. The credit-offer eligibility read surface (ADR-0269 rule 2, #8918) — STRIDE supplement
+
+`GET /api/v1/lending/credit-offers/eligibility/{partyId}` is a NEW inbound REST surface on a
+money-path service, so it is modelled here before it is wired (ADR-0030 D2).
+
+It exposes a decision the service already made in-process. The gate calls itself the one place a
+credit offer is cleared, and that was true of its intent and false of its reach: it had no wire
+surface, so the only caller was `CustomerQuoteResource` asking the PULL question. Every push
+surface ADR-0269 governs had no way to ask, which is why rule 2's distress floor was enforced
+nowhere on that side.
+
+The sensitivity is the point: an allowed/suppressed pair plus a reason code is a statement about a
+named person's financial distress — `ARREARS`, `INSOLVENCY`, `HARDSHIP`. It is a smaller disclosure
+than the underlying facts and a real one.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **E**levation of privilege | A backend service reaches other lending endpoints through the door opened for this read | The OPA rule `service-credit-offer-eligibility` is scoped to ONE action and one principal. Tests assert the same identity gets nothing else from it, and that the edge does not inherit it. The action is read-only and has no write counterpart to be confused with. |
+| **I**nformation disclosure | A caller enumerates party ids and harvests who is in arrears | Callers are in-repo M2M on the shared `openbank-services` client, so this is every backend service at once — accepted for a single read, and the reason it is not widened. The route is not on the customer edge and no customer token reaches it. Rate limiting and per-caller identity are NOT solved here: the shared client cannot distinguish campaign-service from any other, which is a known limit of the current M2M model (ADR-0206 D5) rather than something this route introduces. |
+| **S**poofing the surface | A caller asks the PULL question to skip the consent half | `OfferSurface.PUSH` is fixed in code and is not a parameter. PULL's consent exemption exists for a customer who asked; making the surface caller-supplied would hand that exemption to anyone who passed the right string. |
+| **T**ampering / misleading | An unreachable gate is read as permission | The route answers a decision or an error and never "probably fine". Callers must fail closed; `SIGNALS_UNAVAILABLE` already suppresses inside the gate rather than guessing. The failure direction is stated in the OpenAPI description so a caller cannot claim it was undocumented. |
+| **R**epudiation | The bank cannot show why a customer was or was not marketed to | `policyVersion` is in the response, so a decision can be tied to the decision-table version that produced it (ADR-0213). The reason code is contract, not a log line. |
+| **D**oS / availability | A large campaign sweep multiplies one DB read plus one analytics profile call per party | Real and unsolved here: this slice reduces the volume by moving the check to delivery rather than enrolment, but not the unit cost. Caching would need an explicit freshness bound, because a stale "not in distress" outlives the arrears that ended it — the harmful direction. Recorded in #8918 rather than inherited by accident. |
+
+**Not modelled here:** the caller's side. campaign-service consuming this route is a separate change
+with its own threat surface, and is deliberately not in this slice.
+
 ## 10. Change log
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or credit-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.

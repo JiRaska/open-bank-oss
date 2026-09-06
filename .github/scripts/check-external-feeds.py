@@ -206,6 +206,7 @@ NOT_PROBED = [
     # the property `kyb.registry.lookups{outcome="unavailable"}` counts.
     ("https://ares.gov.cz/ekonomicke-subjekty-v-be/rest", "ARES per-IČO lookup API (kyb-service); no fixed document, and an outage becomes MANUAL_REVIEW, never a silent pass"),
     ("https://api.gleif.org/api/v1", "GLEIF per-LEI lookup API (kyb-service); same shape as ARES above"),
+    ("https://api.company-information.service.gov.uk", "Companies House per-company lookup API (kyb-service); same shape as ARES above, and key-gated: with no API key the adapter declines GB_CRN and the case falls back to manual attestation rather than failing"),
     # --- gitops corpus (#6242). Everything below became visible when CORPUS_GLOBS gained
     # `openbank-infra/gitops/**/*.yaml`. Each entry is stale-checked in BOTH directions by
     # check_drift: an entry whose URL leaves the tree fails just as loudly as an undeclared URL.
