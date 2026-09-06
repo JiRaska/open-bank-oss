@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: document-service
     app.kubernetes.io/part-of: documents
   annotations:
-    openbank.tech/policy-checksum: "735594f3986b70b9"
+    openbank.tech/policy-checksum: "7241591d67d79073"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1618,5 +1618,35 @@ data:
           - money.*
           - gh.pr.*
           - secrets.*
+    - id: kyb-analyst
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - kyb
+          - governance
+        - tier: write_proposal
+          resources:
+          - case-thread
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: business-copilot
+      tools:
+        allow:
+        - query.balance.readonly
+        - query.transaction.readonly
+        - propose.payment
+        - propose.card_freeze
+        - propose.dispute
+        deny:
+        - money.*
+        - gh.pr.*
+        - '*.write'
+        - secrets.read.raw
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}
