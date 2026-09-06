@@ -261,9 +261,19 @@ class NotificationConsumerIT {
         )
 
         consumeAndAwait(request)
+        // What ONE delivery leaves behind is not one row: this class runs with
+        // push-fallback.enabled=true and the party has no device tokens, so the PUSH reroutes to a
+        // generic EMAIL row (#4363). That second row is the fallback working, not a duplicate —
+        // asserting a total of one row conflated "one deduplicated fact" with "one row" and failed
+        // against correct behaviour.
+        val afterFirstDelivery = notificationsFor(partyId).size
         consumeAndAwait(request)
 
-        assertThat(countFor(partyId)).isEqualTo(1L)
+        // The subject of this test: the durable fact exists exactly once, and the redelivery adds
+        // nothing at all. The second assertion is what would catch a dedup regression even if the
+        // fallback's row count changes later.
+        assertThat(notificationsFor(partyId).count { it.deduplicationKey == grantId }).isEqualTo(1)
+        assertThat(notificationsFor(partyId)).hasSize(afterFirstDelivery)
         assertThat(correlationIdFor(partyId)).isEqualTo(grantId)
     }
 
