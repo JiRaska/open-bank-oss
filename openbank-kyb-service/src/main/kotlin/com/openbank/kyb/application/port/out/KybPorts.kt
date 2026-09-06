@@ -7,10 +7,12 @@ package com.openbank.kyb.application.port.out
 import com.openbank.kyb.application.port.`in`.DeclaredEntity
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.CountryPack
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import io.smallrye.mutiny.Uni
@@ -114,4 +116,31 @@ interface KybMetricsPort {
  */
 interface BusinessOnboardingWorkflowPort {
     fun stateEntered(caseId: UUID, state: CaseStatus)
+}
+
+/**
+ * One jurisdiction's beneficial-ownership register (ADR-0284 D5).
+ *
+ * Separate from [RegistryAdapter] rather than another method on it, because the two registers are
+ * genuinely different sources: the UK publishes companies in Companies House and their PSCs through
+ * the same API, while the Czech `Evidence skutečných majitelů` is a different register with no
+ * public API at all. Folding them together would make "the register answered" ambiguous about which
+ * register.
+ */
+interface UboAdapter {
+    val source: String
+
+    fun supports(scheme: IdentifierScheme): Boolean
+
+    /**
+     * The finding, or null when this adapter does not answer for the identifier at all. An adapter
+     * that reaches its register and learns nothing returns a finding with no owners — the caller
+     * cannot tell "no owners" from "did not look" if both are null.
+     */
+    suspend fun lookup(identifier: LegalEntityIdentifier, pack: CountryPack): UboFinding?
+}
+
+/** The router over every [UboAdapter]; what the use cases depend on. */
+interface BeneficialOwnershipPort {
+    suspend fun lookup(identifier: LegalEntityIdentifier): UboFinding
 }
