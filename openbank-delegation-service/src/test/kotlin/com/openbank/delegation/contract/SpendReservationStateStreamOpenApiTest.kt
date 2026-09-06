@@ -17,4 +17,14 @@ class SpendReservationStateStreamOpenApiTest {
         assertThat(contract).contains("IDEMPOTENCY_KEY_REUSED")
         assertThat(contract).contains("Domestic reservation admission is disabled")
     }
+
+    @Test
+    fun `contract pins the negative case — a reservation on someone else's grant is 404`() {
+        val contract = requireNotNull(javaClass.getResource("/openapi.yaml")).readText()
+
+        // ADR-0279 #3: enumeration resistance is part of the wire contract — a caller holding
+        // no grant on the delegation gets the same 404 as a nonexistent one, never a 403 that
+        // would confirm the delegation exists.
+        assertThat(contract).contains("'404': { description: No such delegation, or the caller is not its grantee }")
+    }
 }
