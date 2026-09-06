@@ -95,6 +95,29 @@ class DomesticPaymentDelegationContractTest {
     }
 
     @Test
+    fun `every published operation keeps the 403 rejection in the contract`() {
+        // Negative case (ADR-0279 #3): a contract that only covers success stays green when the
+        // provider stops enforcing authz. Every operation this service publishes must document
+        // the Forbidden rejection — the shape a wrong or missing identity gets.
+        val forbidden = openApi.substringAfter("    Forbidden:")
+        assertThat(forbidden).contains("application/json")
+        val operations = Regex("operationId: (\\w+)").findAll(openApi).map { it.groupValues[1] }.toList()
+        assertThat(operations).isNotEmpty
+        operations.forEach { opId ->
+            val afterOpId = openApi.substringAfter("operationId: $opId")
+            val operation = afterOpId.substring(
+                0,
+                Regex("\\n  (/api/|\\S)").find(afterOpId)?.range?.first ?: afterOpId.length,
+            )
+            // Either the shared Forbidden ref or an inline '403' (the approvals decide endpoint
+            // carries its own segregation-of-duties wording) — both pin the rejection shape.
+            assertThat(operation)
+                .`as`("operation %s documents the 403 rejection", opId)
+                .contains("'403':")
+        }
+    }
+
+    @Test
     fun `REST contract does not advertise the trust seam before it is authorized and implemented`() {
         // The persistence/event half is safe to expand independently. Accepting identity and
         // delegation IDs from HTTP headers changes a money-path trust boundary and is intentionally
