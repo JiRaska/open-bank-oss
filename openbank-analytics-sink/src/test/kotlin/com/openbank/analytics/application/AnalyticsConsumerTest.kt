@@ -253,4 +253,39 @@ class AnalyticsConsumerTest {
         assertThat(env.aggregateType).isEqualTo("LEDGER")
         assertThat(env.aggregateId).isEqualTo("led-1")
     }
+
+    // ---------------------------------------------------------------- #8893: lending events
+    //
+    // Six of lending-service's nine `openbank.lending.events` payloads (loan.stage_changed,
+    // loan.disbursed, loan.written_off, loan.rescheduled, loan.interest_accrued, loan.provisioned)
+    // omit `aggregateType`/`aggregateId` entirely and carry `loanId` as their identifying field.
+    // Before LOAN existed here, `loanId` was untested and `partyId` was checked first, so any of
+    // these carrying a partyId (stage_changed, disbursed, written_off, rescheduled all do) would
+    // have landed as aggregateType=PARTY, aggregate_id=<the party, not the loan> — folding every
+    // loan a customer holds into one bronze aggregate keyed by their party id.
+
+    @Test
+    fun `a loan stage-change event is a LOAN, not a bare PARTY`() {
+        val node = mapper.readTree(
+            """
+            {"loanId":"loan-1","partyId":"pty-1","previousStage":"STAGE_1","newStage":"STAGE_2"}
+            """.trimIndent(),
+        )
+        val env = consumer.toEnvelope(node)
+        assertThat(env.aggregateType).isEqualTo("LOAN")
+        assertThat(env.aggregateId).isEqualTo("loan-1")
+    }
+
+    @Test
+    fun `a loan event with neither partyId nor accountId still resolves to LOAN`() {
+        // loan.interest_accrued / loan.provisioned carry only loanId — no partyId, no accountId —
+        // so before LOAN existed these fell all the way through to UNKNOWN and then the topic
+        // fallback, which used to attribute every unlisted lending payload as aggregateType=LENDING.
+        val node = mapper.readTree(
+            """{"loanId":"loan-2","installment":3,"principal":1000}""",
+        )
+        val env = consumer.toEnvelope(node)
+        assertThat(env.aggregateType).isEqualTo("LOAN")
+        assertThat(env.aggregateId).isEqualTo("loan-2")
+    }
 }

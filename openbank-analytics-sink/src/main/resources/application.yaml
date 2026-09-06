@@ -106,9 +106,12 @@ mp:
         # an anonymous public endpoint, these events only from an authenticated request. Keep them
         # separate downstream too — unioning them would give the anonymous stream's trust level to
         # the credit one.
+        # lending.events (#8893) is the POST-decision half credit.funnel.events cannot see: decision
+        # outcome, application/loan state transitions, disbursement, accrual, write-off, reschedule,
+        # stage change and provisioning. See clickhouse/V14__credit_domain.sql for the gold views.
         # Every topic here also needs a Read ACL on the analytics-sink KafkaUser
         # (openbank-infra/gitops/components/analytics/kafka-analytics-sink-mtls.yaml).
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.sca.events,openbank.documents.document.event,openbank.onboarding.funnel.events,openbank.feedback.events,openbank.engagement.events,openbank.credit.funnel.events
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.sca.events,openbank.documents.document.event,openbank.onboarding.funnel.events,openbank.feedback.events,openbank.engagement.events,openbank.credit.funnel.events,openbank.lending.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
         # openbank-fraud-service's application.yaml / openbank-anacredit-service's
