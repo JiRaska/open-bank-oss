@@ -106,6 +106,18 @@ mp:
         # an anonymous public endpoint, these events only from an authenticated request. Keep them
         # separate downstream too — unioning them would give the anonymous stream's trust level to
         # the credit one.
+        # lending.events (#8893) is the credit LIFECYCLE stream, and is not the same thing as
+        # credit.funnel.events above: the funnel is what a customer did on the way to applying,
+        # this is what the bank decided and what the book then did — engine outcome with its
+        # ADR-0213 evidence, disbursement, IFRS 9 staging, ECL. It is the source V14's marts read;
+        # before this line they were views over an aggregate_type that had never arrived.
+        # Its events name their own aggregateType/aggregateId (#8928), which is a PRECONDITION,
+        # not a detail: without it the consumer falls back to the topic (LENDING for every type)
+        # and then to `?: accountId ?: partyId` for the id, so six of the eleven types would land
+        # keyed by the BORROWER and silver_current_state would collapse every loan of one customer
+        # into a single aggregate.
+        # Every topic here also needs a Read ACL on the analytics-sink KafkaUser
+        # (openbank-infra/gitops/components/analytics/kafka-analytics-sink-mtls.yaml).
         # kyb.events (ADR-0284 D8) is the business half of the customer graph: which legal
         # entities exist, who is authorised to act for them, and how far each case got. It is what
         # lets Customer 360 see that a personal customer also runs two companies — the connection
@@ -113,9 +125,7 @@ mp:
         # company name is not personal data, but a SOLE TRADER's legal name IS their own name, and
         # no field-name-keyed rule can tell the two apart. The identifier stays in the clear, so
         # nothing analytics needs is lost.
-        # Every topic here also needs a Read ACL on the analytics-sink KafkaUser
-        # (openbank-infra/gitops/components/analytics/kafka-analytics-sink-mtls.yaml).
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.sca.events,openbank.documents.document.event,openbank.onboarding.funnel.events,openbank.feedback.events,openbank.engagement.events,openbank.credit.funnel.events,openbank.kyb.events
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.sca.events,openbank.documents.document.event,openbank.onboarding.funnel.events,openbank.feedback.events,openbank.engagement.events,openbank.credit.funnel.events,openbank.lending.events,openbank.kyb.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
         # openbank-fraud-service's application.yaml / openbank-anacredit-service's

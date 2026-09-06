@@ -346,6 +346,7 @@ class TerminationService(
             append(""""aggregateType":"LOAN",""")
             append(""""aggregateId":"$id",""")
             append(""""loanId":"$id",""")
+            append(""""partyId":"${loan.partyId}",""")
             append(""""fromState":"${from.name}",""")
             append(""""toState":"${to.name}",""")
             append(""""actorId":"$actor",""")
@@ -378,7 +379,8 @@ class TerminationService(
         LendingOutboxMessage(
             aggregateId = loan.id.value,
             eventType = type,
-            payload = """{"eventType":"$type","loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
+            payload = """{"eventType":"$type","aggregateType":"LOAN","aggregateId":"${loan.id.value}",""" +
+                """"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
                 """"occurredAt":"${clock.instant()}","sourceService":"lending"}""",
         ),
     )

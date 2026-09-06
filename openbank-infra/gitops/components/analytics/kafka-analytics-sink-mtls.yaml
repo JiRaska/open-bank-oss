@@ -66,6 +66,9 @@ spec:
       # authenticated request — the trust levels must not be merged into one stream.
       - resource: { type: topic, name: openbank.credit.funnel.events, patternType: literal }
         operations: [Read, Describe]
+      # The credit lifecycle stream (#8893): engine decisions and the loan book's IFRS 9 staging.
+      - resource: { type: topic, name: openbank.lending.events, patternType: literal }
+        operations: [Read, Describe]
         host: "*"
       # ADR-0192 in-app screen feedback (metadata + screenshot object key; never image bytes).
       - resource: { type: topic, name: openbank.feedback.events, patternType: literal }
