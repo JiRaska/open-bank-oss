@@ -56,6 +56,12 @@ object TopicAttribution {
         "documents" to "DOCUMENT",
         "onboarding" to "ONBOARDING",
         "feedback" to "FEEDBACK",
+        // #8792. Singularised for the same reason as `documents` above, but the load-bearing part is
+        // that these must equal what `inferAggregateType` derives from the BODY. The body path wins,
+        // so a disagreement files one event family under `CARD` and its sibling under `CARDS` — the
+        // ACCOUNT/Account split of #4553, which gave one aggregate two current-state rows.
+        "cards" to "CARD",
+        "standing-orders" to "STANDING_ORDER",
     )
 
     /** `openbank.sca.events` → `sca`; null if the topic does not follow the convention. */
