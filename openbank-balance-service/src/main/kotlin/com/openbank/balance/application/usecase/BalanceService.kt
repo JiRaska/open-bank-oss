@@ -11,6 +11,7 @@ import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.event.EventActor
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import java.sql.SQLException
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -18,6 +19,9 @@ import java.util.UUID
 class BalanceNotFoundException(msg: String) : RuntimeException(msg)
 class InsufficientFundsException(msg: String) : RuntimeException(msg)
 class HoldNotFoundException(msg: String) : RuntimeException(msg)
+
+private const val SQLSTATE_UNIQUE_VIOLATION = "23505"
+private const val HOLD_REFERENCE_CONSTRAINT = "uq_balance_holds_reference"
 
 @ApplicationScoped
 class BalanceService(
@@ -52,6 +56,21 @@ class BalanceService(
      * audit against the current accounting day, so the figure becomes correct on its own the moment
      * the day passes the value date — no roll job has to have run.
      */
+    /**
+     * True when the failure chain carries the unique violation of `uq_balance_holds_reference`
+     * (V10). Hibernate Reactive adapts the Vert.x PgException into a plain [SQLException] whose
+     * sqlState may or may not survive the adaptation, so the check accepts either the 23505
+     * sqlState or the "(23505)" marker the server embeds in the message text — and ALWAYS requires
+     * the constraint name, so an unrelated unique violation is never swallowed as a dedup replay
+     * (same shape as NotificationConsumer.isDeduplicationConflict, #8953).
+     */
+    private fun Throwable.isHoldReferenceConflict(): Boolean = generateSequence(this) { it.cause }
+        .filterIsInstance<SQLException>()
+        .any {
+            it.message?.contains(HOLD_REFERENCE_CONSTRAINT) == true &&
+                (it.sqlState == SQLSTATE_UNIQUE_VIOLATION || it.message.orEmpty().contains("(23505)"))
+        }
+
     private suspend fun withValueDateBasis(balance: Balance): Balance = balance.copy(
         notYetEffectiveCredit = balanceRepo.sumNotYetEffectiveCredit(
             balance.accountId,
@@ -89,6 +108,13 @@ class BalanceService(
         balanceRepo.findAllByAccountId(accountId).map { withValueDateBasis(it) }
 
     override suspend fun placeHold(cmd: PlaceHoldCommand): BalanceHold {
+        // Idempotent replay (ADR-0287, #8351): the referenceId names one durable business fact, so a
+        // retried placeHold with the same (accountId, currency, referenceId) replays the ORIGINAL
+        // hold with no second reservation and no second event. The check runs BEFORE the balance
+        // guard on purpose: a replay arriving after funds moved must still return the original hold,
+        // not fail with insufficient funds. `uq_balance_holds_reference` (V10) is the race backstop.
+        holdRepo.findByNaturalKey(cmd.accountId, cmd.currency, cmd.referenceId)?.let { return it }
+
         // The cover decision (#1745). Hydrating the value-date basis here is what actually stops a
         // posted-but-not-yet-effective credit being spent: `withReservation` guards on
         // `effectiveAvailable()`, and without this the tail is ZERO and the guard sees the raw
@@ -118,24 +144,31 @@ class BalanceService(
         // Transactional outbox (#8510): the balance reservation, the hold row and the HOLD_PLACED
         // event commit in ONE transaction — no event is written for a hold that never landed, and
         // no hold lands without its event.
-        return holdRepo.saveWithEvent(
-            hold,
-            updated,
-            BalanceEvent(
-                eventId = UUID.randomUUID(),
-                eventType = BalanceEventType.HOLD_PLACED,
-                accountId = cmd.accountId,
-                currency = cmd.currency,
-                amount = cmd.amount,
-                bookedAmount = updated.bookedAmount,
-                availableAmount = updated.availableAmount,
-                reservedAmount = updated.reservedAmount,
-                occurredAt = OffsetDateTime.now(clock),
-                actorId = BalanceEventActors.API,
-                actorType = EventActor.TYPE_SYSTEM,
-                sourceService = "balance-service",
-            ),
-        )
+        return try {
+            holdRepo.saveWithEvent(
+                hold,
+                updated,
+                BalanceEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = BalanceEventType.HOLD_PLACED,
+                    accountId = cmd.accountId,
+                    currency = cmd.currency,
+                    amount = cmd.amount,
+                    bookedAmount = updated.bookedAmount,
+                    availableAmount = updated.availableAmount,
+                    reservedAmount = updated.reservedAmount,
+                    occurredAt = OffsetDateTime.now(clock),
+                    actorId = BalanceEventActors.API,
+                    actorType = EventActor.TYPE_SYSTEM,
+                    sourceService = "balance-service",
+                ),
+            )
+        } catch (e: Exception) {
+            // Lost the race against a concurrent first attempt with the same natural key: the
+            // unique index rejected our insert, so the winner's row IS the correct replay answer.
+            if (!e.isHoldReferenceConflict()) throw e
+            holdRepo.findByNaturalKey(cmd.accountId, cmd.currency, cmd.referenceId) ?: throw e
+        }
     }
 
     override suspend fun releaseHold(cmd: ReleaseHoldCommand): BalanceHold {

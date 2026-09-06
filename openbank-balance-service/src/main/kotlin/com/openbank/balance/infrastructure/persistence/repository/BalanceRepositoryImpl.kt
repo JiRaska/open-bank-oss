@@ -195,6 +195,12 @@ class HoldRepositoryImpl(
         repo.find("referenceId = ?1 and releasedAt is null", referenceId).list()
     }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun findByNaturalKey(accountId: UUID, currency: String, referenceId: String): BalanceHold? =
+        Panache.withSession {
+            repo.find("accountId = ?1 and currency = ?2 and referenceId = ?3", accountId, currency, referenceId)
+                .firstResult()
+        }.awaitSuspending()?.toDomain()
+
     override suspend fun save(hold: BalanceHold): BalanceHold = Panache.withTransaction {
         val entity = hold.toEntity()
         repo.persist(entity).replaceWith(entity.toDomain())

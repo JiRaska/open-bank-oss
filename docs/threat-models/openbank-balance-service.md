@@ -174,6 +174,12 @@ also be deleted (nothing else in balance-service depends on it).
 
 ## 7. Change log
 
+- **2026-09-06** — Hold placement is now replay-safe (#8351, ADR-0287). `placeHold` checks the
+  caller-supplied natural key (accountId, currency, referenceId) before reserving and replays the
+  original hold on a retry — previously a retried `POST /{accountId}/holds` reserved TWICE, keeping
+  customer funds unavailable until expiry or release. `uq_balance_holds_reference` (V10) is the race
+  backstop; a lost race re-reads the winner's row. No new caller, endpoint or privilege. Rollback:
+  revert + `DROP INDEX uq_balance_holds_reference`.
 - **2026-09-04** — Balance domain events now travel through the transactional outbox
   (`balance_outbox` + `balance-outbox-out`) instead of a direct `@Channel("balance-events-out")`
   emitter (#8510). The write moved into the repository layer: `HoldRepository.saveWithEvent` /

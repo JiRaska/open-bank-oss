@@ -16,11 +16,11 @@ openbank-account-service POST /api/v1/accounts/{accountId}/pockets  # creation P
 openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals  # creation POST with no idempotency key today — burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}/decide  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/unfreeze  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
-openbank-balance-service POST /api/v1/balances/reconciliation  # creation POST with no idempotency key today — burn-down #8351
-openbank-balance-service POST /api/v1/balances/{accountId}/credit  # creation POST with no idempotency key today — burn-down #8351
-openbank-balance-service POST /api/v1/balances/{accountId}/debit  # creation POST with no idempotency key today — burn-down #8351
-openbank-balance-service POST /api/v1/balances/{accountId}/holds  # creation POST with no idempotency key today — burn-down #8351
-openbank-balance-service POST /api/v1/balances/{accountId}/initialize  # creation POST with no idempotency key today — burn-down #8351
+openbank-balance-service POST /api/v1/balances/reconciliation  # operator trigger, mutates no balance; re-run records a fresh report by design — ADR-0287 exception; burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/credit  # natural-key idempotency via balance_movement dedup ledger (V8) — ADR-0287 exception; burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/debit  # natural-key idempotency via balance_movement dedup ledger (V8) — ADR-0287 exception; burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/holds  # natural-key idempotency on (accountId,currency,referenceId), check-first + uq_balance_holds_reference (V10) — ADR-0287 exception; burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/initialize  # natural-key idempotency on (accountId,currency) — ADR-0287 exception; burn-down #8351
 openbank-billing-service POST /api/v1/fees/assess  # creation POST with no idempotency key today — burn-down #8351
 openbank-billing-service POST /api/v1/fees/post  # creation POST with no idempotency key today — burn-down #8351
 openbank-billing-service POST /api/v1/fees/reverse  # creation POST with no idempotency key today — burn-down #8351
