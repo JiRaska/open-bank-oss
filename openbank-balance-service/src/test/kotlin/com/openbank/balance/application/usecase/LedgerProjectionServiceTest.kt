@@ -146,6 +146,8 @@ class LedgerProjectionServiceTest {
             active.filter { it.accountId == accountId }
         override suspend fun findActiveByReferenceId(referenceId: String): List<BalanceHold> =
             active.filter { it.referenceId == referenceId && it.releasedAt == null }
+        override suspend fun findByNaturalKey(accountId: UUID, currency: String, referenceId: String): BalanceHold? =
+            active.firstOrNull { it.accountId == accountId && it.currency == currency && it.referenceId == referenceId }
         override suspend fun save(hold: BalanceHold): BalanceHold = hold
         override suspend fun update(hold: BalanceHold): BalanceHold = hold
         override suspend fun saveWithEvent(

@@ -45,6 +45,33 @@ class BalanceServiceTest {
     )
 
     @Test
+    fun `a retried placeHold with the same referenceId replays the original hold with no second reservation`(): Unit =
+        runBlocking {
+            // ADR-0287 / #8351: referenceId names one durable business fact, so a retry must replay
+            // the original hold — no second reservation, no second HOLD_PLACED event.
+            val balance = sampleBalance()
+            val balanceRepo = FakeBalanceRepository(balance)
+            val holdRepo = FakeHoldRepository()
+            val movement = FakeBalanceMovementPort(balanceRepo)
+            val service = BalanceService(balanceRepo, holdRepo, movement)
+            val cmd =
+                PlaceHoldCommand(
+                    balance.accountId,
+                    BigDecimal("20.00"),
+                    "CZK",
+                    "card auth",
+                    "ref-1",
+                    ttlSeconds = 60,
+                )
+
+            val first = service.placeHold(cmd)
+            val replayed = service.placeHold(cmd)
+
+            assertEquals(first.id, replayed.id)
+            assertEquals(1, holdRepo.savedWithEvent.size)
+        }
+
+    @Test
     fun `placeHold persists hold and emits HOLD_PLACED event`(): Unit = runBlocking {
         val balance = sampleBalance()
         val balanceRepo = FakeBalanceRepository(balance)
@@ -462,6 +489,10 @@ class BalanceServiceTest {
                 referenceId &&
                 it.releasedAt == null
         }
+        override suspend fun findByNaturalKey(accountId: UUID, currency: String, referenceId: String): BalanceHold? =
+            saved.firstOrNull {
+                it.accountId == accountId && it.currency == currency && it.referenceId == referenceId
+            }
         override suspend fun save(hold: BalanceHold): BalanceHold = hold.also { saved += it }
         override suspend fun update(hold: BalanceHold): BalanceHold = hold
         override suspend fun saveWithEvent(hold: BalanceHold, balance: Balance, event: BalanceEvent): BalanceHold =
