@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.1 -> 1.2): additive
   # only — GET /approvals (the checker's queue, issue #3472) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Real-time sanctions screening against EU, UN, OFAC, HM Treasury and CNB lists. PATCH
     /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
@@ -361,6 +361,11 @@ components:
           description: "Arbitrary identifiers e.g. passport, taxId"
           default: {}
 
+        listTypes:
+          type: array
+          nullable: true
+          items:
+            type: string
     ReviewCommand:
       type: object
       required: [checkId, reviewedBy, note, newStatus]

@@ -10,7 +10,7 @@ info:
   # Minor bump (1.11.0 -> 1.12.0): additive only — GET /approvals (the checker's queue, issue
   # #5679, mirroring sanctions' #3472) plus two additive fields on the PATCH .../approvals/{id}
   # response (makerId, createdAt). No breaking change.
-  version: 1.13.0
+  version: 1.14.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -552,11 +552,11 @@ components:
           type: number
         currencyCode:
           type: string
-        baseCurrencyCode:
-          type: string
-          nullable: true
         baseAmount:
           type: number
+          nullable: true
+        baseCurrencyCode:
+          type: string
           nullable: true
         description:
           type: string
@@ -564,6 +564,9 @@ components:
         valueDate:
           type: string
           format: date
+        bookingDate:
+          type: string
+          nullable: true
         initiatedByPartyId:
           type: string
           format: uuid
