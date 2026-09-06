@@ -60,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sanctions-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-90771f5e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-f328ebdf
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -127,6 +127,12 @@ spec:
                 secretKeyRef:
                   name: sanctions-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # Advisory deliberately (#8470): set by 59f4096df1 (2026-06-28, "disable OPA enforce
+            # mode in sandbox (advisory-only)") while the screening-decision population is observed
+            # in the live decision log. This stood 67 days with NO justification and read exactly
+            # like an oversight — the money-path authz-enforce gate now fails on a bare false, so
+            # this comment and the date are load-bearing. Flip target: 2026-10-05, after the
+            # advisory report confirms an empty "would DENY" population.
             - name: AUTHZ_ENFORCE
               value: "false"
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
