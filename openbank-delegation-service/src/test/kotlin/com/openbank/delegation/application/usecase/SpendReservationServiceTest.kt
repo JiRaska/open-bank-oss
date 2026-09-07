@@ -69,6 +69,11 @@ class SpendReservationServiceTest {
         monthly: Money? = null,
         perTx: Money? = null,
         status: DelegationStatus = DelegationStatus.ACTIVE,
+        // The validity window is normally anchored to the FIXED clock above, which is what every
+        // test here wants. The one test that deliberately uses a real clock must anchor it to the
+        // real clock instead, or the grant expires in wall-clock time and the reservation is
+        // refused for a reason that has nothing to do with what that test asserts.
+        at: OffsetDateTime = now,
     ) = DelegationGrant(
         grantorPartyId = grantor,
         granteePartyId = grantee,
@@ -78,11 +83,11 @@ class SpendReservationServiceTest {
         perTransactionLimit = perTx,
         dailyLimit = daily,
         monthlyLimit = monthly,
-        validFrom = now.minusDays(1),
-        validTo = now.plusDays(30),
+        validFrom = at.minusDays(1),
+        validTo = at.plusDays(30),
         status = status,
-        createdAt = now,
-        updatedAt = now,
+        createdAt = at,
+        updatedAt = at,
     )
 
     private lateinit var currentGrant: DelegationGrant
@@ -299,6 +304,11 @@ class SpendReservationServiceTest {
         // `Instant.EPOCH` defaults passed every isNotNull() assertion in this fleet while the
         // whole trail claimed 1970-01-01 (#3874/#3883). Only recency can tell them apart.
         val realClockService = SpendReservationService(delegationRepository, reservations, Clock.systemUTC())
+        // Anchored to the real clock, not the fixed one: with a fixed-clock grant this test was a
+        // time bomb that armed itself on the day it was written and fired 30 days later. It began
+        // failing at 2026-09-07T12:00Z, when `2026-08-08T12:00Z + 30 days` fell behind wall-clock
+        // now, with `SpendReservationRefusedException` — an expiry, not the assertion below.
+        currentGrant = grant(at = OffsetDateTime.now(ZoneOffset.UTC))
         val before = Instant.now()
         runBlocking {
             realClockService.reserve(
