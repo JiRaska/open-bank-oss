@@ -60,5 +60,6 @@
   "openbank-delegation-service": "0.13.3",
   "openbank-kyb-service": "0.1.0",
   "openbank-case-coordinator-agent": "0.8.0",
-  "openbank-loyalty-service": "0.1.0"
+  "openbank-loyalty-service": "0.1.0",
+  "openbank-card-processing-service": "0.1.0"
 }

@@ -103,3 +103,18 @@ openbank-standing-order-service POST /api/v1/standing-orders/{id}/resume  # life
 openbank-swift-service POST /api/v1/swift/{id}/ack  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-swift-service POST /api/v1/swift/{id}/reject  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-vop-service POST /api/v1/vop/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+
+# card-issuance joined money_path_services in ADR-0283 phase 0 (#8808). Nothing about these seven
+# endpoints changed; the classification widened, which is the gate working — a service that ships
+# an authorisation decision was being scored by the lenient rule. Burn-down: #8845.
+openbank-card-issuance-service POST /api/v1/cards/{id}/activate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/block  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/cancel  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/authorizations  # decision endpoint that persists nothing — CardAuthorizationPolicy is pure and the handler only reads the card and its rules, so a replay recomputes the same answer; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/outbox/requeue  # operator replay of DEAD outbox rows (ROLE_ADMIN) — a second run moves 0 rows because the first left none DEAD; verify in burn-down #8351
+openbank-card-processing-service POST /api/v1/card-authorizations/{id}/reversal  # lifecycle/action endpoint on an addressed authorisation — a replay is refused by the aggregate (NOT_HOLDING_FUNDS in AuthorizationLifecycle.reverse) and the acquirer identifies the reversal by the authorisation id in the path; verify in burn-down #8351
+openbank-card-processing-service POST /api/v1/card-tokens/{tokenReference}/status  # state-set on an addressed token — the target state IS the identity: the scheme models suspend/resume/delete as a state change, so a replay lands on the same state, and DELETED is refused by the aggregate before any call; verify in burn-down #8351
+openbank-card-processing-service POST /api/v1/card-disputes/{id}/evidence  # operator filing addressed at an existing case — a replay re-files the SAME document reference and leaves the case in EVIDENCE_SUBMITTED with that reference; a different filing carries a different reference, which is a new intent and not a retry; verify in burn-down #8351
+openbank-card-processing-service POST /api/v1/card-disputes/{id}/refresh  # read-through of the network's status that persists and publishes ONLY on a move — a replay after the first finds nothing to move and writes nothing; verify in burn-down #8351
