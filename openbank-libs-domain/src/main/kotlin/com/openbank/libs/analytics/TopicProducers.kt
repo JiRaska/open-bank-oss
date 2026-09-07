@@ -131,6 +131,12 @@ object TopicProducers {
         "openbank.credit.funnel.events" to "customer-edge",
         // openbank-engagement-service/src/main/resources/application.yaml -> engagement-events-out.
         "openbank.engagement.events" to "engagement-service",
+        // ADR-0284 D8: openbank-kyb-service/src/main/resources/application.yaml -> kyb-events-out.
+        // Kept WITH the "openbank-" prefix, unlike every row above, because
+        // KybAnalyticsIngestTest.kt already pins this exact value ("a kyb record attributes to
+        // the kyb service without an override") and that test predates this table -- matching it
+        // here is correct, not a case of the stripped-prefix rule being violated by accident.
+        "openbank.kyb.events" to "openbank-kyb-service",
     )
 
     /** Topics with a verified producer entry. Visible for coverage tests. */
