@@ -386,12 +386,6 @@ components:
               - FATF_HIGH_RISK
               - PEP_GLOBAL
               - CNB_DOMESTIC
-
-        listTypes:
-          type: array
-          nullable: true
-          items:
-            type: string
     ReviewCommand:
       type: object
       required: [checkId, reviewedBy, note, newStatus]
