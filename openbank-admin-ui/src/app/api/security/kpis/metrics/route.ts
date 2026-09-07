@@ -48,7 +48,10 @@ function snapshotFile(): string {
 // Extract the gauges that the snapshot actually supports today. Each collector
 // degrades independently (`available: false` + reason), so each mapping checks
 // its own section and field — a field that is not a finite number is omitted.
-export function gaugesFromSnapshot(kpis: Record<string, unknown>): Gauge[] {
+// NOT exported: a route module may export only Next.js' Route export fields
+// (webpack fails the build on anything else; Turbopack dev tolerates it, which
+// is how #3262/#3611 shipped — gate route-exports enforces this).
+function gaugesFromSnapshot(kpis: Record<string, unknown>): Gauge[] {
   const out: Gauge[] = []
   const section = (k: string): Record<string, unknown> | null => {
     const s = kpis[k]
