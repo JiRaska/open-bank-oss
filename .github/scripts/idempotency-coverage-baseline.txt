@@ -35,6 +35,7 @@ openbank-consent-service POST /api/v1/suppressions  # creation POST with no idem
 openbank-consent-service POST /api/v1/suppressions/{id}/revoke  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegation-role-presets  # creation POST with no idempotency key today — burn-down #8351
 openbank-delegation-service POST /api/v1/delegations  # creation POST with no idempotency key today — burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/approvals/{approvalId}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by terminal proposal state (isIdempotentReplay returns the recorded decision; a conflicting re-decision is a 409); verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/check  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/preview  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/{id}/accept  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
@@ -89,15 +90,14 @@ openbank-sca-service POST /api/v1/sca/challenges  # creation POST with no idempo
 openbank-sca-service POST /api/v1/sca/challenges/{id}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sca-service POST /api/v1/sca/challenges/{id}/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sca-service POST /api/v1/sca/parties/{partyId}/devices  # creation POST with no idempotency key today — burn-down #8351
-openbank-sdd-service POST /api/v1/sdd/collections/authorise  # creation POST with no idempotency key today — burn-down #8351
-openbank-sdd-service POST /api/v1/sdd/mandates  # creation POST with no idempotency key today — burn-down #8351
+openbank-sdd-service POST /api/v1/sdd/collections/authorise  # natural-key idempotency on (mandateId, UMR, dueDate) — ADR-0289 exception; authorise replay-guarded since #8351
+openbank-sdd-service POST /api/v1/sdd/mandates  # natural-key idempotency on (creditorId, UMR) — ADR-0289 exception; burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/cancel  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/confirm  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sepa-instant POST /api/v1/sepa-instant/{paymentId}/recall  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sepa-payment POST /api/v1/sepa-payments/returns  # creation POST with no idempotency key today — burn-down #8351
-openbank-standing-order-service POST /api/v1/standing-orders  # creation POST with no idempotency key today — burn-down #8351
 openbank-standing-order-service POST /api/v1/standing-orders/{id}/pause  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-standing-order-service POST /api/v1/standing-orders/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-swift-service POST /api/v1/swift/{id}/ack  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351

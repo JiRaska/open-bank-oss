@@ -38,6 +38,10 @@ data class Party(
     val nationality: String?,
     val taxId: String?,
     val registrationNumber: String?,
+    /** ADR-0284: register legal-form code (ARES `pravniForma`, ISO 20275 ELF, …) for a COMPANY/SOLE_TRADER; null for a person. */
+    val legalForm: String? = null,
+    /** ADR-0284: ISO 3166-1 alpha-2 of the register that issued [registrationNumber]. */
+    val registrationCountry: String? = null,
     val email: String,
     val phone: String?,
     /** Pay-to-phone findability. Opt-in — see [PhoneDirectory]. */

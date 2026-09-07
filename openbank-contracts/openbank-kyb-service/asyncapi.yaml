@@ -1,0 +1,270 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+# Everything below is DERIVED from the code that runs (`KybEvents.lifecycle` builds the envelope,
+# `KafkaKybOutboxEventPublisher` emits it verbatim); each claim names its source.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank KYB Service — events
+  version: 1.0.0
+  description: |
+    Lifecycle events of a business onboarding case (ADR-0284): a sole trader or company being
+    verified against its public register and signed for by its listed representatives.
+
+    **Transactional outbox.** Events are written to `kyb_outbox` in the same transaction as the
+    case row and dispatched afterwards (`KybOutboxDispatcher`, `KafkaKybOutboxEventPublisher`), so
+    a published event always corresponds to a committed transition.
+
+    **No personal data of representatives on the wire.** The envelope carries the entity's
+    identifier, legal name and form, the party ids involved and the signature counts — never a
+    representative's name or date of birth, which stay inside the case record.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: "Strimzi cluster `openbank-cluster` in `messaging`; mTLS, per-service KafkaUser (`kyb-service`)."
+
+channels:
+  kybEvents:
+    address: openbank.kyb.events
+    title: Business onboarding case lifecycle
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      `openbank-infra/gitops/components/kyb/kafka-topic.yaml`. A change feed, not a source of truth:
+      a consumer rebuilding a projection seeds from `GET /api/v1/kyb/cases` and follows the topic.
+
+      **Partitioning key: `aggregateId`** = the case id (`OutboxKafkaHeaders.partitionKey`), so all
+      events of one case are ordered with respect to each other.
+    messages:
+      BusinessOnboardingStarted:
+        $ref: '#/components/messages/BusinessOnboardingStarted'
+      BusinessRegistryVerified:
+        $ref: '#/components/messages/BusinessRegistryVerified'
+      BusinessOnboardingReviewRequired:
+        $ref: '#/components/messages/BusinessOnboardingReviewRequired'
+      BusinessSignerInvited:
+        $ref: '#/components/messages/BusinessSignerInvited'
+      BusinessSignerIdentified:
+        $ref: '#/components/messages/BusinessSignerIdentified'
+      BusinessAgreementSigned:
+        $ref: '#/components/messages/BusinessAgreementSigned'
+      BusinessOnboardingCompleted:
+        $ref: '#/components/messages/BusinessOnboardingCompleted'
+      BusinessOnboardingRejected:
+        $ref: '#/components/messages/BusinessOnboardingRejected'
+      BusinessOnboardingAbandoned:
+        $ref: '#/components/messages/BusinessOnboardingAbandoned'
+
+operations:
+  publishKybEvents:
+    action: send
+    channel:
+      $ref: '#/channels/kybEvents'
+    summary: "kyb-service publishes case lifecycle events through its outbox."
+
+components:
+  messages:
+    BusinessOnboardingStarted:
+      name: BUSINESS_ONBOARDING_STARTED
+      payload:
+        $ref: '#/components/schemas/CaseEnvelope'
+    BusinessRegistryVerified:
+      name: BUSINESS_REGISTRY_VERIFIED
+      summary: "The register answered, the entity party was minted in party-service (`entityPartyId` set)."
+      payload:
+        $ref: '#/components/schemas/CaseEnvelope'
+    BusinessOnboardingReviewRequired:
+      name: BUSINESS_ONBOARDING_REVIEW_REQUIRED
+      summary: "The case needs an operator (unknown identifier, unparseable representation rule, unverified extract, initiator not listed)."
+      payload:
+        $ref: '#/components/schemas/ReviewEnvelope'
+    BusinessSignerInvited:
+      name: BUSINESS_SIGNER_INVITED
+      payload:
+        $ref: '#/components/schemas/SignerEnvelope'
+    BusinessSignerIdentified:
+      name: BUSINESS_SIGNER_IDENTIFIED
+      summary: "An invited representative onboarded as themselves and bound their own party to the case."
+      payload:
+        $ref: '#/components/schemas/SignerEnvelope'
+    BusinessAgreementSigned:
+      name: BUSINESS_AGREEMENT_SIGNED
+      summary: "The required number of distinct verified signers has signed; mandates were granted in party-service."
+      payload:
+        $ref: '#/components/schemas/CaseEnvelope'
+    BusinessOnboardingCompleted:
+      name: BUSINESS_ONBOARDING_COMPLETED
+      summary: "Signed AND the entity party passed the KYC+AML gate (ADR-0267) — the relationship is live."
+      payload:
+        $ref: '#/components/schemas/CaseEnvelope'
+    BusinessOnboardingRejected:
+      name: BUSINESS_ONBOARDING_REJECTED
+      payload:
+        $ref: '#/components/schemas/ReviewEnvelope'
+    BusinessOnboardingAbandoned:
+      name: BUSINESS_ONBOARDING_ABANDONED
+      summary: "By the initiator, or by the Temporal idle/invitation timer (`actorId: temporal-timer`)."
+      payload:
+        $ref: '#/components/schemas/CaseEnvelope'
+
+  schemas:
+    CaseEnvelope:
+      type: object
+      description: "Flat payload of `CaseEvent` (domain/model/KybEvent.kt) — the constructor properties ARE the wire fields."
+      required: [eventType, caseId, status, identifierScheme, identifier, initiatorPartyId, signedCount, occurredAt, actorId, actorType, sourceService]
+      properties:
+        eventType:
+          type: string
+        caseId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [IDENTIFIER_ENTERED, REGISTRY_VERIFIED, INITIATOR_MATCHED, AWAITING_COSIGNERS, READY_TO_SIGN, SIGNED, ACTIVE, MANUAL_REVIEW, REJECTED, ABANDONED]
+        identifierScheme:
+          type: string
+          enum: [CZ_ICO, SK_ICO, PL_NIP, PL_KRS, DE_HRB, AT_FN, GB_CRN, FR_SIREN, NL_KVK, LEI, EUID, EU_VAT, DUNS]
+        identifier:
+          type: string
+        country:
+          type: [string, 'null']
+        legalName:
+          type: [string, 'null']
+        legalFormClass:
+          type: [string, 'null']
+          enum: [SOLE_TRADER, LIMITED_COMPANY, JOINT_STOCK, PARTNERSHIP, COOPERATIVE, FOUNDATION, PUBLIC_BODY, BRANCH, OTHER, null]
+        initiatorPartyId:
+          type: string
+          format: uuid
+        entityPartyId:
+          type: [string, 'null']
+          format: uuid
+        requiredSignatures:
+          type: [integer, 'null']
+        signedCount:
+          type: integer
+        occurredAt:
+          type: string
+          format: date-time
+        actorId:
+          type: string
+          description: "A customer party id, an operator principal, `system:kyb-service:<mechanism>`, or `temporal-timer`."
+        actorType:
+          type: string
+          enum: [CUSTOMER, SYSTEM]
+        sourceService:
+          type: string
+          const: kyb-service
+    ReviewEnvelope:
+      type: object
+      description: "`CaseReviewEvent` — the case envelope plus why a human is involved."
+      required: [eventType, caseId, status, identifierScheme, identifier, initiatorPartyId, signedCount, occurredAt, actorId, actorType, sourceService]
+      properties:
+        eventType:
+          type: string
+        caseId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [IDENTIFIER_ENTERED, REGISTRY_VERIFIED, INITIATOR_MATCHED, AWAITING_COSIGNERS, READY_TO_SIGN, SIGNED, ACTIVE, MANUAL_REVIEW, REJECTED, ABANDONED]
+        identifierScheme:
+          type: string
+          enum: [CZ_ICO, SK_ICO, PL_NIP, PL_KRS, DE_HRB, AT_FN, GB_CRN, FR_SIREN, NL_KVK, LEI, EUID, EU_VAT, DUNS]
+        identifier:
+          type: string
+        country:
+          type: [string, 'null']
+        legalName:
+          type: [string, 'null']
+        legalFormClass:
+          type: [string, 'null']
+          enum: [SOLE_TRADER, LIMITED_COMPANY, JOINT_STOCK, PARTNERSHIP, COOPERATIVE, FOUNDATION, PUBLIC_BODY, BRANCH, OTHER, null]
+        initiatorPartyId:
+          type: string
+          format: uuid
+        entityPartyId:
+          type: [string, 'null']
+          format: uuid
+        requiredSignatures:
+          type: [integer, 'null']
+        signedCount:
+          type: integer
+        occurredAt:
+          type: string
+          format: date-time
+        actorId:
+          type: string
+          description: "A customer party id, an operator principal, `system:kyb-service:<mechanism>`, or `temporal-timer`."
+        actorType:
+          type: string
+          enum: [CUSTOMER, SYSTEM]
+        sourceService:
+          type: string
+          const: kyb-service
+        reviewReason:
+          type: [string, 'null']
+    SignerEnvelope:
+      type: object
+      description: "`CaseSignerEvent` — the case envelope plus which signer moved. `signerName` is present on the invitation only; no date of birth is ever on the wire."
+      required: [eventType, caseId, status, identifierScheme, identifier, initiatorPartyId, signedCount, occurredAt, actorId, actorType, sourceService, signerId]
+      properties:
+        eventType:
+          type: string
+        caseId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [IDENTIFIER_ENTERED, REGISTRY_VERIFIED, INITIATOR_MATCHED, AWAITING_COSIGNERS, READY_TO_SIGN, SIGNED, ACTIVE, MANUAL_REVIEW, REJECTED, ABANDONED]
+        identifierScheme:
+          type: string
+          enum: [CZ_ICO, SK_ICO, PL_NIP, PL_KRS, DE_HRB, AT_FN, GB_CRN, FR_SIREN, NL_KVK, LEI, EUID, EU_VAT, DUNS]
+        identifier:
+          type: string
+        country:
+          type: [string, 'null']
+        legalName:
+          type: [string, 'null']
+        legalFormClass:
+          type: [string, 'null']
+          enum: [SOLE_TRADER, LIMITED_COMPANY, JOINT_STOCK, PARTNERSHIP, COOPERATIVE, FOUNDATION, PUBLIC_BODY, BRANCH, OTHER, null]
+        initiatorPartyId:
+          type: string
+          format: uuid
+        entityPartyId:
+          type: [string, 'null']
+          format: uuid
+        requiredSignatures:
+          type: [integer, 'null']
+        signedCount:
+          type: integer
+        occurredAt:
+          type: string
+          format: date-time
+        actorId:
+          type: string
+          description: "A customer party id, an operator principal, `system:kyb-service:<mechanism>`, or `temporal-timer`."
+        actorType:
+          type: string
+          enum: [CUSTOMER, SYSTEM]
+        sourceService:
+          type: string
+          const: kyb-service
+        signerId:
+          type: string
+          format: uuid
+        signerName:
+          type: [string, 'null']
+        signerPartyId:
+          type: [string, 'null']
+          format: uuid

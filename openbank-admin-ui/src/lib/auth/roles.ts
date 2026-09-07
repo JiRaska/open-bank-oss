@@ -62,6 +62,9 @@ export const PERMISSIONS = {
   // Lending compliance-pack reads include the operational lending roles accepted by
   // CompliancePackResource.listActive; maker/checker writes remain compliance/admin only.
   "lending:compliance:view":    [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.CREDIT_RISK, ROLES.LENDING_OFFICER],
+  // Credit-risk console (ADR-0230 D1): the same set CreditRiskResource admits — the desk that may
+  // read the ADR-0214 evidence bundle, and nobody wider (it exposes every applicant's income).
+  "lending:risk:view":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.CREDIT_RISK, ROLES.LENDING_OFFICER],
   "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
   "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
@@ -199,6 +202,13 @@ export const PERMISSIONS = {
   // MCP agent-service accepts only these human roles; keep demo out of the tool cockpit and
   // expose compliance's authorized read/execute path instead.
   "agent:view":               [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // Communication Studio (ADR-0285 D6, phase 1). Read-only projection of the ADR-0148 prompt
+  // registry: what each channel says today and which layer is locked. Deliberately WIDER than
+  // agent:view — the audience is the business units that talk to customers (contact centre,
+  // back-office, complaints), not the agent cockpit. The dedicated ROLE_COMMS_EDITOR /
+  // ROLE_COMMS_APPROVER of D6 arrive with the write path in phase 2; granting them now would
+  // put two role vocabularies in the console for a surface that cannot yet be written to.
+  "communication:view":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.SUPERVISOR],
   "agent:execute":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Agent proposal reads/decisions are exposed by ProposalResource to these human roles;
   // demo/system-view users must not see an actionable approval queue that the backend rejects.
@@ -258,6 +268,9 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['compliance:view', [
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360',
     '/docs/compliance', '/docs/bcp',
+    // ADR-0286: the warehouse-backed risk reporting surface. Each registry entry also carries
+    // its own permission at the BFF boundary — this prefix only gates the page shell.
+    '/reporting',
   ]],
   ['loyalty:view', ['/loyalty']],
   ['campaign:view', ['/segments']],
@@ -265,6 +278,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['campaign:view', ['/campaigns']],
   ['campaign:create', ['/campaigns/new']],
   ['lending:compliance:view', ['/lending/compliance-packs']],
+  ['lending:risk:view', ['/lending/risk']],
   ['approvals:view', ['/approvals']],
   ['system:view', [
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
@@ -272,6 +286,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ]],
   ['notifications:view', ['/notifications']],
   ['agent:view', ['/system/agent']],
+  ['communication:view', ['/communication']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],
 ]

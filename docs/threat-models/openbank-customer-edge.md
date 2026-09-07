@@ -109,7 +109,7 @@ Trust boundaries:
 | E-2 | Edge service account (ROLE_OPERATOR M2M) abused | `openbank-edge` client in `openbank` realm has a client secret (Kubernetes Secret, not in git). Rotation via Vault ExternalSecret. Compromise of this secret → attacker could call any ROLE_OPERATOR endpoint. | High — secret rotation SLA needed before GA |
 | E-3 | Container escape → access cluster APIs | `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities: drop ALL`, `seccompProfile: RuntimeDefault`. No cluster API access in ServiceAccount. | Low |
 | E-4 | Party with PENDING_KYC opens account | `POST /onboarding/account` KYC gate checks party-service for `status == ACTIVE` before forwarding to account-service. | Low — enforced by edge |
-| E-5 | Customer initiates a payment debiting **another** customer's account (IDOR via `debtorAccountId`) | `POST /domestic-payments` resolves the `debtorAccountId` via account-service and rejects (403) unless its `partyId` equals the JWT party — the same ownership re-check as the transactions read (I-5). NB: this 3a step only creates + screens the instruction; it does not move money (settlement is a later SCA-gated step), so the residual exposure is a screened payment record, not a debit. | Low — IDOR closed at the edge |
+| E-5 | Customer initiates a payment debiting another party's account without a current, attributable delegation, or races concurrent payments past a cumulative ceiling | Owner debits stay local. A non-owner must receive `authorized=true`, `outcome=DELEGATED`, UUID grant and grantor evidence from account-service; every other shape is the same 403. The reserve sender is off by default and delegated initiation is 503 while disabled — never the old unreserved bypass. Once enabled after downstream health proof, the edge reserves one trim+uppercase canonical amount/currency tuple after enrichment and SCA, then forwards grant/reservation ids only in trusted M2M headers. Reservation 4xx/5xx/malformed evidence fails closed. The same required, ≤128-character idempotency key binds reserve and payment; replay evidence must match delegation, amount and currency. A 201 is only accepted instruction, so the edge never confirms/releases it. Every remote error, including 400, is ambiguous because the key may have persisted on an earlier attempt; a timeout or elapsed TTL is never evidence that no payment exists. Only an authoritative terminal event or an atomic receiver-side `FINALIZED_ABSENT` tombstone may settle the reservation. Downstream auth/routing bodies are never forwarded; only the contracted idempotency problem remains customer-visible. | Medium until receiver-side atomic reconciliation is deployed and proven; the rollout gate must remain disabled. Afterwards, residual denial-of-headroom is bounded by reconciliation latency. |
 | E-6 | Customer is served ANOTHER party's data because the edge follows an ADR-0179 `merged_into` pointer | `PartyMergeResolver` rewrites the JWT `party_id` to the surviving party when party-service reports the claimed party as `MERGED`. This is the intended meaning of a merge (the two rows are one human), so the whole gate is on WRITING the pointer, not on reading it: `POST /api/v1/parties/{id}/merge` is `@Authorize(action = "party.merge")` and `party.merge` is listed in `rules.yaml: four_eyes.actions`, so a merge needs a maker plus a different checker. The resolver reads only party-service (in-cluster mTLS, M2M token) — never a client-supplied id — follows at most 5 hops with a visited-set so a corrupted or cyclic pointer cannot redirect indefinitely, and fails OPEN to the claimed id so a party-service outage degrades to today's behaviour rather than to a wrong identity. | **High until the merge gate is enforced** — a wrongly-approved merge is an account-takeover primitive, and today the four-eyes gate that is supposed to prevent one is WIRED BUT INERT: party-service ships `AUTHZ_FOUR_EYES_ENFORCE` at its `false` default and `gitops/components/party/party-service.yaml` sets `AUTHZ_ENFORCE="false"`, so a single `ROLE_OPERATOR` can merge unilaterally and this resolver will follow that merge. Flipping both flags is the mitigation; the resolver's own kill switch (`openbank.edge.party-merge-follow-enabled`) is the containment lever meanwhile |
 
 ---
@@ -148,6 +148,21 @@ Trust boundaries:
 | Mobile certificate pinning | 🔲 ADR-0064 Phase F2 |
 
 ## 6. Change log
+
+- **2026-09-01** — **Delegated domestic spend is reserved before the rail.** The edge now accepts
+  delegated debit authority only as the complete `DELEGATED` + grant UUID + grantor UUID tuple,
+  consumes SCA, then reserves the exact amount and currency under the caller's stable
+  Idempotency-Key before domestic-payment. The trusted grant and reservation headers are produced
+  only inside the edge. The sender binding gate defaults off: owner payments stay unchanged and
+  delegated initiation returns 503, preventing deployment order from restoring an unreserved
+  bypass. A reservation refusal, outage, or invalid evidence never reaches the rail;
+  a key replay with different money is 409. Domestic 201 and ambiguous failures retain headroom
+  because neither proves settlement nor absence. Remote 400 is ambiguous too: the same key may have
+  persisted on an earlier attempt, so without explicit `NOT_PERSISTED` evidence the edge never
+  releases synchronously and leaves settlement to an authoritative terminal outcome or atomic
+  receiver-side absent-payment tombstone; time alone never releases headroom. Rollback:
+  revert the integration as one unit; otherwise removing only the reserve would re-open the
+  concurrency gap while leaving downstream evidence headers optional.
 
 - **2026-08-01** — ADR-0211 customer intake. `POST /customer/v1/loan-applications` forwards a loan
   application to lending-service. The party travels as `X-Customer-Party-Id`, derived from the

@@ -1,0 +1,55 @@
+# Single-owner Postgres for kyb-service, reconciled by the cluster-wide CNPG operator. CNPG
+# generates the `kyb-db-app` secret (username/password for the `openbank` owner) and a
+# `kyb-db-rw` Service — both consumed by the kyb-service Deployment for the reactive
+# datasource and Flyway migrations. One instance for sandbox FinOps; prod should raise to 3.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: kyb-db
+  namespace: kyb
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_kyb
+      owner: openbank
+  # WAL archiving + base backups to S3. A case row is the evidence of WHO signed for a company
+  # and on what register extract — the AML/KYB audit trail (ADR-0284), retained 5 years.
+  # Credentials from EKS Pod Identity on the kyb-db ServiceAccount.
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/kyb-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: kyb-db-daily
+  namespace: kyb
+spec:
+  schedule: "0 50 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: kyb-db

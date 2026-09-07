@@ -177,6 +177,18 @@ class AccountPactFolderProviderVerificationTest {
         context?.verifyInteraction()
     }
 
+    /**
+     * Serves the NEGATIVE interaction of the VoP pact: an IBAN the bank does not hold must answer
+     * 404, not an empty account. The absence IS the state — nothing is seeded, and the IBAN in the
+     * pact is one no other state creates — but a handler still has to exist, because pact-jvm fails
+     * the interaction on an unknown state string before it ever issues the request, which is what
+     * "GET the account behind an IBAN the bank does not hold FAILED" meant the first time (#8889).
+     */
+    @State("no account exists for the IBAN")
+    fun noAccountForIban() {
+        // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
+    }
+
     @State("an account has been created")
     fun accountHasBeenCreated() {
         // No setup: the message is produced deterministically by the @PactVerifyProvider method below.
