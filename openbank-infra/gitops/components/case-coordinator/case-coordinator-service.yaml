@@ -38,7 +38,7 @@ spec:
       annotations:
         # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
         # Must match case-coordinator-opa-bundle's openbank.tech/policy-checksum (CI verifies).
-        openbank.tech/policy-checksum: "1c54b526c3689161"
+        openbank.tech/policy-checksum: "e7477333d70228ee"
     spec:
       securityContext:
         runAsNonRoot: true

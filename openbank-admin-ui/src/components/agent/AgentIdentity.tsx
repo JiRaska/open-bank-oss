@@ -8,6 +8,9 @@ import {
   ChartNoAxesCombined, ClipboardCheck, GitPullRequest, KeyRound,
   LifeBuoy, MessageCircleQuestion, Network, Radar, Scale, SearchCheck,
   ShieldCheck, TestTubeDiagonal,
+  CreditCard,
+
+  FileSearch,
 } from 'lucide-react'
 import styles from './AgentIdentity.module.css'
 
@@ -147,6 +150,20 @@ const PERSONAS: Record<string, PersonaDefinition> = {
     value: { cs: 'Vrací týmům důvěru v CI a šetří čas ztracený falešnými poplachy.', en: 'Restores trust in CI and saves time lost to false alarms.' },
     talents: [{ cs: 'Hledání vzorců selhání', en: 'Failure patterning' }, { cs: 'Ověření opakováním', en: 'Reproduction checks' }, { cs: 'Návrh stabilizace', en: 'Stabilisation proposals' }],
     accent: '#be123c', glow: '#fecdd3', shell: '#fff1f2', variant: 'lens', icon: TestTubeDiagonal,
+  },
+  'card-dispute-evidence-agent': {
+    name: { cs: 'Doležal', en: 'Dolezal' }, role: { cs: 'Sběratel důkazů ke sporům', en: 'Dispute evidence assembler' },
+    purpose: { cs: 'Připravuje podklady k otevřenému karetnímu sporu dřív, než uplyne lhůta sítě.', en: 'Prepares the evidence for an open card dispute before the network’s deadline passes.' },
+    value: { cs: 'Zkracuje hledání podkladů na kontrolu návrhu — podat je vždy musí člověk.', en: 'Turns a hunt for paperwork into a review of a draft — filing always stays a human act.' },
+    talents: [{ cs: 'Sběr podkladů', en: 'Evidence assembly' }, { cs: 'Hlídání lhůty', en: 'Deadline tracking' }, { cs: 'Návrh k podání', en: 'Filing proposals' }],
+    accent: '#7c2d12', glow: '#fed7aa', shell: '#fff7ed', variant: 'guide', icon: FileSearch,
+  },
+  'card-scheme-bulletin-agent': {
+    name: { cs: 'Karel', en: 'Karel' }, role: { cs: 'Čtenář karetních bulletinů', en: 'Card bulletin reader' },
+    purpose: { cs: 'Sleduje mandatorní oznámení Visy a Mastercardu a hlásí, co se banky skutečně týká.', en: 'Tracks Visa and Mastercard mandate bulletins and reports what actually concerns this bank.' },
+    value: { cs: 'Zkracuje cestu od zveřejněného mandátu k rozhodnutí, místo aby ho někdo objevil až po termínu.', en: 'Shortens the path from a published mandate to a decision, instead of it being noticed after the deadline.' },
+    talents: [{ cs: 'Čtení bulletinů', en: 'Bulletin reading' }, { cs: 'Posouzení dopadu', en: 'Impact assessment' }, { cs: 'Návrh termínu', en: 'Deadline proposals' }],
+    accent: '#1d4ed8', glow: '#bfdbfe', shell: '#eff6ff', variant: 'guide', icon: CreditCard,
   },
   'case-coordinator': {
     name: { cs: 'Kord', en: 'Chord' }, role: { cs: 'Koordinátor případu', en: 'Case coordinator' },

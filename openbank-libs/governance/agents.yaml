@@ -416,6 +416,149 @@ agents:
       - sca: dynamic_linking
     limits: { tokens_per_run: 80000, runs_per_day: 1000 }
 
+  # Card scheme release-bulletin watcher (ADR-0283 phase 4, issue #8812).
+  #
+  # WHY IT EXISTS: the card networks publish mandates twice a year with hard effective dates, and
+  # working out which of them touch this platform is a manual read of two long PDFs that nobody's
+  # job covers. Missing one is not a defect anybody can see until the date passes.
+  #
+  # WHY IT IS PROPOSAL-ONLY: a mandate has to be INTERPRETED against our capability ports, and a
+  # wrong interpretation applied automatically would change a control nobody reviewed. It files an
+  # issue citing the bulletin and the capability it mapped to, so a human checks the mapping rather
+  # than trusting it.
+  #
+  # `enabled: false` ON PURPOSE: no bulletin feed is wired yet (there is no public machine-readable
+  # source, and the portal feeds need a developer account). A charter that claims to run while its
+  # input does not exist is the shape this repo has been burnt by — an agent reporting nothing is
+  # indistinguishable from an agent finding nothing. Flip this on in the PR that wires the feed.
+  - id: card-scheme-bulletin-agent
+    plane: control
+    model: deepseek-ai/DeepSeek-V3.2
+    charter: ADR-0283
+    description: >
+      Reads the card networks' periodic release bulletins and maps each mandate onto this platform's
+      capability ports, filing one governance issue per mandate with its effective date. Read-only:
+      it proposes an issue and never edits a port, a policy or a manifest.
+    enabled: false
+    enforcement: block
+    schedule:
+      weekly: Monday 07:00 UTC
+    data_scope:
+      read:
+        - read.governance
+      pii: none
+    tools:
+      allow:
+        - tier: read
+          resources:
+            - read.governance
+        - tier: write_proposal
+          resources:
+            - draft.ticket
+      deny:
+        - tier: write
+          resources:
+            - '*'
+        - tier: execute
+          resources:
+            - '*'
+    requires_human:
+      - any_mandate_interpretation
+      - any_port_or_adapter_change
+    limits:
+      tokens_per_run: 40000
+      runs_per_day: 1
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - bulletin_reference
+        - mandate_effective_date
+        - mapped_capability_id
+    compliance:
+      eu_ai_act: >
+        Art. 13 — transparency: every filed issue cites the bulletin it came from and the capability
+        it was mapped to, so a reader can check the mapping rather than trust it.
+      dora: ICT third-party change awareness — a scheme mandate is a supplier-imposed change
+
+  # Card dispute evidence assembler (ADR-0283 phase 4, issue #8812).
+  #
+  # WHY IT EXISTS: a chargeback is won or lost on the evidence filed before the network's respond-by
+  # date, and assembling it is a manual hunt across the authorisation row, the clearing, the
+  # merchant descriptor and whatever the customer sent in. The deadline is the network's and it does
+  # not pause while somebody looks for the paperwork.
+  #
+  # WHY IT PROPOSES AND NEVER FILES: `POST /api/v1/card-disputes/{id}/evidence` reaches the scheme,
+  # and a submission is not retractable. The agent drafts the bundle and a human files it — the
+  # requires_human list below is the same boundary card-processing enforces at the endpoint, stated
+  # where the charter can be read.
+  #
+  # `enabled: false` ON PURPOSE, and this is the honest part. The desk and the endpoint exist as of
+  # ADR-0283 phase 3, but the EVIDENCE does not: there is no document store this agent can read, the
+  # 3-D Secure result is not persisted anywhere it could reach, and openbank-dispute-service — which
+  # holds what the customer actually said — is not wired to the scheme case at all (#8869). An agent
+  # switched on now would assemble a bundle out of an authorisation row and call it evidence, and
+  # nothing downstream could tell that apart from a real one. Flip this on in the PR that gives it
+  # something to read.
+  - id: card-dispute-evidence-agent
+    plane: control
+    model: deepseek-ai/DeepSeek-V3.2
+    charter: ADR-0283
+    description: >
+      Drafts the evidence bundle for an open card chargeback — the authorisation, the clearing that
+      followed it, the merchant as the network identifies it — and proposes it against the case's
+      respond-by date. Read-only: it prepares a draft and never files evidence with a scheme.
+    enabled: false
+    enforcement: block
+    schedule:
+      daily: "06:00 UTC"
+    data_scope:
+      read:
+        - read.governance
+      # The card is referenced by its card-issuance id and the party by id; no name, address or
+      # document number is in scope. Keeping the PAN outside card-processing is what keeps this
+      # agent outside the cardholder-data environment too.
+      pii: none
+    tools:
+      allow:
+        - tier: read
+          resources:
+            - read.governance
+        - tier: write_proposal
+          resources:
+            - draft.ticket
+      deny:
+        - tier: write
+          resources:
+            - '*'
+        - tier: execute
+          resources:
+            - '*'
+    requires_human:
+      - any_evidence_submission
+      - any_dispute_status_change
+    limits:
+      tokens_per_run: 40000
+      runs_per_day: 4
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - network_case_id
+        - respond_by_date
+    compliance:
+      eu_ai_act: >
+        Art. 13 — transparency: a drafted bundle names every record it drew on, so a reviewer checks
+        the assembly rather than trusting it. Art. 14 — human oversight: filing stays a human act,
+        because a submission to a scheme cannot be withdrawn.
+      dora: ICT change awareness — a missed representment window is a financial loss with a date on it
+
   - id: finops-agent
     plane: control
     model: deepseek-ai/DeepSeek-V3.2

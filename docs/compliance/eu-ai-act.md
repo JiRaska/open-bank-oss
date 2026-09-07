@@ -33,6 +33,8 @@ it can move past *Proposed*.
 | `customer-copilot` | customer | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `mcp-anonymous` | customer | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `ap2-anonymous` | customer | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
+| `card-scheme-bulletin-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
+| `card-dispute-evidence-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `finops-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `devops-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `control-liveness-sentinel` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
@@ -109,7 +111,7 @@ not deployed.
 
 ## Provenance
 
-- Source: `openbank-libs/governance/agents.yaml` (sha256 `564374d7b1d9a782…`, 18 charters)
+- Source: `openbank-libs/governance/agents.yaml` (sha256 `590178960a64ad17…`, 20 charters)
 - Source: `openbank-libs/governance/ml-systems.yaml` (sha256 `9cd5cb5b20918520…`, 4 non-agent systems)
 - Related: ADR-0031 (agent governance), ADR-0084 (fraud scoring plane), ADR-0139/0140
   (ML decisioning platform), ADR-0141 (model registry), ADR-0142 (credit decisioning),
