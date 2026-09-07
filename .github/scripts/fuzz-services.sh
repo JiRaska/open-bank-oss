@@ -290,6 +290,23 @@ for svc in $SERVICES; do
   STUB_PORTS="$(grep -oE 'url: \$\{[A-Za-z0-9_]+:http://localhost:[0-9]+' "$APP_YAML" \
     | grep -oE '[0-9]+$' | sort -un \
     | grep -vxE "${PORT}|5432|6379|8080|4317|8181" || true)"
+  # The OUTBOUND half of OIDC (quarkus.oidc-client) is NOT covered by "%dev disables OIDC" — the
+  # dev profile switches off the inbound resource server only, and the M2M token mint precedes the
+  # HTTP call: with no Keycloak in this job the OidcClientRequestReactiveFilter dies on
+  # "OIDC Server is not available: Connection refused" and the endpoint answers 500 without ever
+  # reaching the 404 stub above. Measured on run 34107337021, ledger's POST
+  # /api/v1/ledger/fx-revaluation — the very case #8930's stub was written for — failed exactly
+  # this way, because the token fetch to the (excluded) keycloak port happens BEFORE the stubbed
+  # fx-service call. Fix it the same derived way: a service declaring `oidc-client:` gets a stub
+  # token issuer on 18099 (discovery + a static fake token), pointed there by a system property so
+  # it wins over any `${...:default}` spelling; the minted token is only ever presented to the
+  # 404 stubs, which validate nothing.
+  OIDC_FLAGS=()
+  if grep -qE '^  oidc-client:' "$APP_YAML"; then
+    echo "==> [${svc}] config declares oidc-client — stubbing the token issuer on 18099 (outbound M2M mint)"
+    STUB_PORTS="$(printf '%s\n18099\n' ${STUB_PORTS} | sort -un)"
+    OIDC_FLAGS+=("-Dquarkus.oidc-client.auth-server-url=http://127.0.0.1:18099/realms/openbank")
+  fi
   STUB_PID=""
   if [ -n "${STUB_PORTS}" ]; then
     echo "==> [${svc}] stubbing absent cross-service port(s) with 404-for-everything: $(echo ${STUB_PORTS})"
@@ -303,13 +320,28 @@ import time
 class Absent(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def _absent(self):
-        body = b'{"status":404,"title":"absent (fuzz cross-service stub)"}'
-        self.send_response(404)
+    def _answer(self, code, body):
+        self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _absent(self):
+        # OIDC token-issuer stub: the outbound oidc-client discovers the realm and mints a token
+        # BEFORE the cross-service call; without these two answers the mint throws and the caller
+        # answers 500 without the 404 stub ever being asked (see the caller-side comment).
+        if self.path.endswith("/.well-known/openid-configuration"):
+            host = self.headers.get("Host", "127.0.0.1:18099")
+            body = ('{"issuer":"http://%s/realms/openbank",'
+                    '"token_endpoint":"http://%s/realms/openbank/protocol/openid-connect/token"}'
+                    % (host, host)).encode()
+            self._answer(200, body)
+            return
+        if self.path.endswith("/protocol/openid-connect/token"):
+            self._answer(200, b'{"access_token":"fuzz-stub-token","token_type":"Bearer","expires_in":3600}')
+            return
+        self._answer(404, b'{"status":404,"title":"absent (fuzz cross-service stub)"}')
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _absent
 
@@ -334,6 +366,18 @@ STUBEOF
   for prop in ${WORKER_PROPS}; do
     WORKER_FLAGS+=("-D${prop}=false")
     echo "==> [${svc}] disabling Temporal worker via ${prop}=false"
+  done
+
+  # Fail-closed feature gates keyed off a secret with an EMPTY default, derived like the worker
+  # flags: a `${VAR:}` placeholder whose name contains PEPPER or TOKEN_PEPPER (today: party's
+  # OPENBANK_IDENTITY_RC_PEPPER, ADR-0072) leaves the feature deliberately OFF — and the endpoint
+  # then answers a DESIGNED 503 (DEDUP_UNAVAILABLE), which schemathesis counts as a server error
+  # (party leg of run 34017868446). A fixed job-local value flips the gate the same way the
+  # deployed secret does; a fuzz run exercises the endpoint, not uniqueness.
+  PEPPER_VARS="$(grep -oE '\$\{[A-Za-z0-9_]*PEPPER[A-Za-z0-9_]*:\}' "$APP_YAML" | sed -E 's/^\$\{([A-Za-z0-9_]+):\}$/\1/' | sort -u || true)"
+  for var in ${PEPPER_VARS}; do
+    export "${var}=fuzz-static-pepper-not-a-secret"
+    echo "==> [${svc}] ${var} set to a fixed fuzz value (fail-closed gate would answer 503 by design)"
   done
 
   # Compile BEFORE the readiness clock starts. The 180s budget below was being spent on the
@@ -384,7 +428,7 @@ STUBEOF
       -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
       -Dquarkus.datasource.username="${DBUSER}" \
       -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
-      "${WORKER_FLAGS[@]}" "$@" \
+      "${WORKER_FLAGS[@]}" "${OIDC_FLAGS[@]}" "$@" \
       -Dquarkus.devservices.enabled=false \
       -Dquarkus.console.basic=true \
       --console=plain --quiet \
@@ -416,6 +460,22 @@ STUBEOF
       OVERALL=1
     else
       echo "==> [${svc}] answered after ${WAITED}s (${label}); fuzzing http://localhost:${PORT}"
+      # Per-service operation exclusions — the LAST resort, one measured reason and one tracking
+      # reference each, because every exclusion is a hole in the coverage this lane exists to
+      # prove. An entry with neither is a finding waiting to be hidden.
+      EXCLUDE_FLAGS=()
+      case "${svc}" in
+        openbank-sanctions-service)
+          # POST /api/v1/sanctions/lists/refresh-all fans out to the EXTERNAL sanctions feeds
+          # synchronously; a real fetch exceeds this lane's 5s request window by design — it
+          # read-timed-out on every fleet fuzz since the lane exists (runs 34017868446,
+          # 34107337021). Not a handler defect and not stubbable: the slow peer is the public
+          # internet. The tracked fix is the async-202 redesign (#8590), not a longer window —
+          # a synchronous trigger that can take minutes belongs off the request path entirely.
+          EXCLUDE_FLAGS+=(--exclude-operation-id refreshAllSanctionsLists)
+          echo "==> [${svc}] excluding refreshAllSanctionsLists from fuzz (external-feed fan-out > request window; async redesign tracked in #8590)"
+          ;;
+      esac
       # schemathesis 4.x CLI (bumped from 3.39.16 to close 6 Dependabot alerts on transitive
       # starlette/pytest — 3.x hard-caps pytest<9 and starlette<1):
       #   --base-url -> --url; --hypothesis-max-examples -> --max-examples;
@@ -427,6 +487,7 @@ STUBEOF
         --checks not_a_server_error \
         --max-examples "${MAX_EXAMPLES}" \
         --request-timeout 5 \
+        "${EXCLUDE_FLAGS[@]}" \
         --report junit --report-junit-path "fuzz-reports/${svc}-junit${logsuffix}.xml" \
         | tee "fuzz-reports/${svc}-fuzz${logsuffix}.log" || OVERALL=1
 
