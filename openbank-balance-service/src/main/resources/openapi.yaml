@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Balance Service API
-  version: 1.9.0
+  version: 1.9.1
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -119,6 +119,10 @@ paths:
     post:
       tags: [Balances]
       summary: Place a hold on funds
+      description: >-
+        Idempotent on the natural key (accountId, currency, referenceId): the referenceId names one
+        durable business fact (a payment authorisation), so a retried placeHold with the same triple
+        replays the original hold and reserves nothing a second time (ADR-0287).
       operationId: placeHold
       parameters:
         - $ref: '#/components/parameters/accountId'
@@ -216,6 +220,9 @@ paths:
     post:
       tags: [Balances]
       summary: Initialize balance for a new account
+      description: >-
+        Idempotent on the natural key (accountId, currency): a repeat call for an already
+        initialized pair returns the existing balance unchanged (ADR-0287).
       operationId: initializeBalance
       parameters:
         - $ref: '#/components/parameters/accountId'
@@ -238,7 +245,9 @@ paths:
       description: >-
         Runs the ADR-0039 Phase A tie-out as of the given date (default today), comparing the ledger
         deposit-control balance against the sum of booked balances per currency, persisting the run
-        and surfacing drift. Read-only — mutates no balance.
+        and surfacing drift. Read-only — mutates no balance; a re-run for the same date records a
+        fresh report row by design (an audit trail of runs), so a retry has no double effect
+        (ADR-0287).
       operationId: runReconciliation
       parameters:
         - name: asOf
