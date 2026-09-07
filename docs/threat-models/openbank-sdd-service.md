@@ -74,7 +74,7 @@ instruction, but the irreversible debit lives downstream.
 
 ## 6. Change log
 
-- **2026-09-06** — Replay-safe collection authorisation (#8351, ADR-0285). `SddMandateService.authorise`
+- **2026-09-06** — Replay-safe collection authorisation (#8351, ADR-0289). `SddMandateService.authorise`
   now short-circuits when the instruction's `dueDate` equals the mandate's `lastCollectionDate`: a
   retried authorise of the same collection replays the stored policy decision with no `save` and no
   outbox append. The collection's downstream dedup key (`so-sdd-{mandateId}-{umr}-{dueDate}`) was

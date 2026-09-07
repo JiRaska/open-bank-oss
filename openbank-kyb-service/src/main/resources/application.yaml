@@ -104,6 +104,13 @@ quarkus:
       url: ${GLEIF_BASE_URL:https://api.gleif.org/api/v1}
       connect-timeout: 2000
       read-timeout: 4000
+    # Free of charge but key-gated, unlike ARES and GLEIF. With no key the adapter declines
+    # GB_CRN entirely and the router falls through to manual attestation (the key itself is
+    # supplied from the environment; nothing in this repo carries one).
+    companies-house:
+      url: ${COMPANIES_HOUSE_BASE_URL:https://api.company-information.service.gov.uk}
+      connect-timeout: 2000
+      read-timeout: 4000
 
   management:
     enabled: true

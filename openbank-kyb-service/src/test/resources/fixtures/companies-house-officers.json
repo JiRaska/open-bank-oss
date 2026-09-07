@@ -1,0 +1,28 @@
+{
+  "total_results": 4,
+  "items": [
+    {
+      "name": "SMITH, Jane Elizabeth",
+      "officer_role": "director",
+      "appointed_on": "2011-06-14",
+      "date_of_birth": { "month": 5, "year": 1980 }
+    },
+    {
+      "name": "PATEL, Rajesh",
+      "officer_role": "director",
+      "appointed_on": "2019-02-01",
+      "date_of_birth": { "month": 11, "year": 1975 }
+    },
+    {
+      "name": "BROWN, Peter",
+      "officer_role": "director",
+      "appointed_on": "2012-01-09",
+      "resigned_on": "2020-03-31"
+    },
+    {
+      "name": "CORPORATE SECRETARIES LIMITED",
+      "officer_role": "secretary",
+      "appointed_on": "2011-06-14"
+    }
+  ]
+}

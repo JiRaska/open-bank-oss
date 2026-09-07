@@ -13,6 +13,7 @@ import {
   AlertOctagon,
   ArrowLeftRight,
   Banknote,
+  BarChart3,
   Bell,
   Bluetooth,
   BookOpen,
@@ -136,6 +137,8 @@ const complianceNav: NavItem[] = [
   { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view' },
   { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view' },
   { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view' },
+  // ADR-0286: warehouse-backed risk reporting via the governed query registry + embedded Grafana.
+  { nameCs: 'Reporting (DWH)',    nameEn: 'Reporting (DWH)',  href: '/reporting',         icon: BarChart3,             permission: 'compliance:view' },
 ]
 
 const opsNav: NavItem[] = [

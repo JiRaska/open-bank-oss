@@ -10,7 +10,7 @@ tags: [resilience, payments]
 summary: "SDD's two creation POSTs (mandates, collections/authorise) stay free of a synthetic Idempotency-Key: the scheme's natural keys already make a retry a no-op, and the #8351 gate records them as ADR-linked exceptions."
 ---
 
-# ADR-0285 — SDD creation POSTs are idempotent on scheme natural keys, not synthetic keys
+# ADR-0289 — SDD creation POSTs are idempotent on scheme natural keys, not synthetic keys
 
 ## Context
 

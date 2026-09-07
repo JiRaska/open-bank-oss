@@ -54,6 +54,21 @@ is a bug — that is the drift ADR-0212 already paid for once.
   GLEIF are declared `@SyntheticTaintExternalBoundary` (a synthetic marker must not leave the
   platform); party-service is internal and PROPAGATES the marker, because an entity party minted
   for a synthetic case must stay tainted downstream.
+- **A register adapter that cannot serve a scheme must not CLAIM it.** `RegistryRouter` picks the
+  first adapter whose `supports()` answers true and only falls through to manual attestation when
+  none does, so an adapter that claims `GB_CRN` without a Companies House API key turns "we could
+  not check" into "the register said no" — a hard failure on every GB case instead of a review
+  queue. `CompaniesHouseRegistryAdapter.supports()` therefore tests the key, and the class is
+  `@Startup` so the "no key configured" warning is emitted at BOOT. An `@ApplicationScoped` bean is
+  lazy: without `@Startup` that warning first appears on the first GB lookup, which for a bank with
+  no UK customers is never, and the fallback then reads as a decision rather than a missing key.
+- **Not every register publishes a representation rule, and the pack has to say so.** The UK puts
+  the power to bind a company in the articles, not in the register, so `gb-v1.json` carries
+  `representationRuleParser: null` and `listsRepresentationRule: false`, and the rule is DERIVED
+  (model articles: any single director binds). A company whose officers could not be read is
+  `UNKNOWN`, never `SOLE` — assuming one signature is the failure that produces an invalid
+  contract. Companies House also publishes only the month and year of a director's birth, so
+  `Representative.dateOfBirth` stays null for GB rather than being reconstructed.
 
 ## Authorization
 
