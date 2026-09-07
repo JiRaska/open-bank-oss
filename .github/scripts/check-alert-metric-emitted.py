@@ -78,7 +78,24 @@ GITOPS = REPO / "openbank-infra" / "gitops"
 
 # Domain metrics that legitimately come from outside this repo's Kotlin. Each needs a
 # reason. Checked BOTH ways -- a stale entry is itself reported -- so this can only shrink.
-EXTERNALLY_PROVIDED: dict[str, str] = {}
+EXTERNALLY_PROVIDED: dict[str, str] = {
+    # openbank_security_kpi_* gauges are emitted by the admin-ui Next.js route
+    # src/app/api/security/kpis/metrics/route.ts (TypeScript, plain text template),
+    # which metricsrc.emitted_names() structurally cannot see -- it scans only
+    # openbank-*/src/main/**/*.kt. The values come from the CI-generated
+    # security-kpis.json snapshot (.github/scripts/security-kpis.py), never invented
+    # in the route. Issue #8590.
+    "openbank_security_kpi_generated_timestamp_seconds":
+        "emitted by admin-ui TS route api/security/kpis/metrics (metricsrc scans Kotlin only); #8590",
+    "openbank_security_kpi_fuzz_coverage_pct":
+        "emitted by admin-ui TS route api/security/kpis/metrics (metricsrc scans Kotlin only); #8590",
+    "openbank_security_kpi_credentials_overdue":
+        "emitted by admin-ui TS route api/security/kpis/metrics (metricsrc scans Kotlin only); #8590",
+    "openbank_security_kpi_threat_models_stale":
+        "emitted by admin-ui TS route api/security/kpis/metrics (metricsrc scans Kotlin only); #8590",
+    "openbank_security_kpi_dependabot_oldest_open_days":
+        "emitted by admin-ui TS route api/security/kpis/metrics (metricsrc scans Kotlin only); #8590",
+}
 
 # Dead alert rules declared rather than hidden, keyed by "<alert>#<metric>" so fixing one alert
 # does not silently excuse another on the same metric. Checked BOTH ways below: an entry that
