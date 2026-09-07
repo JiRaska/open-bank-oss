@@ -273,21 +273,50 @@ def self_test() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         origin, clone = Path(tmp) / "origin", Path(tmp) / "clone"
         git_o = ["git", "-C", str(origin)]
-        subprocess.run(["git", "init", "--quiet", "-b", "main", str(origin)],
-                       check=False, capture_output=True, text=True)
-        ident = ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
-        for n in range(3):
-            (origin / f"f{n}.txt").write_text(str(n))
-            subprocess.run([*git_o, "add", f"f{n}.txt"], check=False, capture_output=True, text=True)
-            subprocess.run([*git_o, *ident, "commit", "--quiet", "-m", f"c{n}"],
-                           check=False, capture_output=True, text=True)
-        rev = subprocess.run([*git_o, "rev-parse", "HEAD~2"], check=False,
-                             capture_output=True, text=True)
+        # A fixture must not depend on the ambient git configuration. CI built no commits at
+        # all here — `rev-parse HEAD~2` came back `fatal: ambiguous argument` — while the same
+        # code committed fine on a developer machine, which is the signature of a system or
+        # global gitconfig doing something the fixture never asked for (a commit template, a
+        # hooks path, signing, an identity policy). Rather than chase which one, the whole
+        # ambient layer is switched off: GIT_CONFIG_* to /dev/null, HOME inside the fixture,
+        # and the identity supplied through the environment instead of inherited.
+        env = {
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "HOME": str(Path(tmp) / "home"),
+            "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+            "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+        }
+        (Path(tmp) / "home").mkdir(exist_ok=True)
+        steps: list[subprocess.CompletedProcess[str]] = []
+
+        def git(*args: str) -> subprocess.CompletedProcess[str]:
+            done = subprocess.run(["git", *args], check=False, capture_output=True,
+                                  text=True, env=env)
+            steps.append(done)
+            return done
+
+        # Build defensively and stop at the first failure. A fixture that raises instead of
+        # reporting is the same defect once more: the exception escapes as a crash and the
+        # gate is recorded as unfalsified, with no sentence anywhere saying the fixture is
+        # what broke.
+        origin.mkdir(parents=True, exist_ok=True)
+        try:
+            if git("init", "--quiet", "-b", "main", str(origin)).returncode == 0:
+                for n in range(3):
+                    (origin / f"f{n}.txt").write_text(str(n))
+                    if git(*git_o[1:], "add", f"f{n}.txt").returncode != 0:
+                        break
+                    if git(*git_o[1:], "-c", "commit.gpgsign=false",
+                           "commit", "--quiet", "-m", f"c{n}").returncode != 0:
+                        break
+        except OSError as exc:
+            steps.append(subprocess.CompletedProcess(["<fixture build>"], 1, "", str(exc)))
+        rev = git(*git_o[1:], "rev-parse", "HEAD~2")
         old_sha = rev.stdout.strip()
-        cloned = subprocess.run(
-            ["git", "clone", "--quiet", "--depth=1", f"file://{origin}", str(clone)],
-            check=False, capture_output=True, text=True,
-        )
+        cloned = git("clone", "--quiet", "--depth=1", f"file://{origin}", str(clone))
         # A fixture that failed to build must say so as a FIXTURE fault. Reporting it as
         # "the gate is broken" would be this gate's own bug one storey up: a setup failure
         # dressed as a finding. `git rev-parse` echoes its argument back when it cannot
@@ -295,8 +324,14 @@ def self_test() -> int:
         # the failure reads exactly like a real one.
         setup_error = None
         if not re.fullmatch(r"[0-9a-f]{40}", old_sha):
-            setup_error = (f"rev-parse gave {old_sha!r} (rc={rev.returncode}); "
-                           f"stderr={rev.stderr.strip()[:200]}")
+            # Name the FIRST step that failed, not just the last symptom: the earlier
+            # attempt reported rev-parse's complaint, which is downstream of whichever
+            # setup command actually broke.
+            first_bad = next((d for d in steps if d.returncode != 0), None)
+            blame = (f"first failing setup step: {' '.join(first_bad.args)!r} "
+                     f"rc={first_bad.returncode} stderr={first_bad.stderr.strip()[:200]}"
+                     if first_bad else "every setup step exited 0, which should be impossible")
+            setup_error = (f"rev-parse gave {old_sha!r} (rc={rev.returncode}); {blame}")
         elif cloned.returncode != 0:
             setup_error = f"clone rc={cloned.returncode}; stderr={cloned.stderr.strip()[:200]}"
         present_before, rc2, buf2 = False, 0, io.StringIO()
