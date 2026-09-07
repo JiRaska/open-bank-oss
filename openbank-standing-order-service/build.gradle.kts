@@ -4,6 +4,9 @@
 
 plugins {
     id("openbank.quarkus-service")
+    // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
+    // this service and does not trigger a fleet-wide rebuild. 1.19.0 supports Gradle 9.
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -70,4 +73,21 @@ kover {
             }
         }
     }
+}
+
+// Mutation testing (ADR-0063 / ADR-0030 D3).
+// StandingOrder carries the recurrence/failure arithmetic that decides whether the next
+// payment fires: calculateNextDate per Frequency, MAX_CONSECUTIVE_FAILURES, and the
+// ONCE/endDate completion boundaries. 9 branch sites across 2 domain files.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.standingorder.domain.*")
+    targetTests = setOf("com.openbank.standingorder.domain.*", "com.openbank.standingorder.application.usecase.*")
+    // Advisory (ADR-0063): pitest.yml reports the score; the Gradle task itself must not
+    // fail the run, so the threshold is 0. The workflow owns the 70% check.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.standingorder.domain.*Kt")
 }
