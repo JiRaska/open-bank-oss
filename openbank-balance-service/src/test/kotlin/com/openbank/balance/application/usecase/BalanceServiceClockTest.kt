@@ -65,6 +65,10 @@ class BalanceServiceClockTest {
         // The cover decision reads the not-yet-effective credit tail (#1745); nothing is booked
         // forward here, so the value-date basis is a no-op and this test's subject is unaffected.
         coEvery { balanceRepo.sumNotYetEffectiveCredit(any(), any(), any()) } returns BigDecimal.ZERO
+        // #8351: placeHold is replay-safe, so it asks for an existing hold on the natural key
+        // BEFORE reserving. This test is about the clock, so the answer is "no prior hold" — but
+        // the stub has to exist or mockk fails the call rather than the assertion.
+        coEvery { holdRepo.findByNaturalKey(any(), any(), any()) } returns null
         // #8510: the reservation + hold + event go through ONE transactional repository method.
         coEvery { holdRepo.saveWithEvent(any(), any(), any()) } answers { firstArg() }
 
