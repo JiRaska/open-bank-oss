@@ -560,9 +560,16 @@ _probe_selftest() {
   # Counted, never hard-coded: a literal here would keep reporting a full corpus after someone
   # deleted half the cases, which is the exact shape min_subjects exists to catch (#4339).
   # --- probe_commit_before_utc (the bare-date baseline drift) --------------------------
-  # Hermetic fixture: 48 hourly EMPTY commits across 2026-08-08 and 2026-08-09, all in UTC, so a
-  # 9-hour timezone shift necessarily selects a different one. The cutoff is 2026-08-09T00:00:00Z
-  # and the only correct answer is the commit at 2026-08-08T23:00:00Z.
+  # Hermetic fixture: 48 hourly EMPTY commits across 2026-08-08 and 2026-08-09, all in UTC. The
+  # cutoff is 2026-08-09T00:00:00Z and the only correct answer is the commit at 2026-08-08T23:00Z.
+  #
+  # Do NOT reach for a timezone shift as the control here. Measured across five zones: the bare
+  # date resolves to that date at the CURRENT LOCAL TIME OF DAY, and since the local wall clock
+  # shifts by the same offset as the zone, the resulting instant is IDENTICAL for UTC, Prague,
+  # Tokyo and Kiritimati — only a zone whose local calendar date has rolled over (Honolulu) picks
+  # a different commit. A TZ-based control is therefore true only some hours of the day, which is
+  # how it first shipped here and went red the next morning. The drift is over the CLOCK, not over
+  # the map, so the control below compares the bare form against the probe instead.
   local crepo
   crepo="$(mktemp -d)"
   (
@@ -603,16 +610,17 @@ _probe_selftest() {
   _check "probe_commit_before_utc is TZ-invariant" \
     "$([ "$picked_tokyo" = "$picked" ] && echo 1 || echo 0)"
 
-  # THE vacuity control. If the broken form happened to agree across those two zones, the case
-  # above would prove nothing — so assert that this fixture can actually SEE the trap.
-  local bare_utc bare_tokyo
+  # THE vacuity control: the probe must DISAGREE with the broken form on this fixture. If they
+  # agreed, every case above would pass against a probe that merely reimplements the bug.
+  local bare_utc
   bare_utc="$(cd "$crepo" && TZ=UTC git rev-list -1 --before=2026-08-09 main 2>/dev/null)"
-  bare_tokyo="$(cd "$crepo" && TZ=Asia/Tokyo git rev-list -1 --before=2026-08-09 main 2>/dev/null)"
-  _check "the bare-date form IS zone-dependent (the trap is reproduced, not assumed)" \
-    "$([ -n "$bare_utc" ] && [ "$bare_utc" != "$bare_tokyo" ] && echo 1 || echo 0)"
+  _check "the probe and the bare-date form disagree (the trap is reproduced, not assumed)" \
+    "$([ -n "$bare_utc" ] && [ "$bare_utc" != "$picked" ] && echo 1 || echo 0)"
 
   # And the defect itself: under UTC the bare date resolves to 2026-08-09 at the current time of
-  # day, so it returns a commit from INSIDE the window it was meant to exclude.
+  # day, so it returns a commit from INSIDE the window it was meant to exclude. Deterministic:
+  # the fixture holds an hourly commit through all of 2026-08-09, so whatever the clock says there
+  # is always one at or after the window start and at or before the resolved cutoff.
   local bare_s cutoff_s2
   bare_s="$(git -C "$crepo" show -s --format=%ct "$bare_utc" 2>/dev/null)"
   cutoff_s2="$(probe_utc_epoch "2026-08-09T00:00:00Z")"
