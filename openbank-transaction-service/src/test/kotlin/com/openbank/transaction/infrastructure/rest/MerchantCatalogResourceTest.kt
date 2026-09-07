@@ -425,4 +425,57 @@ class MerchantCatalogResourceTest {
 
         assertThat(saved.captured.geoPrecision).isEqualTo("CITY")
     }
+
+    @Test
+    fun `locations for a merchant are listed in the form the read path keys on`() {
+        val row = MerchantLocationEntity().also {
+            it.descriptorKey = "BILLA"
+            it.cityToken = "BRNO"
+            it.lat = 49.1951
+            it.lon = 16.6068
+            it.city = "Brno"
+            it.country = "CZ"
+        }
+        coEvery { locations.listForMerchant("BILLA") } returns listOf(row)
+
+        val response = runBlocking { locationResource.listLocations("BILLA PRAHA 4") }
+
+        @Suppress("UNCHECKED_CAST")
+        val body = response.entity as List<MerchantLocationResponse>
+        assertThat(body).singleElement().satisfies({
+            assertThat(it.cityToken).isEqualTo("BRNO")
+            assertThat(it.precision).isEqualTo("CITY")
+        })
+    }
+
+    @Test
+    fun `deleting a location that is not there is a 404`() {
+        coEvery { locations.deleteByKey(any(), any()) } returns false
+
+        val response = runBlocking { locationResource.deleteLocation("BILLA", "BRNO") }
+
+        assertThat(response.status).isEqualTo(404)
+    }
+
+    @Test
+    fun `deleting a location normalises both halves of the key`() {
+        coEvery { locations.deleteByKey("BILLA", "PLZEN") } returns true
+
+        val response = runBlocking { locationResource.deleteLocation("BILLA A.S. PRAHA", "Plzeň") }
+
+        assertThat(response.status).isEqualTo(204)
+        coVerify { locations.deleteByKey("BILLA", "PLZEN") }
+    }
+
+    /** A descriptor that normalises away entirely must not become a lookup for the empty key. */
+    @Test
+    fun `a descriptor that normalises to nothing is refused on every location route`() {
+        assertThat(runBlocking { locationResource.listLocations("PRAHA 4") }.status).isEqualTo(400)
+        assertThat(runBlocking { locationResource.deleteLocation("PRAHA 4", "BRNO") }.status).isEqualTo(400)
+        assertThat(
+            runBlocking {
+                locationResource.upsertLocation("PRAHA 4", "BRNO", MerchantLocationRequest(lat = 1.0, lon = 2.0))
+            }.status,
+        ).isEqualTo(400)
+    }
 }
