@@ -58,16 +58,24 @@ enum class FunnelStage {
         /**
          * Derive the funnel stage from the three upstream status dimensions.
          * The logic must stay in the domain layer — no framework imports allowed.
+         *
+         * The `kyc` branch is an exhaustive `when` over [KycStage] (no `else`) so that a value
+         * added to that enum without being classified here is a compile error, not a silent
+         * fall-through — that fall-through is what previously sent an APPROVED kyc back to
+         * [REGISTERED], moving the funnel board backwards at the moment it should be closest to
+         * done (#8951). [REGISTERED] itself is not a `derive()` output: it is assigned directly
+         * when a party record is first created, before any KYC case exists.
          */
         fun derive(party: PartyStage, kyc: KycStage?, scaEnrolled: Boolean): FunnelStage = when {
             party == PartyStage.SUSPENDED || party == PartyStage.CLOSED -> BLOCKED
             party == PartyStage.ACTIVE && scaEnrolled -> ACTIVE
             party == PartyStage.ACTIVE && !scaEnrolled -> SCA_PENDING
-            kyc == KycStage.UNDER_REVIEW -> KYC_UNDER_REVIEW
-            kyc == KycStage.DOCUMENTS_REQUIRED -> KYC_DOCUMENTS_REQUIRED
-            kyc == KycStage.OPEN || kyc == null -> KYC_OPEN
-            kyc == KycStage.REJECTED || kyc == KycStage.EXPIRED -> BLOCKED
-            else -> REGISTERED
+            else -> when (kyc) {
+                null, KycStage.OPEN -> KYC_OPEN
+                KycStage.DOCUMENTS_REQUIRED -> KYC_DOCUMENTS_REQUIRED
+                KycStage.UNDER_REVIEW, KycStage.APPROVED -> KYC_UNDER_REVIEW
+                KycStage.REJECTED, KycStage.EXPIRED -> BLOCKED
+            }
         }
     }
 }
