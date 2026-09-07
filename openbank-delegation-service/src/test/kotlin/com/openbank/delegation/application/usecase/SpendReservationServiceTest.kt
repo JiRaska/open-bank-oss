@@ -78,8 +78,13 @@ class SpendReservationServiceTest {
         perTransactionLimit = perTx,
         dailyLimit = daily,
         monthlyLimit = monthly,
-        validFrom = now.minusDays(1),
-        validTo = now.plusDays(30),
+        // validTo must outlive the REAL wall clock too, not just the fixed test `clock`: the
+        // "real clock reading" test below deliberately constructs a service on Clock.systemUTC(),
+        // so a grant window anchored only to the fixed `now` expires the moment real time passes
+        // it - which it did (test authored 2026-08-08, this fired 2026-09-08). Anchor to whichever
+        // of the two clocks is later.
+        validFrom = minOf(now, OffsetDateTime.now(Clock.systemUTC())).minusDays(1),
+        validTo = maxOf(now, OffsetDateTime.now(Clock.systemUTC())).plusDays(30),
         status = status,
         createdAt = now,
         updatedAt = now,
