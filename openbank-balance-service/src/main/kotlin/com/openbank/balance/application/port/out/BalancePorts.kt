@@ -103,7 +103,7 @@ interface HoldRepository {
      * The hold recorded for the caller-supplied natural key (accountId, currency, referenceId), or
      * null. The referenceId names one durable business fact (a payment authorisation), so a retried
      * placeHold with the same triple must replay the ORIGINAL hold, never reserve a second time
-     * (ADR-0287, burn-down #8351). Backed by `uq_balance_holds_reference` (V11), which is also the
+     * (ADR-0287, burn-down #8351). Backed by `uq_balance_holds_reference` (V14), which is also the
      * race backstop for two concurrent first attempts.
      */
     suspend fun findByNaturalKey(accountId: UUID, currency: String, referenceId: String): BalanceHold?

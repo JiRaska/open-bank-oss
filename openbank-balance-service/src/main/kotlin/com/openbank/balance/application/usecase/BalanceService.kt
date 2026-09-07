@@ -113,7 +113,7 @@ class BalanceService(
         // retried placeHold with the same (accountId, currency, referenceId) replays the ORIGINAL
         // hold with no second reservation and no second event. The check runs BEFORE the balance
         // guard on purpose: a replay arriving after funds moved must still return the original hold,
-        // not fail with insufficient funds. `uq_balance_holds_reference` (V11) is the race backstop.
+        // not fail with insufficient funds. `uq_balance_holds_reference` (V14) is the race backstop.
         holdRepo.findByNaturalKey(cmd.accountId, cmd.currency, cmd.referenceId)?.let { return it }
 
         // The cover decision (#1745). Hydrating the value-date basis here is what actually stops a

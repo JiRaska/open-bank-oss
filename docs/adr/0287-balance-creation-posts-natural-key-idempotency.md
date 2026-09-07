@@ -36,7 +36,7 @@ Keep the endpoints free of a synthetic key and make the natural keys the contrac
   (the amount stayed unavailable until expiry or release — a real money effect). Fixed in the
   same change: `BalanceService.placeHold` checks the natural key
   (accountId, currency, referenceId) first and replays the original hold with no second
-  reservation and no second event; `uq_balance_holds_reference` (V11) is the race backstop
+  reservation and no second event; `uq_balance_holds_reference` (V14) is the race backstop
   for two concurrent first attempts, recovered by re-reading the winner's row.
 - **reconciliation** — an operator trigger, not a fact creation: it mutates no balance, and a
   re-run for the same date records a fresh report row BY DESIGN (the audit trail of runs).
