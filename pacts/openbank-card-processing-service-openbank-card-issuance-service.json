@@ -1,0 +1,208 @@
+{
+  "consumer": {
+    "name": "openbank-card-processing-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the card whose owner card-processing resolves before authorising",
+      "providerStates": [
+        {
+          "name": "a card held by a known party exists"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/cards/0a0a0a0a-1b1b-4c2c-8d3d-4e4e4e4e4e4e"
+      },
+      "response": {
+        "body": {
+          "accountId": "7c7c7c7c-8d8d-4e9e-8f0f-1a1a1a1a1a1a",
+          "id": "0a0a0a0a-1b1b-4c2c-8d3d-4e4e4e4e4e4e",
+          "partyId": "5f5f5f5f-6a6a-4b7b-8c8c-9d9d9d9d9d9d"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.accountId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.partyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST an authorisation for card-issuance to decide",
+      "providerStates": [
+        {
+          "name": "a card held by a known party exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "amountMinorUnits": 2500,
+          "channel": "CONTACTLESS",
+          "countryCode": "CZ",
+          "mcc": "5411",
+          "spentThisMonthInCategoryMinorUnits": 0,
+          "spentThisMonthMinorUnits": 0,
+          "spentTodayMinorUnits": 0
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.amountMinorUnits": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.channel": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.countryCode": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.mcc": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.spentThisMonthInCategoryMinorUnits": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.spentThisMonthMinorUnits": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.spentTodayMinorUnits": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/cards/0a0a0a0a-1b1b-4c2c-8d3d-4e4e4e4e4e4e/authorizations"
+      },
+      "response": {
+        "body": {
+          "approved": true,
+          "category": "GROCERIES"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.approved": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.category": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a card id card-issuance does not know",
+      "providerStates": [
+        {
+          "name": "no card exists with the unknown id"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/cards/3c3c3c3c-4d4d-4e4e-8f8f-9a9a9a9a9a9a"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-card-issuance-service"
+  }
+}
