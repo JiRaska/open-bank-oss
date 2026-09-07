@@ -209,6 +209,8 @@ class TransactionService(
             scaExemption = command.scaExemption,
             rail = command.rail,
             instructionType = command.instructionType,
+            reversalOf = command.reversalOf,
+            isReversal = command.type == TransactionType.REVERSAL,
         )
 
         val saved = try {
@@ -284,6 +286,7 @@ class TransactionService(
                 description = "Reversal: ${command.reason}",
                 valueDate = java.time.LocalDate.now(clock),
                 initiatedBy = UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                reversalOf = original.id,
             ),
         )
     }
