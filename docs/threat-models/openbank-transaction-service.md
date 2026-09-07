@@ -209,6 +209,38 @@ only from an operator request.
 **Rollback:** revert; `logoUrl` returns to null and the route disappears. The migration is additive,
 so the previous release runs unchanged against the new schema.
 
+## 4f. Per-town merchant locations (geo precision) — STRIDE supplement
+
+`merchant_location` and `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/locations[/{cityToken}]`
+let an operator record where a merchant trades town by town, and `MerchantGeo` gained a `precision`
+field. The surface shape matches §4d — operator-only writes into a table the customer statement
+renders from — so what is new here is a correctness-of-claim risk rather than a new kind of access.
+
+**What was wrong before.** V16 seeded ONE coordinate per brand. `BILLA` sat at a Prague address, so
+every Billa purchase in the country resolved there — on a screen captioned "where you spent". No
+component was broken: the data answered exactly the question it was asked, and a chain has no single
+location. A wrong location presented as a fact is worse than no location, and it was being presented
+as a fact because nothing in the response said how much the pin was worth.
+
+| STRIDE | Threat | Mitigation |
+| --- | --- | --- |
+| **T**ampering | A customer reads a purchase as having happened somewhere it did not — the basis for a false fraud report, or for dismissing a real one | `precision` is now part of the contract: `CITY` says the pin is representative and a client must caption a town rather than draw a street. `EXACT` is refused unless the row names the device that took the payment, in the API **and** in a table constraint, so it cannot be asserted by typing |
+| **T**ampering | A location for the wrong town is substituted for a merchant with shops in many | The read matches on the PAIR (descriptor, town-from-this-transaction's-descriptor). Matching on the merchant alone would return whichever row came back first — the same defect one level down, which `a location for another town is never substituted` holds |
+| **I**nfo disclosure | The location table becomes a record of where a CARDHOLDER was | Rows are keyed by (acquirer descriptor, town) and hold public business data. Nothing is keyed by customer, card or transaction; the town comes from the merchant's own descriptor, which is identical for every customer who shopped there |
+| **S**poofing | A planted location moves a merchant somewhere plausible | Writes require `Roles.OPERATOR`/`ADMIN` and OPA `merchant.update`; `source` records where a coordinate came from |
+| **D**oS | Locations add a per-row query to the statement page | One query per page, bounded by the distinct merchants on it, mirroring the catalogue read beside it |
+
+**DFD update:** none beyond §4d — same callers, same roles, one more local reference read inside the
+existing request.
+**Risk class:** truthfulness of a location claim shown to a customer.
+**Rollback:** revert; `precision` disappears and geo falls back to the catalogue pin. The migration is
+additive and its rollback is in the file.
+
+**Known gap, stated rather than papered over.** `EXACT` requires a terminal id and **no feed in this
+fleet supplies one** — card authorisations carry MCC and country and nothing else. So today every row
+is `CITY`, and the honest per-purchase location a POS or ATM identifier would give is not yet
+reachable. The column exists so a fact can land without a schema change; it does not pretend one has.
+
 ## 5. Residual risks / assumptions
 
 - **Booked balance is now a ledger projection (ADR-0039 Phase D-2).** The saga no longer debits/credits
@@ -246,6 +278,8 @@ so the previous release runs unchanged against the new schema.
   this change is inert until a separately-approved cutover.
 
 ## 6. Change log
+
+- **2026-09-07** — Per-town merchant locations (`merchant_location`, `…/locations[/{cityToken}]`) and a `precision` field on `MerchantGeo` (§4f). The seeded catalogue pinned each chain at one Prague coordinate, so a Billa purchase in Brno rendered 185 km from where it happened; coordinates now say whether they are `EXACT` (the place the money was spent) or `CITY` (representative for the town), and `EXACT` is refused without the device id that would justify it — in the API and in a `CHECK` constraint. No new caller, role or network edge. Rollback: revert; geo falls back to the catalogue pin.
 
 - **2026-09-07** — Merchant logos are stored and served by this service (`merchant_logo`, `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/logo`), and `merchant.logoUrl` became a derived origin-relative path instead of a catalogue-controlled URL (§4e). Two boundaries moved: operator-uploaded binary content that a customer app renders, and a URL clients dereference. The design point is privacy — an external logo host would have learned each customer's IP together with the merchant they paid, every statement render. Uploads are re-encoded rather than stored, which is what refuses SVG/polyglots and strips EXIF; header dimensions are checked before any pixel buffer is allocated. Rollback: revert; the field returns to null and the additive migration can stay or be dropped.
 

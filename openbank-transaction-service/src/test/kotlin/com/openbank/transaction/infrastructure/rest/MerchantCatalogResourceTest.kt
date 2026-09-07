@@ -6,8 +6,10 @@ package com.openbank.transaction.infrastructure.rest
 
 import com.openbank.transaction.infrastructure.image.LogoImages
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
+import com.openbank.transaction.infrastructure.persistence.entity.MerchantLocationEntity
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantLogoEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
+import com.openbank.transaction.infrastructure.persistence.repository.MerchantLocationRepository
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantLogoRepository
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionDescriptorRepository
 import io.mockk.coEvery
@@ -38,6 +40,8 @@ class MerchantCatalogResourceTest {
     private lateinit var catalog: MerchantCatalogRepository
     private lateinit var transactions: TransactionDescriptorRepository
     private lateinit var logos: MerchantLogoRepository
+    private lateinit var locations: MerchantLocationRepository
+    private lateinit var locationResource: MerchantLocationResource
     private lateinit var resource: MerchantCatalogResource
 
     @BeforeEach
@@ -45,7 +49,9 @@ class MerchantCatalogResourceTest {
         catalog = mockk()
         transactions = mockk()
         logos = mockk()
+        locations = mockk()
         resource = MerchantCatalogResource(catalog, transactions, logos)
+        locationResource = MerchantLocationResource(locations)
         coEvery { catalog.upsert(any()) } returns true
         coEvery { catalog.findByKey(any()) } returns null
         coEvery { catalog.deleteByKey(any()) } returns true
@@ -340,5 +346,83 @@ class MerchantCatalogResourceTest {
         val response = runBlocking { resource.deleteLogo("ALZACZ") }
 
         assertThat(response.status).isEqualTo(404)
+    }
+
+    /**
+     * EXACT is earned, not asserted. A coordinate that is not tied to the device which took the
+     * payment cannot be about where the money was spent, and letting an operator type EXACT would
+     * be the chain-pin mistake rewritten one table lower.
+     */
+    @Test
+    fun `a location claiming EXACT without a terminal is refused`() {
+        val response = runBlocking {
+            locationResource.upsertLocation(
+                "BILLA",
+                "BRNO",
+                MerchantLocationRequest(
+                    lat = 49.1951,
+                    lon = 16.6068,
+                    precision = "EXACT",
+                ),
+            )
+        }
+
+        assertThat(response.status).isEqualTo(400)
+        @Suppress("UNCHECKED_CAST")
+        assertThat((response.entity as Map<String, String>)["message"]).contains("requires a terminalId")
+    }
+
+    @Test
+    fun `a location with a terminal may claim EXACT`() {
+        val saved = slot<MerchantLocationEntity>()
+        coEvery { locations.upsert(capture(saved)) } returns true
+
+        val response = runBlocking {
+            locationResource.upsertLocation(
+                "BILLA",
+                "BRNO",
+                MerchantLocationRequest(
+                    lat = 49.1951,
+                    lon = 16.6068,
+                    precision = "EXACT",
+                    terminalId = "T-00042",
+                ),
+            )
+        }
+
+        assertThat(response.status).isEqualTo(201)
+        assertThat(saved.captured.geoPrecision).isEqualTo("EXACT")
+        assertThat(saved.captured.terminalId).isEqualTo("T-00042")
+    }
+
+    /**
+     * The town an operator types must key the same row the read path derives from a descriptor —
+     * folded and upper-cased. Stored verbatim, a carefully entered location would be one the lookup
+     * can never find.
+     */
+    @Test
+    fun `an operator-typed town is folded the way the descriptor parser folds it`() {
+        val saved = slot<MerchantLocationEntity>()
+        coEvery { locations.upsert(capture(saved)) } returns true
+
+        runBlocking {
+            locationResource.upsertLocation("BILLA", "Plzeň", MerchantLocationRequest(lat = 49.7475, lon = 13.3776))
+        }
+
+        assertThat(saved.captured.cityToken).isEqualTo("PLZEN")
+        assertThat(saved.captured.geoPrecision).isEqualTo("CITY")
+    }
+
+    /** The catalogue row itself may not be talked into EXACT either — same reason, same table shape. */
+    @Test
+    fun `an unknown precision on a catalogue upsert falls back to CITY rather than being stored`() {
+        val saved = slot<MerchantCatalogEntity>()
+        coEvery { catalog.upsert(capture(saved)) } returns true
+
+        runBlocking {
+            resource.upsert("BILLA", MerchantUpsertRequest(cleanName = "Billa", geoPrecision = "STREET"))
+        }
+
+        assertThat(saved.captured.geoPrecision).isEqualTo("CITY")
     }
 }

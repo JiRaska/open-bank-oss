@@ -10,7 +10,7 @@ info:
   # Minor bump (1.11.0 -> 1.12.0): additive only — GET /approvals (the checker's queue, issue
   # #5679, mirroring sanctions' #3472) plus two additive fields on the PATCH .../approvals/{id}
   # response (makerId, createdAt). No breaking change.
-  version: 1.15.0
+  version: 1.16.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -426,6 +426,69 @@ paths:
       responses:
         '204': {description: Logo removed}
         '404': {description: No logo stored for this merchant}
+  /api/v1/merchants/{descriptorKey}/locations:
+    get:
+      tags: [Merchant catalogue]
+      summary: Per-town locations for one merchant
+      operationId: listMerchantLocations
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Locations, by town
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/MerchantLocation'}
+        '400': {description: Key normalises to nothing}
+  /api/v1/merchants/{descriptorKey}/locations/{cityToken}:
+    put:
+      tags: [Merchant catalogue]
+      summary: Create or replace one town's location for a merchant
+      description: >-
+        `cityToken` is the town as the ACQUIRER DESCRIPTOR spells it — folded and upper-cased
+        (`PLZEN`, not `Plzeň`) — because that is the token the read path derives from a transaction
+        and matches on. It is folded the same way here, so an operator may type either form.
+      operationId: upsertMerchantLocation
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+        - name: cityToken
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MerchantLocationUpsert'}
+      responses:
+        '200': {description: Location replaced}
+        '201': {description: Location created}
+        '400': {description: Key or town normalises to nothing, unknown precision, or EXACT without a terminalId}
+    delete:
+      tags: [Merchant catalogue]
+      summary: Remove one town's location for a merchant
+      operationId: deleteMerchantLocation
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+        - name: cityToken
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '204': {description: Location removed}
+        '400': {description: Key or town normalises to nothing}
+        '404': {description: No location under that merchant and town}
   /api/v1/transactions/approvals:
     get:
       tags: [Transactions]
@@ -536,6 +599,10 @@ components:
         lon: {type: number, format: double, nullable: true}
         city: {type: string, nullable: true}
         country: {type: string, nullable: true}
+        geoPrecision:
+          type: string
+          enum: [EXACT, CITY]
+          description: What the coordinates on this catalogue row can answer. CITY for every chain.
         updatedAt: {type: string, format: date-time}
     MerchantLogoWritten:
       type: object
@@ -557,6 +624,42 @@ components:
         lon: {type: number, format: double, nullable: true}
         city: {type: string, nullable: true}
         country: {type: string, nullable: true}
+        geoPrecision:
+          type: string
+          enum: [EXACT, CITY]
+          default: CITY
+          description: >-
+            Anything but EXACT is stored as CITY. A chain's single coordinate cannot be where a
+            purchase happened in any of forty towns, so CITY is the honest default and EXACT on a
+            catalogue row is reserved for a genuinely single-site merchant.
+    MerchantLocation:
+      type: object
+      description: Where one merchant trades in one town, keyed by the town token its descriptors carry.
+      properties:
+        descriptorKey: {type: string}
+        cityToken: {type: string}
+        lat: {type: number, format: double}
+        lon: {type: number, format: double}
+        city: {type: string, nullable: true}
+        country: {type: string, nullable: true}
+        precision: {type: string, enum: [EXACT, CITY]}
+        terminalId: {type: string, nullable: true}
+        source: {type: string, nullable: true}
+        updatedAt: {type: string, format: date-time}
+    MerchantLocationUpsert:
+      type: object
+      required: [lat, lon]
+      description: >-
+        `precision` defaults to CITY and may only be EXACT together with a `terminalId`: a coordinate
+        not tied to the device that took the payment cannot be about where the money was spent.
+      properties:
+        lat: {type: number, format: double}
+        lon: {type: number, format: double}
+        city: {type: string, nullable: true}
+        country: {type: string, nullable: true}
+        precision: {type: string, enum: [EXACT, CITY], default: CITY}
+        terminalId: {type: string, nullable: true}
+        source: {type: string, nullable: true}
     ApprovalResponse:
       type: object
       description: >-
@@ -749,6 +852,13 @@ components:
         Location of the SHOP, for card-present spend. Absent for card-not-present merchants: an
         e-shop has no place where the money was spent, and a head-office pin on a "where you spent"
         map would be fiction.
+
+        `precision` says how much the coordinates are worth, and a client MUST honour it. `EXACT`
+        means the pin is about the place this money was spent — a single-site merchant, or a
+        location resolved from the device that took the payment. `CITY` means the merchant trades in
+        this town and the pin is representative: caption the town, do not draw a marker claiming a
+        street. The distinction exists because the catalogue's seeded rows pinned each chain at one
+        Prague address, so a purchase in Brno resolved 185 km from where it happened.
       properties:
         lat:
           type: number
@@ -765,7 +875,13 @@ components:
           type: string
           nullable: true
           description: ISO-3166 alpha-2.
-      required: [lat, lon]
+        precision:
+          type: string
+          enum: [EXACT, CITY]
+          description: >
+            EXACT = where the money was spent. CITY = the merchant trades in this town and the pin
+            is representative.
+      required: [lat, lon, precision]
 
     InitiateTransactionRequest:
       type: object
