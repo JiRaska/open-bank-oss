@@ -9,6 +9,7 @@ import com.openbank.transaction.application.port.out.TransactionEventPublisher
 import com.openbank.transaction.domain.event.TransactionCompletedEvent
 import com.openbank.transaction.domain.event.TransactionFailedEvent
 import com.openbank.transaction.domain.event.TransactionInitiatedEvent
+import com.openbank.transaction.domain.event.TransactionReversedEvent
 import com.openbank.transaction.domain.event.TransactionSettledEvent
 import com.openbank.transaction.domain.model.Transaction
 import jakarta.enterprise.context.ApplicationScoped
@@ -53,6 +54,17 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
 
     override fun failedPayload(transaction: Transaction, reason: String): String = objectMapper.writeValueAsString(
         TransactionFailedEvent(
+            aggregateId = transaction.id,
+            version = transaction.version,
+            referenceNumber = transaction.referenceNumber,
+            reason = reason,
+            occurredAt = Instant.now(clock),
+            sourceService = SOURCE_SERVICE,
+        ),
+    )
+
+    override fun reversedPayload(transaction: Transaction, reason: String): String = objectMapper.writeValueAsString(
+        TransactionReversedEvent(
             aggregateId = transaction.id,
             version = transaction.version,
             referenceNumber = transaction.referenceNumber,
