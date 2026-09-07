@@ -66,6 +66,7 @@ class AuthorizationServiceTest {
         val acc = account()
         val command = grantCommand(acc.id)
         coEvery { accountRepository.findById(acc.id) } returns acc
+        coEvery { authorizationRepository.findByAccountId(acc.id) } returns emptyList()
         val saved = slot<AccountAuthorization>()
         coEvery { authorizationRepository.save(capture(saved)) } answers { firstArg() }
 
@@ -82,6 +83,71 @@ class AuthorizationServiceTest {
         assertThat(saved.captured.grantedBy).isEqualTo(command.grantedBy)
         assertThat(saved.captured.grantedAt).isEqualTo(fixedInstant)
         assertThat(saved.captured.revokedAt).isNull()
+    }
+
+    @Test
+    fun `grantAuthorization replays the identical ACTIVE grant instead of stacking a duplicate (ADR-0295)`(): Unit =
+        runBlocking {
+            val acc = account()
+            val command = grantCommand(acc.id)
+            val original = authorization(accountId = acc.id, partyId = command.partyId, role = command.role).copy(
+                dailyLimit = command.dailyLimit,
+                transactionLimit = command.transactionLimit,
+                validFrom = command.validFrom,
+                validTo = command.validTo,
+            )
+            coEvery { accountRepository.findById(acc.id) } returns acc
+            coEvery { authorizationRepository.findByAccountId(acc.id) } returns listOf(original)
+
+            val result = service.grantAuthorization(command)
+
+            assertThat(result).isEqualTo(original)
+            coVerify(exactly = 0) { authorizationRepository.save(any()) }
+        }
+
+    @Test
+    fun `grantAuthorization replays even when the retry serializes the limit at a different scale`(): Unit =
+        runBlocking {
+            val acc = account()
+            val command = grantCommand(acc.id)
+            val original = authorization(accountId = acc.id, partyId = command.partyId, role = command.role).copy(
+                // Same money, different BigDecimal scale — 10000.0 vs the command's 10000.00.
+                dailyLimit = Money.of(BigDecimal("10000.0"), "CZK"),
+                transactionLimit = command.transactionLimit,
+                validFrom = command.validFrom,
+                validTo = command.validTo,
+            )
+            coEvery { accountRepository.findById(acc.id) } returns acc
+            coEvery { authorizationRepository.findByAccountId(acc.id) } returns listOf(original)
+
+            val result = service.grantAuthorization(command)
+
+            assertThat(result).isEqualTo(original)
+            coVerify(exactly = 0) { authorizationRepository.save(any()) }
+        }
+
+    @Test
+    fun `grantAuthorization persists an identical-looking grant once the original was REVOKED`(): Unit = runBlocking {
+        val acc = account()
+        val command = grantCommand(acc.id)
+        val revoked = authorization(accountId = acc.id, partyId = command.partyId, role = command.role).copy(
+            dailyLimit = command.dailyLimit,
+            transactionLimit = command.transactionLimit,
+            validFrom = command.validFrom,
+            validTo = command.validTo,
+            status = AuthorizationStatus.REVOKED,
+            revokedBy = UUID.randomUUID(),
+            revokedAt = fixedInstant,
+            revokedReason = "no longer needed",
+        )
+        coEvery { accountRepository.findById(acc.id) } returns acc
+        coEvery { authorizationRepository.findByAccountId(acc.id) } returns listOf(revoked)
+        coEvery { authorizationRepository.save(any()) } answers { firstArg() }
+
+        service.grantAuthorization(command)
+
+        // A re-grant after revoke is a NEW grant, not a retry — it must persist.
+        coVerify(exactly = 1) { authorizationRepository.save(any()) }
     }
 
     @Test
