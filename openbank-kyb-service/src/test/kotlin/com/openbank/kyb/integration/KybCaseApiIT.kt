@@ -192,4 +192,24 @@ class KybCaseApiIT {
             { post("/api/v1/kyb/lookup") } Then
             { statusCode(404) }
     }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_KYC"])
+    fun `a typo in the case status filter is a 400, not the MANUAL_REVIEW list`() {
+        // #9038: an unparseable status used to silently substitute MANUAL_REVIEW and answer the
+        // WRONG list with a 200. Absent still means the operator review queue.
+        Given {
+            queryParam("status", "MANUAL_REVIE")
+        } When
+            { get("/api/v1/kyb/cases") } Then
+            { statusCode(400) }
+        Given { this } When
+            { get("/api/v1/kyb/cases") } Then
+            { statusCode(200) }
+        Given {
+            queryParam("status", "MANUAL_REVIEW")
+        } When
+            { get("/api/v1/kyb/cases") } Then
+            { statusCode(200) }
+    }
 }
