@@ -46,6 +46,36 @@ quarkus:
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
 
+  # REST clients. The URL MUST live under `quarkus.rest-client.<configKey>.url` — this is the
+  # only key `@RegisterRestClient(configKey = ...)` reads.
+  #
+  # This service previously declared the URLs as bare top-level keys (`consent-service.url`,
+  # `incentive-service.url`). Quarkus does not read those for a REST client, so every client here
+  # was built with no base URL and threw from `RestClientCDIDelegateBuilder.configureBaseUrl` on
+  # first use. Both call sites catch broadly and fail closed, so the failure surfaced as
+  # "credit consent unreadable for party … treating as absent" for EVERY party, and an enrolment
+  # sweep reporting `{"enrolled":0}` — indistinguishable from an empty segment. Found by running a
+  # real campaign in sandbox, not by any test: the tests inject the ports directly and never
+  # exercise this configuration.
+  #
+  # The env var names are unchanged, so the Deployment needs no edit; only the key they land on
+  # moves. lending-service's own application.yaml already uses this shape.
+  rest-client:
+    consent-service:
+      url: ${CONSENT_SERVICE_URL:http://localhost:8106}
+      connect-timeout: 2000
+      read-timeout: 3000
+    incentive-service:
+      url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
+      connect-timeout: 2000
+      read-timeout: 3000
+    # ADR-0269 rule 2 (#8918). Short read timeout: this sits in the send path and a slow refusal
+    # must not hold a journey open.
+    lending-service:
+      url: ${LENDING_SERVICE_URL:http://lending-service.lending.svc:8126}
+      connect-timeout: 2000
+      read-timeout: 3000
+
   # Health probes and the Prometheus scrape live on the management interface, not the
   # application port — the Deployment probes /q/health/{live,ready} on 8085 and the
   # PodMonitor scrapes the same port. Without this block nothing listens there, so the
@@ -108,16 +138,6 @@ openbank:
     quiet-hours-start: ${CAMPAIGN_QUIET_HOURS_START:21}
     quiet-hours-end: ${CAMPAIGN_QUIET_HOURS_END:8}
     consent-grantee: party-service:marketing-comms
-
-consent-service:
-  url: http://localhost:8106
-
-incentive-service:
-  url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
-
-# ADR-0269 rule 2 (#8918): the credit distress floor, asked per credit send.
-lending-service:
-  url: ${LENDING_SERVICE_URL:http://lending-service.lending.svc:8126}
 
 analytics:
   clickhouse-url: ${CLICKHOUSE_URL:http://localhost:8123}
