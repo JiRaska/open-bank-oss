@@ -5,6 +5,7 @@
 #
 # Actions gated (KybResource):
 #   kyb.lookup                 — POST /kyb/lookup (public-register read, creates nothing)
+#   kyb.ubo.read               — GET  /kyb/ubo (beneficial-ownership register read, staff only)
 #   kyb.case.start             — POST /kyb/cases (mints the entity party in party-service)
 #   kyb.case.list              — GET /kyb/cases (customer: own cases; operator: review queue)
 #   kyb.case.read              — GET /kyb/cases/{id}
@@ -15,6 +16,10 @@
 #   kyb.case.abandon           — POST /kyb/cases/{id}/abandon
 #   kyb.case.review.resolve    — POST /kyb/cases/{id}/review/resolve (staff)
 #   kyb.case.reject            — POST /kyb/cases/{id}/reject (staff)
+#
+# kyb.ubo.read is covered by the staff `kyb.` prefix rule below and is deliberately ABSENT from the
+# edge list: a beneficial-ownership extract is personal data about third parties who are not the
+# caller, so it belongs to the analyst working the review queue and not to a customer's own app.
 #
 # Same narrowing as delegation_rest_ext.rego: the customer path is granted to the EDGE principal
 # only (it authenticates the human and stamps X-Customer-Party-Id, the header every customer
