@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.74.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.73.0...customer-edge-v0.74.0) (2026-09-07)
+
+
+### Features
+
+* **account:** show the owner everyone who can act on their account ([#8011](https://github.com/JiRaska/open-bank-oss/issues/8011)) ([b201a04](https://github.com/JiRaska/open-bank-oss/commit/b201a0415ccbfb6ba3f76532122f463259dab08e))
+* **delegation:** reserve delegated spend, so a payment-capable grant can exist ([#8321](https://github.com/JiRaska/open-bank-oss/issues/8321)) ([a5225f9](https://github.com/JiRaska/open-bank-oss/commit/a5225f9184d74cb7f16f1e0c6a4c12b2701125b3))
+* **kyb:** legal-entity onboarding, representation mandates and profile switching (ADR-0284) ([#8863](https://github.com/JiRaska/open-bank-oss/issues/8863)) ([3766d3d](https://github.com/JiRaska/open-bank-oss/commit/3766d3de2281dbeb17e0b7a6a4e6c754988d1145))
+
+
+### Bug Fixes
+
+* **consent:** wire the OPA path for the edge's ADR-0269 credit-consent switch ([#8489](https://github.com/JiRaska/open-bank-oss/issues/8489)) ([5d38133](https://github.com/JiRaska/open-bank-oss/commit/5d38133566414fd0923209e41423d08f530d1956))
+* **party:** make GDPR Art. 15 and Art. 20 exports reachable by the data subject ([#8487](https://github.com/JiRaska/open-bank-oss/issues/8487)) ([2ba4787](https://github.com/JiRaska/open-bank-oss/commit/2ba4787544aeaf723cd1e867f04777c32978f68b))
+
+
+### Security
+
+* **payments:** bind delegated payment ingress ([#8274](https://github.com/JiRaska/open-bank-oss/issues/8274)) ([3f84120](https://github.com/JiRaska/open-bank-oss/commit/3f84120aafdf04b818d9e898fc148d77bbc62ac5))
+
 ## [0.73.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.72.0...customer-edge-v0.73.0) (2026-09-03)
 
 

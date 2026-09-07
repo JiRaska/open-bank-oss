@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.28.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.27.1...ledger-service-v1.28.0) (2026-09-07)
+
+
+### Features
+
+* **clearing:** post net-settlement journal per settled batch via the transactional outbox ([#8723](https://github.com/JiRaska/open-bank-oss/issues/8723)) ([5e38f44](https://github.com/JiRaska/open-bank-oss/commit/5e38f445e4169f24a4f0871ca748c22debf9e384))
+* **ledger:** record the synthetic taint on the journal and let the trial balance exclude it ([#8629](https://github.com/JiRaska/open-bank-oss/issues/8629)) ([7989f39](https://github.com/JiRaska/open-bank-oss/commit/7989f39afab7a77bb389a1391878b0292c6254ed))
+
+
+### Bug Fixes
+
+* **balance,ledger:** fuzz-found 500s on date query params become 400/default ([#8835](https://github.com/JiRaska/open-bank-oss/issues/8835)) ([062c26a](https://github.com/JiRaska/open-bank-oss/commit/062c26afd615d4c973a51bfd4920618ceb5401f4))
+
 ## [1.27.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.27.0...ledger-service-v1.27.1) (2026-09-03)
 
 

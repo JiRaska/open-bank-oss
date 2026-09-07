@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.2...standing-order-service-v0.16.3) (2026-09-07)
+
+
+### Bug Fixes
+
+* **standing-order:** correct the create POST's OpenAPI schema to the served contract ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#8968](https://github.com/JiRaska/open-bank-oss/issues/8968)) ([b997cf0](https://github.com/JiRaska/open-bank-oss/commit/b997cf01c2b54b00850fd2fe8e86ab9d35abf98b))
+* **standing-order:** reject a missing amount at the deserialization boundary ([#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)) ([#8971](https://github.com/JiRaska/open-bank-oss/issues/8971)) ([338d1b1](https://github.com/JiRaska/open-bank-oss/commit/338d1b12245981f4ed43225d4bc14206f5431e93))
+
 ## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.1...standing-order-service-v0.16.2) (2026-09-03)
 
 

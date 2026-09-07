@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.30.1...notification-service-v0.31.0) (2026-09-07)
+
+
+### Features
+
+* **notification:** alert grantor on first delegated spend ([#8334](https://github.com/JiRaska/open-bank-oss/issues/8334)) ([24e15de](https://github.com/JiRaska/open-bank-oss/commit/24e15de97237ff29bb888b66c437143f8d69d277))
+* **notifications:** tell customers when a third party gains or loses account access ([#8491](https://github.com/JiRaska/open-bank-oss/issues/8491)) ([add3357](https://github.com/JiRaska/open-bank-oss/commit/add33579f036aae4ca9b09534d845d2a8dfa3229))
+
+
+### Bug Fixes
+
+* **notification:** remove the unproducible PASSWORD_RESET template ([#8857](https://github.com/JiRaska/open-bank-oss/issues/8857)) ([c5b43f8](https://github.com/JiRaska/open-bank-oss/commit/c5b43f81db762b74820b5aea5d78e43f6c793d5c))
+* **notification:** renumber the deduplication-key migration V14 to V15 — V14 is taken on main ([#8953](https://github.com/JiRaska/open-bank-oss/issues/8953)) ([0464d4a](https://github.com/JiRaska/open-bank-oss/commit/0464d4a06be781c37f22e7d4fffedb3b60dabf5b))
+
 ## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.30.0...notification-service-v0.30.1) (2026-09-03)
 
 

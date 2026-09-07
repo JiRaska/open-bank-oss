@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.1...psd2-service-v0.11.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **psd2:** declare the enforced Idempotency-Key on all four v2 PIS endpoints ([#8772](https://github.com/JiRaska/open-bank-oss/issues/8772)) ([ed9addd](https://github.com/JiRaska/open-bank-oss/commit/ed9addd8a3d7aa7901d973dd76102dd4647d719e)), closes [#8351](https://github.com/JiRaska/open-bank-oss/issues/8351)
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.0...psd2-service-v0.11.1) (2026-09-03)
 
 

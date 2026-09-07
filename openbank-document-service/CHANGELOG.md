@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.2...document-service-v0.14.3) (2026-09-07)
+
+
+### Bug Fixes
+
+* **document:** bound the party document browse and put it behind the PDP ([#8479](https://github.com/JiRaska/open-bank-oss/issues/8479)) ([be8c178](https://github.com/JiRaska/open-bank-oss/commit/be8c1783ff47bae36c2a83b555d37fbc3a8d1e18)), closes [#8082](https://github.com/JiRaska/open-bank-oss/issues/8082)
+* **kafka:** resolve the 11 baselined auto.offset.reset config lies ([#8370](https://github.com/JiRaska/open-bank-oss/issues/8370)) ([#8860](https://github.com/JiRaska/open-bank-oss/issues/8860)) ([f328ebd](https://github.com/JiRaska/open-bank-oss/commit/f328ebdf265f2dd3dd90ad3db3d2a052eb657923))
+
 ## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.14.1...document-service-v0.14.2) (2026-09-03)
 
 

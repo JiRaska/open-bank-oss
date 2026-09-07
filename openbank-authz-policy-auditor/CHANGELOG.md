@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/authz-policy-auditor-v0.6.1...authz-policy-auditor-v0.6.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **authz-policy-auditor:** refuse instead of returning a fabricated proposal URL ([#5906](https://github.com/JiRaska/open-bank-oss/issues/5906)) ([0b476ab](https://github.com/JiRaska/open-bank-oss/commit/0b476ab6c9083eae5c8926dcd0e194afc940846b)), closes [#5897](https://github.com/JiRaska/open-bank-oss/issues/5897)
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/authz-policy-auditor-v0.6.0...authz-policy-auditor-v0.6.1) (2026-08-27)
 
 

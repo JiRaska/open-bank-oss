@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.9.1...clearing-service-v0.10.0) (2026-09-07)
+
+
+### Features
+
+* **clearing:** post net-settlement journal per settled batch via the transactional outbox ([#8723](https://github.com/JiRaska/open-bank-oss/issues/8723)) ([5e38f44](https://github.com/JiRaska/open-bank-oss/commit/5e38f445e4169f24a4f0871ca748c22debf9e384))
+
+
+### Bug Fixes
+
+* **clearing:** announce an empty clearing cycle instead of settling it silently ([#8844](https://github.com/JiRaska/open-bank-oss/issues/8844)) ([38239b2](https://github.com/JiRaska/open-bank-oss/commit/38239b242e37e4a3f3c83b218cd982414fdd126d)), closes [#8745](https://github.com/JiRaska/open-bank-oss/issues/8745)
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.9.0...clearing-service-v0.9.1) (2026-09-03)
 
 

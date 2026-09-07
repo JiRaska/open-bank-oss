@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.4...audit-service-v0.18.5) (2026-09-07)
+
+
+### Bug Fixes
+
+* **audit:** subscribe to billing, standing-order and psd2 — [#6035](https://github.com/JiRaska/open-bank-oss/issues/6035)'s last three gaps ([#8534](https://github.com/JiRaska/open-bank-oss/issues/8534)) ([a2512e1](https://github.com/JiRaska/open-bank-oss/commit/a2512e1be448c62419eb7f0615fd6877c98e3e06))
+
 ## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.3...audit-service-v0.18.4) (2026-09-03)
 
 

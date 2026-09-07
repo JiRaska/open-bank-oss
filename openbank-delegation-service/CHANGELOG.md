@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.3...delegation-service-v0.14.0) (2026-09-07)
+
+
+### Features
+
+* **delegation:** add lifecycle approval evidence ([#8310](https://github.com/JiRaska/open-bank-oss/issues/8310)) ([ded789d](https://github.com/JiRaska/open-bank-oss/commit/ded789d3c8fb62b27fbcf4ea45f83c19f6c7876d))
+* **notification:** alert grantor on first delegated spend ([#8334](https://github.com/JiRaska/open-bank-oss/issues/8334)) ([24e15de](https://github.com/JiRaska/open-bank-oss/commit/24e15de97237ff29bb888b66c437143f8d69d277))
+
 ## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.13.2...delegation-service-v0.13.3) (2026-09-03)
 
 

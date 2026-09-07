@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.1...aml-service-v0.10.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **kafka:** resolve the 11 baselined auto.offset.reset config lies ([#8370](https://github.com/JiRaska/open-bank-oss/issues/8370)) ([#8860](https://github.com/JiRaska/open-bank-oss/issues/8860)) ([f328ebd](https://github.com/JiRaska/open-bank-oss/commit/f328ebdf265f2dd3dd90ad3db3d2a052eb657923))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.10.0...aml-service-v0.10.1) (2026-09-03)
 
 

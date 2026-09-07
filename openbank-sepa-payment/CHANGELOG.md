@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.1...sepa-payment-v0.13.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **sepa-payment:** add sourceService to the Temporal-path event payloads ([#5888](https://github.com/JiRaska/open-bank-oss/issues/5888)) ([b81eb66](https://github.com/JiRaska/open-bank-oss/commit/b81eb66bc0e9b5697ad32601171e56101e3c11c8)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.0...sepa-payment-v0.13.1) (2026-09-04)
 
 

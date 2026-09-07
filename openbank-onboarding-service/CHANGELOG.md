@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.9.0...onboarding-service-v0.10.0) (2026-09-07)
+
+
+### Features
+
+* **kyb:** legal-entity onboarding, representation mandates and profile switching (ADR-0284) ([#8863](https://github.com/JiRaska/open-bank-oss/issues/8863)) ([3766d3d](https://github.com/JiRaska/open-bank-oss/commit/3766d3de2281dbeb17e0b7a6a4e6c754988d1145))
+
+
+### Bug Fixes
+
+* **onboarding:** reject an unparseable ?stage= with 400 instead of returning every record ([#8710](https://github.com/JiRaska/open-bank-oss/issues/8710)) ([8e4cc9c](https://github.com/JiRaska/open-bank-oss/commit/8e4cc9c1b0aa5d31d4ec7a359397ceae8b0b2ce2)), closes [#8699](https://github.com/JiRaska/open-bank-oss/issues/8699)
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.4...onboarding-service-v0.9.0) (2026-08-24)
 
 

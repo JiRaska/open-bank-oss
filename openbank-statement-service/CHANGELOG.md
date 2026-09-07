@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.12.0...statement-service-v0.12.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **kafka:** resolve the 11 baselined auto.offset.reset config lies ([#8370](https://github.com/JiRaska/open-bank-oss/issues/8370)) ([#8860](https://github.com/JiRaska/open-bank-oss/issues/8860)) ([f328ebd](https://github.com/JiRaska/open-bank-oss/commit/f328ebdf265f2dd3dd90ad3db3d2a052eb657923))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.11.0...statement-service-v0.12.0) (2026-08-24)
 
 

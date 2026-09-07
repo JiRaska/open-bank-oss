@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.4](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.3...card-issuance-service-v0.26.4) (2026-09-07)
+
+
+### Bug Fixes
+
+* **card-issuance:** give the corrected IssueCardRequest spec its MINOR bump ([#8452](https://github.com/JiRaska/open-bank-oss/issues/8452)) ([8691976](https://github.com/JiRaska/open-bank-oss/commit/8691976f59834abaa4cc56bf1ce1758ed257c35f)), closes [#8150](https://github.com/JiRaska/open-bank-oss/issues/8150)
+
 ## [0.26.3](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.2...card-issuance-service-v0.26.3) (2026-09-03)
 
 
