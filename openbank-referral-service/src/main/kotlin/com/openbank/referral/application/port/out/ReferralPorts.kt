@@ -3,11 +3,12 @@
 
 package com.openbank.referral.application.port.out
 
-import com.openbank.referral.domain.ReferralEvent
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralProgram
-import com.openbank.referral.domain.ReferralPublishOutcome
 import com.openbank.referral.domain.ReferralReward
+import io.smallrye.mutiny.Uni
 import java.util.UUID
 
 interface ReferralProgramRepository {
@@ -23,20 +24,24 @@ interface ReferralInviteRepository {
     suspend fun attribute(id: UUID, refereePartyId: UUID, at: java.time.Instant): ReferralInvite
 }
 
+/**
+ * [create] and [outcome] persist the reward row and its outbox event(s) in ONE transaction
+ * (ADR-0049/ADR-0050) — never a separate "publish" call after the fact. A reward whose event was
+ * hand-carried to a live transport outside the state-changing transaction is the exact shape
+ * #7190 replaced: a process crash or emit failure between the two could lose the event, or record
+ * one for a reward that never committed. The outbox row IS the durable hand-off; a scheduled
+ * dispatcher drains it asynchronously (see [ReferralOutboxRepository]).
+ */
 interface ReferralRewardRepository {
     suspend fun findByInviteAndEvent(inviteId: UUID, eventId: String): ReferralReward?
     suspend fun findByReference(reference: String): ReferralReward?
-    suspend fun create(reward: ReferralReward): ReferralReward
-    suspend fun outcome(reference: String, status: String, at: java.time.Instant): ReferralReward
+    suspend fun create(reward: ReferralReward, outbox: List<OutboxMessage>): ReferralReward
+    suspend fun outcome(reference: String, status: String, at: java.time.Instant, outbox: OutboxMessage): ReferralReward
 }
 
-interface ReferralEventPublisher {
-    /**
-     * Hands [event] to the transport and reports what actually happened. Callers must branch on
-     * the returned [ReferralPublishOutcome] — there is deliberately no boolean, so an unwired
-     * adapter cannot be mistaken for a delivering one.
-     */
-    suspend fun publish(event: ReferralEvent): ReferralPublishOutcome
+/** Outbound port for draining the transactional referral outbox (read pending, mark sent/failed). */
+interface ReferralOutboxRepository : OutboxRepository {
+    fun persistInTransaction(message: OutboxMessage): Uni<Void>
 }
 
 interface ReferralAuditRepository {

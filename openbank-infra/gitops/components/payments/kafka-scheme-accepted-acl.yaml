@@ -515,6 +515,10 @@ rules:
       # SecretSyncedError, ArgoCD never advances past sync-wave -1, and no pod is ever created —
       # the #2749 failure delegation-service hit.
       - kyb-service
+      # issue #7190: Qualified/RewardRequested/RewardOutcome outbox relay, ns referral (first ESO
+      # client there). Without this the keystore ExternalSecret sits at SecretSyncedError, ArgoCD
+      # never advances past sync-wave -1, and no pod is ever created — the #2749 failure class.
+      - referral-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1

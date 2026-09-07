@@ -1,0 +1,51 @@
+# Domain event topics produced by referral-service's transactional outbox (#7190: the outbox
+# relay that replaces UnwiredReferralEventPublisher's silent drop). Declared explicitly (the
+# broker does not auto-create topics — kafka.yaml, ADR-0137) so the Strimzi topic operator
+# manages them and the producer's outbox dispatcher/readiness has somewhere to write. Lives in
+# `messaging` (the topic operator only watches its own namespace), labelled for the
+# openbank-cluster. Single partition + RF 1 for the single-broker sandbox; prod should raise
+# partitions for parallelism and RF to 3 — same shape as document-service's kafka-topic.yaml.
+#
+# Producer-only for now: no consumer exists yet (Campaign Studio side, #7194), which is why
+# these three topics are allowlisted in rules.yaml: event_consumer_liveness.allowlist.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.referral.qualified.v1
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.referral.reward-requested.v1
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.referral.reward-outcome.v1
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

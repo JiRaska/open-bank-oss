@@ -408,6 +408,12 @@ change_requirements:
         reason: "ADR-0282 phase 2, first slice. The Lístek ledger publishes earn, benefit-grant and expiry events; the services that would react to them (billing for the IFRS 15 provisioning journal, interest and fx for benefit delivery) are money-path and belong to a later slice, so a consumer written now would have nothing to do. ADR-0006's own sequencing is producers before consumers (#1916). Not the #889 class — the absence is the plan, not an oversight. Re-triage: remove this entry with the first delivering-engine PR (#8793)."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
+      - topic: "openbank.referral.qualified.v1"
+        reason: "#7190's outbox relay replaces UnwiredReferralEventPublisher's silent drop and is deliberately producer-only: the PR's own scope note says building the Campaign Studio consumer side is out of scope, tracked as future work (#7194). The producer is fully wired — openbank-infra/gitops/components/referral/kafka-topic.yaml declares the KafkaTopic and kafka-referral-service-mtls.yaml grants Write+Describe — so this is the same shape as the proposal-events entry above (ADR-0244): a real, deployed producer with no consumer yet. Re-triage and remove once #7194 lands a consumer."
+      - topic: "openbank.referral.reward-requested.v1"
+        reason: "Same #7190 outbox relay as openbank.referral.qualified.v1 above — producer-only pending the Campaign Studio consumer (#7194). See that entry for the full reasoning."
+      - topic: "openbank.referral.reward-outcome.v1"
+        reason: "Same #7190 outbox relay as openbank.referral.qualified.v1 above — producer-only pending the Campaign Studio consumer (#7194). See that entry for the full reasoning."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
