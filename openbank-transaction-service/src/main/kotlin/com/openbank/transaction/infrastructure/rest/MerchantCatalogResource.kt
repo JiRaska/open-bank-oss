@@ -8,6 +8,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.transaction.domain.model.MerchantDescriptor
 import com.openbank.transaction.infrastructure.image.LogoImages
+import com.openbank.transaction.infrastructure.persistence.entity.GeoPrecision
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantLogoEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
@@ -286,6 +287,11 @@ data class MerchantUpsertRequest(
     val lon: Double? = null,
     val city: String? = null,
     val country: String? = null,
+    /**
+     * What the coordinates on the catalogue row can answer. Defaults to CITY, which is the honest
+     * answer for a chain — one pin cannot be where a purchase happened in any of forty towns.
+     */
+    val geoPrecision: String? = null,
 )
 
 /**
@@ -301,6 +307,7 @@ data class MerchantAdminResponse(
     val cleanName: String,
     val logoUrl: String?,
     val logoContentHash: String?,
+    val geoPrecision: String,
     val category: String?,
     val lat: Double?,
     val lon: Double?,
@@ -323,6 +330,7 @@ private fun MerchantUpsertRequest.toEntity(key: String) = MerchantCatalogEntity(
     it.category = category?.trim()?.ifBlank { null }?.uppercase()
     it.lat = lat
     it.lon = lon
+    it.geoPrecision = geoPrecision?.trim()?.uppercase()?.takeIf { p -> p == GeoPrecision.EXACT } ?: GeoPrecision.CITY
     it.city = city?.trim()?.ifBlank { null }
     it.country = country?.trim()?.ifBlank { null }?.uppercase()
     it.updatedAt = Instant.now()
@@ -333,6 +341,7 @@ private fun MerchantCatalogEntity.toAdminResponse() = MerchantAdminResponse(
     cleanName = cleanName,
     logoUrl = logoUrl,
     logoContentHash = logoEtag,
+    geoPrecision = geoPrecision,
     category = category,
     lat = lat,
     lon = lon,
