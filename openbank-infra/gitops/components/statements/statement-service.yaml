@@ -35,7 +35,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-statement-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "8fe6497b9e3148bf"
+        openbank.tech/policy-checksum: "69762d1c8d9c894a"
       labels:
         app.kubernetes.io/name: statement-service
         app.kubernetes.io/part-of: statements
