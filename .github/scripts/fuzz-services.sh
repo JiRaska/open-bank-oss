@@ -336,6 +336,18 @@ STUBEOF
     echo "==> [${svc}] disabling Temporal worker via ${prop}=false"
   done
 
+  # Fail-closed feature gates keyed off a secret with an EMPTY default, derived like the worker
+  # flags: a `${VAR:}` placeholder whose name contains PEPPER or TOKEN_PEPPER (today: party's
+  # OPENBANK_IDENTITY_RC_PEPPER, ADR-0072) leaves the feature deliberately OFF — and the endpoint
+  # then answers a DESIGNED 503 (DEDUP_UNAVAILABLE), which schemathesis counts as a server error
+  # (party leg of run 34017868446). A fixed job-local value flips the gate the same way the
+  # deployed secret does; a fuzz run exercises the endpoint, not uniqueness.
+  PEPPER_VARS="$(grep -oE '\$\{[A-Za-z0-9_]*PEPPER[A-Za-z0-9_]*:\}' "$APP_YAML" | sed -E 's/^\$\{([A-Za-z0-9_]+):\}$/\1/' | sort -u || true)"
+  for var in ${PEPPER_VARS}; do
+    export "${var}=fuzz-static-pepper-not-a-secret"
+    echo "==> [${svc}] ${var} set to a fixed fuzz value (fail-closed gate would answer 503 by design)"
+  done
+
   # Compile BEFORE the readiness clock starts. The 180s budget below was being spent on the
   # Gradle build, not on the Quarkus boot: measured on run 32288156614, `starting quarkusDev` was
   # echoed at 18:43:10 and quarkusDev's first log line landed at 18:45:38 — 148 of 180 seconds
