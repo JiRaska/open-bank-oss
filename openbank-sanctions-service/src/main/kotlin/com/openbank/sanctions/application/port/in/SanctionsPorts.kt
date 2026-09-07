@@ -18,8 +18,13 @@ data class ScreenEntityCommand(
     val dateOfBirth: String? = null,
     val nationality: String? = null,
     val identifiers: Map<String, String> = emptyMap(),
-    /** Restrict screening to these list types (null/empty = all enabled lists). */
-    val listTypes: List<String>? = null,
+    /**
+     * Restrict screening to these list types (null/empty = all enabled lists).
+     * Nullable element for the same reason as [aliases] (#7867): `{"listTypes": [null]}`
+     * arrives holding a null despite the Kotlin element type — fleet fuzz run 34017868446
+     * turned exactly that into an NPE-driven 500.
+     */
+    val listTypes: List<String?>? = null,
 )
 
 data class ReviewCommand(
