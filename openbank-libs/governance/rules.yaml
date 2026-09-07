@@ -924,6 +924,16 @@ money_path_services:
                                             # a gate (TPP revocation, consent termination by an operator) are not
                                             # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                             # joins the #3679 cohort.
+  - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                            # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                            # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                            # may move, which is money-path for the same reason sca/consent/vop/
+                                            # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                            # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                            # repair money movement; card.create/activate are SCA-bound customer
+                                            # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                            # without the cardholder's SCA today — add a verb here when one ships.
+                                            # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
 
 # ---------------------------------------------------------------------------------------
 # SLOs (issue #669 — operational evidence, scope item 3). Governed data: a single
