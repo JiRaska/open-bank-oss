@@ -84,6 +84,18 @@ class TransactionReversalLinkIT {
                 assertThat(rs.next()).isTrue()
                 assertThat(rs.getBoolean("is_reversal")).isFalse()
             }
+            // #8745: the COMPLETED -> REVERSED transition announces itself — the outbox row
+            // committed atomically with the status flip (transactional outbox, ADR-0049).
+            conn.createStatement().executeQuery(
+                "SELECT payload FROM transaction_outbox " +
+                    "WHERE aggregate_id = '$originalId' " +
+                    "AND event_type = 'openbank.transactions.transaction.reversed'",
+            ).use { rs ->
+                assertThat(rs.next())
+                    .describedAs("transaction.reversed outbox row for the original")
+                    .isTrue()
+                assertThat(rs.getString("payload")).contains("TransactionReversed")
+            }
         }
     }
 }
