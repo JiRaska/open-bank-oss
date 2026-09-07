@@ -1,0 +1,29 @@
+# Scrape admin-ui's security-KPI metrics endpoint (ADR-0279, issue #8590).
+# admin-ui is a Next.js app with no Micrometer /q/metrics — the fleet PodMonitor
+# (podmonitor-openbank-services.yaml) cannot see it, and its only Prometheus
+# surface is the /api/security/kpis/metrics route, which re-exports the weekly
+# CI snapshot (security-kpis.json) as gauges. That route is exempted from the
+# session middleware (proxy.ts) for exactly this scrape; everything else under
+# /api stays authenticated. Selects the admin-ui Service in the admin-ui
+# namespace; alerting rules consuming these series live in
+# prometheus-rules-security-kpis.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: admin-ui
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - admin-ui
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: admin-ui
+  endpoints:
+    - port: http
+      interval: 60s
+      path: /api/security/kpis/metrics
+      honorLabels: true
