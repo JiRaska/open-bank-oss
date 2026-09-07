@@ -237,6 +237,8 @@ private fun TransactionEntity.toDomain(): com.openbank.transaction.domain.model.
         },
         merchantCategory = merchantCategory,
         originatingPaymentId = originatingPaymentId,
+        reversalOf = reversalOf,
+        isReversal = isReversal,
     )
 }
 
@@ -272,6 +274,8 @@ private fun com.openbank.transaction.domain.model.Transaction.toEntity() = Trans
     instructionType = this@toEntity.instructionType?.name
     merchantCategory = this@toEntity.merchantCategory
     originatingPaymentId = this@toEntity.originatingPaymentId
+    reversalOf = this@toEntity.reversalOf
+    isReversal = this@toEntity.isReversal
 }
 
 /**
