@@ -33,13 +33,12 @@ class InMemoryNonceStoreTest {
     }
 
     @Test
-    fun `a zero or negative TTL still burns the nonce - an expired claim is not a free replay`(): Unit =
-        runBlocking {
-            assertThat(store.claim("expired", 0)).isTrue()
-            assertThat(store.claim("expired", 0)).isFalse()
-            assertThat(store.claim("past", -30)).isTrue()
-            assertThat(store.claim("past", -30)).isFalse()
-        }
+    fun `a zero or negative TTL still burns the nonce - an expired claim is not a free replay`(): Unit = runBlocking {
+        assertThat(store.claim("expired", 0)).isTrue()
+        assertThat(store.claim("expired", 0)).isFalse()
+        assertThat(store.claim("past", -30)).isTrue()
+        assertThat(store.claim("past", -30)).isFalse()
+    }
 
     @Test
     fun `the eviction sweep past the cap does not resurrect a live nonce`(): Unit = runBlocking {

@@ -26,7 +26,9 @@ class PartyAdapterTest {
 
     private fun respond(address: PartyAddressClientResponse?) {
         every { client.getById(partyId.toString()) } returns
-            Uni.createFrom().item(PartyClientResponse(id = partyId.toString(), legalName = "Jan Novák", address = address))
+            Uni.createFrom().item(
+                PartyClientResponse(id = partyId.toString(), legalName = "Jan Novák", address = address),
+            )
     }
 
     @Test

@@ -22,15 +22,14 @@ import java.util.Optional
  */
 class AgentContentSafetyProducerTest {
 
-    private fun producer(enabled: Boolean, endpoint: String?, apiKey: String? = "k") =
-        AgentContentSafetyProducer(
-            safetyMetrics = mockk<ContentSafetyMetricsPort>(relaxed = true),
-            callMetrics = mockk<LlmCallMetricsPort>(relaxed = true),
-            enabled = enabled,
-            endpoint = Optional.ofNullable(endpoint),
-            model = "meta-llama/llama-guard-4-12b",
-            apiKey = Optional.ofNullable(apiKey),
-        )
+    private fun producer(enabled: Boolean, endpoint: String?, apiKey: String? = "k") = AgentContentSafetyProducer(
+        safetyMetrics = mockk<ContentSafetyMetricsPort>(relaxed = true),
+        callMetrics = mockk<LlmCallMetricsPort>(relaxed = true),
+        enabled = enabled,
+        endpoint = Optional.ofNullable(endpoint),
+        model = "meta-llama/llama-guard-4-12b",
+        apiKey = Optional.ofNullable(apiKey),
+    )
 
     @Test
     fun `disabled by flag produces the DISABLED port`() {

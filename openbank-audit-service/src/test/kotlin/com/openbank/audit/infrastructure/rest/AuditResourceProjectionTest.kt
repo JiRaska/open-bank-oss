@@ -61,8 +61,7 @@ class AuditResourceProjectionTest {
     )
 
     @Suppress("UNCHECKED_CAST")
-    private fun rowsOf(response: jakarta.ws.rs.core.Response) =
-        response.entity as List<Map<String, String?>>
+    private fun rowsOf(response: jakarta.ws.rs.core.Response) = response.entity as List<Map<String, String?>>
 
     @Test
     fun `the customer access log projects metadata only, never the chain-hashed payload`(): Unit = runBlocking {
@@ -72,7 +71,11 @@ class AuditResourceProjectionTest {
 
         assertThat(rows).hasSize(1)
         assertThat(rows.first()).containsOnlyKeys(
-            "eventType", "aggregateType", "actorType", "sourceService", "occurredAt",
+            "eventType",
+            "aggregateType",
+            "actorType",
+            "sourceService",
+            "occurredAt",
         )
         assertThat(rows.first()["occurredAt"]).isEqualTo("2026-06-01T10:00:00Z")
     }
@@ -146,17 +149,16 @@ class AuditResourceProjectionTest {
     }
 
     @Test
-    fun `an unparseable or operation-less payload yields a null operation, not a failed request`(): Unit =
-        runBlocking {
-            coEvery { repo.findOnBehalfOf(any(), any(), any(), any()) } returns listOf(
-                entry(payload = "not json at all"),
-                entry(payload = """{"amount":10}"""),
-            )
+    fun `an unparseable or operation-less payload yields a null operation, not a failed request`(): Unit = runBlocking {
+        coEvery { repo.findOnBehalfOf(any(), any(), any(), any()) } returns listOf(
+            entry(payload = "not json at all"),
+            entry(payload = """{"amount":10}"""),
+        )
 
-            val rows = rowsOf(resource.getDelegatedActionsForGrantor("grantor-1", null, null, 100))
+        val rows = rowsOf(resource.getDelegatedActionsForGrantor("grantor-1", null, null, 100))
 
-            assertThat(rows.map { it["operation"] }).containsExactly(null, null)
-        }
+        assertThat(rows.map { it["operation"] }).containsExactly(null, null)
+    }
 
     @Test
     fun `integrity reports BROKEN and the first broken entry when the walk fails`(): Unit = runBlocking {

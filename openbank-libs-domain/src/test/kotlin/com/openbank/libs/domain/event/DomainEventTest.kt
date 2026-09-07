@@ -20,10 +20,8 @@ import java.util.UUID
  */
 class DomainEventTest {
 
-    private data class AccountOpened(
-        override val aggregateId: UUID,
-        override val occurredAt: Instant,
-    ) : DomainEvent(occurredAt) {
+    private data class AccountOpened(override val aggregateId: UUID, override val occurredAt: Instant) :
+        DomainEvent(occurredAt) {
         override val aggregateType: String = "ACCOUNT"
         override val eventType: String = "account.opened"
         override val version: Long = 1

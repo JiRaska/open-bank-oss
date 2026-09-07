@@ -50,11 +50,10 @@ class AgentMetricsAdapterTest {
         )
     }
 
-    private fun adapter(registry: SimpleMeterRegistry?) =
-        AgentMetricsAdapter(proposals, registry).also {
-            it.domainMetrics = domainMetrics
-            it.register()
-        }
+    private fun adapter(registry: SimpleMeterRegistry?) = AgentMetricsAdapter(proposals, registry).also {
+        it.domainMetrics = domainMetrics
+        it.register()
+    }
 
     @Test
     fun `the gauge follows the backlog across refreshes, up and back down`() {

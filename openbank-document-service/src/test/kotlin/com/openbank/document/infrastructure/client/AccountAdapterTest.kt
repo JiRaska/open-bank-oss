@@ -24,14 +24,13 @@ class AccountAdapterTest {
     private val partyId: UUID = UUID.randomUUID()
     private val currentProductId: UUID = UUID.randomUUID()
 
-    private fun account(type: String, iban: String, productId: UUID = UUID.randomUUID()) =
-        AccountClientResponse(
-            id = UUID.randomUUID().toString(),
-            accountNumber = iban,
-            accountType = type,
-            productId = productId.toString(),
-            status = "ACTIVE",
-        )
+    private fun account(type: String, iban: String, productId: UUID = UUID.randomUUID()) = AccountClientResponse(
+        id = UUID.randomUUID().toString(),
+        accountNumber = iban,
+        accountType = type,
+        productId = productId.toString(),
+        status = "ACTIVE",
+    )
 
     private fun respond(vararg accounts: AccountClientResponse) {
         every { client.listByParty(partyId.toString()) } returns

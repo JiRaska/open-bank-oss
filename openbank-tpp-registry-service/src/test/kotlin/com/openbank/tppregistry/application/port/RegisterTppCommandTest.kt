@@ -2,8 +2,13 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.tppregistry.application.port.`in`
+// Deliberately NOT in ...port.`in` alongside the type under test: `in` is a Kotlin keyword and
+// ktlint's standard:package-name rejects it. main's TppRegistryPort.kt carries that violation in
+// ktlint-baseline.xml as inherited debt, and adding a NEW file to a baseline is how debt grows
+// quietly - so this test sits one package up and imports the command instead.
+package com.openbank.tppregistry.application.port
 
+import com.openbank.tppregistry.application.port.`in`.RegisterTppCommand
 import com.openbank.tppregistry.domain.model.TppRole
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy

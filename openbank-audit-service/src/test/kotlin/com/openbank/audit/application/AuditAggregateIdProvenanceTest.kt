@@ -54,26 +54,27 @@ class AuditAggregateIdProvenanceTest {
             .counter()?.count() ?: 0.0
 
     @Test
-    fun `the producer's own aggregateId wins over the inference chain, and is marked DECLARED`(): Unit =
-        runBlocking {
-            val declared = UUID.randomUUID()
-            val other = UUID.randomUUID()
-            val payload = """
+    fun `the producer's own aggregateId wins over the inference chain, and is marked DECLARED`(): Unit = runBlocking {
+        val declared = UUID.randomUUID()
+        val other = UUID.randomUUID()
+        val payload = """
                 {"eventType":"JournalPosted","aggregateId":"$declared","transactionId":"$other",
                  "sourceService":"ledger-service"}
-            """.trimIndent()
+        """.trimIndent()
 
-            consumer.consume(payload)
+        consumer.consume(payload)
 
-            coVerify { repo.save(match { it.aggregateId == declared.toString() }) }
-            assertThat(provenanceCount("ledger-service", AggregateIdProvenance.DECLARED)).isEqualTo(1.0)
-            assertThat(provenanceCount("ledger-service", AggregateIdProvenance.INFERRED)).isZero()
-        }
+        coVerify { repo.save(match { it.aggregateId == declared.toString() }) }
+        assertThat(provenanceCount("ledger-service", AggregateIdProvenance.DECLARED)).isEqualTo(1.0)
+        assertThat(provenanceCount("ledger-service", AggregateIdProvenance.INFERRED)).isZero()
+    }
 
     @Test
     fun `an explicitly null aggregateId falls through to inference, never the string null`(): Unit = runBlocking {
         val accountId = UUID.randomUUID()
-        val payload = """{"eventType":"X","aggregateId":null,"accountId":"$accountId","sourceService":"account-service"}"""
+        val payload =
+            """{"eventType":"X","aggregateId":null,"accountId":"$accountId",""" +
+                """"sourceService":"account-service"}"""
 
         consumer.consume(payload)
 
@@ -92,14 +93,13 @@ class AuditAggregateIdProvenanceTest {
     }
 
     @Test
-    fun `nothing identifying at all is ABSENT and stores the sentinel, kept apart from INFERRED`(): Unit =
-        runBlocking {
-            consumer.consume("""{"eventType":"HeartBeat","sourceService":"balance-service"}""")
+    fun `nothing identifying at all is ABSENT and stores the sentinel, kept apart from INFERRED`(): Unit = runBlocking {
+        consumer.consume("""{"eventType":"HeartBeat","sourceService":"balance-service"}""")
 
-            coVerify { repo.save(match { it.aggregateId == "unknown" && it.aggregateType == "UNKNOWN" }) }
-            assertThat(provenanceCount("balance-service", AggregateIdProvenance.ABSENT)).isEqualTo(1.0)
-            assertThat(provenanceCount("balance-service", AggregateIdProvenance.INFERRED)).isZero()
-        }
+        coVerify { repo.save(match { it.aggregateId == "unknown" && it.aggregateType == "UNKNOWN" }) }
+        assertThat(provenanceCount("balance-service", AggregateIdProvenance.ABSENT)).isEqualTo(1.0)
+        assertThat(provenanceCount("balance-service", AggregateIdProvenance.INFERRED)).isZero()
+    }
 
     @Test
     fun `the inference chain takes the FIRST recognised field, in its declared order`(): Unit = runBlocking {
@@ -158,16 +158,15 @@ class AuditAggregateIdProvenanceTest {
     }
 
     @Test
-    fun `a PARTY_MERGED event with no survivor writes no edge, and still stores the audit row`(): Unit =
-        runBlocking {
-            consumer.mergeIndex = mergeIndex
-            consumer.consume(
-                """{"eventType":"PARTY_MERGED","partyId":"${UUID.randomUUID()}","sourceService":"party-service"}""",
-            )
+    fun `a PARTY_MERGED event with no survivor writes no edge, and still stores the audit row`(): Unit = runBlocking {
+        consumer.mergeIndex = mergeIndex
+        consumer.consume(
+            """{"eventType":"PARTY_MERGED","partyId":"${UUID.randomUUID()}","sourceService":"party-service"}""",
+        )
 
-            coVerify(exactly = 0) { mergeIndex.recordMerge(any(), any(), any()) }
-            coVerify(exactly = 1) { repo.save(any()) }
-        }
+        coVerify(exactly = 0) { mergeIndex.recordMerge(any(), any(), any()) }
+        coVerify(exactly = 1) { repo.save(any()) }
+    }
 
     @Test
     fun `a merge-index failure never rolls back the audit row that is already stored`(): Unit = runBlocking {

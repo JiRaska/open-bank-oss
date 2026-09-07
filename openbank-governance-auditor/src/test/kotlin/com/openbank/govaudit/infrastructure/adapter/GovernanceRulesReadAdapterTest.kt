@@ -42,20 +42,19 @@ class GovernanceRulesReadAdapterTest {
         }
 
     @Test
-    fun `an empty element produced by a trailing or doubled comma is dropped, not kept as an empty name`():
-        Unit = runBlocking {
-        val services = adapterFor("openbank-ledger-service,,openbank-fx-service,").moneyPathServices()
+    fun `an empty element produced by a trailing or doubled comma is dropped, not kept as an empty name`(): Unit =
+        runBlocking {
+            val services = adapterFor("openbank-ledger-service,,openbank-fx-service,").moneyPathServices()
 
-        assertThat(services).doesNotContain("")
-        assertThat(services).hasSize(2)
-    }
+            assertThat(services).doesNotContain("")
+            assertThat(services).hasSize(2)
+        }
 
     @Test
-    fun `an entirely blank config yields an empty set rather than a set holding one empty name`(): Unit =
-        runBlocking {
-            assertThat(adapterFor("").moneyPathServices()).isEmpty()
-            assertThat(adapterFor("   ").moneyPathServices()).isEmpty()
-        }
+    fun `an entirely blank config yields an empty set rather than a set holding one empty name`(): Unit = runBlocking {
+        assertThat(adapterFor("").moneyPathServices()).isEmpty()
+        assertThat(adapterFor("   ").moneyPathServices()).isEmpty()
+    }
 
     @Test
     fun `a duplicated service name collapses because the result is a set`(): Unit = runBlocking {

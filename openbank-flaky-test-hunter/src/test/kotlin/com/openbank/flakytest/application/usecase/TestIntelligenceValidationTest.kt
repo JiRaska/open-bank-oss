@@ -167,7 +167,9 @@ class TestIntelligenceValidationTest {
     fun `an unknown evidence kind or state is rejected`() {
         rejects(
             "invalid evidence vocabulary",
-            request(components = listOf(component(evidence = listOf(TestIntelligenceEvidenceInput("chaos", "passed"))))),
+            request(
+                components = listOf(component(evidence = listOf(TestIntelligenceEvidenceInput("chaos", "passed")))),
+            ),
         )
         rejects(
             "invalid evidence vocabulary",
@@ -177,7 +179,15 @@ class TestIntelligenceValidationTest {
         )
         rejects(
             "invalid evidence vocabulary",
-            request(components = listOf(component(evidence = List(21) { TestIntelligenceEvidenceInput("unit", "passed") }))),
+            request(
+                components = listOf(
+                    component(
+                        evidence = List(21) {
+                            TestIntelligenceEvidenceInput("unit", "passed")
+                        },
+                    ),
+                ),
+            ),
         )
     }
 
@@ -226,7 +236,9 @@ class TestIntelligenceValidationTest {
         coEvery { repository.save(any()) } answers { firstArg() }
 
         val findings = service.analyze(
-            request(components = listOf(component(evidence = listOf(TestIntelligenceEvidenceInput("contract", "passed"))))),
+            request(
+                components = listOf(component(evidence = listOf(TestIntelligenceEvidenceInput("contract", "passed")))),
+            ),
         )
 
         assertThat(findings.map { it.checkType })
@@ -252,7 +264,9 @@ class TestIntelligenceValidationTest {
         coEvery { repository.findById(any()) } returns stored
 
         val findings = service.analyze(
-            request(components = listOf(component(evidence = listOf(TestIntelligenceEvidenceInput("contract", "passed"))))),
+            request(
+                components = listOf(component(evidence = listOf(TestIntelligenceEvidenceInput("contract", "passed")))),
+            ),
         )
 
         assertThat(findings).containsExactly(stored)

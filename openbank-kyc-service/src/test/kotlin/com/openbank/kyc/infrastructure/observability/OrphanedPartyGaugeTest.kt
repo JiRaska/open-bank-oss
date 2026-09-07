@@ -36,13 +36,12 @@ class OrphanedPartyGaugeTest {
     private val clock: Clock = Clock.fixed(now, ZoneOffset.UTC)
     private val detector = mockk<OrphanedPartyDetector>()
 
-    private fun report(orphans: List<UUID>, oldest: Instant?, scanned: Long) =
-        OrphanedPartyReport(
-            orphanedPartyIds = orphans,
-            oldestOrphanCreatedAt = oldest,
-            partiesScanned = scanned,
-            checkedAt = now,
-        )
+    private fun report(orphans: List<UUID>, oldest: Instant?, scanned: Long) = OrphanedPartyReport(
+        orphanedPartyIds = orphans,
+        oldestOrphanCreatedAt = oldest,
+        partiesScanned = scanned,
+        checkedAt = now,
+    )
 
     private fun metricsOver(registry: MeterRegistry): DomainMetrics {
         val instance = mockk<Instance<MeterRegistry>>()
