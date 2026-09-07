@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/v0.9.5...v0.10.0) (2026-09-07)
+
+
+### Features
+
+* **admin-ui:** link browser failure diagnostics ([#7049](https://github.com/JiRaska/open-bank-oss/issues/7049)) ([5409645](https://github.com/JiRaska/open-bank-oss/commit/5409645c46285ffe5483d745aaf89eed02810acf))
+
 ## [0.9.5](https://github.com/JiRaska/open-bank-oss/compare/v0.9.4...v0.9.5) (2026-09-03)
 
 

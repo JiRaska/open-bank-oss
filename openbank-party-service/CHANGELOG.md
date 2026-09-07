@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.22.2...party-service-v0.23.0) (2026-09-07)
+
+
+### Features
+
+* **kyb:** legal-entity onboarding, representation mandates and profile switching (ADR-0284) ([#8863](https://github.com/JiRaska/open-bank-oss/issues/8863)) ([3766d3d](https://github.com/JiRaska/open-bank-oss/commit/3766d3de2281dbeb17e0b7a6a4e6c754988d1145))
+
+
+### Bug Fixes
+
+* **kafka:** resolve the 11 baselined auto.offset.reset config lies ([#8370](https://github.com/JiRaska/open-bank-oss/issues/8370)) ([#8860](https://github.com/JiRaska/open-bank-oss/issues/8860)) ([f328ebd](https://github.com/JiRaska/open-bank-oss/commit/f328ebdf265f2dd3dd90ad3db3d2a052eb657923))
+* **party:** make GDPR Art. 15 and Art. 20 exports reachable by the data subject ([#8487](https://github.com/JiRaska/open-bank-oss/issues/8487)) ([2ba4787](https://github.com/JiRaska/open-bank-oss/commit/2ba4787544aeaf723cd1e867f04777c32978f68b))
+* **party:** replay the anonymous VoP pact + JSON security-abort envelope ([#8900](https://github.com/JiRaska/open-bank-oss/issues/8900)) ([9b4ae30](https://github.com/JiRaska/open-bank-oss/commit/9b4ae30e6d07dc35b602156dc35c55e2059db075))
+
 ## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.22.1...party-service-v0.22.2) (2026-09-03)
 
 

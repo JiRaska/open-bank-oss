@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.4...account-service-v0.28.0) (2026-09-07)
+
+
+### Features
+
+* **account:** show the owner everyone who can act on their account ([#8011](https://github.com/JiRaska/open-bank-oss/issues/8011)) ([b201a04](https://github.com/JiRaska/open-bank-oss/commit/b201a0415ccbfb6ba3f76532122f463259dab08e))
+* **account:** tell the customer when their account opens, closes or is frozen ([#8469](https://github.com/JiRaska/open-bank-oss/issues/8469)) ([eaae2af](https://github.com/JiRaska/open-bank-oss/commit/eaae2af6548bba733575b161ab087be0661c77be))
+
+
+### Bug Fixes
+
+* **account:** map screening outcomes to 503/422 without leaking the match ([#8512](https://github.com/JiRaska/open-bank-oss/issues/8512)) ([#8712](https://github.com/JiRaska/open-bank-oss/issues/8712)) ([08e80e7](https://github.com/JiRaska/open-bank-oss/commit/08e80e7e8678fb587266afa64798afac1cc05001))
+* **account:** render security-abort 401/403 as JSON + replay the anonymous pact ([#8852](https://github.com/JiRaska/open-bank-oss/issues/8852)) ([dbca79b](https://github.com/JiRaska/open-bank-oss/commit/dbca79b68be2abeed84aa69a277d7100b833ff63)), closes [#8803](https://github.com/JiRaska/open-bank-oss/issues/8803)
+* **kafka:** resolve the 11 baselined auto.offset.reset config lies ([#8370](https://github.com/JiRaska/open-bank-oss/issues/8370)) ([#8860](https://github.com/JiRaska/open-bank-oss/issues/8860)) ([f328ebd](https://github.com/JiRaska/open-bank-oss/commit/f328ebdf265f2dd3dd90ad3db3d2a052eb657923))
+
 ## [0.27.4](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.27.3...account-service-v0.27.4) (2026-09-03)
 
 

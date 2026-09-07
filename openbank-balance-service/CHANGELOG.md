@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.17.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.17.0...balance-service-v1.17.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **balance,ledger:** fuzz-found 500s on date query params become 400/default ([#8835](https://github.com/JiRaska/open-bank-oss/issues/8835)) ([062c26a](https://github.com/JiRaska/open-bank-oss/commit/062c26afd615d4c973a51bfd4920618ceb5401f4))
+* **balance:** write balance events to the outbox, retire the direct emitter ([#8510](https://github.com/JiRaska/open-bank-oss/issues/8510)) ([#8688](https://github.com/JiRaska/open-bank-oss/issues/8688)) ([82f0be3](https://github.com/JiRaska/open-bank-oss/commit/82f0be3409cb9cc82cfd0fd1fe2130562624c9e5))
+* **kafka:** resolve the 11 baselined auto.offset.reset config lies ([#8370](https://github.com/JiRaska/open-bank-oss/issues/8370)) ([#8860](https://github.com/JiRaska/open-bank-oss/issues/8860)) ([f328ebd](https://github.com/JiRaska/open-bank-oss/commit/f328ebdf265f2dd3dd90ad3db3d2a052eb657923))
+
 ## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.16.0...balance-service-v1.17.0) (2026-09-01)
 
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.14.1...kyc-service-v0.15.0) (2026-09-07)
+
+
+### Features
+
+* **kyb:** legal-entity onboarding, representation mandates and profile switching (ADR-0284) ([#8863](https://github.com/JiRaska/open-bank-oss/issues/8863)) ([3766d3d](https://github.com/JiRaska/open-bank-oss/commit/3766d3de2281dbeb17e0b7a6a4e6c754988d1145))
+* **kyc:** adverse-media port with an explicit not-configured state ([#5893](https://github.com/JiRaska/open-bank-oss/issues/5893)) ([636331e](https://github.com/JiRaska/open-bank-oss/commit/636331e76fd1b2f9321331f20d7944555bac9787))
+* **kyc:** expire abandoned OPEN cases so the party can be KYC'd again ([#8562](https://github.com/JiRaska/open-bank-oss/issues/8562)) ([ccafc32](https://github.com/JiRaska/open-bank-oss/commit/ccafc32d390dd7d6e1772170deefa35da475a710))
+
+
+### Bug Fixes
+
+* **domestic-payment:** disambiguate SOURCE_SERVICE const collisions + gate budget repair ([#8823](https://github.com/JiRaska/open-bank-oss/issues/8823)) ([2e92438](https://github.com/JiRaska/open-bank-oss/commit/2e9243887b7311b46cd4365c5112b8be1cd21c8c))
+* **kyc:** replay the published case-page contract and consume it in the Admin UI ([#8482](https://github.com/JiRaska/open-bank-oss/issues/8482)) ([68c2c69](https://github.com/JiRaska/open-bank-oss/commit/68c2c69428c6b7d4f7cceddc983039dffc55b3ba))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.14.0...kyc-service-v0.14.1) (2026-09-03)
 
 

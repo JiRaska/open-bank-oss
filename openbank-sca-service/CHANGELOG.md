@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.15.0...sca-service-v0.15.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **sca:** commit the enrolled device and its outbox row in one transaction ([#8683](https://github.com/JiRaska/open-bank-oss/issues/8683)) ([1a9445f](https://github.com/JiRaska/open-bank-oss/commit/1a9445ff1ba21d185e23ddaad759f6d47376f8fe)), closes [#8679](https://github.com/JiRaska/open-bank-oss/issues/8679)
+* **sca:** refuse TOTP instead of minting a challenge nobody can satisfy ([#8567](https://github.com/JiRaska/open-bank-oss/issues/8567)) ([3095ae6](https://github.com/JiRaska/open-bank-oss/commit/3095ae652ec3ee2acf671aad05e6b2c30772aa9c))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.14.1...sca-service-v0.15.0) (2026-08-24)
 
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.1...swift-service-v0.11.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **swift:** give the test JVM the same 2g ceiling account and lending already run ([#8934](https://github.com/JiRaska/open-bank-oss/issues/8934)) ([f7020af](https://github.com/JiRaska/open-bank-oss/commit/f7020aff16bc108706cfc548030763ca0feb3800))
+* **swift:** publish COMPLETED, the terminal status the pact already asserts ([#6016](https://github.com/JiRaska/open-bank-oss/issues/6016)) ([65b5110](https://github.com/JiRaska/open-bank-oss/commit/65b5110575c4d896e39fc2d0a48f397d81aea7e5))
+* **swift:** publish operator acknowledge and reject through the outbox ([#8752](https://github.com/JiRaska/open-bank-oss/issues/8752)) ([cf193f0](https://github.com/JiRaska/open-bank-oss/commit/cf193f04c637156debb573b78d1e4d2b3e0f8514))
+* **swift:** raise test-worker heap to 3g — 2g still OOMs the full suite on CI ([#8970](https://github.com/JiRaska/open-bank-oss/issues/8970)) ([1ee7280](https://github.com/JiRaska/open-bank-oss/commit/1ee7280a8db300cbf63b4ac16655238ac584ee98)), closes [#8916](https://github.com/JiRaska/open-bank-oss/issues/8916)
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.0...swift-service-v0.11.1) (2026-09-03)
 
 

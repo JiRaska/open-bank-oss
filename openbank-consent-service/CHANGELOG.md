@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.23.0...consent-service-v0.24.0) (2026-09-07)
+
+
+### Features
+
+* **notifications:** tell customers when a third party gains or loses account access ([#8491](https://github.com/JiRaska/open-bank-oss/issues/8491)) ([add3357](https://github.com/JiRaska/open-bank-oss/commit/add33579f036aae4ca9b09534d845d2a8dfa3229))
+
+
+### Bug Fixes
+
+* **consent:** reconcile the consent request/response schemas with the DTOs they describe ([#6017](https://github.com/JiRaska/open-bank-oss/issues/6017)) ([89f7b73](https://github.com/JiRaska/open-bank-oss/commit/89f7b73b6a2d9c447002ff505bd7c8ecf66e567b))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.22.0...consent-service-v0.23.0) (2026-09-01)
 
 

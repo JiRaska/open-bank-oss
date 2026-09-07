@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.2...lending-service-v0.33.0) (2026-09-07)
+
+
+### Features
+
+* **lending:** credit-risk & decisioning console — and the engine evidence that was never persisted ([#8898](https://github.com/JiRaska/open-bank-oss/issues/8898)) ([e8a085f](https://github.com/JiRaska/open-bank-oss/commit/e8a085f4bac736226e408b5febd6e2d28bfedf79))
+* **lending:** expose the credit-offer eligibility decision to push surfaces ([#8918](https://github.com/JiRaska/open-bank-oss/issues/8918)) ([#8956](https://github.com/JiRaska/open-bank-oss/issues/8956)) ([b79e499](https://github.com/JiRaska/open-bank-oss/commit/b79e49901af64f98648254b2ad255ea88d6dce8b))
+* **lending:** version IFRS 9 risk parameters end-to-end with calibration replay ([#8681](https://github.com/JiRaska/open-bank-oss/issues/8681)) ([76b5ff0](https://github.com/JiRaska/open-bank-oss/commit/76b5ff01d6e01a4553b92f29010a9dc8146cdc3e))
+
+
+### Bug Fixes
+
+* **lending:** add sourceService to loan.withdrawn and loan.accelerated ([#5894](https://github.com/JiRaska/open-bank-oss/issues/5894)) ([a54c9f6](https://github.com/JiRaska/open-bank-oss/commit/a54c9f6042f713b43f30fa1798c4c482fdee3671)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+* **lending:** every event settles its own aggregate identity, and four gain partyId ([#8928](https://github.com/JiRaska/open-bank-oss/issues/8928)) ([222e332](https://github.com/JiRaska/open-bank-oss/commit/222e3325ec8cb6d0b43d87d6806f5a8d4102732a)), closes [#8893](https://github.com/JiRaska/open-bank-oss/issues/8893)
+* **lending:** order pending pack proposals by the entity property, not the column ([#5948](https://github.com/JiRaska/open-bank-oss/issues/5948)) ([e1d9906](https://github.com/JiRaska/open-bank-oss/commit/e1d9906c2117afc64420b5e03c58578e9f92b7cf))
+
 ## [0.32.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.32.1...lending-service-v0.32.2) (2026-09-03)
 
 

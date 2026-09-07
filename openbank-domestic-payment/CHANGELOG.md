@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.19.1...domestic-payment-v0.20.0) (2026-09-07)
+
+
+### Features
+
+* **domestic-payment:** carry the synthetic taint across the Kafka hop ([#8640](https://github.com/JiRaska/open-bank-oss/issues/8640)) ([462b634](https://github.com/JiRaska/open-bank-oss/commit/462b634fe7c34fa8384d7bb160a01a879b51fd83))
+* **payments:** tell the customer when a domestic payment is rejected ([#8508](https://github.com/JiRaska/open-bank-oss/issues/8508)) ([d64653d](https://github.com/JiRaska/open-bank-oss/commit/d64653dcec71a20b2906336baca85fdf8504bee2))
+
+
+### Bug Fixes
+
+* **domestic-payment:** disambiguate SOURCE_SERVICE const collisions + gate budget repair ([#8823](https://github.com/JiRaska/open-bank-oss/issues/8823)) ([2e92438](https://github.com/JiRaska/open-bank-oss/commit/2e9243887b7311b46cd4365c5112b8be1cd21c8c))
+
 ## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.19.0...domestic-payment-v0.19.1) (2026-09-03)
 
 
