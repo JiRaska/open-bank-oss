@@ -103,7 +103,11 @@ object RetentionPolicies {
      */
     fun categoryForAggregateType(aggregateType: String): DataCategory = when (aggregateType.uppercase()) {
         "ACCOUNT", "TRANSACTION", "BALANCE", "LEDGER" -> DataCategory.ACCOUNTING
-        "PARTY", "KYC" -> DataCategory.KYC
+        // KYB is customer due diligence on a legal entity (ADR-0284): the same AML legal basis
+        // as KYC, not the accounting default. The default would hold it for the same period, so
+        // this changes the declared BASIS rather than the outcome — which is the point: an
+        // unclassified aggregate reads exactly like a classified one in every report.
+        "PARTY", "KYC", "KYB" -> DataCategory.KYC
         "CONSENT" -> DataCategory.CONSENT
         else -> DataCategory.ACCOUNTING
     }
