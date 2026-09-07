@@ -50,6 +50,16 @@ class MerchantCatalogEntity : PanacheEntityBase {
     @Column(name = "country")
     var country: String? = null
 
+    /**
+     * [MerchantLogoEntity.contentHash] when a logo has been ingested for this merchant, else null.
+     *
+     * Denormalised so the per-page enrichment read can decide whether to emit a logo URL without a
+     * join, and doubles as the cache-busting token in that URL — a corrected logo changes the hash,
+     * so clients pick it up immediately instead of after a cache TTL.
+     */
+    @Column(name = "logo_etag")
+    var logoEtag: String? = null
+
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.now()
 }
