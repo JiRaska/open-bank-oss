@@ -153,7 +153,7 @@ line and needs its own review.
 | **I**nfo disclosure | Enrichment leaks a *cardholder's* whereabouts rather than a shop's | The catalogue has no customer-, card- or transaction-scoped column; a row is per merchant descriptor and identical for every customer who shopped there. Nothing customer-derived is written back |
 | **T**ampering | A wrong or planted catalogue row attributes a payment to the wrong business — a lever for social engineering ("your payment to X") or for hiding one | Rows arrive only by migration, never from a request. Lookup is an **exact** match on the normalised key: no fuzzy or prefix matching, so a near-name cannot inherit another merchant's identity. `description` is passed through unmodified, so the raw acquirer text remains available and authoritative |
 | **R**epudiation | A dispute is raised against a prettified name that does not appear on the acquirer record | Enrichment is display-only and additive. Disputes and SPAYD consume `description`, which this change does not touch; `source: ENRICHED` labels anything the bank resolved |
-| **S**poofing | `logoUrl` points at attacker-controlled content rendered inside the bank app | URLs are catalogue-controlled and expected to be on a bank-controlled CDN; there is no request path that can set one |
+| **S**poofing | `logoUrl` points at attacker-controlled content rendered inside the bank app | Since §4e the field is DERIVED and origin-relative — it can only ever address this service's own logo route, and the catalogue column an operator writes is provenance that customers never receive. The mitigation is now structural rather than an expectation about what operators type |
 | **D**oS | Enrichment adds a per-row query to every statement page | One query per page: descriptors are normalised, de-duplicated and fetched together, so cost is bounded by distinct merchants on the page, not row count |
 
 **DFD update:** none. Same caller, same endpoint, same authorisation; one additional read of a
@@ -178,6 +178,36 @@ lie about who the customer paid.
 | **I**nfo disclosure | The catalogue becomes a record of where a cardholder was | The table is keyed by acquirer descriptor and holds public business data only — nothing in it is keyed by customer, card or transaction, stated in both `V16__create_merchant_catalog.sql` and the entity KDoc. `GET /unmatched` returns raw descriptors and their counts, never the transactions or accounts they came from |
 | **D**oS | `GET /unmatched` scans the whole transactions table on every operator refresh | `recentDescriptions` is a bounded, ordered window — `scan` is clamped to `MAX_SCAN` (20 000) and page size to `MAX_PAGE_SIZE`, both server-side via `coerceIn`, so a caller cannot widen the query. It lives in `TransactionDescriptorRepository` rather than the domain repository, keeping catalogue curation off the transaction persistence port |
 | **E**oP | A viewer edits the catalogue | Read and write roles are separate: `list`/`unmatched` admit `VIEWER`, `upsert`/`delete` do not, and the OPA action differs too, so a viewer is denied at both layers |
+
+## 4e. Self-hosted merchant logos — STRIDE supplement
+
+`merchant_logo` stores the logo bitmaps and `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/logo`
+serves and maintains them. Two boundaries move: an operator can now upload **binary content that a
+customer's banking app renders**, and the statement response gained a URL that clients dereference.
+
+**The privacy decision this exists to implement.** The obvious alternative — putting a logo CDN's
+URL in the statement response — would make every render tell that host the customer's IP address
+and which merchant they paid, at the moment they open their transaction list. That is a spending
+profile reconstructable from a third party's access log, outside any consent or processor
+agreement, and it needs no compromise of anything: it is what the feature would do while working
+correctly. Serving the bytes from this origin removes the third party from the request path.
+
+| STRIDE | Threat | Mitigation |
+| --- | --- | --- |
+| **I**nfo disclosure | A logo request tells an external host who a customer paid | `MerchantResponse.logoUrl` is derived and origin-relative; it cannot be set from a request and cannot address another host. `merchant_catalog.logo_url` keeps the upstream URL for licence evidence and is returned only on the operator API |
+| **I**nfo disclosure | The stored image leaks whoever produced it — EXIF, GPS, embedded thumbnails | Only decoded pixels are kept. Re-encoding to a fresh PNG drops every metadata segment, because nothing but the raster is carried across |
+| **T**ampering | An upload carries script into an app that renders it — an SVG, or a polyglot with a payload appended after a valid image | Format is sniffed by magic number, so SVG and HTML are refused as not raster; anything after the image data does not survive the decode/re-encode. `LogoImagesTest` asserts each refusal, not the happy path |
+| **D**oS | A small upload declares an enormous canvas (a decompression bomb) and the decode allocates gigabytes, killing the pod | Dimensions are read from the header **before** any pixel buffer exists and refused above 4096 per side; uploads are capped at 512 kB; the served variants are pre-rendered, and `size` is an enumeration, so a caller cannot make the service resize on the request path |
+| **S**poofing | A planted logo attributes a payment to the wrong business more convincingly than a name alone | Write requires `Roles.OPERATOR`/`ADMIN` and OPA `merchant.update`; the row records `uploaded_by`, `source_url` and `licence`, which the catalogue text rows still do not (§4d's residual repudiation gap is narrower here, not closed elsewhere) |
+| **T**ampering | A cached wrong logo persists after correction, since the response is cached for a year | The URL carries a prefix of the content hash and the ETag is the hash, so replaced bytes are a different URL. Immutability is safe *because* of that, not despite it |
+| **E**oP | A viewer replaces a logo | Read and write split as in §4d: `merchant.list` for the GET, `merchant.update` / `merchant.delete` for the writes, and `VIEWER` holds only the first |
+
+**DFD update:** one new inbound binary write (operator → service) and one new authenticated read of
+static content. No new outbound edge — this service fetches nothing from the internet; bytes arrive
+only from an operator request.
+**Risk class:** content integrity of what a banking app renders, plus the privacy boundary above.
+**Rollback:** revert; `logoUrl` returns to null and the route disappears. The migration is additive,
+so the previous release runs unchanged against the new schema.
 
 ## 5. Residual risks / assumptions
 
@@ -216,6 +246,8 @@ lie about who the customer paid.
   this change is inert until a separately-approved cutover.
 
 ## 6. Change log
+
+- **2026-09-07** — Merchant logos are stored and served by this service (`merchant_logo`, `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/logo`), and `merchant.logoUrl` became a derived origin-relative path instead of a catalogue-controlled URL (§4e). Two boundaries moved: operator-uploaded binary content that a customer app renders, and a URL clients dereference. The design point is privacy — an external logo host would have learned each customer's IP together with the merchant they paid, every statement render. Uploads are re-encoded rather than stored, which is what refuses SVG/polyglots and strips EXIF; header dimensions are checked before any pixel buffer is allocated. Rollback: revert; the field returns to null and the additive migration can stay or be dropped.
 
 - **2026-09-05** — New inbound REST surface `MerchantCatalogResource` (`/api/v1/merchants`): list, an unmatched-descriptor worklist, upsert and delete, so the D5 catalogue §4c reads can actually be filled (#8573). New trust boundary crossing, hence §4d. No money path touched and no cardholder data added — the table stays keyed by acquirer descriptor. Residual gap recorded rather than papered over: the row records `updated_at` but not who edited it. Rollback: revert the commit; §4c degrades to the empty catalogue it reads today, which already renders the raw descriptor.
 
