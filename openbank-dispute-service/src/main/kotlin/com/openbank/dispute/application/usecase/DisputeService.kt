@@ -107,19 +107,29 @@ class DisputeService(
                     resolution = request.resolution ?: dispute.resolution,
                     chargebackAmount = request.chargebackAmount ?: dispute.chargebackAmount,
                     resolvedBy = request.resolvedBy ?: dispute.resolvedBy,
-                    resolvedAt = if (request.status in listOf(
-                            DisputeStatus.RESOLVED_CUSTOMER,
-                            DisputeStatus.RESOLVED_MERCHANT,
-                            DisputeStatus.WITHDRAWN,
-                        )
-                    ) {
+                    resolvedAt = if (request.status in TERMINAL_STATUSES) {
                         OffsetDateTime.now(clock)
                     } else {
                         dispute.resolvedAt
                     },
                     updatedAt = OffsetDateTime.now(clock),
                 )
-                disputeRepo.update(updated).flatMap { saved ->
+                // A dispute that ENDS here must announce it exactly as `resolve` does.
+                // engagement-service applies an ADR-0220 D3.5 targeting exclusion on
+                // `dispute.opened` and lifts it ONLY on `dispute.resolved`
+                // (DisputeOpenedEventConsumer:26-27), so a dispute that reaches a terminal state
+                // through this path without the event leaves that customer excluded permanently.
+                // `withdraw()` delegates here, so every withdrawal took that path. The timeline row
+                // below is internal to this service and reaches no consumer.
+                // Guarded on the PREVIOUS status so a repeated PUT of an already-terminal status
+                // does not re-announce; the empty list makes this call identical to the one-arg
+                // overload, which the repository implements with the same @WithTransaction.
+                val messages = if (updated.status in TERMINAL_STATUSES && dispute.status !in TERMINAL_STATUSES) {
+                    listOf(resolvedOutboxMessage(updated))
+                } else {
+                    emptyList()
+                }
+                disputeRepo.update(updated, messages).flatMap { saved ->
                     val event = DisputeTimelineEvent(
                         disputeId = saved.id,
                         eventType = "STATUS_CHANGED",
@@ -300,7 +310,9 @@ class DisputeService(
         // would never lift. Additive, and `dispute.remediation_requested` already carries one.
         payload = """{"eventType":"dispute.resolved","disputeId":"${dispute.id}",""" +
             """"reference":"${dispute.reference}","partyId":"${dispute.partyId}",""" +
-            """"outcome":"${dispute.remediationOutcome}",""" +
+            // WITHDRAWN reaches this builder with no remediation outcome; interpolating it
+            // straight would put the four-character string "null" in a quoted field.
+            """"outcome":${dispute.remediationOutcome?.let { "\"$it\"" } ?: "null"},""" +
             """"status":"${dispute.status}","resolvedAt":"${dispute.resolvedAt}",""" +
             """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}",""" +
             """"sourceService":"$SOURCE_SERVICE"}""",
@@ -346,6 +358,18 @@ class DisputeService(
 
     companion object {
         private val BANK_TIME: ZoneId = ZoneId.of("Europe/Prague")
+
+        /**
+         * The states in which a dispute is over. Shared by [update] between the `resolvedAt` stamp
+         * and the `dispute.resolved` emission so the two can never disagree about what "terminal"
+         * means -- before this they were the same three names written out twice, one of which
+         * emitted nothing.
+         */
+        internal val TERMINAL_STATUSES = setOf(
+            DisputeStatus.RESOLVED_CUSTOMER,
+            DisputeStatus.RESOLVED_MERCHANT,
+            DisputeStatus.WITHDRAWN,
+        )
 
         /** States from which a remediation resolution may be recorded (evidence-gathering states). */
         internal val RESOLVABLE_FROM = setOf(

@@ -154,11 +154,19 @@ class DisputeServiceTest {
             updatedAt = now,
         )
         val update = UpdateDisputeRequest(status = DisputeStatus.RESOLVED_CUSTOMER, resolvedBy = "caseworker")
+        val outbox = slot<List<OutboxMessage>>()
         every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
-        every { disputeRepo.update(any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { disputeRepo.update(any(), capture(outbox)) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
         every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
 
         val result = service.update(id, update).await().indefinitely()
+
+        // The dispute ENDS here, so it must announce itself: engagement-service lifts its ADR-0220
+        // targeting exclusion only on `dispute.resolved`, so without this the customer stays
+        // excluded forever. The timeline row is internal and reaches no consumer.
+        assertThat(outbox.captured).singleElement()
+            .satisfies({ m -> assertThat(m.eventType).isEqualTo("dispute.resolved") })
+        assertThat(outbox.captured.single().payload).contains(existing.partyId.toString())
 
         assertThat(result.status).isEqualTo(DisputeStatus.RESOLVED_CUSTOMER)
         assertThat(result.resolvedBy).isEqualTo("caseworker")
@@ -166,8 +174,41 @@ class DisputeServiceTest {
         assertThat(result.updatedAt).isNotNull()
 
         verify(exactly = 1) { disputeRepo.findById(id) }
-        verify(exactly = 1) { disputeRepo.update(any()) }
+        verify(exactly = 1) { disputeRepo.update(any(), any()) }
         verify(exactly = 1) { timelineRepo.save(any()) }
+    }
+
+    @Test
+    fun `a non-terminal status change announces nothing`() {
+        val id = UUID.randomUUID()
+        val existing = Dispute(
+            id = id,
+            reference = "DSP-3000",
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.OTHER,
+            amount = BigDecimal("5.00"),
+            transactionDate = today,
+            filingDate = today,
+            resolutionDeadline = today.plusDays(45),
+            createdAt = now,
+            updatedAt = now,
+        )
+        val outbox = slot<List<OutboxMessage>>()
+        every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
+        every { disputeRepo.update(any(), capture(outbox)) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        val result = service.update(id, UpdateDisputeRequest(status = DisputeStatus.UNDER_REVIEW)).await()
+            .indefinitely()
+
+        // The counter-case to the two tests above. Without it, "emits on terminal" would also pass
+        // for an implementation that emits on EVERY update -- which would tell engagement to lift
+        // an exclusion while the dispute is still open.
+        assertThat(result.status).isEqualTo(DisputeStatus.UNDER_REVIEW)
+        assertThat(result.resolvedAt).isNull()
+        assertThat(outbox.captured).isEmpty()
     }
 
     @Test
@@ -187,11 +228,19 @@ class DisputeServiceTest {
             createdAt = now,
             updatedAt = now,
         )
+        val outbox = slot<List<OutboxMessage>>()
         every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
-        every { disputeRepo.update(any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { disputeRepo.update(any(), capture(outbox)) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
         every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
 
         val result = service.withdraw(id, "customer").await().indefinitely()
+
+        // `withdraw` delegates to `update`, so before this fix EVERY withdrawal was silent.
+        assertThat(outbox.captured).singleElement()
+            .satisfies({ m -> assertThat(m.eventType).isEqualTo("dispute.resolved") })
+        // WITHDRAWN carries no remediation outcome: it must serialise as JSON null, not as the
+        // four-character string "null" inside quotes.
+        assertThat(outbox.captured.single().payload).contains("\"outcome\":null")
 
         assertThat(result.status).isEqualTo(DisputeStatus.WITHDRAWN)
         assertThat(result.resolution).isEqualTo(DisputeResolution.WITHDRAWN)
@@ -199,7 +248,7 @@ class DisputeServiceTest {
         assertThat(result.updatedAt).isNotNull()
 
         verify(exactly = 1) { disputeRepo.findById(id) }
-        verify(exactly = 1) { disputeRepo.update(any()) }
+        verify(exactly = 1) { disputeRepo.update(any(), any()) }
         verify(exactly = 1) { timelineRepo.save(any()) }
     }
 
