@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.6 -> 1.7): additive
   # only — GET /approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -332,11 +332,22 @@ components:
 
     CreateSepaPaymentRequest:
       type: object
-      required: [debtorAccountId, creditorIban, creditorName, amount, currencyCode, endToEndId]
+      # Property names and optionality mirror the DTO the resource deserializes into
+      # (CreateSepaPaymentRequest in SepaPaymentDtos.kt). Before #8828 this schema published
+      # currencyCode and requestedExecutionDate, neither of which exists on that DTO, and
+      # omitted type, debtorIban and debtorName, all three non-nullable — so a client
+      # generated from this document could not create a SEPA payment at all.
+      required: [type, debtorAccountId, debtorIban, debtorName, creditorIban, creditorName, amount, currency]
       properties:
+        type:
+          type: string
         debtorAccountId:
           type: string
           format: uuid
+        debtorIban:
+          type: string
+        debtorName:
+          type: string
         creditorIban:
           type: string
         creditorName:
@@ -345,17 +356,13 @@ components:
           type: string
         amount:
           type: number
-        currencyCode:
+        currency:
           type: string
           example: EUR
-        endToEndId:
-          type: string
         remittanceInfo:
           type: string
-        requestedExecutionDate:
+        endToEndId:
           type: string
-          format: date
-
     TransitionStatusRequest:
       type: object
       required: [targetStatus]

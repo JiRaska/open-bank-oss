@@ -5,7 +5,7 @@ info:
   title: Domestic Payment Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.5 -> 1.6): additive
   # machine-readable 409 for unsafe Idempotency-Key reuse. No request/response field was removed.
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -286,19 +286,35 @@ components:
   schemas:
     CreateDomesticPaymentRequest:
       type: object
-      required: [debtorAccountId, creditorAccountNumber, creditorBankCode, amount, currencyCode]
+      # Property names and optionality mirror the DTO the resource deserializes into
+      # (CreateDomesticPaymentRequest in DomesticPaymentDtos.kt). Before #8828 this schema
+      # published currencyCode and message, neither of which exists on that DTO, and omitted
+      # nine DTO properties including the non-nullable debtorAccountNumber, debtorBankCode,
+      # debtorName, creditorName and priority — so a client generated from this document could
+      # not create a domestic payment at all.
+      required: [debtorAccountId, debtorAccountNumber, debtorBankCode, debtorName,
+                 creditorAccountNumber, creditorBankCode, creditorName, amount, currency, priority]
       properties:
         debtorAccountId:
           type: string
           format: uuid
+        debtorAccountNumber:
+          type: string
+        debtorBankCode:
+          type: string
+          example: "0800"
+        debtorName:
+          type: string
         creditorAccountNumber:
           type: string
         creditorBankCode:
           type: string
           example: "0100"
+        creditorName:
+          type: string
         amount:
           type: number
-        currencyCode:
+        currency:
           type: string
           example: CZK
         variableSymbol:
@@ -307,7 +323,17 @@ components:
           type: string
         constantSymbol:
           type: string
-        message:
+        messageForPayee:
+          type: string
+        priority:
+          type: string
+        transferScope:
+          type: string
+        technicalAccountCode:
+          type: string
+        statementLabel:
+          type: string
+        endToEndId:
           type: string
 
     TransitionStatusRequest:

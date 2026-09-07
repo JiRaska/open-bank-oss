@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Balance Service API
-  version: 1.9.0
+  version: 1.10.0
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -453,7 +453,11 @@ components:
 
     PlaceHoldRequest:
       type: object
-      required: [amount, currency, reason]
+      # Property names and optionality mirror the DTO the resource deserializes into
+      # (PlaceHoldRequest in BalanceResource.kt). Before #8828 this schema published expiresAt,
+      # which no DTO has — the hold's lifetime is expressed as ttlSeconds — and omitted the
+      # non-nullable referenceId.
+      required: [amount, currency, reason, referenceId]
       properties:
         amount:
           type: number
@@ -461,9 +465,11 @@ components:
           type: string
         reason:
           type: string
-        expiresAt:
+        referenceId:
           type: string
-          format: date-time
+        ttlSeconds:
+          type: integer
+          format: int64
 
     HoldResponse:
       type: object
