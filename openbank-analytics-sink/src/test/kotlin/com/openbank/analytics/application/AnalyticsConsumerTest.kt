@@ -110,7 +110,10 @@ class AnalyticsConsumerTest {
         assertThat(env.aggregateType).isEqualTo("ENGAGEMENT")
         assertThat(env.aggregateId).isEqualTo(eventId.toString())
         assertThat(env.eventType).isEqualTo("EngagementEvent.CLICK")
-        assertThat(env.sourceService).isEqualTo("openbank-engagement-service")
+        // The module directory name without the `openbank-` prefix, which is what a producer
+        // stamps itself (`check-source-service-convention.py`). This pinned the old derivation's
+        // output, a spelling no module carries — see TopicProducers.
+        assertThat(env.sourceService).isEqualTo("engagement-service")
         assertThat(env.payload).containsEntry("campaignId", campaignId.toString())
         assertThat(env.payload).containsEntry("stepOrder", 2L)
         assertThat(env.payload).containsEntry("channel", "PUSH")
