@@ -117,9 +117,72 @@ def inventory(root: Path, today: dt.date) -> tuple[str, int]:
     return "\n".join(lines) + "\n", 1 if overdue else 0
 
 
+def _diff_added(base: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", "diff", "--name-only", "--diff-filter=A", f"{base}...HEAD"],
+                          capture_output=True, text=True, check=False)
+
+
+def _can_diff(base: str) -> bool:
+    """Can the gate's ACTUAL query run — not merely: does the object exist.
+
+    This distinction is the whole bug, twice over. `base...HEAD` is a three-dot diff, so it
+    needs a MERGE BASE, not just the base commit. Fetching the sha by name (`--depth=1`) makes
+    `git cat-file -e` succeed while the histories stay disconnected, so the diff still exits
+    128. The first version of this fix checked exactly that — object presence — declared the
+    base reached, and failed in precisely the same place it was written to fix.
+
+    Probing with the real command is the only criterion that cannot be satisfied by an
+    almost-correct repair.
+    """
+    return _diff_added(base).returncode == 0
+
+
+def reach_base(base: str) -> bool:
+    """Make `base` reachable in a shallow checkout, reporting honestly if it cannot be.
+
+    The gates shard checks out at `fetch-depth: 1` (ci.yml says so in its own comment), so a
+    PR whose base commit has since scrolled out of the shallow window simply does not have it.
+    `git diff base...HEAD` then exits 128 — and because the caller passed `check=True`, the
+    gate died with a CalledProcessError traceback and was reported as
+    `FAIL new static ExternalSecret must declare a rotation deadline`. It had found no such
+    thing. It had not looked.
+
+    That is the failure mode this repo keeps re-learning: a check that cannot distinguish
+    "nothing to report" from "could not run" is not a check. Here it happened to fail closed,
+    which is the right direction and the wrong sentence — it accused the PR of a credential
+    violation it did not commit, and sent the author looking for an ExternalSecret that was
+    never there. Measured on #9095, whose diff touches no manifest at all.
+
+    Same deepen-in-place idiom as check-flyway-version-commit-order.py, for the same reason:
+    60 other gates do not need full history and should not pay for it.
+    """
+    if _can_diff(base):
+        return True
+    # Deepen, cheapest first, re-probing with the real query after each attempt. Fetching the
+    # sha by name alone is deliberately NOT enough here — see _can_diff.
+    for args in (["--depth=1", "origin", base], ["--unshallow", "origin", "main"],
+                 ["--depth=2147483647", "origin", "main"]):
+        subprocess.run(["git", "fetch", "--quiet", *args],
+                       capture_output=True, text=True, check=False)
+        if _can_diff(base):
+            return True
+    return False
+
+
 def enforce_new(base: str, today: dt.date) -> int:
-    out = subprocess.run(["git", "diff", "--name-only", "--diff-filter=A", f"{base}...HEAD"],
-                         capture_output=True, text=True, check=True)
+    if not reach_base(base):
+        print(f"::error::credential-deadline-ratchet could not reach the diff base {base}, so it "
+              f"scanned NOTHING. This is an UNKNOWN result, not a clean one, and not a finding "
+              f"against this pull request. Usual cause: the base commit has scrolled out of the "
+              f"shard's shallow window (ci.yml checks out at fetch-depth: 1) — rebasing the branch "
+              f"onto current main resolves it.")
+        return 1
+    out = _diff_added(base)
+    if out.returncode != 0:
+        print(f"::error::credential-deadline-ratchet could not diff {base}...HEAD "
+              f"(git exit {out.returncode}), so it scanned NOTHING. UNKNOWN, not clean, and not a "
+              f"finding against this pull request. git said: {out.stderr.strip()[:300]}")
+        return 1
     bad = 0
     for name in out.stdout.splitlines():
         f = Path(name)
@@ -166,6 +229,77 @@ def self_test() -> int:
     doc_bad = doc_ok.replace('"2027-01-01"', '"next quarter"')
     if validate_deadline(Cred(doc_bad, Path("x.yaml")), today) is None:
         print("self-test FAIL: non-date deadline accepted"); bad += 1
+    # The gate must be unable to pass off "could not look" as "looked and found nothing" —
+    # and must not dress it up as a credential finding either. A sha of the right shape that
+    # cannot exist stands in for the scrolled-out base seen in CI.
+    #
+    # Run it inside a throwaway repo with NO remote, not against the checkout. Two reasons, both
+    # learned the hard way: against the real repo `reach_base` reaches the network and tries
+    # `--unshallow`, which took 12.7s against this gate's 5s budget and failed the shard; and a
+    # self-test that deepens the checkout it is running in has changed the thing it was meant to
+    # observe. With no `origin` configured every fetch fails immediately and offline, so the
+    # unreachable-base path is exercised at full speed.
+    import contextlib
+    import io
+    import os
+    import tempfile
+    unreachable = "0" * 40
+    buf = io.StringIO()
+    cwd = os.getcwd()
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            os.chdir(tmp)
+            subprocess.run(["git", "init", "--quiet"], check=False,
+                           capture_output=True, text=True)
+            with contextlib.redirect_stdout(buf):
+                rc = enforce_new(unreachable, today)
+        finally:
+            os.chdir(cwd)
+    said = buf.getvalue()
+    if rc == 0:
+        print("self-test FAIL: unreachable base returned success — a gate that did not run "
+              "must never report clean"); bad += 1
+    if "UNKNOWN" not in said:
+        print("self-test FAIL: unreachable base did not say UNKNOWN"); bad += 1
+    if "rotation deadline" in said or "ADR-0279" in said:
+        print("self-test FAIL: unreachable base reported as a credential violation"); bad += 1
+
+    # The three checks above pin the OUTCOME contract (never clean, always UNKNOWN, never an
+    # accusation) — but they pass whether or not `reach_base` actually recovers anything, because
+    # an unrecoverable base and a failed diff both land on an honest UNKNOWN. That left the half
+    # that fixes the real CI symptom unproven, so it gets its own case: a base that is genuinely
+    # absent from a shallow clone and genuinely recoverable from its origin. `file://` keeps it
+    # offline and fast; the deepening path is the same one CI takes.
+    with tempfile.TemporaryDirectory() as tmp:
+        origin, clone = Path(tmp) / "origin", Path(tmp) / "clone"
+        git_o = ["git", "-C", str(origin)]
+        subprocess.run(["git", "init", "--quiet", "-b", "main", str(origin)],
+                       check=False, capture_output=True, text=True)
+        ident = ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        for n in range(3):
+            (origin / f"f{n}.txt").write_text(str(n))
+            subprocess.run([*git_o, "add", f"f{n}.txt"], check=False, capture_output=True, text=True)
+            subprocess.run([*git_o, *ident, "commit", "--quiet", "-m", f"c{n}"],
+                           check=False, capture_output=True, text=True)
+        old_sha = subprocess.run([*git_o, "rev-parse", "HEAD~2"], check=False,
+                                 capture_output=True, text=True).stdout.strip()
+        subprocess.run(["git", "clone", "--quiet", "--depth=1", f"file://{origin}", str(clone)],
+                       check=False, capture_output=True, text=True)
+        cwd2 = os.getcwd()
+        try:
+            os.chdir(clone)
+            present_before = _can_diff(old_sha)
+            buf2 = io.StringIO()
+            with contextlib.redirect_stdout(buf2):
+                rc2 = enforce_new(old_sha, today)
+        finally:
+            os.chdir(cwd2)
+    if present_before:
+        print("self-test FAIL: shallow clone already had the old base — the fixture proves "
+              "nothing, so the recovery path was never exercised"); bad += 1
+    if rc2 != 0 or "UNKNOWN" in buf2.getvalue():
+        print(f"self-test FAIL: a recoverable base was not recovered (rc={rc2}) — reach_base "
+              f"is not doing its job: {buf2.getvalue().strip()[:200]}"); bad += 1
     print("credential-inventory self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0
 
