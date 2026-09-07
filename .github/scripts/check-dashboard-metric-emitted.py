@@ -58,10 +58,38 @@ GITOPS = REPO / "openbank-infra" / "gitops"
 # "<dashboard>#<panel>#<metric>". Checked BOTH ways: an entry that stops reproducing is itself
 # reported, so the list can only shrink.
 #
-# EMPTY. #5049's sweep is complete -- 235 panel queries across 27 dashboards, 153 of them naming
-# an openbank_ series, and every one resolves to instrumented code. The gate ships as a pure
-# ratchet so the estate cannot quietly reacquire the debt it just paid off.
-KNOWN_UNEMITTED: dict[str, str] = {}
+# The Security-KPI entries (#8590) are the one sanctioned exception shape: the
+# openbank_security_kpi_* gauges are emitted by admin-ui's Next.js route
+# src/app/api/security/kpis/metrics/route.ts (TypeScript), which
+# metricsrc.emitted_names() cannot see -- it scans only openbank-*/src/main/**/*.kt.
+# The values come from the CI-generated security-kpis.json snapshot, never invented
+# in the route. The dependabot panel is expected to read "No data" until a
+# security-scoped METADATA_REFRESH_PAT unblocks the dependabot-alerts 403 -- the
+# emitter OMITS the series rather than faking a 0.
+KNOWN_UNEMITTED: dict[str, str] = {
+    "OpenBank — Security KPIs#Snapshot age (weekly publisher)#openbank_security_kpi_generated_timestamp_seconds":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+    "OpenBank — Security KPIs#Snapshot generated at#openbank_security_kpi_generated_timestamp_seconds":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+    "OpenBank — Security KPIs#NetworkPolicy coverage#openbank_security_kpi_netpol_coverage_pct":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+    "OpenBank — Security KPIs#Dependency freshness score#openbank_security_kpi_dependency_freshness_score":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+    "OpenBank — Security KPIs#Fuzz coverage (in-scope operations)#openbank_security_kpi_fuzz_coverage_pct":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+    "OpenBank — Security KPIs#Fuzz operations tested / in scope#openbank_security_kpi_fuzz_tested_operations":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+    "OpenBank — Security KPIs#Fuzz operations tested / in scope#openbank_security_kpi_fuzz_in_scope_operations":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+    "OpenBank — Security KPIs#Credentials overdue rotation#openbank_security_kpi_credentials_overdue":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+    "OpenBank — Security KPIs#Credentials without a declared deadline#openbank_security_kpi_credentials_undeclared":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+    "OpenBank — Security KPIs#Threat models stale (>90d)#openbank_security_kpi_threat_models_stale":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+    "OpenBank — Security KPIs#Oldest open Critical/High Dependabot alert (days) — absent while the API answers 403#openbank_security_kpi_dependabot_oldest_open_days":
+        "admin-ui TS emitter, invisible to the Kotlin scan; #8590",
+}
 
 
 def panel_queries() -> list[dict]:
