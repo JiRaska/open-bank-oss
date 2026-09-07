@@ -396,3 +396,14 @@ money_path_accountability:
       note: >-
         Also the PSD2 RTS Art. 32(4) interface whose quarterly availability statistics this
         programme is meant to generate, so its journey is evidence as well as monitoring.
+    - service: openbank-card-issuance-service
+      note: >-
+        ADR-0283 phase 0 (#8808). Ships the card authorisation decision that nothing calls yet;
+        the journey that exercises it is the card-processing path (#8809): issue → authorise →
+        clear → posted journal. Until then the accountable surface is the SCA-gated card
+        operations (ADR-0194).
+    - service: openbank-card-processing-service
+      note: >-
+        ADR-0283 phase 1 (#8809). The journey here is the whole card path end to end — issue,
+        authorise, clear, posted journal, statement line — because the defect it must be able to
+        see is a clearing that never reaches the ledger, which no single-service probe can.

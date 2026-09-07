@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "2f61847889e313b7" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "0a1a758b48093769" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -378,7 +378,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a2f76340bc0c5c59"
+        openbank.tech/policy-checksum: "7f3484c09744e63d"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -747,7 +747,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
         # comment (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "5e58eace60a00ed5" # domestic-payment-opa-bundle
+        openbank.tech/policy-checksum: "1c4a029297817535" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1084,7 +1084,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "45f9c4db8630db54"
+        openbank.tech/policy-checksum: "7827fa63a039814c"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1405,7 +1405,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "50586d33545f868b" # clearing-opa-bundle
+        openbank.tech/policy-checksum: "5f8c8d05b38bc97d" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1703,7 +1703,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "c412b712c016f700" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "3ef998bcb9674897" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1982,7 +1982,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "67ae5de5a957d77f"
+        openbank.tech/policy-checksum: "d4d6d3c099c3b869"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2081,6 +2081,14 @@ spec:
             # (AUTHZ_ENFORCE=false, @Authorize logs "would DENY" without blocking) — matches
             # every other service's rollout convention. Flip to true only after an observation
             # window with a clean advisory report.
+            #
+            # Advisory deliberately (#8470): ADR-0283 phase 0 makes this service money-path, so
+            # the money-path authz-enforce gate now reads this value. It stays false because the
+            # observation window above has not run — the card authorisation decision only started
+            # shipping with ADR-0283, so there is no advisory report to confirm an empty
+            # "would DENY" population yet. Flipping on the same PR that declares the service
+            # money-path would enforce against a policy nobody has watched decide.
+            # Flip target: 2026-10-05, with the other three advisory money-path services.
             - name: AUTHZ_ENFORCE
               value: "false"
           startupProbe:
@@ -2230,6 +2238,276 @@ spec:
       targetPort: http
 ---
 # ─────────────────────────────────────────────────────────────────────────────
+# card-processing-service  (port 8157)
+# The card money path (ADR-0283 phase 1, #8809): authorisation -> hold -> clearing -> ledger
+# posting on the CARD rail. Calls card-issuance for the DECISION (it does not re-implement it),
+# transaction-service to post cleared spend, and fraud-service in shadow.
+# Stores no PAN and no card credential — a card is referenced by its card-issuance id, which is
+# what keeps this workload outside the cardholder-data environment.
+# Image pinned to a bootstrap tag; auto-deploy rewrites it once this manifest exists.
+# mTLS to Strimzi (ADR-0137): authenticates as the KafkaUser 'card-processing-service'
+# (kafka-scheme-accepted-acl.yaml); PKCS#12 keystore/truststore projected by External Secrets.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: card-processing-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: card-processing-service
+    app.kubernetes.io/part-of: payments
+spec:
+  replicas: 1
+  # Terminate-first (#3545): with one replica the default maxSurge 1 / maxUnavailable 0 needs room
+  # for two pods, and on a full cluster the rollout never completes while reporting 1/1 READY.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: card-processing-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: card-processing-service
+        app.kubernetes.io/part-of: payments
+      annotations:
+        # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-card-processing-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "b0af87e36592a3af"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: card-processing-service
+          # Bootstrap pin: a real `sandbox-<sha>` naming a commit in this repository, because the deploy
+          # drift watch can only compare a tag it can resolve to a commit — an unpinned placeholder
+          # is UNVERIFIABLE forever rather than merely stale. No image carries this tag yet; the
+          # first auto-deploy run rewrites the line, and until then the Deployment does not admit,
+          # which is the honest state for a service whose image has never been built.
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-c111ba4dc
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8157
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://card-processing-db-rw.payments.svc:5432/openbank_card_processing
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: postgresql://card-processing-db-rw.payments.svc:5432/openbank_card_processing
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: card-processing-db-app
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: card-processing-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
+            - name: CARD_ISSUANCE_SERVICE_URL
+              value: http://card-issuance-service.payments.svc:8118
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
+            # fraud-service lives in its own `fraud` namespace on 8133 (ADR-0037 domain=namespace),
+            # not in payments. Verified against the Service object, not guessed from the port table:
+            # 8110 is sca-service, and a wrong port here would make every shadow score a connection
+            # error nobody would notice, because the score changes no outcome.
+            - name: FRAUD_SERVICE_URL
+              value: http://fraud-service.fraud.svc:8133
+            # Never on in a deployed environment: the sandbox acquirer can move money end to end.
+            - name: CARD_SANDBOX_ACQUIRER_ENABLED
+              value: "false"
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: card-processing-service-oidc
+                  key: OIDC_CLIENT_SECRET
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            # Advisory first (ADR-0034 Phase 5 convention): @Authorize logs "would DENY" without
+            # blocking. Flip to true only after an observation window with a clean advisory report.
+            #
+            # Advisory deliberately (#8470): ADR-0283 phase 1 makes this service money-path, so the
+            # money-path authz-enforce gate reads this value. It stays false because the observation
+            # window above cannot have run — the service does not exist yet, so there is no advisory
+            # report to confirm an empty "would DENY" population. Enforcing on the PR that creates
+            # the service would enforce against a policy nobody has watched decide.
+            # Flip target: 2026-10-05, with the other advisory money-path services.
+            - name: AUTHZ_ENFORCE
+              value: "false"
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+        # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for the
+        # cardprocessing.* actions. Bundle from the card-processing-opa-bundle ConfigMap
+        # (gen-card-processing-opa-bundle.sh).
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: card-processing-opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: card-processing-opa-bundle
+              mountPath: /bundle/card_processing_rest_ext.rego
+              subPath: card_processing_rest_ext.rego
+              readOnly: true
+            - name: card-processing-opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: card-processing-opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: card-processing-opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: card-processing-opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: card-processing-opa-bundle
+          configMap:
+            name: card-processing-opa-bundle
+        - name: kafka-keystore
+          secret:
+            secretName: card-processing-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: card-processing-service
+  namespace: payments
+  labels:
+    app.kubernetes.io/name: card-processing-service
+spec:
+  selector:
+    app.kubernetes.io/name: card-processing-service
+  ports:
+    - name: http
+      port: 8157
+      targetPort: http
+---
+# ─────────────────────────────────────────────────────────────────────────────
 # settlement-service  (port 8138)
 # ADR-0101 P3 — Temporal durable workflow for interbank settlement.
 # Feature flag openbank.temporal.enabled=false by default.
@@ -2260,7 +2538,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-settlement-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "442d3dce35b98e13" # settlement-opa-bundle
+        openbank.tech/policy-checksum: "b4af85b5aa999945" # settlement-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2686,7 +2964,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-swift-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "2eaf986cc1138d31"
+        openbank.tech/policy-checksum: "15fdf822b1dfcfcf"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3000,7 +3278,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-vop-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "f061034a288b8f50"
+        openbank.tech/policy-checksum: "3e4dea80dbe96ae1"
     spec:
       securityContext:
         runAsNonRoot: true
