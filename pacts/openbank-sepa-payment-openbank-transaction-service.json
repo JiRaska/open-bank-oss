@@ -16,7 +16,7 @@
           "currencyCode": "EUR",
           "description": "pact contract SEPA payment",
           "idempotencyKey": "pact-sepa-txn-001",
-          "rail": "SEPA",
+          "rail": "SEPA_CT",
           "sourceAccountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
           "type": "TRANSFER",
           "valueDate": "2026-01-20"

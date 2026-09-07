@@ -42,9 +42,13 @@ class SepaPaymentTransactionServicePactConsumerTest {
           "currencyCode": "EUR",
           "description": "pact contract SEPA payment",
           "valueDate": "2026-01-20",
-          "rail": "SEPA"
+          "rail": "SEPA_CT"
         }
     """.trimIndent()
+
+    // #8699: the pact used to send rail "SEPA", which is NOT a PaymentRail value — it only passed
+    // because transaction-service silently nulled unparseable enums. The production client
+    // (SettlementAdapter) sends SEPA_CT; the contract must mirror the real wire.
 
     @Pact(consumer = "openbank-sepa-payment", provider = "openbank-transaction-service")
     fun initiateSepaTransactionPact(builder: PactDslWithProvider): RequestResponsePact = builder
