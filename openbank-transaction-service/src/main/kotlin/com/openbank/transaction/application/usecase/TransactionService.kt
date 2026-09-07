@@ -78,6 +78,7 @@ class TransactionService(
 
     companion object {
         private const val TRANSACTION_INITIATED_EVENT = "openbank.transactions.transaction.initiated"
+        private const val TRANSACTION_REVERSED_EVENT = "openbank.transactions.transaction.reversed"
         // The completed/failed event types moved with the terminal write into
         // PaymentActivitiesImpl (#4238) — they are emitted by the workflow, not by this caller.
 
@@ -270,8 +271,20 @@ class TransactionService(
             "Cannot reverse transaction ${original.id}: no source account"
         }
 
-        // Mark original as reversed; no domain event — the reversal transaction carries the audit trail
-        transactionRepository.update(original.reverse())
+        // Mark original as reversed AND announce it (#8745 finding 1): this was the only terminal
+        // transition with no event — the reversal's transaction.initiated announces THAT a reversal
+        // happened, but a consumer projecting status held the ORIGINAL at COMPLETED permanently.
+        // The row and the outbox event commit atomically (update's two-arg overload), the same
+        // transactional-outbox shape the workflow's terminal writes use.
+        val reversed = original.reverse()
+        transactionRepository.update(
+            reversed,
+            OutboxMessage(
+                aggregateId = reversed.id,
+                eventType = TRANSACTION_REVERSED_EVENT,
+                payload = eventPublisher.reversedPayload(reversed, command.reason),
+            ),
+        )
 
         // Initiate reversal credit — flows through the normal saga as an incoming credit
         // (sourceAccountId=null → no balance cover needed; DEBIT cash-clearing, CREDIT deposit-control)
