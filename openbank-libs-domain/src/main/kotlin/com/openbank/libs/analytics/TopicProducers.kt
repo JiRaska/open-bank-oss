@@ -132,11 +132,12 @@ object TopicProducers {
         // openbank-engagement-service/src/main/resources/application.yaml -> engagement-events-out.
         "openbank.engagement.events" to "engagement-service",
         // ADR-0284 D8: openbank-kyb-service/src/main/resources/application.yaml -> kyb-events-out.
-        // Kept WITH the "openbank-" prefix, unlike every row above, because
-        // KybAnalyticsIngestTest.kt already pins this exact value ("a kyb record attributes to
-        // the kyb service without an override") and that test predates this table -- matching it
-        // here is correct, not a case of the stripped-prefix rule being violated by accident.
-        "openbank.kyb.events" to "openbank-kyb-service",
+        // Stripped like every row above. This row briefly carried the "openbank-" prefix, justified
+        // by KybAnalyticsIngestTest pinning that spelling -- but the justification had the facts
+        // backwards: the service itself emits KybEvent.SOURCE_SERVICE = "kyb-service", so the
+        // prefixed fallback would have attributed the SAME producer under a second spelling on any
+        // event that arrived without the field. That split is the whole reason this table exists.
+        "openbank.kyb.events" to "kyb-service",
     )
 
     /** Topics with a verified producer entry. Visible for coverage tests. */

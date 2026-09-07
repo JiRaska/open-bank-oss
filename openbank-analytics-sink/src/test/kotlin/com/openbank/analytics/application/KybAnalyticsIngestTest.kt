@@ -36,7 +36,10 @@ class KybAnalyticsIngestTest {
     fun `a kyb record attributes to the kyb service without an override`() {
         assertThat(TopicAttribution.domainOf("openbank.kyb.events")).isEqualTo("kyb")
         assertThat(TopicAttribution.aggregateType("openbank.kyb.events")).isEqualTo("KYB")
-        assertThat(TopicAttribution.sourceService("openbank.kyb.events")).isEqualTo("openbank-kyb-service")
+        // Stripped, matching KybEvent.SOURCE_SERVICE — the value the service actually emits. The
+        // fallback must agree with the producer, or an event missing the field is attributed
+        // under a second spelling.
+        assertThat(TopicAttribution.sourceService("openbank.kyb.events")).isEqualTo("kyb-service")
     }
 
     @Test
