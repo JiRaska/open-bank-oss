@@ -160,4 +160,54 @@ class MerchantGeoResolutionTest {
 
         assertThat(merchant?.geo?.city).isEqualTo("Praha")
     }
+
+    /**
+     * The only shape that may claim EXACT: a location tied to the device that took the payment.
+     * The response must carry that through, because a client is allowed to draw a real pin for
+     * EXACT and only a town caption for CITY — the distinction is worthless if it stops at the
+     * database.
+     */
+    @Test
+    fun `a device-resolved location surfaces as EXACT`() {
+        val exact = MerchantLocationEntity().also {
+            it.descriptorKey = "BILLA"
+            it.cityToken = "BRNO"
+            it.lat = 49.1951
+            it.lon = 16.6068
+            it.city = "Brno"
+            it.country = "CZ"
+            it.geoPrecision = GeoPrecision.EXACT
+            it.terminalId = "T-00042"
+        }
+
+        val merchant = runBlocking { listWith("BILLA BRNO", mapOf("BILLA|BRNO" to exact)) }
+
+        assertThat(merchant?.geo?.precision).isEqualTo(GeoPrecision.EXACT)
+    }
+
+    /**
+     * A merchant with no coordinates anywhere carries no geo at all. Absent is the honest answer for
+     * an e-shop — there is no place where the money was spent — and it must not degrade into a pin
+     * at latitude 0.
+     */
+    @Test
+    fun `a merchant with no coordinates carries no geo`() {
+        val eshop = MerchantCatalogEntity().also {
+            it.descriptorKey = "BILLA"
+            it.cleanName = "Billa"
+            it.geoPrecision = GeoPrecision.CITY
+        }
+        coEvery { useCase.listTransactions(any()) } returns
+            CursorPage(listOf(transaction("BILLA BRNO")), PageInfo(limit = 20, hasNextPage = false))
+        coEvery { catalog.findByDescriptors(any()) } returns mapOf("BILLA" to eshop)
+        coEvery { locations.findByKeys(any()) } returns emptyMap()
+
+        val response = runBlocking { resource.listTransactions(accountId, 20, null) }
+
+        @Suppress("UNCHECKED_CAST")
+        val page = response.entity as CursorPage<TransactionResponse>
+        val merchant = page.data.single().merchant
+        assertThat(merchant?.cleanName).isEqualTo("Billa")
+        assertThat(merchant?.geo).isNull()
+    }
 }
