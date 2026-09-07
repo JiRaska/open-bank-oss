@@ -397,9 +397,11 @@ change_requirements:
     allowlist:
       # openbank.psd2.events left the allowlist in #8510: the producer itself was deleted
       # (the psd2_outbox apparatus had zero writers), so there is no topic left to exempt.
-      # openbank.kyb.events left the allowlist here: onboarding-service now consumes it
-      # (BusinessOnboardingEventConsumer, channel kyb-events-in, ADR-0284 D6). The entry said
-      # to remove it with the first consumer PR, and the gate fails on a stale entry too.
+      # openbank.kyb.events left the allowlist here: it now has TWO consumers, which is what the
+      # entry anticipated — onboarding-service's business funnel projection
+      # (BusinessOnboardingEventConsumer, channel kyb-events-in, ADR-0284 D6) and analytics-sink's
+      # Customer 360 silver layer (D8). The entry said to remove it with the first consumer PR, and
+      # the gate fails on a stale entry under --enforce, in both directions.
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "proposal-events"
