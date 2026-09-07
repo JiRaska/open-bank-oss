@@ -95,6 +95,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-processing-db-1",job="card-processing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-1",job="domestic-payment-db"}'
@@ -252,6 +254,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-processing-db-1",job="card-processing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-1",job="domestic-payment-db"}'
@@ -386,6 +390,8 @@ tests:
       - series: 'up{container="postgres",namespace="party",pod="party-db-1",job="party-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-processing-db-1",job="card-processing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
         values: "1+0x40"

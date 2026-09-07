@@ -1,0 +1,155 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# CARD SCHEME CAPABILITY REGISTRY (ADR-0283 phase 2, issue #8810).
+#
+# WHY THIS FILE EXISTS
+#   The platform's card position is "one domain, N adapters": the bank chooses a network per
+#   product, and that choice binds an adapter rather than forking the code. That promise is only
+#   real if there is one place saying WHICH capabilities exist, which network offers each, and what
+#   each costs to adopt — otherwise the answer lives in whoever last read a developer portal.
+#
+#   Everything derived from this file is GENERATED (rule 6): the capability matrix in the docs and
+#   the Card Center screen (ADR-0283 phase 3) render from here. Edit this file, never the artifact.
+#
+# WHAT A `port` VALUE MEANS
+#   The Kotlin interface in openbank-libs-domain that a binding implements. `null` means the
+#   capability is registered as a known part of the landscape but no port has been designed yet —
+#   an honest state, and distinguishable from "we forgot".
+#
+# WHAT A NETWORK ENTRY IS, AND IS NOT
+#   `product` is the vendor's own name for the capability, as printed in their developer portal.
+#   `availability` is what the SANDBOX offers, not what a production contract would: `sandbox` means
+#   a free developer-portal sandbox exists and an adapter can be exercised without a commercial
+#   agreement; `contract` means the capability needs a signed agreement before any call succeeds;
+#   `none` means the network does not offer it.
+#
+#   Nothing here asserts we have integrated anything. `bindings` on each capability is the truthful
+#   record of what this repository actually implements today, and for phase 2 that is the simulator
+#   only. A registry that quietly reads as an integration status page is worse than no registry.
+
+version: 1
+
+networks:
+  visa:
+    label: Visa
+    developer_portal: https://developer.visa.com
+    # Two-way TLS plus an API key; some products additionally require message-level encryption.
+    sandbox_auth: mutual-TLS + API key (MLE on some products)
+  mastercard:
+    label: Mastercard
+    developer_portal: https://developer.mastercard.com
+    # OAuth 1.0a request signing with a key issued by the portal — not a bearer token.
+    sandbox_auth: OAuth 1.0a request signing
+
+capabilities:
+  - id: bin-lookup
+    label: BIN and card-product attributes
+    port: com.openbank.libs.domain.cards.scheme.BinLookupPort
+    why: >-
+      Answers what a card number's issuer range is: brand, product type, country, funding source.
+      First because it is read-only, needs no cardholder data, and is the missing WRITER for the
+      merchant/BIN reference data the transaction categoriser is starved of (#8573).
+    # `visa` and `mastercard` name adapters that EXIST in card-processing-service. Neither can
+    # call anything without a developer-portal credential, and with none configured each reports
+    # NOT_BOUND — a state distinct from a failure. Listing them is the honest reading of "what this
+    # repository implements"; the credential is a deployment fact, not a code one.
+    bindings: [simulator, visa, mastercard]
+    networks:
+      visa: { product: BIN Attributes Sharing, availability: sandbox }
+      mastercard: { product: BIN Lookup, availability: sandbox }
+
+  - id: merchant-data
+    label: Merchant identification and location
+    port: com.openbank.libs.domain.cards.scheme.MerchantDataPort
+    why: >-
+      Turns an acquirer's merchant descriptor into a named, located merchant. Drives the customer's
+      "where was this" and the categorisation the card controls act on.
+    # Simulator only: the vendor merchant services need a contract-tier account even in sandbox,
+    # and the descriptor cleaning the simulator does is genuinely useful on its own — it is what
+    # the authorisation path calls today.
+    bindings: [simulator]
+    networks:
+      visa: { product: Merchant Search / Merchant Locator, availability: sandbox }
+      mastercard: { product: Merchant Identifier / Places, availability: sandbox }
+
+  - id: tokenisation
+    label: Network tokenisation (wallets, card-on-file)
+    port: com.openbank.libs.domain.cards.scheme.TokenisationPort
+    why: >-
+      A network token replaces the PAN at the merchant, so a breach at one merchant cannot be
+      replayed. Also the mechanism behind wallet provisioning.
+    bindings: [simulator]
+    networks:
+      visa: { product: Visa Token Service (VTS), availability: contract }
+      mastercard: { product: MDES, availability: contract }
+
+  - id: push-payment
+    label: Push payment to a card
+    port: com.openbank.libs.domain.cards.scheme.PushPaymentPort
+    why: >-
+      Sends funds TO a card rather than pulling from one — disbursements, refunds outside the
+      original authorisation, person-to-person.
+    bindings: [simulator]
+    networks:
+      visa: { product: Visa Direct, availability: contract }
+      mastercard: { product: Mastercard Send, availability: contract }
+
+  - id: dispute
+    label: Disputes and chargebacks
+    port: com.openbank.libs.domain.cards.scheme.DisputePort
+    why: >-
+      The scheme's own case lifecycle, reason codes and evidence exchange. The bank-side lifecycle
+      is ADR-0117; this is the wire to the network.
+    bindings: [simulator]
+    networks:
+      visa: { product: Visa Resolve Online (VROL), availability: contract }
+      mastercard: { product: Mastercom, availability: contract }
+
+  - id: account-updater
+    label: Card-on-file account updater
+    port: com.openbank.libs.domain.cards.scheme.AccountUpdaterPort
+    why: >-
+      Tells merchants holding a card on file that it was reissued, so a subscription does not fail
+      on a card the customer has replaced.
+    bindings: [simulator]
+    networks:
+      visa: { product: Visa Account Updater, availability: contract }
+      mastercard: { product: Automatic Billing Updater, availability: contract }
+
+  - id: network-controls
+    label: Network-side spend controls
+    port: null
+    why: >-
+      Controls evaluated by the network before the authorisation reaches the issuer. Deliberately
+      portless for now: this platform enforces its controls at card-issuance (ADR-0194), and
+      duplicating them at the network would create two copies of one control — the exact drift the
+      card platform is designed to avoid. Registered so the choice is visible rather than missing.
+    bindings: []
+    networks:
+      visa: { product: Visa Transaction Controls, availability: contract }
+      mastercard: { product: In Control, availability: contract }
+
+  - id: three-d-secure
+    label: 3-D Secure / issuer authentication
+    port: null
+    why: >-
+      Out of scope by ADR-0283 D2 and ADR-0190 before it: an issuer Access Control Server needs EMV
+      3DS certification and a real cardholder-authentication relationship. Registered here so the
+      absence is a recorded position rather than an omission a reader has to infer.
+    bindings: []
+    networks:
+      visa: { product: Visa Secure, availability: contract }
+      mastercard: { product: Identity Check, availability: contract }
+
+  - id: fx-rate
+    label: Scheme FX rates
+    port: null
+    why: >-
+      The rate a scheme applies to a cross-currency card transaction. Portless because fx-service
+      already owns rate sourcing (ADR-0171 sibling); a second source would have to be reconciled
+      with it, and that is a decision, not an adapter.
+    bindings: []
+    networks:
+      visa: { product: Visa FX Rates API, availability: sandbox }
+      mastercard: { product: Currency Conversion Calculator, availability: sandbox }

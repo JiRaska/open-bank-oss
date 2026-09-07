@@ -9,7 +9,7 @@ import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
-  CreditCard, Search, RefreshCw, CheckCircle2, XCircle, Clock, ChevronRight, Plus, ShieldCheck, X,
+  CreditCard, Search, RefreshCw, CheckCircle2, XCircle, Clock, ChevronRight, Plus, ShieldCheck, X, Layers,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { hasPermission } from '@/lib/auth/roles'
@@ -140,6 +140,12 @@ export default function CardsPage() {
                 <Plus size={13} aria-hidden="true" /> {t('Vydat kartu', 'Issue a card')}
               </button>
             )}
+            {/* The capability matrix is a sibling surface, not a filter on this list: it answers
+                "which network offers what, and what do we bind" rather than anything about the
+                cards below (ADR-0283 phase 3). */}
+            <Link href="/cards/capabilities" className="btn btn-ghost btn-sm">
+              <Layers size={13} aria-hidden="true" /> {t('Schopnosti sítí', 'Network capabilities')}
+            </Link>
             <button type="button" className="btn btn-ghost btn-sm" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit karty', 'Refresh cards')}>
               <RefreshCw size={13} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
             </button>
