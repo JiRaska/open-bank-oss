@@ -478,4 +478,40 @@ class MerchantCatalogResourceTest {
             }.status,
         ).isEqualTo(400)
     }
+
+    /** Replacing an existing location answers 200; creating one answers 201. */
+    @Test
+    fun `replacing a location that already exists is a 200`() {
+        coEvery { locations.upsert(any()) } returns false
+
+        val response = runBlocking {
+            locationResource.upsertLocation("BILLA", "BRNO", MerchantLocationRequest(lat = 49.1, lon = 16.6))
+        }
+
+        assertThat(response.status).isEqualTo(200)
+    }
+
+    @Test
+    fun `an unknown precision on a location is refused rather than silently downgraded`() {
+        val response = runBlocking {
+            locationResource.upsertLocation(
+                "BILLA",
+                "BRNO",
+                MerchantLocationRequest(lat = 49.1, lon = 16.6, precision = "STREET"),
+            )
+        }
+
+        assertThat(response.status).isEqualTo(400)
+    }
+
+    @Test
+    fun `a merchant with no locations lists an empty array, not a 404`() {
+        coEvery { locations.listForMerchant("BILLA") } returns emptyList()
+
+        val response = runBlocking { locationResource.listLocations("BILLA") }
+
+        assertThat(response.status).isEqualTo(200)
+        @Suppress("UNCHECKED_CAST")
+        assertThat(response.entity as List<MerchantLocationResponse>).isEmpty()
+    }
 }
