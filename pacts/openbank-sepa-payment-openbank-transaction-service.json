@@ -57,6 +57,34 @@
         },
         "status": 201
       }
+    },
+    {
+      "description": "POST initiate SEPA transaction with no credentials",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 250.00,
+          "currencyCode": "EUR",
+          "description": "pact contract SEPA payment",
+          "idempotencyKey": "pact-sepa-txn-001",
+          "rail": "SEPA_CT",
+          "sourceAccountId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "type": "TRANSFER",
+          "valueDate": "2026-01-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {
