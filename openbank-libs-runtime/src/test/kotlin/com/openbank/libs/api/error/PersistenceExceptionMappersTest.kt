@@ -7,6 +7,7 @@ package com.openbank.libs.api.error
 import org.assertj.core.api.Assertions.assertThat
 import org.hibernate.exception.ConstraintViolationException
 import org.hibernate.exception.DataException
+import org.jboss.resteasy.reactive.server.core.multipart.MultipartParser
 import org.junit.jupiter.api.Test
 import java.io.CharConversionException
 import java.sql.SQLException
@@ -142,6 +143,18 @@ class GenericExceptionMapperClassificationTest {
 
         assertThat(response.status).isEqualTo(500)
         assertThat((response.entity as ApiError).code).isEqualTo(ErrorCode.INTERNAL_ERROR.code)
+    }
+
+    @Test
+    fun `a malformed multipart frame is classified 400`() {
+        // Found by fleet fuzzing (run 34017868446): a garbage multipart/form-data body reached
+        // GenericExceptionMapper on party-service's /parties/{id}/documents/upload and rendered
+        // as 500. The parser's exception is the caller's framing error, never a server fault.
+        val malformed = MultipartParser.MalformedMessageException()
+        val response = GenericExceptionMapper().toResponse(malformed)
+
+        assertThat(response.status).isEqualTo(400)
+        assertThat((response.entity as ApiError).code).isEqualTo(ErrorCode.VALIDATION_ERROR.code)
     }
 
     @Test
