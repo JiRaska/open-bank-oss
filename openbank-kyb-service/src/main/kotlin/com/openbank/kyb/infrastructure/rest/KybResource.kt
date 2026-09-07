@@ -14,9 +14,11 @@ import com.openbank.kyb.application.port.`in`.RejectCaseCommand
 import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
+import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
 import com.openbank.kyb.infrastructure.rest.dto.ClaimInvitationRequest
 import com.openbank.kyb.infrastructure.rest.dto.ExtractResponse
@@ -28,6 +30,7 @@ import com.openbank.kyb.infrastructure.rest.dto.ResolveReviewRequest
 import com.openbank.kyb.infrastructure.rest.dto.SchemeResponse
 import com.openbank.kyb.infrastructure.rest.dto.SignRequest
 import com.openbank.kyb.infrastructure.rest.dto.StartCaseRequest
+import com.openbank.kyb.infrastructure.rest.dto.UboResponse
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import io.quarkus.security.identity.SecurityIdentity
@@ -66,6 +69,8 @@ class KybResource {
     @Inject lateinit var lookup: RegistryLookupUseCase
 
     @Inject lateinit var onboarding: BusinessOnboardingUseCase
+
+    @Inject lateinit var ubo: BeneficialOwnershipPort
 
     @Inject lateinit var identity: SecurityIdentity
 
@@ -118,6 +123,30 @@ class KybResource {
                     ),
                 ).build()
         return Response.ok(ExtractResponse.from(extract)).build()
+    }
+
+    @GET
+    @Path("/ubo")
+    @Authorize(action = "kyb.ubo.read")
+    @Operation(
+        summary = "Beneficial owners of a business identifier, as its jurisdiction's register states them",
+    )
+    suspend fun ubo(@QueryParam("scheme") scheme: String?, @QueryParam("identifier") identifier: String?): Response {
+        // Nullable declarations, not `String`: JAX-RS injects null for an absent parameter, and a
+        // non-null Kotlin parameter turns that into a 500 at offset 0 — the guard in the body would
+        // be dead code (rules.yaml: nonnull-jaxrs-param-ratchet). libs-runtime maps
+        // IllegalArgumentException to 400; never a service-local mapper (#526).
+        requireNotNull(scheme) { "query parameter 'scheme' is required" }
+        requireNotNull(identifier) { "query parameter 'identifier' is required" }
+        val parsed = LegalEntityIdentifier.of(
+            runCatching { IdentifierScheme.valueOf(scheme.uppercase()) }
+                .getOrElse { throw IllegalArgumentException("unknown identifier scheme '$scheme'") },
+            identifier,
+        )
+        // Always 200. A finding whose source is UNAVAILABLE or SELF_DECLARATION is an ANSWER the
+        // analyst has to act on, not an error: 404 here would read as "this company has no owners",
+        // which is the one conclusion none of the three sources supports.
+        return Response.ok(UboResponse.from(ubo.lookup(parsed))).build()
     }
 
     @POST

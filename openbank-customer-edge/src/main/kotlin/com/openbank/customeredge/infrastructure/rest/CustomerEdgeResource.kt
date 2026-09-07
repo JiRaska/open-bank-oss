@@ -305,6 +305,36 @@ class CustomerEdgeResource(
         return Response.ok(accountJson).type(MediaType.APPLICATION_JSON).build()
     }
 
+    /**
+     * Who can act on one of the caller's OWN accounts (ADR-0232).
+     *
+     * **Owner-only, deliberately.** [getAccount] lets a delegate read the account itself, but not
+     * this: the list of everyone else who holds access is the grantor's business. A delegate who
+     * could read it would learn about the owner's other delegates and the bank mandates on the
+     * account — none of which their own grant is about.
+     *
+     * The answer unifies BOTH stores the payment guard consults — bank mandates and customer
+     * delegations — because an owner shown only the delegations they issued themselves would be
+     * shown a comforting half-truth about who can take money out.
+     *
+     * Party ids only cross this boundary; no names or contact details, so the response cannot turn
+     * an account id into a person's details.
+     */
+    @GET
+    @Path("/accounts/{accountId}/access")
+    @Authorize(action = "customer.accounts.read", resource = "#accountId")
+    @Blocking
+    fun getAccountAccess(@PathParam("accountId") accountId: UUID): Response {
+        val customer = customer()
+        if (!ownsAccount(accountId, customer.partyId)) {
+            return forbidden("Account does not belong to caller")
+        }
+        return upstream.get(
+            "$accountServiceUrl/api/v1/accounts/$accountId/authorizations/effective",
+            customer.partyId.toString(),
+        )
+    }
+
     // --- Balances ---
 
     /**

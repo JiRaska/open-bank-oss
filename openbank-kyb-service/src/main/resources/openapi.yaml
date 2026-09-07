@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OpenBank KYB Service API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -332,6 +332,36 @@ paths:
                 $ref: '#/components/schemas/Case'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/kyb/ubo:
+    get:
+      tags: [KYB]
+      summary: Beneficial owners of a business identifier, as its jurisdiction's register states them
+      operationId: lookupBeneficialOwners
+      description: >-
+        Always 200. `source` is the field to read first: REGISTER means a beneficial-ownership
+        register answered, SELF_DECLARATION means the jurisdiction has no queryable register and the
+        customer must declare, UNAVAILABLE means a register exists and could not be reached. An empty
+        `owners` list means something different under each, which is why a filed register statement
+        ("no individual PSC identified") is carried separately rather than collapsed into the absence.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: scheme
+          in: query
+          required: true
+          schema: { type: string, example: GB_CRN }
+        - name: identifier
+          in: query
+          required: true
+          schema: { type: string, example: "OC123456" }
+      responses:
+        '200':
+          description: What is known about the entity's beneficial owners right now
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UboFinding' }
+        '400':
+          description: Missing or unparseable scheme/identifier
 components:
   securitySchemes:
     bearerAuth:
@@ -386,6 +416,59 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    UboFinding:
+      type: object
+      properties:
+        scheme: { type: string }
+        identifier: { type: string }
+        source:
+          type: string
+          enum: [REGISTER, SELF_DECLARATION, UNAVAILABLE]
+        owners:
+          type: array
+          items: { $ref: '#/components/schemas/BeneficialOwner' }
+        registerStatements:
+          type: array
+          description: Statements the company filed, e.g. that no individual PSC has been identified.
+          items: { type: string }
+        threshold:
+          type: number
+          format: double
+          description: The jurisdiction's ownership threshold from its country pack (AMLD5 default 0.25).
+        registerName: { type: string, nullable: true }
+        sourceRef: { type: string, nullable: true }
+        requiresDeclaration:
+          type: boolean
+          description: True whenever the source is not a register — the bank still has to ask a human.
+        fetchedAt: { type: string, format: date-time }
+      required: [scheme, identifier, source, owners, registerStatements, threshold, requiresDeclaration, fetchedAt]
+    BeneficialOwner:
+      type: object
+      description: >-
+        One person or entity a register names as a beneficial owner. `band` is a band and never a
+        percentage: the UK PSC register publishes `ownership-of-shares-25-to-50-percent` and nothing
+        finer, so a precise figure would be invented rather than reported. `natureOfControl` carries
+        the register's own vocabulary verbatim.
+      properties:
+        fullName: { type: string }
+        dateOfBirth:
+          type: string
+          format: date
+          nullable: true
+          description: Null where the register publishes only a partial date (Companies House gives month and year).
+        nationality: { type: string, nullable: true }
+        countryOfResidence: { type: string, nullable: true }
+        band:
+          type: string
+          enum: [BELOW_THRESHOLD, PCT_25_TO_50, PCT_50_TO_75, PCT_75_TO_100, UNQUANTIFIED]
+        natureOfControl:
+          type: array
+          items: { type: string }
+        notifiedOn: { type: string, format: date, nullable: true }
+        corporate:
+          type: boolean
+          description: True when the owner is itself a company, so the ownership chain does not end here.
+      required: [fullName, band, natureOfControl, corporate]
     Error:
       type: object
       properties:

@@ -932,3 +932,121 @@ agents:
     compliance:
       eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, human disposes; not Annex III high-risk"
       dora: "ICT change management (Art. 8–10); operational resilience via durable, bounded case coordination"
+
+  # ── Business plane (ADR-0284 D9) ────────────────────────────────────────────────────────────
+  # A third plane beside control and development, and the distinction is not cosmetic: these two
+  # read BUSINESS data — a company's register extract, its beneficial owners, a customer's own
+  # accounts — where the control plane reads telemetry and CI artefacts. Neither has a runtime
+  # yet. The charters land first on purpose: an agent's powers are cheap to bound before anyone
+  # writes the loop that uses them, and expensive afterwards.
+  - id: kyb-analyst
+    plane: business
+    model: deepseek-ai/DeepSeek-V3.2
+    charter: "ADR-0284"
+    description: >
+      Drafts a disposition proposal for a business-onboarding case that reached MANUAL_REVIEW:
+      reads the register extract, the declared data, the beneficial-ownership finding and any
+      sanctions hits, and proposes "resolve with N signers", "reject — entity dissolved" or
+      "request a power of attorney", each with the evidence it rests on cited by id. Joins the
+      review as an ADR-0244 case participant; the operator disposes. Nothing about a case changes
+      on the model's word.
+
+      Its second job is narrower and more useful: a representation rule the Czech parser marked
+      UNKNOWN is shown to the model, which proposes the signature count. An ACCEPTED proposal
+      becomes a new pinned parser test — so the judgement is captured as DATA and re-checked by
+      CI forever, instead of being trusted at runtime on the next case that looks like it.
+    enabled: false                     # no runtime yet; the charter bounds it before it is built
+    enforcement: block
+    data_scope:
+      read:
+        - kyb-case-readonly            # cases in MANUAL_REVIEW only — never a live customer's
+        - registry-extract-readonly    # what the public register answered, verbatim
+        - ubo-finding-readonly         # beneficial owners, incl. SELF_DECLARATION and UNAVAILABLE
+        - sanctions-hit-readonly       # the screening result, not the screening list
+      pii: masked                      # names of representatives are masked; ids are not
+    tools:
+      allow:
+        - tier: read
+          resources: [kyb, governance]
+        - tier: write_proposal
+          resources: [case-thread]     # a proposal on the ADR-0244 case thread; no case write
+      deny:
+        - tier: write
+          resources: ["*"]             # explicit: never resolves a review, never rejects a case
+        - tier: execute
+          resources: ["*"]
+    case_capabilities:
+      - case.join                      # participates; only case-coordinator opens or synthesizes
+    requires_human:
+      - every: proposal                # the operator resolves or rejects, never the agent
+      - approver_must_differ_from: author
+      - record: reason
+    limits:
+      tokens_per_run: 50000
+      runs_per_day: 48
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - case_id
+        - proposed_disposition
+        - cited_evidence_ids
+        - human_approved_by
+    compliance:
+      # Annex III(5)(b) is creditworthiness of NATURAL PERSONS and Annex III(5)(a) is access to
+      # essential public services — neither covers onboarding due diligence on a legal entity, and
+      # the operator makes every decision either way. Art. 14 human oversight is the control that
+      # matters here, and it is structural: the agent has no write tier at all.
+      eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; Art. 14 — human oversight; proposal-only, not Annex III high-risk"
+      aml: "5AMLD Art. 13 customer due diligence — the agent PREPARES the file an obliged person then assesses; it performs no CDD step itself"
+      dora: "Art. 8–10 ICT risk — read-only over an existing case store, no new data path"
+
+  - id: business-copilot
+    plane: business
+    model: deepseek-ai/DeepSeek-V3.2
+    charter: "ADR-0284"
+    description: >
+      customer-copilot (ADR-0089) wearing the business hat. Same on-behalf-of token, now carrying
+      the acting-for entity, and the same proposal-only action tools: "send the invoice from the
+      company account" produces an ActionProposal the edge routes into the existing payment + SCA
+      flow, never a debit.
+
+      The scope rule is the whole charter: it reads the ENTITY the caller is currently acting for
+      and nothing else. A person who runs two companies and holds a personal account must not see
+      one from inside another — the mandate resolved at the edge decides which, and the model is
+      never asked to pick.
+    enabled: false                     # no runtime yet; the charter bounds it before it is built
+    enforcement: block
+    data_scope:
+      # The entity the caller is acting for, resolved from the mandate at the edge — NOT every
+      # entity they hold a mandate over, and never the caller's personal party in the same breath.
+      read: [balance, transaction, business-profile]
+      pii: own
+    tools:
+      allow: [query.balance.readonly, query.transaction.readonly,
+              propose.payment, propose.card_freeze, propose.dispute]
+      deny: ["money.*", "gh.pr.*", "*.write", secrets.read.raw]
+    requires_human:
+      - every: proposal                # ActionProposal on the reply, never a direct effect
+      - sca: dynamic_linking           # HITL + SCA bound to amount+payee before any state change
+      - scope: acting_for_entity       # one entity per session; the mandate at the edge decides
+    limits:
+      tokens_per_run: 80000
+      runs_per_day: 1000
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - acting_for_party_id
+        - mandate_id
+        - proposed_action
+        - human_approved_by
+    compliance:
+      eu_ai_act: "Art. 13 — transparency; Art. 14 — human oversight; proposal-only, not Annex III high-risk"
+      psd2: "SCA with dynamic linking (RTS Art. 5) is applied by the edge to every proposal that would move money; the agent itself initiates nothing"
+      gdpr: "Art. 5(1)(c) data minimisation — one acting-for entity per session, never the caller's other companies or their personal party"

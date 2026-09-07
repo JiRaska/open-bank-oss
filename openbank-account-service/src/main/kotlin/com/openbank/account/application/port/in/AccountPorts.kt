@@ -135,6 +135,14 @@ interface AuthorizationUseCase {
     ): Boolean
 
     /**
+     * Everyone who can act on an account right now, from BOTH stores the payment guard consults.
+     *
+     * Built for the account owner's transparency view. Returns an empty list for an unknown
+     * account rather than throwing, so a caller cannot use it as an existence oracle.
+     */
+    suspend fun effectiveAccess(accountId: UUID): List<com.openbank.account.domain.model.AccountAccessEntry>
+
+    /**
      * Amount-aware variant for the payment path (ADR-0232 D3 / AC6): a delegated
      * PAYMENT_ONLY answer also checks the grant's per-transaction ceiling.
      */

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.19.0
+  version: 1.20.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -149,6 +149,41 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/lending/credit-offers/eligibility/{partyId}:
+    get:
+      tags: [Lending]
+      operationId: creditOfferEligibility
+      summary: Whether an UNPROMPTED credit offer may be surfaced to this party
+      description: >-
+        ADR-0269 rules 1 and 2, for callers OUTSIDE this service. The eligibility gate is the one
+        place a credit offer is cleared, but it had no wire surface, so every push surface the ADR
+        governs — a campaign step, a pre-approved tile, an agent nudge — had no way to ask, and the
+        distress floor was enforced nowhere on that side.
+
+        The surface is fixed to PUSH and is deliberately NOT a parameter: PULL skips the consent
+        half because a customer who asked has already spoken for themselves, and letting a caller
+        name its own surface would hand that exemption to anyone who passed the right string. A
+        caller serving a customer-initiated request wants /intake/quotes instead.
+
+        Answers 200 for BOTH outcomes. "You may not offer" is a successful answer to the question
+        asked, not a client error, and a caller distinguishing a refusal from a transport failure by
+        status code will eventually get it wrong in the permissive direction. A caller that cannot
+        reach this route must refuse to offer: not knowing whether it may market credit is answered
+        no, never "probably fine".
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The decision, allowed or suppressed with its reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditOfferEligibilityDecision'
+        '403': { description: Caller is not permitted this action }
 
   /api/v1/lending/intake/quotes:
     post:
@@ -1166,6 +1201,25 @@ components:
         tables:
           type: array
           items: { $ref: '#/components/schemas/PolicyTableView' }
+    CreditOfferEligibilityDecision:
+      type: object
+      required: [allowed, policyVersion]
+      properties:
+        allowed: { type: boolean }
+        reasonCode:
+          type: string
+          nullable: true
+          description: >-
+            Null when allowed. Part of the contract rather than a log line: a caller must be able to
+            count "declined for arrears" separately from "never opted in", and a conduct review asks
+            for exactly that split. SIGNALS_UNAVAILABLE means the gate could not read what it needed
+            and refused rather than guessed.
+          enum: [CONSENT_ABSENT, SIGNALS_UNAVAILABLE, INSOLVENCY, ENFORCEMENT, ARREARS, HARDSHIP,
+                 NEGATIVE_BALANCE, AFFORDABILITY_COOLING, BUFFER_BELOW_FLOOR, FREQUENCY_CAP,
+                 NO_MATERIAL_CHANGE, HISTORY_TOO_THIN]
+        policyVersion:
+          type: integer
+          description: The version of the decision table that produced this answer (ADR-0213).
     CustomerQuoteRequest:
       type: object
       required: [amount, termMonths]
