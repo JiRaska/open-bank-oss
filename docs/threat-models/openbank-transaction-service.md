@@ -361,8 +361,8 @@ lie about who the customer paid.
 - **2026-09-07** — The 401 envelope moves from a service-local registration to the shared provider.
   The entry above stands: the response shape, the constant message and the unchanged refusal are
   all as described there. What changes is only where the `@Provider` lives.
-  `TransactionUnauthorizedExceptionMapper` is deleted and `openbank-libs-runtime`'s
-  `UnauthorizedExceptionMapper` is annotated instead, so every service gets the envelope rather
+  `TransactionUnauthorizedExceptionMapper` now does not exist in this service's source;
+  `openbank-libs-runtime`'s `UnauthorizedExceptionMapper` is annotated instead, so every service gets the envelope rather
   than the ones that remembered to opt in. Risk class = **unchanged**; no new trust boundary, no
   new data in the body, same status. The supply-chain note worth recording is the enabling change:
   `provider-type-classpath`'s `SAFE_ROOTS` gains `io.quarkus.security.`, which is a deliberate
