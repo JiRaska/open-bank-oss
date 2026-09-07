@@ -479,6 +479,9 @@ class TransactionServiceTest {
         assertThat(result.type).isEqualTo(TransactionType.REVERSAL)
         assertThat(result.targetAccountId).isEqualTo(originalSourceId)
         assertThat(result.sourceAccountId).isNull()
+        // #8841: the reversal must say WHAT it reversed — the id is available at the call site.
+        assertThat(result.reversalOf).isEqualTo(original.id)
+        assertThat(result.isReversal).isTrue()
         coVerify { transactionRepository.update(match { it.status == TransactionStatus.REVERSED }) }
     }
 
