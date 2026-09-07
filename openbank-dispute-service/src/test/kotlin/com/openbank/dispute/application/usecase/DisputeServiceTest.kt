@@ -155,7 +155,13 @@ class DisputeServiceTest {
         )
         val update = UpdateDisputeRequest(status = DisputeStatus.RESOLVED_CUSTOMER, resolvedBy = "caseworker")
         every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
-        every { disputeRepo.update(any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        val outbox = slot<List<OutboxMessage>>()
+        // #8745: the transition INTO a terminal status now commits dispute.resolved atomically —
+        // the same event doResolve emits — instead of the timeline-only write that never left
+        // the service.
+        every { disputeRepo.update(any(), capture(outbox)) } answers {
+            Uni.createFrom().item(firstArg<Dispute>())
+        }
         every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
 
         val result = service.update(id, update).await().indefinitely()
@@ -166,8 +172,41 @@ class DisputeServiceTest {
         assertThat(result.updatedAt).isNotNull()
 
         verify(exactly = 1) { disputeRepo.findById(id) }
-        verify(exactly = 1) { disputeRepo.update(any()) }
+        verify(exactly = 1) { disputeRepo.update(any(), any()) }
         verify(exactly = 1) { timelineRepo.save(any()) }
+        assertThat(outbox.captured.single().payload).contains(""""eventType":"dispute.resolved"""")
+    }
+
+    @Test
+    fun `update to a non-terminal status emits no outbox event`() {
+        val id = UUID.randomUUID()
+        val existing = Dispute(
+            id = id,
+            reference = "DSP-1001",
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.DUPLICATE,
+            amount = BigDecimal("10.00"),
+            transactionDate = today,
+            filingDate = today,
+            resolutionDeadline = today.plusDays(45),
+            createdAt = now,
+            updatedAt = now,
+        )
+        every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
+        every { disputeRepo.update(any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        val result = service.update(
+            id,
+            UpdateDisputeRequest(status = DisputeStatus.UNDER_REVIEW),
+        ).await().indefinitely()
+
+        assertThat(result.status).isEqualTo(DisputeStatus.UNDER_REVIEW)
+        assertThat(result.resolvedAt).isNull()
+        verify(exactly = 1) { disputeRepo.update(any()) }
+        verify(exactly = 0) { disputeRepo.update(any(), any()) }
     }
 
     @Test
@@ -188,7 +227,9 @@ class DisputeServiceTest {
             updatedAt = now,
         )
         every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
-        every { disputeRepo.update(any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        // WITHDRAWN is terminal: withdraw (which delegates to update) now commits
+        // dispute.resolved atomically via the two-arg overload (#8745).
+        every { disputeRepo.update(any(), any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
         every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
 
         val result = service.withdraw(id, "customer").await().indefinitely()
@@ -199,7 +240,7 @@ class DisputeServiceTest {
         assertThat(result.updatedAt).isNotNull()
 
         verify(exactly = 1) { disputeRepo.findById(id) }
-        verify(exactly = 1) { disputeRepo.update(any()) }
+        verify(exactly = 1) { disputeRepo.update(any(), any()) }
         verify(exactly = 1) { timelineRepo.save(any()) }
     }
 
