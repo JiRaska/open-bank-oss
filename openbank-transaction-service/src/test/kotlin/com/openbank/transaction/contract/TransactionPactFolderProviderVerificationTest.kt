@@ -12,6 +12,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
@@ -84,6 +85,13 @@ import java.util.UUID
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-transaction-service")
 @PactFolder("../pacts")
+// Everything EXCEPT the unauthenticated interactions, which class-level @TestSecurity above makes
+// unservable here — they expect 401 and every request this class makes carries an operator
+// identity. TransactionNegativeAuthPactVerificationTest serves them without @TestSecurity; the two
+// filters are complements built from one literal, so no interaction lands in both or in neither.
+// pact-jvm 4.7.3 matches a filter value against the state name with String.matches (a full-match
+// Java regex, read from InteractionFilter$ByProviderState), so the negative lookahead holds.
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class TransactionPactFolderProviderVerificationTest {
 

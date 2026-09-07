@@ -139,6 +139,12 @@ spec:
             # explicit svc URL so gen-network-policies.py sees the edge.
             - name: CONSENT_SERVICE_URL
               value: http://consent-service.consent.svc:8106
+            # ADR-0269 rule 2 (#8918): the distress floor, asked before every credit
+            # send. Same reason for the explicit svc URL as the consent edge above —
+            # gen-network-policies.py derives the NetworkPolicy from these env URLs, so
+            # an omitted one is a call that is both unconfigured AND dropped in-cluster.
+            - name: LENDING_SERVICE_URL
+              value: http://lending-service.lending.svc:8126
             # ADR-0210: read-only segment evaluation against the silver layer.
             # ClickHouse requires auth: the `analytics` user, password from the
             # Vault-backed clickhouse-auth Secret projected into this namespace
