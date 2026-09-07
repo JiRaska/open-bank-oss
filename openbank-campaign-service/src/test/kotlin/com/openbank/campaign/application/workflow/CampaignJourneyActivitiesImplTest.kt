@@ -8,6 +8,7 @@ import com.openbank.campaign.application.port.out.BannerPlacementPort
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.ConversionContext
+import com.openbank.campaign.application.port.out.CreditOfferGatePort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.SendHandoffOutcome
@@ -109,6 +110,7 @@ class CampaignJourneyActivitiesImplTest {
             notificationSend,
             bannerPlacement,
             metrics,
+            CreditOfferGatePort { true },
             dryRun = false,
         ) {
             override fun <T> runBlockingOnWorker(block: suspend () -> T): T = runBlocking { block() }

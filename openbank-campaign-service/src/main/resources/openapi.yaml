@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.44.0
+  version: 1.45.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -601,7 +601,7 @@ paths:
             type: string
             enum:
               [SENT, DRY_RUN, FAILED, SUPPRESSED_CONSENT, SUPPRESSED_CAP, SUPPRESSED_QUIET_HOURS,
-               SUPPRESSED_LIST, SKIPPED_CONDITION, CONVERTED]
+               SUPPRESSED_LIST, SUPPRESSED_CREDIT_DISTRESS, SKIPPED_CONDITION, CONVERTED]
         - name: page
           in: query
           required: false
@@ -1400,6 +1400,10 @@ components:
             # Present in SendOutcome since ADR-0219 and missing from this enum until now — the
             # spec understated the values a client could receive (corrected in 1.9.0).
             - SUPPRESSED_LIST
+            # ADR-0269 rule 2 (#8918): the credit distress floor refused the send. A client that
+            # does not model it would render an unknown outcome, so it is advertised here rather
+            # than left for the same understatement this enum was already corrected for once.
+            - SUPPRESSED_CREDIT_DISTRESS
             # The step's branch condition did not hold, so nothing was attempted (1.10.0, #3585).
             # Not a suppression: no policy denied anything.
             - SKIPPED_CONDITION
