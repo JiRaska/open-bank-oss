@@ -323,3 +323,18 @@ what the catalogue may hold.
   alter initiation); the span is assertion-backed by `TransactionApiIT`, which drives the real HTTP
   endpoint against PostgreSQL/Redpanda Testcontainers and the test Temporal terminal-write workflow.
   The contract proves this service boundary only — it does not claim a distributed downstream trace.
+- **2026-09-07** — Authentication-failure response shape. An unauthenticated call to a
+  `@RolesAllowed` endpoint answered with Quarkus's bare `Not Authorized` string, while every other
+  error from this service is an `ApiError` document: `io.quarkus.security.UnauthorizedException` is
+  not a `WebApplicationException`, so `WebApplicationExceptionMapper` — which already maps status
+  401 to `ErrorCode.UNAUTHORIZED` — never saw it. The service now registers the shared
+  `UnauthorizedExceptionMapper` from `openbank-libs-runtime` via a thin `@Provider` subclass, so a
+  401 carries the standard envelope. Risk class = **integrity of the client contract**, not
+  confidentiality: the trust boundary itself is unchanged, the endpoint is refused exactly as
+  before, and the envelope adds no detail about why — the message is a constant
+  (`Authentication required`), never the exception's own text, so nothing about the token, the
+  principal or the failure reason reaches the caller. What changes is that a caller parsing the
+  error body no longer breaks on the one response it is most likely to receive. Assertion-backed by
+  the swift, sdd and interest provider-replay interactions, which each require a 401 for a debit
+  presented without a valid M2M identity and could not be verified at all until this landed
+  (issues #8993, #8984).

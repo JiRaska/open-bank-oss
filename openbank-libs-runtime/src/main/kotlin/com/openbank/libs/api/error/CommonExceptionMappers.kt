@@ -7,6 +7,7 @@ package com.openbank.libs.api.error
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.authz.PolicyDecisionException
+import io.quarkus.security.UnauthorizedException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -155,6 +156,36 @@ class PolicyDecisionExceptionMapper : ExceptionMapper<PolicyDecisionException> {
 // the exact failure this comment already warned about for the jakarta.validation case. Services
 // with an ORM register these two explicitly (`@Provider` on a thin subclass, or list the class in
 // `quarkus.arc.additional-indexed-classes`); services without one never load them at all.
+
+/**
+ * A 401 as the standard error envelope, instead of Quarkus's bare `Not Authorized` string.
+ *
+ * Every other error these services emit is an [ApiError] document; an authentication failure is
+ * plain text, because [io.quarkus.security.UnauthorizedException] is not a
+ * [WebApplicationException] and never reaches [WebApplicationExceptionMapper] below — Quarkus
+ * answers first. A client that parses the error body therefore breaks on the one response it is
+ * most likely to meet. Measured through transaction-service's provider replay of the three
+ * "missing or expired token" pacts, where pact-jvm reports
+ * `Invalid JSON (1:2), found unexpected character 'N'` (issue #8993).
+ *
+ * NOT `@Provider`, deliberately, and for the same reason as the two persistence mappers above:
+ * `quarkus-security` is `compileOnly` here, so auto-registering this class would load
+ * `io.quarkus.security.UnauthorizedException` in every service that consumes libs-runtime and
+ * crash the ones without the extension at ArC init — the #6240 failure. A service that has
+ * security opts in with a thin `@Provider` subclass.
+ */
+open class UnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
+    override fun toResponse(exception: UnauthorizedException): Response =
+        Response.status(ErrorCode.UNAUTHORIZED.httpStatus)
+            .entity(
+                apiError(
+                    ErrorCode.UNAUTHORIZED.httpStatus,
+                    ErrorCode.UNAUTHORIZED.code,
+                    "Authentication required",
+                ),
+            )
+            .build()
+}
 
 @Provider
 class WebApplicationExceptionMapper : ExceptionMapper<WebApplicationException> {
