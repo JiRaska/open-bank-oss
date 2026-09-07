@@ -70,6 +70,10 @@ object TopicAttribution {
         "openbank.clearing.batch.event" to "clearing-service",
         "openbank.security.ict.incident" to "security-scanner",
         "openbank.cards.events" to "card-issuance-service",
+        // Card MONEY PATH, distinct from the lifecycle topic above and from any domain-segment
+        // derivation: `openbank.card.processing.*` would derive to "card-service", which does not
+        // exist (ADR-0283 phase 1).
+        "openbank.card.processing.events" to "card-processing-service",
         "openbank.dispute.events" to "dispute-service",
         "openbank.domestic.payment.events" to "domestic-payment",
         "openbank.sepa.payment.events" to "sepa-payment",

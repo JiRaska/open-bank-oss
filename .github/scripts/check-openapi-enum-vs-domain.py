@@ -125,6 +125,23 @@ BASELINE: dict[str, str] = {
     # values. FAILED/PENDING (a screening verdict vs OutboxStatus), APPROVED/REJECTED (a task
     # lifecycle vs ApprovalStatus) and PENDING/SENT/FAILED (a payment status vs OutboxStatus) are
     # overlaps of vocabulary, not identity — the same shape as the pid-service entries below.
+    # MIS-PAIRINGS from the card scheme ports (ADR-0283 phase 2, #8810). Same class as the three
+    # below: shared libs enums clearing the overlap threshold against customer-edge spec enums that
+    # model a different concept. `CardScheme` is which network ADAPTER answered a capability call
+    # (VISA | MASTERCARD | SIMULATOR); the spec enum is which brand a card CARRIES, so it has no
+    # SIMULATOR and never will — publishing one would advertise a card brand that does not exist.
+    # `NetworkTokenStatus` pairs twice on ACTIVE/SUSPENDED alone, against a card-token lifecycle and
+    # a party lifecycle. Neither is drift, and reconciling either would mean changing a customer
+    # spec to match an enum it does not serve.
+    "openbank-customer-edge:MASTERCARD,VISA":
+        "#8810 — mis-pairing: card BRAND on the card resource vs libs CardScheme, which names the "
+        "answering ADAPTER and carries SIMULATOR by design.",
+    "openbank-customer-edge:ACTIVE,CANCELLED,EXPIRED,PENDING_CONFIRMATION,SUSPENDED":
+        "#8810 — mis-pairing: a card-token lifecycle shares ACTIVE/SUSPENDED with libs "
+        "NetworkTokenStatus.",
+    "openbank-customer-edge:ACTIVE,CLOSED,MERGED,PENDING_KYC,SUSPENDED":
+        "#8810 — mis-pairing: a party lifecycle shares ACTIVE/SUSPENDED with libs "
+        "NetworkTokenStatus.",
     "openbank-customer-edge:FAILED,MANUAL_REVIEW,PASSED,PENDING":
         "#7984 — mis-pairing: screening verdict shares FAILED/PENDING with libs OutboxStatus.",
     "openbank-customer-edge:APPROVED,EXPIRED,IN_PROGRESS,NOT_STARTED,REJECTED":
