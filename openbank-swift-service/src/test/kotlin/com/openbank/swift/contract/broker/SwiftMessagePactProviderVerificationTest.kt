@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-package com.openbank.swift.contract
+package com.openbank.swift.contract.broker
 
 import au.com.dius.pact.provider.PactVerifyProvider
 import au.com.dius.pact.provider.junit5.MessageTestTarget
@@ -54,7 +54,9 @@ class SwiftMessagePactProviderVerificationTest {
         // exception during scan"), failing verification with mismatches:[] (a harness crash, not a
         // contract mismatch) — which kept the transaction<->swift edge red after #1938 re-enabled
         // this class (#1348). Every working sibling (account/party/kyc/transaction) scopes the scan.
-        context?.target = MessageTestTarget(listOf("com.openbank.swift.contract"))
+        // Scoped to this class's own leaf package — see the folder twin for why the shared parent
+        // package was ambiguous and what that ambiguity cost (#8916).
+        context?.target = MessageTestTarget(listOf("com.openbank.swift.contract.broker"))
     }
 
     @TestTemplate
