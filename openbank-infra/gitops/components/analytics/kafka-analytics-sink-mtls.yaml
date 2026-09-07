@@ -74,6 +74,11 @@ spec:
       - resource: { type: topic, name: openbank.feedback.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
+      # ADR-0284 D8 business onboarding + representation mandates — the business half of the
+      # customer graph. Read only; the sink never writes to a domain topic.
+      - resource: { type: topic, name: openbank.kyb.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
       # Privacy-safe campaign attribution: server-resolved campaign/step/channel plus app action.
       - resource: { type: topic, name: openbank.engagement.events, patternType: literal }
         operations: [Read, Describe]

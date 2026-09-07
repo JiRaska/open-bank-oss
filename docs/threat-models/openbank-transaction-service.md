@@ -161,6 +161,22 @@ what the catalogue may hold.
 **Rollback:** revert; absent the field, responses are byte-identical to before (the field is
 `NON_NULL`, so an unenriched transaction never carried it).
 
+## 4d. Merchant catalogue administration (#8573) — STRIDE supplement
+
+`MerchantCatalogResource` (`/api/v1/merchants`) is a new inbound REST surface: an operator tool for
+filling the catalogue that §4c reads. It writes no money and reads no cardholder data, but it is a
+write path into a table the customer-facing statement renders from, so a bad row is a bank-attested
+lie about who the customer paid.
+
+| STRIDE | Threat | Mitigation |
+| --- | --- | --- |
+| **S**poofing | An unauthenticated or non-operator caller writes catalogue rows | `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` plus OPA `@Authorize(action = "merchant.update")` / `"merchant.delete"` on the write endpoints; reads are `Roles.VIEWER`+ with `action = "merchant.list"`. Grants are declared in `openbank-libs/governance/rules-opa-data.yaml`, so `AUTHZ_ENFORCE=true` fails closed on an ungranted action rather than defaulting to allow |
+| **T**ampering | Two spellings of one descriptor create two rows, and the statement renders whichever it hits | Every key — path parameter and worklist output alike — goes through `MerchantDescriptor.normalise`, the same function the read path keys on. A key that normalises away entirely is rejected rather than stored, so an empty key cannot become the row every unidentifiable descriptor collides on |
+| **R**epudiation | No record of who renamed a merchant | `merchant_catalog.updated_at` is stamped on every upsert. **Not** a full audit trail: the row carries no editor identity, so who made a change is recoverable only from the access log. Recorded as a residual risk rather than claimed as a control |
+| **I**nfo disclosure | The catalogue becomes a record of where a cardholder was | The table is keyed by acquirer descriptor and holds public business data only — nothing in it is keyed by customer, card or transaction, stated in both `V16__create_merchant_catalog.sql` and the entity KDoc. `GET /unmatched` returns raw descriptors and their counts, never the transactions or accounts they came from |
+| **D**oS | `GET /unmatched` scans the whole transactions table on every operator refresh | `recentDescriptions` is a bounded, ordered window — `scan` is clamped to `MAX_SCAN` (20 000) and page size to `MAX_PAGE_SIZE`, both server-side via `coerceIn`, so a caller cannot widen the query. It lives in `TransactionDescriptorRepository` rather than the domain repository, keeping catalogue curation off the transaction persistence port |
+| **E**oP | A viewer edits the catalogue | Read and write roles are separate: `list`/`unmatched` admit `VIEWER`, `upsert`/`delete` do not, and the OPA action differs too, so a viewer is denied at both layers |
+
 ## 5. Residual risks / assumptions
 
 - **Booked balance is now a ledger projection (ADR-0039 Phase D-2).** The saga no longer debits/credits
@@ -198,6 +214,8 @@ what the catalogue may hold.
   this change is inert until a separately-approved cutover.
 
 ## 6. Change log
+
+- **2026-09-05** — New inbound REST surface `MerchantCatalogResource` (`/api/v1/merchants`): list, an unmatched-descriptor worklist, upsert and delete, so the D5 catalogue §4c reads can actually be filled (#8573). New trust boundary crossing, hence §4d. No money path touched and no cardholder data added — the table stays keyed by acquirer descriptor. Residual gap recorded rather than papered over: the row records `updated_at` but not who edited it. Rollback: revert the commit; §4c degrades to the empty catalogue it reads today, which already renders the raw descriptor.
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal balance, FX and ledger REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or transaction-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
