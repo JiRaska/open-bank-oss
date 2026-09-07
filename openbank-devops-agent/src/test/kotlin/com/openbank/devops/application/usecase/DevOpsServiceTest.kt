@@ -54,7 +54,8 @@ class DevOpsServiceTest {
     @BeforeEach
     fun setUp() {
         every { temporalConfig.taskQueue() } returns "openbank-devops"
-        every { workflowClient.newWorkflowStub(DevOpsAnalysisWorkflow::class.java, any<WorkflowOptions>()) } returns stub
+        every { workflowClient.newWorkflowStub(DevOpsAnalysisWorkflow::class.java, any<WorkflowOptions>()) } returns
+            stub
         mockkStatic(WorkflowClient::class)
     }
 

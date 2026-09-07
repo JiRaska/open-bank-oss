@@ -76,10 +76,7 @@ class DiagnoseAndProposeActivityImplTest {
         override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
     }
 
-    private fun finding(
-        status: FindingStatus = FindingStatus.OPEN,
-        rootCause: String? = null,
-    ) = ReleaseStewardFinding(
+    private fun finding(status: FindingStatus = FindingStatus.OPEN, rootCause: String? = null) = ReleaseStewardFinding(
         id = "f-1",
         checkType = ReleaseInvariantCheckType.APP_VERSION_OVERRIDE,
         severity = FindingSeverity.CRITICAL,
@@ -97,7 +94,11 @@ class DiagnoseAndProposeActivityImplTest {
         val repository = RecordingRepository()
         val before = Instant.now()
 
-        val result = SyncActivity(StubLlm(rootCause = "version.txt was never registered"), StubProposalPort(), repository)
+        val result = SyncActivity(
+            StubLlm(rootCause = "version.txt was never registered"),
+            StubProposalPort(),
+            repository,
+        )
             .diagnose(finding(), mapOf("openPrs" to 2.0))
 
         assertThat(result.rootCause).isEqualTo("version.txt was never registered")

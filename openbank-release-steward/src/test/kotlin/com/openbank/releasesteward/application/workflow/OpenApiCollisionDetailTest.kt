@@ -34,12 +34,19 @@ class OpenApiCollisionDetailTest {
             ),
         )
 
-    private fun change(pr: Int, service: String, version: String) =
-        OpenApiPrChange(prNumber = pr, prUrl = "https://github.com/JiRaska/open-bank-oss/pull/$pr", service = service, proposedInfoVersion = version)
+    private fun change(pr: Int, service: String, version: String) = OpenApiPrChange(
+        prNumber = pr,
+        prUrl = "https://github.com/JiRaska/open-bank-oss/pull/$pr",
+        service = service,
+        proposedInfoVersion = version,
+    )
 
     @Test
     fun `two PRs proposing DIFFERENT versions for one spec get the diff-base-race wording`() {
-        val findings = detect(listOf(change(10, "openbank-ledger-service", "1.3.0"), change(11, "openbank-ledger-service", "1.4.0")))
+        val findings =
+            detect(
+                listOf(change(10, "openbank-ledger-service", "1.3.0"), change(11, "openbank-ledger-service", "1.4.0")),
+            )
 
         val finding = findings.single { it.checkType == ReleaseInvariantCheckType.OPENAPI_VERSION_COLLISION }
         assertThat(finding.title).contains("different proposed versions").contains("1.3.0", "1.4.0")
@@ -64,7 +71,10 @@ class OpenApiCollisionDetailTest {
     fun `the SAME PR listed twice for one spec is not a collision - the count is over distinct PRs`() {
         // A PR can legitimately appear twice for one service (two touched files); only two DISTINCT
         // PR numbers race.
-        val findings = detect(listOf(change(10, "openbank-ledger-service", "1.3.0"), change(10, "openbank-ledger-service", "1.3.0")))
+        val findings =
+            detect(
+                listOf(change(10, "openbank-ledger-service", "1.3.0"), change(10, "openbank-ledger-service", "1.3.0")),
+            )
 
         assertThat(findings).isEmpty()
     }

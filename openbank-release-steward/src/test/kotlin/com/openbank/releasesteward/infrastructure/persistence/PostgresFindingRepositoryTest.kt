@@ -38,24 +38,21 @@ class PostgresFindingRepositoryTest {
 
     private val id = UUID.fromString("11111111-2222-3333-4444-555555555555")
 
-    private fun finding(
-        status: FindingStatus = FindingStatus.OPEN,
-        rootCause: String? = null,
-        prNumber: Int? = null,
-    ) = ReleaseStewardFinding(
-        id = id.toString(),
-        checkType = ReleaseInvariantCheckType.OPENAPI_VERSION_COLLISION,
-        severity = FindingSeverity.CRITICAL,
-        detectedAt = Instant.parse("2026-01-01T00:00:00Z"),
-        title = "two open PRs race the ledger spec",
-        component = "openbank-ledger-service/openapi.yaml",
-        prNumber = prNumber,
-        prUrl = prNumber?.let { "https://github.com/JiRaska/open-bank-oss/pull/$it" },
-        rawMetricValue = BigDecimal("2"),
-        threshold = BigDecimal.ONE,
-        rootCause = rootCause,
-        status = status,
-    )
+    private fun finding(status: FindingStatus = FindingStatus.OPEN, rootCause: String? = null, prNumber: Int? = null) =
+        ReleaseStewardFinding(
+            id = id.toString(),
+            checkType = ReleaseInvariantCheckType.OPENAPI_VERSION_COLLISION,
+            severity = FindingSeverity.CRITICAL,
+            detectedAt = Instant.parse("2026-01-01T00:00:00Z"),
+            title = "two open PRs race the ledger spec",
+            component = "openbank-ledger-service/openapi.yaml",
+            prNumber = prNumber,
+            prUrl = prNumber?.let { "https://github.com/JiRaska/open-bank-oss/pull/$it" },
+            rawMetricValue = BigDecimal("2"),
+            threshold = BigDecimal.ONE,
+            rootCause = rootCause,
+            status = status,
+        )
 
     private fun <T> stubWithTransaction() {
         every { sf.withTransaction(any<Function<Mutiny.Session, Uni<T>>>()) } answers {

@@ -51,15 +51,14 @@ class NotificationResourceRedactionTest {
     private fun body(response: Response): Map<String, Any?> = response.entity as Map<String, Any?>
 
     @Test
-    fun `get - a secret-bearing template is redacted even when the stored row holds the code`(): Unit =
-        runBlocking {
-            coEvery { repo.findById(id) } returns row(NotificationTemplate.OTP_CODE.name, "Your code is 314159")
+    fun `get - a secret-bearing template is redacted even when the stored row holds the code`(): Unit = runBlocking {
+        coEvery { repo.findById(id) } returns row(NotificationTemplate.OTP_CODE.name, "Your code is 314159")
 
-            val view = body(resource.getNotification(id))
+        val view = body(resource.getNotification(id))
 
-            assertThat(view["body"]).isEqualTo(TemplateSensitivity.REDACTED_BODY)
-            assertThat(view["body"] as String).doesNotContain("314159")
-        }
+        assertThat(view["body"]).isEqualTo(TemplateSensitivity.REDACTED_BODY)
+        assertThat(view["body"] as String).doesNotContain("314159")
+    }
 
     @Test
     fun `get - an ordinary template is served verbatim`(): Unit = runBlocking {

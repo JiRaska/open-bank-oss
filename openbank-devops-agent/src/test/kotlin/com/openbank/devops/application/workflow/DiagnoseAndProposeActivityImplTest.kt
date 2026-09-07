@@ -40,20 +40,14 @@ class DiagnoseAndProposeActivityImplTest {
     private val repository = mockk<FindingRepository>()
 
     /** Runs the activity body inline instead of on a Vert.x duplicated context. */
-    private class TestActivity(
-        l: LlmDiagnosisPort,
-        p: RemediationProposalPort,
-        r: FindingRepository,
-    ) : DiagnoseAndProposeActivityImpl(l, p, r) {
+    private class TestActivity(l: LlmDiagnosisPort, p: RemediationProposalPort, r: FindingRepository) :
+        DiagnoseAndProposeActivityImpl(l, p, r) {
         override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
     }
 
     private val activity = TestActivity(llm, proposals, repository)
 
-    private fun finding(
-        rootCause: String? = null,
-        status: FindingStatus = FindingStatus.OPEN,
-    ) = DevOpsFinding(
+    private fun finding(rootCause: String? = null, status: FindingStatus = FindingStatus.OPEN) = DevOpsFinding(
         id = "6f1c0b5e-0000-4000-8000-000000000001",
         detector = DetectorId.D3_RUNNER_CAPACITY,
         severity = FindingSeverity.CRITICAL,

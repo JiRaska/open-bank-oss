@@ -35,11 +35,8 @@ class DiagnoseAndProposeActivityImplTest {
     private val github = mockk<GitHubProposalPort>()
     private val repository = mockk<FindingRepository>()
 
-    private class Testable(
-        llm: LlmDiagnosisPort,
-        github: GitHubProposalPort,
-        repository: FindingRepository,
-    ) : DiagnoseAndProposeActivityImpl(llm, github, repository) {
+    private class Testable(llm: LlmDiagnosisPort, github: GitHubProposalPort, repository: FindingRepository) :
+        DiagnoseAndProposeActivityImpl(llm, github, repository) {
         override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
     }
 

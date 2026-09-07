@@ -21,7 +21,6 @@ import io.mockk.slot
 import io.mockk.unmockkAll
 import io.mockk.verify
 import io.temporal.client.WorkflowClient
-import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat

@@ -43,8 +43,12 @@ class CollectRepoStateActivityImplTest {
 
     private fun activity() = DirectCollect(repoState, githubOpenPr)
 
-    private fun change(pr: Int, service: String, version: String) =
-        OpenApiPrChange(prNumber = pr, prUrl = "https://example.invalid/pull/$pr", service = service, proposedInfoVersion = version)
+    private fun change(pr: Int, service: String, version: String) = OpenApiPrChange(
+        prNumber = pr,
+        prUrl = "https://example.invalid/pull/$pr",
+        service = service,
+        proposedInfoVersion = version,
+    )
 
     @Test
     fun `the main baseline is looked up once per DISTINCT service, not once per PR change`() {

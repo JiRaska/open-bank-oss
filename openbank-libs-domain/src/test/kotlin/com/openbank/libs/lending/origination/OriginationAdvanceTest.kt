@@ -35,7 +35,9 @@ class OriginationAdvanceTest {
 
     @Test
     fun `marking one optional state mandatory does not pull the other one in`() {
-        assertThat(OriginationAdvance.nextState(OriginationState.KYC_PENDING, setOf(OriginationState.REFLECTION_PERIOD)))
+        assertThat(
+            OriginationAdvance.nextState(OriginationState.KYC_PENDING, setOf(OriginationState.REFLECTION_PERIOD)),
+        )
             .isEqualTo(OriginationState.ASSESSMENT)
     }
 

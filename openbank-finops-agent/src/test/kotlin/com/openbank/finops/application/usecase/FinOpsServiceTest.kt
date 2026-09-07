@@ -41,8 +41,7 @@ class FinOpsServiceTest {
     private val repository = mockk<AnomalyRepository>()
     private val clock = Clock.fixed(Instant.parse("2026-08-02T03:00:00Z"), ZoneOffset.UTC)
 
-    private fun service(clk: Clock = clock) =
-        FinOpsService(workflowClient, temporalConfig, repository, clk)
+    private fun service(clk: Clock = clock) = FinOpsService(workflowClient, temporalConfig, repository, clk)
 
     private fun report() = FinOpsRunReport(
         runId = "run-1",

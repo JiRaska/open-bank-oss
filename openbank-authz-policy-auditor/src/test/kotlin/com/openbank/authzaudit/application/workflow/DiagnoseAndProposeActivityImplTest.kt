@@ -45,10 +45,7 @@ class DiagnoseAndProposeActivityImplTest {
         }
     }
 
-    private class ScriptedLlm(
-        private val diagnosis: String,
-        private val fixDiff: String? = null,
-    ) : LlmDiagnosisPort {
+    private class ScriptedLlm(private val diagnosis: String, private val fixDiff: String? = null) : LlmDiagnosisPort {
         var lastContext: Map<String, Double>? = null
         override suspend fun diagnose(finding: AuthzPolicyFinding, contextMetrics: Map<String, Double>): String {
             lastContext = contextMetrics
@@ -58,10 +55,8 @@ class DiagnoseAndProposeActivityImplTest {
         override suspend fun proposeFixDiff(finding: AuthzPolicyFinding, diagnosis: String): String? = fixDiff
     }
 
-    private class ScriptedProposal(
-        private val prUrl: String? = null,
-        private val ticketUrl: String? = null,
-    ) : GitHubProposalPort {
+    private class ScriptedProposal(private val prUrl: String? = null, private val ticketUrl: String? = null) :
+        GitHubProposalPort {
         var ticketCalls = 0
         var lastTicketDiagnosis: String? = null
         override suspend fun openProposalPr(finding: AuthzPolicyFinding, fixDiff: String): String? = prUrl
@@ -80,20 +75,19 @@ class DiagnoseAndProposeActivityImplTest {
         override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
     }
 
-    private fun openFinding(rootCause: String? = null, status: FindingStatus = FindingStatus.OPEN) =
-        AuthzPolicyFinding(
-            id = "f-33333333-4444",
-            checkType = AuthzPolicyCheckType.AGENT_ID_PREFIX_MISMATCH,
-            severity = FindingSeverity.CRITICAL,
-            detectedAt = Instant.parse("2026-08-02T00:00:00Z"),
-            title = "agents.rego compares input.agent without trim_prefix",
-            component = "agents.rego",
-            filePath = "openbank-infra/opa/policies/agents.rego",
-            rawMetricValue = BigDecimal.ONE,
-            threshold = BigDecimal.ZERO,
-            rootCause = rootCause,
-            status = status,
-        )
+    private fun openFinding(rootCause: String? = null, status: FindingStatus = FindingStatus.OPEN) = AuthzPolicyFinding(
+        id = "f-33333333-4444",
+        checkType = AuthzPolicyCheckType.AGENT_ID_PREFIX_MISMATCH,
+        severity = FindingSeverity.CRITICAL,
+        detectedAt = Instant.parse("2026-08-02T00:00:00Z"),
+        title = "agents.rego compares input.agent without trim_prefix",
+        component = "agents.rego",
+        filePath = "openbank-infra/opa/policies/agents.rego",
+        rawMetricValue = BigDecimal.ONE,
+        threshold = BigDecimal.ZERO,
+        rootCause = rootCause,
+        status = status,
+    )
 
     @Test
     fun `diagnose records the model's root cause, moves the finding to DIAGNOSED and persists it`() {

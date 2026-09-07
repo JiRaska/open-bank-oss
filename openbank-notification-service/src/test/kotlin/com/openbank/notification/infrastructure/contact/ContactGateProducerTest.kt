@@ -82,18 +82,17 @@ class ContactGateProducerTest {
     }
 
     @Test
-    fun `the impression counter is honestly zero, so only the budget of 1 bounds an impression`(): Unit =
-        runBlocking {
-            // `impressionsInWindow` is wired to 0 rather than to something invented, so the first
-            // impression is decided by consent — reached only because 0 is under the budget.
-            every {
-                consentClient.hasActiveConsent(partyId, ContactGateProducer.MARKETING_GRANTEE, "MARKETING_COMMS_PUSH")
-            } returns Uni.createFrom().item(ConsentCheckResponse(granted = false))
+    fun `the impression counter is honestly zero, so only the budget of 1 bounds an impression`(): Unit = runBlocking {
+        // `impressionsInWindow` is wired to 0 rather than to something invented, so the first
+        // impression is decided by consent — reached only because 0 is under the budget.
+        every {
+            consentClient.hasActiveConsent(partyId, ContactGateProducer.MARKETING_GRANTEE, "MARKETING_COMMS_PUSH")
+        } returns Uni.createFrom().item(ConsentCheckResponse(granted = false))
 
-            val decision = gate.check(partyId, ContactClass.PROMOTIONAL_IMPRESSION, "MARKETING_COMMS_PUSH")
+        val decision = gate.check(partyId, ContactClass.PROMOTIONAL_IMPRESSION, "MARKETING_COMMS_PUSH")
 
-            assertThat(decision.denyReason).isEqualTo(ContactDenyReason.NO_CONSENT)
-        }
+        assertThat(decision.denyReason).isEqualTo(ContactDenyReason.NO_CONSENT)
+    }
 
     @Test
     fun `a SERVICE_EXEMPT contact is allowed without touching consent or the send log`(): Unit = runBlocking {

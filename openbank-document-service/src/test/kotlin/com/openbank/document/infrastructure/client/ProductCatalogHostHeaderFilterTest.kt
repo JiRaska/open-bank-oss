@@ -24,7 +24,10 @@ class ProductCatalogHostHeaderFilterTest {
 
     @Test
     fun `a configured override is written as the Host header`() {
-        val filter = ProductCatalogHostHeaderFilter().also { it.hostOverride = Optional.of("product-catalog.accounts.svc") }
+        val filter = ProductCatalogHostHeaderFilter().also {
+            it.hostOverride =
+                Optional.of("product-catalog.accounts.svc")
+        }
 
         filter.filter(ctx)
 
@@ -43,7 +46,10 @@ class ProductCatalogHostHeaderFilterTest {
     @Test
     fun `an override REPLACES a pre-existing Host rather than appending a second one`() {
         headers.add(HttpHeaders.HOST, "stale.example")
-        val filter = ProductCatalogHostHeaderFilter().also { it.hostOverride = Optional.of("product-catalog.accounts.svc") }
+        val filter = ProductCatalogHostHeaderFilter().also {
+            it.hostOverride =
+                Optional.of("product-catalog.accounts.svc")
+        }
 
         filter.filter(ctx)
 

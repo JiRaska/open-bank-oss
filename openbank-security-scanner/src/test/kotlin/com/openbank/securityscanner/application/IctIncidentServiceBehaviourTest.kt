@@ -40,6 +40,7 @@ class IctIncidentServiceBehaviourTest {
 
     private val now = Instant.parse("2026-08-16T10:00:00Z")
     private val clock: Clock = Clock.fixed(now, ZoneOffset.UTC)
+
     // findAndRegisterModules() alone is NOT the production shape: plain Jackson leaves
     // WRITE_DATES_AS_TIMESTAMPS enabled, so an Instant goes on the wire as an epoch float
     // ("1.7868744E9") instead of ISO-8601. Quarkus disables it on the mapper it injects, so the

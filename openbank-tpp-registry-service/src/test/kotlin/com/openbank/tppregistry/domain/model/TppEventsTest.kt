@@ -91,7 +91,13 @@ class TppEventsTest {
         assertThat(event.eventType).isEqualTo("TPP_BLACKLISTED")
         assertThat(event.occurredAt).isEqualTo(at.toInstant())
         assertThat(event.envelope.keys).containsExactly(
-            "eventType", "entryId", "tppId", "status", "blacklistReason", "blacklistedAt", "occurredAt",
+            "eventType",
+            "entryId",
+            "tppId",
+            "status",
+            "blacklistReason",
+            "blacklistedAt",
+            "occurredAt",
         )
         assertThat(event.envelope["status"]).isEqualTo("BLACKLISTED")
         assertThat(event.envelope["blacklistReason"]).isEqualTo("licence revoked by CNB")

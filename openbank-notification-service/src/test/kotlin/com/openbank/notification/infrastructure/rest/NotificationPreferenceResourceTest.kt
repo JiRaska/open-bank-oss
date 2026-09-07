@@ -27,14 +27,13 @@ class NotificationPreferenceResourceTest {
 
     private val partyId: UUID = UUID.randomUUID()
 
-    private fun row(payments: Boolean, product: Boolean, marketing: Boolean) =
-        NotificationPreferenceEntity().also {
-            it.partyId = partyId
-            it.paymentsPush = payments
-            it.productPush = product
-            it.marketingPush = marketing
-            it.updatedAt = Instant.parse("2026-09-01T00:00:00Z")
-        }
+    private fun row(payments: Boolean, product: Boolean, marketing: Boolean) = NotificationPreferenceEntity().also {
+        it.partyId = partyId
+        it.paymentsPush = payments
+        it.productPush = product
+        it.marketingPush = marketing
+        it.updatedAt = Instant.parse("2026-09-01T00:00:00Z")
+    }
 
     @Test
     fun `get - no stored row - every category reads as on`(): Unit = runBlocking {
