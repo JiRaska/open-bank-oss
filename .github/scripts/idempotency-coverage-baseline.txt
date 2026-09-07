@@ -47,11 +47,11 @@ openbank-delegation-service POST /api/v1/delegations/{id}/reservations/{rid}/rel
 openbank-delegation-service POST /api/v1/delegations/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-fraud-service POST /api/v1/fraud/score  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-fx-service POST /api/v1/fx/cnb/ingest  # creation POST with no idempotency key today — burn-down #8351
-openbank-interest-service POST /api/v1/interest/accrue  # creation POST with no idempotency key today — burn-down #8351
-openbank-interest-service POST /api/v1/interest/accrue/all  # creation POST with no idempotency key today — burn-down #8351
-openbank-interest-service POST /api/v1/interest/capitalize/{accountId}  # creation POST with no idempotency key today — burn-down #8351
-openbank-interest-service POST /api/v1/interest/rates  # creation POST with no idempotency key today — burn-down #8351
-openbank-interest-service POST /api/v1/interest/withholding/remittances  # creation POST with no idempotency key today — burn-down #8351
+openbank-interest-service POST /api/v1/interest/accrue  # natural-key replay (V12) — ADR-0291, burn-down #8351
+openbank-interest-service POST /api/v1/interest/accrue/all  # re-runnable batch, per-account natural-key dedup — ADR-0291, burn-down #8351
+openbank-interest-service POST /api/v1/interest/capitalize/{accountId}  # claim-based exactly-once (ADR-0033) — ADR-0291, burn-down #8351
+openbank-interest-service POST /api/v1/interest/rates  # natural-key replay (active twin) — ADR-0291, burn-down #8351
+openbank-interest-service POST /api/v1/interest/withholding/remittances  # one batch per period (V4) — ADR-0291, burn-down #8351
 openbank-ledger-service POST /api/v1/journals/replay-booked-changes  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-ledger-service POST /api/v1/journals/{journalId}/reverse  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-ledger-service POST /api/v1/ledger/accounting-days/{businessDate}  # path natural key, 409 on replay (uq V21) — ADR-0294, burn-down #8351
