@@ -14,9 +14,12 @@ import java.time.Instant
 /**
  * One merchant in the enrichment catalogue, keyed by its normalised acquirer descriptor.
  *
- * Read-only in this service: rows arrive by migration or by an out-of-band catalogue load, never
- * from a customer request. Holding only public business data (trading name, shop location) is a
- * deliberate boundary — see the table comment in `V10__create_merchant_catalog.sql`.
+ * Maintained by operators through `MerchantCatalogResource`, and never from a customer request
+ * (#8573). Until that resource existed the table was write-never: it held the rows one migration
+ * seeded and had no writer at all, so the enrichment it feeds was absent for most transactions.
+ *
+ * Holding only public business data (trading name, shop location) is a deliberate boundary that
+ * the write path preserves — see the table comment in `V16__create_merchant_catalog.sql`.
  */
 @Entity
 @Table(name = "merchant_catalog")

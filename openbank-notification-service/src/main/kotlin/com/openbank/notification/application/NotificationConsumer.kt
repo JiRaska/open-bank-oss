@@ -37,6 +37,7 @@ import com.openbank.notification.domain.model.PushSendOutcome
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.PartyContactClient
 import com.openbank.notification.infrastructure.client.PartyMergeResolver
+import com.openbank.notification.infrastructure.persistence.NotificationDeduplication
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
@@ -58,7 +59,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import java.sql.SQLException
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -83,10 +83,10 @@ class NotificationConsumer @Inject constructor(
 
     companion object {
         /** Name of the notifications deduplication partial unique index, a stable duplicate discriminator. */
-        const val NOTIFICATION_DEDUPLICATION_CONSTRAINT = "uq_notifications_deduplication_key"
+        const val NOTIFICATION_DEDUPLICATION_CONSTRAINT = NotificationDeduplication.CONSTRAINT
 
         /** Postgres SQLState for unique_violation, as surfaced by the reactive pg client. */
-        const val SQLSTATE_UNIQUE_VIOLATION = "23505"
+        const val SQLSTATE_UNIQUE_VIOLATION = NotificationDeduplication.SQLSTATE_UNIQUE_VIOLATION
 
         /**
          * Generic, PII-free push body (ADR-0135 §3, issue #1182). Lock-screen-visible push
@@ -403,12 +403,7 @@ class NotificationConsumer @Inject constructor(
      * constraint name must appear in the message so an unrelated unique violation on this
      * table is not swallowed as a dedup skip.
      */
-    private fun Throwable.isDeduplicationConflict(): Boolean = generateSequence(this) { it.cause }
-        .filterIsInstance<SQLException>()
-        .any {
-            it.sqlState == SQLSTATE_UNIQUE_VIOLATION &&
-                it.message?.contains(NOTIFICATION_DEDUPLICATION_CONSTRAINT) == true
-        }
+    private fun Throwable.isDeduplicationConflict(): Boolean = NotificationDeduplication.isConflict(this)
 
     private fun publishOversight(req: NotificationRequest): Uni<Void> {
         if (!OversightWebhook.isOversight(req.template)) return Uni.createFrom().voidItem()

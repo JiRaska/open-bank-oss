@@ -13,7 +13,7 @@ on:
       services:
         description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service"
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service"
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -61,6 +61,19 @@ jobs:
           # by the thin-domain criterion (clearing/swift/lending/settlement/billing 1-2 files).
           - openbank-sdd-service
           - openbank-interest-service
+          # 2026-09-07 sweep: three money_path_services measured (branch sites over every
+          # src/main/kotlin/**/domain/**.kt, counting `if (` / `when (` / `require(` / `check(`):
+          # delegation 60 across 7 files (SpendCeilings per-tx/daily/monthly ceiling arithmetic and
+          # the zero-clamped headroom — real BigDecimal money math), vop 21 across 2 files
+          # (VopNameMatchPolicy's three-band decision: bounded Levenshtein, initials, legal-form
+          # stripping — the sanctions "matching decision logic" shape), standing-order 9 across 2
+          # files (recurrence dates per Frequency, MAX_CONSECUTIVE_FAILURES, ONCE/endDate
+          # completion boundaries — it decides whether the next payment fires). psd2 (1 file, 0
+          # branches) and settlement/clearing (thin, 0 branches) were measured and REJECTED; the
+          # seven documented exclusions in rules.yaml: coverage.money_path_depth stand unchanged.
+          - openbank-delegation-service
+          - openbank-vop-service
+          - openbank-standing-order-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
