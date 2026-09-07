@@ -9,6 +9,7 @@ import com.openbank.campaign.application.usecase.CampaignReferenceNotFoundExcept
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -33,6 +34,20 @@ import java.util.UUID
 data class CreateCampaignRequest(
     val name: String,
     val goal: String,
+    /**
+     * ADR-0269 rule 1. Defaults to NONE when absent.
+     *
+     * I first made this mandatory on the wire, and the api-contract gate was right to refuse it: a
+     * newly required request property is a breaking change and would demand /api/v2 for an
+     * operator API, which is out of proportion to the change.
+     *
+     * The default is safe in the direction that matters. An unstated kind is NOT credit, so a
+     * client that has never heard of this field cannot create a campaign that delivers credit
+     * marketing — the failure mode is "no credit campaign", never "credit campaign to someone who
+     * did not consent". The requirement that a HUMAN state it belongs where a human is: admin-ui
+     * offers no pre-selection and refuses to submit without one.
+     */
+    val productKind: CampaignProductKind = CampaignProductKind.NONE,
     val segmentName: String,
     val segmentVersion: Int,
     /**
@@ -189,6 +204,7 @@ private fun CreateCampaignRequest.toDecisions(): List<CampaignDecision> = decisi
 private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignDefinition(
     name = name,
     goal = goal,
+    productKind = productKind,
     segmentRef = SegmentRef(segmentName, segmentVersion),
     steps = toSteps(),
     stopCondition = stopCondition?.let { StopCondition(it.maxSendsPerParty) },
@@ -230,6 +246,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             SegmentRef(request.segmentName, request.segmentVersion),
             request.toSteps(),
             createdBy,
+            request.productKind,
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
             request.conversionRule,
             request.holdoutPercent,

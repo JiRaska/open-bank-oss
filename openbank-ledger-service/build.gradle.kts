@@ -103,6 +103,18 @@ System.setProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
 
+tasks.withType<Test> {
+    // Same class of OOM as account-service's override above it in git history (issue #4414):
+    // Gradle's default test-JVM heap is 512m, unchanged fleet-wide. ledger-service carries 14
+    // @QuarkusTest classes plus a Kotest property test (LedgerServiceIdempotencyPropertyTest)
+    // that allocates many double-entry journal fixtures per run. CI repeatedly died with
+    // `java.lang.OutOfMemoryError` inside the test JVM — repeatable on rerun, not a one-off
+    // shared-runner spike. Per-module rather than a fleet default, same reasoning as
+    // account-service/lending-service/product-catalog: nothing measures test heap anywhere, so
+    // bump the module that is actually short rather than every module that might be.
+    maxHeapSize = "2g"
+}
+
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
 // pitest.yml, advisory — never a per-PR gate. info.solidsoft.pitest 1.19.0 supports Gradle 9.
 pitest {

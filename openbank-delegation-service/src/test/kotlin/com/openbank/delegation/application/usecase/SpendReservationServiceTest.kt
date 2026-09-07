@@ -9,6 +9,9 @@ import com.openbank.delegation.application.port.`in`.ReserveSpendResult
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.application.port.out.ReserveOutcome
 import com.openbank.delegation.application.port.out.SpendReservationRepository
+import com.openbank.delegation.domain.event.SpendConfirmed
+import com.openbank.delegation.domain.event.SpendReleased
+import com.openbank.delegation.domain.event.SpendReserved
 import com.openbank.delegation.domain.model.CountedSpend
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
@@ -19,6 +22,7 @@ import com.openbank.delegation.domain.model.SpendRefusalReason
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.delegation.domain.model.SpendWindow
+import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.domain.money.Money
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -212,6 +216,106 @@ class SpendReservationServiceTest {
             .isInstanceOf(SpendReservationNotFoundException::class.java)
     }
 
+    // --- ADR-0249 D4 audit events (issue #5728) ---
+    //
+    // The ADR's Consequences section claims "every grant, reservation, confirmation and revocation
+    // is an audit event". Before #5728 this path emitted NOTHING, and the claim was checked by
+    // nobody. These assert the CONTENT — event type, both party ids, the reservation id, the
+    // amount, `sourceService` and a real clock reading — not merely that something was emitted:
+    // "the publisher was called" cannot tell a correct event from an empty one.
+
+    @Test
+    fun `a created reservation emits SpendReserved naming both parties, the reservation and the amount`() {
+        val result = reserve("1500.00", key = "payment-7")
+
+        val event = reservations.events.single()
+        assertThat(event).isInstanceOf(SpendReserved::class.java)
+        val reserved = event as SpendReserved
+        assertThat(reserved.eventType).isEqualTo("SpendReserved")
+        assertThat(reserved.aggregateType).isEqualTo("DelegationGrant")
+        // The GRANT is the aggregate/partition key; the reservation is a field. Keying on the
+        // reservation would let a consumer see spend against an authority whose revocation it has
+        // not applied yet.
+        assertThat(reserved.aggregateId).isEqualTo(currentGrant.id)
+        assertThat(reserved.reservationId).isEqualTo(result.reservation.id)
+        assertThat(reserved.grantorPartyId).isEqualTo(grantor)
+        assertThat(reserved.granteePartyId).isEqualTo(grantee)
+        assertThat(reserved.amount.amount).isEqualByComparingTo(BigDecimal("1500.00"))
+        assertThat(reserved.amount.currency).isEqualTo("CZK")
+        assertThat(reserved.idempotencyKey).isEqualTo("payment-7")
+        assertThat(reserved.sourceService).isEqualTo("delegation-service")
+    }
+
+    @Test
+    fun `confirm emits SpendConfirmed and release emits SpendReleased, each once`() {
+        val toConfirm = reserve("100.00")
+        val toRelease = reserve("200.00")
+        runBlocking { service.confirm(currentGrant.id, toConfirm.reservation.id, grantee) }
+        runBlocking { service.release(currentGrant.id, toRelease.reservation.id, grantee) }
+
+        val confirmed = reservations.events.filterIsInstance<SpendConfirmed>().single()
+        assertThat(confirmed.eventType).isEqualTo("SpendConfirmed")
+        assertThat(confirmed.aggregateId).isEqualTo(currentGrant.id)
+        assertThat(confirmed.reservationId).isEqualTo(toConfirm.reservation.id)
+        assertThat(confirmed.grantorPartyId).isEqualTo(grantor)
+        assertThat(confirmed.granteePartyId).isEqualTo(grantee)
+        assertThat(confirmed.amount.amount).isEqualByComparingTo(BigDecimal("100.00"))
+        assertThat(confirmed.settledAt).isEqualTo(now)
+        assertThat(confirmed.sourceService).isEqualTo("delegation-service")
+
+        val released = reservations.events.filterIsInstance<SpendReleased>().single()
+        assertThat(released.eventType).isEqualTo("SpendReleased")
+        assertThat(released.reservationId).isEqualTo(toRelease.reservation.id)
+        assertThat(released.amount.amount).isEqualByComparingTo(BigDecimal("200.00"))
+        assertThat(released.settledAt).isEqualTo(now)
+        assertThat(released.sourceService).isEqualTo("delegation-service")
+    }
+
+    @Test
+    fun `a replay and a refusal emit no event`() {
+        reserve("3000.00", key = "payment-42")
+        reserve("3000.00", key = "payment-42")
+        assertThatThrownBy { reserve("2500.00") }
+            .isInstanceOf(SpendReservationRefusedException::class.java)
+
+        // One reservation exists, so exactly one SpendReserved may. A replay created no state and
+        // a refusal created none at all; an event for either would claim a spend that never
+        // happened.
+        assertThat(reservations.events.filterIsInstance<SpendReserved>()).hasSize(1)
+    }
+
+    @Test
+    fun `a no-op re-confirm emits no second event`() {
+        val first = reserve("100.00")
+        runBlocking { service.confirm(currentGrant.id, first.reservation.id, grantee) }
+        runBlocking { service.confirm(currentGrant.id, first.reservation.id, grantee) }
+
+        assertThat(reservations.events.filterIsInstance<SpendConfirmed>()).hasSize(1)
+    }
+
+    @Test
+    fun `occurredAt is a real clock reading, not a default`() {
+        // Deliberately NOT the fixed clock the other tests use, and deliberately NOT isNotNull():
+        // `Instant.EPOCH` defaults passed every isNotNull() assertion in this fleet while the
+        // whole trail claimed 1970-01-01 (#3874/#3883). Only recency can tell them apart.
+        val realClockService = SpendReservationService(delegationRepository, reservations, Clock.systemUTC())
+        val before = Instant.now()
+        runBlocking {
+            realClockService.reserve(
+                ReserveSpendCommand(
+                    callerPartyId = grantee,
+                    delegationId = currentGrant.id,
+                    amount = czk("10.00"),
+                    idempotencyKey = "wall-clock",
+                ),
+            )
+        }
+        val after = Instant.now()
+
+        val reserved = reservations.events.filterIsInstance<SpendReserved>().single()
+        assertThat(reserved.occurredAt).isBetween(before, after)
+    }
+
     /**
      * Counts for real instead of returning canned answers, so the "reserved counts / confirmed
      * counts / released does not" rule is exercised by every test above rather than restated.
@@ -222,9 +326,13 @@ class SpendReservationServiceTest {
 
         fun all(): List<SpendReservation> = rows.values.toList()
 
+        /** Every audit event the service handed us, in order. */
+        val events = mutableListOf<DomainEvent>()
+
         override suspend fun reserve(
             candidate: SpendReservation,
             window: SpendWindow,
+            auditEvent: (SpendReservation) -> DomainEvent,
             decide: (DelegationGrant, CountedSpend) -> SpendDecision,
         ): ReserveOutcome {
             rows.values.firstOrNull {
@@ -247,6 +355,10 @@ class SpendReservationServiceTest {
                 is SpendDecision.Refused -> ReserveOutcome.Refused(decision)
                 SpendDecision.Allowed -> {
                     rows[candidate.id] = candidate
+                    // The real repository writes the outbox row inside the insert's transaction
+                    // and ONLY for a Created outcome; the fake mirrors that rule so a test can
+                    // tell an emitted event from an unemitted one.
+                    events += auditEvent(candidate)
                     ReserveOutcome.Created(candidate)
                 }
             }
@@ -260,6 +372,7 @@ class SpendReservationServiceTest {
             reservationId: UUID,
             target: SpendReservationState,
             settledAt: OffsetDateTime,
+            auditEvent: (SpendReservation) -> DomainEvent,
         ): SpendReservation? {
             val existing = findById(grantId, reservationId) ?: return null
             if (existing.state != SpendReservationState.RESERVED) return null
@@ -269,6 +382,7 @@ class SpendReservationServiceTest {
                 SpendReservationState.RESERVED -> return null
             }
             rows[reservationId] = settled
+            events += auditEvent(settled)
             return settled
         }
     }

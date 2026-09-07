@@ -422,6 +422,24 @@ set) apply equally to the new `ledger.approval.decide` action.
   translated into a financial success; an application failure remains an error span and propagates
   unchanged. Rollback: revert the instrumentation and its contract test; no stored financial data,
   schema, caller, endpoint, role, or policy changes.
+
+- **2026-09-04** — Journal entries now carry the `synthetic` taint themselves, not only the
+  outbox (ADR-0252 phase 1, #8615, refs #4348). V24 put `synthetic` on `ledger_outbox`, so the
+  taint survived onto Kafka but died in the book of record — regulatory returns are built from the
+  journal (FINREP reads the trial balance, not the event stream), so a canary posting summed into
+  the same balances as real customer money with no dimension to exclude it by. The column sits on
+  `journal_entries`, not `journal_lines`: a journal is balanced within itself
+  (`JournalEntry.validateBalance`), so excluding whole entries keeps debits == credits, while a
+  per-line filter could split a balanced entry and unbalance every aggregate that used it.
+  **New surface on `GET /trial-balance`:** a `scope` query param (`REAL_ONLY` default,
+  `SYNTHETIC_ONLY`, `ALL`) selects the population; the response echoes the scope it counted.
+  Risk class = **information disclosure** (an authorized reader can now select synthetic-only
+  activity, which was previously invisible as a category) and **tampering** (a wrong default would
+  silently include canary postings in a regulatory figure). Mitigated by the default (`REAL_ONLY`)
+  matching what a regulatory reader needs without the caller having to know the dimension exists,
+  and by the same `@RolesAllowed`/`@Authorize("ledger.read")` gate the endpoint already had — no
+  new role or policy. Rollback: revert; `synthetic` defaults false on existing rows via the
+  migration's backfill, so no read observes a changed value for pre-existing data.
 - **2026-09-05** — Input validation hardened on the FX revaluation ops trigger
   (`POST /api/v1/ledger/fx-revaluation`): a malformed `date` is rejected as 400
   (`IllegalArgumentException` via libs-runtime `CommonExceptionMappers`) where a raw
@@ -430,3 +448,4 @@ set) apply equally to the new `ledger.approval.decide` action.
   endpoint, same authz (`ROLE_OPERATOR`), tighter input handling. The blank-date 500 the fuzzer saw
   was harness-environment-only (no fx-service in the single-service lane); loud failure on a down
   ČNB rate dependency stays by design. Risk class = **availability**. Rollback: revert the guard.
+

@@ -47,6 +47,24 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET a party id the bank does not hold",
+      "providerStates": [
+        {
+          "name": "no party exists for the id"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/parties/00000000-0000-4000-8000-000000000001"
+      },
+      "response": {
+        "status": 404
+      }
     }
   ],
   "metadata": {

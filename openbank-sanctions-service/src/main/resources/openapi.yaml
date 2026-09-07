@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.1 -> 1.2): additive
   # only — GET /approvals (the checker's queue, issue #3472) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Real-time sanctions screening against EU, UN, OFAC, HM Treasury and CNB lists. PATCH
     /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
@@ -55,6 +55,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SanctionsCheck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /api/v1/sanctions/review:
     post:
@@ -291,6 +293,13 @@ paths:
 
 components:
   responses:
+    BadRequest:
+      description: Invalid request (e.g. an unrecognised sanctions list type in listTypes)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
     NotFound:
       description: Not found
       content:
@@ -360,6 +369,23 @@ components:
             type: string
           description: "Arbitrary identifiers e.g. passport, taxId"
           default: {}
+        listTypes:
+          type: array
+          description: >-
+            Restrict screening to these lists. Omitted, null or empty means every enabled list.
+            An unrecognised name is rejected with 400 — it is never dropped, because a dropped
+            entry would produce a screening result narrower than the caller asked for while
+            reporting success.
+          items:
+            type: string
+            enum:
+              - OFAC_SDN
+              - EU_CONSOLIDATED
+              - UN_CONSOLIDATED
+              - HM_TREASURY
+              - FATF_HIGH_RISK
+              - PEP_GLOBAL
+              - CNB_DOMESTIC
 
     ReviewCommand:
       type: object

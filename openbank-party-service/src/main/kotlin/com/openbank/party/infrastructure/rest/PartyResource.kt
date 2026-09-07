@@ -749,6 +749,9 @@ data class CreatePartyRequest(
     val consentMarketing: Boolean? = null,
     /** Explicit only for bank-owned production canaries; omitted stays CUSTOMER. */
     val classification: String? = null,
+    /** ADR-0284: register legal-form code + issuing country of [registrationNumber] for a legal entity. */
+    val legalForm: String? = null,
+    val registrationCountry: String? = null,
 ) {
     fun classification(): PartyClassification = classification?.let {
         PartyClassification.valueOf(it.uppercase())
@@ -763,6 +766,8 @@ data class CreatePartyRequest(
             consentGdpr = consentGdpr,
             consentMarketing = consentMarketing,
             classification = classification,
+            legalForm = legalForm?.takeIf { it.isNotBlank() },
+            registrationCountry = registrationCountry?.takeIf { it.isNotBlank() }?.uppercase(),
         )
     }
 }
@@ -830,6 +835,8 @@ fun Party.toResponse() = mapOf(
     "status" to status,
     "legalName" to legalName,
     "tradingName" to tradingName, "email" to email, "phone" to phone,
+    // ADR-0284: register facts of a legal entity (null for a person).
+    "registrationNumber" to registrationNumber, "registrationCountry" to registrationCountry, "legalForm" to legalForm,
     "kycStatus" to kycStatus, "address" to address, "createdAt" to createdAt, "updatedAt" to updatedAt,
     // Onboarding-time consent snapshot (consentGdpr is informational/non-revocable — see
     // UpdateMarketingConsentCommand kdoc) + the live, revocable marketing preference.

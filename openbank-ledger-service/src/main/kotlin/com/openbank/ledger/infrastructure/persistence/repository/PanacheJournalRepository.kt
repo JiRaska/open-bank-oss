@@ -13,6 +13,7 @@ import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.JournalStatus
 import com.openbank.ledger.domain.model.LedgerConflictException
+import com.openbank.ledger.domain.model.LedgerScope
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalanceLine
 import com.openbank.ledger.infrastructure.persistence.entity.JournalEntryEntity
@@ -174,10 +175,10 @@ class PanacheJournalRepository(
         }
     }.awaitSuspending()
 
-    override suspend fun trialBalance(asOf: LocalDate): List<TrialBalanceLine> {
+    override suspend fun trialBalance(asOf: LocalDate, scope: LedgerScope): List<TrialBalanceLine> {
         val rows: List<*> = Panache.withSession {
             Panache.getSession().flatMap { session ->
-                session.createNativeQuery<Any>(TRIAL_BALANCE_SQL)
+                session.createNativeQuery<Any>(trialBalanceSql(scope))
                     .setParameter("asOf", asOf)
                     .resultList
             }
@@ -197,10 +198,14 @@ class PanacheJournalRepository(
         }
     }
 
-    override suspend fun trialBalanceForPeriod(from: LocalDate, to: LocalDate): List<TrialBalanceLine> {
+    override suspend fun trialBalanceForPeriod(
+        from: LocalDate,
+        to: LocalDate,
+        scope: LedgerScope,
+    ): List<TrialBalanceLine> {
         val rows: List<*> = Panache.withSession {
             Panache.getSession().flatMap { session ->
-                session.createNativeQuery<Any>(TRIAL_BALANCE_PERIOD_SQL)
+                session.createNativeQuery<Any>(trialBalancePeriodSql(scope))
                     .setParameter("fromDate", from)
                     .setParameter("toDate", to)
                     .resultList
@@ -328,6 +333,7 @@ class PanacheJournalRepository(
         it.createdBy = createdBy
         it.version = version
         it.reversalOf = reversalOf
+        it.synthetic = synthetic
     }
 
     private fun JournalLine.toEntity() = JournalLineEntity().also {
@@ -357,6 +363,7 @@ class PanacheJournalRepository(
         createdBy = createdBy,
         version = version,
         reversalOf = reversalOf,
+        synthetic = synthetic,
     )
 
     private fun JournalLineEntity.toDomainLine(): JournalLine {
@@ -398,14 +405,27 @@ class PanacheJournalRepository(
         // can't catch it because the surviving reversal entry is internally balanced too).
         private const val BOOKED_STATUSES = "('POSTED', 'REVERSED')"
 
-        private val TRIAL_BALANCE_SQL = """
+        /**
+         * ADR-0252 population filter, applied on the ENTRY (`journal_entries.synthetic`, V26) and
+         * never on the line: a journal balances within itself, so excluding whole entries keeps
+         * sum(debits) == sum(credits), while a per-line predicate could keep one leg of a balanced
+         * pair. Built from a closed enum, so nothing caller-supplied reaches the SQL text.
+         */
+        private fun scopeClause(scope: LedgerScope): String = when (scope) {
+            LedgerScope.REAL_ONLY -> " and je.synthetic = false"
+            LedgerScope.SYNTHETIC_ONLY -> " and je.synthetic = true"
+            LedgerScope.ALL -> ""
+        }
+
+        private fun trialBalanceSql(scope: LedgerScope) = """
             select ga.id, ga.code, ga.name, ga.type, jl.base_currency,
                    coalesce(sum(case when jl.side = 'D' then jl.base_amount else 0 end), 0) as total_debit,
                    coalesce(sum(case when jl.side = 'C' then jl.base_amount else 0 end), 0) as total_credit
             from journal_lines jl
             join journal_entries je on je.id = jl.journal_id
             join gl_accounts ga on ga.id = jl.gl_account_id
-            where je.status in $BOOKED_STATUSES and je.entry_date <= :asOf
+            where je.status in $BOOKED_STATUSES
+              and je.entry_date <= :asOf${scopeClause(scope)}
             group by ga.id, ga.code, ga.name, ga.type, jl.base_currency
             order by ga.code
         """.trimIndent()
@@ -413,14 +433,15 @@ class PanacheJournalRepository(
         // Fiscal-period aggregation behind the entity-level year close (ADR-0078 D5): booked
         // activity with entry_date INSIDE the period, per GL account. Same shape as
         // TRIAL_BALANCE_SQL, but range-bounded instead of cumulative-to-date.
-        private val TRIAL_BALANCE_PERIOD_SQL = """
+        private fun trialBalancePeriodSql(scope: LedgerScope) = """
             select ga.id, ga.code, ga.name, ga.type, jl.base_currency,
                    coalesce(sum(case when jl.side = 'D' then jl.base_amount else 0 end), 0) as total_debit,
                    coalesce(sum(case when jl.side = 'C' then jl.base_amount else 0 end), 0) as total_credit
             from journal_lines jl
             join journal_entries je on je.id = jl.journal_id
             join gl_accounts ga on ga.id = jl.gl_account_id
-            where je.status in $BOOKED_STATUSES and je.entry_date >= :fromDate and je.entry_date <= :toDate
+            where je.status in $BOOKED_STATUSES
+              and je.entry_date >= :fromDate and je.entry_date <= :toDate${scopeClause(scope)}
             group by ga.id, ga.code, ga.name, ga.type, jl.base_currency
             order by ga.code
         """.trimIndent()
