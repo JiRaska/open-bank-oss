@@ -281,23 +281,42 @@ def self_test() -> int:
             subprocess.run([*git_o, "add", f"f{n}.txt"], check=False, capture_output=True, text=True)
             subprocess.run([*git_o, *ident, "commit", "--quiet", "-m", f"c{n}"],
                            check=False, capture_output=True, text=True)
-        old_sha = subprocess.run([*git_o, "rev-parse", "HEAD~2"], check=False,
-                                 capture_output=True, text=True).stdout.strip()
-        subprocess.run(["git", "clone", "--quiet", "--depth=1", f"file://{origin}", str(clone)],
-                       check=False, capture_output=True, text=True)
-        cwd2 = os.getcwd()
-        try:
-            os.chdir(clone)
-            present_before = _can_diff(old_sha)
-            buf2 = io.StringIO()
-            with contextlib.redirect_stdout(buf2):
-                rc2 = enforce_new(old_sha, today)
-        finally:
-            os.chdir(cwd2)
-    if present_before:
+        rev = subprocess.run([*git_o, "rev-parse", "HEAD~2"], check=False,
+                             capture_output=True, text=True)
+        old_sha = rev.stdout.strip()
+        cloned = subprocess.run(
+            ["git", "clone", "--quiet", "--depth=1", f"file://{origin}", str(clone)],
+            check=False, capture_output=True, text=True,
+        )
+        # A fixture that failed to build must say so as a FIXTURE fault. Reporting it as
+        # "the gate is broken" would be this gate's own bug one storey up: a setup failure
+        # dressed as a finding. `git rev-parse` echoes its argument back when it cannot
+        # resolve it, so an unbuilt fixture hands the gate the literal string "HEAD~2" and
+        # the failure reads exactly like a real one.
+        setup_error = None
+        if not re.fullmatch(r"[0-9a-f]{40}", old_sha):
+            setup_error = (f"rev-parse gave {old_sha!r} (rc={rev.returncode}); "
+                           f"stderr={rev.stderr.strip()[:200]}")
+        elif cloned.returncode != 0:
+            setup_error = f"clone rc={cloned.returncode}; stderr={cloned.stderr.strip()[:200]}"
+        present_before, rc2, buf2 = False, 0, io.StringIO()
+        if setup_error is None:
+            cwd2 = os.getcwd()
+            try:
+                os.chdir(clone)
+                present_before = _can_diff(old_sha)
+                with contextlib.redirect_stdout(buf2):
+                    rc2 = enforce_new(old_sha, today)
+            finally:
+                os.chdir(cwd2)
+    if setup_error is not None:
+        print(f"self-test FAIL: the recovery FIXTURE did not build, so the recovery path was "
+              f"never exercised — this is a fixture fault, not a gate finding: {setup_error}")
+        bad += 1
+    elif present_before:
         print("self-test FAIL: shallow clone already had the old base — the fixture proves "
               "nothing, so the recovery path was never exercised"); bad += 1
-    if rc2 != 0 or "UNKNOWN" in buf2.getvalue():
+    elif rc2 != 0 or "UNKNOWN" in buf2.getvalue():
         print(f"self-test FAIL: a recoverable base was not recovered (rc={rc2}) — reach_base "
               f"is not doing its job: {buf2.getvalue().strip()[:200]}"); bad += 1
     print("credential-inventory self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
