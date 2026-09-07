@@ -157,6 +157,30 @@ SQL; the registry is the only query surface, and its entries are the audit inven
 - PSD2:    not applicable — no payment-initiation or customer-facing surface; Admin UI is an operator tool.
 - CNB:     engaged — internal risk/finance reporting becomes warehouse-backed, and the registry provides a reviewable inventory of reported figures; regulator-bound returns are explicitly *not* sourced here (they remain on frozen OLTP state via finrep-service).
 
+## Deployment verification
+
+Verified end-to-end on the sandbox environment on 2026-09-06/07:
+
+- Feature shipped in #8949 (`/reporting` route, gold query registry, Grafana embed); the V15
+  gold-mart migration was applied to the sandbox ClickHouse (`15-reporting-gold.sql` via the
+  analytics ConfigMap) and all four gold views return data (`event_volume_daily` 107 rows,
+  `settled_transactions` 48, `settlement_daily` 19, `failures_daily` 4).
+- The rollout exposed a pre-existing admin-ui pipeline blocker, tracked as #8981: since #8847
+  every build failed its second cosign attestation, because cosign's legacy attestation model
+  appends to the single `sha256-<digest>.att` tag and `openbank-admin-ui` sits in
+  `ecr_immutable_repositories`, so ECR rejected the SLSA-provenance append with
+  `TAG_INVALID ... tag is immutable`. Hotfix #8982 teaches `cosign_attest_slsa_provenance` to
+  tolerate exactly that signature (the kyverno SLSA policy is Audit-only; signature and SBOM
+  attestations land first and remain Enforce). The durable fix — an ECR exclusion filter for
+  `*.att`, or OCI referrers once kyverno supports them — remains open under #8981.
+- Post-hotfix evidence: dispatch run 34061627188 and push run 34061932549 both completed
+  sign + SBOM attest + (tolerated) SLSA attest; the GitOps pin advanced through auto-PRs
+  #8985 → #8989 → `sandbox-74a5007e9-run34072377301`, and the sandbox deployment runs an
+  image whose commit is 14 commits ahead of the #8949 merge with 1/1 ready replicas.
+- `GET https://admin.open-bank.tech/reporting` answers 200 (auth-gated, redirecting to
+  Keycloak login with `callbackUrl=/reporting`), confirming the route is registered and
+  served in the sandbox build.
+
 ## References
 
 - ADR-0022 — event-fed ClickHouse analytics layer (bronze/silver/gold, retention, consistency model)
