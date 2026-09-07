@@ -64,11 +64,18 @@ class SpendReservationServiceTest {
 
     private fun czk(amount: String) = Money.of(amount, "CZK")
 
+    /**
+     * [at] is the clock the SERVICE under test will read, not decoration. The validity window is
+     * derived from it, so a test running on a different clock than [clock] gets a grant that is
+     * valid on ITS clock. Defaulting the window to the fixed clock while one test deliberately
+     * runs on the wall clock is what made this suite expire (see the wall-clock test below).
+     */
     private fun grant(
         daily: Money? = czk("5000.00"),
         monthly: Money? = null,
         perTx: Money? = null,
         status: DelegationStatus = DelegationStatus.ACTIVE,
+        at: OffsetDateTime = now,
     ) = DelegationGrant(
         grantorPartyId = grantor,
         granteePartyId = grantee,
@@ -78,16 +85,11 @@ class SpendReservationServiceTest {
         perTransactionLimit = perTx,
         dailyLimit = daily,
         monthlyLimit = monthly,
-        // validTo must outlive the REAL wall clock too, not just the fixed test `clock`: the
-        // "real clock reading" test below deliberately constructs a service on Clock.systemUTC(),
-        // so a grant window anchored only to the fixed `now` expires the moment real time passes
-        // it - which it did (test authored 2026-08-08, this fired 2026-09-08). Anchor to whichever
-        // of the two clocks is later.
-        validFrom = minOf(now, OffsetDateTime.now(Clock.systemUTC())).minusDays(1),
-        validTo = maxOf(now, OffsetDateTime.now(Clock.systemUTC())).plusDays(30),
+        validFrom = at.minusDays(1),
+        validTo = at.plusDays(30),
         status = status,
-        createdAt = now,
-        updatedAt = now,
+        createdAt = at,
+        updatedAt = at,
     )
 
     private lateinit var currentGrant: DelegationGrant
@@ -303,7 +305,14 @@ class SpendReservationServiceTest {
         // Deliberately NOT the fixed clock the other tests use, and deliberately NOT isNotNull():
         // `Instant.EPOCH` defaults passed every isNotNull() assertion in this fleet while the
         // whole trail claimed 1970-01-01 (#3874/#3883). Only recency can tell them apart.
-        val realClockService = SpendReservationService(delegationRepository, reservations, Clock.systemUTC())
+        val wallClock = Clock.systemUTC()
+        val realClockService = SpendReservationService(delegationRepository, reservations, wallClock)
+        // The grant must be valid on the clock the SERVICE reads. Inheriting the fixed clock's
+        // window made this test pass until 2026-09-07T12:00Z — the fixed instant plus the 30-day
+        // validTo — and refuse every reservation after it, for good. A dated fixture that outlives
+        // its own window fails on a calendar date, not on a code change, which is why #8310 and
+        // #9015 both went green and main went red between them.
+        currentGrant = grant(at = OffsetDateTime.now(wallClock))
         val before = Instant.now()
         runBlocking {
             realClockService.reserve(
