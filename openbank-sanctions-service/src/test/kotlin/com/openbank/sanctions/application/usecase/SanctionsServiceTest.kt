@@ -69,6 +69,25 @@ class SanctionsServiceTest {
     }
 
     @Test
+    fun `screen rejects a null listTypes element with IllegalArgumentException`(): Unit = runBlocking {
+        // Fleet fuzz run 34017868446: `{"listTypes": [null]}` reached resolveTargetLists and the
+        // isBlank filter NPE'd — 500. Same Jackson element-nullability hole as aliases (#7867);
+        // the guard names the offending index, exactly like the aliases one.
+        var thrown: Throwable? = null
+        try {
+            service.screen(sampleScreenCommand(name = "John Doe", listTypes = listOf("OFAC_SDN", null)))
+        } catch (e: IllegalArgumentException) {
+            thrown = e
+        }
+
+        assertThat(thrown)
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("listTypes[1]")
+        coVerify(exactly = 0) { repo.findByIdempotencyKey(any()) }
+        coVerify(exactly = 0) { repo.saveWithEvent(any(), any()) }
+    }
+
+    @Test
     fun `screen detects HIT when entry repo returns a high-score match`(): Unit = runBlocking {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
         coEvery { repo.saveWithEvent(any(), any()) } answers { firstArg() }
@@ -296,11 +315,13 @@ class SanctionsServiceTest {
         idempotencyKey: String = "idem-1",
         name: String = "John Doe",
         aliases: List<String?> = emptyList(),
+        listTypes: List<String?>? = null,
     ) = ScreenEntityCommand(
         idempotencyKey = idempotencyKey,
         entityType = EntityType.INDIVIDUAL,
         name = name,
         aliases = aliases,
+        listTypes = listTypes,
     )
 
     private fun sampleEntry(
