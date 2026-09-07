@@ -111,8 +111,8 @@ class TransactionResource(
                 referenceNumber = referenceNumber,
                 endToEndId = endToEndId,
                 counterpartyName = counterparty,
-                status = status?.let { runCatching { TransactionStatus.valueOf(it) }.getOrNull() },
-                type = type?.let { runCatching { TransactionType.valueOf(it) }.getOrNull() },
+                status = parseEnumParam<TransactionStatus>("status", status),
+                type = parseEnumParam<TransactionType>("type", type),
                 dateFrom = dateFrom?.let { LocalDate.parse(it) },
                 dateTo = dateTo?.let { LocalDate.parse(it) },
                 amountMin = amountMin,
@@ -166,8 +166,8 @@ class TransactionResource(
             initiatedByPartyId = request.initiatedByPartyId,
             scaChallengeId = request.scaChallengeId,
             scaExemption = request.scaExemption,
-            rail = request.rail?.let { runCatching { PaymentRail.valueOf(it) }.getOrNull() },
-            instructionType = request.instructionType?.let { runCatching { InstructionType.valueOf(it) }.getOrNull() },
+            rail = parseEnumParam<PaymentRail>("rail", request.rail),
+            instructionType = parseEnumParam<InstructionType>("instructionType", request.instructionType),
         )
         val tx = transactionUseCase.initiateTransaction(command)
         return Response.created(URI.create("/api/v1/transactions/${tx.id}"))
@@ -396,3 +396,21 @@ private fun Transaction.toResponse(merchants: Map<String, MerchantCatalogEntity>
 
 private fun CursorPage<Transaction>.toResponse(merchants: Map<String, MerchantCatalogEntity> = emptyMap()) =
     CursorPage(data = data.map { it.toResponse(merchants) }, pagination = pagination)
+
+/**
+ * Strict enum parsing for request inputs (issue #8699). The previous
+ * `runCatching { X.valueOf(it) }.getOrNull()` turned an unparseable value into a LEGAL null, and
+ * null then did two different wrong things: on the search filters it DROPPED the condition, so
+ * `?status=FAILDE` returned every transaction with a 200 (while a malformed date three lines
+ * below correctly 400s), and on the initiate path it persisted a money-path debit with
+ * `rail = null` under a 201. Absent and unparseable must stay distinguishable: absent stays null,
+ * unparseable is the caller's error — IllegalArgumentException, which libs-runtime maps to 400
+ * (#526: never a service-local mapper).
+ */
+private inline fun <reified E : Enum<E>> parseEnumParam(name: String, raw: String?): E? {
+    raw ?: return null
+    return enumValues<E>().firstOrNull { it.name == raw }
+        ?: throw IllegalArgumentException(
+            "'$name' has unknown value '$raw' (allowed: ${enumValues<E>().joinToString()})",
+        )
+}
