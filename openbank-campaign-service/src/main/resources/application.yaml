@@ -115,6 +115,10 @@ consent-service:
 incentive-service:
   url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
 
+# ADR-0269 rule 2 (#8918): the credit distress floor, asked per credit send.
+lending-service:
+  url: ${LENDING_SERVICE_URL:http://lending-service.lending.svc:8126}
+
 analytics:
   clickhouse-url: ${CLICKHOUSE_URL:http://localhost:8123}
   clickhouse-user: ${CLICKHOUSE_USER:}

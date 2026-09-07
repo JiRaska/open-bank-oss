@@ -92,10 +92,34 @@ locals {
   # re-push fails, so flipping the fleet would break the self-heal that exists to
   # rescue stranded deploys.
   #
-  # openbank-admin-ui is IMMUTABLE in the live account and stays that way — it is
-  # built by its own workflow (build-push-admin-ui.sh) off a version, not a sha,
-  # and tightening is never reverted here to make a plan quieter.
-  ecr_immutable_repositories = toset(["openbank-admin-ui"])
+  # openbank-admin-ui WAS the one IMMUTABLE repository. It is not any more, and the
+  # reason is a real incompatibility rather than a quieter plan (the rule this comment
+  # used to state still holds: never loosen a control to make Terraform agree with the
+  # account).
+  #
+  # cosign v2 stores every attestation for an image under ONE tag, `sha256-<digest>.att`,
+  # and attaching a second predicate must append to it — a rewrite. #8847 added SLSA build
+  # provenance alongside the CycloneDX SBOM, so each build now attests twice, and on an
+  # immutable repository the second write is refused:
+  #
+  #   TAG_INVALID: The image tag 'sha256-<digest>.att' already exists ... and cannot be
+  #   overwritten because the tag is immutable
+  #
+  # #8982 stopped that from failing the build (the kyverno SLSA policy is Audit, so a
+  # deploy is not gated on the envelope) and admin-ui deploys work again. What it could not
+  # do is make the attestation land: admin-ui is now the one deploy image in the fleet with
+  # no build provenance, tolerated on every run. This is the other half — the repository
+  # joins the fleet default, so the third leg of ADR-0030 D4 is actually written, and
+  # #8982's tolerate branch becomes the safety net it reads as rather than the steady state.
+  #
+  # The tag scheme is not ours to change: cosign v3 writes OCI 1.1 referrers, which the
+  # pinned kyverno 3.2.6 cannot discover, so v2 and its `.att` tag are load-bearing until
+  # issue #770. Under that constraint an immutable repository holds exactly one attestation.
+  #
+  # What the platform gives up is tag-reuse protection on one repository, which no other
+  # repository has. What it keeps is the part that proves authenticity — the KMS cosign
+  # signature and both attestations, verified at admission. Revisit at #770.
+  ecr_immutable_repositories = toset([])
 }
 
 resource "aws_ecr_repository" "service" {
