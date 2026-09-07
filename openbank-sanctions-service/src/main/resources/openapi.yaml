@@ -386,6 +386,7 @@ components:
               - FATF_HIGH_RISK
               - PEP_GLOBAL
               - CNB_DOMESTIC
+
     ReviewCommand:
       type: object
       required: [checkId, reviewedBy, note, newStatus]
