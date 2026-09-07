@@ -28,7 +28,54 @@ enum class KycCaseStatus {
     }
 }
 enum class RiskLevel { LOW, MEDIUM, HIGH, VERY_HIGH }
-enum class CheckType { IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA }
+
+/**
+ * [REGISTRY_MATCH], [REPRESENTATIVE_AUTHORITY] and [UBO_IDENTIFICATION] are the KYB checks of a
+ * BUSINESS subject (ADR-0284 D5): does the entity exist as declared in its public register, are
+ * the people who signed listed as able to bind it, and who ultimately owns it (AMLD5 Art. 30).
+ */
+enum class CheckType {
+    IDENTITY,
+    ADDRESS,
+    PEP_SCREENING,
+    SANCTIONS_SCREENING,
+    ADVERSE_MEDIA,
+    REGISTRY_MATCH,
+    REPRESENTATIVE_AUTHORITY,
+    UBO_IDENTIFICATION,
+}
+
+/** Whether the case is about a natural person or a legal entity; decides the check set (ADR-0284 D5). */
+enum class SubjectType {
+    INDIVIDUAL,
+    BUSINESS,
+    ;
+
+    val mandatoryChecks: List<CheckType>
+        get() = when (this) {
+            INDIVIDUAL -> listOf(
+                CheckType.IDENTITY,
+                CheckType.ADDRESS,
+                CheckType.PEP_SCREENING,
+                CheckType.SANCTIONS_SCREENING,
+            )
+            BUSINESS -> listOf(
+                CheckType.REGISTRY_MATCH,
+                CheckType.REPRESENTATIVE_AUTHORITY,
+                CheckType.UBO_IDENTIFICATION,
+                CheckType.SANCTIONS_SCREENING,
+                CheckType.ADVERSE_MEDIA,
+            )
+        }
+
+    companion object {
+        /** party-service's `partyType` (INDIVIDUAL | SOLE_TRADER | COMPANY | TRUST) → subject type. */
+        fun fromPartyType(partyType: String?): SubjectType = when (partyType?.uppercase()) {
+            "SOLE_TRADER", "COMPANY", "TRUST" -> BUSINESS
+            else -> INDIVIDUAL
+        }
+    }
+}
 enum class CheckStatus { PENDING, PASSED, FAILED, MANUAL_REVIEW }
 
 data class KycCase(
@@ -44,6 +91,7 @@ data class KycCase(
     val expiresAt: Instant?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val subjectType: SubjectType = SubjectType.INDIVIDUAL,
 )
 
 data class KycCheck(

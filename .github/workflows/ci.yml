@@ -315,6 +315,7 @@ jobs:
       # that need them are set here rather than in the manifest.
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_BODY: ${{ github.event.pull_request.body }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
       BASE_REF: ${{ github.base_ref || github.ref_name }}
       # `gh` needs GH_TOKEN; the job-level `permissions: contents: read` above is what
       # scopes it. check-msg-channel-image-parity.py reads a file at an arbitrary historical
@@ -430,18 +431,33 @@ jobs:
       # creation-time base and both claimed the same openapi info.version (#481 x #524).
       # Exported per shard because every shard may hold a `needs_base: true` gate; a gate
       # that reads it while it is empty is failed by run-gates.py rather than run vacuously.
+      #
+      # The previous HEAD^2 shortcut did not survive contact with this job's fetch-depth: 1
+      # checkout: the merge commit's parent objects are not in the object database, so
+      # `rev-parse --verify HEAD^2` fails and every long-lived PR fell back to the
+      # creation-time base.sha. A branch that had absorbed main since opening then diffed
+      # the whole absorbed window — measured 2026-09-06 on #8334: a ~17-file notification
+      # PR reported 620 touched money-path files (security-checklist-money-path) and 33
+      # "changed" contract tests (adversarial-contract-test), all of them main's own merged
+      # work. Deepen the base branch until the TRUE merge-base resolves; branch refs are
+      # fetchable here while arbitrary shas are not (verified 2026-09-06: `git fetch origin
+      # <sha>` answers "couldn't find remote ref" for short shas and works for full ones,
+      # but a ref fetch is the stable path).
       - name: resolve PR diff base (current merge-base, not creation-time base.sha)
         if: github.event_name == 'pull_request'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          base="${EVENT_BASE_SHA}"
-          git fetch --depth=2 origin "${GITHUB_SHA}" 2>/dev/null || true
-          if git rev-parse -q --verify 'HEAD^2' >/dev/null 2>&1; then
-            base="$(git rev-parse 'HEAD^1')"
-          else
-            git fetch --depth=1 origin "${base}" 2>/dev/null || true
+          base=""
+          git fetch -q --depth=1 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          for _ in 1 2 3 4 5 6 7 8; do
+            if base="$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null)"; then break; fi
+            git fetch -q --deepen=400 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          done
+          if [ -z "${base}" ]; then
+            echo "::warning::merge-base against origin/${BASE_REF} did not resolve after deepening; falling back to the event base.sha, which is stale for a PR that has absorbed main since opening"
+            base="${EVENT_BASE_SHA}"
           fi
           echo "PR diff base: ${base} (event base.sha: ${EVENT_BASE_SHA})"
           echo "PR_DIFF_BASE=${base}" >> "$GITHUB_ENV"

@@ -7,6 +7,8 @@ package com.openbank.delegation.infrastructure.rest
 import com.openbank.delegation.application.port.out.DelegationConcurrentTransitionException
 import com.openbank.delegation.application.usecase.DelegationCallerMismatchException
 import com.openbank.delegation.application.usecase.DelegationEligibilityException
+import com.openbank.delegation.application.usecase.DelegationLifecycleApprovalConflict
+import com.openbank.delegation.application.usecase.DelegationLifecycleApprovalNotFound
 import com.openbank.delegation.application.usecase.DelegationNotFoundException
 import com.openbank.delegation.application.usecase.DelegationNotGranteeException
 import com.openbank.delegation.application.usecase.DelegationNotGrantorException
@@ -39,6 +41,22 @@ class DelegationNotFoundExceptionMapper : ExceptionMapper<DelegationNotFoundExce
 @Provider
 class DelegationConcurrentTransitionExceptionMapper : ExceptionMapper<DelegationConcurrentTransitionException> {
     override fun toResponse(exception: DelegationConcurrentTransitionException): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationLifecycleApprovalNotFoundMapper : ExceptionMapper<DelegationLifecycleApprovalNotFound> {
+    override fun toResponse(exception: DelegationLifecycleApprovalNotFound): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message))
+            .build()
+}
+
+@Provider
+class DelegationLifecycleApprovalConflictMapper : ExceptionMapper<DelegationLifecycleApprovalConflict> {
+    override fun toResponse(exception: DelegationLifecycleApprovalConflict): Response =
         Response.status(Response.Status.CONFLICT)
             .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message))
             .build()

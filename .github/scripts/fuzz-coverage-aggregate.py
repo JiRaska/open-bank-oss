@@ -64,6 +64,12 @@ def aggregate(artifacts: Path, scope_file: Path, run_url: str) -> dict:
         "run": run_url,
         "inScope": len(scope.get("keep", [])),
         "excluded": scope.get("skipped", []),
+        # A dispatch-narrowed run is NOT a fleet coverage measurement — the security-kpis
+        # collector skips artifacts flagged override (and an old artifact without the flag
+        # is treated as NOT overridden, i.e. measured, because every scheduled run derives
+        # the full set; the flag exists from the workflow change that introduced it).
+        "override": bool(scope.get("override", False)),
+        "overrideRequested": scope.get("overrideRequested", []),
         "tested": tested,
         "coveragePct": round(100 * tested / len(services)) if services else 0,
         "totalExercised": sum(s["exercised"] for s in services),
@@ -104,6 +110,15 @@ def self_test() -> int:
             print("self-test FAIL: authz-OFF pass leaked into the coverage record"); bad += 1
         if cov["excluded"] != [["openbank-vop-service", "no postgresql:// URL"]]:
             print("self-test FAIL: excluded services must carry their reason"); bad += 1
+        if cov["override"] is not False or cov["overrideRequested"] != []:
+            print("self-test FAIL: a derived (non-override) scope must record override=false"); bad += 1
+        # an override scope must propagate the flag — the KPI collector keys off it
+        (root / "ovr.json").write_text(json.dumps({
+            "keep": ["openbank-ledger-service"], "skipped": [],
+            "override": True, "overrideRequested": ["openbank-ledger-service"]}))
+        ovr = aggregate(root, root / "ovr.json", "https://example.test/run/2")
+        if ovr["override"] is not True or ovr["overrideRequested"] != ["openbank-ledger-service"]:
+            print("self-test FAIL: override scope must surface override=true"); bad += 1
     print("fuzz-coverage-aggregate self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0
 

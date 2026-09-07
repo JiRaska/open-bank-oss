@@ -117,8 +117,15 @@ jobs:
               fh.write("services=" + json.dumps(keep) + "\n")
           # Durable scope record for the aggregate step: the job list alone is NOT
           # evidence of what was in scope (#2) — keep and skipped-with-reason both.
+          # `override` matters downstream: the security-kpis collector reads the LATEST
+          # run's artifact, and a dispatch-narrowed run is not a coverage measurement
+          # (the authenticated lane says so in its step summary; here it must be
+          # machine-readable, or the KPI reports 2/2 = 100 % about a two-service probe
+          # as if it were the fleet — measured 2026-09-05, run 33954836043).
           with open("fuzz-scope.json", "w") as fh:
-              json.dump({"keep": keep, "skipped": skipped}, fh, indent=2)
+              json.dump({"keep": keep, "skipped": skipped,
+                         "override": bool(override),
+                         "overrideRequested": override}, fh, indent=2)
           PY
 
       - name: Upload derived scope

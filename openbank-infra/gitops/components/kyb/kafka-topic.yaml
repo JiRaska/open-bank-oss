@@ -1,0 +1,33 @@
+# Business onboarding lifecycle events — published by kyb-service through its transactional
+# outbox (ADR-0284): started / registry verified / review required / signer invited & identified /
+# agreement signed / completed / rejected / abandoned. Consumers: onboarding-service (business
+# funnel, follow-up) and audit-service.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.kyb.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
+# Dead-letter topic for kyb-service's party-events consumer (failure-strategy: dead-letter-queue).
+# Topics are not auto-created; without this the rethrow wedges on the DLQ send instead (#5745).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.kyb.party-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete

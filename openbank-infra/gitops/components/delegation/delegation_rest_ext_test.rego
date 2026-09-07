@@ -41,6 +41,50 @@ test_viewer_may_not_suspend if {
 	count(allowed_reasons) == 0 with input as {"principal": viewer, "action": "delegation.suspend"}
 }
 
+# --- durable lifecycle approval inbox ---
+
+test_operator_may_read_lifecycle_approval if {
+	"operator-delegation-approval" in allowed_reasons with input as {
+		"principal": operator,
+		"action": "delegation.approval.read",
+	}
+}
+
+test_operator_may_propose_lifecycle_approval if {
+	"operator-delegation-approval" in allowed_reasons with input as {
+		"principal": operator,
+		"action": "delegation.approval.propose",
+	}
+}
+
+test_admin_may_decide_lifecycle_approval if {
+	"operator-delegation-approval" in allowed_reasons with input as {
+		"principal": admin,
+		"action": "delegation.approval.decide",
+	}
+}
+
+test_viewer_may_not_read_lifecycle_approval if {
+	count(allowed_reasons) == 0 with input as {
+		"principal": viewer,
+		"action": "delegation.approval.read",
+	}
+}
+
+test_shared_backend_is_prohibited_from_lifecycle_approvals if {
+	prohibited with input as {
+		"principal": services_m2m,
+		"action": "delegation.approval.read",
+	}
+}
+
+test_edge_is_prohibited_from_lifecycle_approval_mutations if {
+	prohibited with input as {
+		"principal": edge,
+		"action": "delegation.approval.propose",
+	}
+}
+
 # --- the regression this file exists to prevent ---
 
 test_shared_backend_identity_may_not_offer if {

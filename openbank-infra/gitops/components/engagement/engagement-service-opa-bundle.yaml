@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: engagement-service
     app.kubernetes.io/part-of: engagement
   annotations:
-    openbank.tech/policy-checksum: "8802558fa4fc6972"
+    openbank.tech/policy-checksum: "d6433c6ad1ec23f0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1076,6 +1076,10 @@ data:
             - ledger.read
             - lending.list
             - lending.read
+            # #8573: the merchant enrichment catalogue an operator maintains. Read is here rather
+            # than relying on the generic operator ".read" rule so the worklist route is granted
+            # explicitly, the same way every other list action in this matrix is.
+            - merchant.list
             - notification.list
             - notification.read
             # ADR-0224 D3 (E2E #2750): the staff OBO channel's MCP read tools — the capabilities
@@ -1139,6 +1143,12 @@ data:
             - ledger.replay
             - ledger.reverse
             - ledger.trigger
+            - kyb.case.list                    # ADR-0284: business onboarding review queue
+            - kyb.case.read
+            - kyb.case.reject
+            - kyb.case.review.resolve
+            - kyb.lookup
+            - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
             - lending.approve
             - lending.collateralDecide
             - lending.collateralRegister
@@ -1147,8 +1157,16 @@ data:
             - lending.repay
             - lending.reschedule
             - lending.writeoff
+            # #8573: maintaining the merchant enrichment catalogue. Public business data only — a
+            # trading name, a logo, a shop location — never anything customer-derived, and not
+            # reachable through customer-edge.
+            - merchant.delete
+            - merchant.update
             - party.approval.decide
             - party.consent.update
+            - party.mandate.grant              # ADR-0284 D3: bind a representative to a legal-entity party
+            - party.mandate.read
+            - party.mandate.revoke
             - party.merge
             - party.update
             - sanctions.approval.decide
@@ -1214,6 +1232,11 @@ data:
           grant:
             - kyc.case.approve
             - kyc.case.reject
+            - kyb.case.list                    # ADR-0284: the KYB review queue is the KYC reviewer's queue
+            - kyb.case.read
+            - kyb.case.reject
+            - kyb.case.review.resolve
+            - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
         ROLE_AUDITOR:
           grant:
             - audit.read
@@ -1584,5 +1607,35 @@ data:
           - money.*
           - gh.pr.*
           - secrets.*
+    - id: kyb-analyst
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - kyb
+          - governance
+        - tier: write_proposal
+          resources:
+          - case-thread
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: business-copilot
+      tools:
+        allow:
+        - query.balance.readonly
+        - query.transaction.readonly
+        - propose.payment
+        - propose.card_freeze
+        - propose.dispute
+        deny:
+        - money.*
+        - gh.pr.*
+        - '*.write'
+        - secrets.read.raw
   manifest.json: |
     {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}

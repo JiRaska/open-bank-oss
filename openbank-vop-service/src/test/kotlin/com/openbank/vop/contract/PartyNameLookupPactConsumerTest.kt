@@ -111,6 +111,36 @@ class PartyNameLookupPactConsumerTest {
     // (no token, expect rejection) stays a client property, not a wire contract.
 
     /**
+     * The negative case (ADR-0279 #3), in the one shape the provider replay CAN serve: a party id
+     * nobody holds is a DIFFERENT PATH, so the provider distinguishes it from the 200 interaction
+     * and answers 404 under the same TestAuthMechanism that makes a recorded 401 unreachable.
+     * Enumeration resistance is a real contract — "not found" must not become an empty party.
+     */
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun unknownPartyPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no party exists for the id")
+        .uponReceiving("GET a party id the bank does not hold")
+        .path(UNKNOWN_PARTY_PATH)
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "unknownPartyPact")
+    fun `a party id the bank does not hold is a 404, not an empty party`(mockServer: MockServer) {
+        assertClientPathMatchesContract()
+
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get("/api/v1/parties/$UNKNOWN_PARTY_ID")
+            .then()
+            .statusCode(404)
+    }
+
+    /**
      * The asymmetry that makes this contract falsifiable at the consumer layer: the path the client
      * would really call, recomputed from [PartyServiceClient]'s own annotations, must equal the
      * literal this pact promises party-service. A `@Path` edit on the client reddens here.
@@ -136,6 +166,10 @@ class PartyNameLookupPactConsumerTest {
          * + `@GET @Path("/{id}")`). Never derive this from the client — see the class KDoc.
          */
         const val EXPECTED_PARTY_PATH = "/api/v1/parties/$PACT_PARTY_ID"
+
+        /** No state seeds this one — that IS the state. A well-formed id no party carries. */
+        const val UNKNOWN_PARTY_ID = "00000000-0000-4000-8000-000000000001"
+        const val UNKNOWN_PARTY_PATH = "/api/v1/parties/$UNKNOWN_PARTY_ID"
 
         fun clientDerivedPartyPath(): String {
             val base = PartyServiceClient::class.java.getAnnotation(Path::class.java).value

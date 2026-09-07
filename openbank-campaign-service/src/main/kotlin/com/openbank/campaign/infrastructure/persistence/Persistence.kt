@@ -31,6 +31,7 @@ import com.openbank.campaign.domain.model.Audience
 import com.openbank.campaign.domain.model.AudienceState
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -60,6 +61,8 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.time.Instant
@@ -77,6 +80,16 @@ class CampaignEntity : PanacheEntityBase() {
 
     @Column(nullable = false)
     lateinit var goal: String
+
+    /**
+     * ADR-0269 rule 1. NOT NULL with no database default: a row that reaches here without a kind is
+     * a bug worth failing on, not one to paper over with an implicit NONE. V19 backfilled the rows
+     * that predate the column, which is a one-off statement about history, not a standing default
+     * for new writes.
+     */
+    @Column(nullable = false, length = 32)
+    @Enumerated(EnumType.STRING)
+    lateinit var productKind: CampaignProductKind
 
     @Column(nullable = false)
     lateinit var segmentName: String
@@ -350,6 +363,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         id = this@toEntity.id
         name = this@toEntity.name
         goal = this@toEntity.goal
+        productKind = this@toEntity.productKind
         segmentName = this@toEntity.segmentRef.name
         segmentVersion = this@toEntity.segmentRef.version
         stepsJson = mapper.writeValueAsString(this@toEntity.steps)
@@ -374,6 +388,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         id = id,
         name = name,
         goal = goal,
+        productKind = productKind,
         segmentRef = SegmentRef(segmentName, segmentVersion),
         steps = mapper.readValue<List<CampaignStep>>(stepsJson),
         decisions = decisionsJson?.let { mapper.readValue<List<CampaignDecision>>(it) } ?: emptyList(),

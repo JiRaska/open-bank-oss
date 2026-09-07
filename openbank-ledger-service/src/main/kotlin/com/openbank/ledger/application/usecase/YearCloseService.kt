@@ -169,6 +169,8 @@ class YearCloseService(
         )
     }
 
+    // Real-only by the port's default (ADR-0252 / LedgerScope). The fiscal-year close hash is an
+    // attestation over the statutory population; canary activity is not part of it.
     private suspend fun computeTrialBalance(fiscalYear: Int): FiscalYearTrialBalance {
         requireValid(fiscalYear in YearCloseRecord.MIN_FISCAL_YEAR..YearCloseRecord.MAX_FISCAL_YEAR) {
             "fiscalYear out of range: $fiscalYear"

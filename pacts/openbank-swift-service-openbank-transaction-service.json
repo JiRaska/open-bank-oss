@@ -1,0 +1,105 @@
+{
+  "consumer": {
+    "name": "openbank-swift-service"
+  },
+  "interactions": [
+    {
+      "description": "POST the settled MT103 as a SWIFT one-off debit",
+      "providerStates": [
+        {
+          "name": "a valid source account exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 12500.00,
+          "currencyCode": "EUR",
+          "description": "MT103 INVOICE-2026-0042",
+          "idempotencyKey": "swift-settlement-5e2a7b10-1111-4222-8333-444444444444",
+          "instructionType": "ONE_OFF",
+          "rail": "SWIFT",
+          "sourceAccountId": "eeeeeeee-1111-4222-8333-444444444444",
+          "type": "DEBIT",
+          "valueDate": "2026-02-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "instructionType": "ONE_OFF",
+          "rail": "SWIFT",
+          "status": "COMPLETED"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "POST the MT103 settlement debit with a missing or expired token",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 12500.00,
+          "currencyCode": "EUR",
+          "description": "MT103 INVOICE-2026-0042",
+          "idempotencyKey": "swift-settlement-5e2a7b10-1111-4222-8333-444444444444",
+          "instructionType": "ONE_OFF",
+          "rail": "SWIFT",
+          "sourceAccountId": "eeeeeeee-1111-4222-8333-444444444444",
+          "type": "DEBIT",
+          "valueDate": "2026-02-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-transaction-service"
+  }
+}

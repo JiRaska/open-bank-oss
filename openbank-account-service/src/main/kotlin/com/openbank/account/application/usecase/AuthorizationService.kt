@@ -13,8 +13,11 @@ import com.openbank.account.application.port.`in`.RevokeAuthorizationCommand
 import com.openbank.account.application.port.out.AccountAuthorizationRepository
 import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.DelegationProjectionRepository
+import com.openbank.account.domain.model.AccountAccessEntry
+import com.openbank.account.domain.model.AccountAccessSource
 import com.openbank.account.domain.model.AccountAuthorization
 import com.openbank.account.domain.model.AuthorizationRole
+import com.openbank.account.domain.model.DelegatedAccessGrant
 import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
@@ -70,6 +73,69 @@ class AuthorizationService(
 
     override suspend fun listAuthorizations(query: ListAuthorizationsQuery): List<AccountAuthorization> =
         authorizationRepository.findByAccountId(query.accountId)
+
+    /**
+     * The owner-facing mirror of the payment guard (see [authorizeDelegatedPayment]).
+     *
+     * Reads the SAME two stores, in the same order, with the same active/validity filters. It is
+     * written as a projection of the guard on purpose: an independently computed transparency view
+     * drifts from enforcement the first time either store changes, and the view is the half that
+     * never gets exercised by a real debit.
+     *
+     * `canInitiatePayments` answers the only question an owner actually cares about — can this
+     * person take money out — rather than restating a role name the customer never chose.
+     */
+    override suspend fun effectiveAccess(accountId: UUID): List<AccountAccessEntry> {
+        // No such account: an empty list, not an exception. A 404-vs-200 difference here would let
+        // any caller probe which account ids exist.
+        val account = accountRepository.findById(accountId) ?: return emptyList()
+        val now = OffsetDateTime.now(clock)
+        val today = now.toLocalDate()
+
+        val owner = AccountAccessEntry(
+            partyId = account.partyId,
+            source = AccountAccessSource.OWNER,
+            canInitiatePayments = true,
+            capabilities = setOf(DelegatedAccessGrant.CAP_INITIATE_PAYMENT),
+        )
+
+        val mandates = authorizationRepository.findByAccountId(accountId)
+            .filter { it.isActiveOn(today) }
+            .map { auth ->
+                AccountAccessEntry(
+                    partyId = auth.partyId,
+                    source = AccountAccessSource.BANK_MANDATE,
+                    // Same disjunct the guard uses: PAYMENT_ONLY or FULL_ACCESS may debit.
+                    canInitiatePayments = auth.role == AuthorizationRole.PAYMENT_ONLY ||
+                        auth.role == AuthorizationRole.FULL_ACCESS,
+                    capabilities = setOf(auth.role.name),
+                    perTransactionLimit = auth.transactionLimit?.amount,
+                    perTransactionLimitCurrency = auth.transactionLimit?.currency?.code,
+                    validFrom = auth.validFrom.atStartOfDay().atOffset(now.offset),
+                    validTo = auth.validTo?.atStartOfDay()?.atOffset(now.offset),
+                )
+            }
+
+        val delegations = delegationProjectionRepository.findActiveByAccount(accountId)
+            // issuedBy: a grant only speaks for this account if its grantor owns it. Dropping the
+            // check would let a grant naming someone else's account appear in this owner's view.
+            .filter { it.issuedBy(account.partyId) && it.isActiveOn(now) }
+            .map { grant ->
+                AccountAccessEntry(
+                    partyId = grant.granteePartyId,
+                    source = AccountAccessSource.CUSTOMER_DELEGATION,
+                    canInitiatePayments = grant.satisfies(AuthorizationRole.PAYMENT_ONLY),
+                    capabilities = grant.capabilities,
+                    perTransactionLimit = grant.perTransactionLimitAmount,
+                    perTransactionLimitCurrency = grant.perTransactionLimitCurrency,
+                    validFrom = grant.validFrom,
+                    validTo = grant.validTo,
+                    grantId = grant.id,
+                )
+            }
+
+        return listOf(owner) + mandates + delegations
+    }
 
     override suspend fun isAuthorized(accountId: UUID, partyId: UUID, role: AuthorizationRole): Boolean {
         val account = accountRepository.findById(accountId) ?: return false
