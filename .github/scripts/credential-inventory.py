@@ -310,7 +310,7 @@ def self_test() -> int:
             finally:
                 os.chdir(cwd2)
     if setup_error is not None:
-        print(f"self-test FAIL: the recovery FIXTURE did not build, so the recovery path was "
+        print(f"::error::self-test FAIL: the recovery FIXTURE did not build, so the recovery path was "
               f"never exercised — this is a fixture fault, not a gate finding: {setup_error}")
         bad += 1
     elif present_before:
