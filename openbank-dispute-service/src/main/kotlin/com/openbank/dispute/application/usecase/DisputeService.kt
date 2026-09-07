@@ -119,7 +119,30 @@ class DisputeService(
                     },
                     updatedAt = OffsetDateTime.now(clock),
                 )
-                disputeRepo.update(updated).flatMap { saved ->
+                // #8745 finding 2: this endpoint knowingly handles the three terminal statuses
+                // (it stamps resolvedAt for them), so the same terminal state emitted
+                // dispute.resolved through resolveRemediation and NOTHING through here — an
+                // ADR-0220 exclusion applied on dispute.opened would never lift for a dispute
+                // resolved on this path. Mirror doResolve: the transition INTO a terminal
+                // status carries the event, committed atomically with the row.
+                val terminal = listOf(
+                    DisputeStatus.RESOLVED_CUSTOMER,
+                    DisputeStatus.RESOLVED_MERCHANT,
+                    DisputeStatus.WITHDRAWN,
+                )
+                val messages =
+                    if (updated.status in terminal && dispute.status !in terminal) {
+                        listOf(resolvedOutboxMessage(updated))
+                    } else {
+                        emptyList()
+                    }
+                val write =
+                    if (messages.isEmpty()) {
+                        disputeRepo.update(updated)
+                    } else {
+                        disputeRepo.update(updated, messages)
+                    }
+                write.flatMap { saved ->
                     val event = DisputeTimelineEvent(
                         disputeId = saved.id,
                         eventType = "STATUS_CHANGED",
