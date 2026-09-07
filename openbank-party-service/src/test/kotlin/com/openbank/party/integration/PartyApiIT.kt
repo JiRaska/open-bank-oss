@@ -287,6 +287,19 @@ class PartyApiIT {
     }
 
     @Test
+    @Order(17)
+    fun `GET party by id with no identity at all returns 401`() {
+        // The VoP hop-2 path (GET /api/v1/parties/{id}). A recorded 401 pact cannot survive
+        // provider replay — the replay TestAuthMechanism authenticates every request — so the
+        // negative case is asserted here instead (#8552 class).
+        Given { this } When {
+            get("/api/v1/parties/${java.util.UUID.randomUUID()}")
+        } Then {
+            statusCode(401)
+        }
+    }
+
+    @Test
     @Order(16)
     fun `GET gdpr-export with no identity at all returns 401`() {
         // Previously this endpoint carried no @Authenticated/@RolesAllowed annotation and an

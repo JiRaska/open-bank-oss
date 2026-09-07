@@ -8,10 +8,12 @@ import com.openbank.campaign.application.port.out.BannerPlacementPort
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.ConversionContext
+import com.openbank.campaign.application.port.out.CreditOfferGatePort
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -103,6 +105,7 @@ class CampaignJourneyMetricsTest {
             notificationSend,
             bannerPlacement,
             metrics,
+            CreditOfferGatePort { true },
             dryRun = dryRun,
         ) {
             override fun <T> runBlockingOnWorker(block: suspend () -> T): T = runBlocking { block() }
@@ -113,6 +116,7 @@ class CampaignJourneyMetricsTest {
         id = campaignId,
         name = "spring-offer",
         goal = "activation",
+        productKind = CampaignProductKind.NONE,
         segmentRef = SegmentRef("all", 1),
         steps = listOf(
             CampaignStep(

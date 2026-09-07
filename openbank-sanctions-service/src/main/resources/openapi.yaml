@@ -55,6 +55,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SanctionsCheck'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /api/v1/sanctions/review:
     post:
@@ -291,6 +293,13 @@ paths:
 
 components:
   responses:
+    BadRequest:
+      description: Invalid request (e.g. an unrecognised sanctions list type in listTypes)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
     NotFound:
       description: Not found
       content:
@@ -360,6 +369,23 @@ components:
             type: string
           description: "Arbitrary identifiers e.g. passport, taxId"
           default: {}
+        listTypes:
+          type: array
+          description: >-
+            Restrict screening to these lists. Omitted, null or empty means every enabled list.
+            An unrecognised name is rejected with 400 — it is never dropped, because a dropped
+            entry would produce a screening result narrower than the caller asked for while
+            reporting success.
+          items:
+            type: string
+            enum:
+              - OFAC_SDN
+              - EU_CONSOLIDATED
+              - UN_CONSOLIDATED
+              - HM_TREASURY
+              - FATF_HIGH_RISK
+              - PEP_GLOBAL
+              - CNB_DOMESTIC
 
         listTypes:
           type: array

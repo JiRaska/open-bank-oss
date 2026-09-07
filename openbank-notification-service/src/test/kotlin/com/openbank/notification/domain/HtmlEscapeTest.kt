@@ -24,9 +24,9 @@ class HtmlEscapeTest {
 
     @Test
     fun `an attribute-breakout payload can no longer close the surrounding quote`() {
-        // The PASSWORD_RESET template interpolates resetLink into href="...". A raw double quote
-        // in the value would close the attribute early and let the rest of the string inject a
-        // new attribute or element; escaped, the quote is inert text.
+        // A variable interpolated into an href="..." attribute (the removed PASSWORD_RESET's
+        // resetLink was that case, #8568): a raw double quote would close the attribute early and
+        // let the rest of the string inject a new attribute or element; escaped, it is inert text.
         val payload = "https://example.com/reset?t=abc\" onmouseover=\"alert(1)"
         val escaped = HtmlEscape.escape(payload)
         assertThat(escaped).doesNotContain("\"")

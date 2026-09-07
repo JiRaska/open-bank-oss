@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071).
+dataDomain: open-banking
+primaryDatastore: PostgreSQL
+databaseName: openbank_loyalty
+dataLineageRole: both
+dataClassification: confidential
+retentionPolicy: 13 months
+evidenceExported: false
+databaseLineage:
+  ownedDatabases:
+    - openbank_loyalty

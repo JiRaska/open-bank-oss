@@ -118,7 +118,7 @@ sequenceDiagram
 | party `ACTIVE` a `scaEnrolled` | `ACTIVE` |
 | party `ACTIVE` a neenrollnuto | `SCA_PENDING` |
 | kyc `UNDER_REVIEW` | `KYC_UNDER_REVIEW` |
-| kyc `DOCUMENTS_REQUIRED` | `KYC_DOCUMENTS_REQUIRED` |
+| kyc `DOCUMENTS_REQUIRED` | `KYC_DOCUMENTS_REQUIRED` | <!-- nedosažitelné: kyc tento stav nikdy nenastaví (#8535) -->
 | kyc `OPEN` nebo null | `KYC_OPEN` |
 | kyc `REJECTED` nebo `EXPIRED` | `BLOCKED` |
 | jinak | `REGISTERED` |

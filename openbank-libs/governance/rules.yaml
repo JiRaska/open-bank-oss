@@ -397,10 +397,17 @@ change_requirements:
     allowlist:
       # openbank.psd2.events left the allowlist in #8510: the producer itself was deleted
       # (the psd2_outbox apparatus had zero writers), so there is no topic left to exempt.
+      # openbank.kyb.events left the allowlist here: it now has TWO consumers, which is what the
+      # entry anticipated — onboarding-service's business funnel projection
+      # (BusinessOnboardingEventConsumer, channel kyb-events-in, ADR-0284 D6) and analytics-sink's
+      # Customer 360 silver layer (D8). The entry said to remove it with the first consumer PR, and
+      # the gate fails on a stale entry under --enforce, in both directions.
       - topic: "openbank.tpp.registry.event"
         reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
       - topic: "proposal-events"
         reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). The producer is now fully deployed and the exemption is about the CONSUMER side only: openbank-infra/gitops/components/case-coordinator/kafka-case-coordinator-mtls.yaml declares the KafkaUser with Write+Describe on this topic and says in words \"producer-only ... No consumer side\", and kafka-topic.yaml (the Strimzi KafkaTopic, which does exist) says \"Consumer: none yet\". The intended consumer is the oversight/review surface ADR-0244 D7 describes; the ADR-0031 approval queue reads proposals through agent-service's store/REST today. Same shape as the delegation.events and incentive.events entries above. CORRECTED 2026-08-31 (#7740): this reason previously rested on three facts that are all false on main — the topic IS declared under openbank-infra/ (kafka-topic.yaml + the mTLS ACL), openbank-case-coordinator-agent IS in auto-deploy.yml's ALL_SERVICES, and its KafkaUser DOES exist. The conclusion survived its own evidence, which is the failure mode: a stale justification reads as a verified one. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free."
+      - topic: "openbank.loyalty.events"
+        reason: "ADR-0282 phase 2, first slice. The Lístek ledger publishes earn, benefit-grant and expiry events; the services that would react to them (billing for the IFRS 15 provisioning journal, interest and fx for benefit delivery) are money-path and belong to a later slice, so a consumer written now would have nothing to do. ADR-0006's own sequencing is producers before consumers (#1916). Not the #889 class — the absence is the plan, not an oversight. Re-triage: remove this entry with the first delivering-engine PR (#8793)."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
   lineage_code_audit:
@@ -2854,6 +2861,10 @@ authz:
         - ledger.read
         - lending.list
         - lending.read
+        # #8573: the merchant enrichment catalogue an operator maintains. Read is here rather
+        # than relying on the generic operator ".read" rule so the worklist route is granted
+        # explicitly, the same way every other list action in this matrix is.
+        - merchant.list
         - notification.list
         - notification.read
         # ADR-0224 D3 (E2E #2750): the staff OBO channel's MCP read tools — the capabilities
@@ -2917,6 +2928,12 @@ authz:
         - ledger.replay
         - ledger.reverse
         - ledger.trigger
+        - kyb.case.list                    # ADR-0284: business onboarding review queue
+        - kyb.case.read
+        - kyb.case.reject
+        - kyb.case.review.resolve
+        - kyb.lookup
+        - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
         - lending.approve
         - lending.collateralDecide
         - lending.collateralRegister
@@ -2925,8 +2942,16 @@ authz:
         - lending.repay
         - lending.reschedule
         - lending.writeoff
+        # #8573: maintaining the merchant enrichment catalogue. Public business data only — a
+        # trading name, a logo, a shop location — never anything customer-derived, and not
+        # reachable through customer-edge.
+        - merchant.delete
+        - merchant.update
         - party.approval.decide
         - party.consent.update
+        - party.mandate.grant              # ADR-0284 D3: bind a representative to a legal-entity party
+        - party.mandate.read
+        - party.mandate.revoke
         - party.merge
         - party.update
         - sanctions.approval.decide
@@ -2992,6 +3017,11 @@ authz:
       grant:
         - kyc.case.approve
         - kyc.case.reject
+        - kyb.case.list                    # ADR-0284: the KYB review queue is the KYC reviewer's queue
+        - kyb.case.read
+        - kyb.case.reject
+        - kyb.case.review.resolve
+        - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
     ROLE_AUDITOR:
       grant:
         - audit.read
@@ -3153,6 +3183,9 @@ shared_m2m_matrix_write_grants:
     - interest.create
     - interest.delete
     - interest.trigger
+    - kyb.case.reject
+    - kyb.case.review.resolve
+    - kyb.lookup
     - ledger.create
     - ledger.replay
     - ledger.reverse
@@ -3165,10 +3198,14 @@ shared_m2m_matrix_write_grants:
     - lending.repay
     - lending.reschedule
     - lending.writeoff
+    - merchant.delete
+    - merchant.update
     - opsmessage.approval.decide
     - opsmessage.compose
     - party.approval.decide
     - party.consent.update
+    - party.mandate.grant
+    - party.mandate.revoke
     - party.merge
     - party.update
     - sanctions.approval.decide

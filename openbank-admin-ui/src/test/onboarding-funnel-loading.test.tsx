@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import OnboardingPage from '@/app/onboarding/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
-const FUNNEL = { REGISTERED: 12, KYC_OPEN: 4, KYC_DOCUMENTS_REQUIRED: 2, KYC_UNDER_REVIEW: 1, SCA_PENDING: 3, ACTIVE: 40, BLOCKED: 1 }
+const FUNNEL = { REGISTERED: 12, KYC_OPEN: 4, KYC_UNDER_REVIEW: 1, SCA_PENDING: 3, ACTIVE: 40, BLOCKED: 1 }
 const RECORDS = { items: [], total: 0, page: 0, size: 20 }
 
 function response(status: number, body: unknown) {

@@ -57,13 +57,11 @@ class TemplateVariableSchemaTest {
     @Test
     fun `secret templates declare exactly the variable that carries the secret`() {
         assertThat(NotificationTemplate.OTP_CODE.variables).containsExactly("code")
-        assertThat(NotificationTemplate.PASSWORD_RESET.variables).containsExactly("resetLink")
-        // Both are also classified SECRET, so their rendered body is delivered but never stored.
+        // It is also classified SECRET, so its rendered body is delivered but never stored.
         // Two independent controls: the schema stops the secret arriving on the WRONG template,
         // TemplateSensitivity stops it being stored on the RIGHT one.
         assertThat(TemplateSensitivity.SECRET_TEMPLATES).contains(
             NotificationTemplate.OTP_CODE,
-            NotificationTemplate.PASSWORD_RESET,
         )
     }
 

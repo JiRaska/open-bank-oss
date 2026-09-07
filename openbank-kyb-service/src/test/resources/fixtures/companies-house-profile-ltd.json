@@ -1,0 +1,15 @@
+{
+  "company_number": "OC123456",
+  "company_name": "EXAMPLE TRADING LIMITED",
+  "type": "ltd",
+  "company_status": "active",
+  "date_of_creation": "2011-06-14",
+  "jurisdiction": "england-wales",
+  "registered_office_address": {
+    "address_line_1": "1 Example Street",
+    "address_line_2": "Floor 4",
+    "locality": "London",
+    "postal_code": "EC1A 1BB",
+    "country": "United Kingdom"
+  }
+}

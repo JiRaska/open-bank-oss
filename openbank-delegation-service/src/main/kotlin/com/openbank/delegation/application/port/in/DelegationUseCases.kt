@@ -8,9 +8,12 @@ import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationLifecycleApproval
+import com.openbank.delegation.domain.model.DelegationLifecycleOperation
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.Exposure
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.governance.ProposalState
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -150,4 +153,29 @@ interface GetDelegationUseCase {
  */
 interface CheckDelegationUseCase {
     suspend fun check(command: CheckDelegationCommand): DelegationCheckResult
+}
+
+data class ProposeDelegationLifecycleCommand(
+    val delegationId: UUID,
+    val operation: DelegationLifecycleOperation,
+    val reason: String,
+    val proposedBy: String,
+    val requestKey: String,
+)
+
+data class DecideDelegationLifecycleCommand(
+    val approvalId: UUID,
+    val approve: Boolean,
+    val decidedBy: String,
+    val reason: String,
+)
+
+interface DelegationLifecycleApprovalUseCase {
+    suspend fun propose(command: ProposeDelegationLifecycleCommand): DelegationLifecycleApproval
+    suspend fun decide(command: DecideDelegationLifecycleCommand): DelegationLifecycleApproval
+}
+
+interface DelegationLifecycleApprovalQuery {
+    suspend fun get(id: UUID): DelegationLifecycleApproval
+    suspend fun list(state: ProposalState?, limit: Int): List<DelegationLifecycleApproval>
 }

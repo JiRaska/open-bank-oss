@@ -92,17 +92,47 @@ locals {
   # re-push fails, so flipping the fleet would break the self-heal that exists to
   # rescue stranded deploys.
   #
-  # openbank-admin-ui is IMMUTABLE in the live account and stays that way — it is
-  # built by its own workflow (build-push-admin-ui.sh) off a version, not a sha,
-  # and tightening is never reverted here to make a plan quieter.
-  ecr_immutable_repositories = toset(["openbank-admin-ui"])
+  # openbank-admin-ui is IMMUTABLE_WITH_EXCLUSION — the durable answer to the #8981
+  # incident, replacing both half-measures that preceded it:
+  #
+  # cosign v2 stores every attestation for an image under ONE tag, `sha256-<digest>.att`,
+  # and attaching a second predicate must append to it — a rewrite. #8847 added SLSA build
+  # provenance alongside the CycloneDX SBOM, so each build attests twice, and on a plain
+  # IMMUTABLE repository the second write was refused (`TAG_INVALID ... tag is immutable`,
+  # every admin-ui deploy broken 2026-09-05/06, #8981). #8982 taught the attest script to
+  # tolerate that one failure (the kyverno SLSA policy is Audit-only, so deploys were
+  # unblocked but provenance silently missing); #8979 then made the attestation land by
+  # dropping immutability entirely — which also dropped the protection nobody else in the
+  # fleet lacks: a `sandbox-<sha>` deploy tag on this repository could be force-overwritten
+  # underneath a pinned GitOps manifest.
+  #
+  # IMMUTABLE_WITH_EXCLUSION keeps BOTH halves: every deploy tag is immutable again, and
+  # only the cosign-internal `sha256-*` tags (`.att` append + `.sig` rewrite) stay mutable,
+  # which is the smallest surface the cosign v2 tag scheme can work with. The tag scheme is
+  # not ours to change: cosign v3 writes OCI 1.1 referrers, which the pinned kyverno 3.2.6
+  # cannot discover, so v2 and its `.att` tag are load-bearing until issue #770.
+  #
+  # The #8982 tolerate branch in cosign-attest.sh stays deliberately: with the exclusion in
+  # place it never fires, and if it ever DOES fire again the pipeline config has regressed
+  # (exclusion lost, or the repo flipped back to IMMUTABLE) — the WARNING is the alarm.
+  ecr_immutable_with_exclusion_repositories = {
+    openbank-admin-ui = ["sha256-*"]
+  }
 }
 
 resource "aws_ecr_repository" "service" {
   for_each = local.service_ecr_repositories
 
   name                 = each.key
-  image_tag_mutability = contains(local.ecr_immutable_repositories, each.key) ? "IMMUTABLE" : "MUTABLE"
+  image_tag_mutability = contains(keys(local.ecr_immutable_with_exclusion_repositories), each.key) ? "IMMUTABLE_WITH_EXCLUSION" : "MUTABLE"
+
+  dynamic "image_tag_mutability_exclusion_filter" {
+    for_each = lookup(local.ecr_immutable_with_exclusion_repositories, each.key, [])
+    content {
+      filter      = image_tag_mutability_exclusion_filter.value
+      filter_type = "WILDCARD"
+    }
+  }
 
   # AES256 (the ECR-managed key) rather than KMS: matches every repository that
   # exists today, and a KMS switch is a destroy-and-recreate, not an in-place edit.

@@ -124,28 +124,48 @@ class AccountIbanLookupPactConsumerTest {
         assertThat(summary.status).isEqualTo("ACTIVE")
     }
 
+    // NO 401-without-identity pact interaction is recorded here, deliberately: the provider-side
+    // replay boots with a TestAuthMechanism that authenticates EVERY replayed request as
+    // pact-verifier/ROLE_OPERATOR, so a recorded 401/403 expectation can never pass provider
+    // replay — it would be a permanently red interaction (measured: account-service build failed
+    // on exactly this interaction, #8552). The negative case is covered where it can actually run:
+    // account-service's own AccountResourceAuthzTest asserts an anonymous GET on the IBAN lookup
+    // answers 401. The consumer-side behaviour (no token, expect rejection) stays a client
+    // property, not a wire contract.
+
+    /**
+     * The negative case (ADR-0279 #3), in the one shape the provider replay CAN serve. The comment
+     * above explains why a 401 cannot be recorded here; what it leaves is a contract with no
+     * negative interaction at all, which is the thing the adversarial-contract gate exists to
+     * prevent — and that gate is currently satisfied by the word "401" appearing in that comment.
+     *
+     * An IBAN the bank does not hold is a DIFFERENT PATH, so the provider distinguishes it from
+     * the 200 interaction and answers 404 under the same TestAuthMechanism that makes 401
+     * unreachable. Enumeration resistance is a real contract: "not found" must not become an empty
+     * account object.
+     */
     @Pact(consumer = CONSUMER, provider = PROVIDER)
-    fun rejectsWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("an account owned by a known party exists")
-        .uponReceiving("GET the account behind the payee IBAN, with no caller identity")
-        .path(EXPECTED_ACCOUNT_PATH)
+    fun unknownIbanPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no account exists for the IBAN")
+        .uponReceiving("GET the account behind an IBAN the bank does not hold")
+        .path(UNKNOWN_ACCOUNT_PATH)
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
-        .status(401)
+        .status(404)
         .toPact()
 
     @Test
-    @PactTestFor(pactMethod = "rejectsWithMissingToken")
-    fun `rejects the account-by-iban lookup with 401 when the caller has no valid identity`(mockServer: MockServer) {
+    @PactTestFor(pactMethod = "unknownIbanPact")
+    fun `an IBAN the bank does not hold is a 404, not an empty account`(mockServer: MockServer) {
         assertClientPathMatchesContract()
 
         given()
             .baseUri(mockServer.getUrl())
             .accept("application/json")
-            .get(clientDerivedAccountPath())
+            .get("/api/v1/accounts/iban/$UNKNOWN_IBAN")
             .then()
-            .statusCode(401)
+            .statusCode(404)
     }
 
     /**
@@ -183,6 +203,18 @@ class AccountIbanLookupPactConsumerTest {
          * client — see the class KDoc.
          */
         const val EXPECTED_ACCOUNT_PATH = "/api/v1/accounts/iban/$PACT_IBAN"
+
+        /**
+         * No state seeds this one — that IS the state. Two constraints shape it, each learned by
+         * tripping over it: the mod-97 check digits are REAL (a made-up IBAN makes account-service
+         * answer 400, not 404, because it never reaches the lookup, and a negative case must fail
+         * for the reason it claims to test), and it stays inside the demo range .gitleaks.toml
+         * safelists (CZ6508000000192000145\\d{3}) — gitleaks cannot tell a fixture from a customer
+         * account, which is why that safelist is a range. Of the eleven suffixes in the range with
+         * valid check digits, ...399 is the seeded account and this is not.
+         */
+        const val UNKNOWN_IBAN = "CZ6508000000192000145981"
+        const val UNKNOWN_ACCOUNT_PATH = "/api/v1/accounts/iban/$UNKNOWN_IBAN"
 
         fun clientDerivedAccountPath(): String {
             val base = AccountServiceClient::class.java.getAnnotation(Path::class.java).value

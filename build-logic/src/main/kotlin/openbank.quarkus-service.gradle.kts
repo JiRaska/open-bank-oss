@@ -208,6 +208,18 @@ tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setSchemaVersion("1.5")
 }
 
+// Reproducible archives (issue #8355, OpenSSF Silver build_reproducible): jar entries carry
+// mtimes by default, so two builds of the SAME commit differ byte-for-byte and no supply-chain
+// comparison (rebuild-and-compare, attestation verification) can ever say "identical". Gradle
+// ships the normalization as opt-in; set it fleet-wide here so every service jar is byte-
+// reproducible for identical inputs. Remaining drift sources (Quarkus-augmented runner jars,
+// generated build-metadata) are exactly what the rebuild-and-compare job exists to surface —
+// it reports WHICH zip entries differ instead of a bare checksum mismatch.
+tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}
+
 // Kover instruments every class that a Quarkus test JVM loads unless told otherwise.
 // Testcontainers is third-party test infrastructure, never part of this module's coverage
 // denominator; attempting to transform its shaded classes has produced invalid frames and a

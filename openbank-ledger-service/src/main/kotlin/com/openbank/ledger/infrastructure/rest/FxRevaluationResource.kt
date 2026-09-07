@@ -36,7 +36,18 @@ class FxRevaluationResource(private val useCase: FxRevaluationUseCase) {
     @Authorize(action = "ledger.trigger", resource = "")
     @Operation(summary = "Run the daily FX revaluation for a business day (default: today, Europe/Prague)")
     suspend fun revalue(@QueryParam("date") date: String?): Response {
-        val day = date?.takeIf { it.isNotBlank() }?.let { LocalDate.parse(it) }
+        // Blank means "omitted"; a malformed value is a client error — IllegalArgumentException maps
+        // to 400 via libs-runtime CommonExceptionMappers, where a raw DateTimeParseException would
+        // surface as a 500 (#8832).
+        val day = date?.takeIf { it.isNotBlank() }?.let {
+            try {
+                LocalDate.parse(it)
+            } catch (ex: java.time.format.DateTimeParseException) {
+                throw IllegalArgumentException(
+                    "query parameter 'date' must be an ISO-8601 date (yyyy-MM-dd), got '$it'",
+                )
+            }
+        }
             ?: LocalDate.now(ZoneId.of("Europe/Prague"))
         return Response.ok(useCase.revalue(RevalueFxCommand(day))).build()
     }

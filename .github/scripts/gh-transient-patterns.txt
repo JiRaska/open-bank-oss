@@ -82,6 +82,7 @@ broken pipe
 timed ?out
 timeout
 (^|[^a-z0-9])eof([^a-z0-9]|$)
+dependency review is not supported
 
 [cases]
 TRANSIENT	gh: API rate limit exceeded for installation ID 12345. (HTTP 403)
@@ -105,6 +106,7 @@ TRANSIENT	gh: Too Many Requests (HTTP 429)
 TRANSIENT	error connecting to api.github.com
 TRANSIENT	Get "https://api.github.com/rate_limit": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
 TRANSIENT	gh: Gateway Timeout (HTTP 504)
+TRANSIENT	gh: Dependency review is not supported on this repository. (HTTP 422)
 FINAL	gh: Resource not accessible by integration (HTTP 403)
 FINAL	gh: Must have admin rights to Repository. (HTTP 403)
 FINAL	gh: Not Found (HTTP 404)

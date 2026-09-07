@@ -18,6 +18,7 @@ import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.delegation.domain.model.SpendWindow
 import com.openbank.delegation.infrastructure.persistence.entity.DelegationGrantEntity
 import com.openbank.delegation.infrastructure.persistence.entity.SpendReservationEntity
+import com.openbank.libs.domain.event.DomainEvent
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheRepository
@@ -71,6 +72,7 @@ class SpendReservationRepositoryImpl(
     override suspend fun reserve(
         candidate: SpendReservation,
         window: SpendWindow,
+        auditEvent: (SpendReservation) -> DomainEvent,
         decide: (DelegationGrant, CountedSpend) -> SpendDecision,
     ): ReserveOutcome = Panache.withTransaction {
         Panache.getSession().flatMap { session ->
@@ -91,7 +93,7 @@ class SpendReservationRepositoryImpl(
                     ) {
                         Uni.createFrom().item(ReserveOutcome.StateStreamUnavailable)
                     } else {
-                        countAndInsert(session, lockedGrant.toDomain(), candidate, window, decide)
+                        countAndInsert(session, lockedGrant.toDomain(), candidate, window, auditEvent, decide)
                     }
                 }
             }
@@ -116,6 +118,7 @@ class SpendReservationRepositoryImpl(
         reservationId: UUID,
         target: SpendReservationState,
         settledAt: OffsetDateTime,
+        auditEvent: (SpendReservation) -> DomainEvent,
     ): SpendReservation? = Panache.withTransaction {
         Panache.getSession().flatMap { session ->
             lockGrant(session, grantId).flatMap { lockedGrant ->
@@ -138,7 +141,12 @@ class SpendReservationRepositoryImpl(
                                 ).flatMap { count ->
                                     if (count > 0L) {
                                         val settled = before.toDomain().copy(state = target, settledAt = settledAt)
-                                        appendStateEvent(settled, lockedGrant.toDomain()).replaceWith(settled)
+                                        // The CAS won, so the settlement happened: audit it inside
+                                        // this transaction. The losing side changed nothing and
+                                        // reaches only the null branch below (ADR-0249 D4, #5728).
+                                        appendStateEvent(settled, lockedGrant.toDomain())
+                                            .flatMap { appendAuditEvent(auditEvent(settled)) }
+                                            .replaceWith(settled)
                                     } else {
                                         Uni.createFrom().nullItem()
                                     }
@@ -164,6 +172,7 @@ class SpendReservationRepositoryImpl(
         lockedGrant: DelegationGrant,
         candidate: SpendReservation,
         window: SpendWindow,
+        auditEvent: (SpendReservation) -> DomainEvent,
         decide: (DelegationGrant, CountedSpend) -> SpendDecision,
     ): Uni<ReserveOutcome> = countedSpend(session, candidate, window).flatMap { counted ->
         when (val decision = decide(lockedGrant, counted)) {
@@ -171,9 +180,28 @@ class SpendReservationRepositoryImpl(
 
             SpendDecision.Allowed -> session.persist(SpendReservationEntity.fromDomain(candidate))
                 .flatMap { appendStateEvent(candidate, lockedGrant) }
+                // Same transaction as the insert: a committed reservation always has its audit
+                // event, a rolled-back one never does (ADR-0249 D4, #5728).
+                .flatMap { appendAuditEvent(auditEvent(candidate)) }
                 .replaceWith(ReserveOutcome.Created(candidate) as ReserveOutcome)
         }
     }
+
+    /**
+     * The ADR-0249 D4 audit event (SpendReserved/SpendConfirmed/SpendReleased), written for EVERY
+     * operation type — unlike [appendStateEvent], which is the domestic-payment state stream and
+     * is gated. Audit is not a stream a consumer can opt out of: the trail either exists or the
+     * ADR's compliance claim is false.
+     */
+    private fun appendAuditEvent(event: DomainEvent): Uni<Void> = outboxRepository.persistInTransaction(
+        OutboxMessage(
+            eventId = event.eventId,
+            aggregateId = event.aggregateId,
+            eventType = event.eventType,
+            payload = objectMapper.writeValueAsString(event),
+            createdAt = event.occurredAt,
+        ),
+    )
 
     private fun appendStateEvent(reservation: SpendReservation, grant: DelegationGrant): Uni<Void> {
         if (reservation.operationType != SpendReservationOperationType.DOMESTIC_PAYMENT) {

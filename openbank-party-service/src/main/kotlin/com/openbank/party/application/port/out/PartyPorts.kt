@@ -9,6 +9,7 @@ import com.openbank.party.domain.model.PartyChangeMateriality
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
 import com.openbank.party.domain.model.PartyEvent
+import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.Payee
 import java.time.Instant
@@ -203,4 +204,20 @@ interface PartyAccountGuardPort {
  */
 interface PartyChangeMetricsPort {
     fun changeClassified(materiality: PartyChangeMateriality)
+}
+
+/** Outbound persistence port for representation mandates (ADR-0284 D3). */
+interface PartyMandateRepository {
+    /** Row + outbox event in ONE transaction; an ACTIVE (principal, agent, role) triple is upserted, never duplicated. */
+    suspend fun save(mandate: PartyMandate, event: PartyEvent): PartyMandate
+
+    suspend fun update(mandate: PartyMandate, event: PartyEvent): PartyMandate
+
+    suspend fun findById(id: UUID): PartyMandate?
+
+    suspend fun findByPrincipal(principalPartyId: UUID): List<PartyMandate>
+
+    suspend fun findByAgent(agentPartyId: UUID): List<PartyMandate>
+
+    suspend fun findActive(principalPartyId: UUID, agentPartyId: UUID, role: String): PartyMandate?
 }

@@ -321,3 +321,10 @@ also be deleted (nothing else in balance-service depends on it).
   added `assertj` test dep for the guard. Additive DDL only — no new flow/surface/boundary.
   Risk class = **availability** (missing sequence breaks all balance writes), mitigated by
   `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+- **2026-09-05** — Input validation hardened on the reconciliation trigger
+  (`POST /api/v1/balances/reconciliation`): a blank `asOf` now means "omitted" and a malformed one
+  is rejected as 400 (`IllegalArgumentException` via libs-runtime `CommonExceptionMappers`) where a
+  raw `DateTimeParseException` previously surfaced as 500. Found by the api-fuzz lane (#8832).
+  No new surface, role, or data flow — same endpoint, same authz, tighter input handling.
+  Risk class = **availability/information disclosure** (500s on an operator control endpoint).
+  Rollback: revert the guard; no stored data or schema changes.

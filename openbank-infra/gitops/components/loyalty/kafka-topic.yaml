@@ -1,0 +1,26 @@
+# Domain event topic owned by loyalty-service (ADR-0282). Declared explicitly because the broker
+# does not auto-create topics: a producer channel with no destination fails at send time, and a
+# consumer subscribed to a topic that does not exist receives nothing while reporting healthy —
+# which is why the absence cannot show up as a red signal at runtime (#2598).
+#
+# Lives in the `messaging` namespace where the Strimzi topic operator watches, even though it is
+# logically owned by the loyalty domain — cross-namespace by design, mirroring the centralized
+# broker. Single partition and RF 1 to match the single-broker sandbox; production should raise
+# partitions for parallelism and RF to 3.
+#
+# The partition key is the party id, so raising the partition count keeps one customer's ledger
+# events ordered relative to each other. No consumer exists yet, which is declared in
+# `rules.yaml: event_consumer_liveness.allowlist` rather than left to be noticed.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.loyalty.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

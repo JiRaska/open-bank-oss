@@ -15,7 +15,7 @@ PostgreSQL 16, databáze **`openbank_kyc`** (reaktivní PG klient + JDBC pro Fly
 | `id` | BIGSERIAL PK | interní id; sekvence `kyc_cases_seq` (V4) |
 | `case_id` | UUID UNIQUE | business id (agregát `KycCase.id`) |
 | `party_id` | UUID | prověřovaná party — viz PII níže |
-| `status` | VARCHAR(30) | OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW / APPROVED / REJECTED / EXPIRED |
+| `status` | VARCHAR(30) | OPEN / DOCUMENTS_REQUIRED / UNDER_REVIEW / APPROVED / REJECTED / EXPIRED — DOCUMENTS_REQUIRED nedosažitelný (#8535) |
 | `risk_level` | VARCHAR(20) | LOW / MEDIUM / HIGH / VERY_HIGH |
 | `assigned_to` | VARCHAR(100) | přiřazení revizora |
 | `checks_json` | TEXT | serializovaný seznam `KycCheck` |

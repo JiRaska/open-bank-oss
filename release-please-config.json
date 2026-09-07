@@ -163,6 +163,12 @@
         "openbank-consent-service/src/test"
       ]
     },
+    "openbank-kyb-service": {
+      "component": "kyb-service",
+      "exclude-paths": [
+        "openbank-kyb-service/src/test"
+      ]
+    },
     "openbank-delegation-service": {
       "component": "delegation-service",
       "exclude-paths": [
@@ -410,6 +416,12 @@
       "component": "engagement-service",
       "exclude-paths": [
         "openbank-engagement-service/src/test"
+      ]
+    },
+    "openbank-loyalty-service": {
+      "component": "loyalty-service",
+      "exclude-paths": [
+        "openbank-loyalty-service/src/test"
       ]
     }
   }

@@ -41,6 +41,10 @@ jobs:
       - name: Recompute the snapshot
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # dependabot-alerts API has no GITHUB_TOKEN permission class (flat 403); when the
+          # elevated PAT secret exists it unlocks the MTTR collector, otherwise that one
+          # collector reports unavailable-with-reason and the rest still publish.
+          MTTR_GH_TOKEN: ${{ secrets.METADATA_REFRESH_PAT }}
         run: python3 .github/scripts/security-kpis.py
 
       - name: Open a refresh PR when the snapshot moved

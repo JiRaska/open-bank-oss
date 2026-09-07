@@ -72,14 +72,22 @@ class KycResource {
         @QueryParam("status") statusParam: String?,
     ): Response {
         val status = statusParam?.uppercase()?.let { runCatching { KycCaseStatus.valueOf(it) }.getOrNull() }
-        val items = kycService.listCases(page, size.coerceIn(1, 100), status)
+        // Echo the EFFECTIVE window, never the raw query values. `size` was already clamped for the
+        // query and echoed un-clamped, so `?size=500` answered `"size": 500` over at most 100 rows —
+        // a caller computing ceil(total / size) off that pages past the end and renders a short list
+        // as complete; the spec declares the parameter as 1..100, so the clamped value is the only
+        // one it can honestly publish. `?page=-1` answered 200 while echoing `"page": -1`, handing a
+        // pager a negative offset to page forward from. Pinned by KycCasePageApiContractTest.
+        val effectivePage = page.coerceAtLeast(0)
+        val effectiveSize = size.coerceIn(MIN_PAGE_SIZE, MAX_PAGE_SIZE)
+        val items = kycService.listCases(effectivePage, effectiveSize, status)
         val total = kycService.countCases(status)
         return Response.ok(
             mapOf(
                 "items" to items,
                 "total" to total,
-                "page" to page,
-                "size" to size,
+                "page" to effectivePage,
+                "size" to effectiveSize,
                 "statusFilter" to status?.name,
             ),
         ).build()
@@ -222,6 +230,12 @@ class KycResource {
         val rejector = secCtx.userPrincipal?.name
             ?: return Response.status(Response.Status.UNAUTHORIZED).build()
         return Response.ok(kycService.rejectCase(caseId, rejector, req.reason)).build()
+    }
+
+    private companion object {
+        /** Page-size bounds published by `openapi.yaml` for the `size` query parameter. */
+        const val MIN_PAGE_SIZE = 1
+        const val MAX_PAGE_SIZE = 100
     }
 }
 
