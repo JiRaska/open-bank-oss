@@ -20,3 +20,86 @@ scenarios:
     safety_boundary: Every request is invalid by construction (no valid token, no accepted body, nothing created), so the lane is safe against any stack — the rejection path IS the subject. A 200 or 5xx on any probe is a finding, not a pass.
     blocker: Requires an auth-ENABLED disposable boot before it can join the scheduled perf gate — the current perf-gate harness boots with quarkus.oidc.enabled=false, which would make every identity probe a false 200. Wiring = a second boot profile in perf-gate.yml (auth on, disposable identity) reusing the same throwaway postgres; tracked in #8590 #4. Validated locally against a stub in both directions (exit 0 on a well-behaved target, exit 99 with breaches counted on a 200-answering one).
     assertions: no-token and malformed-token probes must 401/403; NUL-byte query param must 400/401/403 (NulByteGuards boundary, never 500); enumeration sweep must 401/403/404 (200 = IDOR) with a latency trend for the timing side-channel; oversized header must 400/401/431.
+
+  # Per-module money-path read baselines (<module>/src/test/k6/*.js).
+  # Every one is GET-only, so unlike money-path-write-benchmark they need no isolated
+  # target or synthetic-data teardown — only a least-privilege read identity.
+  - id: account-read-baseline
+    definition: openbank-account-service/src/test/k6/account-read-baseline.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Read-only by construction — every request is a GET against openbank-account-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
+    target_schedule: "0 5 * * *"
+    blocker: Needs a booted openbank-account-service target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    assertions: Exercises account list (partyId, cursor), account detail, account balance, trigram IBAN search. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: balance-read-baseline
+    definition: openbank-balance-service/src/test/k6/balance-read-baseline.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Read-only by construction — every request is a GET against openbank-balance-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
+    target_schedule: "0 5 * * *"
+    blocker: Needs a booted openbank-balance-service target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    assertions: Exercises all balances for an account, single-currency balance, latest reconciliation run. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: ledger-read-baseline
+    definition: openbank-ledger-service/src/test/k6/ledger-read-baseline.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Read-only by construction — every request is a GET against openbank-ledger-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
+    target_schedule: "0 5 * * *"
+    blocker: Needs a booted openbank-ledger-service target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    assertions: Exercises journal list, trial balance, current accounting day. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: transaction-read-baseline
+    definition: openbank-transaction-service/src/test/k6/transaction-read-baseline.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Read-only by construction — every request is a GET against openbank-transaction-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
+    target_schedule: "0 5 * * *"
+    blocker: Needs a booted openbank-transaction-service target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    assertions: Exercises transaction list (accountId, cursor) and transaction search. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: sepa-payment-read-baseline
+    definition: openbank-sepa-payment/src/test/k6/sepa-payment-read-baseline.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Read-only by construction — every request is a GET against openbank-sepa-payment; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
+    target_schedule: "0 5 * * *"
+    blocker: Needs a booted openbank-sepa-payment target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    assertions: Exercises SEPA payment list (offset-paginated) and the pending-approval queue. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: sepa-instant-read-baseline
+    definition: openbank-sepa-instant/src/test/k6/sepa-instant-read-baseline.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Read-only by construction — every request is a GET against openbank-sepa-instant; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
+    target_schedule: "0 5 * * *"
+    blocker: Needs a booted openbank-sepa-instant target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    assertions: Exercises SCT Inst payment list and per-debtor list. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: domestic-payment-read-baseline
+    definition: openbank-domestic-payment/src/test/k6/domestic-payment-read-baseline.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Read-only by construction — every request is a GET against openbank-domestic-payment; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
+    target_schedule: "0 5 * * *"
+    blocker: Needs a booted openbank-domestic-payment target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    assertions: Exercises domestic payment list (offset-paginated) and the pending-approval queue. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: fx-read-baseline
+    definition: openbank-fx-service/src/test/k6/fx-read-baseline.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Read-only by construction — every request is a GET against openbank-fx-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
+    target_schedule: "0 5 * * *"
+    blocker: Needs a booted openbank-fx-service target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    assertions: Exercises all rates, single currency pair, pair history. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: sca-read-baseline
+    definition: openbank-sca-service/src/test/k6/sca-read-baseline.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Read-only by construction — every request is a GET against openbank-sca-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
+    target_schedule: "0 5 * * *"
+    blocker: Needs a booted openbank-sca-service target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    assertions: Exercises enrolled device credentials for a party and challenge detail. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
+
+  - id: consent-read-baseline
+    definition: openbank-consent-service/src/test/k6/consent-read-baseline.js
+    execution_mode: planned-read-only-sandbox
+    safety_boundary: Read-only by construction — every request is a GET against openbank-consent-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
+    target_schedule: "0 5 * * *"
+    blocker: Needs a booted openbank-consent-service target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    assertions: Exercises consents by party, consents by grantee, active-consent resolve. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
