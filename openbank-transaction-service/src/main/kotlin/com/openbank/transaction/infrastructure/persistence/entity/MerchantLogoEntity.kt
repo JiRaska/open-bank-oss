@@ -55,5 +55,5 @@ class MerchantLogoEntity : PanacheEntityBase {
     var uploadedBy: String? = null
 
     @Column(name = "updated_at", nullable = false)
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 }

@@ -1,3 +1,8 @@
+-- Rollback: DROP TABLE merchant_logo; ALTER TABLE merchant_catalog DROP COLUMN logo_etag;
+-- Both are additive, so the previous release runs unchanged against this schema and the rollback
+-- loses only the ingested bitmaps — every one of which can be re-uploaded, since the catalogue row
+-- and its provenance (merchant_catalog.logo_url) survive.
+--
 -- Self-hosted merchant logos for transaction enrichment.
 --
 -- WHY THE BYTES LIVE HERE AND NOT AS A LINK TO SOMEBODY ELSE'S CDN.
