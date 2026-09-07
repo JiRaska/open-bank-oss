@@ -226,12 +226,15 @@ private fun TransactionEntity.toDomain(): com.openbank.transaction.domain.model.
         version = version,
         initiatedByPartyId = actorId
             ?.takeIf { actorType == "CUSTOMER" }
-            ?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+            ?.let { strictPersisted(it, "actorId", id, UUID::fromString) },
         scaChallengeId = scaChallengeId,
         scaExemption = scaExemption,
-        rail = rail?.let { runCatching { com.openbank.libs.domain.payment.PaymentRail.valueOf(it) }.getOrNull() },
-        instructionType = instructionType
-            ?.let { runCatching { com.openbank.libs.domain.payment.InstructionType.valueOf(it) }.getOrNull() },
+        rail = rail?.let {
+            strictPersisted(it, "rail", id, com.openbank.libs.domain.payment.PaymentRail::valueOf)
+        },
+        instructionType = instructionType?.let {
+            strictPersisted(it, "instructionType", id, com.openbank.libs.domain.payment.InstructionType::valueOf)
+        },
         merchantCategory = merchantCategory,
         originatingPaymentId = originatingPaymentId,
     )
@@ -270,3 +273,14 @@ private fun com.openbank.transaction.domain.model.Transaction.toEntity() = Trans
     merchantCategory = this@toEntity.merchantCategory
     originatingPaymentId = this@toEntity.originatingPaymentId
 }
+
+/**
+ * Read-back strictness (issue #8699): a persisted value that does not parse is data corruption,
+ * not a caller mistake — it must be LOUD, never silently nulled the way
+ * `runCatching { … }.getOrNull()` did. The enum name / UUID string is not PII, so it belongs in
+ * the message.
+ */
+private fun <T> strictPersisted(value: String, field: String, id: Any?, parse: (String) -> T): T =
+    runCatching { parse(value) }.getOrElse {
+        throw IllegalStateException("unrecognised $field '$value' persisted on transaction $id")
+    }
