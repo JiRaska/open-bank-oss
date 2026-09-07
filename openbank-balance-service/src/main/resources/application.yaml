@@ -144,7 +144,10 @@ mp:
         topic: openbank.ledger.journal.posted
         group.id: openbank-balance-service
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
+        # auto.offset.reset deliberately unset (#8370): the inert dotted YAML key was a config lie --
+        # SmallRye quotes dotted leaf keys, so the connector always ran its default (latest) and the
+        # declared `earliest` never applied. Deleting it makes the file match the running reality; to
+        # rebuild projections, flip it via the msg-override ConfigMap in an announced replay window.
       # ADR-0267 §3: create a zero balance row when an account is created (event-driven init,
       # so onboarding accounts opened from a Kafka consumer get a balance without the
       # synchronous authenticated REST call). initializeBalance is idempotent.
@@ -164,7 +167,10 @@ mp:
         topic: openbank.accounts.account.created
         group.id: openbank-balance-service
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
+        # auto.offset.reset deliberately unset (#8370): the inert dotted YAML key was a config lie --
+        # SmallRye quotes dotted leaf keys, so the connector always ran its default (latest) and the
+        # declared `earliest` never applied. Deleting it makes the file match the running reality; to
+        # rebuild projections, flip it via the msg-override ConfigMap in an announced replay window.
 
 "%dev":
   quarkus:

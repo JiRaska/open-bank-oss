@@ -278,6 +278,54 @@ for svc in $SERVICES; do
     continue
   fi
 
+  # Cross-service REST stubs, derived exactly like Redis above: a `url: ${VAR:http://localhost:PORT}`
+  # default names another openbank service that is NOT running in this job, and without a stub its
+  # absence masquerades as a server-error finding — measured on run 34017868446, ledger's
+  # POST /api/v1/ledger/fx-revaluation answered 500 solely because fx-service (8119) was down;
+  # same class as the Redis/OPA/Temporal traps in the header. The stub answers 404 to everything:
+  # the "absent" answer these cross-service readers are written to expect (the fx adapter maps 404
+  # to null and skips the leg), so schemathesis measures the HTTP surface, not the harness.
+  # Never stub ports this job already provisions (postgres, redis) or shares with other infra
+  # defaults (keycloak 8080, otel 4317, OPA 8181), and never the service's own port.
+  STUB_PORTS="$(grep -oE 'url: \$\{[A-Za-z0-9_]+:http://localhost:[0-9]+' "$APP_YAML" \
+    | grep -oE '[0-9]+$' | sort -un \
+    | grep -vxE "${PORT}|5432|6379|8080|4317|8181" || true)"
+  STUB_PID=""
+  if [ -n "${STUB_PORTS}" ]; then
+    echo "==> [${svc}] stubbing absent cross-service port(s) with 404-for-everything: $(echo ${STUB_PORTS})"
+    python3 - ${STUB_PORTS} >/dev/null 2>&1 <<'STUBEOF' &
+import http.server
+import sys
+import threading
+import time
+
+
+class Absent(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def _absent(self):
+        body = b'{"status":404,"title":"absent (fuzz cross-service stub)"}'
+        self.send_response(404)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _absent
+
+    def log_message(self, *args):
+        pass
+
+
+for port in sys.argv[1:]:
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", int(port)), Absent)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+while True:
+    time.sleep(3600)
+STUBEOF
+    STUB_PID=$!
+  fi
+
   # Quarkus dev mode: %dev disables OIDC; Flyway migrates at start. Kafka producers are lazy — no
   # broker needed for the HTTP surface (the transactional outbox keeps brokers out of the request
   # path). Temporal worker OFF for the fuzz run (see header for why and how it's derived).
@@ -315,6 +363,7 @@ for svc in $SERVICES; do
     OVERALL=1
     docker rm -f fuzz-pg >/dev/null 2>&1 || true
     docker rm -f fuzz-redis >/dev/null 2>&1 || true
+    [ -n "${STUB_PID}" ] && kill "${STUB_PID}" 2>/dev/null || true
     continue
   fi
 
@@ -448,6 +497,7 @@ OPSJSON
   # Containers only — run_pass already stopped each pass's JVM.
   docker rm -f fuzz-pg >/dev/null 2>&1 || true
   docker rm -f fuzz-redis >/dev/null 2>&1 || true
+  [ -n "${STUB_PID}" ] && kill "${STUB_PID}" 2>/dev/null || true
 done
 
 exit "$OVERALL"

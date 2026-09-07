@@ -4034,7 +4034,14 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md"]
     run: |
-      python3 .github/scripts/check-security-checklist.py --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
+      # PR_BODY is github.event.pull_request.body — frozen at the last synchronize event.
+      # Editing the body to add the checklist (the documented remediation) only reached this
+      # gate after an otherwise-pointless empty commit pushed to re-emit the event (measured
+      # 2026-09-06 on #8934: body edited 11:45Z, run at 11:46Z still read the old body).
+      # The live body is the truth the gate means to check; the frozen one is the fallback
+      # when the API is unreachable. One contents-read API call per shard run.
+      LIVE_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .body 2>/dev/null || true)"
+      python3 .github/scripts/check-security-checklist.py --body "${LIVE_BODY:-${PR_BODY}}" --base "${PR_DIFF_BASE}" --enforce
 
   # ADR-0030 D2, third half (#6037, PR #6048): the coverage gate proves a threat model EXISTS
   # and the diff gate proves it is TOUCHED when a trust boundary moves. Neither reads a single
@@ -4190,6 +4197,26 @@ gates:
     selftest_inputs: [".github/scripts/check-authz-pdp-parity.py"]
     run: |
       python3 .github/scripts/check-authz-pdp-parity.py . --enforce
+
+  # The converse of the sidecar-parity gate above (issue #8470): that one stops an enforcing
+  # service running without a PDP; this one stops a money-path service running WITHOUT enforcing.
+  # 16 of 23 money-path services have a fail-open code default, so a manifest that omits (or
+  # loses) AUTHZ_ENFORCE silently downgrades authorization with a healthy pod. The three
+  # deliberately-advisory services are allowlisted only while their manifest repeats the
+  # justification and the flip date — a bare `value: "false"` flags.
+  - id: authz-enforce-money-path
+    rationale: "A money-path service whose deployed manifest leaves authz in advisory mode accepts requests its policy would deny; the default must be enforce, with every advisory exception argued in the manifest itself (#8470)."
+    review_after: "2026-10-05"
+    budget_seconds: 30   # 1.1s locally over 23 services + gitops walk
+    min_subjects: 23   # the money_path_services list the gate asserts over; an empty list would pass vacuously
+    name: "money-path services enforce authz in the deployed manifest (enforced, #8470)"
+    group: security
+    mode: enforced
+    selftest: python3 .github/scripts/check-authz-enforce-money-path.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-authz-enforce-money-path.py"]
+    run: |
+      python3 .github/scripts/check-authz-enforce-money-path.py . --enforce
 
   # @RolesAllowed ⇒ realm parity (issue #2404). The JWT-role half of the check above: a role
   # name that exists in no realm never matches, so the endpoint answers 403 to every caller,

@@ -1,0 +1,63 @@
+{
+  "country": "GB",
+  "version": 1,
+  "effectiveFrom": "2026-09-01",
+  "displayName": { "cs": "Spojené království", "en": "United Kingdom" },
+  "schemes": ["GB_CRN", "LEI", "EU_VAT"],
+  "registry": {
+    "adapter": "companies-house",
+    "name": "Companies House (UK)",
+    "publicSource": "https://find-and-update.company-information.service.gov.uk",
+    "free": true,
+    "listsRepresentatives": true,
+    "listsRepresentationRule": false
+  },
+  "uboRegister": {
+    "name": "Register of People with Significant Control (PSC)",
+    "publicApi": true,
+    "fallback": "SELF_DECLARATION",
+    "threshold": 0.25,
+    "legalBasis": "Companies Act 2006 Part 21A; Money Laundering Regulations 2017"
+  },
+  "representationRuleParser": null,
+  "legalForms": {
+    "ltd": "LIMITED_COMPANY",
+    "private-limited-guarant-nsc": "LIMITED_COMPANY",
+    "private-limited-guarant-nsc-limited-exemption": "LIMITED_COMPANY",
+    "private-limited-shares-section-30-exemption": "LIMITED_COMPANY",
+    "private-unlimited": "LIMITED_COMPANY",
+    "private-unlimited-nsc": "LIMITED_COMPANY",
+    "plc": "JOINT_STOCK",
+    "old-public-company": "JOINT_STOCK",
+    "llp": "PARTNERSHIP",
+    "limited-partnership": "PARTNERSHIP",
+    "scottish-partnership": "PARTNERSHIP",
+    "registered-society-non-jurisdictional": "COOPERATIVE",
+    "industrial-and-provident-society": "COOPERATIVE",
+    "northern-ireland-other": "OTHER",
+    "royal-charter": "OTHER",
+    "charitable-incorporated-organisation": "FOUNDATION",
+    "scottish-charitable-incorporated-organisation": "FOUNDATION",
+    "uk-establishment": "BRANCH",
+    "oversea-company": "BRANCH",
+    "unregistered-company": "OTHER",
+    "other": "OTHER"
+  },
+  "legalFormLabels": {
+    "ltd": { "en": "Private limited company", "cs": "Společnost s ručením omezeným (Ltd)" },
+    "plc": { "en": "Public limited company", "cs": "Akciová společnost (plc)" },
+    "llp": { "en": "Limited liability partnership", "cs": "Partnerství s ručením omezeným (LLP)" },
+    "limited-partnership": { "en": "Limited partnership", "cs": "Komanditní partnerství" },
+    "uk-establishment": { "en": "UK establishment of an overseas company", "cs": "Pobočka zahraniční společnosti" },
+    "oversea-company": { "en": "Overseas company", "cs": "Zahraniční společnost" }
+  },
+  "requiredEvidence": {
+    "SOLE_TRADER": ["SELF_EMPLOYMENT_DECLARATION"],
+    "LIMITED_COMPANY": ["REGISTER_EXTRACT", "PSC_EXTRACT"],
+    "JOINT_STOCK": ["REGISTER_EXTRACT", "PSC_EXTRACT", "SHAREHOLDER_STRUCTURE"],
+    "PARTNERSHIP": ["REGISTER_EXTRACT", "PSC_EXTRACT", "PARTNERSHIP_AGREEMENT"],
+    "COOPERATIVE": ["REGISTER_EXTRACT", "PSC_EXTRACT"],
+    "OTHER": ["REGISTER_EXTRACT", "UBO_DECLARATION", "POWER_OF_ATTORNEY"]
+  },
+  "amlLegalBasis": "Money Laundering, Terrorist Financing and Transfer of Funds (Information on the Payer) Regulations 2017, reg. 27–28 (customer due diligence, beneficial ownership)"
+}

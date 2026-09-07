@@ -122,6 +122,9 @@ spec:
               kubernetes.io/metadata.name: interest
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: kyb
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: kyc
         - namespaceSelector:
             matchLabels:

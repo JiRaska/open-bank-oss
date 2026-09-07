@@ -50,6 +50,24 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET the account behind an IBAN the bank does not hold",
+      "providerStates": [
+        {
+          "name": "no account exists for the IBAN"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/accounts/iban/CZ6508000000192000145981"
+      },
+      "response": {
+        "status": 404
+      }
     }
   ],
   "metadata": {

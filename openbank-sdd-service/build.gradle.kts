@@ -50,6 +50,12 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+
+    // Consumer-driven contract against transaction-service's POST /api/v1/transactions (#8345).
+    // pact.rootDir, `pact.writer.overwrite` and the pactbroker.* forwarding are centralised in the
+    // `openbank.quarkus-service` convention plugin (ADR-0250 Phase 2, #4414), so this dependency is
+    // the whole of the per-module wiring.
+    testImplementation(libs.pact.consumer)
 }
 
 kover {
