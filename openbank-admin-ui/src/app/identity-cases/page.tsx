@@ -4,7 +4,8 @@
 
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type RefObject } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
@@ -12,7 +13,6 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { Fingerprint, RefreshCw, ShieldAlert, Users, Check, Search } from 'lucide-react'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 
 const SVC = 'pid-service'
 
@@ -67,9 +67,11 @@ function shortId(id: string): string {
 function DecisionForm({
   c,
   onDecided,
+  closeFocusFallbackRef,
 }: {
   c: VerificationCase
   onDecided: () => void
+  closeFocusFallbackRef: RefObject<HTMLElement | null>
 }) {
   const { t } = useLanguage()
   const [verdict, setVerdict] = useState<Verdict>(c.firstVerdict ?? 'DISTINCT_NEW')
@@ -79,6 +81,7 @@ function DecisionForm({
   const [error, setError] = useState<string | null>(null)
   const [decisionIntent, setDecisionIntent] = useState<'vote' | 'reopen' | null>(null)
   const decisionTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const decisionCloseFocusOverrideRef = useRef<HTMLElement | null>(null)
 
   const isSecond = c.status === 'AWAITING_SECOND_APPROVAL'
 
@@ -155,14 +158,15 @@ function DecisionForm({
 
   const openDecisionReview = (intent: 'vote' | 'reopen', trigger: HTMLButtonElement) => {
     decisionTriggerRef.current = trigger
+    decisionCloseFocusOverrideRef.current = null
     setError(null)
     setDecisionIntent(intent)
   }
 
   const closeDecisionReview = () => {
     if (busy) return
+    decisionCloseFocusOverrideRef.current = null
     setDecisionIntent(null)
-    requestAnimationFrame(() => decisionTriggerRef.current?.focus())
   }
 
   return (
@@ -252,17 +256,23 @@ function DecisionForm({
         notes={notes}
         busy={busy}
         error={error}
+        closeFocusOverrideRef={decisionCloseFocusOverrideRef}
+        closeFocusFallbackRef={closeFocusFallbackRef}
+        triggerRef={decisionTriggerRef}
         onCancel={closeDecisionReview}
         onConfirm={async () => {
           const succeeded = decisionIntent === 'vote' ? await submit() : await reopen()
-          if (succeeded) setDecisionIntent(null)
+          if (succeeded) {
+            decisionCloseFocusOverrideRef.current = closeFocusFallbackRef.current
+            setDecisionIntent(null)
+          }
         }}
       />}
     </div>
   )
 }
 
-function IdentityDecisionReviewDialog({ c, intent, verdict, linkPartyId, notes, busy, error, onCancel, onConfirm }: {
+function IdentityDecisionReviewDialog({ c, intent, verdict, linkPartyId, notes, busy, error, closeFocusOverrideRef, closeFocusFallbackRef, triggerRef, onCancel, onConfirm }: {
   c: VerificationCase
   intent: 'vote' | 'reopen'
   verdict: Verdict
@@ -270,40 +280,50 @@ function IdentityDecisionReviewDialog({ c, intent, verdict, linkPartyId, notes, 
   notes: string
   busy: boolean
   error: string | null
+  closeFocusOverrideRef: RefObject<HTMLElement | null>
+  closeFocusFallbackRef: RefObject<HTMLElement | null>
+  triggerRef: RefObject<HTMLElement | null>
   onCancel: () => void
   onConfirm: () => Promise<void>
 }) {
   const { t } = useLanguage()
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const titleId = `identity-${c.id}-decision-title`
-  const impactId = `identity-${c.id}-decision-impact`
+  const backRef = useRef<HTMLButtonElement>(null)
   const isReopen = intent === 'reopen'
 
-  return <div
-    ref={dialogRef}
-    role="alertdialog"
-    aria-modal="true"
-    aria-labelledby={titleId}
-    aria-describedby={impactId}
-    aria-busy={busy}
-    onKeyDown={event => {
-      if (event.key === 'Escape' && !busy) onCancel()
-      trapDialogFocus(event, dialogRef.current)
-    }}
-    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)', display: 'grid', placeItems: 'center', padding: 20 }}
-  >
-    <div className="card" style={{ width: 'min(620px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
+    <Dialog.Portal>
+      <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)' }} />
+      <Dialog.Content
+        role="alertdialog"
+        aria-busy={busy}
+        onOpenAutoFocus={event => { event.preventDefault(); backRef.current?.focus() }}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          const override = closeFocusOverrideRef.current
+          const trigger = triggerRef.current
+          const target = override?.isConnected
+            ? override
+            : trigger?.isConnected
+              ? trigger
+              : closeFocusFallbackRef.current
+          target?.focus()
+        }}
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+        onInteractOutside={event => event.preventDefault()}
+        style={{ position: 'fixed', inset: 0, zIndex: 1201, display: 'grid', placeItems: 'center', padding: 20 }}
+      >
+        <div className="card" style={{ width: 'min(620px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <Fingerprint size={20} aria-hidden="true" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
         <div>
-          <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{isReopen ? t('Znovu otevřít případ identity', 'Reopen identity case') : isSecondVote(c) ? t('Potvrdit druhý hlas', 'Confirm second vote') : t('Odeslat první hlas', 'Submit first vote')}</h2>
-          <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+          <Dialog.Title style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{isReopen ? t('Znovu otevřít případ identity', 'Reopen identity case') : isSecondVote(c) ? t('Potvrdit druhý hlas', 'Confirm second vote') : t('Odeslat první hlas', 'Submit first vote')}</Dialog.Title>
+          <Dialog.Description style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
             {isReopen
               ? t('Neshodný případ vrátíte do otevřeného posouzení. Předchozí hlasy zůstanou v auditní stopě; nový verdikt bude znovu vyžadovat čtyři oči.', 'The disputed case returns to open adjudication. Prior votes remain in the audit trail; a new verdict again requires four-eyes.')
               : isSecondVote(c)
                 ? t('Stejný verdikt od jiného schvalovatele případ dokončí. Odlišný verdikt služba odmítne a případ lze znovu otevřít.', 'The same verdict from a different approver completes the case. The service rejects a disagreement and the case can be reopened.')
                 : t('Tímto uložíte první hlas. Konečné rozhodnutí vznikne až po stejném hlasu jiného oprávněného schvalovatele.', 'This records the first vote. A final decision exists only after the same vote from another authorized approver.')}
-          </p>
+          </Dialog.Description>
         </div>
       </div>
       <dl style={{ margin: '14px 0 0', padding: 12, borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface-2)', display: 'grid', gap: 8, fontSize: 12.5 }}>
@@ -315,11 +335,13 @@ function IdentityDecisionReviewDialog({ c, intent, verdict, linkPartyId, notes, 
       </dl>
       {error && <p role="alert" style={{ margin: '12px 0 0', padding: '10px 12px', borderRadius: 8, color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', fontSize: 12 }}>{error}</p>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
-        <button type="button" autoFocus className="btn btn-secondary" disabled={busy} onClick={onCancel}>{t('Zpět ke kontrole', 'Back to review')}</button>
+        <button ref={backRef} type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>{t('Zpět ke kontrole', 'Back to review')}</button>
         <button type="button" className="btn btn-primary" disabled={busy} aria-busy={busy} onClick={() => void onConfirm()}>{busy ? t('Ukládám…', 'Recording…') : isReopen ? t('Potvrdit znovuotevření', 'Confirm reopen') : t('Potvrdit hlas', 'Confirm vote')}</button>
       </div>
-    </div>
-  </div>
+        </div>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
 }
 
 function isSecondVote(c: VerificationCase): boolean {
@@ -337,6 +359,7 @@ export default function IdentityCasesPage() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'AWAITING_SECOND_APPROVAL'>('ALL')
   const [triggerFilter, setTriggerFilter] = useState<'ALL' | Trigger>('ALL')
   const loadGeneration = useRef(0)
+  const workspaceRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current
@@ -402,7 +425,7 @@ export default function IdentityCasesPage() {
     : `${count} ${count === 1 ? 'candidate' : 'candidates'}`
 
   return <AuthGuard permission="identity-cases:view">
-    <div>
+    <div ref={workspaceRef} role="region" aria-label={t('Pracovní plocha případů identity', 'Identity cases workspace')} tabIndex={-1}>
       <PageHeader
         icon={<Fingerprint size={20} aria-hidden="true" />}
         title={t('Ověření identity — čtyři oči', 'Identity Verification — Four-Eyes')}
@@ -532,7 +555,7 @@ export default function IdentityCasesPage() {
               </div>
 
               <Can permission="identity-cases:decide" fallback={<div style={{ marginTop: '12px', color: 'var(--text-secondary)', fontSize: '12px' }}>{t('Rozhodnutí může provést pouze oprávněný schvalovatel.', 'Only an authorized approver can decide this case.')}</div>}>
-                <DecisionForm c={c} onDecided={load} />
+                <DecisionForm c={c} onDecided={load} closeFocusFallbackRef={workspaceRef} />
               </Can>
             </div>
           ))}
