@@ -14,6 +14,7 @@ import com.openbank.delegation.application.port.out.ExternalDisclosureRepository
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.ExternalDisclosure
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.ForbiddenException
@@ -67,7 +68,7 @@ class ExternalDisclosureService(
 
         val linkSecret = randomSecret()
         val otp = "%06d".format(Locale.ROOT, random.nextInt(OTP_BOUND))
-        val disclosureId = UUID.randomUUID()
+        val disclosureId = Ids.newId()
         val disclosure = ExternalDisclosure(
             id = disclosureId,
             delegationId = grant.id,
