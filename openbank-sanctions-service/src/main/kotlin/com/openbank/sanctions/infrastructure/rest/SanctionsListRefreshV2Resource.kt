@@ -8,6 +8,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.sanctions.application.usecase.SanctionsListService
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
@@ -30,5 +31,13 @@ class SanctionsListRefreshV2Resource(private val service: SanctionsListService) 
     @Path("/refresh-all")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "sanctions.trigger", resource = "")
-    suspend fun refreshAll(): Response = Response.accepted(mapOf("requested" to service.requestRefreshAll())).build()
+    suspend fun refreshAll(@HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        // #8351: money-path POSTs require the key. Nullable + requireNotNull in the BODY — a
+        // non-nullable JAX-RS param NPEs at injection (a 500), and a suspend fun emits no
+        // intrinsic at all (the null flows in silently). libs-runtime maps this to 400.
+        // No dedup store is needed: flagging is `UPDATE ... SET refresh_requested_at = now`,
+        // idempotent by construction — a replayed key converges to the same state.
+        requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        return Response.accepted(mapOf("requested" to service.requestRefreshAll())).build()
+    }
 }

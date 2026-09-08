@@ -252,6 +252,15 @@ paths:
         on subsequent scheduler ticks, one list at a time, and per-list progress is observable
         through each list's lastUpdatedAt on GET /api/v1/sanctions/lists.
       operationId: refreshAllSanctionsListsV2
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: >-
+            Required on money-path POSTs (#8351). Flagging is idempotent by construction, so a
+            retried key converges to the same state.
+          schema:
+            type: string
       responses:
         '202':
           description: Refresh of all enabled lists queued on the scheduler.
