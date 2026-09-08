@@ -9,6 +9,7 @@ import com.openbank.delegation.application.port.out.ExternalDisclosureArtifact
 import com.openbank.delegation.infrastructure.rest.ExternalDisclosureResource
 import com.openbank.delegation.infrastructure.rest.dto.ExternalDisclosureLinkRequest
 import com.openbank.delegation.infrastructure.rest.dto.ExternalDisclosureOtpRequest
+import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -17,6 +18,8 @@ import jakarta.ws.rs.NotFoundException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.OffsetDateTime
+import java.util.Base64
 import java.util.UUID
 
 class ExternalDisclosureResourceTest {
@@ -63,5 +66,23 @@ class ExternalDisclosureResourceTest {
         assertThat(response.status).isEqualTo(200)
         assertThat(response.entity).isEqualTo(sealed)
         assertThat(response.mediaType.toString()).isEqualTo("application/pdf")
+    }
+
+    @Test
+    fun `content replay returns cached sealed bytes without another release`(): Unit = runBlocking {
+        val sealed = byteArrayOf(37, 80, 68, 70)
+        coEvery { idempotency.get(any()) } returns IdempotencyRecord(
+            key = "cached",
+            statusCode = 200,
+            responseBody = Base64.getEncoder().encodeToString(sealed),
+            createdAt = OffsetDateTime.now(),
+        )
+
+        val response = resource.content(id, ExternalDisclosureLinkRequest("link-secret", "request-1"))
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(response.entity).isEqualTo(sealed)
+        assertThat(response.getHeaderString("X-Idempotency-Replayed")).isEqualTo("true")
+        coVerify(exactly = 0) { disclosures.release(any(), any()) }
     }
 }
