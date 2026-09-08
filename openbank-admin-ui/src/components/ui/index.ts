@@ -18,6 +18,7 @@
 export { PageHeader } from './PageHeader'
 export { StatCard } from './StatCard'
 export { StatusBadge } from './StatusBadge'
+export { Tabs, type TabItem } from './Tabs'
 export {
   BADGE_CLASS,
   DOT_CLASS,
