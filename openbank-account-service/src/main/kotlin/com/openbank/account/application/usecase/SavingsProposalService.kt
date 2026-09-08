@@ -65,6 +65,24 @@ class SavingsProposalService(
             )
         }
         val now = OffsetDateTime.now(clock)
+        // Idempotent replay (ADR-0295, #8351): a retried propose with the same natural key —
+        // (account, delegate, amount, currency, note) — while the original is still PENDING and
+        // unexpired replays the ORIGINAL proposal (and its approval id) instead of stacking a
+        // duplicate the owner could approve twice. The check runs AFTER the authorization guard on
+        // purpose: a caller with no grant must still get 403, never a replayed proposal. A
+        // genuinely intended second identical proposal is still possible — once the first leaves
+        // PENDING (decided or expired), the key no longer matches and a new row persists. No DB
+        // backstop (see the ADR): a lost true-concurrency race stacks two PENDING proposals, but
+        // each still needs its own owner SCA decision, so nothing executes silently.
+        proposalRepository.findByAccountAndStatus(command.accountId, WithdrawalProposalStatus.PENDING)
+            .firstOrNull { existing ->
+                existing.delegatePartyId == command.delegatePartyId &&
+                    existing.amountMinor == command.amountMinor &&
+                    existing.currency == command.currency &&
+                    existing.note == command.note &&
+                    existing.approvalId != null &&
+                    !existing.isExpiredAt(now)
+            }?.let { return ProposalCreated(it, it.approvalId!!) }
         val proposal = WithdrawalProposal(
             id = Ids.newId(),
             accountId = command.accountId,
