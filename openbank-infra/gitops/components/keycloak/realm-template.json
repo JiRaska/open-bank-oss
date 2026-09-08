@@ -4,6 +4,9 @@
   "displayName": "OpenBank",
   "displayNameHtml": "OpenBank Framework",
   "loginTheme": "openbank",
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self' https://admin.open-bank.tech; frame-ancestors 'self' https://admin.open-bank.tech; object-src 'none';"
+  },
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
