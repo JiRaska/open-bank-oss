@@ -71,9 +71,20 @@ spec:
           ports:
             - name: http
               containerPort: 8143
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8088
           env:
+            # The sealed external-disclosure export is exposed on a parallel private-CA TLS
+            # listener. Existing in-cluster HTTP callers remain untouched during the fleet
+            # transport migration.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/document-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/document-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
             - name: QUARKUS_MANAGEMENT_HOST
               value: "0.0.0.0"
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
@@ -246,6 +257,9 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: document-tls
+              mountPath: /mnt/document-tls
+              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: kafka-keystore
@@ -340,6 +354,10 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: document-tls
+          secret:
+            secretName: document-service-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -402,6 +420,9 @@ spec:
     - name: http
       port: 8143
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
     - name: management
       port: 8088
       targetPort: management
