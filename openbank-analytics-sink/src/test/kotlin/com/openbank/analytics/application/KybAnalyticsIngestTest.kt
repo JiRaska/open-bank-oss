@@ -36,7 +36,13 @@ class KybAnalyticsIngestTest {
     fun `a kyb record attributes to the kyb service without an override`() {
         assertThat(TopicAttribution.domainOf("openbank.kyb.events")).isEqualTo("kyb")
         assertThat(TopicAttribution.aggregateType("openbank.kyb.events")).isEqualTo("KYB")
-        assertThat(TopicAttribution.sourceService("openbank.kyb.events")).isEqualTo("openbank-kyb-service")
+        // NOT "openbank-kyb-service": TopicProducers.sourceService (delegated to here) strips the
+        // module prefix like every other row, per its own documented rule and per
+        // check-source-service-convention.py -- and KybEvent.SOURCE_SERVICE, what kyb-service
+        // actually stamps in the body, is "kyb-service" too. This test's earlier value was wrong,
+        // and TopicProducersTest's "no row carries the openbank- prefix" was the invariant that
+        // caught it (issue found 2026-09-07).
+        assertThat(TopicAttribution.sourceService("openbank.kyb.events")).isEqualTo("kyb-service")
     }
 
     @Test
