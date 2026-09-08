@@ -19,6 +19,9 @@ is now stated in the row rather than implied away.
 - Enforcement integrity of the whole platform: every product service's delegation
   projection trusts this service's event stream.
 - SCA ceremony integrity (grant + acceptance).
+- `ExternalDisclosure` evidence — a short-lived, bounded release of one sealed document to an
+  external recipient. It holds only recipient label, document/delegation ids, state timestamps and
+  domain-separated SHA-256 hashes of the link secret and OTP; it never stores either raw secret.
 
 ## Lifecycle approval execution
 
@@ -49,6 +52,11 @@ and require a human operator plus OPA; client applications do not receive a bank
 6. delegation-service → compacted Kafka (`openbank.delegation.spend-reservation-state`) — complete
    domestic reservation snapshots. The stream is default-off for new domestic reservations until
    a compatible binding consumer is deployed; rail-neutral callers remain unchanged.
+7. **Pending, fail-closed:** an external recipient → future disclosure endpoint. The D7 storage
+   boundary exists, but no public route, ingress rule or document-service export client is present
+   yet. Therefore no internet request can reach a document through this code. It may be opened
+   only with a sealed-export contract, recipient OTP delivery, rate limiting and the controls in
+   T21–T25 in the same deploy.
 
 ## Threats and mitigations
 
@@ -74,6 +82,11 @@ and require a human operator plus OPA; client applications do not receive a bank
 | T18 | A reservation is created without recoverable state, a stale grant is used after revoke, or a delayed publish makes a rebuild reopen headroom | The grant is re-read under `PESSIMISTIC_WRITE` in the same transaction as ceiling evaluation, reservation insertion and outbox insertion. New DOMESTIC_PAYMENT admission is default-off unless the state writer is enabled; exact retries remain replayable, while a key reused for another immutable tuple is 409. The compacted stream publishes no raw idempotency key and uses bounded `reservationId:v1`/`:v2` keys, so an ambiguous delayed v1 completion cannot replace terminal v2. Consumers must fold the greatest payload revision. Rollback must first stop creators and prove zero RESERVED domestic rows plus zero unsent state rows; turning the writer off alone is unsafe. |
 | T19 | A service account, maker, or replay decides a bank-side lifecycle proposal | Proposal/decision actions are human-only and exclude `service-account-*`; the domain rejects maker = checker. The proposal request key is unique in Postgres and terminal rejection is serialized by a row lock, preserving the original actor, reason and timestamps. The admin BFF exposes GET only. Residual: direct staff lifecycle endpoints are not routed through the inbox, so mutation activation remains prohibited until that authority is narrowed. |
 | T20 | Approval races a newer lifecycle transition and overwrites state or emits stale evidence | This first slice is fail-closed: `approve=true` returns 409 even if the dark mutation setting is enabled, so no grant row or outbox event is touched. Execution may land only on top of lifecycle V8-V10 through their expected-revision/CAS transition and revision-stamped event, proven by a real-Postgres race test. Emergency suspend remains only the existing fraud/AML safety path. |
+| T21 | A leaked external-link token becomes an unbounded, permanent document download | Each disclosure has a per-record SHA-256 link-secret hash, hard expiry, revocable state and a positive maximum view count. The row and its immutable view timestamps are locked and transitioned in one database transaction, so replicas cannot both consume the last allowed view. Raw secrets never persist. Residual: no external route is enabled yet; when one is added it needs request-rate limiting and opaque, uniform unavailable responses to avoid turning hashes or ids into an oracle. |
+| T22 | A link alone releases a confidential document | The model requires a separate OTP hash before any view may be consumed. OTP verification, revocation, expiry and view-limit denial occur before any document bytes are requested. Residual: OTP generation, out-of-band delivery, attempt throttling and lockout are not implemented; the public route must not be enabled until they are part of the same release. |
+| T23 | A concurrent view and revocation allow a post-revocation release | Issuance, OTP verification, view consumption and revocation are expressed as transitions on one disclosure aggregate. The repository takes `SELECT … FOR UPDATE` on the exact disclosure before executing a transition, records at most one append-only view timestamp and updates the count in that transaction. A request that locks after revocation sees unavailable and cannot issue bytes. Residual: the future document exporter must be called only after a committed successful claim; it must emit a derived sealed artifact, not proxy document-service's internal `/content` endpoint. |
+| T24 | A customer shares a document they are not entitled to disclose, or shares a broad live API | The intended issuer path will re-read the linked grant, require `ACTIVE`, require the authenticated grantor and require `DOCUMENT` + `OBJECT_READ`; D7 is an immutable single-object emission rather than a new product-service authorization path. Residual: this command/API is not yet implemented, so no production control should claim these checks have run. |
+| T25 | Disclosure evidence exposes unnecessary recipient or device data | The storage schema deliberately retains one human recipient label and the event time required for grantor transparency, but not recipient account identity, IP address, user-agent, raw link or raw OTP. View rows are append-only so a later counter update cannot erase earlier access evidence. Residual: retention, data-subject access and audit-envelope routing must be specified with the sealed-export integration before external exposure. |
 
 ## Outbound authentication (added 2026-08-06)
 
@@ -104,8 +117,10 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Out of scope (tracked as follow-ups)
 
-- External disclosure links (D7b): OTP, expiry, watermark, view counting — threat model
-  update required when that lands (leaked-link = leaked-document analysis).
+- D7b sealed-document exporter: redaction/watermark rendering, institutional PAdES seal, OTP
+  delivery/attempt throttling, recipient-facing rate limit and audit-envelope routing. The
+  disclosure persistence boundary is implemented, but **no external ingress is enabled** until
+  this export path and its controls ship together.
 - EUDI verifiable-credential delivery channel (follow-up ADR on ADR-0094).
 - `AccountAuthorization` migration dual-run window (two grant sources for accounts).
 - ~~**Cumulative daily/monthly ceilings are REFUSED at the API, not silently accepted.**~~
