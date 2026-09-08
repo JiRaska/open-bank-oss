@@ -459,6 +459,30 @@ jobs:
             echo "::warning::merge-base against origin/${BASE_REF} did not resolve after deepening; falling back to the event base.sha, which is stale for a PR that has absorbed main since opening"
             base="${EVENT_BASE_SHA}"
           fi
+          # Every gate runs `git diff "${PR_DIFF_BASE}...HEAD"`, and the THREE-DOT form needs the
+          # merge-base of the two — not merely the base object. In a shallow checkout those are
+          # different properties: measured 2026-09-07 against this remote, with the base fetched by
+          # sha and `git cat-file -e` answering yes, `git diff A...HEAD` still exits 128 while
+          # `A..HEAD` works, because the shared history is cut. Deepening is what fixes it: after
+          # `--deepen`, merge-base resolves and the three-dot diff succeeds.
+          #
+          # So the invariant to guarantee here is `git merge-base <base> HEAD` resolving, and the
+          # bug this replaces is that the fallback above sets a base without re-checking it. Three
+          # gates then died with `exit status 128` and the runner rendered each as that gate's
+          # FINDING rather than an error — credential-deadline-ratchet, adversarial-contract-test
+          # and security-checklist-money-path all reported plausible, actionable defects on
+          # #9077/#9086/#9098 having evaluated nothing (issue #9100).
+          if ! git merge-base "${base}" HEAD >/dev/null 2>&1; then
+            echo "merge-base ${base}..HEAD does not resolve yet — unshallowing so gates can diff."
+            git fetch -q --unshallow origin 2>/dev/null || git fetch -q --deepen=2000 origin 2>/dev/null || true
+          fi
+          if ! git merge-base "${base}" HEAD >/dev/null 2>&1; then
+            echo "::error::No merge-base between ${base} and HEAD in this checkout, so every gate that"
+            echo "::error::diffs against PR_DIFF_BASE would exit 128 and be reported as a FINDING."
+            echo "::error::This is a checkout/fetch failure, not a policy violation. Re-run the job, or"
+            echo "::error::merge origin/${BASE_REF} into the branch so the base is in its own history."
+            exit 1
+          fi
           echo "PR diff base: ${base} (event base.sha: ${EVENT_BASE_SHA})"
           echo "PR_DIFF_BASE=${base}" >> "$GITHUB_ENV"
 
