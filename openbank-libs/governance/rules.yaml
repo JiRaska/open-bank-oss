@@ -1145,6 +1145,18 @@ four_eyes:
   actions:
     - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                          # core also enforces maker != checker for standalone installs.
+    - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
+                                         # playbook version. Confirmed no M2M caller — the only allow
+                                         # rule for this action (rest.rego commstyle-publish) requires
+                                         # HUMAN + (ROLE_COMMS_APPROVER or ROLE_ADMIN) and explicitly
+                                         # excludes any service-account-* principal id; D6 deliberately
+                                         # never grants commstyle.publish to a service account
+                                         # (shared_m2m_matrix_write_grants stays empty for it). Also
+                                         # enforced at the application layer, independently: the
+                                         # draft's own maker can never be the caller here
+                                         # (CommunicationStyleService.publish), D3's literal "the
+                                         # maker can never approve their own version" — two separate
+                                         # checks, not one restated twice.
     - opsmessage.compose                # ADR-0176 D5: operator-initiated customer messaging.
                                          # Confirmed no M2M caller — the only allow rule for this
                                          # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and
@@ -1513,7 +1525,10 @@ dependencies:
         - openbank-flaky-test-hunter
         - openbank-ap2-service              # ADR-0193 -- same agent plane as mcp-service
         - openbank-mcp-service              # ADR-0181 -- explicitly inside the ADR-0136 boundary
-      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service') as a dependency"
+        - openbank-communication-service    # ADR-0285 D5 -- explicit, not a reasoning/acting agent
+                                             # itself, but the ADR's own binding decision places it
+                                             # "under ADR-0197 like the rest of that plane"
+      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service') as a dependency"
       license: "AGPL-3.0-only"
       adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]
