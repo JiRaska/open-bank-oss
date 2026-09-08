@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: lending-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-lending-service:sandbox-1cff9564
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-lending-service:sandbox-4219b4e1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
