@@ -160,21 +160,28 @@ class PolicyDecisionExceptionMapper : ExceptionMapper<PolicyDecisionException> {
 /**
  * A 401 as the standard error envelope, instead of Quarkus's bare `Not Authorized` string.
  *
- * Every other error these services emit is an [ApiError] document; an authentication failure is
+ * Every other error these services emit is an [ApiError] document; an authentication failure was
  * plain text, because [io.quarkus.security.UnauthorizedException] is not a
  * [WebApplicationException] and never reaches [WebApplicationExceptionMapper] below — Quarkus
- * answers first. A client that parses the error body therefore breaks on the one response it is
+ * answers first. A client that parses the error body therefore broke on the one response it is
  * most likely to meet. Measured through transaction-service's provider replay of the three
- * "missing or expired token" pacts, where pact-jvm reports
+ * "missing or expired token" pacts, where pact-jvm reported
  * `Invalid JSON (1:2), found unexpected character 'N'` (issue #8993).
  *
- * NOT `@Provider`, deliberately, and for the same reason as the two persistence mappers above:
- * `quarkus-security` is `compileOnly` here, so auto-registering this class would load
- * `io.quarkus.security.UnauthorizedException` in every service that consumes libs-runtime and
- * crash the ones without the extension at ArC init — the #6240 failure. A service that has
- * security opts in with a thin `@Provider` subclass.
+ * `@Provider` here, unlike the two persistence mappers above, and the difference is the one the
+ * `provider-type-classpath` gate encodes: a shared `@Provider` is registered in every consumer and
+ * ArC loads its type closure at init, so the type argument must come from a package every consumer
+ * certainly has. `org.hibernate.exception.*` is not — that is #6240. `io.quarkus.security` is:
+ * every module here that builds a Quarkus service declares `quarkus-oidc`. The gate's `SAFE_ROOTS`
+ * carries that reasoning and the self-test pins it, including that a neighbouring `io.quarkus`
+ * package still fires.
+ *
+ * The message is a CONSTANT and never `exception.message`: Quarkus puts the failed mechanism or
+ * the missing permission there, and echoing it would tell an unauthenticated caller which door it
+ * just tried.
  */
-open class UnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
+@Provider
+class UnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
     override fun toResponse(exception: UnauthorizedException): Response =
         Response.status(ErrorCode.UNAUTHORIZED.httpStatus)
             .entity(
