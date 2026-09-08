@@ -21,6 +21,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.sql.SQLException
 import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -72,6 +73,21 @@ class InterestService(
     private val log = Logger.getLogger(InterestService::class.java)
 
     override fun accrue(request: AccrualRequest): Uni<InterestAccrual> =
+        // Idempotent replay (ADR-0291, #8351): (account, date, product, currency) IS one day's
+        // accrual — the V12 UNIQUE constraint backs it — so a retried accrue replays the ORIGINAL
+        // row with no second write. The check runs BEFORE the rate resolution on purpose: a replay
+        // arriving after the config was deactivated must still return the original accrual, not
+        // fail closed with RateConfigNotFoundException. The constraint is the race backstop.
+        accrualRepo.findByNaturalKey(request.accountId, request.accrualDate, request.productId, request.currency)
+            .flatMap { existing ->
+                if (existing != null) {
+                    Uni.createFrom().item(existing)
+                } else {
+                    accrueNew(request)
+                }
+            }
+
+    private fun accrueNew(request: AccrualRequest): Uni<InterestAccrual> =
         configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
             .flatMap { config ->
                 if (config == null) {
@@ -97,7 +113,23 @@ class InterestService(
                         currency = request.currency,
                         createdAt = OffsetDateTime.now(clock),
                     )
-                    accrualRepo.save(accrual)
+                    accrualRepo.save(accrual).onFailure().recoverWithUni { e ->
+                        // Lost the race against a concurrent first attempt with the same natural
+                        // key: the V12 constraint rejected our insert, so the winner's row IS the
+                        // correct replay answer. Anything else propagates unchanged.
+                        if (!e.isAccrualConflict()) {
+                            Uni.createFrom().failure(e)
+                        } else {
+                            accrualRepo.findByNaturalKey(
+                                request.accountId,
+                                request.accrualDate,
+                                request.productId,
+                                request.currency,
+                            ).flatMap { winner ->
+                                if (winner != null) Uni.createFrom().item(winner) else Uni.createFrom().failure(e)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -560,7 +592,47 @@ class InterestService(
     override fun getCapitalizations(accountId: UUID): Uni<List<InterestCapitalization>> =
         capitalizationRepo.findByAccountId(accountId)
 
-    override fun createConfig(config: InterestRateConfig): Uni<InterestRateConfig> = configRepo.save(config)
+    /**
+     * Creates a rate config idempotently (ADR-0291, #8351): the natural key of one config is
+     * (productId, accountId-or-null, currency, effectiveFrom), so a retried POST replays the
+     * ORIGINAL row instead of minting a second active config that would silently shadow the first
+     * in `findEffectiveRate`. A legitimate rate change carries a DIFFERENT effectiveFrom and is
+     * therefore not a twin — it passes the check-first and persists normally. The check runs
+     * BEFORE the insert so a replay never depends on the row still being resolvable as the
+     * effective rate (a later config may have superseded it).
+     *
+     * Race backstops differ by scope: an account override is protected by `ux_rate_active_account`
+     * (V11) — a concurrent first attempt loses on the constraint and recovers the winner below. A
+     * product-wide default has NO DB backstop (adding one now would require deduplicating existing
+     * production rows first — see the ADR), so two truly concurrent first inserts of a product
+     * default can still both land; the check-first read collapses every REPLAY, which is the case
+     * the endpoint actually sees (admin clients retry; they do not race themselves).
+     */
+    override fun createConfig(config: InterestRateConfig): Uni<InterestRateConfig> =
+        configRepo.findActiveTwin(config.productId, config.accountId, config.currency, config.effectiveFrom)
+            .flatMap { existing ->
+                if (existing != null) {
+                    Uni.createFrom().item(existing)
+                } else {
+                    configRepo.save(config).onFailure().recoverWithUni { e ->
+                        // Only an account override can lose a unique race (ux_rate_active_account);
+                        // the winner is whatever active override that account now has.
+                        if (config.accountId == null || !e.isRateOverrideConflict()) {
+                            Uni.createFrom().failure(e)
+                        } else {
+                            configRepo.findEffectiveRate(
+                                config.accountId,
+                                config.productId,
+                                LocalDate.now(clock),
+                                config.currency,
+                            ).flatMap { winner ->
+                                if (winner != null) Uni.createFrom().item(winner) else Uni.createFrom().failure(e)
+                            }
+                        }
+                    }
+                }
+            }
+
     override fun getConfig(id: UUID): Uni<InterestRateConfig?> = configRepo.findById(id)
     override fun listConfigs(productId: String?): Uni<List<InterestRateConfig>> =
         if (productId != null) configRepo.findByProductId(productId) else configRepo.findAll()
@@ -576,7 +648,30 @@ class InterestService(
         }
     }
 
+    /**
+     * True when the failure chain carries the unique violation of the V12 accrual natural-key
+     * constraint. Hibernate Reactive adapts the Vert.x PgException into a plain [SQLException]
+     * whose sqlState may or may not survive the adaptation, so the check accepts either the 23505
+     * sqlState or the "(23505)" marker the server embeds in the message text — and ALWAYS requires
+     * the constraint name, so an unrelated unique violation is never swallowed as a dedup replay
+     * (same shape as NotificationConsumer.isDeduplicationConflict, #8953).
+     */
+    private fun Throwable.isAccrualConflict(): Boolean = isUniqueViolationOf(ACCRUAL_NATURAL_KEY_CONSTRAINT)
+
+    /** Same chain walk for `ux_rate_active_account` (V11) — see [isAccrualConflict]. */
+    private fun Throwable.isRateOverrideConflict(): Boolean = isUniqueViolationOf(RATE_ACTIVE_ACCOUNT_INDEX)
+
+    private fun Throwable.isUniqueViolationOf(constraintName: String): Boolean = generateSequence(this) { it.cause }
+        .filterIsInstance<SQLException>()
+        .any {
+            it.message?.contains(constraintName) == true &&
+                (it.sqlState == SQLSTATE_UNIQUE_VIOLATION || it.message.orEmpty().contains("(23505)"))
+        }
+
     private companion object {
         const val ACCRUAL_PAGE_SIZE = 100
+        const val SQLSTATE_UNIQUE_VIOLATION = "23505"
+        const val ACCRUAL_NATURAL_KEY_CONSTRAINT = "interest_accruals_account_date_product_currency_key"
+        const val RATE_ACTIVE_ACCOUNT_INDEX = "ux_rate_active_account"
     }
 }

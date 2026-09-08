@@ -53,21 +53,32 @@ class CompliancePackActivationService(
         require(maker.isNotBlank()) { "Proposer identity is required" }
         val compiled = CompliancePackCompiler.compile(CompliancePackJson.fromJson(packJson))
         val now = OffsetDateTime.now(clock)
-        val entity = CompliancePackActivationEntity().apply {
-            id = com.openbank.libs.domain.identifiers.Ids.newId()
-            state = ProposalState.PROPOSED
-            jurisdiction = compiled.pack.jurisdiction
-            productType = compiled.pack.productType.name
-            packVersion = compiled.pack.version
-            effectiveFrom = compiled.pack.effectiveFrom
-            payload = packJson
-            contentHash = compiled.contentHash
-            proposedBy = maker
-            proposedAt = now
-            createdAt = now
-            updatedAt = now
+        // Idempotent replay (ADR-0297, #8351): a pack proposal is content-addressed — the
+        // contentHash IS its natural key. A retried propose with the identical payload while the
+        // original is still PROPOSED replays the ORIGINAL proposal instead of stacking a
+        // duplicate awaiting a checker. A re-proposal of the same content AFTER a decision is a
+        // legitimate new proposal (e.g. re-submitting a rejected pack) and persists.
+        return activations.findByState(ProposalState.PROPOSED).flatMap { proposed ->
+            proposed.firstOrNull { it.contentHash == compiled.contentHash }
+                ?.let { twin -> Uni.createFrom().item(twin.toView()) }
+                ?: run {
+                    val entity = CompliancePackActivationEntity().apply {
+                        id = com.openbank.libs.domain.identifiers.Ids.newId()
+                        state = ProposalState.PROPOSED
+                        jurisdiction = compiled.pack.jurisdiction
+                        productType = compiled.pack.productType.name
+                        packVersion = compiled.pack.version
+                        effectiveFrom = compiled.pack.effectiveFrom
+                        payload = packJson
+                        contentHash = compiled.contentHash
+                        proposedBy = maker
+                        proposedAt = now
+                        createdAt = now
+                        updatedAt = now
+                    }
+                    activations.save(entity).map { it.toView() }
+                }
         }
-        return activations.save(entity).map { it.toView() }
     }
 
     fun decide(proposalId: UUID, approve: Boolean, checker: String, reason: String?): Uni<PackActivationView> =

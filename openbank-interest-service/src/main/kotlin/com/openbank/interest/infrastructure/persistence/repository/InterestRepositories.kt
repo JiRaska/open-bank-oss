@@ -85,6 +85,31 @@ class InterestRateConfigRepositoryImpl @Inject constructor(
             .setMaxResults(1).singleResultOrNull
     }.map { it?.let(mapper::toDomain) }
 
+    @WithSession
+    override fun findActiveTwin(
+        productId: String,
+        accountId: UUID?,
+        currency: String,
+        effectiveFrom: LocalDate,
+    ): Uni<InterestRateConfig?> = sf.withSession { s ->
+        // Two explicitly typed branches: a nullable :a in ":a IS NULL" leaves Postgres unable to
+        // infer the parameter type (42P08) when the driver binds it without a type hint.
+        if (accountId == null) {
+            s.createQuery(
+                "FROM InterestRateConfigEntity WHERE active = true AND productId = :p AND currency = :c " +
+                    "AND effectiveFrom = :f AND accountId IS NULL",
+                InterestRateConfigEntity::class.java,
+            ).setParameter("p", productId).setParameter("c", currency).setParameter("f", effectiveFrom)
+        } else {
+            s.createQuery(
+                "FROM InterestRateConfigEntity WHERE active = true AND productId = :p AND currency = :c " +
+                    "AND effectiveFrom = :f AND accountId = :a",
+                InterestRateConfigEntity::class.java,
+            ).setParameter("p", productId).setParameter("c", currency).setParameter("f", effectiveFrom)
+                .setParameter("a", accountId)
+        }.setMaxResults(1).singleResultOrNull
+    }.map { it?.let(mapper::toDomain) }
+
     @WithTransaction
     override fun update(config: InterestRateConfig): Uni<InterestRateConfig> = sf.withTransaction { s ->
         s.find(InterestRateConfigEntity::class.java, config.id).flatMap { e ->
@@ -133,7 +158,24 @@ class InterestAccrualRepositoryImpl @Inject constructor(
         return q.map { it.map(mapper::toDomain) }
     }
 
-    @WithSession override fun findPendingCapitalization(
+    @WithSession
+    override fun findByNaturalKey(
+        accountId: UUID,
+        accrualDate: LocalDate,
+        productId: String,
+        currency: String,
+    ): Uni<InterestAccrual?> = sf.withSession { s ->
+        s.createQuery(
+            "FROM InterestAccrualEntity WHERE accountId = :a AND accrualDate = :d " +
+                "AND productId = :p AND currency = :c",
+            InterestAccrualEntity::class.java,
+        ).setParameter("a", accountId).setParameter("d", accrualDate)
+            .setParameter("p", productId).setParameter("c", currency)
+            .setMaxResults(1).singleResultOrNull
+    }.map { it?.let(mapper::toDomain) }
+
+    @WithSession
+    override fun findPendingCapitalization(
         accountId: UUID,
         productId: String,
         toDate: LocalDate,
