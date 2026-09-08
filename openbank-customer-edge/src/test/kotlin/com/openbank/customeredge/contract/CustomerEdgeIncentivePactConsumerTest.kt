@@ -144,6 +144,49 @@ class CustomerEdgeIncentivePactConsumerTest {
         .body(customerReservationBody("RELEASED"))
         .toPact()
 
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-incentive-service")
+    fun reserveWithoutIdentity(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a published offer contains the pact promo code for the pact product")
+        .uponReceiving("POST an attributed customer reservation WITHOUT trusted party identity")
+        .path("/api/v1/customer-incentives/offers/$OFFER_ID/reservations")
+        .method("POST")
+        .headers(
+            mapOf(
+                "Content-Type" to "application/json",
+                "Idempotency-Key" to IDEMPOTENCY_KEY,
+            ),
+        )
+        .body(
+            newJsonBody { body ->
+                body.stringValue("code", "WELCOME10")
+                body.stringValue("productRef", PRODUCT_ID)
+                body.stringValue("attributionRef", INTERACTION_REF)
+            }.build(),
+        )
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "reserveWithoutIdentity")
+    fun `provider rejects a reservation request that carries no trusted identity`(mockServer: MockServer) {
+        val connection = java.net.URI(
+            "${mockServer.getUrl()}/api/v1/customer-incentives/offers/$OFFER_ID/reservations",
+        ).toURL().openConnection() as java.net.HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.setRequestProperty("Content-Type", "application/json")
+        connection.setRequestProperty("Idempotency-Key", IDEMPOTENCY_KEY)
+        connection.doOutput = true
+        connection.outputStream.use { out ->
+            out.write(
+                """{"code":"WELCOME10","productRef":"$PRODUCT_ID","attributionRef":"$INTERACTION_REF"}"""
+                    .toByteArray(),
+            )
+        }
+
+        assertThat(connection.responseCode).isEqualTo(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "reserveAttributedIncentive")
     fun `real edge client reserves against the provider contract`(mockServer: MockServer) {

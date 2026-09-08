@@ -4,6 +4,30 @@
   },
   "interactions": [
     {
+      "description": "POST an attributed customer reservation WITHOUT trusted party identity",
+      "providerStates": [
+        {
+          "name": "a published offer contains the pact promo code for the pact product"
+        }
+      ],
+      "request": {
+        "body": {
+          "attributionRef": "22222222-2222-4222-8222-222222222222",
+          "code": "WELCOME10",
+          "productRef": "33333333-3333-4333-8333-333333333333"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "claim-pact-once"
+        },
+        "method": "POST",
+        "path": "/api/v1/customer-incentives/offers/44444444-4444-4444-8444-444444444444/reservations"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "POST an attributed customer reservation with trusted party identity",
       "providerStates": [
         {
