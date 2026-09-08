@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.12.0
+  version: 1.13.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -591,7 +591,7 @@ components:
           description: >-
             As dailyLimit, over the Europe/Prague calendar month.
         exposure:
-          allOf: [{ $ref: '#/components/schemas/ExposureDto' }]
+          $ref: '#/components/schemas/ExposureDto'
           deprecated: true
           description: >-
             Non-null values are refused with 400 EXPOSURE_UNSUPPORTED. Historical values remain
@@ -625,7 +625,7 @@ components:
         dailyLimit: { $ref: '#/components/schemas/MoneyDto' }
         monthlyLimit: { $ref: '#/components/schemas/MoneyDto' }
         exposure:
-          allOf: [{ $ref: '#/components/schemas/ExposureDto' }]
+          $ref: '#/components/schemas/ExposureDto'
           deprecated: true
           description: >-
             Non-null values are refused with 400 EXPOSURE_UNSUPPORTED. Historical values remain
@@ -737,7 +737,7 @@ components:
           description: >-
             See dailyLimit. Not enforced; do not render it as a limit.
         exposure:
-          allOf: [{ $ref: '#/components/schemas/ExposureDto' }]
+          $ref: '#/components/schemas/ExposureDto'
           deprecated: true
           description: >-
             Historical audit metadata only. New non-null values are refused with 400
