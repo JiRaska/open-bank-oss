@@ -679,4 +679,65 @@ class MerchantCatalogResourceTest {
         assertThat(body.enabled).isTrue()
         assertThat(body.allowedHosts).containsExactly("upload.example.org")
     }
+
+
+    /**
+     * The catalogue page an operator actually reads, including the two fields the screen decides
+     * from: `logoContentHash` (upload or replace) and `geoPrecision` (is this pin a shop or a
+     * brand). Both are null-or-value on the same row, and a mapper that dropped either would leave
+     * the screen guessing while every other assertion stayed green.
+     */
+    @Test
+    fun `a catalogue page carries the fields the operator screen decides from`() {
+        val row = entity("BILLA").also {
+            it.cleanName = "Billa"
+            it.logoUrl = "https://logo.example.com/billa.png"
+            it.logoEtag = "d".repeat(64)
+            it.category = "GROCERIES"
+            it.lat = 50.0834
+            it.lon = 14.4238
+            it.city = "Praha"
+            it.country = "CZ"
+        }
+        coEvery { catalog.listPaged(0, 50) } returns listOf(row)
+        coEvery { catalog.countAll() } returns 1
+
+        val response = runBlocking { resource.list(0, 50) }
+
+        assertThat(response.status).isEqualTo(200)
+        val page = response.entity as MerchantPage
+        assertThat(page.total).isEqualTo(1)
+        val only = page.data.single()
+        assertThat(only.descriptorKey).isEqualTo("BILLA")
+        assertThat(only.logoContentHash).isEqualTo("d".repeat(64))
+        assertThat(only.geoPrecision).isEqualTo("CITY")
+        // Provenance, and operator-facing only: it is the URL the bitmap came FROM, not the one a
+        // customer app is given.
+        assertThat(only.logoUrl).isEqualTo("https://logo.example.com/billa.png")
+    }
+
+    /** Page size is clamped server-side, so a caller cannot widen the query by asking. */
+    @Test
+    fun `an oversized page request is clamped rather than honoured`() {
+        coEvery { catalog.listPaged(any(), any()) } returns emptyList()
+        coEvery { catalog.countAll() } returns 0
+
+        runBlocking { resource.list(-3, 10_000) }
+
+        coVerify { catalog.listPaged(0, 200) }
+    }
+
+    /**
+     * A merchant with no logo reports a null hash — that is what turns the screen's button from
+     * "replace" into "upload", and an empty string would read as a logo that exists.
+     */
+    @Test
+    fun `a merchant with no ingested logo reports a null content hash`() {
+        coEvery { catalog.listPaged(any(), any()) } returns listOf(entity("ALZACZ"))
+        coEvery { catalog.countAll() } returns 1
+
+        val response = runBlocking { resource.list(0, 50) }
+
+        assertThat((response.entity as MerchantPage).data.single().logoContentHash).isNull()
+    }
 }
