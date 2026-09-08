@@ -13,7 +13,7 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 class DelegationPortfolioNotFound(id: UUID) : RuntimeException("delegation portfolio not found: $id")
-class DelegationPortfolioAccessDenied : RuntimeException("the authenticated business principal does not own this portfolio")
+class DelegationPortfolioAccessDenied : RuntimeException("the authenticated active profile does not own this portfolio")
 
 @ApplicationScoped
 class DelegationPortfolioService(

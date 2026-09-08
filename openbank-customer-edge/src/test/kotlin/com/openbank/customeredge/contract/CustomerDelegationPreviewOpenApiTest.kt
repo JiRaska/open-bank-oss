@@ -18,4 +18,12 @@ class CustomerDelegationPreviewOpenApiTest {
         assertThat(normalized).contains("creates no grant, emits no event and never consumes SCA")
         assertThat(normalized).contains("a successful preview is not an authorization decision")
     }
+
+    @Test
+    fun `customer contract exposes portfolio management without caller supplied ownership`() {
+        assertThat(contract).contains("/delegations/portfolios:")
+        assertThat(contract).contains("Create a named account portfolio for the active profile")
+        assertThat(normalized).contains("ownerPartyId is derived from the authenticated profile")
+        assertThat(normalized).contains("not payment or co-signing authority")
+    }
 }

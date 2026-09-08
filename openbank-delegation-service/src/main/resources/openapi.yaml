@@ -17,10 +17,10 @@ paths:
   /api/v1/delegation-portfolios:
     post:
       tags: [Delegation portfolios]
-      summary: Create a named corporate account portfolio
+      summary: Create a named account portfolio for the active profile
       description: >-
-        A durable account scope owned by the active business principal. It is not a grant and never
-        authorizes payment or co-signing by itself; customer-edge resolves the current business
+        A durable account scope owned by the active profile. It is not a grant and never authorizes
+        payment or co-signing by itself; for a business profile customer-edge resolves the current
         mandate before forwarding X-Customer-Party-Id, and this route requires it to equal ownerPartyId.
       parameters:
         - $ref: '#/components/parameters/CustomerPartyId'
@@ -36,11 +36,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
         '400': { description: Missing or invalid name or account scope }
-        '403': { description: Authenticated business principal does not equal ownerPartyId }
+        '403': { description: Authenticated active profile does not equal ownerPartyId }
   /api/v1/delegation-portfolios/owner/{ownerPartyId}:
     get:
       tags: [Delegation portfolios]
-      summary: List portfolios of the active business principal
+      summary: List portfolios of the active profile
       parameters:
         - $ref: '#/components/parameters/PartyId'
         - $ref: '#/components/parameters/CustomerPartyId'
@@ -50,11 +50,11 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DelegationPortfolioResponse' } }
-        '403': { description: Authenticated business principal does not equal ownerPartyId }
+        '403': { description: Authenticated active profile does not equal ownerPartyId }
   /api/v1/delegation-portfolios/{id}:
     get:
       tags: [Delegation portfolios]
-      summary: Read a portfolio of the active business principal
+      summary: Read a portfolio of the active profile
       parameters:
         - $ref: '#/components/parameters/DelegationId'
         - $ref: '#/components/parameters/CustomerPartyId'
@@ -64,7 +64,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
-        '403': { description: Authenticated business principal does not own the portfolio }
+        '403': { description: Authenticated active profile does not own the portfolio }
         '404': { description: Portfolio not found }
   /api/v1/delegation-role-presets:
     get:
