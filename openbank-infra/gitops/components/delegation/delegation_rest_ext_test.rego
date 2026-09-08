@@ -117,6 +117,27 @@ test_edge_may_revoke if {
 	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.revoke"}
 }
 
+test_edge_may_read_its_customer_recertifications if {
+	"edge-service-delegation" in allowed_reasons with input as {
+		"principal": edge,
+		"action": "delegation.recertification.read",
+	}
+}
+
+test_edge_may_confirm_its_customer_recertifications if {
+	"edge-service-delegation" in allowed_reasons with input as {
+		"principal": edge,
+		"action": "delegation.recertification.confirm",
+	}
+}
+
+test_shared_backend_identity_may_not_confirm_recertifications if {
+	count(allowed_reasons) == 0 with input as {
+		"principal": services_m2m,
+		"action": "delegation.recertification.confirm",
+	}
+}
+
 # ADR-0249 D3 — the spend-reservation trio. Enumerated one by one rather than in a loop so a
 # failure names WHICH action regressed: they are three separate lines in the rule, and a partial
 # edit is the likely mistake.

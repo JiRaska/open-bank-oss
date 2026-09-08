@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.`in`.CheckDelegationCommand
 import com.openbank.delegation.application.port.`in`.CheckDelegationUseCase
+import com.openbank.delegation.application.port.`in`.DelegationRecertificationUseCase
 import com.openbank.delegation.application.port.`in`.GetDelegationUseCase
 import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
 import com.openbank.delegation.application.port.`in`.OfferDelegationUseCase
@@ -19,6 +20,7 @@ import com.openbank.delegation.application.port.`in`.SuspendDelegationCommand
 import com.openbank.delegation.infrastructure.rest.dto.CheckDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.DelegationCheckResponse
 import com.openbank.delegation.infrastructure.rest.dto.DelegationPreviewResponse
+import com.openbank.delegation.infrastructure.rest.dto.DelegationRecertificationResponse
 import com.openbank.delegation.infrastructure.rest.dto.DelegationResponse
 import com.openbank.delegation.infrastructure.rest.dto.OfferDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.PreviewDelegationRequest
@@ -63,6 +65,9 @@ class DelegationResource(
     private val objectMapper: ObjectMapper,
 ) {
 
+    @Inject
+    lateinit var recertification: DelegationRecertificationUseCase
+
     @Operation(summary = "Validate a delegation draft without consuming SCA or creating a grant")
     @POST
     @Path("/preview")
@@ -86,6 +91,7 @@ class DelegationResource(
                 dailyLimit = request.dailyLimit?.toDomain(),
                 monthlyLimit = request.monthlyLimit?.toDomain(),
                 exposure = request.exposure?.toDomain(),
+                recertificationAudience = request.recertificationAudience,
                 validTo = request.validTo,
             ),
         )
@@ -144,6 +150,7 @@ class DelegationResource(
                 dailyLimit = request.dailyLimit?.toDomain(),
                 monthlyLimit = request.monthlyLimit?.toDomain(),
                 exposure = request.exposure?.toDomain(),
+                recertificationAudience = request.recertificationAudience,
                 validTo = request.validTo,
                 grantScaSessionId = request.grantScaSessionId,
                 note = request.note,
@@ -190,6 +197,39 @@ class DelegationResource(
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
     ): List<DelegationResponse> =
         getDelegation.listByGrantee(partyId, customerPartyId).map { DelegationResponse.from(it) }
+
+    @Operation(summary = "List pending customer recertification tasks for grants issued by a party")
+    @GET
+    @Path("/recertifications/grantor/{partyId}")
+    @Authorize(action = "delegation.recertification.read", resource = "#partyId")
+    suspend fun pendingRecertifications(
+        @PathParam("partyId") partyId: UUID,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): List<DelegationRecertificationResponse> =
+        recertification.listPending(partyId, customerPartyId).map { DelegationRecertificationResponse.from(it) }
+
+    @Operation(summary = "Confirm that the grantor reviewed a pending delegation recertification task")
+    @POST
+    @Path("/recertifications/{id}/confirm")
+    @Authorize(action = "delegation.recertification.confirm", resource = "#id")
+    suspend fun confirmRecertification(
+        @PathParam("id") id: UUID,
+        @QueryParam("grantorPartyId") grantorPartyId: UUID?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): DelegationRecertificationResponse {
+        requireNotNull(grantorPartyId) { "query parameter 'grantorPartyId' is required" }
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val cacheKey = recertificationConfirmKey(id, grantorPartyId, idempotencyKey)
+        idempotencyStore.get(cacheKey)?.let { cached ->
+            return objectMapper.readValue(cached.responseBody, DelegationRecertificationResponse::class.java)
+        }
+        val response = DelegationRecertificationResponse.from(
+            recertification.confirm(id, grantorPartyId, customerPartyId),
+        )
+        idempotencyStore.save(cacheKey, Response.Status.OK.statusCode, objectMapper.writeValueAsString(response))
+        return response
+    }
 
     @Operation(summary = "Accept an OFFERED grant after the grantee's SCA challenge completes")
     @POST
@@ -327,6 +367,9 @@ class DelegationResource(
     }
 
     private fun offerKey(grantorPartyId: UUID, requestId: String) = "delegation:offer:$grantorPartyId:$requestId"
+
+    private fun recertificationConfirmKey(id: UUID, grantorPartyId: UUID, key: String) =
+        "delegation:recertification-confirm:$id:$grantorPartyId:$key"
 
     companion object {
         /**

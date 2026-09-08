@@ -13,6 +13,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -91,6 +92,35 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     fun sharedWithMe(): Response {
         val partyId = partyId()
         return upstream.get("$delegationServiceUrl$UPSTREAM/grantee/$partyId", partyId)
+    }
+
+    /**
+     * The grantor's review inbox. An overdue item asks the customer to keep, narrow or revoke a
+     * grant; it never auto-suspends an already-active delegation.
+     */
+    @GET
+    @Path("/recertifications")
+    @Blocking
+    fun pendingRecertifications(): Response {
+        val partyId = partyId()
+        return upstream.get("$delegationServiceUrl$UPSTREAM/recertifications/grantor/$partyId", partyId)
+    }
+
+    /** Explicitly records a review; authority-changing alternatives keep their own routes/SCA. */
+    @POST
+    @Path("/recertifications/{id}/confirm")
+    @Blocking
+    fun confirmRecertification(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        val partyId = partyId()
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/recertifications/$id/confirm?grantorPartyId=$partyId",
+            partyId,
+            "",
+            idempotencyKey,
+        )
     }
 
     /**

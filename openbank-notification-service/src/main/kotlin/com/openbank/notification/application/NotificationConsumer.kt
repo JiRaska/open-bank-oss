@@ -1150,6 +1150,11 @@ class NotificationConsumer @Inject constructor(
                 "Delegated access was used for a payment" to
                     "<h2>Delegated Access Used</h2><p>A person you authorised used delegated access " +
                     "for a confirmed payment. Open the OpenBank app to review your delegated access.</p>"
+            NotificationTemplate.DELEGATION_RECERTIFICATION_DUE ->
+                "Review delegated access" to
+                    "<h2>Review Delegated Access</h2><p>A delegated access grant is due for review " +
+                    "under your <b>${vars.v("audience")}</b> review cadence. Access remains active until " +
+                    "you explicitly keep, narrow or revoke it in the OpenBank app.</p>"
         }
 }
 

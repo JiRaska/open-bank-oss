@@ -7,7 +7,8 @@ info:
   # (the client echoes the terms version it rendered; a mismatch with the catalogue's currently
   # effective version is a 409, forcing re-display during a terms rollout) and a new 409 response
   # on POST /term-deposits.
-  version: 1.54.0
+  # 1.54.0 -> 1.55.0: customer recertification review and evidence routes.
+  version: 1.55.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3348,6 +3349,34 @@ paths:
       operationId: offerDelegation
       security:
         - customerOidc: [delegations:write]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [granteePartyId, resourceType, resourceId, capabilities, grantScaSessionId]
+              properties:
+                grantorPartyId: {type: string, format: uuid, description: Optional; if present it must match the token party}
+                granteePartyId: {type: string, format: uuid}
+                resourceType: {type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT]}
+                resourceId: {type: string, format: uuid}
+                capabilities: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+                approvalPolicy: {type: string, default: SOLO}
+                requiredApprovals: {type: integer}
+                perTransactionLimit: {type: object}
+                dailyLimit: {type: object}
+                monthlyLimit: {type: object}
+                exposure: {type: object}
+                recertificationAudience:
+                  type: string
+                  enum: [PERSONAL, FOP, SME, CORPORATE]
+                  description: >-
+                    A review-only cadence selected by the grantor. It never changes access rights.
+                    FOP is 12 months, SME 6 months and CORPORATE 3 months; company size is not inferred.
+                validTo: {type: string, format: date-time}
+                grantScaSessionId: {type: string, format: uuid}
+                note: {type: string}
       responses:
         '201': {description: Grant offered}
         '400':
@@ -3388,12 +3417,59 @@ paths:
                 dailyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
                 monthlyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
                 exposure: {type: object}
+                recertificationAudience:
+                  type: string
+                  enum: [PERSONAL, FOP, SME, CORPORATE]
+                  description: Review-only cadence; it never changes access rights.
                 validTo: {type: string, format: date-time}
       responses:
         '200': {description: Draft is currently eligible to proceed to SCA}
         '400': {description: Invalid draft or a constraint the customer channel cannot enforce}
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
+  /delegations/recertifications:
+    get:
+      tags: [Delegation]
+      summary: List the caller's overdue delegation review tasks
+      description: >-
+        Overdue review never automatically suspends delegated access. The customer can explicitly
+        keep, narrow or revoke each grant from the access-management experience.
+      operationId: listDelegationRecertifications
+      security:
+        - customerOidc: [delegations:read]
+      responses:
+        '200':
+          description: Pending review tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/DelegationRecertification'}
+        '403': {description: Customer is not authorized for the active profile}
+  /delegations/recertifications/{id}/confirm:
+    post:
+      tags: [Delegation]
+      summary: Confirm that the caller reviewed a current delegation
+      operationId: confirmDelegationRecertification
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, minLength: 1, maxLength: 200}
+      responses:
+        '200':
+          description: Review recorded; access has not changed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DelegationRecertification'}
+        '404': {description: Task not found}
+        '409': {description: Task already confirmed or the delegation lifecycle changed}
 
   /profiles:
     get:
@@ -3781,6 +3857,21 @@ components:
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file
     # $ref). Kept field-for-field in step with the upstream openapi.yaml they mirror.
+
+    # Mirrors delegation-service's customer review evidence. A confirmation records only the
+    # review; no capability, lifecycle status or product authority changes through this schema.
+    DelegationRecertification:
+      type: object
+      required: [id, delegationId, expectedLifecycleRevision, audience, sequence, dueAt, status]
+      properties:
+        id: {type: string, format: uuid}
+        delegationId: {type: string, format: uuid}
+        expectedLifecycleRevision: {type: integer, format: int64}
+        audience: {type: string, enum: [PERSONAL, FOP, SME, CORPORATE]}
+        sequence: {type: integer, minimum: 1}
+        dueAt: {type: string, format: date-time}
+        status: {type: string, enum: [PENDING, CONFIRMED]}
+        confirmedAt: {type: string, format: date-time, nullable: true}
 
     # Mirrors account-service's PocketResponse (currency-pocket / multi-currency wallet, ADR-0024).
     Pocket:

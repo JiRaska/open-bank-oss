@@ -128,8 +128,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
     # the day each PR lands, and re-editing the same rows here would conflict with a live branch.
     'onboarding-service|5. AML / sanctions override — special controls|kyc.check.override':
         'an ADR-0068 planned control; absent from `rules.yaml` and from every resource',
-    'onboarding-service|5. AML / sanctions override — special controls|confirmedBy':
-        'an ADR-0068 planned field; present in no entity, DTO or migration',
     'openbank-account-service|6. Change log|openAccountIdempotencyKey':
         'no such identifier anywhere in the tree',
     'openbank-clearing-service|6. Change log|ClearingResourceSecurityTest':

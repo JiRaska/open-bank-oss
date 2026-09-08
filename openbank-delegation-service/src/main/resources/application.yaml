@@ -207,6 +207,9 @@ openbank:
     # scheduler does not.
     expiration:
       cron: "0 7 * * * ?"
+    recertification:
+      # A reminder-only sweep. Due tasks are idempotent and the grant remains ACTIVE after dueAt.
+      cron: "0 15 * * * ?"
   outbox:
     dispatch-enabled: true
   rate-limit:

@@ -65,6 +65,42 @@ class CustomerDelegationResourceTest {
     }
 
     @Test
+    fun `recertification inbox is scoped to the token grantor and forwards that identity`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val party = slot<String>()
+        every { upstream.get(capture(url), capture(party)) } returns Response.ok("[]").build()
+
+        val response = resource(upstream).pendingRecertifications()
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(url.captured).isEqualTo("$svc/api/v1/delegations/recertifications/grantor/$caller")
+        assertThat(party.captured).isEqualTo(caller.toString())
+        assertThat(url.captured).doesNotContain(stranger.toString())
+    }
+
+    @Test
+    fun `recertification confirmation identifies the grantor only from the token`() {
+        val upstream = mockk<UpstreamClient>()
+        val url = slot<String>()
+        val party = slot<String>()
+        val body = slot<String>()
+        val idempotencyKey = slot<String?>()
+        every { upstream.post(capture(url), capture(party), capture(body), capture(idempotencyKey)) } returns
+            Response.ok().build()
+
+        val response = resource(upstream).confirmRecertification(GRANT_ID, "review-once")
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(url.captured)
+            .isEqualTo("$svc/api/v1/delegations/recertifications/$GRANT_ID/confirm?grantorPartyId=$caller")
+        assertThat(party.captured).isEqualTo(caller.toString())
+        assertThat(body.captured).isEmpty()
+        assertThat(idempotencyKey.captured).isEqualTo("review-once")
+        assertThat(url.captured).doesNotContain(stranger.toString())
+    }
+
+    @Test
     fun `every read forwards the token party as the upstream party header`() {
         val upstream = mockk<UpstreamClient>()
         val party = slot<String>()
