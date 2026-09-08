@@ -178,4 +178,81 @@ class LogoFetcherTest {
             .hasMessageNotContaining("non-public address")
             .hasMessageNotContaining("not in the configured allowlist")
     }
+
+
+    /**
+     * The body cap is enforced by READING at most the cap, not by trusting `Content-Length`. A source
+     * that lies about the header is precisely the one you least want to allocate for, so the test
+     * feeds a stream that reports nothing and simply keeps producing bytes.
+     */
+    @Test
+    fun `a body over the cap is refused, however the source describes itself`() {
+        val f = fetcher("upload.wikimedia.org")
+        val endless = object : java.io.InputStream() {
+            override fun read(): Int = 0
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                java.util.Arrays.fill(b, off, off + len, 0)
+                return len
+            }
+        }
+
+        assertThatThrownBy { f.readCapped(endless) }
+            .isInstanceOf(LogoFetcher.RefusedException::class.java)
+            .hasMessageContaining("exceeds")
+    }
+
+    @Test
+    fun `a body exactly at the cap is accepted`() {
+        val f = fetcher("upload.wikimedia.org")
+        val atCap = ByteArray(com.openbank.transaction.infrastructure.image.LogoImages.MAX_UPLOAD_BYTES) { 1 }
+
+        assertThat(f.readCapped(atCap.inputStream())).hasSize(atCap.size)
+    }
+
+    @Test
+    fun `an empty body is refused rather than handed on as an image`() {
+        val f = fetcher("upload.wikimedia.org")
+
+        assertThatThrownBy { f.readCapped(ByteArray(0).inputStream()) }
+            .isInstanceOf(LogoFetcher.RefusedException::class.java)
+            .hasMessageContaining("empty body")
+    }
+
+    @Test
+    fun `a short body is read whole`() {
+        val f = fetcher("upload.wikimedia.org")
+
+        assertThat(f.readCapped(byteArrayOf(1, 2, 3).inputStream())).containsExactly(1, 2, 3)
+    }
+
+    /**
+     * A redirect is a status here, not a hop. The message says so, because an operator told
+     * "redirect" supplies the final URL while one told only "refused" retries the same one.
+     */
+    @Test
+    fun `a redirect status is refused and named as a redirect`() {
+        val f = fetcher("upload.wikimedia.org")
+
+        listOf(301, 302, 307, 308).forEach { status ->
+            assertThatThrownBy { f.requireUsableStatus(status) }
+                .isInstanceOf(LogoFetcher.RefusedException::class.java)
+                .hasMessageContaining("redirect")
+        }
+    }
+
+    @Test
+    fun `a non-200 status is refused with the status in the message`() {
+        val f = fetcher("upload.wikimedia.org")
+
+        assertThatThrownBy { f.requireUsableStatus(404) }
+            .isInstanceOf(LogoFetcher.RefusedException::class.java)
+            .hasMessageContaining("404")
+        assertThatThrownBy { f.requireUsableStatus(500) }
+            .isInstanceOf(LogoFetcher.RefusedException::class.java)
+    }
+
+    @Test
+    fun `200 is the only status that proceeds`() {
+        fetcher("upload.wikimedia.org").requireUsableStatus(200)
+    }
 }

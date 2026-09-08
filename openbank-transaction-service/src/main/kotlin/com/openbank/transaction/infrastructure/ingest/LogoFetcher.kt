@@ -140,17 +140,7 @@ class LogoFetcher(
             throw RefusedException("fetch was interrupted", e)
         }
 
-        // A redirect arrives as a 3xx rather than being followed, and is refused here with the reason
-        // spelled out — an operator seeing "redirect" knows to use the final URL, not to retry.
-        if (response.statusCode() in REDIRECT_RANGE) {
-            throw RefusedException(
-                "source answered ${response.statusCode()} (a redirect); redirects are never followed — " +
-                    "supply the final URL",
-            )
-        }
-        if (response.statusCode() != HTTP_OK) {
-            throw RefusedException("source answered HTTP ${response.statusCode()}")
-        }
+        requireUsableStatus(response.statusCode())
 
         val bytes = response.body().use { readCapped(it) }
         return Fetched(
@@ -158,6 +148,21 @@ class LogoFetcher(
             sourceUrl = uri.toString(),
             contentType = response.headers().firstValue("content-type").orElse(null),
         )
+    }
+
+    /**
+     * Refuses any status but 200, and says specially why a 3xx is one of them.
+     *
+     * A redirect arrives as a status rather than being followed, and an operator who is told
+     * "redirect" knows to supply the final URL; told only "refused", they retry the same one.
+     */
+    internal fun requireUsableStatus(status: Int) {
+        if (status in REDIRECT_RANGE) {
+            throw RefusedException(
+                "source answered $status (a redirect); redirects are never followed — supply the final URL",
+            )
+        }
+        if (status != HTTP_OK) throw RefusedException("source answered HTTP $status")
     }
 
     private fun parse(rawUrl: String): URI = try {
@@ -229,7 +234,7 @@ class LogoFetcher(
      * Streamed rather than trusting `Content-Length`: the header is whatever the source says, and a
      * source that lies about it is the one you least want to allocate for.
      */
-    private fun readCapped(input: java.io.InputStream): ByteArray {
+    internal fun readCapped(input: java.io.InputStream): ByteArray {
         val cap = LogoImages.MAX_UPLOAD_BYTES
         val buffer = ByteArray(cap + 1)
         var read = 0

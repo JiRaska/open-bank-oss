@@ -16,7 +16,6 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
-import jakarta.ws.rs.POST
 import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -179,7 +178,11 @@ class MerchantLogoResource(private val logos: MerchantLogoRepository, private va
      * What arrives is bytes, and they go through exactly the same decode / dimension-check /
      * re-encode as an upload. Nothing about "we fetched it ourselves" makes the content trustworthy.
      */
-    @POST
+    // PUT, not POST, and the idempotency gate is right to have asked. The operation is an upsert
+    // keyed by the descriptor: fetching the same URL twice stores the same bytes and answers with
+    // the same hash, so replaying it changes nothing. POST claimed a create-each-time semantic this
+    // never had, and an operator retrying after a timeout would have been right to fear it.
+    @PUT
     @Path("/{descriptorKey}/logo/fetch")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "merchant.update", resource = "")

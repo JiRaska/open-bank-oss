@@ -354,7 +354,7 @@ paths:
                     type: array
                     items: {type: string}
   /api/v1/merchants/{descriptorKey}/logo/fetch:
-    post:
+    put:
       tags: [Merchant catalogue]
       summary: Ingest a merchant logo from an allowlisted source URL
       description: >-
