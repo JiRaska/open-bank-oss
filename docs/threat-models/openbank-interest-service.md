@@ -64,6 +64,13 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-09-07** — Natural-key idempotency on the creation POSTs (ADR-0291, burn-down #8351).
+  `accrue` and `rates` gained check-first replay on their natural keys (accrual: V12's
+  `(account, date, product, currency)`; rate config: `(product, account, currency,
+  effectiveFrom)`), each with the unique constraint as race backstop and a constraint-name-scoped
+  recovery that re-reads the winner's row. No new endpoint, caller, privilege or control bypass:
+  the change only converts a retry's 500-on-constraint into a replay of the original row, and a
+  retry's duplicate-active-config into a no-op. The trust boundaries are unchanged.
 - **2026-09-03** — Four-eyes assessment (#8359, ADR-0034 D-criteria as applied in the #938 sweep).
   Per-verb caller audit: **`interest.create` and `interest.trigger` are now four-eyes-gated** via
   `rules.yaml: four_eyes.actions`. `interest.create` bundles every operator write on the money path

@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.11.0
+  version: 1.12.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -27,6 +27,9 @@ paths:
     post:
       tags: [Delegation role presets]
       summary: Create a delegation role preset
+      description: >-
+        Idempotent on the natural key (name, resourceType): a retried create replays the original
+        preset — no duplicate catalog row (ADR-0292).
       requestBody:
         required: true
         content:
@@ -59,7 +62,7 @@ paths:
   /api/v1/delegations:
     post:
       tags: [Delegations]
-      summary: Offer a delegation grant (OFFERED); idempotent via X-Request-ID
+      summary: Offer a delegation grant (OFFERED); idempotent via X-Request-ID (ADR-0292)
       parameters:
         - name: X-Request-ID
           in: header
