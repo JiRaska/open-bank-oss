@@ -142,6 +142,14 @@ spec:
                 secretKeyRef:
                   name: delegation-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # Dedicated client-credentials identity for the future sealed external
+            # disclosure export. It is intentionally separate from OIDC_CLIENT_SECRET,
+            # which remains the resource-server configuration during the staged rollout.
+            - name: DISCLOSURE_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: delegation-service-oidc
+                  key: DISCLOSURE_OIDC_CLIENT_SECRET
             # Idempotency store (libs' Redis-backed IdempotencyStore). A hard boot
             # dependency: without it the ReactiveRedisDataSource bean is inactive and the
             # app dies with InactiveBeanException.

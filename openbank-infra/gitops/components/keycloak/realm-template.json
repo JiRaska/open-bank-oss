@@ -228,6 +228,23 @@
       "secret": "__SERVICES_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-delegation-disclosure",
+      "name": "OpenBank Delegation Disclosure",
+      "description": "Dedicated client-credentials identity for delegation-service to request sealed external disclosures from document-service. It must not be shared with other backend workloads.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "roles"
+      ],
+      "secret": "__DELEGATION_DISCLOSURE_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-edge",
       "name": "OpenBank Customer Edge",
       "description": "M2M service-account client for the customer-facing edge proxy (ADR-0065). The edge validates customer JWTs from openbank-customers realm and uses this client (client_credentials) to call upstream backend services with an operator-realm token.",
@@ -484,6 +501,14 @@
       "username": "service-account-openbank-services",
       "enabled": true,
       "serviceAccountClientId": "openbank-services",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-delegation-disclosure",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-delegation-disclosure",
       "realmRoles": [
         "ROLE_API"
       ]

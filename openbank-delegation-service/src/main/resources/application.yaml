@@ -71,9 +71,13 @@ quarkus:
   # Same shape as party-service / document-service / sdd-service.
   oidc-client:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
-    client-id: openbank-services
+    # This credential is deliberately not the fleet-wide `openbank-services` client.
+    # Document disclosure is an authority-bearing export: document-service can therefore
+    # authorize this caller by its exact service-account subject, rather than accepting
+    # every backend sharing the generic client.
+    client-id: openbank-delegation-disclosure
     credentials:
-      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      secret: ${DISCLOSURE_OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
 
