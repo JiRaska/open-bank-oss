@@ -5,6 +5,7 @@ package com.openbank.delegation.application.usecase
 
 import com.openbank.delegation.application.port.`in`.IssueExternalDisclosureCommand
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.ExternalDisclosureDocumentExporter
 import com.openbank.delegation.application.port.out.ExternalDisclosureRepository
 import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
@@ -52,7 +53,13 @@ class ExternalDisclosureServiceTest {
         val disclosures = mockk<ExternalDisclosureRepository>()
         coEvery { delegations.findById(grant.id) } returns grant
         coEvery { disclosures.issue(any()) } answers { firstArg() }
-        val service = ExternalDisclosureService(delegations, disclosures, clock, SecureRandom())
+        val service = ExternalDisclosureService(
+            delegations,
+            disclosures,
+            mockk<ExternalDisclosureDocumentExporter>(),
+            clock,
+            SecureRandom(),
+        )
 
         val issued = service.issue(command(grantor))
 
@@ -60,7 +67,7 @@ class ExternalDisclosureServiceTest {
         assertThat(issued.otp).matches("\\d{6}")
         assertThat(issued.disclosure.linkSecretHash).isNotEqualTo(issued.linkSecret)
         assertThat(issued.disclosure.otpHash).isNotEqualTo(issued.otp)
-        assertThat(issued.disclosure.verifyOtp(issued.otp, now)).isNotNull
+        assertThat(issued.disclosure.verifyOtpAttempt(issued.otp, now)).isNotNull
         coVerify(exactly = 1) { disclosures.issue(any()) }
     }
 
@@ -69,7 +76,13 @@ class ExternalDisclosureServiceTest {
         val delegations = mockk<DelegationRepository>()
         val disclosures = mockk<ExternalDisclosureRepository>()
         coEvery { delegations.findById(grant.id) } returns grant
-        val service = ExternalDisclosureService(delegations, disclosures, clock, SecureRandom())
+        val service = ExternalDisclosureService(
+            delegations,
+            disclosures,
+            mockk<ExternalDisclosureDocumentExporter>(),
+            clock,
+            SecureRandom(),
+        )
 
         assertThatThrownBy { runBlocking { service.issue(command(UUID.randomUUID())) } }
             .isInstanceOf(jakarta.ws.rs.ForbiddenException::class.java)

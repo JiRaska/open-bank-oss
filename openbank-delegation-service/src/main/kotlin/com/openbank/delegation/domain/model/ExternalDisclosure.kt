@@ -24,6 +24,8 @@ data class ExternalDisclosure(
     val createdAt: OffsetDateTime,
     val verifiedAt: OffsetDateTime? = null,
     val viewedAt: List<OffsetDateTime> = emptyList(),
+    val failedOtpAttempts: Int = 0,
+    val lockedAt: OffsetDateTime? = null,
     val revokedAt: OffsetDateTime? = null,
 ) {
     init {
@@ -32,17 +34,29 @@ data class ExternalDisclosure(
         require(expiresAt.isAfter(createdAt)) { "external disclosure expiry must be after issuance" }
     }
 
-    fun verifyOtp(rawOtp: String, now: OffsetDateTime): ExternalDisclosure {
+    /** Persist this result even when the OTP is wrong: throwing would roll the counter back. */
+    fun verifyOtpAttempt(rawOtp: String, now: OffsetDateTime): ExternalDisclosure {
         require(isLinkLive(now)) { "external disclosure link is unavailable" }
-        require(secretHash(id, rawOtp) == otpHash) { "external disclosure OTP is invalid" }
-        return if (verifiedAt == null) copy(verifiedAt = now) else this
+        return if (secretHash(id, rawOtp) == otpHash) {
+            if (verifiedAt == null) copy(verifiedAt = now) else this
+        } else {
+            val attempts = failedOtpAttempts + 1
+            copy(failedOtpAttempts = attempts, lockedAt = now.takeIf { attempts >= MAX_FAILED_OTP_ATTEMPTS })
+        }
+    }
+
+    fun matchesOtp(rawOtp: String): Boolean = secretHash(id, rawOtp) == otpHash
+
+    /** Validates the link before any remote PDF work; the view is consumed only after that work succeeds. */
+    fun requireReleasable(rawLinkSecret: String, now: OffsetDateTime) {
+        require(isLinkLive(now)) { "external disclosure link is unavailable" }
+        require(verifiedAt != null) { "external disclosure OTP has not been verified" }
+        require(secretHash(id, rawLinkSecret) == linkSecretHash) { "external disclosure link is invalid" }
     }
 
     /** Calling code must persist this compare-and-set transition atomically with its audit outbox. */
     fun consumeView(rawLinkSecret: String, now: OffsetDateTime): ExternalDisclosure {
-        require(isLinkLive(now)) { "external disclosure link is unavailable" }
-        require(verifiedAt != null) { "external disclosure OTP has not been verified" }
-        require(secretHash(id, rawLinkSecret) == linkSecretHash) { "external disclosure link is invalid" }
+        requireReleasable(rawLinkSecret, now)
         require(viewedAt.size < maxViews) { "external disclosure view limit reached" }
         return copy(viewedAt = viewedAt + now)
     }
@@ -50,9 +64,11 @@ data class ExternalDisclosure(
     fun revoke(now: OffsetDateTime): ExternalDisclosure = if (revokedAt == null) copy(revokedAt = now) else this
 
     private fun isLinkLive(now: OffsetDateTime): Boolean =
-        revokedAt == null && now.isBefore(expiresAt) && viewedAt.size < maxViews
+        revokedAt == null && lockedAt == null && now.isBefore(expiresAt) && viewedAt.size < maxViews
 
     companion object {
+        const val MAX_FAILED_OTP_ATTEMPTS = 5
+
         fun secretHash(disclosureId: UUID, rawSecret: String): String {
             require(rawSecret.isNotBlank()) { "disclosure secret must not be blank" }
             val digest = MessageDigest.getInstance("SHA-256")

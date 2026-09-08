@@ -176,6 +176,11 @@ class IssuedExternalDisclosure(val disclosure: ExternalDisclosure, val linkSecre
 interface ExternalDisclosureUseCase {
     suspend fun issue(command: IssueExternalDisclosureCommand): IssuedExternalDisclosure
     suspend fun revoke(disclosureId: UUID, callerPartyId: CallerPartyId): ExternalDisclosure
+    suspend fun verifyOtp(disclosureId: UUID, linkSecret: String, otp: String): ExternalDisclosure
+    suspend fun release(
+        disclosureId: UUID,
+        linkSecret: String,
+    ): com.openbank.delegation.application.port.out.ExternalDisclosureArtifact
 }
 
 data class ProposeDelegationLifecycleCommand(

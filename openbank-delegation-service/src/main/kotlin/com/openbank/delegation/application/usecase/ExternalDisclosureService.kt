@@ -8,6 +8,8 @@ import com.openbank.delegation.application.port.`in`.ExternalDisclosureUseCase
 import com.openbank.delegation.application.port.`in`.IssueExternalDisclosureCommand
 import com.openbank.delegation.application.port.`in`.IssuedExternalDisclosure
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.ExternalDisclosureArtifact
+import com.openbank.delegation.application.port.out.ExternalDisclosureDocumentExporter
 import com.openbank.delegation.application.port.out.ExternalDisclosureRepository
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationResourceType
@@ -28,6 +30,7 @@ import java.util.UUID
 class ExternalDisclosureService(
     private val delegationRepository: DelegationRepository,
     private val disclosureRepository: ExternalDisclosureRepository,
+    private val documentExporter: ExternalDisclosureDocumentExporter,
     private val clock: Clock,
     private val random: SecureRandom,
 ) : ExternalDisclosureUseCase {
@@ -36,7 +39,8 @@ class ExternalDisclosureService(
     constructor(
         delegationRepository: DelegationRepository,
         disclosureRepository: ExternalDisclosureRepository,
-    ) : this(delegationRepository, disclosureRepository, Clock.systemUTC(), SecureRandom())
+        documentExporter: ExternalDisclosureDocumentExporter,
+    ) : this(delegationRepository, disclosureRepository, documentExporter, Clock.systemUTC(), SecureRandom())
 
     override suspend fun issue(command: IssueExternalDisclosureCommand): IssuedExternalDisclosure {
         val now = OffsetDateTime.now(clock)
@@ -87,6 +91,36 @@ class ExternalDisclosureService(
         return requireNotNull(disclosureRepository.mutateById(disclosureId) { it.revoke(OffsetDateTime.now(clock)) }) {
             "external disclosure disappeared during revocation"
         }
+    }
+
+    override suspend fun verifyOtp(disclosureId: UUID, linkSecret: String, otp: String): ExternalDisclosure {
+        val linkSecretHash = ExternalDisclosure.secretHash(disclosureId, linkSecret)
+        val updated = disclosureRepository.mutateByLinkSecretHash(linkSecretHash) {
+            it.verifyOtpAttempt(otp, OffsetDateTime.now(clock))
+        } ?: throw NotFoundException("external disclosure unavailable")
+        if (!updated.matchesOtp(otp)) throw NotFoundException("external disclosure unavailable")
+        return updated
+    }
+
+    override suspend fun release(disclosureId: UUID, linkSecret: String): ExternalDisclosureArtifact {
+        val now = OffsetDateTime.now(clock)
+        val disclosure = disclosureRepository.findById(disclosureId)
+            ?: throw NotFoundException("external disclosure unavailable")
+        disclosure.requireReleasable(linkSecret, now)
+
+        // The remote service sees a sealed derivative only. If it fails, nothing reaches the
+        // caller and the later CAS is never attempted, so a transient export outage cannot burn
+        // an allowed view. A concurrent revoke/view wins at the CAS and likewise returns no bytes.
+        val artifact = documentExporter.export(
+            documentId = disclosure.documentId,
+            disclosureId = disclosure.id,
+            recipientLabel = disclosure.recipientLabel,
+            issuedAt = disclosure.createdAt.toInstant(),
+        )
+        requireNotNull(disclosureRepository.mutateById(disclosureId) { it.consumeView(linkSecret, now) }) {
+            "external disclosure unavailable"
+        }
+        return artifact
     }
 
     private fun requireGrantor(callerPartyId: CallerPartyId, grantorPartyId: UUID) {

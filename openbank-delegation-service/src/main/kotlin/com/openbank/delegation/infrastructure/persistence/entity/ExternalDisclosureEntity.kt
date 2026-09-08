@@ -47,6 +47,12 @@ class ExternalDisclosureEntity : PanacheEntityBase() {
     @Column(name = "view_count", nullable = false)
     var viewCount: Int = 0
 
+    @Column(name = "failed_otp_attempts", nullable = false)
+    var failedOtpAttempts: Int = 0
+
+    @Column(name = "locked_at")
+    var lockedAt: OffsetDateTime? = null
+
     @Column(name = "revoked_at")
     var revokedAt: OffsetDateTime? = null
 
@@ -65,12 +71,16 @@ class ExternalDisclosureEntity : PanacheEntityBase() {
         createdAt = createdAt,
         verifiedAt = verifiedAt,
         viewedAt = viewedAt,
+        failedOtpAttempts = failedOtpAttempts,
+        lockedAt = lockedAt,
         revokedAt = revokedAt,
     )
 
     fun apply(disclosure: ExternalDisclosure) {
         verifiedAt = disclosure.verifiedAt
         viewCount = disclosure.viewedAt.size
+        failedOtpAttempts = disclosure.failedOtpAttempts
+        lockedAt = disclosure.lockedAt
         revokedAt = disclosure.revokedAt
     }
 
@@ -86,6 +96,8 @@ class ExternalDisclosureEntity : PanacheEntityBase() {
             maxViews = disclosure.maxViews
             verifiedAt = disclosure.verifiedAt
             viewCount = disclosure.viewedAt.size
+            failedOtpAttempts = disclosure.failedOtpAttempts
+            lockedAt = disclosure.lockedAt
             revokedAt = disclosure.revokedAt
             createdAt = disclosure.createdAt
         }
