@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "6aea1bc3872940a0"
+    openbank.tech/policy-checksum: "7535fed238b3d4ce"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1624,6 +1624,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

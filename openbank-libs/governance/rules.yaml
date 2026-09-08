@@ -2977,6 +2977,7 @@ authz:
         - sepaPayment.transitionStatus
         - settlement.create
         - swift.approval.decide
+        - transaction.categorise
         - transaction.create
         - transaction.reverse
         - opsmessage.compose
@@ -3231,6 +3232,7 @@ shared_m2m_matrix_write_grants:
     - sepaPayment.transitionStatus
     - settlement.create
     - swift.approval.decide
+    - transaction.categorise
     - transaction.create
     - transaction.reverse
 

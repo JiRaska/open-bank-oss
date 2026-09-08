@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-issuance-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "75d3b400f8c9dd31"
+    openbank.tech/policy-checksum: "4e4d95a8296816b6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1578,6 +1578,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

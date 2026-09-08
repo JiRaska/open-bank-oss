@@ -15,6 +15,7 @@ import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
+import com.openbank.transaction.infrastructure.persistence.repository.TransactionCategoryOverrideRepository
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -42,6 +43,7 @@ class MerchantLogoUrlTest {
     private lateinit var repository: PanacheTransactionRepository
     private lateinit var catalog: MerchantCatalogRepository
     private lateinit var resource: TransactionResource
+    private lateinit var categoryOverrides: TransactionCategoryOverrideRepository
 
     private val accountId: UUID = UUID.randomUUID()
     private val hash = "0123456789abcdef" + "f".repeat(48)
@@ -51,7 +53,12 @@ class MerchantLogoUrlTest {
         useCase = mockk()
         repository = mockk()
         catalog = mockk()
-        resource = TransactionResource(useCase, repository, catalog)
+        // The customer-category read path is not what this test is about; an empty override map
+        // keeps `category` resolving from the catalogue exactly as it did before #8909, so the
+        // logo assertions below stay about logos.
+        categoryOverrides = mockk()
+        coEvery { categoryOverrides.findFor(any(), any()) } returns emptyMap()
+        resource = TransactionResource(useCase, repository, catalog, categoryOverrides)
     }
 
     private fun transaction() = Transaction(
