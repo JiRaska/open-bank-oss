@@ -53,6 +53,11 @@ The raw-colour and local-status-map ratchets are shrink-only. A new literal or p
 map is a CI failure; a literal that cannot be mapped must be recorded with its data-visualisation
 reason before it is kept.
 
+The production build also enforces shrink-only JavaScript ceilings for both the largest route-owned
+chunk and their aggregate size. This is a regression guard, not a user-performance claim: shared and
+lazy chunks are measured separately by browser Web Vitals. A feature that needs more route code must
+first recover the bytes through extraction or deferred loading instead of silently raising a ceiling.
+
 ## Migration order
 
 1. Operator money and risk surfaces: Payments, FinOps, sanctions, day-end, FX.
