@@ -47,10 +47,10 @@ data class ExternalDisclosure(
         return copy(viewedAt = viewedAt + now)
     }
 
-    fun revoke(now: OffsetDateTime): ExternalDisclosure =
-        if (revokedAt == null) copy(revokedAt = now) else this
+    fun revoke(now: OffsetDateTime): ExternalDisclosure = if (revokedAt == null) copy(revokedAt = now) else this
 
-    private fun isLinkLive(now: OffsetDateTime): Boolean = revokedAt == null && now.isBefore(expiresAt) && viewedAt.size < maxViews
+    private fun isLinkLive(now: OffsetDateTime): Boolean =
+        revokedAt == null && now.isBefore(expiresAt) && viewedAt.size < maxViews
 
     companion object {
         fun secretHash(disclosureId: UUID, rawSecret: String): String {
