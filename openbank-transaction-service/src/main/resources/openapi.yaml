@@ -10,7 +10,7 @@ info:
   # Minor bump (1.11.0 -> 1.12.0): additive only — GET /approvals (the checker's queue, issue
   # #5679, mirroring sanctions' #3472) plus two additive fields on the PATCH .../approvals/{id}
   # response (makerId, createdAt). No breaking change.
-  version: 1.16.0
+  version: 1.17.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -332,6 +332,77 @@ paths:
       responses:
         '204': {description: Entry removed}
         '404': {description: No entry under that key}
+  /api/v1/merchants/logo-sources:
+    get:
+      tags: [Merchant catalogue]
+      summary: Whether logo fetching is enabled, and the hosts it may fetch from
+      description: >-
+        The operator screen needs this to decide whether to offer the fetch action at all: a feature
+        that is off by design and one that is broken look identical from a 400, and an allowlist an
+        operator cannot see is one they will guess at.
+      operationId: getMerchantLogoSources
+      responses:
+        '200':
+          description: Ingest configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: {type: boolean}
+                  allowedHosts:
+                    type: array
+                    items: {type: string}
+  /api/v1/merchants/{descriptorKey}/logo/fetch:
+    post:
+      tags: [Merchant catalogue]
+      summary: Ingest a merchant logo from an allowlisted source URL
+      description: >-
+        Downloads a logo instead of having an operator upload the file. This is a server-side request
+        forgery primitive by construction — the service fetches an operator-named URL from inside the
+        cluster — so it is fenced four ways, each load-bearing on its own: a host allowlist that is
+        EMPTY BY DEFAULT (with no configuration the endpoint refuses everything), https only, every
+        resolved address checked to be publicly routable (an allowlisted name that resolves to
+        127.0.0.1 or 169.254.169.254 is refused), and redirects refused rather than followed. What
+        comes back is then decoded, dimension-checked and re-encoded exactly like an upload: fetching
+        it ourselves makes the bytes no more trustworthy.
+      operationId: fetchMerchantLogo
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceUrl]
+              properties:
+                sourceUrl: {type: string}
+                licence:
+                  type: string
+                  nullable: true
+                  description: The operator's assertion about the source; an image file carries no licence of its own.
+                attribution: {type: string, nullable: true}
+      responses:
+        '200':
+          description: Logo replaced
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MerchantLogoWritten'}
+        '201':
+          description: Logo stored
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MerchantLogoWritten'}
+        '400':
+          description: >-
+            Fetching disabled, missing sourceUrl, non-https scheme, host not allowlisted, host
+            resolving to a non-public address, a redirect, a non-200 source, an oversized body, or
+            content that is not a decodable raster image.
+        '404': {description: No catalogue entry under that key to attach a logo to}
   /api/v1/merchants/{descriptorKey}/logo:
     get:
       tags: [Merchant catalogue]

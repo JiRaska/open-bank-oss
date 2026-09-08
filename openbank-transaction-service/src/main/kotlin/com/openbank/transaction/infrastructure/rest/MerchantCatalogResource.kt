@@ -8,6 +8,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.transaction.domain.model.MerchantDescriptor
 import com.openbank.transaction.infrastructure.image.LogoImages
+import com.openbank.transaction.infrastructure.ingest.LogoFetcher
 import com.openbank.transaction.infrastructure.persistence.entity.GeoPrecision
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantLogoEntity
@@ -19,6 +20,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -62,6 +64,7 @@ class MerchantCatalogResource(
     private val catalog: MerchantCatalogRepository,
     private val transactions: TransactionDescriptorRepository,
     private val logos: MerchantLogoRepository,
+    private val fetcher: LogoFetcher,
 ) {
 
     @GET
@@ -269,6 +272,87 @@ class MerchantCatalogResource(
         it.maxAge = LOGO_MAX_AGE_SECONDS
     }
 
+    /**
+     * Ingest a logo from a URL the operator names, instead of uploading the file by hand.
+     *
+     * **Why this is worth the risk it carries.** Without it the catalogue is filled one file at a
+     * time, and a catalogue that is filled by hand is one that stays at thirty rows — which is the
+     * failure the whole `merchant_catalog` history is about. With it, an operator working the
+     * unmatched worklist can resolve a merchant in one action.
+     *
+     * The risk is server-side request forgery, and [LogoFetcher] is where it is fenced: a host
+     * allowlist that is empty by default, HTTPS only, every resolved address checked to be publicly
+     * routable, and redirects refused rather than followed. Read that class before changing anything
+     * here — the guards are not interchangeable and each one is what makes another meaningful.
+     *
+     * What arrives is bytes, and they go through exactly the same decode / dimension-check /
+     * re-encode as an upload. Nothing about "we fetched it ourselves" makes the content trustworthy.
+     */
+    @POST
+    @Path("/{descriptorKey}/logo/fetch")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "merchant.update", resource = "")
+    @Operation(summary = "Ingest a merchant logo from an allowlisted source URL")
+    suspend fun fetchLogo(
+        @PathParam("descriptorKey") descriptorKey: String,
+        @Context security: SecurityContext,
+        request: MerchantLogoFetchRequest?,
+    ): Response {
+        val key = MerchantDescriptor.normalise(descriptorKey)
+            ?: return badRequest("descriptorKey normalises to nothing identifying")
+        // Nullable body + explicit check: JAX-RS injects null for an absent body, and a non-nullable
+        // parameter would turn the commonest mistake into a 500 (fleet rule).
+        val sourceUrl = request?.sourceUrl?.trim()?.ifBlank { null }
+            ?: return badRequest("sourceUrl is required")
+
+        val fetched = try {
+            fetcher.fetch(sourceUrl)
+        } catch (e: LogoFetcher.RefusedException) {
+            return badRequest(e.message ?: "the source URL was refused")
+        }
+        val rendered = try {
+            LogoImages.render(fetched.bytes)
+        } catch (e: LogoImages.RejectedException) {
+            return badRequest("fetched content was rejected: ${e.message}")
+        }
+
+        val entity = MerchantLogoEntity().also {
+            it.descriptorKey = key
+            it.bytes64 = rendered.small
+            it.bytes128 = rendered.large
+            it.contentType = LogoImages.CONTENT_TYPE
+            it.contentHash = rendered.contentHash
+            // The URL AS FETCHED, not as typed: it is licence evidence, so it has to be the thing
+            // that actually answered.
+            it.sourceUrl = fetched.sourceUrl
+            it.licence = request.licence?.trim()?.ifBlank { null }
+            it.attribution = request.attribution?.trim()?.ifBlank { null }
+            it.uploadedBy = security.userPrincipal?.name
+            it.updatedAt = Instant.now()
+        }
+        val created = logos.upsert(entity)
+            ?: return Response.status(Response.Status.NOT_FOUND)
+                .entity(mapOf("message" to "no catalogue entry under key '$key' to attach a logo to"))
+                .build()
+        val status = if (created) Response.Status.CREATED else Response.Status.OK
+        return Response.status(status).entity(MerchantLogoResponse(key, rendered.contentHash)).build()
+    }
+
+    /**
+     * Whether logo fetching is configured, and from where.
+     *
+     * The operator screen needs this to decide whether to offer the button at all: a feature that is
+     * off by design and a feature that is broken look identical from a 400, and an allowlist an
+     * operator cannot see is one they will guess at.
+     */
+    @GET
+    @Path("/logo-sources")
+    @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "merchant.list", resource = "")
+    @Operation(summary = "Whether logo fetching is enabled, and the hosts it may fetch from")
+    fun logoSources(): Response =
+        Response.ok(MerchantLogoSources(fetcher.isEnabled(), fetcher.allowedHosts().sorted())).build()
+
     private fun badRequest(message: String): Response =
         Response.status(Response.Status.BAD_REQUEST).entity(mapOf("message" to message)).build()
 
@@ -319,6 +403,21 @@ data class MerchantAdminResponse(
 data class MerchantPage(val data: List<MerchantAdminResponse>, val total: Long)
 
 data class UnmatchedDescriptor(val descriptorKey: String, val occurrences: Int)
+
+/**
+ * Where to fetch a logo from, and under what terms it may be shown.
+ *
+ * `licence` and `attribution` are the operator's assertion about the source, not something the fetch
+ * can establish — an image file does not carry its own licence.
+ */
+data class MerchantLogoFetchRequest(
+    val sourceUrl: String? = null,
+    val licence: String? = null,
+    val attribution: String? = null,
+)
+
+/** Whether logo fetching is configured, and the hosts it is allowed to reach. */
+data class MerchantLogoSources(val enabled: Boolean, val allowedHosts: List<String>)
 
 /** What a logo write returns: the key it landed under and the hash that now identifies its bytes. */
 data class MerchantLogoResponse(val descriptorKey: String, val contentHash: String)

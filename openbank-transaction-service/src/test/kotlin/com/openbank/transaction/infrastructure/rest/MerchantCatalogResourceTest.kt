@@ -5,6 +5,7 @@
 package com.openbank.transaction.infrastructure.rest
 
 import com.openbank.transaction.infrastructure.image.LogoImages
+import com.openbank.transaction.infrastructure.ingest.LogoFetcher
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantLocationEntity
 import com.openbank.transaction.infrastructure.persistence.entity.MerchantLogoEntity
@@ -42,6 +43,7 @@ class MerchantCatalogResourceTest {
     private lateinit var logos: MerchantLogoRepository
     private lateinit var locations: MerchantLocationRepository
     private lateinit var locationResource: MerchantLocationResource
+    private lateinit var fetcher: LogoFetcher
     private lateinit var resource: MerchantCatalogResource
 
     @BeforeEach
@@ -50,7 +52,10 @@ class MerchantCatalogResourceTest {
         transactions = mockk()
         logos = mockk()
         locations = mockk()
-        resource = MerchantCatalogResource(catalog, transactions, logos)
+        // Fetching OFF, which is the default everywhere: these tests are about the catalogue, and a
+        // configured allowlist would put a real network call behind them.
+        fetcher = LogoFetcher(java.util.Optional.empty())
+        resource = MerchantCatalogResource(catalog, transactions, logos, fetcher)
         locationResource = MerchantLocationResource(locations)
         coEvery { catalog.upsert(any()) } returns true
         coEvery { catalog.findByKey(any()) } returns null
