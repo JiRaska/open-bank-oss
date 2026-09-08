@@ -27,11 +27,11 @@ openbank-billing-service POST /api/v1/fees/reverse  # creation POST with no idem
 openbank-clearing-service POST /api/v1/clearing/batches/{id}/settle  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-clearing-service POST /api/v1/clearing/cycle/trigger  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-clearing-service POST /api/v1/clearing/submit  # creation POST with no idempotency key today — burn-down #8351
-openbank-consent-service POST /api/v1/consents  # creation POST with no idempotency key today — burn-down #8351
+openbank-consent-service POST /api/v1/consents  # Berlin Group tppTransactionId / X-Request-ID replay enforced in code, keys optional by contract — ADR-0293 exception; burn-down #8351
 openbank-consent-service POST /api/v1/consents/{id}/activate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-consent-service POST /api/v1/consents/{id}/reject  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-consent-service POST /api/v1/consents/{id}/validate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
-openbank-consent-service POST /api/v1/suppressions  # creation POST with no idempotency key today — burn-down #8351
+openbank-consent-service POST /api/v1/suppressions  # natural-key idempotency on (partyId,scope,value) over active rows, check-first + uq_suppressions_active_natural (V8) — ADR-0293 exception; burn-down #8351
 openbank-consent-service POST /api/v1/suppressions/{id}/revoke  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegation-role-presets  # natural-key idempotency on (name,resourceType), check-first + uq_delegation_role_presets_name_type (V15) — ADR-0292 exception; burn-down #8351
 openbank-delegation-service POST /api/v1/delegations  # Berlin Group X-Request-ID replay enforced in code, key optional by contract — ADR-0292 exception; burn-down #8351
