@@ -5140,10 +5140,43 @@ class CustomerEdgeResource(
             put("currency", product.path("currency").asText())
             product.get("minBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("minimumDeposit", it) }
             product.get("maxBalance")?.takeIf { !it.isNull }?.let { set<JsonNode>("maximumDeposit", it) }
-            put("annualRate", configuration.path("interestRateAnnual").asDouble())
-            set<JsonNode>("term", configuration)
+            put("annualRate", ratePercent(configuration, "interestRateAnnual") ?: 0.0)
+            set<JsonNode>("term", configWithPercentRates(configuration, "interestRateAnnual"))
             set<JsonNode>("termsAndConditions", product.path("termsAndConditions"))
         }
+    }
+
+    /**
+     * The platform stores every rate as a decimal FRACTION (0.058); the customer contract states
+     * them as a PERCENT (5.8), which is what `annualRatePercent` on the interest endpoint has
+     * always done and what the schema's own `example: 5.8` promises. The two conventions met here
+     * and nobody converted, so the app rendered 5.8 % p.a. as "0.1 %" and projected a hundredth of
+     * the interest — while the product's own description string, written by hand, said 5,8 %.
+     *
+     * Converting at this boundary rather than in each client keeps one rule: fractions inside,
+     * percent at the customer edge.
+     */
+    private fun ratePercent(node: JsonNode, field: String): Double? =
+        node.get(field)?.takeIf { it.isNumber }?.decimalValue()
+            ?.multiply(java.math.BigDecimal(RATE_FRACTION_TO_PERCENT))
+            ?.stripTrailingZeros()
+            ?.toDouble()
+
+    /** The catalogue's own config, with every rate inside it restated as a percent. */
+    private fun configWithPercentRates(configuration: JsonNode, vararg rateFields: String): ObjectNode {
+        val out = configuration.deepCopy<ObjectNode>()
+        rateFields.forEach { field -> ratePercent(configuration, field)?.let { out.put(field, it) } }
+        val tiers = configuration.get("interestTiers")
+        if (tiers != null && tiers.isArray) {
+            val converted = objectMapper.createArrayNode()
+            tiers.forEach { tier ->
+                val copy = tier.deepCopy<ObjectNode>()
+                ratePercent(tier, "rateAnnual")?.let { copy.put("rateAnnual", it) }
+                converted.add(copy)
+            }
+            out.set<JsonNode>("interestTiers", converted)
+        }
+        return out
     }
 
     /**
@@ -5174,11 +5207,13 @@ class CustomerEdgeResource(
             product.get("fee")?.takeIf { !it.isNull }?.let { set<JsonNode>("fee", it) }
             // Price, in the catalogue's own shape. Never flattened, never interpolated.
             product.get("termDepositConfig")?.takeIf { it.isObject }?.let { configuration ->
-                put("annualRate", configuration.path("interestRateAnnual").asDouble())
-                set<JsonNode>("term", configuration)
+                put("annualRate", ratePercent(configuration, "interestRateAnnual") ?: 0.0)
+                set<JsonNode>("term", configWithPercentRates(configuration, "interestRateAnnual"))
             }
             product.get("savingsConfig")?.takeIf { it.isObject }?.let { configuration ->
-                set<JsonNode>("savings", configuration)
+                // Tiers carry rates too, and a savings card reads them to state its range — the
+                // same conversion, or the range is a hundredth of the truth.
+                set<JsonNode>("savings", configWithPercentRates(configuration, "baseRateAnnual"))
             }
             set<JsonNode>("termsAndConditions", product.path("termsAndConditions"))
         }
@@ -5428,6 +5463,13 @@ class CustomerEdgeResource(
         private const val AUDIT_DETAIL_MAX_CHARS = 300
 
         /** HTTP status classes start at this value; named to keep upstream-retry policy legible. */
+        /**
+         * Rates are fractions inside the platform and percent at the customer edge. The scaling is
+         * done in BigDecimal because 0.058 * 100 is 5.800000000000001 in binary floating point, and
+         * a price with a tail of noise on it is not a price anybody should have to explain.
+         */
+        private const val RATE_FRACTION_TO_PERCENT = 100
+
         private const val UPSTREAM_SERVER_ERROR_MIN = 500
 
         /** PSD2 RTS 2018/389 Art. 15: same-person, same-PSP transfers are SCA-exempt. */
