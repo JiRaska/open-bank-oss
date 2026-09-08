@@ -49,6 +49,21 @@ interface ExternalDisclosureRepository {
 }
 
 /**
+ * Narrow internal boundary to document-service. The caller receives only a newly recipient-bound
+ * and institutionally sealed PDF — never the original object-store bytes.
+ */
+data class ExternalDisclosureArtifact(val contentType: String, val bytes: ByteArray)
+
+interface ExternalDisclosureDocumentExporter {
+    suspend fun export(
+        documentId: UUID,
+        disclosureId: UUID,
+        recipientLabel: String,
+        issuedAt: java.time.Instant,
+    ): ExternalDisclosureArtifact
+}
+
+/**
  * The aggregate changed after the use case read it. Retrying from a fresh read is safe; writing the
  * detached snapshot is not, because it could reopen a grant a concurrent transition already closed.
  */

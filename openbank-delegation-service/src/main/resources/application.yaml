@@ -130,6 +130,10 @@ quarkus:
       url: ${CARD_ISSUANCE_SERVICE_URL:http://localhost:8118}
       connect-timeout: 2000
       read-timeout: 2000
+    document-service:
+      url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
+      connect-timeout: 2000
+      read-timeout: 3000
 
   management:
     enabled: true

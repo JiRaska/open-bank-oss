@@ -132,6 +132,10 @@ spec:
               value: http://account-service.accounts.svc:8100
             - name: CARD_ISSUANCE_SERVICE_URL
               value: http://card-issuance-service.payments.svc:8118
+            # Recipient-bound sealed disclosure export. The endpoint's OPA rule accepts
+            # only the named disclosure OIDC client; this URL also derives the network edge.
+            - name: DOCUMENT_SERVICE_URL
+              value: http://document-service.documents.svc:8143
             # Keycloak runs in `iam`, not `platform`. A wrong host does not fail the boot
             # (OIDC defers discovery to the first request) — it just makes every
             # authenticated call fail later with `Name does not resolve`.
