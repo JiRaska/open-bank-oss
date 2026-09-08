@@ -12,6 +12,7 @@ import com.openbank.document.domain.model.SignatureLevel
 import com.openbank.document.domain.model.SignerStatus
 import com.openbank.document.domain.model.TemplateEngine
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -98,6 +99,25 @@ interface DocumentQueryUseCase {
 
     /** The document previously issued under [key] (e.g. onboarding idempotency key), or null. */
     suspend fun findByIdempotencyKey(key: String): Document?
+}
+
+data class ExportExternalDisclosureCommand(
+    val documentId: UUID,
+    val disclosureId: UUID,
+    val recipientLabel: String,
+    val issuedAt: Instant,
+)
+
+data class SealedExternalDisclosure(
+    val documentId: UUID,
+    val disclosureId: UUID,
+    val contentType: String,
+    val bytes: ByteArray,
+)
+
+/** Internal-only export: never returns the original storage object. */
+interface ExternalDisclosureExportUseCase {
+    suspend fun export(command: ExportExternalDisclosureCommand): SealedExternalDisclosure
 }
 
 /** Opens signing ceremonies and records signer decisions. */

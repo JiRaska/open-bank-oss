@@ -4,6 +4,7 @@
 
 package com.openbank.document.infrastructure.render
 
+import com.openbank.document.application.port.out.DisclosureWatermarkPort
 import com.openbank.document.application.port.out.ExternalDisclosureSealPort
 import com.openbank.document.application.port.out.SignatureSealPort
 import com.openbank.document.domain.model.SignatureCeremony
@@ -82,7 +83,8 @@ class PdfBoxPadesSealAdapter(
     @ConfigProperty(name = "openbank.signature.allow-ephemeral-seals", defaultValue = "false")
     private val allowEphemeralSeals: Boolean,
 ) : SignatureSealPort,
-    ExternalDisclosureSealPort {
+    ExternalDisclosureSealPort,
+    DisclosureWatermarkPort {
 
     private val logger = Logger.getLogger(PdfBoxPadesSealAdapter::class.java)
 
@@ -163,6 +165,19 @@ class PdfBoxPadesSealAdapter(
                     "External document disclosure $disclosureId",
                 )
             }
+        }
+
+    override suspend fun watermark(pdf: ByteArray, recipientLabel: String, disclosureId: UUID): ByteArray =
+        withContext(Dispatchers.IO) {
+            require(recipientLabel.isNotBlank()) { "external disclosure recipient label is required" }
+            require(!PadesSigning.hasSignatureNamed(pdf, ORGANIZATION_NAME)) {
+                "cannot watermark an already institutionally sealed document"
+            }
+            PadesSigning.stampSignatureBlock(
+                pdf,
+                "EXTERNAL DOCUMENT DISCLOSURE",
+                listOf("Recipient: $recipientLabel", "Disclosure reference: $disclosureId"),
+            )
         }
 
     private fun loadFromKeystore(path: String, password: String): SigningIdentity {
