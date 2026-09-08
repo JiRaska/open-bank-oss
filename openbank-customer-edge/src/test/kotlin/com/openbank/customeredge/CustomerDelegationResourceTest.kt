@@ -86,7 +86,7 @@ class CustomerDelegationResourceTest {
         val party = slot<String>()
         val body = slot<String>()
         val idempotencyKey = slot<String?>()
-        every { upstream.post(capture(url), capture(party), capture(body), capture(idempotencyKey)) } returns
+        every { upstream.post(capture(url), capture(party), capture(body), captureNullable(idempotencyKey)) } returns
             Response.ok().build()
 
         val response = resource(upstream).confirmRecertification(GRANT_ID, "review-once")
