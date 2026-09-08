@@ -20,6 +20,8 @@ data class SanctionsList(
     val cronDays: String,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** #9048: an operator-requested refresh pending the scheduler tick; null when none is owed. */
+    val refreshRequestedAt: Instant? = null,
 )
 
 data class UpdateSanctionsListRequest(
