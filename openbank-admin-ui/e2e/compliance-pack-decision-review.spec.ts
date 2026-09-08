@@ -30,8 +30,9 @@ test('checker reviews exact pack, retains a refusal, and retries the unchanged d
   await page.route('**/api/svc/lending-service/api/v1/lending/compliance-packs/active', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
   )
+  let decided = false
   await page.route('**/api/svc/lending-service/api/v1/lending/compliance-packs/proposals/pending', route =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([proposal]) }),
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(decided ? [] : [proposal]) }),
   )
 
   let attempts = 0
@@ -42,19 +43,27 @@ test('checker reviews exact pack, retains a refusal, and retries the unchanged d
     if (attempts === 1) {
       return route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ error: 'Checker must differ from maker' }) })
     }
+    decided = true
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
   })
 
   await page.goto('/lending/compliance-packs')
   await page.getByRole('textbox', { name: 'Decision reason' }).fill('independent legal review')
-  await page.getByRole('button', { name: 'Approve' }).click()
+  const approve = page.getByRole('button', { name: 'Approve' })
+  await approve.click()
 
   const dialog = page.getByRole('alertdialog', { name: 'Review pack activation' })
+  await expect(dialog.getByRole('button', { name: 'Back' })).toBeFocused()
   await expect(dialog).toContainText('immediately governs new lending applications')
   await expect(dialog).toContainText(proposal.contentHash)
   await expect(dialog).toContainText(proposal.id)
   await expect(dialog).toContainText('independent legal review')
   expect(attempts).toBe(0)
+
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(approve).toBeFocused()
+  await approve.click()
 
   await dialog.getByRole('button', { name: 'Confirm activation' }).click()
   await expect(dialog.getByTestId('decision-review-error')).toContainText('Checker must differ from maker')
@@ -62,6 +71,7 @@ test('checker reviews exact pack, retains a refusal, and retries the unchanged d
 
   await dialog.getByRole('button', { name: 'Confirm activation' }).click()
   await expect(dialog).toBeHidden()
+  await expect(page.getByRole('region', { name: 'Compliance pack proposals' })).toBeFocused()
   expect(attempts).toBe(2)
   expect(payloads).toEqual([
     { approve: true, reason: 'independent legal review' },

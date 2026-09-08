@@ -73,7 +73,8 @@ export default function CompliancePacksPage() {
   const [detail, setDetail] = useState<PackActivationView | null>(null)
   const [review, setReview] = useState<{ proposal: PackActivationView; approve: boolean } | null>(null)
   const reviewCancelRef = useRef<HTMLButtonElement>(null)
-  const reviewConfirmRef = useRef<HTMLButtonElement>(null)
+  const reviewTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const pendingWorkspaceRef = useRef<HTMLDivElement>(null)
   const detailTriggerRef = useRef<HTMLElement | null>(null)
 
   const openDetail = (pack: PackActivationView, event: React.MouseEvent<HTMLElement>) => {
@@ -178,8 +179,8 @@ export default function CompliancePacksPage() {
         ? t('Pack aktivován. Guard ho používá okamžitě, bez restartu služby.',
             'Pack activated. The origination guard uses it immediately — no service restart.')
         : t('Návrh zamítnut.', 'Proposal rejected.'))
-      setReview(null)
       await load()
+      setReview(null)
     } catch {
       setError(t('lending-service je nedostupný.', 'lending-service is unreachable.'))
     } finally {
@@ -283,7 +284,7 @@ export default function CompliancePacksPage() {
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <Clock aria-hidden="true" size={15} /> {t('Čeká na druhý pár očí', 'Awaiting a checker')} ({pending.length})
       </div>
-      <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
+      <div ref={pendingWorkspaceRef} role="region" tabIndex={-1} aria-label={t('Návrhy compliance packů', 'Compliance pack proposals')} className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
         {pending.map(p => (
           <div
             key={p.id}
@@ -313,10 +314,10 @@ export default function CompliancePacksPage() {
                 onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}
                 style={{ fontSize: 12 }}
               />
-              <button type="button" className="btn btn-primary" disabled={busyId === p.id} onClick={() => { setError(null); setReview({ proposal: p, approve: true }) }} style={{ fontSize: 12 }}>
+              <button type="button" className="btn btn-primary" disabled={busyId === p.id} onClick={event => { reviewTriggerRef.current = event.currentTarget; setError(null); setReview({ proposal: p, approve: true }) }} style={{ fontSize: 12 }}>
                 {t('Schválit', 'Approve')}
               </button>
-              <button type="button" className="btn btn-secondary" disabled={busyId === p.id} onClick={() => { setError(null); setReview({ proposal: p, approve: false }) }} style={{ fontSize: 12 }}>
+              <button type="button" className="btn btn-secondary" disabled={busyId === p.id} onClick={event => { reviewTriggerRef.current = event.currentTarget; setError(null); setReview({ proposal: p, approve: false }) }} style={{ fontSize: 12 }}>
                 {t('Zamítnout', 'Reject')}
               </button>
               </Can>
@@ -331,39 +332,35 @@ export default function CompliancePacksPage() {
       </div>
 
       {review && (
-        <div
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="pack-decision-review-title"
-          aria-describedby="pack-decision-review-impact"
-          onKeyDown={event => {
-            if (event.key === 'Escape' && busyId !== review.proposal.id) {
-              setReview(null)
-              setError(null)
-            }
-            if (event.key === 'Tab') {
-              const first = reviewCancelRef.current
-              const last = reviewConfirmRef.current
-              if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault()
-                last?.focus()
-              } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault()
-                first?.focus()
-              }
-            }
-          }}
-          style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-        >
-          <div className="card" style={{ width: 'min(620px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}>
-            <h2 id="pack-decision-review-title" style={{ margin: 0, fontSize: 17 }}>
+        <Dialog.Root open onOpenChange={open => { if (!open && busyId !== review.proposal.id) { setReview(null); setError(null) } }}>
+          <Dialog.Portal>
+          <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)' }} />
+          <Dialog.Content
+            className="card"
+            role="alertdialog"
+            aria-busy={busyId === review.proposal.id}
+            onOpenAutoFocus={event => { event.preventDefault(); reviewCancelRef.current?.focus() }}
+            onCloseAutoFocus={event => {
+              event.preventDefault()
+              requestAnimationFrame(() => {
+                const trigger = reviewTriggerRef.current
+                if (trigger?.isConnected && !trigger.disabled) trigger.focus()
+                else pendingWorkspaceRef.current?.focus()
+              })
+            }}
+            onEscapeKeyDown={event => { if (busyId === review.proposal.id) event.preventDefault() }}
+            onPointerDownOutside={event => { if (busyId === review.proposal.id) event.preventDefault() }}
+            onInteractOutside={event => { if (busyId === review.proposal.id) event.preventDefault() }}
+            style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(620px, calc(100vw - 40px))', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}
+          >
+            <Dialog.Title style={{ margin: 0, fontSize: 17 }}>
               {review.approve ? t('Zkontrolovat aktivaci packu', 'Review pack activation') : t('Zkontrolovat zamítnutí packu', 'Review pack rejection')}
-            </h2>
-            <p id="pack-decision-review-impact" style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.55 }}>
+            </Dialog.Title>
+            <Dialog.Description style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.55 }}>
               {review.approve
                 ? t('Po potvrzení začne tento pack okamžitě řídit nové úvěrové žádosti. Není potřeba restart ani release služby.', 'Once confirmed, this pack immediately governs new lending applications. No service restart or release is required.')
                 : t('Po potvrzení bude návrh definitivně zamítnut a nebude ovlivňovat nové úvěrové žádosti.', 'Once confirmed, the proposal is rejected and will not affect new lending applications.')}
-            </p>
+            </Dialog.Description>
             <dl style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: '8px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
               <dt>{t('Jurisdikce', 'Jurisdiction')}</dt><dd>{review.proposal.jurisdiction}</dd>
               <dt>{t('Produkt', 'Product')}</dt><dd>{review.proposal.productType}</dd>
@@ -377,17 +374,18 @@ export default function CompliancePacksPage() {
             <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               {t('Four-eyes kontrolu vynucuje lending-service: checker musí být jiný principál než maker.', 'The lending service enforces four-eyes: the checker must be a different principal from the maker.')}
             </p>
-            {error && <div data-testid="decision-review-error" style={{ padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+            {error && <div role="alert" data-testid="decision-review-error" style={{ padding: 10, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
               <button ref={reviewCancelRef} autoFocus type="button" className="btn btn-secondary" disabled={busyId === review.proposal.id} onClick={() => { setReview(null); setError(null) }}>
                 {t('Zpět', 'Back')}
               </button>
-              <button ref={reviewConfirmRef} type="button" className={review.approve ? 'btn btn-primary' : 'btn btn-secondary'} aria-busy={busyId === review.proposal.id} disabled={busyId === review.proposal.id} onClick={() => void decide(review.proposal.id, review.approve)}>
+              <button type="button" className={review.approve ? 'btn btn-primary' : 'btn btn-secondary'} aria-busy={busyId === review.proposal.id} disabled={busyId === review.proposal.id} onClick={() => void decide(review.proposal.id, review.approve)}>
                 {busyId === review.proposal.id ? t('Odesílám…', 'Submitting…') : review.approve ? t('Potvrdit aktivaci', 'Confirm activation') : t('Potvrdit zamítnutí', 'Confirm rejection')}
               </button>
             </div>
-          </div>
-        </div>
+          </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
 
       <Dialog.Root open={detail !== null} onOpenChange={open => { if (!open) setDetail(null) }}>
