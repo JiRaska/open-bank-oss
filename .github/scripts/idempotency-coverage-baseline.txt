@@ -16,11 +16,11 @@ openbank-account-service POST /api/v1/accounts/{accountId}/pockets  # creation P
 openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals  # creation POST with no idempotency key today — burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}/decide  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/unfreeze  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
-openbank-balance-service POST /api/v1/balances/reconciliation  # creation POST with no idempotency key today — burn-down #8351
-openbank-balance-service POST /api/v1/balances/{accountId}/credit  # creation POST with no idempotency key today — burn-down #8351
-openbank-balance-service POST /api/v1/balances/{accountId}/debit  # creation POST with no idempotency key today — burn-down #8351
-openbank-balance-service POST /api/v1/balances/{accountId}/holds  # creation POST with no idempotency key today — burn-down #8351
-openbank-balance-service POST /api/v1/balances/{accountId}/initialize  # creation POST with no idempotency key today — burn-down #8351
+openbank-balance-service POST /api/v1/balances/reconciliation  # operator trigger, mutates no balance; re-run records a fresh report by design — ADR-0287 exception; burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/credit  # natural-key idempotency via balance_movement dedup ledger (V8) — ADR-0287 exception; burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/debit  # natural-key idempotency via balance_movement dedup ledger (V8) — ADR-0287 exception; burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/holds  # natural-key idempotency on (accountId,currency,referenceId), check-first + uq_balance_holds_reference (V14) — ADR-0287 exception; burn-down #8351
+openbank-balance-service POST /api/v1/balances/{accountId}/initialize  # natural-key idempotency on (accountId,currency) — ADR-0287 exception; burn-down #8351
 openbank-billing-service POST /api/v1/fees/assess  # creation POST with no idempotency key today — burn-down #8351
 openbank-billing-service POST /api/v1/fees/post  # creation POST with no idempotency key today — burn-down #8351
 openbank-billing-service POST /api/v1/fees/reverse  # creation POST with no idempotency key today — burn-down #8351
@@ -35,6 +35,7 @@ openbank-consent-service POST /api/v1/suppressions  # creation POST with no idem
 openbank-consent-service POST /api/v1/suppressions/{id}/revoke  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegation-role-presets  # creation POST with no idempotency key today — burn-down #8351
 openbank-delegation-service POST /api/v1/delegations  # creation POST with no idempotency key today — burn-down #8351
+openbank-delegation-service POST /api/v1/delegations/approvals/{approvalId}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by terminal proposal state (isIdempotentReplay returns the recorded decision; a conflicting re-decision is a 409); verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/check  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/preview  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/{id}/accept  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
@@ -89,17 +90,27 @@ openbank-sca-service POST /api/v1/sca/challenges  # creation POST with no idempo
 openbank-sca-service POST /api/v1/sca/challenges/{id}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sca-service POST /api/v1/sca/challenges/{id}/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sca-service POST /api/v1/sca/parties/{partyId}/devices  # creation POST with no idempotency key today — burn-down #8351
-openbank-sdd-service POST /api/v1/sdd/collections/authorise  # creation POST with no idempotency key today — burn-down #8351
-openbank-sdd-service POST /api/v1/sdd/mandates  # creation POST with no idempotency key today — burn-down #8351
+openbank-sdd-service POST /api/v1/sdd/collections/authorise  # natural-key idempotency on (mandateId, UMR, dueDate) — ADR-0289 exception; authorise replay-guarded since #8351
+openbank-sdd-service POST /api/v1/sdd/mandates  # natural-key idempotency on (creditorId, UMR) — ADR-0289 exception; burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/cancel  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/confirm  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sdd-service POST /api/v1/sdd/mandates/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sepa-instant POST /api/v1/sepa-instant/{paymentId}/recall  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sepa-payment POST /api/v1/sepa-payments/returns  # creation POST with no idempotency key today — burn-down #8351
-openbank-standing-order-service POST /api/v1/standing-orders  # creation POST with no idempotency key today — burn-down #8351
 openbank-standing-order-service POST /api/v1/standing-orders/{id}/pause  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-standing-order-service POST /api/v1/standing-orders/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-swift-service POST /api/v1/swift/{id}/ack  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-swift-service POST /api/v1/swift/{id}/reject  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-vop-service POST /api/v1/vop/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+
+# card-issuance joined money_path_services in ADR-0283 phase 0 (#8808). Nothing about these seven
+# endpoints changed; the classification widened, which is the gate working — a service that ships
+# an authorisation decision was being scored by the lenient rule. Burn-down: #8845.
+openbank-card-issuance-service POST /api/v1/cards/{id}/activate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/block  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/cancel  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/authorizations  # decision endpoint that persists nothing — CardAuthorizationPolicy is pure and the handler only reads the card and its rules, so a replay recomputes the same answer; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/outbox/requeue  # operator replay of DEAD outbox rows (ROLE_ADMIN) — a second run moves 0 rows because the first left none DEAD; verify in burn-down #8351

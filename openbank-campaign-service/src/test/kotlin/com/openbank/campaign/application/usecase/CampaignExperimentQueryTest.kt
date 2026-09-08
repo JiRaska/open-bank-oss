@@ -7,6 +7,7 @@ import com.openbank.campaign.application.port.out.CampaignExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.ExperimentCohortMetrics
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -75,6 +76,7 @@ class CampaignExperimentQueryTest {
             id = campaignId,
             name = "experiment",
             goal = "open an account",
+            productKind = CampaignProductKind.NONE,
             segmentRef = SegmentRef("eligible", 1),
             steps = listOf(CampaignStep(0, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0)),
             conversionRule = "ACCOUNT_OPENED",

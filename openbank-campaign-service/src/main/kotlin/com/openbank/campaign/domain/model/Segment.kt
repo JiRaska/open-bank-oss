@@ -102,15 +102,20 @@ sealed class SegmentRule {
      * unmasked. The 59 rows behind that measurement predate the field. A claim about data is a
      * claim with a shelf life, and nothing re-checked this one.
      *
-     * READS BRONZE, NOT SILVER, AND THAT IS THE WHOLE CARE IN THIS RULE. Silver keeps only the
-     * LATEST event per (aggregate_type, aggregate_id), and of the four account events only
-     * `AccountCreatedEvent` carries `partyId` — `AccountStatusChanged`, `AccountClosed` and
-     * `SavingsWithdrawalApproved` do not. So an account that has ever changed status has a silver
-     * row with no `partyId` at all, and a silver-based subquery would silently omit exactly the
-     * parties with the most account activity. That is the under-counting failure this rule's own
-     * neighbourhood already records: a fail-closed evaluator renders a missing party as "did not
-     * match", which is indistinguishable from a correct answer. `TenureAtLeastDays` reaches into
-     * bronze for the same reason and says so.
+     * READS THE SHARED `silver_party_accounts` VIEW, and does not re-derive the resolution. That
+     * view (ADR-0210 D2, `V5__party_accounts.sql`) already extracts `partyId` out of ACCOUNT events
+     * in bronze, and its own header says why a second copy is dangerous: the account-to-party
+     * resolution IS the isolation boundary of the Customer 360, so "a caller that widens its own
+     * copy shows another customer's accounts". The first version of this rule re-derived the
+     * subquery inline and was byte-for-byte the same predicate — which is exactly how two copies
+     * start, identical and free to drift apart afterwards.
+     *
+     * The view reads BRONZE rather than silver, and that is still the load-bearing choice, now made
+     * once instead of twice: silver keeps only the LATEST event per aggregate, and of the four
+     * account events only `AccountCreatedEvent` carries `partyId`. An account that has ever changed
+     * status therefore has a silver row with no party link, and a silver-based resolution would
+     * omit exactly the parties with the most account activity — which a fail-closed evaluator
+     * renders as "did not match", indistinguishable from a correct answer.
      *
      * WHAT IT DOES NOT MEAN: "currently holds an OPEN account". Excluding closed accounts is
      * expressible — the terminal signals are `event_type = 'AccountClosed'` and a payload
@@ -121,9 +126,7 @@ sealed class SegmentRule {
     data object HasAccount : SegmentRule() {
         override fun toSql(paramPrefix: String, params: MutableMap<String, Any>): String =
             "(upper(aggregate_type) = 'PARTY' AND aggregate_id IN (" +
-                "SELECT JSONExtractString(payload, 'partyId') FROM openbank_analytics.bronze_events " +
-                "WHERE upper(aggregate_type) = 'ACCOUNT' " +
-                "AND JSONExtractString(payload, 'partyId') != ''))"
+                "SELECT party_id FROM openbank_analytics.silver_party_accounts))"
     }
 
     /**

@@ -66,9 +66,32 @@ spec:
       # authenticated request — the trust levels must not be merged into one stream.
       - resource: { type: topic, name: openbank.credit.funnel.events, patternType: literal }
         operations: [Read, Describe]
+      # The credit lifecycle stream (#8893): engine decisions and the loan book's IFRS 9 staging.
+      - resource: { type: topic, name: openbank.lending.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      # ADR-0282 phase 1 (#8792): the card, lending, standing-order and FX streams. An ACL missing
+      # here is not a red pod — the consumer retries the authorization failure forever and the
+      # topics simply never arrive, which is #2598/#2629's exact shape.
+      - resource: { type: topic, name: openbank.cards.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.lending.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.standing-orders.order.event, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      - resource: { type: topic, name: openbank.fx.conversion.completed, patternType: literal }
+        operations: [Read, Describe]
         host: "*"
       # ADR-0192 in-app screen feedback (metadata + screenshot object key; never image bytes).
       - resource: { type: topic, name: openbank.feedback.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
+      # ADR-0284 D8 business onboarding + representation mandates — the business half of the
+      # customer graph. Read only; the sink never writes to a domain topic.
+      - resource: { type: topic, name: openbank.kyb.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
       # Privacy-safe campaign attribution: server-resolved campaign/step/channel plus app action.

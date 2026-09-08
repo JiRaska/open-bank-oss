@@ -47,6 +47,10 @@ import java.util.UUID
  * Boots Quarkus so the HTTP target hits the live `POST /api/v1/transactions`; `@TestSecurity`
  * matches the endpoint's `@RolesAllowed(Roles.OPERATOR)`. Message interactions need no endpoint —
  * the [PactVerifyProvider] method returns the wire JSON the provider would emit.
+ *
+ * The negative contract (an authenticated caller without ROLE_OPERATOR must answer 403) is pinned
+ * in the git-pact twin `TransactionPactFolderProviderVerificationTest`, which runs on every PR;
+ * this class is `pactbroker.url`-gated and would skip exactly where that pin is needed (ADR-0279 #3).
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
@@ -105,6 +109,17 @@ class TransactionPactProviderVerificationTest {
      * interaction — it proves the listing route exists on the BASE path with `accountId` as a query
      * parameter. A 404 would prove nothing, since Quarkus answers 404 for an absent route too.
      */
+    @State("a valid borrower account exists")
+    fun stateValidBorrowerAccountExists() {
+        // lending-service's BorrowerCreditPactConsumerTest (#8345): the loan disbursement CREDIT,
+        // which carries targetAccountId and NO sourceAccountId — hence a state of its own rather
+        // than reusing "a valid source account exists", which would be false about this payload.
+        // Intentionally empty, for the same reason as the state above: initiateTransaction does not
+        // require the account to pre-exist in this test's Postgres, only that the id parses as a
+        // UUID. Declared rather than left implicit because pact-jvm passes SILENTLY over an
+        // unhandled state name, which is how #468's missing states stayed invisible.
+    }
+
     @State("transaction-service is reachable and holds no transactions for the pact account")
     fun stateNoTransactionsForPactAccount() {
         // Intentionally empty — a fresh Testcontainer DB satisfies it by construction. Declared so

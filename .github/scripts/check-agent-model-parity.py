@@ -83,6 +83,13 @@ BASELINE_UNCOVERED = {
     "docs-truth-agent": "deepseek-ai/DeepSeek-V3.2",
     "authz-policy-auditor": "deepseek-ai/DeepSeek-V3.2",
     "flaky-test-hunter": "deepseek-ai/DeepSeek-V3.2",
+    # 2026-09-05, ADR-0284 D9. Both charters are `enabled: false` and have no runtime at all —
+    # they land ahead of the loop so the powers are bounded before the code exists. Neither can
+    # be served by CharterRegistry until that loop is written, so this is coverage debt by
+    # construction rather than drift; the entry fails the moment agent-service DOES declare them,
+    # which is the point at which the two copies of the model id could start disagreeing.
+    "kyb-analyst": "deepseek-ai/DeepSeek-V3.2",
+    "business-copilot": "deepseek-ai/DeepSeek-V3.2",
 }
 
 

@@ -87,27 +87,12 @@ WATCHED_KEYS = ("group.id", "auto.offset.reset")
 #   actually justified. `validate_baseline()` now refuses a `*` channel with exit 2, so the shape
 #   cannot come back by hand.
 BASELINE = {
-    ("openbank-account-service", "party-events-in", "auto.offset.reset"): "#2945 — declared earliest, effective default; replay risk makes the fix operational",
-    # NOT part of the #2945 decision. Arrived after the baseline and was absorbed by the `*` channel
-    # (#3058 -> #3928). Pinned here so it is a named, reviewable entry rather than an invisible one;
-    # the operational call (msg-override ConfigMap, i.e. a real replay on openbank.delegation.events)
-    # is still open and is exactly what the wildcard was hiding.
-    ("openbank-account-service", "delegation-events-in", "auto.offset.reset"): "#3928 — post-#2945 arrival, absorbed by the old `*` entry; replay decision still OPEN",
-    ("openbank-aml-service", "party-events-in", "auto.offset.reset"): "#2945 — same",
-    ("openbank-balance-service", "ledger-events-in", "auto.offset.reset"): "#2945 — same",
-    ("openbank-balance-service", "balance-init-in", "auto.offset.reset"): "#2945 — same",
-    ("openbank-document-service", "account-created-in", "auto.offset.reset"): "#2945 — same",
-    ("openbank-party-service", "kyc-events-in", "auto.offset.reset"): "#2945 — same",
-    ("openbank-party-service", "aml-events-in", "auto.offset.reset"): "#2945 — same",
-    ("openbank-party-service", "consent-events-in", "auto.offset.reset"): "#2945 — same",
-    ("openbank-statement-service", "account-events-in", "auto.offset.reset"): "#2945 — same",
-    # #4122/#4217/ADR-0248. The group.id entry that stood here is GONE: the deployed image now
-    # carries the channel (check-msg-channel-image-parity.py passes), so the override was added and
-    # the key is covered. Only auto.offset.reset remains, and for a different reason than the
-    # original deferral — not image parity, which is satisfied, but the #2945 replay rule: its
-    # declared `earliest` and its effective `latest` genuinely differ, so making it effective
-    # re-reads the retained log for a group already running as `latest`. Owner decision.
-    ("openbank-document-service", "billing-outbox-events-in", "auto.offset.reset"): "#2945 — declared earliest vs effective latest; setting it would replay the retained log",
+    # EMPTY since #8370: all eleven auto.offset.reset entries were resolved by option 1 (accept
+    # `latest`) — the inert dotted YAML key was deleted from every service's application.yaml, so
+    # the file now matches the connector's running reality and there is nothing left to baseline.
+    # Flipping any channel to a real `earliest` remains an owner decision with a replay window,
+    # done through a msg-override ConfigMap (config_ordinal=500), never through the YAML key.
+    # The historical per-entry notes lived at #2945/#3928 and in git history before this edit.
 }
 
 

@@ -64,3 +64,25 @@
   entry from `check-source-service-convention.py`'s `BASELINE` is the visible act that reopens it;
   the entry pins the `(module, value)` pair, so drifting to some third spelling fails the gate
   today regardless.
+
+- **The engine's DSTI is NOT the CNB definition, and both numbers now exist.**
+  `OriginationDecisionService.affordabilityRatios` is the single definition of the affordability
+  ratios — the ASSESSMENT leg reads it, and so does the credit-risk read side, so a console figure
+  and an engine figure cannot diverge. It returns three numbers: `dsti` (new installment over
+  verified income, what `PolicyAttribute.DSTI` carries into the affordability table),
+  `dti`, and `dstiIncludingExistingDebt` (adds `existingDebtServiceMonthly`, the CNB/EBA
+  total-debt-service definition). **Only the first two reach the engine.** `existingDebtServiceMonthly`
+  is collected at intake and persisted, and no starter rule tests it, so an applicant already
+  servicing debt meets the `DSTI ≤ 0.45` floor with headroom the bank does not see. Deliberate:
+  moving the floor to total debt service tightens credit and is a policy decision under ADR-0213 D4,
+  not a refactor. Whether to take it is #8894. Do not "fix" it by editing the ratio — the read side
+  would silently start disagreeing with the decisions already pinned in the evidence chain.
+
+- **The engine cannot DECLINE for adverse bureau data — the port is a no-op.** `CreditBureauPort`'s
+  default binding returns no adverse flag, so `CUSTOMER_TYPE` is `STANDARD` for every applicant and
+  `starter-ex-adverse` (the only EXCLUSION rule) can never match. A decline rate near zero is a
+  statement about the missing feed, not about the applicants. The credit-risk console says so on the
+  page, and its per-rule hit count shows the rule at zero. Same shape as the PD/LGD placeholders:
+  `RiskParameterSource`'s no-op returns flat constants and stamps `model_version` on every
+  provisioning row, which is why an ECL figure must always be quoted with that version.
+

@@ -12,6 +12,7 @@ import com.openbank.kyc.domain.model.KycCaseStatus
 import com.openbank.kyc.domain.model.KycCheck
 import com.openbank.kyc.domain.model.KycEvent
 import com.openbank.kyc.domain.model.RiskLevel
+import com.openbank.kyc.domain.model.SubjectType
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
@@ -45,6 +46,9 @@ class KycCaseEntity : PanacheEntity() {
 
     @Column(name = "assigned_to")
     var assignedTo: String? = null
+
+    @Column(name = "subject_type", nullable = false)
+    var subjectType: String = "INDIVIDUAL"
 
     @Column(name = "checks_json", columnDefinition = "TEXT")
     lateinit var checksJson: String
@@ -315,6 +319,7 @@ private fun KycCase.toEntity(objectMapper: ObjectMapper) = KycCaseEntity().also 
     it.partyId = partyId
     it.status = status.name
     it.riskLevel = riskLevel.name
+    it.subjectType = subjectType.name
     it.assignedTo = assignedTo
     it.checksJson = objectMapper.writeValueAsString(checks)
     it.notes = notes
@@ -333,5 +338,6 @@ private fun KycCaseEntity.toDomain(objectMapper: ObjectMapper): KycCase {
     return KycCase(
         caseId, partyId, KycCaseStatus.valueOf(status), RiskLevel.valueOf(riskLevel),
         assignedTo, checks, notes, reviewedBy, reviewedAt, expiresAt, createdAt, updatedAt,
+        subjectType = SubjectType.valueOf(subjectType),
     )
 }
