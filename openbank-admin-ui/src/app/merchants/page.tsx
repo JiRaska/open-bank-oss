@@ -17,7 +17,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { RefreshCw, Store, Trash2, Plus, ImageUp, ImageOff, MapPin } from 'lucide-react'
+import { RefreshCw, Store, Trash2, Plus, ImageUp, ImageOff, MapPin, Download } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -67,6 +67,9 @@ type LocationDraft = {
   terminalId: string
 }
 
+/** Whether the service is configured to fetch logos, and from where. */
+type LogoSources = { enabled: boolean; allowedHosts: string[] }
+
 const EMPTY_LOCATION: LocationDraft = {
   cityToken: '', lat: '', lon: '', city: '', country: '', precision: 'CITY', terminalId: '',
 }
@@ -100,13 +103,19 @@ export default function MerchantsPage() {
   const [openLocations, setOpenLocations] = useState<string | null>(null)
   const [locations, setLocations] = useState<MerchantLocation[]>([])
   const [locationDraft, setLocationDraft] = useState<LocationDraft | null>(null)
+  // Null until asked. `enabled: false` is a real answer, not a failure: ingest is off unless an
+  // allowlist was configured, and the screen must not offer an action that cannot work.
+  const [logoSources, setLogoSources] = useState<LogoSources | null>(null)
+  const [fetchFor, setFetchFor] = useState<string | null>(null)
+  const [fetchUrl, setFetchUrl] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [listRes, unmatchedRes] = await Promise.all([
+      const [listRes, unmatchedRes, sourcesRes] = await Promise.all([
         fetch(svcUrl(SERVICE, CATALOGUE, { size: '100' }), { cache: 'no-store' }),
         fetch(svcUrl(SERVICE, `${CATALOGUE}/unmatched`, { limit: '25' }), { cache: 'no-store' }),
+        fetch(svcUrl(SERVICE, `${CATALOGUE}/logo-sources`), { cache: 'no-store' }),
       ])
       if (!listRes.ok) {
         setUnavailable({ kind: await classifyBffFailure(listRes) })
@@ -118,6 +127,9 @@ export default function MerchantsPage() {
       // The worklist failing must not blank the catalogue: they are separate reads, and a stale
       // or empty worklist is a smaller loss than losing the rows an operator is editing.
       setUnmatched(unmatchedRes.ok ? (await unmatchedRes.json() as Unmatched[]) : [])
+      // A failed read is treated as "off", not as "unknown": offering an action that will certainly
+      // be refused is worse than not offering it.
+      setLogoSources(sourcesRes.ok ? (await sourcesRes.json() as LogoSources) : { enabled: false, allowedHosts: [] })
       setUnavailable(null)
     } catch {
       setUnavailable({ kind: 'unreachable' })
@@ -229,6 +241,36 @@ export default function MerchantsPage() {
       await load()
     } catch {
       setActionError(t('Služba je nedostupná', 'The service is unreachable'))
+    }
+  }
+
+  const fetchLogo = async (descriptorKey: string) => {
+    setActionError(null)
+    setUploading(descriptorKey)
+    try {
+      const res = await fetch(
+        svcUrl(SERVICE, `${CATALOGUE}/${encodeURIComponent(descriptorKey)}/logo/fetch`),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceUrl: fetchUrl.trim(), licence: 'trademark' }),
+        },
+      )
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { message?: string } | null
+        // The service says exactly why — host not allowlisted, resolves inward, answered a redirect,
+        // not a raster image. Each of those is a different action for the operator, and collapsing
+        // them into "fetch failed" would leave them with a URL they cannot fix.
+        setActionError(body?.message ?? t('Stažení loga selhalo', 'Fetching the logo failed'))
+        return
+      }
+      setFetchFor(null)
+      setFetchUrl('')
+      await load()
+    } catch {
+      setActionError(t('Služba je nedostupná', 'The service is unreachable'))
+    } finally {
+      setUploading(null)
     }
   }
 
@@ -400,6 +442,33 @@ export default function MerchantsPage() {
           </div>
         </section>}
 
+        {fetchFor && logoSources?.enabled && <section className="card" style={{ marginBottom: 18 }}>
+          <h2 style={{ fontSize: 14, margin: '0 0 4px' }}>
+            {t('Stáhnout logo', 'Fetch a logo')} — <span style={{ fontFamily: 'var(--font-mono)' }}>{fetchFor}</span>
+          </h2>
+          <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>
+            {t(
+              'Server stáhne obrázek sám a uloží ho k sobě — do aplikace zákazníka nikdy neputuje cizí URL. Povolené zdroje:',
+              'The server downloads the image and stores it here; a third-party URL never reaches a customer app. Allowed sources:',
+            )}{' '}
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{logoSources.allowedHosts.join(', ')}</span>
+          </p>
+          <Field label={t('Adresa obrázku', 'Image URL')} value={fetchUrl} onChange={setFetchUrl} mono />
+          <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => void fetchLogo(fetchFor)}
+              disabled={uploading === fetchFor || !fetchUrl.trim()}
+            >
+              {uploading === fetchFor ? t('Stahuji…', 'Fetching…') : t('Stáhnout', 'Fetch')}
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setFetchFor(null)}>
+              {t('Zrušit', 'Cancel')}
+            </button>
+          </div>
+        </section>}
+
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px' }}>
             <h2 style={{ fontSize: 14, margin: 0 }}>
@@ -460,6 +529,14 @@ export default function MerchantsPage() {
                     >
                       <MapPin size={12} aria-hidden="true" />
                     </button>{' '}
+                    {logoSources?.enabled && <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => { setFetchFor(m.descriptorKey); setFetchUrl(''); setActionError(null) }}
+                      aria-label={t(`Stáhnout logo ${m.descriptorKey}`, `Fetch a logo for ${m.descriptorKey}`)}
+                    >
+                      <Download size={12} aria-hidden="true" />
+                    </button>}{' '}
                     <LogoButton
                       merchant={m}
                       busy={uploading === m.descriptorKey}
