@@ -59,7 +59,7 @@ class CustomerEdgeResourceTest {
     private fun termDepositProduct(id: UUID, public: Boolean = true, status: String = "ACTIVE"): String = """{
         "id":"$id", "code":"TERM_DEPOSIT_6M_CZK", "name":"Termínovaný vklad 6 měsíců",
         "type":"TERM_DEPOSIT", "currency":"CZK", "status":"$status", "isPublic":$public,
-        "minBalance":10000, "termDepositConfig":{"termMonths":6,"interestRateAnnual":5.8,
+        "minBalance":10000, "termDepositConfig":{"termMonths":6,"interestRateAnnual":0.058,
         "payoutFrequency":"AT_MATURITY","autoRenewEnabled":true,"earlyWithdrawalPenaltyPct":50.0,
         "earlyWithdrawalNoticeDays":0}, "termsAndConditions":[]
     }
@@ -215,6 +215,33 @@ class CustomerEdgeResourceTest {
         assertThat(items).hasSize(1)
         assertThat(items[0].path("id").asText()).isEqualTo(visible.toString())
         assertThat(items[0].path("term").path("termMonths").asInt()).isEqualTo(6)
+    }
+
+    /**
+     * The catalogue stores 0.058; the customer contract says 5.8. Until this was fixed the edge
+     * passed the fraction straight through, and the app rendered "0.1 % p.a." beside the product's
+     * own description reading "5,8 % p.a." and projected a hundredth of the interest.
+     *
+     * The old fixture said `interestRateAnnual: 5.8` — it encoded the assumption instead of the
+     * data, which is precisely why no test failed while every customer saw the wrong price.
+     */
+    @Test
+    fun `catalogue rates cross the edge as percent, not as the stored fraction`() {
+        val caller = UUID.randomUUID()
+        val offer = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("type=TERM_DEPOSIT") }, any()) } returns
+            Response.ok("[${termDepositProduct(offer)}]").build()
+
+        val response = resourceFor(upstream, caller).apply {
+            productCatalogUrl = "http://catalog"
+        }.listTermDepositOffers()
+
+        val item = ObjectMapper().readTree(response.entity.toString()).path("items")[0]
+        assertThat(item.path("annualRate").asDouble()).isEqualTo(5.8)
+        // The nested config is the catalogue's own shape, and it must not disagree with the
+        // scalar beside it: two rates for one product is worse than one wrong rate.
+        assertThat(item.path("term").path("interestRateAnnual").asDouble()).isEqualTo(5.8)
     }
 
     @Test
@@ -1765,7 +1792,7 @@ class CustomerEdgeResourceTest {
             "[${catalogueProduct(
                 UUID.randomUUID(),
                 type = "TERM_DEPOSIT",
-                extra = ""","termDepositConfig":{"termMonths":12,"interestRateAnnual":4.8}""",
+                extra = ""","termDepositConfig":{"termMonths":12,"interestRateAnnual":0.048}""",
             )}]",
         ).build()
         val offer = offersFrom(upstream, party).first()
