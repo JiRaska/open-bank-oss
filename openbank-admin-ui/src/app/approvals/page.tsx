@@ -11,6 +11,7 @@
 // author) is enforced by the agent.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import Link from 'next/link'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
@@ -20,7 +21,6 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
 import { resolveAgentIdentity, type AgentIdentityRegistry } from '@/lib/governance/agentIdentity'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
-import { trapDialogFocus } from '@/lib/a11y/trapDialogFocus'
 import {
   approvalWorkbenchHref,
   filterAndSortDomainApprovals,
@@ -75,6 +75,7 @@ export default function ApprovalsPage() {
   const flight = useSingleFlight()
   const [decisionIntent, setDecisionIntent] = useState<DecisionIntent | null>(null)
   const decisionTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const approvalsWorkspaceRef = useRef<HTMLDivElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   // The enforced charter registry (agents.yaml). `null` while it is still being fetched or
   // after the fetch failed — resolveAgentIdentity turns both into `unverifiable`, and
@@ -177,10 +178,8 @@ export default function ApprovalsPage() {
   }
 
   const closeDecision = () => {
-    const trigger = decisionTriggerRef.current
     setDecisionIntent(null)
     setError(null)
-    requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus() })
   }
 
   const pending = useMemo(() => rows.filter(r => r.state === 'PROPOSED'), [rows])
@@ -210,7 +209,7 @@ export default function ApprovalsPage() {
 
   return (
     <AuthGuard permission="approvals:view">
-    <div>
+    <div ref={approvalsWorkspaceRef} tabIndex={-1} aria-label={t('Pracovní prostor schvalování', 'Approval workspace')}>
       <PageHeader
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Schvalování', 'Approvals')}</span></div>}
         icon={<ClipboardCheck size={18} aria-hidden="true" />}
@@ -438,6 +437,8 @@ export default function ApprovalsPage() {
         intent={decisionIntent}
         busy={flight.isRunning(`proposal:${decisionIntent.proposal.id}`)}
         failed={error !== null}
+        triggerRef={decisionTriggerRef}
+        fallbackFocusRef={approvalsWorkspaceRef}
         onCancel={closeDecision}
         onConfirm={async reason => {
           const succeeded = await decide(decisionIntent.proposal, decisionIntent.approve, reason)
@@ -449,42 +450,50 @@ export default function ApprovalsPage() {
   )
 }
 
-function ApprovalDecisionDialog({ intent, busy, failed, onCancel, onConfirm }: {
+function ApprovalDecisionDialog({ intent, busy, failed, triggerRef, fallbackFocusRef, onCancel, onConfirm }: {
   intent: DecisionIntent
   busy: boolean
   failed: boolean
+  triggerRef: React.RefObject<HTMLButtonElement | null>
+  fallbackFocusRef: React.RefObject<HTMLDivElement | null>
   onCancel: () => void
   onConfirm: (reason: string) => Promise<void>
 }) {
   const { t } = useLanguage()
   const [reason, setReason] = useState('')
-  const dialogRef = useRef<HTMLDivElement>(null)
+  const reasonRef = useRef<HTMLTextAreaElement>(null)
   const action = intent.approve ? t('Schválit návrh', 'Approve proposal') : t('Zamítnout návrh', 'Reject proposal')
   const titleId = `approval-decision-${intent.proposal.id}-title`
   const impactId = `approval-decision-${intent.proposal.id}-impact`
 
-  return <div
-    ref={dialogRef}
-    role="alertdialog"
-    aria-modal="true"
-    aria-labelledby={titleId}
-    aria-describedby={impactId}
-    aria-busy={busy}
-    onKeyDown={event => {
-      if (event.key === 'Escape' && !busy) onCancel()
-      trapDialogFocus(event, dialogRef.current)
-    }}
-    style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'grid', placeItems: 'center', padding: 20 }}
-  ><div className="card" style={{ width: 'min(560px, 100%)', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}>
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onCancel() }}>
+    <Dialog.Portal>
+      <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)' }} />
+      <Dialog.Content
+        role="alertdialog"
+        aria-busy={busy}
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+        onPointerDownOutside={event => { if (busy) event.preventDefault() }}
+        onInteractOutside={event => { if (busy) event.preventDefault() }}
+        onOpenAutoFocus={event => { event.preventDefault(); reasonRef.current?.focus() }}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          const trigger = triggerRef.current
+          if (trigger?.isConnected && !trigger.disabled) trigger.focus()
+          else fallbackFocusRef.current?.focus()
+        }}
+        className="card"
+        style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(560px, calc(100% - 40px))', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', padding: 22 }}
+      >
     <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
       <AlertTriangle aria-hidden="true" size={19} style={{ color: intent.approve ? 'var(--warning)' : 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
       <div>
-        <h2 id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{action}: {intent.proposal.title}</h2>
-        <p id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+        <Dialog.Title id={titleId} style={{ margin: 0, fontSize: 17, fontWeight: 750 }}>{action}: {intent.proposal.title}</Dialog.Title>
+        <Dialog.Description id={impactId} style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
           {intent.approve
             ? t('Tímto zaznamenáte lidské schválení. Návrh smí pokračovat jen podle svého řízeného následného procesu; AI tím nezískává oprávnění jednat sama.', 'This records human approval. The proposal may proceed only through its governed follow-up process; this does not authorize the AI to act on its own.')
             : t('Tímto zaznamenáte lidské zamítnutí. Návrh se neprovede a důvod zůstane v auditní stopě.', 'This records human rejection. The proposal will not be executed and the reason remains in the audit trail.')}
-        </p>
+        </Dialog.Description>
       </div>
     </div>
     <div style={{ marginTop: 14, padding: '11px 12px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12.5 }}>
@@ -495,9 +504,9 @@ function ApprovalDecisionDialog({ intent, busy, failed, onCancel, onConfirm }: {
       {t('Důvod rozhodnutí (povinný, součást auditní stopy)', 'Decision reason (required, recorded in the audit trail)')}
     </label>
     <textarea
+      ref={reasonRef}
       id="approval-decision-reason"
       aria-label={t('Důvod rozhodnutí návrhu', 'Decision reason for proposal')}
-      autoFocus
       rows={4}
       maxLength={1000}
       value={reason}
@@ -514,5 +523,7 @@ function ApprovalDecisionDialog({ intent, busy, failed, onCancel, onConfirm }: {
         {busy ? t('Ukládám rozhodnutí…', 'Recording decision…') : intent.approve ? t('Potvrdit schválení', 'Confirm approval') : t('Potvrdit zamítnutí', 'Confirm rejection')}
       </button>
     </div>
-  </div></div>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
 }
