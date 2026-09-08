@@ -1151,22 +1151,41 @@ class LendingService @Inject constructor(
         }
         require(registeredBy.isNotBlank()) { "Registrant identity is required" }
         val now = OffsetDateTime.now(clock)
-        return valuation.revalue(request.type.name, request.marketValue).flatMap { valued ->
-            collateral.save(
-                Collateral(
-                    loanId = loanId,
-                    type = request.type,
-                    description = request.description,
-                    marketValue = valued,
-                    haircut = request.haircut,
-                    valuedAt = now,
-                    // Four-eyes: registration alone does not make the collateral usable to reduce a
-                    // loan's LGD — see applyCollateral, which only sums APPROVED items.
-                    status = CollateralStatus.PENDING,
-                    registeredBy = registeredBy,
-                    createdAt = now,
-                ),
-            )
+        // Idempotent replay (ADR-0297, #8351): the natural key of a registration is the full
+        // caller-supplied tuple (loan, type, description, market value, haircut) while the
+        // original is still PENDING. A retried POST replays the ORIGINAL PENDING collateral
+        // instead of stacking a duplicate that a checker could approve twice — two approved
+        // identical items would double-count against the loan's LGD. Once the original is decided
+        // (APPROVED/REJECTED), an identical new registration is legitimate and persists. No DB
+        // backstop (see the ADR): a lost true-concurrency race stacks two PENDING rows, but each
+        // still needs its own checker decision, so nothing affects LGD silently.
+        return collateral.findByLoan(loanId).flatMap { existing ->
+            existing.firstOrNull {
+                it.status == CollateralStatus.PENDING &&
+                    it.type == request.type &&
+                    it.description == request.description &&
+                    it.marketValue.currency == request.marketValue.currency &&
+                    it.marketValue.amount.compareTo(request.marketValue.amount) == 0 &&
+                    it.haircut.compareTo(request.haircut) == 0
+            }?.let { twin ->
+                Uni.createFrom().item(twin)
+            } ?: valuation.revalue(request.type.name, request.marketValue).flatMap { valued ->
+                collateral.save(
+                    Collateral(
+                        loanId = loanId,
+                        type = request.type,
+                        description = request.description,
+                        marketValue = valued,
+                        haircut = request.haircut,
+                        valuedAt = now,
+                        // Four-eyes: registration alone does not make the collateral usable to reduce a
+                        // loan's LGD — see applyCollateral, which only sums APPROVED items.
+                        status = CollateralStatus.PENDING,
+                        registeredBy = registeredBy,
+                        createdAt = now,
+                    ),
+                )
+            }
         }
     }
 

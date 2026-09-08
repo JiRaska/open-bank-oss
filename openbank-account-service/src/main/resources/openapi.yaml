@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.15.0
+  version: 1.16.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -441,7 +441,9 @@ paths:
         The propose-only flow (ADR-0232 D8): a delegate holding SAVINGS_PROPOSE_WITHDRAW
         creates a withdrawal proposal. Returns 202 with the proposal and the approvalId
         of the paired pending approval — the owner's SCA-bound decision is the only
-        path to execution. Authorize action `account.read`.
+        path to execution. Authorize action `account.read`. Idempotent (ADR-0295): a retry
+        while the original is still PENDING and unexpired replays the ORIGINAL proposal and its
+        approvalId instead of stacking a second executable instruction.
       operationId: proposeSavingsWithdrawal
       parameters:
         - $ref: '#/components/parameters/accountId'
@@ -656,6 +658,11 @@ paths:
     post:
       tags: [Accounts]
       summary: Grant an account authorization
+      description: >-
+        Idempotent (ADR-0295): a retry carrying the identical tuple (party, role, limits,
+        validity) while the original grant is still ACTIVE replays the ORIGINAL grant instead of
+        stacking a duplicate authority row. A revoke followed by an identical re-grant is a new
+        grant and persists normally.
       operationId: grantAccountAuthorization
       security:
         - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
@@ -815,6 +822,9 @@ paths:
     post:
       tags: [Accounts]
       summary: Add a currency pocket to an account
+      description: >-
+        Natural-key enforced (ADR-0295): one pocket per (account, currency) — a repeat is a loud
+        400, never a duplicate row (`uq_account_pockets_acc_ccy`, V7).
       operationId: addCurrencyPocket
       security:
         - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]

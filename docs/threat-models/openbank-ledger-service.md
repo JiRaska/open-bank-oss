@@ -242,6 +242,13 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-09-07** — Idempotency contract of the close-cycle POSTs verified and documented
+  (ADR-0294, burn-down #8351). No code change: open-day and transition already conflict loudly
+  on replay (natural key in path + `uq_accounting_day_business_date`, V21), year-close and
+  period-close drafts already refresh idempotently while DRAFT and conflict once
+  ATTESTED/FROZEN (`uq_year_close_fiscal_year` V9, `uq_closed_period` V22). Spec-only: the
+  OpenAPI descriptions now name the ADR; the four baseline entries re-point to it. No new
+  endpoint, caller, privilege or control bypass.
 - **2026-09-01** — `POST /api/v1/journals` answered **500** rather than 400 for two shapes of
   malformed input: a `null` element inside the `lines` array, and an absent request body. Neither
   crossed a trust boundary, moved money or bypassed a control — `@RolesAllowed(OPERATOR)`, the
