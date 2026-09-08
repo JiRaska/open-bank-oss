@@ -37,18 +37,12 @@ class ExternalDisclosureResource(
     @Path("/{id}/verify-otp")
     @Authorize(action = "delegation.disclosure.verify", resource = "#id")
     suspend fun verifyOtp(@PathParam("id") id: UUID, request: ExternalDisclosureOtpRequest?): Response {
-        val body = request ?: throw unavailable()
+        val body = request ?: return unavailableResponse()
         val key = key(id, "verify", body.idempotencyKey)
         idempotencyStore.get(key)?.let {
             return Response.status(it.statusCode).header("X-Idempotency-Replayed", "true").build()
         }
-        try {
-            disclosures.verifyOtp(id, body.linkSecret, body.otp)
-        } catch (exception: IllegalArgumentException) {
-            throw unavailable()
-        } catch (exception: NotFoundException) {
-            throw unavailable()
-        }
+        conceal { disclosures.verifyOtp(id, body.linkSecret, body.otp) }
         idempotencyStore.save(key, Response.Status.NO_CONTENT.statusCode, "")
         return Response.noContent().build()
     }
@@ -58,24 +52,27 @@ class ExternalDisclosureResource(
     @Produces(PDF_MEDIA_TYPE)
     @Authorize(action = "delegation.disclosure.release", resource = "#id")
     suspend fun content(@PathParam("id") id: UUID, request: ExternalDisclosureLinkRequest?): Response {
-        val body = request ?: throw unavailable()
+        val body = request ?: return unavailableResponse()
         val key = key(id, "content", body.idempotencyKey)
         idempotencyStore.get(key)?.let { cached ->
             return Response.ok(Base64.getDecoder().decode(cached.responseBody), PDF_MEDIA_TYPE)
                 .header("X-Idempotency-Replayed", "true").build()
         }
-        val artifact = try {
-            disclosures.release(id, body.linkSecret)
-        } catch (exception: IllegalArgumentException) {
-            throw unavailable()
-        } catch (exception: NotFoundException) {
-            throw unavailable()
-        }
+        val artifact = conceal { disclosures.release(id, body.linkSecret) }
         idempotencyStore.save(key, Response.Status.OK.statusCode, Base64.getEncoder().encodeToString(artifact.bytes))
         return Response.ok(artifact.bytes, artifact.contentType).build()
     }
 
-    private fun unavailable(): NotFoundException = NotFoundException("external disclosure unavailable")
+    /** Keep the external surface non-enumerable while retaining the root cause for server diagnostics. */
+    private suspend fun <T> conceal(action: suspend () -> T): T = try {
+        action()
+    } catch (exception: IllegalArgumentException) {
+        throw NotFoundException("external disclosure unavailable", exception)
+    } catch (exception: NotFoundException) {
+        throw NotFoundException("external disclosure unavailable", exception)
+    }
+
+    private fun unavailableResponse(): Response = Response.status(Response.Status.NOT_FOUND).build()
 
     private fun key(id: UUID, operation: String, supplied: String): String {
         require(supplied.isNotBlank()) { "idempotencyKey is required" }

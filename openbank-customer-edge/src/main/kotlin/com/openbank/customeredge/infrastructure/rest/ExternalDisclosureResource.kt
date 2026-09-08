@@ -53,14 +53,14 @@ class ExternalDisclosureResource(private val upstream: UpstreamClient) {
         )
         return when {
             response.status == Response.Status.OK.statusCode -> response
-            response.status in 400..499 -> unavailable()
+            isClientError(response.status) -> unavailable()
             else -> upstreamUnavailable()
         }
     }
 
     private fun unavailableUnlessSuccess(response: Response, expectedStatus: Int): Response = when {
         response.status == expectedStatus -> Response.status(expectedStatus).build()
-        response.status in 400..499 -> unavailable()
+        isClientError(response.status) -> unavailable()
         else -> upstreamUnavailable()
     }
 
@@ -69,6 +69,9 @@ class ExternalDisclosureResource(private val upstream: UpstreamClient) {
 
     private fun upstreamUnavailable(): Response = Response.status(Response.Status.BAD_GATEWAY)
         .entity(mapOf("error" to "upstream unavailable")).type(MediaType.APPLICATION_JSON).build()
+
+    private fun isClientError(status: Int): Boolean =
+        Response.Status.Family.familyOf(status) == Response.Status.Family.CLIENT_ERROR
 
     private companion object {
         const val PDF_MEDIA_TYPE = "application/pdf"

@@ -44,7 +44,7 @@ class RestExternalDisclosureDocumentExporter @Inject constructor(
     @RestClient private val client: DocumentServiceDisclosureRestClient,
 ) : ExternalDisclosureDocumentExporter {
 
-    @Timeout(3000)
+    @Timeout(EXPORT_TIMEOUT_MILLIS)
     @Retry(maxRetries = 1, delay = 100, jitter = 50, retryOn = [Exception::class])
     @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000, successThreshold = 2)
     override suspend fun export(
@@ -57,11 +57,15 @@ class RestExternalDisclosureDocumentExporter @Inject constructor(
         DocumentDisclosureExportRequest(disclosureId, recipientLabel, issuedAt),
     ).use { response ->
         if (response.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
-            throw IllegalStateException("sealed disclosure export failed with HTTP ${response.status}")
+            error("sealed disclosure export failed with HTTP ${response.status}")
         }
         ExternalDisclosureArtifact(
             contentType = response.mediaType?.toString() ?: "application/pdf",
             bytes = response.readEntity(ByteArray::class.java),
         )
+    }
+
+    private companion object {
+        const val EXPORT_TIMEOUT_MILLIS = 3_000L
     }
 }
