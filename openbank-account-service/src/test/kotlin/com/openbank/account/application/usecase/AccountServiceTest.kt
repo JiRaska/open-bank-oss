@@ -553,6 +553,53 @@ class AccountServiceTest {
         assertThat(result.goalTargetMinorUnits).isNull()
     }
 
+    @Test
+    fun `openAccount refuses a TERM_DEPOSIT without a terms version`() {
+        // #9044: a term deposit must never open without a record of the terms it was opened
+        // under — they carry the early-withdrawal penalty and the notice period. The refusal is
+        // an IllegalArgumentException (400 at the REST layer), before any screening or persist.
+        val command = openAccountCommand().copy(accountType = AccountType.TERM_DEPOSIT)
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+
+        assertThatThrownBy {
+            runBlocking { service.openAccount(command) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("termsVersion is required")
+    }
+
+    @Test
+    fun `openAccount persists the terms record on a TERM_DEPOSIT`(): Unit = runBlocking {
+        val iban = Iban.of("CZ6508000000192000145399")
+        val command = openAccountCommand().copy(
+            accountType = AccountType.TERM_DEPOSIT,
+            termsVersion = "2026-01",
+            termsUrl = "https://docs.example/td-2026-01.pdf",
+            termsEffectiveFrom = java.time.LocalDate.parse("2026-01-01"),
+        )
+        coEvery { sanctionsScreening.screen(any(), any()) } returns SanctionsScreenResult("CLEAR", 0.0, null)
+        every { ibanGenerator.generate(command.currency) } returns iban
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { accountRepository.existsByIban(iban) } returns false
+        coEvery { accountRepository.saveNewAccount(any(), any(), any()) } answers { firstArg() }
+        coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
+
+        val result = service.openAccount(command)
+
+        assertThat(result.termsVersion).isEqualTo("2026-01")
+        coVerify {
+            accountRepository.saveNewAccount(
+                match {
+                    it.termsVersion == "2026-01" &&
+                        it.termsUrl == "https://docs.example/td-2026-01.pdf" &&
+                        it.termsEffectiveFrom == java.time.LocalDate.parse("2026-01-01")
+                },
+                any(),
+                any(),
+            )
+        }
+    }
+
     private fun openAccountCommand(legalName: String = "Test Customer") = OpenAccountCommand(
         idempotencyKey = "idem-123",
         partyId = UUID.randomUUID(),
