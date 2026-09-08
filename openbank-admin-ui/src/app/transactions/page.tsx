@@ -5,11 +5,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeftRight, Search, RefreshCw, Filter, X } from 'lucide-react'
+import { ArrowLeftRight, Search, SearchX, RefreshCw, Filter, X } from 'lucide-react'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { EmptyState, PageHeader, StatusBadge } from '@/components/ui'
 
 const TYPE_COLOR: Record<string, string> = {
   DEBIT:      'var(--danger)',
@@ -75,6 +75,7 @@ export default function TransactionsPage() {
   const [channel, setChannel]             = useState('')
 
   const hasFilters = [iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax, channel].some(Boolean)
+  const hasSearchCriteria = [accountId, iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax, channel].some(Boolean)
   const queryKey = [accountId, iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax, channel].join('\u0000')
   const queryChanged = result !== null && resultQueryKey !== queryKey
 
@@ -152,6 +153,11 @@ export default function TransactionsPage() {
     setIban(''); setBban(''); setReferenceNumber(''); setEndToEndId('')
     setCounterparty(''); setStatus(''); setType(''); setDateFrom('')
     setDateTo(''); setAmountMin(''); setAmountMax(''); setChannel('')
+  }
+
+  function clearSearchCriteria() {
+    clearFilters()
+    setAccountId('')
   }
 
   return (
@@ -292,7 +298,22 @@ export default function TransactionsPage() {
                 </thead>
                 <tbody>
                   {result.data.length === 0 ? (
-                    <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-tertiary)', padding: '32px' }}>{t('Žádné transakce', 'No transactions')}</td></tr>
+                    <tr><td colSpan={8} style={{ padding: '16px' }}>
+                      <EmptyState
+                        icon={<SearchX size={22} />}
+                        title={hasSearchCriteria
+                          ? t('Žádná transakce neodpovídá zadaným kritériím', 'No transactions match your search criteria')
+                          : t('V deníku zatím nejsou žádné transakce', 'No transactions have been recorded yet')}
+                        description={hasSearchCriteria
+                          ? t('Rozšiřte hledání nebo vymažte kritéria. Prázdný výsledek znamená úspěšně dokončené hledání, ne nedostupnost služby.', 'Broaden the search or clear its criteria. An empty result means the search completed successfully, not that the service is unavailable.')
+                          : t('Vyhledávání proběhlo správně, ale transakční služba nevrátila žádný záznam.', 'The search completed successfully, but the transaction service returned no records.')}
+                        action={hasSearchCriteria ? (
+                          <button type="button" className="btn btn-secondary" onClick={clearSearchCriteria}>
+                            <X size={13} aria-hidden="true" /> {t('Vymazat kritéria', 'Clear search criteria')}
+                          </button>
+                        ) : undefined}
+                      />
+                    </td></tr>
                   ) : result.data.map(tx => (
                     <tr key={tx.id}>
                       <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px' }}>{tx.referenceNumber}</td>
@@ -334,11 +355,12 @@ export default function TransactionsPage() {
         )}
 
         {!result && !loading && !failure && (
-          <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
-            <Search size={32} style={{ opacity: 0.3, marginBottom: '12px' }} />
-            <div style={{ fontSize: '14px' }}>{t('Zadejte Account ID, IBAN, BBAN nebo jiný parametr a klikněte Hledat', 'Enter Account ID, IBAN, BBAN or another parameter and click Search')}</div>
-            <div style={{ fontSize: '12px', marginTop: '6px' }}>{t('Podporuje: UUID, IBAN (CZ65 0800…), BBAN (123456-1234567890/0800), reference číslo, protistrana, datum, částka', 'Supports: UUID, IBAN (CZ65 0800…), BBAN (123456-1234567890/0800), reference number, counterparty, date, amount')}</div>
-          </div>
+          <EmptyState
+            className="transaction-search-empty"
+            icon={<Search size={22} />}
+            title={t('Najděte transakci podle údajů, které máte po ruce', 'Find a transaction using the details you have')}
+            description={t('Začněte ID účtu, IBANem nebo BBANem. Rozšířené filtry podporují také referenci, protistranu, období, částku, stav a kanál.', 'Start with an account ID, IBAN or BBAN. Advanced filters also support reference, counterparty, date range, amount, status and channel.')}
+          />
         )}
       </div>
     </div>

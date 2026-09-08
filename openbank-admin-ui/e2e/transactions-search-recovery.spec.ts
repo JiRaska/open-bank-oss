@@ -60,4 +60,34 @@ test.describe('Transaction ledger search recovery', () => {
     await expect(page.getByText(/Failed to load: Transaction search|Načtení selhalo: Vyhledávání transakcí/)).toBeVisible()
     expect(requests).toBe(2)
   })
+
+  test('explains an empty result and offers a keyboard-accessible recovery action', async ({ page }) => {
+    await page.route('**/api/svc/transaction-service/api/v1/transactions/search**', route =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: [], count: 0, limit: 50, offset: 0 }),
+      }),
+    )
+
+    await page.goto('/transactions')
+    await expect(page.getByRole('status')).toContainText('Find a transaction using the details you have')
+
+    await page.getByLabel('Filter by IBAN').fill('CZ6508000000192000145399')
+    await page.getByRole('button', { name: 'Search transactions' }).click()
+
+    const empty = page.getByRole('status')
+    await expect(empty).toContainText('No transactions match your search criteria')
+    await expect(empty).toContainText('not that the service is unavailable')
+
+    const clear = page.getByRole('button', { name: 'Clear search criteria' })
+    await clear.focus()
+    await expect(clear).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(page.getByLabel('Filter by IBAN')).toHaveValue('')
+    await expect(clear).toHaveCount(0)
+
+    await page.locator('html').evaluate(element => element.classList.add('dark'))
+    const background = await page.locator('.ui-empty-state').evaluate(element => getComputedStyle(element).backgroundImage)
+    expect(background).not.toBe('none')
+  })
 })
