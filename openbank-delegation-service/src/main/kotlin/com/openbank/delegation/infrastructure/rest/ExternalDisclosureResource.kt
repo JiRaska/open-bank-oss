@@ -18,8 +18,8 @@ import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
-import java.util.UUID
 import java.util.Base64
+import java.util.UUID
 
 /**
  * Internal half of the recipient disclosure journey. The only permitted caller is customer-edge,
@@ -39,7 +39,9 @@ class ExternalDisclosureResource(
     suspend fun verifyOtp(@PathParam("id") id: UUID, request: ExternalDisclosureOtpRequest?): Response {
         val body = request ?: throw unavailable()
         val key = key(id, "verify", body.idempotencyKey)
-        idempotencyStore.get(key)?.let { return Response.status(it.statusCode).header("X-Idempotency-Replayed", "true").build() }
+        idempotencyStore.get(key)?.let {
+            return Response.status(it.statusCode).header("X-Idempotency-Replayed", "true").build()
+        }
         try {
             disclosures.verifyOtp(id, body.linkSecret, body.otp)
         } catch (exception: IllegalArgumentException) {
