@@ -667,39 +667,40 @@ class DelegationServiceTest {
     }
 
     @Test
-    fun `check denies a legacy active grant carrying exposure while allowing an unconstrained duplicate`(): Unit = runBlocking {
-        val documentId = UUID.randomUUID()
-        val legacy = offeredGrant(setOf(DelegationCapability.ACCOUNT_READ_BALANCES))
-            .copy(
-                resourceType = DelegationResourceType.DOCUMENT,
-                resourceId = documentId,
-                capabilities = setOf(DelegationCapability.OBJECT_READ),
-                exposure = Exposure(maxViews = 1),
-            )
-            .accept(UUID.randomUUID(), now)
-        val safe = offeredGrant(setOf(DelegationCapability.ACCOUNT_READ_BALANCES))
-            .copy(
-                resourceType = DelegationResourceType.DOCUMENT,
-                resourceId = documentId,
-                capabilities = setOf(DelegationCapability.OBJECT_READ),
-            )
-            .accept(UUID.randomUUID(), now)
-        coEvery {
-            repository.findActiveByGranteeAndResource(grantee, DelegationResourceType.DOCUMENT, documentId)
-        } returns listOf(legacy, safe)
+    fun `check denies a legacy active grant carrying exposure while allowing an unconstrained duplicate`(): Unit =
+        runBlocking {
+            val documentId = UUID.randomUUID()
+            val legacy = offeredGrant(setOf(DelegationCapability.ACCOUNT_READ_BALANCES))
+                .copy(
+                    resourceType = DelegationResourceType.DOCUMENT,
+                    resourceId = documentId,
+                    capabilities = setOf(DelegationCapability.OBJECT_READ),
+                    exposure = Exposure(maxViews = 1),
+                )
+                .accept(UUID.randomUUID(), now)
+            val safe = offeredGrant(setOf(DelegationCapability.ACCOUNT_READ_BALANCES))
+                .copy(
+                    resourceType = DelegationResourceType.DOCUMENT,
+                    resourceId = documentId,
+                    capabilities = setOf(DelegationCapability.OBJECT_READ),
+                )
+                .accept(UUID.randomUUID(), now)
+            coEvery {
+                repository.findActiveByGranteeAndResource(grantee, DelegationResourceType.DOCUMENT, documentId)
+            } returns listOf(legacy, safe)
 
-        val result = service.check(
-            CheckDelegationCommand(
-                grantee,
-                DelegationResourceType.DOCUMENT,
-                documentId,
-                DelegationCapability.OBJECT_READ,
-            ),
-        )
+            val result = service.check(
+                CheckDelegationCommand(
+                    grantee,
+                    DelegationResourceType.DOCUMENT,
+                    documentId,
+                    DelegationCapability.OBJECT_READ,
+                ),
+            )
 
-        assertThat(result).isInstanceOf(DelegationCheckResult.Allowed::class.java)
-        assertThat((result as DelegationCheckResult.Allowed).grant.id).isEqualTo(safe.id)
-    }
+            assertThat(result).isInstanceOf(DelegationCheckResult.Allowed::class.java)
+            assertThat((result as DelegationCheckResult.Allowed).grant.id).isEqualTo(safe.id)
+        }
 
     @Test
     fun `check denies when the grant exists but is not active`(): Unit = runBlocking {
