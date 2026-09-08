@@ -82,6 +82,18 @@
 # for exactly this reason ("OPA is not present in a test JVM"); %dev keeps the deployed default of
 # AUTHZ_ENFORCE:true, so the fuzz JVM needs it explicitly.
 #
+# That "pass 1 never reaches the interceptor" immunity ended the day psd2-service entered the
+# fleet scope (#9257): its anonymous-grant endpoints (the eIDAS/mTLS model — gate
+# `psd2-anonymous-grant-stays-behind-eidas-mtls`) pass authN UNAUTHENTICATED by design and DO
+# reach AuthorizeInterceptor, which then fails closed with the same 503 when no sidecar answers.
+# Measured on psd2's first fleet run, 34268765822: 28/29 jobs green, psd2 failed with exactly 12
+# schemathesis failures, every one
+# `[503] POLICY_DECISION_POINT_UNAVAILABLE: policy decision point unavailable: OPA call failed:
+# null` — a harness gap, not an HTTP-surface finding. The harness therefore stubs OPA itself with
+# an allow decision (see the OPA stub comment in the body); pass 1's authN property is unchanged
+# because authenticated endpoints still 401 before the interceptor, and only endpoints whose
+# authn passes reach the now-allowing PDP.
+#
 # So pass 2 tests neither authentication nor authorization, by design — both are pass 1's job. What
 # is left is the only thing pass 2 claims: does a handler answer 5xx to input it should reject with
 # a 4xx.
@@ -218,8 +230,16 @@ EOF
   if ! grep -qE '^[[:space:]]+-Dquarkus\.devservices\.enabled=false \\$' "$0"; then
     echo "SELF-TEST FAIL 3: quarkusDev no longer disables dev services"; ST_RC=1
   fi
+  # Control 4: the OPA allow stub must still be wired — a green fleet run cannot show it
+  # regressed, because only services with anonymous-grant endpoints (today: psd2) ever call
+  # the PDP in pass 1, and their failure mode is the 503 this stub exists to prevent (run
+  # 34268765822). Anchored to the Python handler's exact branch, not the prose: the header and
+  # comments mention the shape too, so an unanchored grep would match its own documentation.
+  if ! grep -qF 'self.server.server_address[1] == 8181 and self.path.startswith("/v1/data/")' "$0"; then
+    echo "SELF-TEST FAIL 4: the OPA allow stub (8181, /v1/data/ -> {\"result\": true}) is gone"; ST_RC=1
+  fi
   rm -rf "${ST_TMP}"
-  [ "${ST_RC}" = 0 ] && echo "self-test OK (3 controls)" || echo "self-test FAILED"
+  [ "${ST_RC}" = 0 ] && echo "self-test OK (4 controls)" || echo "self-test FAILED"
   exit "${ST_RC}"
 fi
 
@@ -286,7 +306,8 @@ for svc in $SERVICES; do
   # the "absent" answer these cross-service readers are written to expect (the fx adapter maps 404
   # to null and skips the leg), so schemathesis measures the HTTP surface, not the harness.
   # Never stub ports this job already provisions (postgres, redis) or shares with other infra
-  # defaults (keycloak 8080, otel 4317, OPA 8181), and never the service's own port.
+  # defaults (keycloak 8080, otel 4317), and never the service's own port. OPA 8181 is likewise
+  # excluded from the 404 stubs — it gets its own ALLOW stub below, not a 404.
   STUB_PORTS="$(grep -oE 'url: \$\{[A-Za-z0-9_]+:http://localhost:[0-9]+' "$APP_YAML" \
     | grep -oE '[0-9]+$' | sort -un \
     | grep -vxE "${PORT}|5432|6379|8080|4317|8181" || true)"
@@ -306,6 +327,23 @@ for svc in $SERVICES; do
     echo "==> [${svc}] config declares oidc-client — stubbing the token issuer on 18099 (outbound M2M mint)"
     STUB_PORTS="$(printf '%s\n18099\n' ${STUB_PORTS} | sort -un)"
     OIDC_FLAGS+=("-Dquarkus.oidc-client.auth-server-url=http://127.0.0.1:18099/realms/openbank")
+  fi
+  # OPA allow-stub on 8181, derived like Redis and oidc-client above: a top-level `opa:` block
+  # means the service wires AuthorizeInterceptor against the sidecar default
+  # `http://localhost:8181`, and pass 1 (authz ON) calls the PDP for every request that passes
+  # authN. For normal services that is never any request (401/403 fires first), so the absent
+  # sidecar was invisible for the fleet's whole life; psd2's anonymous-grant eIDAS/mTLS
+  # endpoints pass authN unauthenticated by design, reach the interceptor, and fail CLOSED
+  # (ADR-0034) — run 34268765822, 12 failures, all
+  # `[503] POLICY_DECISION_POINT_UNAVAILABLE: policy decision point unavailable: OPA call
+  # failed: null`. The stub answers OPA data queries (`/v1/data/…`) with `{"result": true}`,
+  # the bare-boolean allow shape OpaSidecarPolicyDecisionPoint.parseResponse accepts (a 2xx is
+  # required — a 404 raises PolicyDecisionException, which is exactly the 503 being fixed), so
+  # pass 1 fuzzes those anonymous handlers against an ALLOW decision instead of failing closed.
+  # Pass 2 sets authz.enforce=false and never calls the PDP; the stub is simply unused there.
+  if grep -qE '^opa:' "$APP_YAML"; then
+    echo "==> [${svc}] config declares opa: — stubbing the PDP on 8181 with an allow decision (pass-1 anonymous-grant endpoints)"
+    STUB_PORTS="$(printf '%s\n8181\n' ${STUB_PORTS} | sort -un)"
   fi
   STUB_PID=""
   if [ -n "${STUB_PORTS}" ]; then
@@ -340,6 +378,16 @@ class Absent(http.server.BaseHTTPRequestHandler):
             return
         if self.path.endswith("/protocol/openid-connect/token"):
             self._answer(200, b'{"access_token":"fuzz-stub-token","token_type":"Bearer","expires_in":3600}')
+            return
+        # OPA PDP stub (8181 only, started for services declaring a top-level `opa:` block —
+        # see the caller-side comment): pass 1's anonymous-grant endpoints (psd2 eIDAS/mTLS)
+        # reach AuthorizeInterceptor, and a 404 here raises PolicyDecisionException, which the
+        # interceptor maps to the 503 POLICY_DECISION_POINT_UNAVAILABLE that failed run
+        # 34268765822. `{"result": true}` is the bare-boolean allow shape
+        # OpaSidecarPolicyDecisionPoint.parseResponse accepts. Everything NOT a data query
+        # keeps the 404 — the stub answers allow only where a PDP answer is asked for.
+        if self.server.server_address[1] == 8181 and self.path.startswith("/v1/data/"):
+            self._answer(200, b'{"result": true}')
             return
         self._answer(404, b'{"status":404,"title":"absent (fuzz cross-service stub)"}')
 
