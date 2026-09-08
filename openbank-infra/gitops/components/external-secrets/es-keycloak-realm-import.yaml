@@ -30,9 +30,14 @@ spec:
         # the override here lands the theme decision in gitops, next to the theme
         # assets, instead of having to rewrite the Vault blob (the live realm is
         # already themed via kcadm; this only matters on a fresh DB import).
+        # browserSecurityHeaders mirrors the live realm (kcadm, #9216): the
+        # /reporting Grafana embed SSO-bounces through Keycloak inside the
+        # iframe, so the realm must allow admin.open-bank.tech as a frame
+        # ancestor — the Keycloak default (frame-ancestors 'self') blocks it.
         openbank-realm.json: >-
           {{ index . "openbank-realm.json" | mustFromJson
-             | merge (dict "loginTheme" "openbank" "displayNameHtml" "OpenBank Framework")
+             | merge (dict "loginTheme" "openbank" "displayNameHtml" "OpenBank Framework"
+                      "browserSecurityHeaders" (dict "contentSecurityPolicy" "frame-src 'self' https://admin.open-bank.tech; frame-ancestors 'self' https://admin.open-bank.tech; object-src 'none';"))
              | mustToJson }}
   data:
     - secretKey: openbank-realm.json

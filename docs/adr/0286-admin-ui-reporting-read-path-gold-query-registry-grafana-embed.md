@@ -201,6 +201,17 @@ in-pod reads:
   #9059) and an MPL-2.0 header on `.github/workflows/edge-openapi-dispatch.yml` in the
   Apache-2.0 tree (fixed in #9059).
 
+Follow-up (2026-09-08, #9216): the 302 → 200 embed check above stopped at the site boundary
+and missed the SSO hop. The iframe's OAuth dance crosses to Keycloak (`kc.open-bank.tech`),
+whose realm carried no `browserSecurityHeaders`, so the default `frame-ancestors 'self'`
+blocked the frame the moment Keycloak rendered its login form — the browser showed "This
+content is blocked" even with `allow_embedding` on. Fixed live via kcadm (realm `openbank`
+CSP now allowlists `https://admin.open-bank.tech` as a frame ancestor), with the desired
+state landed in `realm-template.json`, the cold-start import override and the docker dev
+realm; Grafana `auth.generic_oauth.auto_login: true` makes the bounce click-free when a
+portal SSO session exists. Lesson: a framing verdict must cover the WHOLE redirect chain,
+off-site hops included — "no X-Frame-Options on Grafana hops" was necessary, not sufficient.
+
 ## References
 
 - ADR-0022 — event-fed ClickHouse analytics layer (bronze/silver/gold, retention, consistency model)
