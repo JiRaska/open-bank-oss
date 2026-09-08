@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-08T17:14:34.306928+00:00",
+  "generatedAt": "2026-09-08T17:55:18.940653+00:00",
   "netpol": {
     "available": true,
     "covered": 60,
@@ -9,9 +9,9 @@
   },
   "freshness": {
     "available": true,
-    "fleetScore": 70,
-    "scoredModules": 10,
-    "unknownModules": 17
+    "fleetScore": 68,
+    "scoredModules": 7,
+    "unknownModules": 20
   },
   "credentials": {
     "available": true,
@@ -30,7 +30,8 @@
     "totalExercised": 4,
     "excludedCount": 1,
     "run": "https://github.com/JiRaska/open-bank-oss/actions/runs/34191293207",
-    "runDate": "2026-09-08"
+    "runDate": "2026-09-08",
+    "note": "1 newer override-scoped run(s) skipped \u2014 an override probes a hand-picked subset, not the fleet"
   },
   "threatModels": {
     "available": true,
