@@ -5,6 +5,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -283,14 +284,13 @@ function PaymentsContent() {
   const [paymentReview, setPaymentReview] = useState<'domestic' | 'sepa' | null>(null)
   const reviewBackRef = useRef<HTMLButtonElement>(null)
   const reviewConfirmRef = useRef<HTMLButtonElement>(null)
+  const reviewReturnFocusRef = useRef<HTMLElement | null>(null)
   const domesticSubmitRef = useRef<HTMLButtonElement>(null)
   const sepaSubmitRef = useRef<HTMLButtonElement>(null)
 
   const returnToPaymentForm = () => {
-    const submit = paymentReview === 'domestic' ? domesticSubmitRef.current : sepaSubmitRef.current
     setPaymentReview(null)
     setCreateError(null)
-    window.requestAnimationFrame(() => submit?.focus())
   }
 
   // SCT Inst monitoring state
@@ -376,6 +376,7 @@ function PaymentsContent() {
       return
     }
     if (!confirmed) {
+      reviewReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       setPaymentReview('domestic')
       return
     }
@@ -441,6 +442,7 @@ function PaymentsContent() {
       return
     }
     if (!confirmed) {
+      reviewReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       setPaymentReview('sepa')
       return
     }
@@ -688,7 +690,7 @@ function PaymentsContent() {
 
           {canCreate && (
             <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', justifyContent: 'flex-end' }}>
-              <button className="btn btn-primary" type="button" aria-expanded={showCreate === 'payment-type'} aria-controls="payment-create-type-panel" aria-label={t('Nová platba', 'New Payment')} onClick={() => setShowCreate(showCreate ? null : 'payment-type')}>
+              <button id="new-payment-trigger" className="btn btn-primary" type="button" aria-expanded={showCreate === 'payment-type'} aria-controls="payment-create-type-panel" aria-label={t('Nová platba', 'New Payment')} onClick={() => setShowCreate(showCreate ? null : 'payment-type')}>
                 <Plus size={14} aria-hidden="true" />
                 {t('Nová platba', 'New Payment')}
               </button>
@@ -947,36 +949,33 @@ function PaymentsContent() {
           )}
 
           {paymentReview && (
-            <div
-              role="alertdialog"
-              aria-modal="true"
-              aria-labelledby="payment-create-review-title"
-              aria-describedby="payment-create-review-impact"
-              onKeyDown={event => {
-                if (event.key === 'Escape' && !creating) {
-                  returnToPaymentForm()
-                }
-                if (event.key === 'Tab') {
-                  const first = reviewBackRef.current
-                  const last = reviewConfirmRef.current
-                  if (event.shiftKey && document.activeElement === first) {
+            <Dialog.Root open onOpenChange={open => { if (!open && !creating) returnToPaymentForm() }}>
+              <Dialog.Portal>
+                <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)' }} />
+                <Dialog.Content
+                  className="card"
+                  role="alertdialog"
+                  aria-busy={creating}
+                  onOpenAutoFocus={event => {
                     event.preventDefault()
-                    last?.focus()
-                  } else if (!event.shiftKey && document.activeElement === last) {
+                    reviewBackRef.current?.focus()
+                  }}
+                  onCloseAutoFocus={event => {
                     event.preventDefault()
-                    first?.focus()
-                  }
-                }
-              }}
-              style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-            >
-              <div className="card" style={{ width: 'min(620px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}>
-                <h2 id="payment-create-review-title" style={{ margin: 0, fontSize: 18 }}>
+                    const original = reviewReturnFocusRef.current
+                    const fallback = document.getElementById('new-payment-trigger')
+                    ;(original?.isConnected ? original : fallback)?.focus()
+                  }}
+                  onEscapeKeyDown={event => { if (creating) event.preventDefault() }}
+                  onPointerDownOutside={event => { if (creating) event.preventDefault() }}
+                  style={{ position: 'fixed', zIndex: 1201, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'min(620px, calc(100% - 40px))', maxHeight: '90vh', overflowY: 'auto', padding: 22 }}
+                >
+                <Dialog.Title style={{ margin: 0, fontSize: 18 }}>
                   {t('Zkontrolovat platební příkaz', 'Review payment order')}
-                </h2>
-                <p id="payment-create-review-impact" style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.55 }}>
+                </Dialog.Title>
+                <Dialog.Description style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.55 }}>
                   {t('Potvrzením odešlete přesně tento příkaz platební službě. Přijetí příkazu ještě neznamená vypořádání; další stav a případné schválení řídí platební workflow.', 'Confirmation submits this exact order to the payment service. Acceptance is not settlement; subsequent status and any required approval remain controlled by the payment workflow.')}
-                </p>
+                </Dialog.Description>
                 {paymentReview === 'domestic' ? (
                   <dl style={{ display: 'grid', gridTemplateColumns: '155px minmax(0, 1fr)', gap: '9px 12px', padding: 14, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}>
                     <dt>{t('Typ', 'Type')}</dt><dd>{domesticForm.instant ? t('Domácí okamžitá', 'Domestic instant') : t('Domácí standardní', 'Domestic standard')}</dd>
@@ -1008,8 +1007,9 @@ function PaymentsContent() {
                     {creating ? t('Odesílám…', 'Submitting…') : t('Potvrdit a odeslat', 'Confirm and submit')}
                   </button>
                 </div>
-              </div>
-            </div>
+                </Dialog.Content>
+              </Dialog.Portal>
+            </Dialog.Root>
           )}
 
           {createSuccess && (
