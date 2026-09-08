@@ -12,7 +12,42 @@ tags:
   - name: Delegations
   - name: Delegation role presets
   - name: Delegation lifecycle approvals
+  - name: External disclosures
 paths:
+  /api/v1/external-disclosures/{id}/verify-otp:
+    post:
+      tags: [External disclosures]
+      summary: Verify an external disclosure one-time passcode
+      description: Available only through the public customer edge. Invalid, expired, revoked, locked and unknown links all return 404.
+      parameters:
+        - $ref: '#/components/parameters/ExternalDisclosureId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalDisclosureOtpRequest' }
+      responses:
+        '204': { description: OTP accepted }
+        '404': { description: External disclosure unavailable }
+  /api/v1/external-disclosures/{id}/content:
+    post:
+      tags: [External disclosures]
+      summary: Release one sealed external disclosure PDF
+      description: Available only through the public customer edge after OTP verification. The response is a recipient-watermarked, sealed PDF derivative, never the original document.
+      parameters:
+        - $ref: '#/components/parameters/ExternalDisclosureId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalDisclosureLinkRequest' }
+      responses:
+        '200':
+          description: Sealed disclosure PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { description: External disclosure unavailable }
   /api/v1/delegation-role-presets:
     get:
       tags: [Delegation role presets]
@@ -485,6 +520,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    ExternalDisclosureId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     PartyId:
       name: partyId
       in: path
@@ -496,6 +536,19 @@ components:
       required: true
       schema: { type: string, format: uuid }
   schemas:
+    ExternalDisclosureOtpRequest:
+      type: object
+      additionalProperties: false
+      required: [linkSecret, otp]
+      properties:
+        linkSecret: { type: string, minLength: 1, maxLength: 128 }
+        otp: { type: string, pattern: '^[0-9]{6}$' }
+    ExternalDisclosureLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [linkSecret]
+      properties:
+        linkSecret: { type: string, minLength: 1, maxLength: 128 }
     DelegationRolePresetRequest:
       type: object
       required: [name, resourceType, capabilities]

@@ -7,7 +7,8 @@ info:
   # (the client echoes the terms version it rendered; a mismatch with the catalogue's currently
   # effective version is a 409, forcing re-display during a terms rollout) and a new 409 response
   # on POST /term-deposits.
-  version: 1.54.0
+  # 1.54.0 -> 1.55.0: anonymous OTP-gated sealed disclosure download.
+  version: 1.55.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -43,6 +44,7 @@ tags:
   - name: Cards
   - name: Lending
   - name: Delegation
+  - name: External disclosures
   - name: Pockets
   - name: Fees
   - name: Interest
@@ -59,6 +61,50 @@ tags:
   - name: Complaints
 
 paths:
+  /external-disclosures/{id}/verify-otp:
+    post:
+      tags: [External disclosures]
+      summary: Verify a disclosure magic-link one-time passcode
+      description: Anonymous recipient route. Invalid, expired, revoked, locked and unknown links all return the same response.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalDisclosureOtpRequest' }
+      responses:
+        '204': { description: OTP accepted }
+        '404': { description: External disclosure unavailable }
+        '502': { description: Disclosure service unavailable }
+  /external-disclosures/{id}/content:
+    post:
+      tags: [External disclosures]
+      summary: Download a sealed external disclosure PDF
+      description: Anonymous recipient route after OTP verification. Only a recipient-watermarked, sealed derivative is returned.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalDisclosureLinkRequest' }
+      responses:
+        '200':
+          description: Sealed disclosure PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '404': { description: External disclosure unavailable }
+        '502': { description: Disclosure service unavailable }
   /products:
     get:
       tags: [Products]
@@ -3777,6 +3823,19 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    ExternalDisclosureOtpRequest:
+      type: object
+      additionalProperties: false
+      required: [linkSecret, otp]
+      properties:
+        linkSecret: { type: string, minLength: 1, maxLength: 128 }
+        otp: { type: string, pattern: '^[0-9]{6}$' }
+    ExternalDisclosureLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [linkSecret]
+      properties:
+        linkSecret: { type: string, minLength: 1, maxLength: 128 }
     # --- Read-endpoint response schemas (issue #1773) ---
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file

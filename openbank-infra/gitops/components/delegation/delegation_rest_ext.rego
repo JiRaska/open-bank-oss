@@ -100,6 +100,10 @@ allowed_reasons contains "edge-service-delegation" if {
 		"delegation.reserve",
 		"delegation.reserve.confirm",
 		"delegation.reserve.release",
+        # The public magic-link routes terminate at customer-edge. The edge presents its own M2M
+        # identity here; no anonymous identity reaches delegation-service.
+        "delegation.disclosure.verify",
+        "delegation.disclosure.release",
 	}
 }
 

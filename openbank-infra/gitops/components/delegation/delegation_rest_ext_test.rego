@@ -132,6 +132,18 @@ test_edge_may_release_reservation if {
 	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.reserve.release"}
 }
 
+test_edge_may_verify_external_disclosure if {
+	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.disclosure.verify"}
+}
+
+test_edge_may_release_external_disclosure if {
+	"edge-service-delegation" in allowed_reasons with input as {"principal": edge, "action": "delegation.disclosure.release"}
+}
+
+test_shared_backend_identity_may_not_release_external_disclosure if {
+	count(allowed_reasons) == 0 with input as {"principal": services_m2m, "action": "delegation.disclosure.release"}
+}
+
 # The reservation actions must not become reachable by the shared backend identity: it holds
 # ROLE_OPERATOR in at least one realm, and `matrix-allows` in base rest.rego turns any
 # role_action_matrix entry into a permit for a HUMAN principal holding that role. This asserts the

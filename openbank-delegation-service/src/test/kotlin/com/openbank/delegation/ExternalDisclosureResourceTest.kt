@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.delegation
+
+import com.openbank.delegation.application.port.`in`.ExternalDisclosureUseCase
+import com.openbank.delegation.application.port.out.ExternalDisclosureArtifact
+import com.openbank.delegation.infrastructure.rest.ExternalDisclosureResource
+import com.openbank.delegation.infrastructure.rest.dto.ExternalDisclosureLinkRequest
+import com.openbank.delegation.infrastructure.rest.dto.ExternalDisclosureOtpRequest
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import jakarta.ws.rs.NotFoundException
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
+import java.util.UUID
+
+class ExternalDisclosureResourceTest {
+    private val disclosures = mockk<ExternalDisclosureUseCase>()
+    private val resource = ExternalDisclosureResource(disclosures)
+    private val id = UUID.randomUUID()
+
+    @Test
+    fun `successful OTP verification returns no content and does not disclose metadata`(): Unit = runBlocking {
+        coEvery { disclosures.verifyOtp(id, "link-secret", "123456") } returns mockk()
+
+        val response = resource.verifyOtp(id, ExternalDisclosureOtpRequest("link-secret", "123456"))
+
+        assertThat(response.status).isEqualTo(204)
+        assertThat(response.entity).isNull()
+        coVerify(exactly = 1) { disclosures.verifyOtp(id, "link-secret", "123456") }
+    }
+
+    @Test
+    fun `unavailable verification becomes the same not found response`(): Unit = runBlocking {
+        coEvery { disclosures.verifyOtp(any(), any(), any()) } throws NotFoundException("different internal detail")
+
+        val exception = org.assertj.core.api.Assertions.catchThrowable {
+            runBlocking { resource.verifyOtp(id, ExternalDisclosureOtpRequest("bad", "000000")) }
+        }
+
+        assertThat(exception).isInstanceOf(NotFoundException::class.java)
+        assertThat(exception?.message).isEqualTo("external disclosure unavailable")
+    }
+
+    @Test
+    fun `content response is the sealed artifact unchanged`(): Unit = runBlocking {
+        val sealed = byteArrayOf(37, 80, 68, 70)
+        coEvery { disclosures.release(id, "link-secret") } returns ExternalDisclosureArtifact("application/pdf", sealed)
+
+        val response = resource.content(id, ExternalDisclosureLinkRequest("link-secret"))
+
+        assertThat(response.status).isEqualTo(200)
+        assertThat(response.entity).isEqualTo(sealed)
+        assertThat(response.mediaType.toString()).isEqualTo("application/pdf")
+    }
+}
