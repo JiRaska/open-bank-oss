@@ -119,7 +119,11 @@ class FraudScoringMetricsTest {
         assertThat(empty.meters).isEmpty()
     }
 
+    // The whole point of this test is a GC pass: it proves the gauge holds a STRONG reference
+    // and survives collection, rather than the WeakReference micrometer default that silently
+    // drops the value. There is no way to assert that without provoking a real collection.
     @Test
+    @Suppress("ExplicitGarbageCollectionCall")
     fun `the gauge holds a strong reference so it survives a garbage collection`() {
         bound().recordSynthetic()
 
