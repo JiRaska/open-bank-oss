@@ -20,4 +20,9 @@ class DelegationPreviewOpenApiTest {
         assertThat(contract).contains("EXPOSURE_UNSUPPORTED")
         assertThat(contract).contains("Historical audit metadata only")
     }
+
+    @Test
+    fun `preview rejects a caller who is not the grantor with 403`() {
+        assertThat(contract).contains("'403': { description: The authenticated party is not the grantor }")
+    }
 }

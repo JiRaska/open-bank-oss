@@ -20,4 +20,9 @@ class CustomerDelegationPreviewOpenApiTest {
         assertThat(contract).contains("EXPOSURE_UNSUPPORTED")
         assertThat(contract).contains("historical metadata is audit-only")
     }
+
+    @Test
+    fun `customer preview rejects a caller who is not the grantor with 403`() {
+        assertThat(normalized).contains("'403': {description: grantorPartyId does not match the authenticated customer}")
+    }
 }
