@@ -13,13 +13,21 @@ summary: "Delegation service owns granular, SCA-bound grants over products (acco
 
 # ADR-0232 — Delegated access: customer-to-party sharing with granular capabilities
 
-**Delivery note (2026-08-19).** `openbank-delegation-service` is live at `version.txt` 0.7.0,
-deployed via `auto-deploy.yml`, carries `DelegationGrant`/`SpendCeilings`/`SpendReservation` and a
-threat model, and is listed money-path in `rules.yaml`. The amount-aware guards are now backed by
-the **enforced** `enforcement-reachability` gate (#3615). What is still unbuilt is the half that
-issue named: no payment service integrates delegation — a grep for `delegation` across
-`openbank-domestic-payment/src/main` and `openbank-sepa-payment/src/main` returns nothing, so the
-delegated money path is reachable in the service and not yet on the payment path.
+**Delivery note (measured 2026-09-09).** `openbank-delegation-service` carries
+`DelegationGrant`/`SpendCeilings`/`SpendReservation`, a threat model, and is listed money-path in
+`rules.yaml`. The first D3 payment-instruction path is now live at customer-edge: a delegated
+domestic-payment initiation asks account-service's amount-aware
+`/delegation/payment-authorization` decision before the delegate's own SCA is consumed or an
+instruction reaches domestic-payment. The decision is based on the local active-grant projection,
+requires `ACCOUNT_INITIATE_PAYMENT`, carries the grantor and delegation id into the audit chain,
+and fails closed for an unavailable decision, absent/expired grant, or a per-transaction ceiling.
+`DelegatedDomesticPaymentTest`, `LegacyDelegationArmRefusedIT` and
+`CustomerEdgeDelegatedPaymentPactConsumerTest` prove that boundary.
+
+This is deliberately a **first rail**, not completion of D3: delegated SEPA, instant, card and
+savings execution still need their own enforcing integrations. Daily/monthly ceilings also remain
+unsupported because no debit transaction atomically writes a cross-rail cumulative counter; the
+API continues to reject them rather than promise a limit it cannot enforce.
 
 Relates: ADR-0034 (unified OPA), ADR-0072 (party identity), ADR-0094
 (EUDI hub), ADR-0118 (GDPR lifecycle), ADR-0126 (unified consent),
