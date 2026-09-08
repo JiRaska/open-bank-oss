@@ -12,7 +12,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { hasIbanShape, isValidIban, looksLikeUuid, normalizeIban } from '@/lib/validation/iban'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { LoadMoreControl, PageHeader, StatusBadge } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 
@@ -160,7 +160,6 @@ export default function AccountsPage() {
   }) ?? []
 
   const visible = filtered.slice(0, visibleCount)
-  const hasMore = filtered.length > visibleCount
   const queryHelpVisible = !ibanHint && !result && !unavailable
 
   return (
@@ -314,7 +313,7 @@ export default function AccountsPage() {
 
         {/* Table */}
         {!unavailable && (
-          <div style={{ overflowX: 'auto' }}>
+          <div id="accounts-results" style={{ overflowX: 'auto' }}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -365,19 +364,16 @@ export default function AccountsPage() {
           </div>
         )}
 
-        {!unavailable && hasMore && (
-          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
-            <button
-              className="btn btn-secondary"
-              type="button"
-              aria-label={t('Zobrazit další účty', 'Load more accounts')}
-              style={{ fontSize: '12px' }}
-              onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
-            >
-              {t(`Zobrazit dalších ${Math.min(PAGE_SIZE, filtered.length - visibleCount)}`, `Load ${Math.min(PAGE_SIZE, filtered.length - visibleCount)} more`)}
-              {' '}({visibleCount}/{filtered.length})
-            </button>
-          </div>
+        {!unavailable && result && filtered.length > 0 && (
+          <LoadMoreControl
+            loaded={visible.length}
+            total={filtered.length}
+            progressLabel={t(`Zobrazeno ${visible.length} z ${filtered.length} účtů`, `Showing ${visible.length} of ${filtered.length} accounts`)}
+            buttonLabel={t(`Zobrazit dalších ${Math.min(PAGE_SIZE, filtered.length - visible.length)}`, `Load ${Math.min(PAGE_SIZE, filtered.length - visible.length)} more`)}
+            buttonAriaLabel={t('Zobrazit další účty', 'Load more accounts')}
+            controls="accounts-results"
+            onLoadMore={() => setVisibleCount(c => c + PAGE_SIZE)}
+          />
         )}
       </div>
     </div>
