@@ -9,11 +9,11 @@
 # burn-down priority).
 #
 # format: <service> POST <path>  # <reason>
-openbank-account-service POST /api/v1/accounts/{accountId}/authorizations  # creation POST with no idempotency key today — burn-down #8351
+openbank-account-service POST /api/v1/accounts/{accountId}/authorizations  # natural-key replay while ACTIVE — ADR-0295, burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/close  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/freeze  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
-openbank-account-service POST /api/v1/accounts/{accountId}/pockets  # creation POST with no idempotency key today — burn-down #8351
-openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals  # creation POST with no idempotency key today — burn-down #8351
+openbank-account-service POST /api/v1/accounts/{accountId}/pockets  # natural-key 409/400 (uq V7) — ADR-0295, burn-down #8351
+openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals  # replay while PENDING+unexpired — ADR-0295, burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/savings-goal/delegation/proposals/{proposalId}/decide  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-account-service POST /api/v1/accounts/{accountId}/unfreeze  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-balance-service POST /api/v1/balances/reconciliation  # operator trigger, mutates no balance; re-run records a fresh report by design — ADR-0287 exception; burn-down #8351

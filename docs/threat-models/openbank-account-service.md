@@ -125,6 +125,14 @@ not change any existing request's outcome until explicitly flipped.
   baselined under ASVS V9.1 exactly as the identical edge from payments, customer-edge and party
   already is; retiring the class is the mesh-mTLS work, not this change. The bearer does not depend
   on the transport.
+- **2026-09-07** — Natural-key idempotency on the creation POSTs (ADR-0295, burn-down #8351).
+  `grantAuthorization` and `propose` gained check-first replay on their natural keys (grant: the
+  full caller tuple restricted to ACTIVE rows; proposal: account/delegate/amount/currency/note
+  while PENDING and unexpired). Pockets were already enforced (`uq_account_pockets_acc_ccy`, V7).
+  The grant fix touches the delegated-access surface: a retried grant can no longer stack a
+  second authority row, and a retried proposal can no longer stack a second executable
+  withdrawal instruction awaiting owner approval. No new endpoint, caller, privilege or control
+  bypass; the authorization guard still runs BEFORE any replay answer on the proposal path.
 - **2026-09-05** — **Inbound REST error surface on the authentication boundary**, no new route,
   caller, edge or privilege. A security abort (anonymous or under-roled caller hitting a
   `@RolesAllowed` route) was rendered by Quarkus REST's built-in handling as the raw exception
