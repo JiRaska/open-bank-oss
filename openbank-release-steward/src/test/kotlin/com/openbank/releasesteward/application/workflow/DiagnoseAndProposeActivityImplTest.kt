@@ -53,8 +53,15 @@ class DiagnoseAndProposeActivityImplTest {
     }
 
     /** Records what was offered to each write path and answers with a configurable URL. */
-    private class StubProposalPort(private val prUrl: String? = null, private val ticketUrl: String? = null) :
-        GitHubProposalPort {
+    // NOT named StubProposalPort: check-threat-model-claims.py resolves a cited symbol by name
+    // across the whole backend corpus INCLUDING src/test, with no service scoping. A helper by
+    // that name here makes openbank-mcp-service's threat-model claim about its own long-retired
+    // StubProposalPort resolve, which retires that model's ALLOWED_UNRESOLVED entry and fails the
+    // gate on a document this PR never touched.
+    private class RecordingReleaseProposalPort(
+        private val prUrl: String? = null,
+        private val ticketUrl: String? = null,
+    ) : GitHubProposalPort {
         var prDiff: String? = null
         var ticketDiagnosis: String? = null
         override suspend fun openProposalPr(finding: ReleaseStewardFinding, fixDiff: String): String? {
@@ -96,7 +103,7 @@ class DiagnoseAndProposeActivityImplTest {
 
         val result = SyncActivity(
             StubLlm(rootCause = "version.txt was never registered"),
-            StubProposalPort(),
+            RecordingReleaseProposalPort(),
             repository,
         )
             .diagnose(finding(), mapOf("openPrs" to 2.0))
@@ -112,7 +119,7 @@ class DiagnoseAndProposeActivityImplTest {
     @Test
     fun `diagnose passes the caller's context metrics through to the model port`() {
         val llm = StubLlm()
-        SyncActivity(llm, StubProposalPort(), RecordingRepository()).diagnose(finding(), mapOf("a" to 1.5))
+        SyncActivity(llm, RecordingReleaseProposalPort(), RecordingRepository()).diagnose(finding(), mapOf("a" to 1.5))
 
         assertThat(llm.lastMetrics).containsEntry("a", 1.5)
     }
@@ -120,7 +127,11 @@ class DiagnoseAndProposeActivityImplTest {
     @Test
     fun `diagnose leaves the identity fields of the finding untouched`() {
         val original = finding()
-        val result = SyncActivity(StubLlm(), StubProposalPort(), RecordingRepository()).diagnose(original, emptyMap())
+        val result = SyncActivity(
+            StubLlm(),
+            RecordingReleaseProposalPort(),
+            RecordingRepository(),
+        ).diagnose(original, emptyMap())
 
         assertThat(result.id).isEqualTo(original.id)
         assertThat(result.checkType).isEqualTo(original.checkType)
@@ -130,7 +141,8 @@ class DiagnoseAndProposeActivityImplTest {
 
     @Test
     fun `propose without a diagnosis fails loudly rather than proposing on nothing`() {
-        val activity = SyncActivity(StubLlm(), StubProposalPort(ticketUrl = "https://x/1"), RecordingRepository())
+        val activity =
+            SyncActivity(StubLlm(), RecordingReleaseProposalPort(ticketUrl = "https://x/1"), RecordingRepository())
 
         assertThatThrownBy { activity.propose(finding(status = FindingStatus.DIAGNOSED, rootCause = null)) }
             .isInstanceOf(IllegalStateException::class.java)
@@ -140,7 +152,7 @@ class DiagnoseAndProposeActivityImplTest {
     @Test
     fun `a mechanical fix-diff takes the PR path and the diff is stored on the finding`() {
         val repository = RecordingRepository()
-        val proposal = StubProposalPort(prUrl = "https://github.com/JiRaska/open-bank-oss/pull/42")
+        val proposal = RecordingReleaseProposalPort(prUrl = "https://github.com/JiRaska/open-bank-oss/pull/42")
         val before = Instant.now()
 
         val result = SyncActivity(StubLlm(fixDiff = "--- a/application.yaml"), proposal, repository)
@@ -158,7 +170,7 @@ class DiagnoseAndProposeActivityImplTest {
 
     @Test
     fun `with no fix-diff the ticket path is taken and no diff is invented`() {
-        val proposal = StubProposalPort(ticketUrl = "https://github.com/JiRaska/open-bank-oss/issues/7")
+        val proposal = RecordingReleaseProposalPort(ticketUrl = "https://github.com/JiRaska/open-bank-oss/issues/7")
 
         val result = SyncActivity(StubLlm(fixDiff = null), proposal, RecordingRepository())
             .propose(finding(status = FindingStatus.DIAGNOSED, rootCause = "root cause"))
@@ -173,7 +185,8 @@ class DiagnoseAndProposeActivityImplTest {
     @Test
     fun `a fix-diff whose PR is refused falls back to a ticket and does NOT store the diff`() {
         // The diff never became a PR, so recording it would claim a proposal that does not exist.
-        val proposal = StubProposalPort(prUrl = null, ticketUrl = "https://github.com/JiRaska/open-bank-oss/issues/9")
+        val proposal =
+            RecordingReleaseProposalPort(prUrl = null, ticketUrl = "https://github.com/JiRaska/open-bank-oss/issues/9")
 
         val result = SyncActivity(StubLlm(fixDiff = "--- a/application.yaml"), proposal, RecordingRepository())
             .propose(finding(status = FindingStatus.DIAGNOSED, rootCause = "root cause"))

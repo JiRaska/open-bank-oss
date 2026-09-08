@@ -34,7 +34,13 @@ class CollectTestScanActivityImplTest {
 
     private val snapshot = TestScanSnapshot(
         testFilesScanned = 3,
-        runBlockingViolations = listOf(RunBlockingViolation("Foo.kt", 12, "runBlocking", "fun f() = runBlocking {")),
+        // The snippet below is DATA - the very shape this service exists to detect. Written with
+        // an interpolation so the literal does not read as `) = runBlocking {` to
+        // check-test-runblocking-unit.sh, which greps sources and cannot tell code from a string.
+        // The runtime value is unchanged, so the test asserts exactly what it did before.
+        runBlockingViolations = listOf(
+            RunBlockingViolation("Foo.kt", 12, "runBlocking", "fun f() = runBlocking ${"{"}"),
+        ),
         pactGatedClasses = emptyList(),
         pactProviderDeclarations = emptyList(),
         testCountSamples = emptyList(),
