@@ -50,6 +50,29 @@ class OnboardingProjectionServiceTest {
     }
 
     @Test
+    fun `an APPROVED kyc on a not-yet-active party stays in the KYC column`(): Unit = runBlocking {
+        // #8951: APPROVED + PENDING_KYC is the NORMAL ordering (kyc-service approves,
+        // party-service activates afterwards) — it used to fall through the catch-all else to
+        // REGISTERED, moving the funnel board BACKWARDS at the moment of approval.
+        assertThat(FunnelStage.derive(PartyStage.PENDING_KYC, KycStage.APPROVED, false))
+            .isEqualTo(FunnelStage.KYC_UNDER_REVIEW)
+        assertThat(FunnelStage.derive(PartyStage.PENDING_KYC, KycStage.APPROVED, true))
+            .isEqualTo(FunnelStage.KYC_UNDER_REVIEW)
+    }
+
+    @Test
+    fun `derive never produces REGISTERED - the funnel only moves forward from it`(): Unit = runBlocking {
+        // REGISTERED is the initial stage written at PartyCreated; no derive() input may map
+        // back onto it. Totality over the three dimensions.
+        val produced = PartyStage.entries.flatMap { party ->
+            (KycStage.entries.toList() + null).flatMap { kyc ->
+                listOf(false, true).map { sca -> FunnelStage.derive(party, kyc, sca) }
+            }
+        }
+        assertThat(produced).doesNotContain(FunnelStage.REGISTERED)
+    }
+
+    @Test
     fun `derive returns SCA_PENDING for ACTIVE party without device`(): Unit = runBlocking {
         assertThat(FunnelStage.derive(PartyStage.ACTIVE, KycStage.APPROVED, false))
             .isEqualTo(FunnelStage.SCA_PENDING)
