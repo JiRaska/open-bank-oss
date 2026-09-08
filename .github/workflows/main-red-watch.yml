@@ -42,6 +42,8 @@ name: main red watch
 
 on:
   workflow_run:
+    # Reject PR-branch completions before allocating a workflow run (Refs #9031).
+    branches: [main]
     # R1: every workflow that pushes to main with no paths filter. These run on
     # every commit, so their conclusion IS main's health. The list is not
     # hand-maintained scope -- check-main-red-watch.py --check-declaration fails
