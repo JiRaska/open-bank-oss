@@ -28,8 +28,9 @@ function rawColourCount(): number {
 
 describe('admin UI semantic colour migration', () => {
   it('does not add raw hexadecimal colours outside the token stylesheet', () => {
-    // Baseline captured after migrating approval identity badges to shared semantic tones.
+    // Re-baselined after migrations reduced the scanner result from 1,782 to 1,684.
+    // Keeping the old ceiling left 98 free regression slots in a shrink-only ratchet.
     // Lowering this number is always safe; raising it requires an intentional token decision.
-    expect(rawColourCount()).toBeLessThanOrEqual(1782)
+    expect(rawColourCount()).toBeLessThanOrEqual(1684)
   })
 })

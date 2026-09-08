@@ -39,7 +39,10 @@ SOURCE_EXTENSIONS = {".tsx", ".css"}
 
 # Lowering this is always safe; raising it needs an intentional token decision, same rule as the
 # Vitest test's own comment. Keep this number equal to that test's ceiling.
-MAX_RAW_COLOUR_LITERALS = 1782
+# Re-baselined from the exact scanner output on main after the design-system
+# migrations had already paid down 98 literals. A shrink-only ratchet must not
+# retain that slack: otherwise a new raw colour can regress while CI stays green.
+MAX_RAW_COLOUR_LITERALS = 1684
 
 
 def source_files(root: pathlib.Path):
