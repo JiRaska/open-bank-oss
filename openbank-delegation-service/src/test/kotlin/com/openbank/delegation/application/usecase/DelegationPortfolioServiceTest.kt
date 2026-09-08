@@ -35,16 +35,30 @@ class DelegationPortfolioServiceTest {
     @Test
     fun `a portfolio cannot be an empty client side grouping`(): Unit = runBlocking {
         assertThatThrownBy {
-            DelegationPortfolio(ownerPartyId = owner, name = "Treasury", accountIds = emptySet(), createdAt = OffsetDateTime.now(clock), updatedAt = OffsetDateTime.now(clock))
+            DelegationPortfolio(
+                ownerPartyId = owner,
+                name = "Treasury",
+                accountIds = emptySet(),
+                createdAt = OffsetDateTime.now(clock),
+                updatedAt = OffsetDateTime.now(clock),
+            )
         }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("at least one account")
     }
 
     @Test
-    fun `read refuses a stale or different business principal even when it knows the portfolio id`(): Unit = runBlocking {
-        val portfolio = DelegationPortfolio(ownerPartyId = owner, name = "Treasury", accountIds = setOf(UUID.randomUUID()), createdAt = OffsetDateTime.now(clock), updatedAt = OffsetDateTime.now(clock))
-        coEvery { repository.findById(portfolio.id) } returns portfolio
+    fun `read refuses a stale or different business principal even when it knows the portfolio id`(): Unit =
+        runBlocking {
+            val portfolio =
+                DelegationPortfolio(
+                    ownerPartyId = owner,
+                    name = "Treasury",
+                    accountIds = setOf(UUID.randomUUID()),
+                    createdAt = OffsetDateTime.now(clock),
+                    updatedAt = OffsetDateTime.now(clock),
+                )
+            coEvery { repository.findById(portfolio.id) } returns portfolio
 
-        assertThatThrownBy { runBlocking { service.get(UUID.randomUUID(), portfolio.id) } }
-            .isInstanceOf(DelegationPortfolioAccessDenied::class.java)
-    }
+            assertThatThrownBy { runBlocking { service.get(UUID.randomUUID(), portfolio.id) } }
+                .isInstanceOf(DelegationPortfolioAccessDenied::class.java)
+        }
 }

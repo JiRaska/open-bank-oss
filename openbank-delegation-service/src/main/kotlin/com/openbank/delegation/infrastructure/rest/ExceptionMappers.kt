@@ -75,13 +75,17 @@ class DelegationRolePresetNotFoundMapper : ExceptionMapper<DelegationRolePresetN
 @Provider
 class DelegationPortfolioNotFoundMapper : ExceptionMapper<DelegationPortfolioNotFound> {
     override fun toResponse(exception: DelegationPortfolioNotFound): Response =
-        Response.status(Response.Status.NOT_FOUND).entity(errorBody(404, exception.message)).build()
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message))
+            .build()
 }
 
 @Provider
 class DelegationPortfolioAccessDeniedMapper : ExceptionMapper<DelegationPortfolioAccessDenied> {
     override fun toResponse(exception: DelegationPortfolioAccessDenied): Response =
-        Response.status(Response.Status.FORBIDDEN).entity(errorBody(403, exception.message)).build()
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(errorBody(Response.Status.FORBIDDEN.statusCode, exception.message))
+            .build()
 }
 
 @Provider

@@ -32,7 +32,12 @@ data class DelegationPortfolioResponse(
 ) {
     companion object {
         fun from(value: DelegationPortfolio) = DelegationPortfolioResponse(
-            value.id, value.ownerPartyId, value.name, value.accountIds, value.createdAt, value.updatedAt,
+            value.id,
+            value.ownerPartyId,
+            value.name,
+            value.accountIds,
+            value.createdAt,
+            value.updatedAt,
         )
     }
 }
@@ -68,7 +73,8 @@ class DelegationPortfolioResource(private val service: DelegationPortfolioServic
     suspend fun list(
         @PathParam("ownerPartyId") ownerPartyId: UUID,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: CallerPartyId,
-    ): List<DelegationPortfolioResponse> = service.list(customerPartyId, ownerPartyId).map(DelegationPortfolioResponse::from)
+    ): List<DelegationPortfolioResponse> =
+        service.list(customerPartyId, ownerPartyId).map(DelegationPortfolioResponse::from)
 
     @GET
     @Path("/{id}")

@@ -163,8 +163,12 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
             return refuse(Response.Status.FORBIDDEN, "ownerPartyId is derived from the authenticated profile")
         }
         val command = json.createObjectNode().apply {
-            requested.get(FIELD_PORTFOLIO_NAME)?.let { set<com.fasterxml.jackson.databind.JsonNode>(FIELD_PORTFOLIO_NAME, it) }
-            requested.get(FIELD_PORTFOLIO_ACCOUNTS)?.let { set<com.fasterxml.jackson.databind.JsonNode>(FIELD_PORTFOLIO_ACCOUNTS, it) }
+            requested.get(FIELD_PORTFOLIO_NAME)?.let {
+                set<com.fasterxml.jackson.databind.JsonNode>(FIELD_PORTFOLIO_NAME, it)
+            }
+            requested.get(FIELD_PORTFOLIO_ACCOUNTS)?.let {
+                set<com.fasterxml.jackson.databind.JsonNode>(FIELD_PORTFOLIO_ACCOUNTS, it)
+            }
         }
         command.put(FIELD_PORTFOLIO_OWNER, partyId)
         return upstream.post("$delegationServiceUrl$PORTFOLIOS", partyId, json.writeValueAsString(command))

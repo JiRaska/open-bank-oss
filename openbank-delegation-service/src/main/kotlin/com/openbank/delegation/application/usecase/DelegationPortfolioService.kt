@@ -16,17 +16,27 @@ class DelegationPortfolioNotFound(id: UUID) : RuntimeException("delegation portf
 class DelegationPortfolioAccessDenied : RuntimeException("the authenticated active profile does not own this portfolio")
 
 @ApplicationScoped
-class DelegationPortfolioService(
-    private val repository: DelegationPortfolioRepository,
-    private val clock: Clock,
-) {
+class DelegationPortfolioService(private val repository: DelegationPortfolioRepository, private val clock: Clock) {
     @Inject
     constructor(repository: DelegationPortfolioRepository) : this(repository, Clock.systemUTC())
 
-    suspend fun create(callerPartyId: CallerPartyId, ownerPartyId: UUID, name: String, accountIds: Set<UUID>): DelegationPortfolio {
+    suspend fun create(
+        callerPartyId: CallerPartyId,
+        ownerPartyId: UUID,
+        name: String,
+        accountIds: Set<UUID>,
+    ): DelegationPortfolio {
         requireOwner(callerPartyId, ownerPartyId)
         val now = OffsetDateTime.now(clock)
-        return repository.save(DelegationPortfolio(ownerPartyId = ownerPartyId, name = name.trim(), accountIds = accountIds, createdAt = now, updatedAt = now))
+        return repository.save(
+            DelegationPortfolio(
+                ownerPartyId = ownerPartyId,
+                name = name.trim(),
+                accountIds = accountIds,
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
     }
 
     suspend fun list(callerPartyId: CallerPartyId, ownerPartyId: UUID): List<DelegationPortfolio> {

@@ -13,7 +13,9 @@ import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
 
 @ApplicationScoped
-class DelegationPortfolioRepositoryImpl : DelegationPortfolioRepository, PanacheRepository<DelegationPortfolioEntity> {
+class DelegationPortfolioRepositoryImpl :
+    DelegationPortfolioRepository,
+    PanacheRepository<DelegationPortfolioEntity> {
     override suspend fun save(portfolio: DelegationPortfolio): DelegationPortfolio = Panache.withTransaction {
         Panache.getSession().flatMap { it.merge(DelegationPortfolioEntity.fromDomain(portfolio)) }
     }.awaitSuspending().toDomain()

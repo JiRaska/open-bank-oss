@@ -81,7 +81,9 @@ class CustomerDelegationResourceTest {
         val body = slot<String>()
         every { upstream.post(any(), any(), capture(body), any()) } returns Response.status(201).build()
 
-        val response = resource(upstream).createPortfolio("""{"name":"Finance","accountIds":["$GRANT_ID"],"ignored":"x"}""")
+        val response = resource(
+            upstream,
+        ).createPortfolio("""{"name":"Finance","accountIds":["$GRANT_ID"],"ignored":"x"}""")
 
         assertThat(response.status).isEqualTo(201)
         assertThat(body.captured).contains("\"ownerPartyId\":\"$caller\"")
@@ -94,7 +96,9 @@ class CustomerDelegationResourceTest {
     fun `portfolio creation rejects a forged owner before upstream`() {
         val upstream = mockk<UpstreamClient>()
 
-        val response = resource(upstream).createPortfolio("""{"ownerPartyId":"$stranger","name":"Finance","accountIds":["$GRANT_ID"]}""")
+        val response = resource(
+            upstream,
+        ).createPortfolio("""{"ownerPartyId":"$stranger","name":"Finance","accountIds":["$GRANT_ID"]}""")
 
         assertThat(response.status).isEqualTo(403)
         verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
