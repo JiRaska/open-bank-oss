@@ -302,6 +302,12 @@ spec:
               api_url: http://keycloak.iam.svc:8080/realms/openbank/protocol/openid-connect/userinfo
               use_pkce: true
               use_refresh_token: true
+              # ADR-0286 / #9216: without auto_login the /reporting iframe first
+              # renders Grafana's login page and makes the operator click through
+              # SSO by hand; with it, the embed bounces straight to Keycloak and
+              # back (transparent with an existing portal SSO session, and the
+              # realm CSP allowlists admin.open-bank.tech as a frame ancestor).
+              auto_login: true
               login_attribute_path: preferred_username
               name_attribute_path: name
               email_attribute_path: email
