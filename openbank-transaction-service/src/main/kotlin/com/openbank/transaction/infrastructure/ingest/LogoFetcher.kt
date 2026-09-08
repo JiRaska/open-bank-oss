@@ -64,7 +64,7 @@ class LogoFetcher(
     private val allowedHostsConfig: Optional<String>,
 ) {
     /** Why a fetch was refused, in a sentence an operator can act on. */
-    class RefusedException(message: String) : IllegalArgumentException(message)
+    class RefusedException(message: String, cause: Throwable? = null) : IllegalArgumentException(message, cause)
 
     /** The bytes and where they came from, ready for [LogoImages.render]. */
     data class Fetched(val bytes: ByteArray, val sourceUrl: String, val contentType: String?) {
@@ -102,6 +102,10 @@ class LogoFetcher(
      *   allowlisted, it resolves to a non-public address, the response is not 200, or the body
      *   exceeds the cap.
      */
+    // Every throw below is a distinct refusal an operator has to be able to tell apart — "not
+    // allowlisted", "resolves inward" and "answered a redirect" call for three different actions,
+    // and collapsing them would say only that the URL was refused.
+    @Suppress("ThrowsCount")
     fun fetch(rawUrl: String): Fetched {
         if (!isEnabled()) {
             throw RefusedException(
@@ -130,10 +134,10 @@ class LogoFetcher(
                 HttpResponse.BodyHandlers.ofInputStream(),
             )
         } catch (e: java.io.IOException) {
-            throw RefusedException("fetch failed: ${e.message}")
+            throw RefusedException("fetch failed: ${e.message}", e)
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            throw RefusedException("fetch was interrupted")
+            throw RefusedException("fetch was interrupted", e)
         }
 
         // A redirect arrives as a 3xx rather than being followed, and is refused here with the reason
@@ -159,7 +163,7 @@ class LogoFetcher(
     private fun parse(rawUrl: String): URI = try {
         URI(rawUrl.trim())
     } catch (e: java.net.URISyntaxException) {
-        throw RefusedException("not a valid URL: ${e.message}")
+        throw RefusedException("not a valid URL: ${e.message}", e)
     }
 
     /**
@@ -169,11 +173,12 @@ class LogoFetcher(
      * address and another for `127.0.0.1` would otherwise pass, and which one the connection uses is
      * not ours to decide.
      */
+    @Suppress("ThrowsCount")
     private fun requirePubliclyRoutable(host: String) {
         val addresses = try {
             InetAddress.getAllByName(host)
         } catch (e: UnknownHostException) {
-            throw RefusedException("host '$host' does not resolve: ${e.message}")
+            throw RefusedException("host '$host' does not resolve: ${e.message}", e)
         }
         if (addresses.isEmpty()) throw RefusedException("host '$host' resolves to no address")
         addresses.forEach { address ->
@@ -193,14 +198,7 @@ class LogoFetcher(
      * carrier-grade NAT 100.64.0.0/10 is not covered, and IPv6 unique-local fc00::/7 is not either.
      */
     private fun isPubliclyRoutable(address: InetAddress): Boolean {
-        if (address.isAnyLocalAddress ||
-            address.isLoopbackAddress ||
-            address.isLinkLocalAddress ||
-            address.isSiteLocalAddress ||
-            address.isMulticastAddress
-        ) {
-            return false
-        }
+        if (isReservedByJdkClassification(address)) return false
         val bytes = address.address
         if (bytes.size == IPV4_BYTES) {
             val first = bytes[0].toInt() and BYTE_MASK
@@ -214,6 +212,16 @@ class LogoFetcher(
         }
         return true
     }
+
+    /**
+     * The ranges the JDK already classifies: any-local, loopback, link-local (which is where cloud
+     * metadata lives), site-local, and multicast.
+     */
+    private fun isReservedByJdkClassification(address: InetAddress): Boolean = address.isAnyLocalAddress ||
+        address.isLoopbackAddress ||
+        address.isLinkLocalAddress ||
+        address.isSiteLocalAddress ||
+        address.isMulticastAddress
 
     /**
      * Reads at most [LogoImages.MAX_UPLOAD_BYTES], and refuses a body that exceeds it.
