@@ -6,7 +6,12 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.1 -> 1.2): additive
   # only — GET /approvals (the checker's queue, issue #3472) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.4.0
+  version: 1.5.0
+  # 1.4.0 -> 1.5.0 (#9048): POST /lists/refresh-all now answers 202 and defers the imports to the
+  # scheduler instead of running them inside the request. The success code changed 200 -> 202,
+  # which oasdiff may classify as breaking; the URL major stays 1 (ADR-0048) because the resource
+  # and its semantics (operator triggers a refresh of all enabled lists) are unchanged — the
+  # previous synchronous 200 was itself the defect (request outlived every proxy timeout).
   description: >-
     Real-time sanctions screening against EU, UN, OFAC, HM Treasury and CNB lists. PATCH
     /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
@@ -222,14 +227,19 @@ paths:
       summary: Trigger manual refresh of all enabled lists
       operationId: refreshAllSanctionsLists
       responses:
-        '200':
-          description: All enabled lists refreshed
+        '202':
+          description: >-
+            Refresh of all enabled lists queued on the scheduler (#9048). The response returns
+            immediately; the imports run on subsequent scheduler ticks, one list at a time, and
+            per-list progress is observable through each list's lastUpdatedAt.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SanctionsList'
+                type: object
+                properties:
+                  requested:
+                    type: integer
+                    description: How many enabled lists were flagged for refresh.
 
   /api/v1/sanctions/approvals:
     get:

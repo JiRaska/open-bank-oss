@@ -222,31 +222,55 @@ class SanctionsListServiceTest {
             .hasMessageContaining("Failed to persist sanctions list refresh")
     }
 
-    // ──── refreshAll ─────────────────────────────────────────────────────────
+    // ──── requestRefreshAll (#9048) ─────────────────────────────────────────
 
     @Test
-    fun `refreshAll only refreshes enabled lists`(): Unit = runBlocking {
-        val enabled = sampleList(listType = "OFAC_SDN", enabled = true)
-        val disabled = sampleList(listType = "FATF_HIGH_RISK", enabled = false)
-        coEvery { repo.listSanctionsLists() } returns listOf(enabled, disabled)
-        coEvery { repo.findByListType("OFAC_SDN") } returns enabled
-        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns ListImportResult.imported(1)
-        coEvery { repo.markUpdated("OFAC_SDN", 1) } returns enabled.copy(lastEntryCount = 1)
+    fun `requestRefreshAll flags enabled lists via repo and returns the count`(): Unit = runBlocking {
+        coEvery { repo.requestRefreshAll() } returns 5
 
-        val result = service.refreshAll()
-
-        assertThat(result).hasSize(1)
-        coVerify(exactly = 0) { repo.findByListType("FATF_HIGH_RISK") }
-    }
-
-    @Test
-    fun `refreshAll returns empty list when nothing is enabled`(): Unit = runBlocking {
-        coEvery { repo.listSanctionsLists() } returns listOf(sampleList(enabled = false))
-
-        assertThat(service.refreshAll()).isEmpty()
+        assertThat(service.requestRefreshAll()).isEqualTo(5)
+        coVerify { repo.requestRefreshAll() }
+        // The endpoint must never touch the importer — the imports belong to the scheduler.
+        coVerify(exactly = 0) { importer.importList(any(), any()) }
     }
 
     // ──── scheduledRefresh ──────────────────────────────────────────────────
+
+    @Test
+    fun `scheduledRefresh refreshes a flagged list even outside its cron window`(): Unit = runBlocking {
+        // clock fixed at 2024-01-15T12:00:00Z (Monday) but this list's cron says 06:00 — without
+        // the #9048 flag it would NOT be due. The refresh-requested flag makes it due.
+        val flagged = sampleList(
+            listType = "OFAC_SDN",
+            sourceUrl = "https://example.com/sdn.xml",
+            cronHour = 6,
+            cronMinute = 0,
+        ).copy(refreshRequestedAt = Instant.parse("2024-01-15T11:58:00Z"))
+        coEvery { repo.listSanctionsLists() } returns listOf(flagged)
+        coEvery { repo.findByListType("OFAC_SDN") } returns flagged
+        coEvery {
+            importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml")
+        } returns ListImportResult.imported(9)
+        coEvery { repo.markUpdated("OFAC_SDN", 9) } returns flagged.copy(lastEntryCount = 9)
+
+        service.scheduledRefresh()
+
+        coVerify { importer.importList(SanctionsListType.OFAC_SDN, "https://example.com/sdn.xml") }
+        // markUpdated is also what clears the flag (repo side), so the list is not re-imported
+        // on every subsequent tick.
+        coVerify { repo.markUpdated("OFAC_SDN", 9) }
+    }
+
+    @Test
+    fun `scheduledRefresh does not refresh a disabled list even when flagged`(): Unit = runBlocking {
+        val flaggedDisabled = sampleList(listType = "OFAC_SDN", enabled = false)
+            .copy(refreshRequestedAt = Instant.parse("2024-01-15T11:58:00Z"))
+        coEvery { repo.listSanctionsLists() } returns listOf(flaggedDisabled)
+
+        service.scheduledRefresh()
+
+        coVerify(exactly = 0) { importer.importList(any(), any()) }
+    }
 
     @Test
     fun `scheduledRefresh skips lists whose cron schedule does not match now`(): Unit = runBlocking {

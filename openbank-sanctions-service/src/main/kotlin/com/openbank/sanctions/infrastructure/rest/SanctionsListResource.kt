@@ -54,5 +54,7 @@ class SanctionsListResource(private val service: SanctionsListService) {
     @Path("/refresh-all")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "sanctions.trigger", resource = "")
-    suspend fun refreshAll(): Response = Response.ok(service.refreshAll()).build()
+    suspend fun refreshAll(): Response =
+        // #9048: 202 Accepted — the imports are queued for the scheduler, not run in-request.
+        Response.accepted(mapOf("requested" to service.requestRefreshAll())).build()
 }
