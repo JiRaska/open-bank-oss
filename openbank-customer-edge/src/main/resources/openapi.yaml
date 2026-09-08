@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.53.0
+  version: 1.53.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -5055,9 +5055,12 @@ components:
           description: Monthly account fee as the catalogue states it. Sent even when zero.
         annualRate:
           type: number
+          example: 5.8
           description: >-
-            Term deposits only — one fixed rate for one fixed term. Absent for every other type;
-            absence means "not priced here", not 0 %.
+            Term deposits only — one fixed rate for one fixed term, as a PERCENT (5.8 means
+            5.8 % p.a.), which is how every rate crossing this edge is stated. The platform keeps
+            rates as decimal fractions internally; the conversion happens here so no client has to
+            know that. Absent for every other type; absence means "not priced here", not 0 %.
         term:
           type: object
           description: The term deposit's own TermDepositConfig, verbatim.
@@ -5083,6 +5086,7 @@ components:
         currency: {type: string, example: CZK}
         minimumDeposit: {type: number, nullable: true}
         maximumDeposit: {type: number, nullable: true}
+        # Percent, not a fraction: 5.8 means 5.8 % p.a. (see ProductOffer.annualRate).
         annualRate: {type: number, format: double, example: 5.8}
         term:
           type: object

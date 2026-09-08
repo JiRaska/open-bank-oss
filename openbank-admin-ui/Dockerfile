@@ -94,16 +94,21 @@ RUN set -e; \
 # added for these trees (!docs/adr/**, !docs/threat-models/**, !docs/agents/**);
 # the rest of docs/ + *.md stays excluded.
 # ──────────────────────────────────────────────────────────────────────
+# Also carries the ADR-0148 prompt registry (openbank-libs/governance/prompts) for the ADR-0285
+# Communication Studio: openbank-libs/ is .dockerignore'd out of the runtime fs, so without this
+# copy /communication renders "registry not available" in the image while looking correct in local
+# dev, where the repo tree is one level up.
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS governance-collector
 WORKDIR /collect
 COPY . /repo
 RUN set -e; \
-    mkdir -p /governance-bundle/adr /governance-bundle/threat-models /governance-bundle/agents /governance-src/openbank-libs/governance; \
+    mkdir -p /governance-bundle/adr /governance-bundle/threat-models /governance-bundle/agents /governance-bundle/prompts /governance-src/openbank-libs/governance; \
     cp /repo/docs/adr/*.md /governance-bundle/adr/ 2>/dev/null || true; \
     cp /repo/docs/threat-models/*.md /governance-bundle/threat-models/ 2>/dev/null || true; \
     cp /repo/docs/agents/*.md /governance-bundle/agents/ 2>/dev/null || true; \
     cp /repo/openbank-libs/governance/rules.yaml /governance-src/openbank-libs/governance/rules.yaml; \
-    echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s) ──"; \
+    cp -R /repo/openbank-libs/governance/prompts/. /governance-bundle/prompts/ 2>/dev/null || true; \
+    echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s), $(find /governance-bundle/prompts -name '*.md' | wc -l) prompt(s) ──"; \
     find /governance-bundle -name '*.md' | sort
 
 # ──────────────────────────────────────────────────────────────────────

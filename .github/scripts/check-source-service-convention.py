@@ -113,6 +113,19 @@ BASELINE = {
         "on top of a split that can never be repaired. This entry is permanent unless #5902 is "
         "deliberately reopened. It pins the VALUE, so a third spelling from this module still fails."
     ),
+    ("openbank-analytics-sink", "account-service"): (
+        "#8792/#2891: NOT a producer stamping its own events. AccountInitialLoadSource projects "
+        "account-service's CREATION event for accounts that pre-date the stream, so the row it "
+        "writes describes a business fact account-service produced — the projection reconstructs "
+        "what that service emitted, through the same mapping and masking as the live consumer. "
+        "Stamping \"analytics-sink\" would create exactly the split this gate exists to prevent, "
+        "in the opposite direction: bronze already holds 19 real AccountCreated rows saying "
+        "\"account-service\", and the 66 seeded ones would report a second producer for one "
+        "stream, with the boundary at whichever day an operator ran the load. Provenance of the "
+        "INGESTION is carried by ingest_source=INITIAL_LOAD and batch_id, which are separate "
+        "columns and exist precisely so source_service does not have to double as one. It pins "
+        "the VALUE, so this module drifting to any other spelling still fails."
+    ),
 }
 
 # A line that is entirely a comment carries no write site. Stripping them is the whole reason this

@@ -176,6 +176,7 @@ class BalanceRepositoryImpl(private val repo: BalancePanacheRepo) : BalanceRepos
 }
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one finder/read shape per caller; grows with hold lifecycle queries
 class HoldRepositoryImpl(
     private val repo: HoldPanacheRepo,
     private val balanceRepo: BalancePanacheRepo,
@@ -194,6 +195,12 @@ class HoldRepositoryImpl(
     override suspend fun findActiveByReferenceId(referenceId: String): List<BalanceHold> = Panache.withSession {
         repo.find("referenceId = ?1 and releasedAt is null", referenceId).list()
     }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun findByNaturalKey(accountId: UUID, currency: String, referenceId: String): BalanceHold? =
+        Panache.withSession {
+            repo.find("accountId = ?1 and currency = ?2 and referenceId = ?3", accountId, currency, referenceId)
+                .firstResult()
+        }.awaitSuspending()?.toDomain()
 
     override suspend fun save(hold: BalanceHold): BalanceHold = Panache.withTransaction {
         val entity = hold.toEntity()
