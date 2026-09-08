@@ -55,6 +55,8 @@ class SanctionsListResource(private val service: SanctionsListService) {
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "sanctions.trigger", resource = "")
     suspend fun refreshAll(): Response =
-        // #9048: 202 Accepted — the imports are queued for the scheduler, not run in-request.
-        Response.accepted(mapOf("requested" to service.requestRefreshAll())).build()
+        // #9048: deprecated in favour of POST /api/v2/sanctions/lists/refresh-all (202). Kept
+        // serving the v1 shape (200 + array) for the deprecation window; the imports are now
+        // deferred to the scheduler here too — the old synchronous fan-out was the defect.
+        Response.ok(service.requestRefreshAllLegacy()).build()
 }

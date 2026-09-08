@@ -88,6 +88,19 @@ class SanctionsListService(
     }
 
     /**
+     * Legacy v1 variant of the same request: flags the lists exactly like [requestRefreshAll] but
+     * returns the enabled lists (200 + array) so the v1 contract SHAPE survives the deprecation
+     * window (docs/03-api: a breaking change moves to /api/v2 while v1 runs in parallel). The
+     * returned lists are the PRE-refresh state — v1 could no longer keep its old post-refresh
+     * semantics anyway, because those semantics were the defect: they required the imports to
+     * finish inside the request.
+     */
+    suspend fun requestRefreshAllLegacy(): List<SanctionsList> {
+        requestRefreshAll()
+        return repo.listSanctionsLists().filter { it.enabled }
+    }
+
+    /**
      * Scheduled refresh: checks cron schedule per list, calls the real importer.
      * Runs every 60s but only triggers a list when its cron time matches.
      *

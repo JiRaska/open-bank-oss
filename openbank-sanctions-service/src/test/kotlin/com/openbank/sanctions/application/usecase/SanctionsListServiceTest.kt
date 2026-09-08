@@ -234,6 +234,19 @@ class SanctionsListServiceTest {
         coVerify(exactly = 0) { importer.importList(any(), any()) }
     }
 
+    @Test
+    fun `requestRefreshAllLegacy flags and returns the enabled lists for the v1 shape`(): Unit = runBlocking {
+        val enabled = sampleList(listType = "OFAC_SDN", enabled = true)
+        coEvery { repo.requestRefreshAll() } returns 1
+        coEvery { repo.listSanctionsLists() } returns listOf(enabled, sampleList(enabled = false))
+
+        val result = service.requestRefreshAllLegacy()
+
+        assertThat(result).containsExactly(enabled)
+        coVerify { repo.requestRefreshAll() }
+        coVerify(exactly = 0) { importer.importList(any(), any()) }
+    }
+
     // ──── scheduledRefresh ──────────────────────────────────────────────────
 
     @Test
