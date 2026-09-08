@@ -81,6 +81,7 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     await user.click(screen.getByRole('button', { name: /zkusit znovu|try again/i }))
     expect(screen.getByRole('listbox')).toHaveAttribute('aria-busy', 'true')
     expect(await screen.findByText('Jan Novák')).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveFocus())
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByRole('textbox')).toHaveValue('nov')
   })
@@ -141,9 +142,10 @@ describe('CommandPalette (ADR-0228 D3)', () => {
   })
 
   it('closes on Escape', async () => {
+    const user = userEvent.setup()
     const onClose = vi.fn()
     renderPalette(true, onClose)
-    fireEvent.keyDown(window, { key: 'Escape' })
+    await user.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -161,7 +163,7 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     await user.tab()
     expect(screen.getByRole('textbox')).toHaveFocus()
     rerender(<LanguageProvider><CommandPalette open={false} onClose={onClose} /></LanguageProvider>)
-    expect(opener).toHaveFocus()
+    await waitFor(() => expect(opener).toHaveFocus())
     opener.remove()
   })
 
