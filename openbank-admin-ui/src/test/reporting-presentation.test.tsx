@@ -78,5 +78,7 @@ it('shows the frame only after the dashboard has rendered', () => {
   Object.defineProperty(frame, 'contentDocument', { value: doc })
   act(() => vi.advanceTimersByTime(500))
   expect(frame).toBeVisible()
+  expect(frame).toHaveStyle({ height: '1420px', overflow: 'hidden' })
+  expect(frame).toHaveAttribute('scrolling', 'no')
   expect(screen.queryByText('Charts could not be loaded yet')).not.toBeInTheDocument()
 })

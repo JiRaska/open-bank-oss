@@ -8,6 +8,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 // Keep the frame on the authenticated tools ingress. External origins require a separate CSP
 // and SSO integration; accepting a build-time URL here silently bypassed that assumption.
 const DASHBOARD = '/tools/grafana/d/openbank-business-warehouse'
+const DASHBOARD_MIN_HEIGHT = 1420
 
 export function WarehouseDashboard({ from, to }: { from: string; to: string }) {
   const { t } = useLanguage()
@@ -15,6 +16,7 @@ export function WarehouseDashboard({ from, to }: { from: string; to: string }) {
   const [attempt, setAttempt] = useState(0)
   const [state, setState] = useState<'loading' | 'ready' | 'unavailable'>('loading')
   const [theme, setTheme] = useState('light')
+  const [frameHeight, setFrameHeight] = useState(DASHBOARD_MIN_HEIGHT)
 
   useEffect(() => {
     const sync = () => setTheme(document.documentElement.classList.contains('dark') ? 'dark' : 'light')
@@ -32,10 +34,19 @@ export function WarehouseDashboard({ from, to }: { from: string; to: string }) {
     // dashboard DOM, allowing OAuth to finish before exposing it as ready.
     const started = Date.now()
     const reset = window.setTimeout(() => setState('loading'), 0)
+    let dashboardObserver: ResizeObserver | null = null
+    const sizeDashboard = () => {
+      const doc = frame.current?.contentDocument
+      if (!doc) return
+      setFrameHeight(Math.max(DASHBOARD_MIN_HEIGHT, doc.documentElement.scrollHeight, doc.body.scrollHeight))
+    }
     const timer = window.setInterval(() => {
       try {
         const doc = frame.current?.contentDocument
         if (doc?.querySelector('[data-testid="data-testid Panel header"], [data-testid^="data-testid Panel header "], .react-grid-layout')) {
+          sizeDashboard()
+          dashboardObserver = new ResizeObserver(sizeDashboard)
+          dashboardObserver.observe(doc.documentElement)
           setState('ready')
           window.clearInterval(timer)
           return
@@ -46,7 +57,7 @@ export function WarehouseDashboard({ from, to }: { from: string; to: string }) {
         window.clearInterval(timer)
       }
     }, 500)
-    return () => { window.clearInterval(timer); window.clearTimeout(reset) }
+    return () => { window.clearInterval(timer); window.clearTimeout(reset); dashboardObserver?.disconnect() }
   }, [url, attempt])
 
   return <section className="card" style={{ padding: 20 }} aria-label={t('Průzkum dat', 'Data exploration')}>
@@ -66,6 +77,7 @@ export function WarehouseDashboard({ from, to }: { from: string; to: string }) {
       <p className="mt-2 text-[var(--text-secondary)]">{t('Otevřete detail v Grafaně pro dokončení přihlášení a potom obnovte grafy. Reporty výše můžete používat nezávisle.', 'Open Grafana to complete sign-in, then refresh the charts. The reports above remain available independently.')}</p>
     </div>}
     <iframe key={`${url}-${attempt}`} ref={frame} src={url} title={t('Trendy a kvalita dat', 'Trends and data quality')}
-      style={{ width: '100%', height: state === 'ready' ? 1120 : 0, border: 0, visibility: state === 'ready' ? 'visible' : 'hidden', display: state === 'unavailable' ? 'none' : 'block', colorScheme: theme }} />
+      scrolling="no"
+      style={{ width: '100%', height: state === 'ready' ? frameHeight : 0, border: 0, overflow: 'hidden', visibility: state === 'ready' ? 'visible' : 'hidden', display: state === 'unavailable' ? 'none' : 'block', colorScheme: theme }} />
   </section>
 }

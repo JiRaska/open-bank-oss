@@ -233,7 +233,9 @@ change `frame-ancestors`, the tools ingress gate, or Grafana's own role mapping.
 The reporting frame uses the same-origin tools path, kiosk mode, the console's theme and an
 explicit UTC date range. Loading a frame alone is not evidence of a loaded dashboard; the UI
 waits for a rendered dashboard layout and offers sign-in in a separate tab plus retry if that
-cannot be established. This remains independent of the governed report results.
+cannot be established. Once ready, its height follows the same-origin dashboard document and
+suppresses nested scrolling so the embedded surface remains visually continuous with the console.
+This remains independent of the governed report results.
 
 Period-based dashboard queries use ClickHouse datasource time/date macros. Warehouse freshness
 is intentionally a current watermark independent of the selected period; an empty warehouse
