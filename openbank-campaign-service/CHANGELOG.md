@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/v0.38.2...v0.39.0) (2026-09-08)
+
+
+### Features
+
+* **admin-ui:** link browser failure diagnostics ([#7049](https://github.com/JiRaska/open-bank-oss/issues/7049)) ([5409645](https://github.com/JiRaska/open-bank-oss/commit/5409645c46285ffe5483d745aaf89eed02810acf))
+* **campaign:** a campaign must say whether it sells credit ([#8773](https://github.com/JiRaska/open-bank-oss/issues/8773)) ([#8862](https://github.com/JiRaska/open-bank-oss/issues/8862)) ([c7f8d97](https://github.com/JiRaska/open-bank-oss/commit/c7f8d977b159a975a215ace8f6d9987e47323a76))
+* **campaign:** check the ADR-0269 distress floor before every credit send ([#8918](https://github.com/JiRaska/open-bank-oss/issues/8918)) ([#8986](https://github.com/JiRaska/open-bank-oss/issues/8986)) ([75bcc9b](https://github.com/JiRaska/open-bank-oss/commit/75bcc9befab4b3c9b194edafb3a4003dfb245ddd))
+* **campaign:** HasAccount works — the reason it was disabled was already stale ([#8885](https://github.com/JiRaska/open-bank-oss/issues/8885)) ([e845f26](https://github.com/JiRaska/open-bank-oss/commit/e845f264412c1eff000ee69536499e25cacdfc4b))
+* **campaign:** HasActiveConsentScope works — and it is still not the consent control ([#8886](https://github.com/JiRaska/open-bank-oss/issues/8886)) ([540dcd1](https://github.com/JiRaska/open-bank-oss/commit/540dcd10199c007d1bdf65b09722b2d43d2d2266))
+* **campaign:** refuse credit enrolment without CREDIT_OFFERS consent ([#8770](https://github.com/JiRaska/open-bank-oss/issues/8770)) ([#8883](https://github.com/JiRaska/open-bank-oss/issues/8883)) ([9913fa3](https://github.com/JiRaska/open-bank-oss/commit/9913fa398eaf242a43fdb04a66f964021a5c73ec))
+
+
+### Bug Fixes
+
+* **campaign:** ask for credit consent under the grantee the customer granted it to ([#9104](https://github.com/JiRaska/open-bank-oss/issues/9104)) ([2c9f222](https://github.com/JiRaska/open-bank-oss/commit/2c9f222b85a68c5105325e31847b86f190ec66ec)), closes [#8918](https://github.com/JiRaska/open-bank-oss/issues/8918)
+* **campaign:** configure REST client URLs under quarkus.rest-client ([#9095](https://github.com/JiRaska/open-bank-oss/issues/9095)) ([6534aeb](https://github.com/JiRaska/open-bank-oss/commit/6534aeb38279449846c8e88f4aa8db6fb4d9d39d)), closes [#8918](https://github.com/JiRaska/open-bank-oss/issues/8918)
+* **campaign:** resolve HasAccount through the shared party-accounts view ([#8902](https://github.com/JiRaska/open-bank-oss/issues/8902)) ([9f0f992](https://github.com/JiRaska/open-bank-oss/commit/9f0f9928e693e886fcccb140c3557945a1d0dab1)), closes [#8792](https://github.com/JiRaska/open-bank-oss/issues/8792)
+
 ## [0.38.2](https://github.com/JiRaska/open-bank-oss/compare/v0.38.1...v0.38.2) (2026-09-01)
 
 
