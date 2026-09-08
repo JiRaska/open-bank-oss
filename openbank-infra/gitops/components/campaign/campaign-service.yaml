@@ -145,6 +145,13 @@ spec:
             # an omitted one is a call that is both unconfigured AND dropped in-cluster.
             - name: LENDING_SERVICE_URL
               value: http://lending-service.lending.svc:8126
+            # ADR-0221 incentive offers. application.yaml has always resolved this client as
+            # ${INCENTIVE_SERVICE_URL:http://localhost:8156} and nothing ever set the variable,
+            # so in-cluster the client pointed at its own pod's loopback and every call failed.
+            # Invisible for the same reason as #9095: the call site fails closed, so a broken
+            # incentive client reads as "no offer for this party" rather than as an error.
+            - name: INCENTIVE_SERVICE_URL
+              value: http://incentive-service.incentive.svc:8156
             # ADR-0210: read-only segment evaluation against the silver layer.
             # ClickHouse requires auth: the `analytics` user, password from the
             # Vault-backed clickhouse-auth Secret projected into this namespace
