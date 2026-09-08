@@ -222,6 +222,8 @@ export default function DocumentTemplatesPage() {
   const [statusFilter, setStatusFilter] = useState('ALL')
 
   const [modalOpen, setModalOpen] = useState(false)
+  const [discardEditorOpen, setDiscardEditorOpen] = useState(false)
+  const [editorBaseline, setEditorBaseline] = useState('')
   const [editingTemplate, setEditingTemplate] = useState<DocumentTemplate | null>(null)
   const [formData, setFormData] = useState<Partial<DocumentTemplate>>({})
   const [saving, setSaving] = useState(false)
@@ -230,6 +232,9 @@ export default function DocumentTemplatesPage() {
   const [sampleDataInvalid, setSampleDataInvalid] = useState(false)
   const [previewNote, setPreviewNote] = useState<string | null>(null)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const editorCloseRef = useRef<HTMLButtonElement>(null)
+  const discardCancelRef = useRef<HTMLButtonElement>(null)
+  const editorTriggerRef = useRef<HTMLElement | null>(null)
   const highlightRef = useRef<HTMLPreElement>(null)
   // Request-generation counter (not just an AbortController) so a stale
   // response — even one that resolves before its abort takes effect — can
@@ -374,20 +379,43 @@ export default function DocumentTemplatesPage() {
     previewRequestIdRef.current++
   }
 
-  const openCreateModal = () => {
+  const editorSnapshot = useCallback((draft: Partial<DocumentTemplate>, sample: string) => JSON.stringify({ draft, sample }), [])
+  const editorDirty = canEdit && editorBaseline !== editorSnapshot(formData, sampleDataText)
+
+  const openCreateModal = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const next = { code: '', version: '1.0.0', name: '', engine: 'HANDLEBARS', bodyHtml: '', locale: language === 'cs' ? 'cs' : 'en', classification: 'internal' }
+    editorTriggerRef.current = event.currentTarget
     setEditingTemplate(null)
-    setFormData({ code: '', version: '1.0.0', name: '', engine: 'HANDLEBARS', bodyHtml: '', locale: language === 'cs' ? 'cs' : 'en', classification: 'internal' })
+    setFormData(next)
     setActionError(null)
     resetPreviewState()
+    setEditorBaseline(editorSnapshot(next, DEFAULT_SAMPLE_DATA_TEXT))
     setModalOpen(true)
   }
 
-  const openEditModal = (tpl: DocumentTemplate) => {
+  const openEditModal = (event: React.MouseEvent<HTMLButtonElement>, tpl: DocumentTemplate) => {
+    const next = { ...tpl }
+    editorTriggerRef.current = event.currentTarget
     setEditingTemplate(tpl)
-    setFormData({ ...tpl })
+    setFormData(next)
     setActionError(null)
     resetPreviewState()
+    setEditorBaseline(editorSnapshot(next, DEFAULT_SAMPLE_DATA_TEXT))
     setModalOpen(true)
+  }
+
+  function requestEditorClose() {
+    if (saving) return
+    if (editorDirty) {
+      setDiscardEditorOpen(true)
+      return
+    }
+    setModalOpen(false)
+  }
+
+  function discardEditor() {
+    setDiscardEditorOpen(false)
+    setModalOpen(false)
   }
 
   function insertToken(token: string) {
@@ -574,7 +602,7 @@ export default function DocumentTemplatesPage() {
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{tpl.productRef ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
-                          <button id={`template-row-primary-${tpl.id}`} type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')} onClick={() => openEditModal(tpl)}>
+                          <button id={`template-row-primary-${tpl.id}`} type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')} onClick={event => openEditModal(event, tpl)}>
                             {canEdit ? <Edit size={13} /> : <Eye size={13} />}
                           </button>
                           {canEdit && (tpl.status ?? 'DRAFT') === 'DRAFT' && (
@@ -608,15 +636,38 @@ export default function DocumentTemplatesPage() {
 
       {/* Create / edit modal — split-pane HTML editor + live sandboxed preview */}
       {modalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,23,42,0.65)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div className="card" role="dialog" aria-modal="true" aria-labelledby="template-editor-title" style={{ width: '920px', maxWidth: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
+        <Dialog.Root open onOpenChange={open => { if (!open) requestEditorClose() }}>
+          <Dialog.Portal>
+          <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,0.65)' }} />
+          <Dialog.Content
+            className="card"
+            aria-busy={saving}
+            onOpenAutoFocus={event => {
+              event.preventDefault()
+              requestAnimationFrame(() => (editingTemplate ? document.getElementById('template-name') : document.getElementById('template-code'))?.focus())
+            }}
+            onCloseAutoFocus={event => {
+              event.preventDefault()
+              const trigger = editorTriggerRef.current
+              const fallback = document.getElementById('template-status-filter')
+              requestAnimationFrame(() => {
+                if (trigger?.isConnected && (!(trigger instanceof HTMLButtonElement) || !trigger.disabled)) trigger.focus()
+                else fallback?.focus()
+              })
+            }}
+            onEscapeKeyDown={event => { if (saving || discardEditorOpen) event.preventDefault() }}
+            onPointerDownOutside={event => { if (saving || editorDirty || discardEditorOpen) event.preventDefault() }}
+            onInteractOutside={event => { if (saving || editorDirty || discardEditorOpen) event.preventDefault() }}
+            style={{ position: 'fixed', zIndex: 1001, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(920px, calc(100vw - 40px))', maxHeight: '92vh', overflowY: 'auto' }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-              <h2 id="template-editor-title" style={{ fontSize: '15px', fontWeight: 700 }}>
+              <Dialog.Title asChild><h2 style={{ fontSize: '15px', fontWeight: 700 }}>
                 {!canEdit
                   ? t('Zobrazit šablonu', 'View Template')
                   : editingTemplate ? t('Upravit šablonu', 'Edit Template') : t('Nová šablona', 'New Template')}
-              </h2>
-              <button type="button" aria-label={t('Zavřít editor šablony', 'Close template editor')} onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
+              </h2></Dialog.Title>
+              <Dialog.Description className="sr-only">{t('Upravte metadata, HTML obsah a ukázková data. Náhled se obnovuje automaticky.', 'Edit metadata, HTML content and sample data. The preview refreshes automatically.')}</Dialog.Description>
+              <button ref={editorCloseRef} type="button" aria-label={t('Zavřít editor šablony', 'Close template editor')} onClick={requestEditorClose} disabled={saving} style={{ background: 'none', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
             </div>
             <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <fieldset disabled={!canEdit} style={{ border: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -795,7 +846,7 @@ export default function DocumentTemplatesPage() {
                 )}
               </fieldset>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', paddingTop: '4px' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)} disabled={saving}>{t('Zavřít', 'Close')}</button>
+                <button type="button" className="btn btn-secondary" onClick={requestEditorClose} disabled={saving}>{t('Zavřít', 'Close')}</button>
                 {canEdit && (
                   <button type="submit" className="btn btn-primary" disabled={saving}>
                     {saving ? t('Ukládám…', 'Saving…') : t('Uložit šablonu', 'Save Template')}
@@ -803,8 +854,33 @@ export default function DocumentTemplatesPage() {
                 )}
               </div>
             </form>
-          </div>
-        </div>
+          </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
+
+      {discardEditorOpen && (
+        <Dialog.Root open onOpenChange={open => { if (!open) setDiscardEditorOpen(false) }}>
+          <Dialog.Portal>
+            <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,0.72)' }} />
+            <Dialog.Content
+              role="alertdialog"
+              className="card"
+              onOpenAutoFocus={event => { event.preventDefault(); discardCancelRef.current?.focus() }}
+              onCloseAutoFocus={event => { event.preventDefault(); editorCloseRef.current?.focus() }}
+              style={{ position: 'fixed', zIndex: 1201, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(440px, calc(100vw - 32px))', padding: 20 }}
+            >
+              <Dialog.Title style={{ margin: 0, fontSize: 17 }}>{t('Zahodit neuložené změny?', 'Discard unsaved changes?')}</Dialog.Title>
+              <Dialog.Description style={{ margin: '8px 0 0', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                {t('Změny šablony a ukázkových dat nejsou uložené. Po zahození je nelze obnovit.', 'Template and sample-data changes have not been saved. They cannot be recovered after discarding.')}
+              </Dialog.Description>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+                <Dialog.Close asChild><button ref={discardCancelRef} type="button" className="btn btn-secondary">{t('Pokračovat v úpravách', 'Keep editing')}</button></Dialog.Close>
+                <button type="button" className="btn btn-danger" onClick={discardEditor}>{t('Zahodit změny', 'Discard changes')}</button>
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
 
       {/* Inline confirm for publish/retire — never a raw browser confirm()/alert() */}
