@@ -77,10 +77,36 @@ class LiveConsentCheckAdapter(
     @RestClient private val client: ConsentServiceClient,
     @ConfigProperty(name = "openbank.campaign.consent-grantee", defaultValue = "party-service:marketing-comms")
     private val grantee: String,
+    @ConfigProperty(name = "openbank.campaign.credit-consent-grantee", defaultValue = "openbank")
+    private val creditGrantee: String,
 ) : ConsentCheckPort {
 
+    /**
+     * The grantee is a property of WHOM the customer granted the consent to, so it follows the
+     * scope rather than the caller.
+     *
+     * Marketing scopes are granted to the comms service (`party-service:marketing-comms`). The
+     * ADR-0269 credit scopes are not: the customer grants those to the BANK, and customer-edge
+     * writes them under `BANK_GRANTEE = "openbank"` (CustomerEdgeResource). This adapter asked
+     * for every scope under the marketing grantee, so the CREDIT_OFFERS lookup queried a
+     * (party, grantee, scope) triple that customer-edge never writes and consent-service will
+     * never hold.
+     *
+     * The rule 1 enrolment gate therefore could not see the switch the customer actually flips.
+     * It failed closed, so it never surfaced as a customer harm — it surfaced as a credit
+     * campaign that enrols nobody, `{"enrolled":0}`, which is indistinguishable from an empty
+     * segment. Verified in sandbox: every CREDIT_* row in consent-service carries
+     * `grantee_id = openbank`, and none carries the marketing grantee.
+     */
+    private fun granteeFor(scope: String): String =
+        if (scope.startsWith(CREDIT_SCOPE_PREFIX)) creditGrantee else grantee
+
     override suspend fun hasActiveConsent(partyId: UUID, scope: String): Boolean =
-        client.hasActiveConsent(partyId, grantee, scope).awaitSuspending().granted
+        client.hasActiveConsent(partyId, granteeFor(scope), scope).awaitSuspending().granted
+
+    private companion object {
+        const val CREDIT_SCOPE_PREFIX = "CREDIT_"
+    }
 }
 
 /**

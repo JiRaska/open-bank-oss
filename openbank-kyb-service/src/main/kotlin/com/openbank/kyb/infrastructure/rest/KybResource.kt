@@ -185,8 +185,14 @@ class KybResource {
             return Response.ok(onboarding.listForParty(partyId).map { CaseResponse.from(it, partyId) }).build()
         }
         requireOperator()
-        val st =
-            status?.let { runCatching { CaseStatus.valueOf(it.uppercase()) }.getOrNull() } ?: CaseStatus.MANUAL_REVIEW
+        // #9038: absent status means the operator review queue (MANUAL_REVIEW), but an UNPARSEABLE
+        // one used to silently substitute MANUAL_REVIEW too — a typo answered the WRONG list with
+        // a 200. libs-runtime maps IllegalArgumentException to 400; never a service-local mapper
+        // (#526).
+        val st = status?.let {
+            runCatching { CaseStatus.valueOf(it.uppercase()) }
+                .getOrElse { _ -> throw IllegalArgumentException("unknown case status '$it'") }
+        } ?: CaseStatus.MANUAL_REVIEW
         return Response.ok(
             onboarding.listByStatus(st, page.coerceAtLeast(0), size.coerceIn(1, MAX_PAGE)).map {
                 CaseResponse.from(it, null)
