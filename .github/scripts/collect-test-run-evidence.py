@@ -197,13 +197,21 @@ def classify(name: str, classname: str, task: str, component: str, service: Path
     # using it here can manufacture end-to-end evidence from a unit/integration test.
     # The JUnit suite classname and Gradle/Playwright task are the producer-owned
     # identity used for categorisation instead.
+    # The report directory is producer-owned provenance. In particular, an E2E
+    # report remains E2E even when a spec happens to contain `contract` in its
+    # filename; conversely a Vitest guard that discusses Playwright is still a
+    # unit test.
+    if re.search(r"(?:^|[-_.])(?:e2e|playwright)(?:$|[-_.])", task, re.I):
+        return "e2e"
     identity = f"{classname} {task}"
     if re.search(r"integration|inttest", identity, re.I) or re.search(r"IT(?:$|[.$\s])", identity):
         return "integration"
-    if re.search(r"pact|contract", identity, re.I):
+    # Lowercase reporter/file tokens need delimiters (`compact` is not Pact).
+    # JVM class names conventionally expose the same words as CamelCase tokens,
+    # for example SwiftPactFolderProviderVerificationTest.
+    if (re.search(r"(?<![a-z0-9])(?:pact|contract)(?![a-z0-9])", identity.lower())
+            or re.search(r"(?:Pact|Contract)(?=$|[A-Z0-9])", identity)):
         return "contract"
-    if re.search(r"e2e|playwright", identity, re.I):
-        return "e2e"
     if component == "openbank-simulation":
         return "simulation"
     if service is not None and source_declared_kind(service, classname) == "integration":
@@ -1018,6 +1026,11 @@ def main() -> None:
             assert classify("UnitTest", "com.openbank.UnitTest", "test", "openbank-x") == "unit"
             assert classify("creates LOAN_PACK_E2E", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x") == "unit"
             assert classify("reads products", "com.openbank.CatalogPlatformResourceTest", "test", "openbank-x", service) == "integration"
+            assert classify("", "campaign-visual-contract.spec.ts", "e2e", "openbank-admin-ui") == "e2e"
+            assert classify("", "playwright-test-intelligence-evidence.guard.test.ts", "vitest", "openbank-admin-ui") == "unit"
+            assert classify("", "compact-filters-a11y.guard.test.ts", "vitest", "openbank-admin-ui") == "unit"
+            assert classify("", "opsmessage-api.contract.test.ts", "vitest", "openbank-admin-ui") == "contract"
+            assert classify("", "com.openbank.SwiftPactFolderProviderVerificationTest", "test", "openbank-swift") == "contract"
             observed = observations(service)
             assert [item["lifecycle"] for item in observed] == ["started", "started", "started", "started", "stopped"]
             assert [item["observedAt"] for item in observed] == [
