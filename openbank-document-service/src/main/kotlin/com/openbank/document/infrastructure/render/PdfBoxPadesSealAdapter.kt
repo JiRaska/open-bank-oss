@@ -4,6 +4,7 @@
 
 package com.openbank.document.infrastructure.render
 
+import com.openbank.document.application.port.out.ExternalDisclosureSealPort
 import com.openbank.document.application.port.out.SignatureSealPort
 import com.openbank.document.domain.model.SignatureCeremony
 import io.quarkus.runtime.Startup
@@ -19,6 +20,7 @@ import java.security.KeyStore
 import java.security.PrivateKey
 import java.security.cert.X509Certificate
 import java.util.Optional
+import java.util.UUID
 
 /**
  * Phase-1 [SignatureSealPort] adapter (ADR-0162 D4): applies the bank's institutional
@@ -79,7 +81,8 @@ class PdfBoxPadesSealAdapter(
     // than an invisible code default.
     @ConfigProperty(name = "openbank.signature.allow-ephemeral-seals", defaultValue = "false")
     private val allowEphemeralSeals: Boolean,
-) : SignatureSealPort {
+) : SignatureSealPort,
+    ExternalDisclosureSealPort {
 
     private val logger = Logger.getLogger(PdfBoxPadesSealAdapter::class.java)
 
@@ -137,6 +140,28 @@ class PdfBoxPadesSealAdapter(
                 pdf
             } else {
                 PadesSigning.applySignature(pdf, identity, ORGANIZATION_NAME, SEAL_REASON)
+            }
+        }
+
+    /**
+     * D7b: a disclosure is evidence of an export, not a customer signature ceremony. It gets the
+     * same trusted-identity gate and PAdES mechanics, with a distinct reason embedded in the PDF.
+     */
+    override suspend fun sealExternalDisclosure(pdf: ByteArray, disclosureId: UUID): ByteArray =
+        withContext(Dispatchers.IO) {
+            check(!identity.ephemeral || allowEphemeralSeals) {
+                "Refusing to apply an institutional PAdES seal to external disclosure $disclosureId " +
+                    "with a DEV-ONLY ephemeral identity"
+            }
+            if (PadesSigning.hasSignatureNamed(pdf, ORGANIZATION_NAME)) {
+                pdf
+            } else {
+                PadesSigning.applySignature(
+                    pdf,
+                    identity,
+                    ORGANIZATION_NAME,
+                    "External document disclosure $disclosureId",
+                )
             }
         }
 
