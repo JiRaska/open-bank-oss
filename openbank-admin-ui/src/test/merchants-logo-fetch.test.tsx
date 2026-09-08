@@ -76,7 +76,7 @@ describe('merchant logo ingest', () => {
     expect(await screen.findByText('upload.wikimedia.org')).toBeInTheDocument()
   })
 
-  it('posts the source URL to the ingest route', async () => {
+  it('puts the source URL to the ingest route', async () => {
     const calls = stubFetch({ enabled: true, allowedHosts: ['upload.wikimedia.org'] })
 
     renderPage()
@@ -87,10 +87,12 @@ describe('merchant logo ingest', () => {
     })
     fireEvent.click(screen.getByText('Fetch'))
 
-    await waitFor(() => expect(calls.some(c => c.method === 'POST')).toBe(true))
-    const post = calls.find(c => c.method === 'POST')!
-    expect(post.url).toContain('/api/v1/merchants/ALZACZ/logo/fetch')
-    expect(JSON.parse(post.body!)).toMatchObject({ sourceUrl: 'https://upload.wikimedia.org/alza.png' })
+    // PUT rather than POST: the ingest is an upsert keyed by the descriptor, so a retry after a
+    // timeout is safe — which is what the idempotency gate was right to insist on.
+    await waitFor(() => expect(calls.some(c => c.method === 'PUT')).toBe(true))
+    const put = calls.find(c => c.method === 'PUT')!
+    expect(put.url).toContain('/api/v1/merchants/ALZACZ/logo/fetch')
+    expect(JSON.parse(put.body!)).toMatchObject({ sourceUrl: 'https://upload.wikimedia.org/alza.png' })
   })
 
   /**
@@ -124,6 +126,6 @@ describe('merchant logo ingest', () => {
     fireEvent.click(screen.getByLabelText('Fetch a logo for ALZACZ'))
 
     expect((await screen.findByText('Fetch') as HTMLButtonElement).disabled).toBe(true)
-    expect(calls.some(c => c.method === 'POST')).toBe(false)
+    expect(calls.some(c => c.method === 'PUT')).toBe(false)
   })
 })

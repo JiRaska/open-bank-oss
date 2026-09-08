@@ -251,7 +251,9 @@ export default function MerchantsPage() {
       const res = await fetch(
         svcUrl(SERVICE, `${CATALOGUE}/${encodeURIComponent(descriptorKey)}/logo/fetch`),
         {
-          method: 'POST',
+          // PUT: the ingest is an upsert keyed by the descriptor, so a retry after a timeout stores
+          // the same bytes rather than a second logo.
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sourceUrl: fetchUrl.trim(), licence: 'trademark' }),
         },
