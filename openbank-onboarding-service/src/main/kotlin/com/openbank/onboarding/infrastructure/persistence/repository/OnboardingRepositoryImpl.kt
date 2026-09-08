@@ -139,7 +139,16 @@ private fun OnboardingEntity.toDomain() = OnboardingRecord(
     email = email,
     partyStatus = PartyStage.valueOf(partyStatus),
     kycCaseId = kycCaseId,
-    kycStatus = kycStatus?.let { runCatching { KycStage.valueOf(it) }.getOrNull() },
+    // A NULL column legitimately means "no KYC case yet" and stays null. A non-null column that
+    // does not parse is data corruption, not an absent value — `getOrNull()` used to conflate the
+    // two, and FunnelStage.derive(_, null, _) reads a null kycStatus as KYC_OPEN, so a corrupted
+    // REJECTED/EXPIRED row would silently render as freshly opened (#9038). Loud throw, like the
+    // sibling partyStatus/funnelStage columns above and below already do.
+    kycStatus = kycStatus?.let {
+        runCatching { KycStage.valueOf(it) }.getOrElse { _ ->
+            throw IllegalStateException("onboarding_records.kyc_status has an unparseable value: '$it'")
+        }
+    },
     scaEnrolled = scaEnrolled,
     deviceCount = deviceCount,
     funnelStage = FunnelStage.valueOf(funnelStage),
