@@ -82,7 +82,11 @@ def entries_in(doc, rel: str) -> list[tuple[str, str]]:
         ref = entry.get("remoteRef") or {}
         if not isinstance(ref, dict):
             continue
-        if SECRET_FIELD not in (ref.get("property"), entry.get("secretKey")):
+        # `remoteRef.property` describes the field name inside a Vault item. A dedicated client
+        # may legitimately use the same field name while projecting it under a different target
+        # key (for example DISCLOSURE_OIDC_CLIENT_SECRET). The shared-client convention applies
+        # only to the target resource-server secret, not to every Vault field called the same.
+        if entry.get("secretKey") != SECRET_FIELD:
             continue
         key = ref.get("key")
         if isinstance(key, str):

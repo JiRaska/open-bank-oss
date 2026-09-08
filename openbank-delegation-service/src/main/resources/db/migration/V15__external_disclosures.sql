@@ -1,5 +1,6 @@
 -- ADR-0232 D7b: external disclosure is sealed document emission, not a live API grant.
 -- The link secret and OTP are intentionally represented only by domain-separated SHA-256 hashes.
+-- Rollback: DROP TABLE delegation_external_disclosure_views; DROP TABLE delegation_external_disclosures;
 
 CREATE TABLE delegation_external_disclosures (
     id                UUID PRIMARY KEY,
