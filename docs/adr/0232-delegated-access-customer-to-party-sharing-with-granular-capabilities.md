@@ -2,7 +2,7 @@
 date: 2026-07-31
 decision-status: proposed
 delivery-status: partial
-followup: "none — the guards and the service are live; no payment service calls them, which is the tail"
+followup: "complete D3 rail rollout and wire the reservation lifecycle before enabling cumulative ceilings"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -25,9 +25,11 @@ and fails closed for an unavailable decision, absent/expired grant, or a per-tra
 `CustomerEdgeDelegatedPaymentPactConsumerTest` prove that boundary.
 
 This is deliberately a **first rail**, not completion of D3: delegated SEPA, instant, card and
-savings execution still need their own enforcing integrations. Daily/monthly ceilings also remain
-unsupported because no debit transaction atomically writes a cross-rail cumulative counter; the
-API continues to reject them rather than promise a limit it cannot enforce.
+savings execution still need their own enforcing integrations. The delegation service now owns an
+atomic, idempotent `SpendReservation` counter for daily/monthly ceilings, but the current domestic
+payment path does not yet reserve, confirm or release against it. Those cumulative ceilings are
+therefore not available on the live rail until its complete reservation lifecycle is wired; this
+preserves the rule that the API must not promise a limit it cannot enforce.
 
 Relates: ADR-0034 (unified OPA), ADR-0072 (party identity), ADR-0094
 (EUDI hub), ADR-0118 (GDPR lifecycle), ADR-0126 (unified consent),
