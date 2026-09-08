@@ -13,6 +13,7 @@ import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
+import com.openbank.delegation.domain.model.ExternalDisclosure
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -87,6 +88,35 @@ class ExternalDisclosureServiceTest {
         assertThatThrownBy { runBlocking { service.issue(command(UUID.randomUUID())) } }
             .isInstanceOf(jakarta.ws.rs.ForbiddenException::class.java)
         coVerify(exactly = 0) { disclosures.issue(any()) }
+    }
+
+    @Test
+    fun `failed sealed export never consumes an external disclosure view`(): Unit = runBlocking {
+        val disclosureId = UUID.randomUUID()
+        val linkSecret = "opaque-link-secret"
+        val disclosure = ExternalDisclosure(
+            id = disclosureId,
+            delegationId = grant.id,
+            documentId = documentId,
+            recipientLabel = "External accountant",
+            linkSecretHash = ExternalDisclosure.secretHash(disclosureId, linkSecret),
+            otpHash = ExternalDisclosure.secretHash(disclosureId, "248913"),
+            expiresAt = now.plusDays(2),
+            maxViews = 1,
+            createdAt = now.minusMinutes(1),
+            verifiedAt = now,
+        )
+        val delegations = mockk<DelegationRepository>()
+        val disclosures = mockk<ExternalDisclosureRepository>()
+        val exporter = mockk<ExternalDisclosureDocumentExporter>()
+        coEvery { disclosures.findById(disclosureId) } returns disclosure
+        coEvery { exporter.export(any(), any(), any(), any()) } throws IllegalStateException("document unavailable")
+        val service = ExternalDisclosureService(delegations, disclosures, exporter, clock, SecureRandom())
+
+        assertThatThrownBy { runBlocking { service.release(disclosureId, linkSecret) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("document unavailable")
+        coVerify(exactly = 0) { disclosures.mutateById(any(), any()) }
     }
 
     private fun command(caller: UUID): IssueExternalDisclosureCommand = IssueExternalDisclosureCommand(
