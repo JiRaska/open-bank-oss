@@ -9,6 +9,7 @@ import com.openbank.delegation.application.port.out.ExternalDisclosureArtifact
 import com.openbank.delegation.infrastructure.rest.ExternalDisclosureResource
 import com.openbank.delegation.infrastructure.rest.dto.ExternalDisclosureLinkRequest
 import com.openbank.delegation.infrastructure.rest.dto.ExternalDisclosureOtpRequest
+import com.openbank.libs.idempotency.IdempotencyStore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -20,14 +21,17 @@ import java.util.UUID
 
 class ExternalDisclosureResourceTest {
     private val disclosures = mockk<ExternalDisclosureUseCase>()
-    private val resource = ExternalDisclosureResource(disclosures)
+    private val idempotency = mockk<IdempotencyStore>()
+    private val resource = ExternalDisclosureResource(disclosures, idempotency)
     private val id = UUID.randomUUID()
 
     @Test
     fun `successful OTP verification returns no content and does not disclose metadata`(): Unit = runBlocking {
+        coEvery { idempotency.get(any()) } returns null
+        coEvery { idempotency.save(any(), any(), any(), any()) } returns Unit
         coEvery { disclosures.verifyOtp(id, "link-secret", "123456") } returns mockk()
 
-        val response = resource.verifyOtp(id, ExternalDisclosureOtpRequest("link-secret", "123456"))
+        val response = resource.verifyOtp(id, ExternalDisclosureOtpRequest("link-secret", "123456", "request-1"))
 
         assertThat(response.status).isEqualTo(204)
         assertThat(response.entity).isNull()
@@ -36,10 +40,11 @@ class ExternalDisclosureResourceTest {
 
     @Test
     fun `unavailable verification becomes the same not found response`(): Unit = runBlocking {
+        coEvery { idempotency.get(any()) } returns null
         coEvery { disclosures.verifyOtp(any(), any(), any()) } throws NotFoundException("different internal detail")
 
         val exception = org.assertj.core.api.Assertions.catchThrowable {
-            runBlocking { resource.verifyOtp(id, ExternalDisclosureOtpRequest("bad", "000000")) }
+            runBlocking { resource.verifyOtp(id, ExternalDisclosureOtpRequest("bad", "000000", "request-1")) }
         }
 
         assertThat(exception).isInstanceOf(NotFoundException::class.java)
@@ -48,10 +53,12 @@ class ExternalDisclosureResourceTest {
 
     @Test
     fun `content response is the sealed artifact unchanged`(): Unit = runBlocking {
+        coEvery { idempotency.get(any()) } returns null
+        coEvery { idempotency.save(any(), any(), any(), any()) } returns Unit
         val sealed = byteArrayOf(37, 80, 68, 70)
         coEvery { disclosures.release(id, "link-secret") } returns ExternalDisclosureArtifact("application/pdf", sealed)
 
-        val response = resource.content(id, ExternalDisclosureLinkRequest("link-secret"))
+        val response = resource.content(id, ExternalDisclosureLinkRequest("link-secret", "request-1"))
 
         assertThat(response.status).isEqualTo(200)
         assertThat(response.entity).isEqualTo(sealed)

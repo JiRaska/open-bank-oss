@@ -8,6 +8,7 @@ import com.openbank.delegation.application.port.`in`.ExternalDisclosureUseCase
 import com.openbank.delegation.infrastructure.rest.dto.ExternalDisclosureLinkRequest
 import com.openbank.delegation.infrastructure.rest.dto.ExternalDisclosureOtpRequest
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyStore
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.NotFoundException
@@ -18,6 +19,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.util.UUID
+import java.util.Base64
 
 /**
  * Internal half of the recipient disclosure journey. The only permitted caller is customer-edge,
@@ -27,12 +29,17 @@ import java.util.UUID
 @Path("/api/v1/external-disclosures")
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_API")
-class ExternalDisclosureResource(private val disclosures: ExternalDisclosureUseCase) {
+class ExternalDisclosureResource(
+    private val disclosures: ExternalDisclosureUseCase,
+    private val idempotencyStore: IdempotencyStore,
+) {
     @POST
     @Path("/{id}/verify-otp")
     @Authorize(action = "delegation.disclosure.verify", resource = "#id")
     suspend fun verifyOtp(@PathParam("id") id: UUID, request: ExternalDisclosureOtpRequest?): Response {
         val body = request ?: throw unavailable()
+        val key = key(id, "verify", body.idempotencyKey)
+        idempotencyStore.get(key)?.let { return Response.status(it.statusCode).header("X-Idempotency-Replayed", "true").build() }
         try {
             disclosures.verifyOtp(id, body.linkSecret, body.otp)
         } catch (exception: IllegalArgumentException) {
@@ -40,6 +47,7 @@ class ExternalDisclosureResource(private val disclosures: ExternalDisclosureUseC
         } catch (exception: NotFoundException) {
             throw unavailable()
         }
+        idempotencyStore.save(key, Response.Status.NO_CONTENT.statusCode, "")
         return Response.noContent().build()
     }
 
@@ -49,6 +57,11 @@ class ExternalDisclosureResource(private val disclosures: ExternalDisclosureUseC
     @Authorize(action = "delegation.disclosure.release", resource = "#id")
     suspend fun content(@PathParam("id") id: UUID, request: ExternalDisclosureLinkRequest?): Response {
         val body = request ?: throw unavailable()
+        val key = key(id, "content", body.idempotencyKey)
+        idempotencyStore.get(key)?.let { cached ->
+            return Response.ok(Base64.getDecoder().decode(cached.responseBody), PDF_MEDIA_TYPE)
+                .header("X-Idempotency-Replayed", "true").build()
+        }
         val artifact = try {
             disclosures.release(id, body.linkSecret)
         } catch (exception: IllegalArgumentException) {
@@ -56,10 +69,16 @@ class ExternalDisclosureResource(private val disclosures: ExternalDisclosureUseC
         } catch (exception: NotFoundException) {
             throw unavailable()
         }
+        idempotencyStore.save(key, Response.Status.OK.statusCode, Base64.getEncoder().encodeToString(artifact.bytes))
         return Response.ok(artifact.bytes, artifact.contentType).build()
     }
 
     private fun unavailable(): NotFoundException = NotFoundException("external disclosure unavailable")
+
+    private fun key(id: UUID, operation: String, supplied: String): String {
+        require(supplied.isNotBlank()) { "idempotencyKey is required" }
+        return "external-disclosure:$id:$operation:$supplied"
+    }
 
     private companion object {
         const val PDF_MEDIA_TYPE = "application/pdf"

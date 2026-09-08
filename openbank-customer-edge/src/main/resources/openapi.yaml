@@ -3826,16 +3826,18 @@ components:
     ExternalDisclosureOtpRequest:
       type: object
       additionalProperties: false
-      required: [linkSecret, otp]
+      required: [linkSecret, otp, idempotencyKey]
       properties:
         linkSecret: { type: string, minLength: 1, maxLength: 128 }
         otp: { type: string, pattern: '^[0-9]{6}$' }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
     ExternalDisclosureLinkRequest:
       type: object
       additionalProperties: false
-      required: [linkSecret]
+      required: [linkSecret, idempotencyKey]
       properties:
         linkSecret: { type: string, minLength: 1, maxLength: 128 }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
     # --- Read-endpoint response schemas (issue #1773) ---
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file

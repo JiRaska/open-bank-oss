@@ -539,16 +539,18 @@ components:
     ExternalDisclosureOtpRequest:
       type: object
       additionalProperties: false
-      required: [linkSecret, otp]
+      required: [linkSecret, otp, idempotencyKey]
       properties:
         linkSecret: { type: string, minLength: 1, maxLength: 128 }
         otp: { type: string, pattern: '^[0-9]{6}$' }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
     ExternalDisclosureLinkRequest:
       type: object
       additionalProperties: false
-      required: [linkSecret]
+      required: [linkSecret, idempotencyKey]
       properties:
         linkSecret: { type: string, minLength: 1, maxLength: 128 }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
     DelegationRolePresetRequest:
       type: object
       required: [name, resourceType, capabilities]

@@ -25,7 +25,10 @@ class ExternalDisclosureResourceTest {
     fun `OTP proxy never exposes an upstream unavailable disclosure as a different state`() {
         every { upstream.postAnonymous(any(), any()) } returns Response.status(403).entity("sensitive").build()
 
-        val response = resource().verifyOtp(disclosureId, "{\"linkSecret\":\"secret\",\"otp\":\"123456\"}")
+        val response = resource().verifyOtp(
+            disclosureId,
+            "{\"linkSecret\":\"secret\",\"otp\":\"123456\",\"idempotencyKey\":\"request-1\"}",
+        )
 
         assertThat(response.status).isEqualTo(404)
         assertThat(response.entity.toString()).contains("external disclosure unavailable").doesNotContain("sensitive")
@@ -38,7 +41,10 @@ class ExternalDisclosureResourceTest {
         every { upstream.postRaw(capture(url), any(), "application/pdf") } returns
             Response.ok(sealed, "application/pdf").build()
 
-        val response = resource().content(disclosureId, "{\"linkSecret\":\"secret\"}")
+        val response = resource().content(
+            disclosureId,
+            "{\"linkSecret\":\"secret\",\"idempotencyKey\":\"request-1\"}",
+        )
 
         assertThat(url.captured).isEqualTo("$serviceUrl/api/v1/external-disclosures/$disclosureId/content")
         assertThat(response.status).isEqualTo(200)
