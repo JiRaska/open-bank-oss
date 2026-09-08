@@ -17,5 +17,7 @@ class DelegationPreviewOpenApiTest {
         assertThat(contract).contains("preview never reads or consumes SCA")
         assertThat(contract).contains("this response is never authorization")
         assertThat(contract).contains("Counterparty names are deliberately not returned")
+        assertThat(contract).contains("EXPOSURE_UNSUPPORTED")
+        assertThat(contract).contains("Historical audit metadata only")
     }
 }
