@@ -58,6 +58,13 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-09-07** — Idempotency contract of the two creation POSTs verified and documented
+  (ADR-0296, burn-down #8351). No code change: challenge initiation already replays on
+  Idempotency-Key/X-Request-ID via the idempotency store (X-Idempotency-Replayed: true, 300 s
+  window), and device enrollment already dedups on the credentialId natural key
+  (`credential_id UNIQUE`, V4) — same party replays, a different party is refused. Spec-only:
+  the OpenAPI now declares the replay headers and the credentialId semantics. No new endpoint,
+  caller, privilege or control bypass.
 - **2026-09-03** — Resolve the four-eyes stalemate via per-action service-account exemptions
   (#8360, ADR-0280). `device.enroll` and `scaChallenge.consume` are now in
   `rules.yaml: four_eyes.actions` with `four_eyes.exemptions` naming their verified M2M callers

@@ -18,6 +18,13 @@ class DelegationRolePresetRepositoryImpl :
         find("order by name").list<DelegationRolePresetEntity>()
     }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun findByNameAndResourceType(
+        name: String,
+        resourceType: com.openbank.delegation.domain.model.DelegationResourceType,
+    ): DelegationRolePreset? = Panache.withSession {
+        find("name = ?1 and resourceType = ?2", name, resourceType).firstResult<DelegationRolePresetEntity>()
+    }.awaitSuspending()?.toDomain()
+
     override suspend fun findById(id: UUID): DelegationRolePreset? =
         Panache.withSession { find("id", id).firstResult<DelegationRolePresetEntity>() }.awaitSuspending()?.toDomain()
 
