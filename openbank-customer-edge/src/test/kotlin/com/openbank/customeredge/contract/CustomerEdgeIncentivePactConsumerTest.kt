@@ -144,6 +144,50 @@ class CustomerEdgeIncentivePactConsumerTest {
         .body(customerReservationBody("RELEASED"))
         .toPact()
 
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-incentive-service")
+    fun reserveUnknownOffer(builder: PactDslWithProvider): RequestResponsePact = builder
+        .uponReceiving("POST an attributed customer reservation for an offer the bank does not hold")
+        .path("/api/v1/customer-incentives/offers/$UNKNOWN_OFFER_ID/reservations")
+        .method("POST")
+        .headers(
+            mapOf(
+                "Content-Type" to "application/json",
+                "X-Customer-Party-Id" to PARTY_ID,
+                "Idempotency-Key" to IDEMPOTENCY_KEY,
+            ),
+        )
+        .body(
+            newJsonBody { body ->
+                body.stringValue("code", "WELCOME10")
+                body.stringValue("productRef", PRODUCT_ID)
+                body.stringValue("attributionRef", INTERACTION_REF)
+            }.build(),
+        )
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "reserveUnknownOffer")
+    fun `provider answers 404 for an offer the caller may not see`(mockServer: MockServer) {
+        val connection = java.net.URI(
+            "${mockServer.getUrl()}/api/v1/customer-incentives/offers/$UNKNOWN_OFFER_ID/reservations",
+        ).toURL().openConnection() as java.net.HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.setRequestProperty("Content-Type", "application/json")
+        connection.setRequestProperty("X-Customer-Party-Id", PARTY_ID)
+        connection.setRequestProperty("Idempotency-Key", IDEMPOTENCY_KEY)
+        connection.doOutput = true
+        connection.outputStream.use { out ->
+            out.write(
+                """{"code":"WELCOME10","productRef":"$PRODUCT_ID","attributionRef":"$INTERACTION_REF"}"""
+                    .toByteArray(),
+            )
+        }
+
+        assertThat(connection.responseCode).isEqualTo(404)
+    }
+
     @Test
     @PactTestFor(pactMethod = "reserveAttributedIncentive")
     fun `real edge client reserves against the provider contract`(mockServer: MockServer) {
@@ -225,6 +269,7 @@ class CustomerEdgeIncentivePactConsumerTest {
         const val INTERACTION_REF = "22222222-2222-4222-8222-222222222222"
         const val PRODUCT_ID = "33333333-3333-4333-8333-333333333333"
         const val OFFER_ID = "44444444-4444-4444-8444-444444444444"
+        const val UNKNOWN_OFFER_ID = "99999999-9999-4999-8999-999999999999"
         const val RESERVATION_ID = "55555555-5555-4555-8555-555555555555"
         const val IDEMPOTENCY_KEY = "claim-pact-once"
         const val OPEN_IDEMPOTENCY_KEY = "open-pact-once"
@@ -237,7 +282,9 @@ class CustomerEdgeIncentivePactConsumerTest {
         val TERM_DEPOSIT_PRODUCT = """
             {"id":"$PRODUCT_ID","code":"TERM_6M","name":"Term deposit","type":"TERM_DEPOSIT",
             "currency":"CZK","status":"ACTIVE","isPublic":true,
-            "termDepositConfig":{"termMonths":6,"interestRateAnnual":5.8},"termsAndConditions":[]}
+            "termDepositConfig":{"termMonths":6,"interestRateAnnual":5.8},
+            "termsAndConditions":[{"version":"2026-01","url":"https://docs.example/td.pdf",
+            "effectiveFrom":"2026-01-01","language":"cs"}]}
         """.trimIndent()
         val ATTRIBUTION = """
             {"campaignId":"66666666-6666-4666-8666-666666666666","stepOrder":0,"channel":"PUSH",
