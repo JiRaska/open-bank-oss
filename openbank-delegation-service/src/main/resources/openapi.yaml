@@ -24,6 +24,10 @@ paths:
         mandate before forwarding X-Customer-Party-Id, and this route requires it to equal ownerPartyId.
       parameters:
         - $ref: '#/components/parameters/CustomerPartyId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 255 }
       requestBody:
         required: true
         content:
@@ -35,7 +39,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPortfolioResponse' }
-        '400': { description: Missing or invalid name or account scope }
+        '400': { description: Missing idempotency key, name, or account scope }
         '403': { description: Authenticated active profile does not equal ownerPartyId }
   /api/v1/delegation-portfolios/owner/{ownerPartyId}:
     get:

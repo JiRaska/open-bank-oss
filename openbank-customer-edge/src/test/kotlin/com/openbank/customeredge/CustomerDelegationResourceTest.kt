@@ -83,7 +83,7 @@ class CustomerDelegationResourceTest {
 
         val response = resource(
             upstream,
-        ).createPortfolio("""{"name":"Finance","accountIds":["$GRANT_ID"],"ignored":"x"}""")
+        ).createPortfolio("""{"name":"Finance","accountIds":["$GRANT_ID"],"ignored":"x"}""", "portfolio-create-1")
 
         assertThat(response.status).isEqualTo(201)
         assertThat(body.captured).contains("\"ownerPartyId\":\"$caller\"")
@@ -98,7 +98,7 @@ class CustomerDelegationResourceTest {
 
         val response = resource(
             upstream,
-        ).createPortfolio("""{"ownerPartyId":"$stranger","name":"Finance","accountIds":["$GRANT_ID"]}""")
+        ).createPortfolio("""{"ownerPartyId":"$stranger","name":"Finance","accountIds":["$GRANT_ID"]}""", "portfolio-create-1")
 
         assertThat(response.status).isEqualTo(403)
         verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }

@@ -13,6 +13,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -155,7 +156,10 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @POST
     @Path("/portfolios")
     @Blocking
-    fun createPortfolio(body: String?): Response {
+    fun createPortfolio(
+        body: String?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
         val partyId = partyId()
         val requested = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
             ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
@@ -171,7 +175,9 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
             }
         }
         command.put(FIELD_PORTFOLIO_OWNER, partyId)
-        return upstream.post("$delegationServiceUrl$PORTFOLIOS", partyId, json.writeValueAsString(command))
+        val key = idempotencyKey?.takeIf { it.isNotBlank() }
+            ?: return refuse(Response.Status.BAD_REQUEST, "Idempotency-Key header is required")
+        return upstream.post("$delegationServiceUrl$PORTFOLIOS", partyId, json.writeValueAsString(command), key)
     }
 
     /** A guessed id is left to the upstream owner check, which returns 404 without an existence oracle. */

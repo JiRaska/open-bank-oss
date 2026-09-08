@@ -25,5 +25,6 @@ class CustomerDelegationPreviewOpenApiTest {
         assertThat(contract).contains("Create a named account portfolio for the active profile")
         assertThat(normalized).contains("ownerPartyId is derived from the authenticated profile")
         assertThat(normalized).contains("not payment or co-signing authority")
+        assertThat(normalized).contains("name: Idempotency-Key in: header required: true")
     }
 }

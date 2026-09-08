@@ -3,10 +3,12 @@
 
 package com.openbank.delegation.infrastructure.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.`in`.CallerPartyId
 import com.openbank.delegation.application.usecase.DelegationPortfolioService
 import com.openbank.delegation.domain.model.DelegationPortfolio
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyStore
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
@@ -50,21 +52,37 @@ data class DelegationPortfolioResponse(
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
-class DelegationPortfolioResource(private val service: DelegationPortfolioService) {
+class DelegationPortfolioResource(
+    private val service: DelegationPortfolioService,
+    private val idempotencyStore: IdempotencyStore,
+    private val objectMapper: ObjectMapper,
+) {
     @POST
     @Authorize(action = "delegation.portfolio.create", resource = "#request.ownerPartyId")
     suspend fun create(
         request: DelegationPortfolioRequest?,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: CallerPartyId,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
         requireNotNull(request) { "request body is required" }
+        val key = requireNotNull(idempotencyKey?.takeIf { it.isNotBlank() }) { "Idempotency-Key header is required" }
+        val ownerPartyId = requireNotNull(request.ownerPartyId) { "ownerPartyId is required" }
+        idempotencyStore.get(createKey(ownerPartyId, key))?.let { cached ->
+            return Response.status(cached.statusCode)
+                .entity(cached.responseBody)
+                .type(MediaType.APPLICATION_JSON)
+                .header("X-Idempotency-Replayed", "true")
+                .build()
+        }
         val created = service.create(
             customerPartyId,
-            requireNotNull(request.ownerPartyId) { "ownerPartyId is required" },
+            ownerPartyId,
             requireNotNull(request.name) { "name is required" },
             requireNotNull(request.accountIds) { "accountIds is required" },
         )
-        return Response.status(Response.Status.CREATED).entity(DelegationPortfolioResponse.from(created)).build()
+        val response = DelegationPortfolioResponse.from(created)
+        idempotencyStore.save(createKey(ownerPartyId, key), 201, objectMapper.writeValueAsString(response))
+        return Response.status(Response.Status.CREATED).entity(response).build()
     }
 
     @GET
@@ -83,4 +101,6 @@ class DelegationPortfolioResource(private val service: DelegationPortfolioServic
         @PathParam("id") id: UUID,
         @HeaderParam(DelegationResource.CUSTOMER_PARTY_HEADER) customerPartyId: CallerPartyId,
     ): DelegationPortfolioResponse = DelegationPortfolioResponse.from(service.get(customerPartyId, id))
+
+    private fun createKey(ownerPartyId: UUID, key: String) = "delegation:portfolio:create:$ownerPartyId:$key"
 }
