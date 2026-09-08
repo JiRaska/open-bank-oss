@@ -16,8 +16,8 @@
 
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, Store, Trash2, Plus } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { RefreshCw, Store, Trash2, Plus, ImageUp, ImageOff } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -29,7 +29,10 @@ const CATALOGUE = '/api/v1/merchants'
 type Merchant = {
   descriptorKey: string
   cleanName: string
+  /** Provenance — where the stored bitmap came from. NOT the URL a customer app is given. */
   logoUrl?: string | null
+  /** Null exactly when no logo has been ingested, which is what "Upload" vs "Replace" turns on. */
+  logoContentHash?: string | null
   category?: string | null
   lat?: number | null
   lon?: number | null
@@ -63,6 +66,7 @@ export default function MerchantsPage() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -132,6 +136,61 @@ export default function MerchantsPage() {
       })
       if (!res.ok && res.status !== 404) {
         setActionError(t('Smazání selhalo', 'Delete failed'))
+        return
+      }
+      await load()
+    } catch {
+      setActionError(t('Služba je nedostupná', 'The service is unreachable'))
+    }
+  }
+
+  // Client-side limits mirroring LogoImages on the service. Duplicated deliberately: the server
+  // is the enforcement point and rejects the same cases, but a 512 kB round trip to be told "too
+  // big" is a worse answer than an immediate one, and the operator is picking a file, not
+  // debugging an API.
+  const MAX_UPLOAD_BYTES = 512 * 1024
+  const ACCEPTED = 'image/png,image/jpeg,image/gif'
+
+  const uploadLogo = async (descriptorKey: string, file: File) => {
+    setActionError(null)
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setActionError(t(
+        `Soubor má ${Math.round(file.size / 1024)} kB, limit je ${MAX_UPLOAD_BYTES / 1024} kB.`,
+        `The file is ${Math.round(file.size / 1024)} kB; the limit is ${MAX_UPLOAD_BYTES / 1024} kB.`,
+      ))
+      return
+    }
+    setUploading(descriptorKey)
+    try {
+      const res = await fetch(
+        svcUrl(SERVICE, `${CATALOGUE}/${encodeURIComponent(descriptorKey)}/logo`, { licence: 'trademark' }),
+        { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: file },
+      )
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { message?: string } | null
+        // The service says WHY it refused — not a raster format, implausible dimensions, no
+        // catalogue row. Passing that through is the difference between a fixable message and
+        // "upload failed".
+        setActionError(body?.message ?? t('Nahrání loga selhalo', 'The logo upload failed'))
+        return
+      }
+      await load()
+    } catch {
+      setActionError(t('Služba je nedostupná', 'The service is unreachable'))
+    } finally {
+      setUploading(null)
+    }
+  }
+
+  const removeLogo = async (descriptorKey: string) => {
+    setActionError(null)
+    try {
+      const res = await fetch(
+        svcUrl(SERVICE, `${CATALOGUE}/${encodeURIComponent(descriptorKey)}/logo`),
+        { method: 'DELETE' },
+      )
+      if (!res.ok && res.status !== 404) {
+        setActionError(t('Smazání loga selhalo', 'Deleting the logo failed'))
         return
       }
       await load()
@@ -246,6 +305,7 @@ export default function MerchantsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
+                <th style={th} aria-label={t('Logo', 'Logo')} />
                 <th style={th}>{t('Descriptor', 'Descriptor')}</th>
                 <th style={th}>{t('Obchodní jméno', 'Trading name')}</th>
                 <th style={th}>{t('Kategorie', 'Category')}</th>
@@ -257,6 +317,7 @@ export default function MerchantsPage() {
             <tbody>
               {rows.map(m => (
                 <tr key={m.descriptorKey} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td style={{ ...td, width: 44 }}><MerchantLogo merchant={m} /></td>
                   <td style={{ ...td, fontFamily: 'var(--font-mono)', fontSize: 12 }}>{m.descriptorKey}</td>
                   <td style={td}>{m.cleanName}</td>
                   <td style={td}>{m.category ?? '—'}</td>
@@ -280,6 +341,23 @@ export default function MerchantsPage() {
                     >
                       {t('Upravit', 'Edit')}
                     </button>{' '}
+                    <LogoButton
+                      merchant={m}
+                      busy={uploading === m.descriptorKey}
+                      accept={ACCEPTED}
+                      label={m.logoContentHash
+                        ? t(`Nahradit logo ${m.descriptorKey}`, `Replace the logo for ${m.descriptorKey}`)
+                        : t(`Nahrát logo ${m.descriptorKey}`, `Upload a logo for ${m.descriptorKey}`)}
+                      onPick={file => void uploadLogo(m.descriptorKey, file)}
+                    />{' '}
+                    {m.logoContentHash && <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => void removeLogo(m.descriptorKey)}
+                      aria-label={t(`Smazat logo ${m.descriptorKey}`, `Delete the logo for ${m.descriptorKey}`)}
+                    >
+                      <ImageOff size={12} aria-hidden="true" />
+                    </button>}{' '}
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
@@ -292,7 +370,7 @@ export default function MerchantsPage() {
                 </tr>
               ))}
               {!loading && rows.length === 0 && (
-                <tr><td colSpan={6} style={{ padding: 20, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
+                <tr><td colSpan={7} style={{ padding: 20, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
                   {t('Katalog je prázdný', 'The catalogue is empty')}
                 </td></tr>
               )}
@@ -323,5 +401,90 @@ function Field({ label, value, onChange, mono }: {
         }}
       />
     </label>
+  )
+}
+
+/**
+ * The stored logo, or a monogram standing in for one that has not been ingested.
+ *
+ * The monogram is a UI affordance and NOT a fallback the customer app gets: absence stays absence
+ * on the wire (`merchant.logoUrl` is simply missing), because a placeholder rendered next to a
+ * payment reads as "this is the merchant's mark" when it is really "we have nothing". Here, on an
+ * operator screen whose whole purpose is to find the gaps, a monogram is exactly the right thing —
+ * it makes a missing logo visible at a glance instead of leaving an empty cell.
+ */
+function MerchantLogo({ merchant }: { merchant: Merchant }) {
+  const box = {
+    width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center',
+    justifyContent: 'center', border: '1px solid var(--border)', background: 'var(--surface-2)',
+    overflow: 'hidden', flexShrink: 0,
+  } as const
+  if (!merchant.logoContentHash) {
+    return (
+      <div style={box} aria-label={`${merchant.cleanName} — no logo`} title={`${merchant.cleanName} — no logo`}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-tertiary)' }}>
+          {merchant.cleanName.trim().charAt(0).toUpperCase() || '?'}
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div style={box}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- the BFF proxies bytes from the
+          service; next/image would need a remote-pattern allowlist for a same-origin path it
+          cannot optimise anyway. */}
+      <img
+        src={svcUrl(SERVICE, `${CATALOGUE}/${encodeURIComponent(merchant.descriptorKey)}/logo`, {
+          size: '64',
+          // Same cache-busting token the service puts in the customer-facing URL: the browser may
+          // cache hard, and a replaced logo is a different URL rather than a stale one.
+          v: merchant.logoContentHash.slice(0, 16),
+        })}
+        alt={merchant.cleanName}
+        width={32}
+        height={32}
+        style={{ objectFit: 'contain' }}
+      />
+    </div>
+  )
+}
+
+/** A file picker dressed as a button — the row already has three, and a bare input breaks the row. */
+function LogoButton({ merchant, busy, accept, label, onPick }: {
+  merchant: Merchant
+  busy: boolean
+  accept: string
+  label: string
+  onPick: (file: File) => void
+}) {
+  const input = useRef<HTMLInputElement>(null)
+  return (
+    <>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        disabled={busy}
+        aria-busy={busy}
+        aria-label={label}
+        title={label}
+        onClick={() => input.current?.click()}
+      >
+        <ImageUp size={12} aria-hidden="true" />
+      </button>
+      <input
+        ref={input}
+        type="file"
+        accept={accept}
+        data-testid={`logo-input-${merchant.descriptorKey}`}
+        style={{ display: 'none' }}
+        onChange={e => {
+          const file = e.target.files?.[0]
+          // Reset the input so picking the SAME file twice fires change again — an operator who
+          // re-crops and re-picks would otherwise get silence.
+          e.target.value = ''
+          if (file) onPick(file)
+        }}
+      />
+    </>
   )
 }
