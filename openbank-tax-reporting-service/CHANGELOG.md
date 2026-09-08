@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/v0.10.0...v0.11.0) (2026-09-08)
+
+
+### Features
+
+* **admin-ui:** link browser failure diagnostics ([#7049](https://github.com/JiRaska/open-bank-oss/issues/7049)) ([5409645](https://github.com/JiRaska/open-bank-oss/commit/5409645c46285ffe5483d745aaf89eed02810acf))
+
+
+### Bug Fixes
+
+* **standing-order,swift,tax-reporting:** entity timestamp defaults EPOCH -&gt; Instant.now() ([#8462](https://github.com/JiRaska/open-bank-oss/issues/8462)) ([09119bb](https://github.com/JiRaska/open-bank-oss/commit/09119bbcb2c79c5fda9310060cb97d537c777a93))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/v0.9.5...v0.10.0) (2026-09-08)
 
 
