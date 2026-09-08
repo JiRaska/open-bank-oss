@@ -464,18 +464,8 @@ STUBEOF
       # reference each, because every exclusion is a hole in the coverage this lane exists to
       # prove. An entry with neither is a finding waiting to be hidden.
       EXCLUDE_FLAGS=()
-      case "${svc}" in
-        openbank-sanctions-service)
-          # POST /api/v1/sanctions/lists/refresh-all fans out to the EXTERNAL sanctions feeds
-          # synchronously; a real fetch exceeds this lane's 5s request window by design — it
-          # read-timed-out on every fleet fuzz since the lane exists (runs 34017868446,
-          # 34107337021). Not a handler defect and not stubbable: the slow peer is the public
-          # internet. The tracked fix is the async-202 redesign (#8590), not a longer window —
-          # a synchronous trigger that can take minutes belongs off the request path entirely.
-          EXCLUDE_FLAGS+=(--exclude-operation-id refreshAllSanctionsLists)
-          echo "==> [${svc}] excluding refreshAllSanctionsLists from fuzz (external-feed fan-out > request window; async redesign tracked in #8590)"
-          ;;
-      esac
+      # refreshAllSanctionsLists used to be excluded here (external-feed fan-out > request
+      # window); #9048 made refresh-all answer 202 immediately, so it is fuzzable again.
       # schemathesis 4.x CLI (bumped from 3.39.16 to close 6 Dependabot alerts on transitive
       # starlette/pytest — 3.x hard-caps pytest<9 and starlette<1):
       #   --base-url -> --url; --hypothesis-max-examples -> --max-examples;
