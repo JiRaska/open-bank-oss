@@ -30,6 +30,13 @@ class ExternalDisclosureRepositoryImpl :
         }
     }.awaitSuspending()
 
+    override suspend fun findById(id: UUID): ExternalDisclosure? = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            findOne(session, FIND_BY_ID_SQL, id)
+                .flatMap { entity -> entity?.let { toDomain(session, it) } ?: Uni.createFrom().nullItem() }
+        }
+    }.awaitSuspending()
+
     override suspend fun findByLinkSecretHash(linkSecretHash: String): ExternalDisclosure? = Panache.withSession {
         Panache.getSession().flatMap { session ->
             findOne(session, FIND_BY_LINK_HASH_SQL, linkSecretHash)
@@ -105,6 +112,7 @@ class ExternalDisclosureRepositoryImpl :
     private companion object {
         const val FIND_BY_LINK_HASH_SQL =
             "select * from delegation_external_disclosures where link_secret_hash = :value"
+        const val FIND_BY_ID_SQL = "select * from delegation_external_disclosures where id = :value"
         const val LOCK_BY_LINK_HASH_SQL = "$FIND_BY_LINK_HASH_SQL for update"
         const val LOCK_BY_ID_SQL = "select * from delegation_external_disclosures where id = :value for update"
         const val VIEWS_SQL = """

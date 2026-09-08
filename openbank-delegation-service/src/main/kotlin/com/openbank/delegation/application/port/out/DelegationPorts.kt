@@ -38,6 +38,7 @@ interface DelegationRepository {
  */
 interface ExternalDisclosureRepository {
     suspend fun issue(disclosure: ExternalDisclosure): ExternalDisclosure
+    suspend fun findById(id: UUID): ExternalDisclosure?
     suspend fun findByLinkSecretHash(linkSecretHash: String): ExternalDisclosure?
     suspend fun mutateByLinkSecretHash(
         linkSecretHash: String,
