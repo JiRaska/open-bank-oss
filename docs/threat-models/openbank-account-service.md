@@ -125,6 +125,14 @@ not change any existing request's outcome until explicitly flipped.
   baselined under ASVS V9.1 exactly as the identical edge from payments, customer-edge and party
   already is; retiring the class is the mesh-mTLS work, not this change. The bearer does not depend
   on the transport.
+- **2026-09-07** — Natural-key idempotency on the creation POSTs (ADR-0295, burn-down #8351).
+  `grantAuthorization` and `propose` gained check-first replay on their natural keys (grant: the
+  full caller tuple restricted to ACTIVE rows; proposal: account/delegate/amount/currency/note
+  while PENDING and unexpired). Pockets were already enforced (`uq_account_pockets_acc_ccy`, V7).
+  The grant fix touches the delegated-access surface: a retried grant can no longer stack a
+  second authority row, and a retried proposal can no longer stack a second executable
+  withdrawal instruction awaiting owner approval. No new endpoint, caller, privilege or control
+  bypass; the authorization guard still runs BEFORE any replay answer on the proposal path.
 - **2026-09-05** — **Inbound REST error surface on the authentication boundary**, no new route,
   caller, edge or privilege. A security abort (anonymous or under-roled caller hitting a
   `@RolesAllowed` route) was rendered by Quarkus REST's built-in handling as the raw exception
@@ -622,3 +630,17 @@ Recovery from a legacy tombstone is a newly issued grant, never replaying the sa
   **Risk class:** confidentiality (bounded to party ids of parties the owner already transacts
   with); no money mutation, no new principal, no new service-to-service edge. Rollback: remove the
   route; enforcement is unchanged because the guard never reads this projection.
+- **2026-09-08** — **Term-deposit openings record the governing terms version** (#9044), no new
+  route, caller, edge or privilege. `POST /api/v1/accounts` for `TERM_DEPOSIT` now carries a
+  required `termsVersion`/`termsUrl`/`termsEffectiveFrom` triple, persisted on the account row
+  (V24; CHECK NOT VALID, existing deposits stay NULL — no backfill, a historical deposit must not
+  gain terms it never showed the customer). The values are resolved server-side by the
+  customer-edge from the product catalogue's currently-effective terms, and a client-supplied
+  `termsVersionShown` mismatch answers 409 there, so a terms rollout can never bind a customer to
+  a document they were not shown. The record is audit data: it is written once at opening, never
+  mutated, and read back in the account response. **Security-relevant half:** the triple is
+  evidence, not input to any authorization or money decision, so forging it requires the caller to
+  already hold the open-account privilege; the 409 comparison happens at the edge against the
+  catalogue of record, not against client-supplied truth. **Risk class:** accountability /
+  non-repudiation hardening; no money mutation, no new principal, no new service-to-service edge.
+  Rollback: drop the three columns; openings of other account types are unaffected.
