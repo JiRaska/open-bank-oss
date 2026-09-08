@@ -29,4 +29,3 @@
 # nothing rejects the call — `requestKey` is simply null, both the get and the save are skipped,
 # and every duplicate initiates a fresh challenge. The quiet direction: the protection exists,
 # runs, and can never engage for a spec-conformant caller.
-openbank-sca-service bound-not-published POST /api/v1/sca/challenges
