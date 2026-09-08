@@ -56,6 +56,13 @@ escalating a consent is a direct path to unauthorized data access or payment ini
 
 ## 6. Change log
 
+- **2026-09-07** — Suppression creation is now replay-safe (#8351, ADR-0293). A retried
+  `POST /api/v1/suppressions` stacked a second identical active row; `SuppressionService.create`
+  now checks the natural key (partyId, scope, value) over active rows and replays the original
+  (no duplicate row, no second event), with `uq_suppressions_active_natural` (V8, partial over
+  `revoked_at IS NULL`) as the race backstop. The consent-grant idempotency keys (Berlin Group
+  `tppTransactionId` / `X-Request-ID`, already enforced) are now declared in openapi.yaml (1.9.1).
+  No new caller, endpoint or privilege. Rollback: revert + `DROP INDEX uq_suppressions_active_natural`.
 - **2026-08-26** — The operator approval inbox gains a bounded, read-only
   `GET /api/v1/consents/approvals` edge. It returns pending approval workflow metadata
   (random id, action, resource id, maker id and creation time) only to `ROLE_OPERATOR` or
