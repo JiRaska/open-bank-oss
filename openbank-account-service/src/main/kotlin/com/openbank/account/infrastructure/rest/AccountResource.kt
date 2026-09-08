@@ -149,6 +149,9 @@ class AccountResource(
                 currency = CurrencyCode.of(request.currencyCode),
                 requestedBy = operatorId(),
                 legalName = request.legalName,
+                termsVersion = request.termsVersion,
+                termsUrl = request.termsUrl,
+                termsEffectiveFrom = request.termsEffectiveFrom,
             ),
         )
         val responseBody = account.toResponse()
@@ -521,6 +524,9 @@ private fun com.openbank.account.domain.model.Account.toResponse() = AccountResp
     goalTargetMinorUnits = goalTargetMinorUnits,
     goalTargetDate = goalTargetDate,
     nickname = nickname,
+    termsVersion = termsVersion,
+    termsUrl = termsUrl,
+    termsEffectiveFrom = termsEffectiveFrom,
 )
 
 private fun CursorPage<com.openbank.account.domain.model.Account>.toResponse() =

@@ -237,7 +237,9 @@ class CustomerEdgeIncentivePactConsumerTest {
         val TERM_DEPOSIT_PRODUCT = """
             {"id":"$PRODUCT_ID","code":"TERM_6M","name":"Term deposit","type":"TERM_DEPOSIT",
             "currency":"CZK","status":"ACTIVE","isPublic":true,
-            "termDepositConfig":{"termMonths":6,"interestRateAnnual":5.8},"termsAndConditions":[]}
+            "termDepositConfig":{"termMonths":6,"interestRateAnnual":5.8},
+            "termsAndConditions":[{"version":"2026-01","url":"https://docs.example/td.pdf",
+            "effectiveFrom":"2026-01-01","language":"cs"}]}
         """.trimIndent()
         val ATTRIBUTION = """
             {"campaignId":"66666666-6666-4666-8666-666666666666","stepOrder":0,"channel":"PUSH",
