@@ -1500,6 +1500,7 @@ dependencies:
         - openbank-flaky-test-hunter/
         - openbank-ap2-service/
         - openbank-mcp-service/
+        - openbank-communication-service/
       reason: "open-core: AGPL-3.0-only + commercial dual-licensing of the AI agent services"
       adr: ADR-0136
   license_boundary_exceptions:

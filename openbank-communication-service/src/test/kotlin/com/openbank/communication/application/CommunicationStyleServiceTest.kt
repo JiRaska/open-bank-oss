@@ -103,20 +103,25 @@ class CommunicationStyleServiceTest {
             CommunicationStyleService(InMemoryPersonaRepository(listOf(persona)), styleVersions, audit, events, clock)
     }
 
-    private fun draft(maker: String = "editor-a") = runBlocking {
-        service.draft(
-            DraftStyleVersionCommand(
-                personaKey = persona.key,
-                tone = "warm",
-                formality = "informal",
-                formOfAddress = "tykání",
-                maxLength = null,
-                preferredTerms = emptyMap(),
-                forbiddenTerms = emptyList(),
-                signature = "Vaše banka",
-                maker = maker,
-            ),
+    // Two statements, not one: ktlint's function-expression-body rule would otherwise demand
+    // the `= runBlocking {` form back, which is exactly what the CI guard forbids — a @Test
+    // written that way returns non-Unit and JUnit5 silently drops it. This helper is not a
+    // @Test and does return a value, but the guard reads shape rather than intent, and a shape
+    // that is unsafe on the tests next to it is not worth defending here (mirrors
+    // SpendReservationServiceTest's `reserve()` helper).
+    private fun draft(maker: String = "editor-a"): StyleVersion {
+        val command = DraftStyleVersionCommand(
+            personaKey = persona.key,
+            tone = "warm",
+            formality = "informal",
+            formOfAddress = "tykání",
+            maxLength = null,
+            preferredTerms = emptyMap(),
+            forbiddenTerms = emptyList(),
+            signature = "Vaše banka",
+            maker = maker,
         )
+        return runBlocking { service.draft(command) }
     }
 
     @Test

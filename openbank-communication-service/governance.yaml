@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Per-service governance manifest (ADR-0071).
-dataDomain: agent-plane
+dataDomain: platform
 primaryDatastore: PostgreSQL
 databaseName: openbank_communication
 dataLineageRole: internal

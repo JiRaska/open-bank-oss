@@ -23,10 +23,22 @@ data class DraftStyleVersionRequest(
     val formality: String,
     val formOfAddress: String,
     val maxLength: Int? = null,
-    val preferredTerms: Map<String, String> = emptyMap(),
-    val forbiddenTerms: List<String> = emptyList(),
+    // Nullable element/value types on purpose: a null array element or map value deserialises
+    // fine (Jackson doesn't reject it) even though the Kotlin type says it cannot happen — the
+    // declared type only decides where the failure lands, and every landing is a 500 unless the
+    // element is declared nullable and guarded explicitly (issue #7867). `requireNotNull` below
+    // turns that 500 into a 400 naming the offending key/index.
+    val preferredTerms: Map<String, String?> = emptyMap(),
+    val forbiddenTerms: List<String?> = emptyList(),
     val signature: String? = null,
-)
+) {
+    /** Validates every element is non-null and returns the caller-facing non-nullable shape. */
+    fun validatedPreferredTerms(): Map<String, String> =
+        preferredTerms.mapValues { (k, v) -> requireNotNull(v) { "preferredTerms['$k'] must not be null" } }
+
+    fun validatedForbiddenTerms(): List<String> =
+        forbiddenTerms.mapIndexed { i, v -> requireNotNull(v) { "forbiddenTerms[$i] must not be null" } }
+}
 
 /**
  * ADR-0285 D7's style editor surface. `commstyle.draft`/`commstyle.submit` carry
@@ -54,8 +66,8 @@ class CommunicationStyleResource(
                     formality = req.formality,
                     formOfAddress = req.formOfAddress,
                     maxLength = req.maxLength,
-                    preferredTerms = req.preferredTerms,
-                    forbiddenTerms = req.forbiddenTerms,
+                    preferredTerms = req.validatedPreferredTerms(),
+                    forbiddenTerms = req.validatedForbiddenTerms(),
                     signature = req.signature,
                     maker = actor(),
                 ),
