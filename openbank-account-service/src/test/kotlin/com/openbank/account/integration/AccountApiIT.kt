@@ -126,7 +126,10 @@ class AccountApiIT {
               "productId": "00000000-2222-0000-0000-000000000002",
               "accountType": "TERM_DEPOSIT",
               "currencyCode": "EUR",
-              "legalName": "Test Customer"
+              "legalName": "Test Customer",
+              "termsVersion": "2026-01",
+              "termsUrl": "https://docs.example/td-2026-01.pdf",
+              "termsEffectiveFrom": "2026-01-01"
             }
         """.trimIndent()
 
@@ -141,6 +144,10 @@ class AccountApiIT {
             body("accountType", equalTo("TERM_DEPOSIT"))
             body("currencyCode", equalTo("EUR"))
             body("status", equalTo("ACTIVE"))
+            // #9044: the terms record the deposit was opened under is persisted and returned.
+            body("termsVersion", equalTo("2026-01"))
+            body("termsUrl", equalTo("https://docs.example/td-2026-01.pdf"))
+            body("termsEffectiveFrom", equalTo("2026-01-01"))
         }
     }
 

@@ -35,6 +35,7 @@ import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.event.AccountStatusChangedEvent
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
+import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.CurrencyPocket
 import com.openbank.account.domain.model.PocketResolution
 import com.openbank.account.domain.model.PocketRouter
@@ -121,6 +122,16 @@ class AccountService(
             ProductLookupResult.Unavailable -> Unit
         }
 
+        // #9044: a TERM_DEPOSIT must never open without a record of the terms version it was
+        // opened under — the terms carry the early-withdrawal penalty and the notice period, and
+        // "which terms govern this deposit" is the first question of any complaints/conduct
+        // review. IllegalArgumentException → 400 via libs-runtime's mapper, same as the REST
+        // layer's own validation. The DB backs this with chk_accounts_terms (NOT VALID — honest
+        // nulls on pre-V24 accounts stay untouched).
+        require(command.accountType != AccountType.TERM_DEPOSIT || !command.termsVersion.isNullOrBlank()) {
+            "termsVersion is required when opening a TERM_DEPOSIT account"
+        }
+
         val iban = ibanGenerator.generate(command.currency)
 
         check(!accountRepository.existsByIban(iban)) {
@@ -142,6 +153,9 @@ class AccountService(
             sanctionsScreenedAt = now,
             sanctionsStatus = screening.status,
             legalName = command.legalName.ifBlank { null },
+            termsVersion = command.termsVersion,
+            termsUrl = command.termsUrl,
+            termsEffectiveFrom = command.termsEffectiveFrom,
         )
 
         // Account + pocket + idempotency key commit in ONE transaction (#465). A concurrent
