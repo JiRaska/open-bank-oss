@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.10.1...dispute-service-v0.10.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **dispute:** operator update to a terminal status emits dispute.resolved ([#9057](https://github.com/JiRaska/open-bank-oss/issues/9057)) ([14fcbb4](https://github.com/JiRaska/open-bank-oss/commit/14fcbb4a6aadb3ed466ffb1deb8addb29acd61e9))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.10.0...dispute-service-v0.10.1) (2026-09-03)
 
 
