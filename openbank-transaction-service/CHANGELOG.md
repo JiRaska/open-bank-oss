@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.21.1...transaction-service-v1.22.0) (2026-09-08)
+
+
+### Features
+
+* **transactions:** let an operator maintain the merchant catalogue ([#8874](https://github.com/JiRaska/open-bank-oss/issues/8874)) ([7c57855](https://github.com/JiRaska/open-bank-oss/commit/7c578553e45097a61c7cff4b6b5096eb276409f9))
+
+
+### Bug Fixes
+
+* **libs:** render a 401 as the standard envelope fleet-wide, from one @Provider ([#9025](https://github.com/JiRaska/open-bank-oss/issues/9025)) ([1cff956](https://github.com/JiRaska/open-bank-oss/commit/1cff95640c40d6bbc8a0f096476994a24f67c916))
+* **transaction:** announce the COMPLETED to REVERSED transition ([#9066](https://github.com/JiRaska/open-bank-oss/issues/9066)) ([dadae4f](https://github.com/JiRaska/open-bank-oss/commit/dadae4f2c0793dee01bedfb12c06d114e467fe6e))
+* **transaction:** reversals record what they reverse ([#9054](https://github.com/JiRaska/open-bank-oss/issues/9054)) ([f3ec567](https://github.com/JiRaska/open-bank-oss/commit/f3ec567a3b5c2ddaf7266cb297d98dc2d8287a3c)), closes [#8841](https://github.com/JiRaska/open-bank-oss/issues/8841)
+* **transaction:** unparseable enum inputs are 400, never a silent null ([#9037](https://github.com/JiRaska/open-bank-oss/issues/9037)) ([cb1e809](https://github.com/JiRaska/open-bank-oss/commit/cb1e8090e7ccd9a02eee4b678f09caed197a5d28))
+
 ## [1.21.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.21.0...transaction-service-v1.21.1) (2026-09-03)
 
 

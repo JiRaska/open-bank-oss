@@ -68,3 +68,23 @@ data class TransactionFailedEvent(
     override val aggregateType = "Transaction"
     override val eventType = "TransactionFailed"
 }
+
+/**
+ * #8745 finding 1: the COMPLETED → REVERSED transition was the only terminal status change with
+ * no event — the reversal's own `transaction.initiated` announces THAT a reversal happened but
+ * (before #8841's linkage) could not say WHAT it reversed, so a consumer projecting status held
+ * the original at COMPLETED permanently. Carries the operator's reason, mirroring
+ * [TransactionFailedEvent].
+ */
+data class TransactionReversedEvent(
+    override val aggregateId: UUID,
+    override val version: Long,
+    val referenceNumber: String,
+    val reason: String,
+    override val occurredAt: Instant,
+    /** See [TransactionInitiatedEvent.sourceService] (#3994/#5256). */
+    val sourceService: String = "transaction-service",
+) : DomainEvent(occurredAt) {
+    override val aggregateType = "Transaction"
+    override val eventType = "TransactionReversed"
+}

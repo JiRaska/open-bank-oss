@@ -1,7 +1,7 @@
 ---
 date: 2026-09-06
-decision-status: proposed
-delivery-status: planned
+decision-status: accepted
+delivery-status: shipped
 authors: [Jiří Raška]
 supersedes: []
 superseded-by: []
@@ -156,6 +156,61 @@ SQL; the registry is the only query surface, and its entries are the audit inven
 - GDPR:    engaged in the same posture as ADR-0022 — gold marts inherit PII-masked payloads and pseudonymous `aggregateId`; the registry's per-entry permission gate is the access-control surface over that data, and no registry entry may unmask what the sink masked.
 - PSD2:    not applicable — no payment-initiation or customer-facing surface; Admin UI is an operator tool.
 - CNB:     engaged — internal risk/finance reporting becomes warehouse-backed, and the registry provides a reviewable inventory of reported figures; regulator-bound returns are explicitly *not* sourced here (they remain on frozen OLTP state via finrep-service).
+
+## Deployment verification
+
+Verified end-to-end on the sandbox environment on 2026-09-06/07:
+
+- Feature shipped in #8949 (`/reporting` route, gold query registry, Grafana embed); the V15
+  gold-mart migration was applied to the sandbox ClickHouse (`15-reporting-gold.sql` via the
+  analytics ConfigMap) and all four gold views return data (`event_volume_daily` 107 rows,
+  `settled_transactions` 48, `settlement_daily` 19, `failures_daily` 4).
+- The rollout exposed a pre-existing admin-ui pipeline blocker, tracked as #8981: since #8847
+  every build failed its second cosign attestation, because cosign's legacy attestation model
+  appends to the single `sha256-<digest>.att` tag and `openbank-admin-ui` sits in
+  `ecr_immutable_repositories`, so ECR rejected the SLSA-provenance append with
+  `TAG_INVALID ... tag is immutable`. Hotfix #8982 teaches `cosign_attest_slsa_provenance` to
+  tolerate exactly that signature (the kyverno SLSA policy is Audit-only; signature and SBOM
+  attestations land first and remain Enforce). The durable fix — an ECR exclusion filter for
+  `*.att`, or OCI referrers once kyverno supports them — remains open under #8981.
+- Post-hotfix evidence: dispatch run 34061627188 and push run 34061932549 both completed
+  sign + SBOM attest + (tolerated) SLSA attest; the GitOps pin advanced through auto-PRs
+  #8985 → #8989 → `sandbox-74a5007e9-run34072377301`, and the sandbox deployment runs an
+  image whose commit is 14 commits ahead of the #8949 merge with 1/1 ready replicas.
+- `GET https://admin.open-bank.tech/reporting` answers 200 (auth-gated, redirecting to
+  Keycloak login with `callbackUrl=/reporting`), confirming the route is registered and
+  served in the sandbox build.
+
+Final rollout, verified 2026-09-08 with an authenticated session (minted Auth.js JWT) and
+in-pod reads:
+
+- Release cut: #8698 merged 2026-09-08, tag `admin-ui-v0.241.0`; the sandbox deployment
+  runs image `sandbox-6fbce4cc4-run34243836847` with `BUILD_VERSION=0.241.0` — the pod env
+  and the authenticated `/api/build-info` agree.
+- The Grafana embed initially rendered "refused to connect": Grafana's default
+  `allow_embedding = false` sets `X-Frame-Options: deny` on every response (issue #9062).
+  #9059 sets `security.allow_embedding: true` in the `kube-prometheus-stack` GitOps values;
+  after the ArgoCD sync the embed URL
+  `/tools/grafana/d/openbank-business-warehouse?kiosk` answers 302 → 200 with no
+  `X-Frame-Options` header at all, and `grafana.ini` in the pod carries the key.
+- Authenticated surface checks: `/reporting` 200 serving the real page, `/api/reporting`
+  returns the live catalogue (e.g. `risk-settlement-daily`), and
+  `/api/reporting/warehouse-event-volume` reads real ClickHouse rows.
+- The same rollout also flushed out two latent `main` drifts that blocked unrelated gates:
+  Kotlin 2.4.20 release artifacts unpinned in `gradle/verification-metadata.xml` (pinned in
+  #9059) and an MPL-2.0 header on `.github/workflows/edge-openapi-dispatch.yml` in the
+  Apache-2.0 tree (fixed in #9059).
+
+Follow-up (2026-09-08, #9216): the 302 → 200 embed check above stopped at the site boundary
+and missed the SSO hop. The iframe's OAuth dance crosses to Keycloak (`kc.open-bank.tech`),
+whose realm carried no `browserSecurityHeaders`, so the default `frame-ancestors 'self'`
+blocked the frame the moment Keycloak rendered its login form — the browser showed "This
+content is blocked" even with `allow_embedding` on. Fixed live via kcadm (realm `openbank`
+CSP now allowlists `https://admin.open-bank.tech` as a frame ancestor), with the desired
+state landed in `realm-template.json`, the cold-start import override and the docker dev
+realm; Grafana `auth.generic_oauth.auto_login: true` makes the bounce click-free when a
+portal SSO session exists. Lesson: a framing verdict must cover the WHOLE redirect chain,
+off-site hops included — "no X-Frame-Options on Grafana hops" was necessary, not sufficient.
 
 ## References
 

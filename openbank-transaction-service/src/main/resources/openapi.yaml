@@ -10,7 +10,7 @@ info:
   # Minor bump (1.11.0 -> 1.12.0): additive only — GET /approvals (the checker's queue, issue
   # #5679, mirroring sanctions' #3472) plus two additive fields on the PATCH .../approvals/{id}
   # response (makerId, createdAt). No breaking change.
-  version: 1.13.0
+  version: 1.15.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -242,6 +242,190 @@ paths:
         '422':
           description: Transaction is not in COMPLETED status and cannot be reversed
 
+  # #8573: operator maintenance of the merchant enrichment catalogue. Additive and
+  # operator-only — nothing here is proxied by customer-edge.
+  /api/v1/merchants:
+    get:
+      tags: [Merchant catalogue]
+      summary: List catalogue entries, most recently updated first
+      operationId: listMerchants
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, default: 0}
+        - name: size
+          in: query
+          schema: {type: integer, default: 50, maximum: 200}
+      responses:
+        '200':
+          description: One page of catalogue entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/MerchantAdmin'}
+                  total: {type: integer, format: int64}
+  /api/v1/merchants/unmatched:
+    get:
+      tags: [Merchant catalogue]
+      summary: Most frequent acquirer descriptors with no catalogue entry
+      description: >-
+        The operator worklist. Reads a bounded window of recent transaction descriptions,
+        normalises them the way the lookup does, drops the ones already in the catalogue and ranks
+        what is left by how many transactions carried it. Bounded rather than exhaustive on
+        purpose: normalisation is not expressible in SQL, and the value is in the top of the list.
+      operationId: listUnmatchedDescriptors
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, default: 25, maximum: 200}
+        - name: scan
+          in: query
+          description: How many recent descriptions to consider.
+          schema: {type: integer, default: 2000, maximum: 20000}
+      responses:
+        '200':
+          description: Unmatched descriptors, most frequent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    descriptorKey: {type: string}
+                    occurrences: {type: integer}
+  /api/v1/merchants/{descriptorKey}:
+    put:
+      tags: [Merchant catalogue]
+      summary: Create or replace a catalogue entry
+      description: >-
+        Idempotent by key. The path value is normalised on the way in, so pasting a raw acquirer
+        descriptor writes the row the lookup will actually hit.
+      operationId: upsertMerchant
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MerchantUpsert'}
+      responses:
+        '200': {description: Entry replaced}
+        '201': {description: Entry created}
+        '400': {description: Key normalises to nothing, cleanName missing, or only one coordinate}
+    delete:
+      tags: [Merchant catalogue]
+      summary: Remove a catalogue entry
+      operationId: deleteMerchant
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '204': {description: Entry removed}
+        '404': {description: No entry under that key}
+  /api/v1/merchants/{descriptorKey}/logo:
+    get:
+      tags: [Merchant catalogue]
+      summary: The merchant's logo as a square PNG
+      description: >-
+        Served from this bank's own origin, which is the point of the endpoint existing at all: the
+        alternative — a logo CDN's URL in the statement response — tells that CDN the customer's IP
+        address and the merchant they paid, every time a transaction list renders. Cached for a
+        year and immutable, which is safe only because the URL clients follow carries the content
+        hash; new bytes are a new URL. Supports If-None-Match.
+      operationId: getMerchantLogo
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          description: Raw or normalised acquirer descriptor; it is normalised the same way the lookup does.
+          schema: {type: string}
+        - name: size
+          in: query
+          description: Pixel size of the square variant. An enumeration, not a free number - the variants are pre-rendered.
+          schema: {type: integer, enum: [64, 128], default: 64}
+        - name: v
+          in: query
+          description: Cache-busting token echoed from the logoUrl the service issued. Ignored by the server.
+          schema: {type: string}
+      responses:
+        '200':
+          description: The logo bitmap
+          headers:
+            ETag: {schema: {type: string}}
+            Cache-Control: {schema: {type: string}}
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+        '304': {description: The client's cached copy is current}
+        '400': {description: Key normalises to nothing, or an unsupported size}
+        '404': {description: No logo stored for this merchant}
+    put:
+      tags: [Merchant catalogue]
+      summary: Store or replace a merchant logo from raw image bytes
+      description: >-
+        The upload is decoded and re-encoded as PNG rather than stored as sent. That is a security
+        boundary, not a resize: it drops anything that was not part of the image — an appended
+        payload, embedded metadata — and refuses formats that can carry script (SVG) or that
+        declare implausible dimensions (a decompression bomb). Provenance query parameters record
+        where a trademark came from and on what terms it may be shown.
+      operationId: putMerchantLogo
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+        - name: sourceUrl
+          in: query
+          description: Where the bytes were obtained. Recorded, never served to a customer client.
+          schema: {type: string}
+        - name: licence
+          in: query
+          description: Terms the logo may be shown under, e.g. "trademark", "CC-BY-4.0".
+          schema: {type: string}
+        - name: attribution
+          in: query
+          description: Credit line a licence requires, where it requires one.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '200':
+          description: Logo replaced
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MerchantLogoWritten'}
+        '201':
+          description: Logo stored
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MerchantLogoWritten'}
+        '400': {description: Missing body, unsupported format, oversized upload, or implausible dimensions}
+        '404': {description: No catalogue entry under that key to attach a logo to}
+    delete:
+      tags: [Merchant catalogue]
+      summary: Remove a merchant logo
+      operationId: deleteMerchantLogo
+      parameters:
+        - name: descriptorKey
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '204': {description: Logo removed}
+        '404': {description: No logo stored for this merchant}
   /api/v1/transactions/approvals:
     get:
       tags: [Transactions]
@@ -329,6 +513,50 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    MerchantAdmin:
+      type: object
+      description: A catalogue entry as an operator sees it. Public business data only.
+      properties:
+        descriptorKey: {type: string}
+        cleanName: {type: string}
+        logoUrl:
+          type: string
+          nullable: true
+          description: >-
+            PROVENANCE — where the stored logo bitmap was obtained, for licence evidence. Operator
+            facing; this is not the URL a customer client receives.
+        logoContentHash:
+          type: string
+          nullable: true
+          description: >-
+            SHA-256 of the stored logo, or null when none has been ingested. Null is how the
+            operator screen knows to offer "upload" rather than "replace".
+        category: {type: string, nullable: true}
+        lat: {type: number, format: double, nullable: true}
+        lon: {type: number, format: double, nullable: true}
+        city: {type: string, nullable: true}
+        country: {type: string, nullable: true}
+        updatedAt: {type: string, format: date-time}
+    MerchantLogoWritten:
+      type: object
+      description: The key the logo landed under and the hash that now identifies its bytes.
+      properties:
+        descriptorKey: {type: string}
+        contentHash: {type: string}
+    MerchantUpsert:
+      type: object
+      required: [cleanName]
+      description: >-
+        Public business data only — a trading name, a logo, a shop location. Coordinates are both
+        or neither; a half-populated pair is refused rather than becoming a pin at latitude 0.
+      properties:
+        cleanName: {type: string}
+        logoUrl: {type: string, nullable: true}
+        category: {type: string, nullable: true}
+        lat: {type: number, format: double, nullable: true}
+        lon: {type: number, format: double, nullable: true}
+        city: {type: string, nullable: true}
+        country: {type: string, nullable: true}
     ApprovalResponse:
       type: object
       description: >-
@@ -493,7 +721,14 @@ components:
         logoUrl:
           type: string
           nullable: true
-          description: Bank-controlled CDN URL. Never a third-party hotlink (privacy + availability).
+          description: >
+            ORIGIN-RELATIVE path to the logo this bank serves itself, e.g.
+            "/api/v1/merchants/ALZACZ/logo?size=64&v=<hash>". Never a third-party URL: an external
+            logo host would learn the customer's IP address and the merchant they paid every time a
+            statement renders, which is a spending profile leaving the bank through an img tag. The
+            v token is a prefix of the image content hash, so replacing a logo changes the URL and
+            the response may be cached immutably. Absent when no logo has been ingested — render
+            what you render today, never a placeholder.
         category:
           type: string
           nullable: true
