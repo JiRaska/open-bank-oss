@@ -5,6 +5,7 @@
 package com.openbank.account.application.usecase
 
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.ScaChallengeClient
 import com.openbank.account.application.port.out.WithdrawalProposalRepository
 import com.openbank.account.domain.event.SavingsWithdrawalApproved
@@ -50,6 +51,7 @@ class SavingsProposalService(
     private val savingsGuard: SavingsGoalDelegationGuard,
     private val approvalStore: ApprovalStore,
     private val scaChallengeClient: ScaChallengeClient,
+    private val partyMandateRepository: PartyMandateProjectionRepository,
     private val clock: Clock,
 ) {
 
@@ -126,15 +128,15 @@ class SavingsProposalService(
         if (proposal.isExpiredAt(OffsetDateTime.now(clock))) {
             throw ProposalExpiredException(proposalId, proposal.expiresAt)
         }
-        verifyOwnerSca(decidedByPartyId, scaSessionId)
+        val actorPartyId = verifyDecisionSca(account.partyId, scaSessionId)
 
         val approvalId = checkNotNull(proposal.approvalId) { "proposal $proposalId has no approval record" }
-        approvalStore.decide(approvalId, decidedByPartyId.toString(), approve)
+        approvalStore.decide(approvalId, actorPartyId.toString(), approve)
             ?: error("approval $approvalId not found")
 
         val now = OffsetDateTime.now(clock)
         return if (approve) {
-            val approved = proposal.approve(decidedByPartyId, scaSessionId, now)
+            val approved = proposal.approve(actorPartyId, scaSessionId, now)
             proposalRepository.save(
                 approved,
                 SavingsWithdrawalApproved(
@@ -150,7 +152,7 @@ class SavingsProposalService(
                 ),
             )
         } else {
-            proposalRepository.save(proposal.reject(decidedByPartyId, now))
+            proposalRepository.save(proposal.reject(actorPartyId, now))
         }
     }
 
@@ -191,7 +193,10 @@ class SavingsProposalService(
      * enforces dynamic linking. Approval is still enforced — by the component that owns it.
      * Purpose is checked here because consume is not told the purpose.
      */
-    private suspend fun verifyOwnerSca(ownerPartyId: UUID, scaSessionId: UUID) {
+    // Distinct failures deliberately preserve not-found, unavailable, wrong-purpose and
+    // unauthorized-representative semantics at this security boundary.
+    @Suppress("ThrowsCount")
+    private suspend fun verifyDecisionSca(ownerPartyId: UUID, scaSessionId: UUID): UUID {
         val challenge = try {
             scaChallengeClient.getChallenge(scaSessionId)
         } catch (e: NotFoundException) {
@@ -199,15 +204,26 @@ class SavingsProposalService(
         } catch (e: Exception) {
             throw ProposalScaException("SCA challenge $scaSessionId could not be verified", e)
         }
-        if (challenge.partyId != ownerPartyId || challenge.purpose != SCA_PURPOSE) {
-            throw ProposalScaException("SCA challenge $scaSessionId does not match the owner or purpose")
+        if (challenge.purpose != SCA_PURPOSE) {
+            throw ProposalScaException("SCA challenge $scaSessionId does not match the decision purpose")
+        }
+        val actorPartyId = challenge.partyId
+        if (actorPartyId != ownerPartyId) {
+            val soleAuthority = partyMandateRepository.findActive(ownerPartyId, actorPartyId)
+                .any { it.permitsSoleDecision() }
+            if (!soleAuthority) {
+                throw ProposalForbiddenException(
+                    "the SCA-authenticated actor holds no exact SOLE mandate for account owner $ownerPartyId",
+                )
+            }
         }
         @Suppress("TooGenericExceptionCaught") // includes sca-service's 409 for an already-spent challenge
         try {
-            scaChallengeClient.consumeChallenge(scaSessionId, ownerPartyId)
+            scaChallengeClient.consumeChallenge(scaSessionId, actorPartyId)
         } catch (e: Exception) {
             throw ProposalScaException("SCA challenge $scaSessionId could not be consumed", e)
         }
+        return actorPartyId
     }
 
     /**

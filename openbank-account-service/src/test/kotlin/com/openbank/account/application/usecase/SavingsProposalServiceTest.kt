@@ -5,10 +5,12 @@
 package com.openbank.account.application.usecase
 
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.ScaChallengeClient
 import com.openbank.account.application.port.out.ScaChallengeSnapshot
 import com.openbank.account.application.port.out.WithdrawalProposalRepository
 import com.openbank.account.domain.model.Account
+import com.openbank.account.domain.model.PartyMandateProjection
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
 import com.openbank.libs.approval.ApprovalStatus
@@ -38,6 +40,7 @@ class SavingsProposalServiceTest {
     private val savingsGuard: SavingsGoalDelegationGuard = mockk()
     private val approvalStore: ApprovalStore = mockk()
     private val scaClient: ScaChallengeClient = mockk()
+    private val partyMandateRepository: PartyMandateProjectionRepository = mockk()
     private val clock: Clock = Clock.fixed(Instant.parse("2026-08-01T12:00:00Z"), ZoneOffset.UTC)
 
     private lateinit var service: SavingsProposalService
@@ -50,7 +53,15 @@ class SavingsProposalServiceTest {
     @BeforeEach
     fun setUp() {
         service =
-            SavingsProposalService(accountRepository, proposalRepository, savingsGuard, approvalStore, scaClient, clock)
+            SavingsProposalService(
+                accountRepository,
+                proposalRepository,
+                savingsGuard,
+                approvalStore,
+                scaClient,
+                partyMandateRepository,
+                clock,
+            )
     }
 
     private fun command() = ProposeWithdrawalCommand(
@@ -172,6 +183,42 @@ class SavingsProposalServiceTest {
 
         assertThat(decided.status).isEqualTo(WithdrawalProposalStatus.APPROVED)
         coVerify { proposalRepository.save(any<WithdrawalProposal>(), any()) }
+    }
+
+    @Test
+    fun `entity owner accepts the human actor authenticated by SCA under an exact sole mandate`(): Unit = runBlocking {
+        val proposal = proposal()
+        val representative = UUID.randomUUID()
+        stubOwnerAndProposal(proposal, scaActor = representative)
+        coEvery { partyMandateRepository.findActive(owner, representative) } returns listOf(
+            PartyMandateProjection(UUID.randomUUID(), owner, representative, "SOLE", 1, true),
+        )
+        coEvery { approvalStore.decide("approval-1", representative.toString(), true) } returns
+            pendingApproval(delegate).copy(status = ApprovalStatus.APPROVED)
+        coEvery { proposalRepository.save(any<WithdrawalProposal>(), any()) } answers { firstArg() }
+
+        val decided = service.decide(accountId, proposal.id, owner, true, UUID.randomUUID())
+
+        assertThat(decided.decidedBy).isEqualTo(representative)
+        coVerify { scaClient.consumeChallenge(any(), representative) }
+        coVerify { approvalStore.decide("approval-1", representative.toString(), true) }
+    }
+
+    @Test
+    fun `joint mandate cannot enter the single-decision path and does not burn SCA`(): Unit = runBlocking {
+        val proposal = proposal()
+        val representative = UUID.randomUUID()
+        stubOwnerAndProposal(proposal, scaActor = representative)
+        coEvery { partyMandateRepository.findActive(owner, representative) } returns listOf(
+            PartyMandateProjection(UUID.randomUUID(), owner, representative, "JOINT", 2, true),
+        )
+
+        assertThatThrownBy {
+            runBlocking { service.decide(accountId, proposal.id, owner, true, UUID.randomUUID()) }
+        }.isInstanceOf(ProposalForbiddenException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
     }
 
     @Test
@@ -317,7 +364,7 @@ class SavingsProposalServiceTest {
         }
     }
 
-    private fun stubOwnerAndProposal(proposal: WithdrawalProposal) {
+    private fun stubOwnerAndProposal(proposal: WithdrawalProposal, scaActor: UUID = owner) {
         val account = mockk<Account>()
         io.mockk.every { account.partyId } returns owner
         coEvery { accountRepository.findById(accountId) } returns account
@@ -326,13 +373,13 @@ class SavingsProposalServiceTest {
         // approves from their phone. Nothing a customer can reach calls sca-service's verify().
         coEvery { scaClient.getChallenge(any()) } returns ScaChallengeSnapshot(
             id = UUID.randomUUID(),
-            partyId = owner,
+            partyId = scaActor,
             purpose = "SAVINGS_WITHDRAW_APPROVAL",
             status = "PENDING",
         )
-        coEvery { scaClient.consumeChallenge(any(), owner) } returns ScaChallengeSnapshot(
+        coEvery { scaClient.consumeChallenge(any(), scaActor) } returns ScaChallengeSnapshot(
             id = UUID.randomUUID(),
-            partyId = owner,
+            partyId = scaActor,
             purpose = "SAVINGS_WITHDRAW_APPROVAL",
             status = "COMPLETED",
         )
