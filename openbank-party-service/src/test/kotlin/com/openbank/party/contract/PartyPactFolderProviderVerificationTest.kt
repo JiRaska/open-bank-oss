@@ -435,6 +435,7 @@ class PartyPactFolderProviderVerificationTest {
                     agentPartyId = DELEGATION_ACTOR_ID,
                     role = MandateRole.LEGAL_REPRESENTATIVE,
                     authority = MandateAuthority.SOLE,
+                    requiredSignatures = 1,
                     source = MandateSource.REGISTRY,
                     evidenceRef = "synthetic-pact-fixture",
                 ),
