@@ -15,6 +15,7 @@ import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.delegation.domain.event.ApprovalGroupChanged
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationRevoked
 import com.openbank.delegation.domain.event.EventMoney
@@ -139,6 +140,28 @@ class DelegationEventPactFolderProviderVerificationTest {
             resourceId = RESOURCE,
             capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
             reason = "grantor revoked",
+            occurredAt = OCCURRED_AT,
+        ),
+    )
+
+    @State("an approval group roster has been revised")
+    fun approvalGroupRevised() = Unit
+
+    @PactVerifyProvider("an ApprovalGroupRevised event with a complete roster")
+    fun produceApprovalGroupRevised(): String = objectMapper.writeValueAsString(
+        ApprovalGroupChanged(
+            aggregateId = GRANT_ID,
+            ownerPartyId = GRANTOR,
+            name = "Treasury approvers",
+            members = setOf(
+                UUID.fromString("aaaa5555-bbbb-4ccc-8ddd-eeeeffff0004"),
+                UUID.fromString("aaaa6666-bbbb-4ccc-8ddd-eeeeffff0005"),
+            ),
+            threshold = 2,
+            revision = 4,
+            active = true,
+            scaSessionId = RESOURCE,
+            eventType = "ApprovalGroupRevised",
             occurredAt = OCCURRED_AT,
         ),
     )

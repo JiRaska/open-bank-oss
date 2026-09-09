@@ -175,4 +175,40 @@ class DelegationEventMessagePactConsumerTest {
         assertThat(UUID.fromString(node.path("grantorPartyId").asText())).isNotNull()
         assertThat(node.path("resourceType").asText()).isEqualTo("ACCOUNT")
     }
+
+    @Pact(consumer = "openbank-account-service", provider = "openbank-delegation-service")
+    fun approvalGroupRevisedPact(builder: MessagePactBuilder): MessagePact = builder
+        .given("an approval group roster has been revised")
+        .expectsToReceive("an ApprovalGroupRevised event with a complete roster")
+        .withContent(
+            newJsonBody { o ->
+                o.stringValue("eventType", "ApprovalGroupRevised")
+                o.uuid("aggregateId")
+                o.uuid("ownerPartyId")
+                o.stringType("name", "Treasury approvers")
+                o.array("members") { members ->
+                    members.stringValue("aaaa5555-bbbb-4ccc-8ddd-eeeeffff0004")
+                    members.stringValue("aaaa6666-bbbb-4ccc-8ddd-eeeeffff0005")
+                }
+                o.integerType("threshold", 2)
+                o.integerType("revision", 4)
+                o.booleanType("active", true)
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "approvalGroupRevisedPact")
+    fun `ApprovalGroupRevised carries the immutable operation roster`(messages: List<Message>) {
+        val node = objectMapper.readTree(messages.first().contentsAsBytes())
+
+        assertThat(node.path("eventType").asText()).isEqualTo("ApprovalGroupRevised")
+        assertThat(UUID.fromString(node.path("aggregateId").asText())).isNotNull()
+        assertThat(UUID.fromString(node.path("ownerPartyId").asText())).isNotNull()
+        assertThat(node.path("members")).hasSize(2)
+        assertThat(node.path("members").map { UUID.fromString(it.asText()) }).hasSize(2)
+        assertThat(node.path("threshold").asInt()).isEqualTo(2)
+        assertThat(node.path("revision").asLong()).isEqualTo(4)
+        assertThat(node.path("active").asBoolean()).isTrue()
+    }
 }
