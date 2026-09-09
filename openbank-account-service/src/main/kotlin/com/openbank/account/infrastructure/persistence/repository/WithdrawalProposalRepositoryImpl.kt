@@ -6,6 +6,7 @@ package com.openbank.account.infrastructure.persistence.repository
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.account.application.port.out.AccountOutboxRepository
+import com.openbank.account.application.port.out.WithdrawalApprovalDecision
 import com.openbank.account.application.port.out.WithdrawalDecisionResult
 import com.openbank.account.application.port.out.WithdrawalProposalRepository
 import com.openbank.account.domain.model.WithdrawalProposal
@@ -21,6 +22,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
+import org.hibernate.reactive.mutiny.Mutiny.Session
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -73,6 +75,25 @@ class WithdrawalProposalRepositoryImpl(
                 .list<WithdrawalProposalEntity>()
         }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun findDecisions(proposalIds: Set<UUID>): List<WithdrawalApprovalDecision> {
+        if (proposalIds.isEmpty()) return emptyList()
+        return Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.createSelectionQuery(
+                    "from WithdrawalApprovalDecisionEntity d where d.proposalId in :proposalIds",
+                    WithdrawalApprovalDecisionEntity::class.java,
+                ).setParameter("proposalIds", proposalIds).resultList
+            }
+        }.awaitSuspending().map { decision ->
+            WithdrawalApprovalDecision(
+                proposalId = decision.proposalId,
+                partyId = decision.partyId,
+                approved = decision.approved,
+                decidedAt = decision.decidedAt,
+            )
+        }
+    }
+
     override suspend fun recordDecision(
         proposalId: UUID,
         actorPartyId: UUID,
@@ -81,77 +102,141 @@ class WithdrawalProposalRepositoryImpl(
         decidedAt: OffsetDateTime,
         approvedEvent: DomainEvent,
     ): WithdrawalDecisionResult = Panache.withTransaction {
+        val command = DecisionWriteCommand(actorPartyId, approved, scaSessionId, decidedAt, approvedEvent)
         Panache.getSession().flatMap { session ->
             session.find(WithdrawalProposalEntity::class.java, proposalId, LockModeType.PESSIMISTIC_WRITE)
                 .flatMap { proposal ->
-                    requireNotNull(proposal) { "withdrawal proposal $proposalId not found" }
-                    require(proposal.status == WithdrawalProposalStatus.PENDING) {
-                        "only a PENDING proposal can be decided (is ${proposal.status})"
-                    }
-                    require(decidedAt.isBefore(proposal.expiresAt)) { "proposal expired at ${proposal.expiresAt}" }
-                    require(actorPartyId in proposal.eligibleApproverIds) {
-                        "party $actorPartyId is not in the proposal's immutable approval roster"
-                    }
-                    session.find(
-                        WithdrawalApprovalDecisionEntity::class.java,
-                        WithdrawalApprovalDecisionId(proposalId, actorPartyId),
-                    ).flatMap { existing ->
-                        if (existing != null) {
-                            require(existing.scaSessionId == scaSessionId && existing.approved == approved) {
-                                "party $actorPartyId has already decided proposal $proposalId"
-                            }
-                            countApprovals(session, proposalId).map { count ->
-                                WithdrawalDecisionResult(proposal.toDomain(), count, replayed = true)
-                            }
-                        } else {
-                            val decision = WithdrawalApprovalDecisionEntity().apply {
-                                this.proposalId = proposalId
-                                partyId = actorPartyId
-                                this.approved = approved
-                                this.scaSessionId = scaSessionId
-                                this.decidedAt = decidedAt
-                            }
-                            session.persist(decision).flatMap {
-                                if (!approved) {
-                                    proposal.status = WithdrawalProposalStatus.REJECTED
-                                    proposal.decidedBy = actorPartyId
-                                    proposal.decidedAt = decidedAt
-                                    Uni.createFrom().item(WithdrawalDecisionResult(proposal.toDomain(), 0, false))
-                                } else {
-                                    session.flush().flatMap { countApprovals(session, proposalId) }.flatMap { count ->
-                                        if (count >= proposal.requiredApprovals) {
-                                            proposal.status = WithdrawalProposalStatus.APPROVED
-                                            proposal.decidedBy = actorPartyId
-                                            proposal.decidedAt = decidedAt
-                                            proposal.scaSessionId = scaSessionId
-                                            outboxRepository.persistInTransaction(
-                                                OutboxMessage(
-                                                    aggregateId = approvedEvent.aggregateId,
-                                                    eventType = approvedEvent.eventType,
-                                                    payload = objectMapper.writeValueAsString(approvedEvent),
-                                                    createdAt = approvedEvent.occurredAt,
-                                                ),
-                                            ).replaceWith(WithdrawalDecisionResult(proposal.toDomain(), count, false))
-                                        } else {
-                                            Uni.createFrom().item(
-                                                WithdrawalDecisionResult(proposal.toDomain(), count, false),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    applyDecision(
+                        session,
+                        requireNotNull(proposal),
+                        command,
+                        outboxRepository,
+                        objectMapper,
+                    )
                 }
         }
     }.awaitSuspending()
-
-    private fun countApprovals(session: org.hibernate.reactive.mutiny.Mutiny.Session, proposalId: UUID): Uni<Int> =
-        session.createSelectionQuery(
-            "select count(d) from WithdrawalApprovalDecisionEntity d " +
-                "where d.proposalId = :proposalId and d.approved = true",
-            java.lang.Long::class.java,
-        ).setParameter("proposalId", proposalId)
-            .singleResult
-            .map { it.toInt() }
 }
+
+private data class DecisionWriteCommand(
+    val actor: UUID,
+    val approved: Boolean,
+    val scaSessionId: UUID,
+    val decidedAt: OffsetDateTime,
+    val event: DomainEvent,
+)
+
+private fun applyDecision(
+    session: Session,
+    proposal: WithdrawalProposalEntity,
+    command: DecisionWriteCommand,
+    outboxRepository: AccountOutboxRepository,
+    objectMapper: ObjectMapper,
+): Uni<WithdrawalDecisionResult> {
+    require(proposal.status == WithdrawalProposalStatus.PENDING) { "only a PENDING proposal can be decided" }
+    require(command.decidedAt.isBefore(proposal.expiresAt)) { "proposal expired at ${proposal.expiresAt}" }
+    require(command.actor in proposal.eligibleApproverIds) { "party ${command.actor} is not in the approval roster" }
+    return session.find(
+        WithdrawalApprovalDecisionEntity::class.java,
+        WithdrawalApprovalDecisionId(proposal.id, command.actor),
+    ).flatMap { existing ->
+        if (existing != null) {
+            replayDecision(session, proposal, existing, command.approved, command.scaSessionId)
+        } else {
+            persistDecision(session, proposal, command, outboxRepository, objectMapper)
+        }
+    }
+}
+
+private fun replayDecision(
+    session: Session,
+    proposal: WithdrawalProposalEntity,
+    existing: WithdrawalApprovalDecisionEntity,
+    approved: Boolean,
+    scaSessionId: UUID,
+): Uni<WithdrawalDecisionResult> {
+    require(existing.scaSessionId == scaSessionId && existing.approved == approved) {
+        "party ${existing.partyId} has already decided proposal ${proposal.id}"
+    }
+    return countApprovals(session, proposal.id).map { WithdrawalDecisionResult(proposal.toDomain(), it, true) }
+}
+
+private fun persistDecision(
+    session: Session,
+    proposal: WithdrawalProposalEntity,
+    command: DecisionWriteCommand,
+    outboxRepository: AccountOutboxRepository,
+    objectMapper: ObjectMapper,
+): Uni<WithdrawalDecisionResult> {
+    val decision = WithdrawalApprovalDecisionEntity().apply {
+        proposalId = proposal.id
+        partyId = command.actor
+        approved = command.approved
+        scaSessionId = command.scaSessionId
+        decidedAt = command.decidedAt
+    }
+    return session.persist(decision).flatMap {
+        if (!command.approved) {
+            reject(proposal, command.actor, command.decidedAt)
+        } else {
+            session.flush().flatMap { countApprovals(session, proposal.id) }
+                .flatMap {
+                    approveWhenQuorum(
+                        proposal,
+                        command.actor,
+                        command.scaSessionId,
+                        command.decidedAt,
+                        command.event,
+                        it,
+                        outboxRepository,
+                        objectMapper,
+                    )
+                }
+        }
+    }
+}
+
+private fun reject(
+    proposal: WithdrawalProposalEntity,
+    actorPartyId: UUID,
+    decidedAt: OffsetDateTime,
+): Uni<WithdrawalDecisionResult> {
+    proposal.status = WithdrawalProposalStatus.REJECTED
+    proposal.decidedBy = actorPartyId
+    proposal.decidedAt = decidedAt
+    return Uni.createFrom().item(WithdrawalDecisionResult(proposal.toDomain(), 0, false))
+}
+
+private fun approveWhenQuorum(
+    proposal: WithdrawalProposalEntity,
+    actorPartyId: UUID,
+    scaSessionId: UUID,
+    decidedAt: OffsetDateTime,
+    event: DomainEvent,
+    count: Int,
+    outboxRepository: AccountOutboxRepository,
+    objectMapper: ObjectMapper,
+): Uni<WithdrawalDecisionResult> {
+    val result = WithdrawalDecisionResult(proposal.toDomain(), count, false)
+    if (count < proposal.requiredApprovals) return Uni.createFrom().item(result)
+    proposal.status = WithdrawalProposalStatus.APPROVED
+    proposal.decidedBy = actorPartyId
+    proposal.decidedAt = decidedAt
+    proposal.scaSessionId = scaSessionId
+    val message = OutboxMessage(
+        aggregateId = event.aggregateId,
+        eventType = event.eventType,
+        payload = objectMapper.writeValueAsString(event),
+        createdAt = event.occurredAt,
+    )
+    return outboxRepository.persistInTransaction(message)
+        .replaceWith(WithdrawalDecisionResult(proposal.toDomain(), count, false))
+}
+
+private fun countApprovals(session: Session, proposalId: UUID): Uni<Int> = session.createSelectionQuery(
+    "select count(d) from WithdrawalApprovalDecisionEntity d " +
+        "where d.proposalId = :proposalId and d.approved = true",
+    java.lang.Long::class.java,
+).setParameter("proposalId", proposalId)
+    .singleResult
+    .map { it.toInt() }

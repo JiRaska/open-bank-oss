@@ -676,6 +676,15 @@ but the account transaction was unavailable, a retry may recover an already-cons
 after that exact signed tuple, actor, purpose and immutable proposal match. The database decision
 ledger then makes recovery idempotent and prevents a duplicate vote or executable event.
 
+The operation-inbox read model exposes aggregate progress, never the immutable roster itself. An
+account owner may see all proposals on the account, a maker only proposals they created, and an
+approval-group member only proposals whose captured roster includes them. Unrelated callers receive
+an empty set rather than an existence oracle. One batch decision query supplies
+`approvalsReceived`, `myDecision` and `canDecide`, avoiding per-row calls as corporate inboxes grow.
+Migration V29 backfills the account owner into every pre-existing PENDING proposal's roster; without
+that expand step, deploying the new ledger would strand legitimate SOLO proposals created by the
+old writer.
+
 Risk class: elevation of privilege and non-repudiation. Mandate events share the existing
 `party-events-in` consumer so Kafka cannot load-balance lifecycle and mandate records between two
 partial projections. Projection failures retain the channel's bounded retry/DLQ behavior.

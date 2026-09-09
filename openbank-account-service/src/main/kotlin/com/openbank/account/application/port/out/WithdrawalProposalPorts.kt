@@ -18,6 +18,7 @@ interface WithdrawalProposalRepository {
 
     /** PENDING proposals whose window has closed, oldest first — the expiry sweep's input. */
     suspend fun findExpirable(now: OffsetDateTime, limit: Int): List<WithdrawalProposal>
+    suspend fun findDecisions(proposalIds: Set<UUID>): List<WithdrawalApprovalDecision>
 
     /** Atomically records one distinct actor decision and emits [approvedEvent] only at quorum. */
     suspend fun recordDecision(
@@ -29,6 +30,13 @@ interface WithdrawalProposalRepository {
         approvedEvent: DomainEvent,
     ): WithdrawalDecisionResult
 }
+
+data class WithdrawalApprovalDecision(
+    val proposalId: UUID,
+    val partyId: UUID,
+    val approved: Boolean,
+    val decidedAt: OffsetDateTime,
+)
 
 data class WithdrawalDecisionResult(
     val proposal: WithdrawalProposal,

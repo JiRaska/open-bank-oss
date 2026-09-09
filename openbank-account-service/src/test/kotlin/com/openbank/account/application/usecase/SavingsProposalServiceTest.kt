@@ -9,6 +9,7 @@ import com.openbank.account.application.port.out.ApprovalGroupRevisionRepository
 import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.ScaChallengeClient
 import com.openbank.account.application.port.out.ScaChallengeSnapshot
+import com.openbank.account.application.port.out.WithdrawalApprovalDecision
 import com.openbank.account.application.port.out.WithdrawalDecisionResult
 import com.openbank.account.application.port.out.WithdrawalProposalRepository
 import com.openbank.account.domain.model.Account
@@ -477,6 +478,84 @@ class SavingsProposalServiceTest {
         coVerify(exactly = 1) {
             proposalRepository.save(match<WithdrawalProposal> { it.status == WithdrawalProposalStatus.EXPIRED })
         }
+    }
+
+    @Test
+    fun `approval inbox exposes aggregate progress but not unrelated proposals to a group member`(): Unit =
+        runBlocking {
+            val member = UUID.randomUUID()
+            val other = UUID.randomUUID()
+            val visible = proposal().copy(
+                approvalGroupId = UUID.randomUUID(),
+                approvalGroupRevision = 3,
+                requiredApprovals = 2,
+                eligibleApproverIds = setOf(member, other),
+            )
+            val hidden = proposal().copy(id = UUID.randomUUID(), eligibleApproverIds = setOf(other))
+            val account = mockk<Account>()
+            io.mockk.every { account.partyId } returns owner
+            coEvery { accountRepository.findById(accountId) } returns account
+            coEvery { proposalRepository.findByAccountAndStatus(accountId, null) } returns listOf(visible, hidden)
+            coEvery { proposalRepository.findDecisions(setOf(visible.id)) } returns listOf(
+                WithdrawalApprovalDecision(visible.id, member, true, now.minusMinutes(1)),
+            )
+
+            val inbox = service.listForAccount(accountId, null, member)
+
+            assertThat(inbox).hasSize(1)
+            assertThat(inbox.single().proposal.id).isEqualTo(visible.id)
+            assertThat(inbox.single().approvalsReceived).isEqualTo(1)
+            assertThat(inbox.single().myDecision).isEqualTo(ProposalActorDecision.APPROVED)
+            assertThat(inbox.single().canDecide).isFalse()
+        }
+
+    @Test
+    fun `approval inbox does not reveal proposals to an unrelated party`(): Unit = runBlocking {
+        val stranger = UUID.randomUUID()
+        val proposal = proposal().copy(eligibleApproverIds = setOf(UUID.randomUUID()))
+        val account = mockk<Account>()
+        io.mockk.every { account.partyId } returns owner
+        coEvery { accountRepository.findById(accountId) } returns account
+        coEvery { proposalRepository.findByAccountAndStatus(accountId, null) } returns listOf(proposal)
+        coEvery { proposalRepository.findDecisions(emptySet()) } returns emptyList()
+
+        assertThat(service.listForAccount(accountId, null, stranger)).isEmpty()
+    }
+
+    @Test
+    fun `eligible approver sees actionable progress without the private roster`(): Unit = runBlocking {
+        val member = UUID.randomUUID()
+        val proposal = proposal().copy(
+            requiredApprovals = 2,
+            eligibleApproverIds = setOf(member, UUID.randomUUID()),
+        )
+        val account = mockk<Account>()
+        io.mockk.every { account.partyId } returns owner
+        coEvery { accountRepository.findById(accountId) } returns account
+        coEvery { proposalRepository.findByAccountAndStatus(accountId, null) } returns listOf(proposal)
+        coEvery { proposalRepository.findDecisions(setOf(proposal.id)) } returns emptyList()
+
+        val item = service.listForAccount(accountId, null, member).single()
+
+        assertThat(item.approvalsReceived).isZero()
+        assertThat(item.myDecision).isNull()
+        assertThat(item.canDecide).isTrue()
+    }
+
+    @Test
+    fun `cancel keeps the real approval progress instead of returning a synthetic zero`(): Unit = runBlocking {
+        val proposal = proposal()
+        coEvery { proposalRepository.findById(proposal.id) } returns proposal
+        coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
+        coEvery { proposalRepository.findDecisions(setOf(proposal.id)) } returns listOf(
+            WithdrawalApprovalDecision(proposal.id, owner, true, now.minusMinutes(1)),
+        )
+
+        val cancelled = service.cancel(accountId, proposal.id, delegate)
+
+        assertThat(cancelled.status).isEqualTo(WithdrawalProposalStatus.CANCELLED)
+        assertThat(cancelled.approvalsReceived).isEqualTo(1)
+        assertThat(cancelled.canDecide).isFalse()
     }
 
     private fun stubOwnerAndProposal(proposal: WithdrawalProposal, scaActor: UUID = owner, approve: Boolean = true) {

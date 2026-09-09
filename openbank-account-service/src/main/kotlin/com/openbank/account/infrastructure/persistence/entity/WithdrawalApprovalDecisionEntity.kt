@@ -13,7 +13,11 @@ import java.io.Serializable
 import java.time.OffsetDateTime
 import java.util.UUID
 
-data class WithdrawalApprovalDecisionId(var proposalId: UUID? = null, var partyId: UUID? = null) : Serializable
+data class WithdrawalApprovalDecisionId(var proposalId: UUID? = null, var partyId: UUID? = null) : Serializable {
+    companion object {
+        private const val serialVersionUID: Long = 1L
+    }
+}
 
 @Entity
 @IdClass(WithdrawalApprovalDecisionId::class)

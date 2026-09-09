@@ -20,6 +20,14 @@ CREATE TABLE savings_withdrawal_eligible_approvers (
     PRIMARY KEY (proposal_id, party_id)
 );
 
+-- Preserve in-flight SOLO proposals created by the old writer. Their only eligible decision maker
+-- was the account owner, but that fact previously lived outside the proposal row.
+INSERT INTO savings_withdrawal_eligible_approvers (proposal_id, party_id)
+SELECT proposal.id, account.party_id
+FROM savings_withdrawal_proposals proposal
+JOIN accounts account ON account.id = proposal.account_id
+WHERE proposal.status = 'PENDING';
+
 CREATE TABLE savings_withdrawal_approval_decisions (
     proposal_id UUID NOT NULL REFERENCES savings_withdrawal_proposals(id) ON DELETE CASCADE,
     party_id UUID NOT NULL,

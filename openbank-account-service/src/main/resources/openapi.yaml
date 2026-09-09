@@ -1385,6 +1385,20 @@ components:
           type: integer
           minimum: 1
           description: Number of distinct eligible actors required for approval.
+        approvalsReceived:
+          type: integer
+          minimum: 0
+          description: Count of distinct affirmative decisions recorded in the authoritative ledger.
+        myDecision:
+          type: string
+          enum: [APPROVED, REJECTED]
+          nullable: true
+          description: Decision previously recorded for the authenticated party, if any.
+        canDecide:
+          type: boolean
+          description: >-
+            True only while this caller is in the immutable roster, has not decided, and the
+            proposal remains pending and unexpired.
         approveScaReference:
           type: string
           description: >-
