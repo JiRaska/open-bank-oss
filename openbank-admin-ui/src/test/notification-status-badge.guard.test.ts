@@ -6,7 +6,7 @@ import path from 'node:path'
 
 describe('notification status presentation contract', () => {
   it('uses the shared semantic badge rather than a page-local colour map', () => {
-    const source = readFileSync(path.resolve(__dirname, '../app/notifications/page.tsx'), 'utf8')
+    const source = readFileSync(path.resolve(__dirname, '../components/notifications/NotificationsPage.tsx'), 'utf8')
 
     expect(source).toContain("import { PageHeader, StatusBadge } from '@/components/ui'")
     expect(source).toContain('<StatusBadge status={n.status} />')
