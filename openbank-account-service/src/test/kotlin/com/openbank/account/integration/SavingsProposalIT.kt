@@ -61,7 +61,7 @@ class SavingsProposalIT {
 
         val proposalId = propose(accountId)
         StubScaChallengeClient.party.set(ownerParty)
-        StubScaChallengeClient.amount.set("10.00")
+        StubScaChallengeClient.amount.set("1500.00")
         StubScaChallengeClient.currency.set("CZK")
         StubScaChallengeClient.reference.set(
             SavingsWithdrawalScaReference.of(UUID.fromString(proposalId), approve = true),
