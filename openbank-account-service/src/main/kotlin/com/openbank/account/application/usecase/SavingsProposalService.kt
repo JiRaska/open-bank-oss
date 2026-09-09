@@ -103,20 +103,16 @@ class SavingsProposalService(
         return ProposalCreated(proposalRepository.save(proposal.copy(approvalId = approval.id)), approval.id)
     }
 
+    @Suppress("ThrowsCount") // preserves account/proposal absence, cross-account and expiry semantics
     suspend fun decide(
         accountId: UUID,
         proposalId: UUID,
-        decidedByPartyId: UUID,
+        callerPartyId: UUID,
         approve: Boolean,
         scaSessionId: UUID,
     ): WithdrawalProposal {
         val account = accountRepository.findById(accountId)
             ?: throw ProposalNotFoundException(proposalId)
-        if (account.partyId != decidedByPartyId) {
-            throw ProposalForbiddenException(
-                "only the account owner can decide a withdrawal proposal on account $accountId",
-            )
-        }
         val proposal = proposalRepository.findById(proposalId)
             ?: throw ProposalNotFoundException(proposalId)
         if (proposal.accountId != accountId) {
@@ -128,7 +124,7 @@ class SavingsProposalService(
         if (proposal.isExpiredAt(OffsetDateTime.now(clock))) {
             throw ProposalExpiredException(proposalId, proposal.expiresAt)
         }
-        val actorPartyId = verifyDecisionSca(account.partyId, scaSessionId)
+        val actorPartyId = verifyDecisionSca(account.partyId, callerPartyId, scaSessionId)
 
         val approvalId = checkNotNull(proposal.approvalId) { "proposal $proposalId has no approval record" }
         approvalStore.decide(approvalId, actorPartyId.toString(), approve)
@@ -196,7 +192,7 @@ class SavingsProposalService(
     // Distinct failures deliberately preserve not-found, unavailable, wrong-purpose and
     // unauthorized-representative semantics at this security boundary.
     @Suppress("ThrowsCount")
-    private suspend fun verifyDecisionSca(ownerPartyId: UUID, scaSessionId: UUID): UUID {
+    private suspend fun verifyDecisionSca(ownerPartyId: UUID, callerPartyId: UUID, scaSessionId: UUID): UUID {
         val challenge = try {
             scaChallengeClient.getChallenge(scaSessionId)
         } catch (e: NotFoundException) {
@@ -208,6 +204,9 @@ class SavingsProposalService(
             throw ProposalScaException("SCA challenge $scaSessionId does not match the decision purpose")
         }
         val actorPartyId = challenge.partyId
+        if (actorPartyId != callerPartyId) {
+            throw ProposalForbiddenException("the SCA-authenticated actor does not match the caller identity")
+        }
         if (actorPartyId != ownerPartyId) {
             val soleAuthority = partyMandateRepository.findActive(ownerPartyId, actorPartyId)
                 .any { it.permitsSoleDecision() }
