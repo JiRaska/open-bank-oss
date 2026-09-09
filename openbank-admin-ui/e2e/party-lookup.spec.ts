@@ -29,9 +29,9 @@ const A_360 = {
 const B_360 = { available: true, partyId: B.id, asOf: null, partyState: null, domains: [], accountIds: [], consents: [] }
 
 const A_CONSENTS = [{
-  id: 'c-1', partyId: A.id, granteeId: 'party-service:marketing-comms', granteeType: 'INTERNAL',
+  id: '11111111-1111-4111-8111-111111111111', partyId: A.id, granteeId: 'party-service:marketing-comms', granteeType: 'INTERNAL_SERVICE',
   granteeName: 'Marketing', scopes: ['MARKETING_COMMS_EMAIL'], accountIbans: null, status: 'ACTIVE',
-  validFrom: '2026-01-01', validTo: '2027-01-01', createdAt: '2026-01-01',
+  validFrom: '2026-01-01T00:00:00Z', validTo: '2026-12-31T00:00:00Z', createdAt: '2026-01-01T00:00:00Z',
 }]
 
 async function stubSearch(page: import('@playwright/test').Page) {

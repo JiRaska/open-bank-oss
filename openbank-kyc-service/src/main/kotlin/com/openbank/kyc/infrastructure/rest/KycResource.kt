@@ -71,7 +71,17 @@ class KycResource {
         @QueryParam("size") @DefaultValue("20") size: Int,
         @QueryParam("status") statusParam: String?,
     ): Response {
-        val status = statusParam?.uppercase()?.let { runCatching { KycCaseStatus.valueOf(it) }.getOrNull() }
+        // #9038: absent status means unfiltered; an UNPARSEABLE one must not silently drop the
+        // condition and answer the full list with a 200 (the #8699 shape). libs-runtime maps
+        // IllegalArgumentException to 400; never a service-local mapper (#526).
+        val status = statusParam?.uppercase()?.let {
+            runCatching { KycCaseStatus.valueOf(it) }
+                .getOrElse { _ ->
+                    throw IllegalArgumentException(
+                        "unknown status '$it'; expected one of ${KycCaseStatus.entries.joinToString()}",
+                    )
+                }
+        }
         // Echo the EFFECTIVE window, never the raw query values. `size` was already clamped for the
         // query and echoed un-clamped, so `?size=500` answered `"size": 500` over at most 100 rows —
         // a caller computing ceil(total / size) off that pages past the end and renders a short list
