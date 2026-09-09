@@ -20,17 +20,30 @@ import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
+import java.time.OffsetDateTime
 import java.util.UUID
 
 // sca-service's ScaChallengeResponse carries method/expiresAt/completedAt/consumedAt/attempt
 // counters too; this client only needs four fields and must not break when that DTO grows.
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ScaChallengeClientResponse(val id: UUID, val partyId: UUID, val purpose: String, val status: String)
+data class ScaChallengeClientResponse(
+    val id: UUID,
+    val partyId: UUID,
+    val purpose: String,
+    val status: String,
+    val amount: String? = null,
+    val currency: String? = null,
+    val reference: String? = null,
+    val consumedAt: String? = null,
+)
 
-/** Mirrors sca-service's ConsumeScaRequest. Only the party is stated: a savings-withdrawal
- *  approval carries no dynamic-linking data, and sca-service authorises an unlinked challenge
- *  exactly when the consume states no operation. */
-data class ConsumeScaChallengeRequest(val partyId: UUID)
+/** Mirrors the operation-bound subset of sca-service's ConsumeScaRequest. */
+data class ConsumeScaChallengeRequest(
+    val partyId: UUID,
+    val amount: String,
+    val currency: String,
+    val reference: String,
+)
 
 @Path("/api/v1/sca/challenges")
 @RegisterRestClient(configKey = "sca-service")
@@ -63,13 +76,25 @@ class ResilientScaChallengeClient @Inject constructor(@RestClient private val cl
     // actually succeeded the first time would surface as a spurious approval failure.
     @Timeout(2000)
     @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000, successThreshold = 2)
-    override suspend fun consumeChallenge(challengeId: UUID, expectedPartyId: UUID): ScaChallengeSnapshot =
-        client.consumeChallenge(challengeId, ConsumeScaChallengeRequest(expectedPartyId)).toSnapshot()
+    override suspend fun consumeChallenge(
+        challengeId: UUID,
+        expectedPartyId: UUID,
+        amount: String,
+        currency: String,
+        reference: String,
+    ): ScaChallengeSnapshot = client.consumeChallenge(
+        challengeId,
+        ConsumeScaChallengeRequest(expectedPartyId, amount, currency, reference),
+    ).toSnapshot()
 
     private fun ScaChallengeClientResponse.toSnapshot() = ScaChallengeSnapshot(
         id = id,
         partyId = partyId,
         purpose = purpose,
         status = status,
+        amount = amount,
+        currency = currency,
+        reference = reference,
+        consumedAt = consumedAt?.let(OffsetDateTime::parse),
     )
 }

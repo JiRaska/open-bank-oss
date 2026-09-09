@@ -15,6 +15,7 @@ import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.ApprovalGroupRevision
 import com.openbank.account.domain.model.DelegatedAccessGrant
 import com.openbank.account.domain.model.PartyMandateProjection
+import com.openbank.account.domain.model.SavingsWithdrawalScaReference
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
 import com.openbank.libs.approval.ApprovalStatus
@@ -222,6 +223,9 @@ class SavingsProposalServiceTest {
             stranger,
             "SAVINGS_WITHDRAW_APPROVAL",
             "PENDING",
+            amount = "1500.00",
+            currency = "CZK",
+            reference = SavingsWithdrawalScaReference.of(proposal.id, approve = true),
         )
 
         assertThatThrownBy {
@@ -258,7 +262,7 @@ class SavingsProposalServiceTest {
         val decided = service.decide(accountId, proposal.id, owner, true, UUID.randomUUID())
 
         assertThat(decided.decidedBy).isEqualTo(representative)
-        coVerify { scaClient.consumeChallenge(any(), representative) }
+        coVerify { scaClient.consumeChallenge(any(), representative, any(), any(), any()) }
         coVerify { proposalRepository.recordDecision(proposal.id, representative, true, any(), any(), any()) }
     }
 
@@ -275,7 +279,7 @@ class SavingsProposalServiceTest {
             runBlocking { service.decide(accountId, proposal.id, owner, true, UUID.randomUUID()) }
         }.isInstanceOf(ProposalForbiddenException::class.java)
 
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
     }
 
@@ -291,6 +295,9 @@ class SavingsProposalServiceTest {
             delegate,
             "SAVINGS_WITHDRAW_APPROVAL",
             "PENDING",
+            amount = "1500.00",
+            currency = "CZK",
+            reference = SavingsWithdrawalScaReference.of(proposal.id, approve = true),
         )
 
         assertThatThrownBy {
@@ -314,7 +321,7 @@ class SavingsProposalServiceTest {
     @Test
     fun `reject flips to REJECTED without emitting an event`(): Unit = runBlocking {
         val proposal = proposal()
-        stubOwnerAndProposal(proposal)
+        stubOwnerAndProposal(proposal, approve = false)
         coEvery { approvalStore.decide("approval-1", owner.toString(), false) } returns
             pendingApproval(delegate).copy(status = ApprovalStatus.REJECTED)
         val decided = service.decide(accountId, proposal.id, owner, false, UUID.randomUUID())
@@ -343,6 +350,50 @@ class SavingsProposalServiceTest {
     }
 
     @Test
+    fun `SCA signed for the opposite decision is rejected without being spent`(): Unit = runBlocking {
+        val proposal = proposal()
+        stubOwnerAndProposal(proposal)
+        coEvery { scaClient.getChallenge(any()) } returns ScaChallengeSnapshot(
+            id = UUID.randomUUID(),
+            partyId = owner,
+            purpose = "SAVINGS_WITHDRAW_APPROVAL",
+            status = "PENDING",
+            amount = "1500.00",
+            currency = "CZK",
+            reference = SavingsWithdrawalScaReference.of(proposal.id, approve = false),
+        )
+
+        assertThatThrownBy {
+            runBlocking { service.decide(accountId, proposal.id, owner, true, UUID.randomUUID()) }
+        }.isInstanceOf(ProposalScaException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { proposalRepository.recordDecision(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `retry recovers an exactly bound challenge already consumed before the account commit`(): Unit = runBlocking {
+        val proposal = proposal()
+        stubOwnerAndProposal(proposal)
+        coEvery { scaClient.getChallenge(any()) } returns ScaChallengeSnapshot(
+            id = UUID.randomUUID(),
+            partyId = owner,
+            purpose = "SAVINGS_WITHDRAW_APPROVAL",
+            status = "COMPLETED",
+            amount = "1500.0",
+            currency = "czk",
+            reference = SavingsWithdrawalScaReference.of(proposal.id, approve = true),
+            consumedAt = now.minusSeconds(1),
+        )
+
+        val decided = service.decide(accountId, proposal.id, owner, true, UUID.randomUUID())
+
+        assertThat(decided.status).isEqualTo(WithdrawalProposalStatus.APPROVED)
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) { proposalRepository.recordDecision(any(), owner, true, any(), any(), any()) }
+    }
+
+    @Test
     fun `approve accepts a PENDING decoupled challenge and lets consume promote it`(): Unit = runBlocking {
         // The state every customer-driven approval is actually in. The previous
         // `status == "COMPLETED"` pre-check rejected exactly this, so no owner could ever approve
@@ -359,7 +410,7 @@ class SavingsProposalServiceTest {
 
         assertThat(decided.status).isEqualTo(WithdrawalProposalStatus.APPROVED)
         // Approval is still enforced — by consume, which owns it.
-        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), owner) }
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), owner, "1500.00", "CZK", any()) }
     }
 
     @Test
@@ -374,7 +425,7 @@ class SavingsProposalServiceTest {
 
         service.decide(accountId, proposal.id, owner, true, UUID.randomUUID())
 
-        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), owner) }
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), owner, "1500.00", "CZK", any()) }
     }
 
     @Test
@@ -382,7 +433,8 @@ class SavingsProposalServiceTest {
         // sca-service answers 409 for an already-spent challenge and refuses one never approved.
         val proposal = proposal()
         stubOwnerAndProposal(proposal)
-        coEvery { scaClient.consumeChallenge(any(), owner) } throws IllegalStateException("already consumed")
+        coEvery { scaClient.consumeChallenge(any(), owner, any(), any(), any()) } throws
+            IllegalStateException("already consumed")
 
         assertThatThrownBy {
             runBlocking { service.decide(accountId, proposal.id, owner, true, UUID.randomUUID()) }
@@ -400,7 +452,7 @@ class SavingsProposalServiceTest {
         }.isInstanceOf(ProposalExpiredException::class.java)
 
         // Checked before the SCA leg: a doomed decision must not spend the owner's one-shot factor.
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
     }
 
@@ -427,7 +479,7 @@ class SavingsProposalServiceTest {
         }
     }
 
-    private fun stubOwnerAndProposal(proposal: WithdrawalProposal, scaActor: UUID = owner) {
+    private fun stubOwnerAndProposal(proposal: WithdrawalProposal, scaActor: UUID = owner, approve: Boolean = true) {
         val account = mockk<Account>()
         io.mockk.every { account.partyId } returns owner
         coEvery { accountRepository.findById(accountId) } returns account
@@ -439,8 +491,11 @@ class SavingsProposalServiceTest {
             partyId = scaActor,
             purpose = "SAVINGS_WITHDRAW_APPROVAL",
             status = "PENDING",
+            amount = "1500.00",
+            currency = "CZK",
+            reference = SavingsWithdrawalScaReference.of(proposal.id, approve),
         )
-        coEvery { scaClient.consumeChallenge(any(), scaActor) } returns ScaChallengeSnapshot(
+        coEvery { scaClient.consumeChallenge(any(), scaActor, any(), any(), any()) } returns ScaChallengeSnapshot(
             id = UUID.randomUUID(),
             partyId = scaActor,
             purpose = "SAVINGS_WITHDRAW_APPROVAL",

@@ -4,6 +4,7 @@
 
 package com.openbank.account.integration
 
+import com.openbank.account.domain.model.SavingsWithdrawalScaReference
 import com.openbank.account.it.PostgresRedpandaRedisTestResource
 import com.openbank.account.it.StubScaChallengeClient
 import io.quarkus.test.common.QuarkusTestResource
@@ -60,6 +61,11 @@ class SavingsProposalIT {
 
         val proposalId = propose(accountId)
         StubScaChallengeClient.party.set(ownerParty)
+        StubScaChallengeClient.amount.set("10.00")
+        StubScaChallengeClient.currency.set("CZK")
+        StubScaChallengeClient.reference.set(
+            SavingsWithdrawalScaReference.of(UUID.fromString(proposalId), approve = true),
+        )
 
         val status: String = (
             Given {

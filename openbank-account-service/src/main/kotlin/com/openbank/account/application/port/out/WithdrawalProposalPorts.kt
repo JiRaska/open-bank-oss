@@ -36,7 +36,16 @@ data class WithdrawalDecisionResult(
     val replayed: Boolean,
 )
 
-data class ScaChallengeSnapshot(val id: UUID, val partyId: UUID, val purpose: String, val status: String)
+data class ScaChallengeSnapshot(
+    val id: UUID,
+    val partyId: UUID,
+    val purpose: String,
+    val status: String,
+    val amount: String? = null,
+    val currency: String? = null,
+    val reference: String? = null,
+    val consumedAt: OffsetDateTime? = null,
+)
 
 interface ScaChallengeClient {
     suspend fun getChallenge(challengeId: UUID): ScaChallengeSnapshot
@@ -47,5 +56,11 @@ interface ScaChallengeClient {
      * component that owns "was this really approved", not the caller. See [ScaChallengeClient]
      * usage in `SavingsProposalService` for why a caller-side completeness pre-check is wrong.
      */
-    suspend fun consumeChallenge(challengeId: UUID, expectedPartyId: UUID): ScaChallengeSnapshot
+    suspend fun consumeChallenge(
+        challengeId: UUID,
+        expectedPartyId: UUID,
+        amount: String,
+        currency: String,
+        reference: String,
+    ): ScaChallengeSnapshot
 }

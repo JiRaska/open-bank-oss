@@ -7,6 +7,7 @@ package com.openbank.account.infrastructure.rest
 import com.openbank.account.application.usecase.ProposalForbiddenException
 import com.openbank.account.application.usecase.ProposeWithdrawalCommand
 import com.openbank.account.application.usecase.SavingsProposalService
+import com.openbank.account.domain.model.SavingsWithdrawalScaReference
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
 import com.openbank.libs.authz.Authorize
@@ -40,6 +41,11 @@ data class ProposalResponse(
     val note: String?,
     val status: WithdrawalProposalStatus,
     val approvalId: String?,
+    val approvalGroupId: UUID?,
+    val approvalGroupRevision: Long?,
+    val requiredApprovals: Int,
+    val approveScaReference: String,
+    val rejectScaReference: String,
     val createdAt: OffsetDateTime,
     val expiresAt: OffsetDateTime,
 ) {
@@ -53,6 +59,11 @@ data class ProposalResponse(
             note = p.note,
             status = p.status,
             approvalId = p.approvalId,
+            approvalGroupId = p.approvalGroupId,
+            approvalGroupRevision = p.approvalGroupRevision,
+            requiredApprovals = p.requiredApprovals,
+            approveScaReference = SavingsWithdrawalScaReference.of(p.id, approve = true),
+            rejectScaReference = SavingsWithdrawalScaReference.of(p.id, approve = false),
             createdAt = p.createdAt,
             expiresAt = p.expiresAt,
         )

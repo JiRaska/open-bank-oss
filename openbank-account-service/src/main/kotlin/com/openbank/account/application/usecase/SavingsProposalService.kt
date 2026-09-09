@@ -12,12 +12,15 @@ import com.openbank.account.application.port.out.WithdrawalProposalRepository
 import com.openbank.account.domain.event.SavingsWithdrawalApproved
 import com.openbank.account.domain.model.DelegatedAccessGrant
 import com.openbank.account.domain.model.SavingsDelegationIntent
+import com.openbank.account.domain.model.SavingsWithdrawalScaReference
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.NotFoundException
+import jakarta.ws.rs.WebApplicationException
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Duration
 import java.time.OffsetDateTime
@@ -173,7 +176,7 @@ class SavingsProposalService(
         if (proposal.isExpiredAt(OffsetDateTime.now(clock))) {
             throw ProposalExpiredException(proposalId, proposal.expiresAt)
         }
-        val actorPartyId = verifyDecisionSca(account.partyId, proposal, decidedByPartyId, scaSessionId)
+        val actorPartyId = verifyDecisionSca(account.partyId, proposal, decidedByPartyId, approve, scaSessionId)
 
         val approvalId = checkNotNull(proposal.approvalId) { "proposal $proposalId has no approval record" }
         val now = OffsetDateTime.now(clock)
@@ -241,6 +244,7 @@ class SavingsProposalService(
         ownerPartyId: UUID,
         proposal: WithdrawalProposal,
         claimedPartyId: UUID,
+        approve: Boolean,
         scaSessionId: UUID,
     ): UUID {
         val challenge = try {
@@ -252,6 +256,14 @@ class SavingsProposalService(
         }
         if (challenge.purpose != SCA_PURPOSE) {
             throw ProposalScaException("SCA challenge $scaSessionId does not match the decision purpose")
+        }
+        val amount = proposal.amountForSca()
+        val reference = SavingsWithdrawalScaReference.of(proposal.id, approve)
+        if (challenge.reference != reference ||
+            challenge.currency?.uppercase() != proposal.currency.uppercase() ||
+            !amountEquals(challenge.amount, amount)
+        ) {
+            throw ProposalScaException("SCA challenge $scaSessionId is not linked to this exact proposal decision")
         }
         val actorPartyId = challenge.partyId
         if (proposal.approvalGroupId != null) {
@@ -271,14 +283,32 @@ class SavingsProposalService(
                 )
             }
         }
-        @Suppress("TooGenericExceptionCaught") // includes sca-service's 409 for an already-spent challenge
+        // A 409 is recoverable only after the signed amount/currency/reference above matched this
+        // exact immutable proposal and decision. This closes the cross-service crash window: if
+        // consume committed but this service failed before its DB transaction, retry completes
+        // the same operation; the decision ledger prevents a second actor vote or second event.
         try {
-            scaChallengeClient.consumeChallenge(scaSessionId, actorPartyId)
+            if (challenge.consumedAt == null) {
+                scaChallengeClient.consumeChallenge(scaSessionId, actorPartyId, amount, proposal.currency, reference)
+            }
+        } catch (e: WebApplicationException) {
+            if (e.response.status != jakarta.ws.rs.core.Response.Status.CONFLICT.statusCode) {
+                throw ProposalScaException("SCA challenge $scaSessionId could not be consumed", e)
+            }
         } catch (e: Exception) {
             throw ProposalScaException("SCA challenge $scaSessionId could not be consumed", e)
         }
         return actorPartyId
     }
+
+    private fun WithdrawalProposal.amountForSca(): String {
+        val fractionDigits = runCatching { java.util.Currency.getInstance(currency).defaultFractionDigits }
+            .getOrElse { throw ProposalScaException("proposal $id has an invalid currency") }
+        return BigDecimal.valueOf(amountMinor, fractionDigits).toPlainString()
+    }
+
+    private fun amountEquals(left: String?, right: String): Boolean =
+        left?.let { runCatching { BigDecimal(it).compareTo(BigDecimal(right)) == 0 }.getOrDefault(false) } == true
 
     /**
      * Marks the closed-window proposals EXPIRED. Idempotent and batched; a proposal the sweep has

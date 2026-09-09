@@ -5,12 +5,9 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  # 1.16.0 -> 1.17.0 (#9044): additive — optional termsVersion/termsUrl/termsEffectiveFrom on
-  # OpenAccountRequest and the Account response. termsVersion is use-case-REQUIRED for
-  # TERM_DEPOSIT openings, which is a behaviour rule, not a contract break (existing clients
-  # opening other account types are unaffected; term-deposit openings come only from
-  # customer-edge, updated in the same change).
-  version: 1.17.0
+  # 1.17.0 -> 1.18.0 (#9430): additive — proposal responses expose the immutable approval-group
+  # snapshot and canonical approve/reject SCA references. Existing clients may ignore them.
+  version: 1.18.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -1373,6 +1370,31 @@ components:
           type: string
           enum: [PENDING, APPROVED, REJECTED, CANCELLED, EXPIRED]
         approvalId: { type: string }
+        approvalGroupId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Approval group captured by this operation; null for SOLO.
+        approvalGroupRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+          description: Exact immutable group revision captured by this operation.
+        requiredApprovals:
+          type: integer
+          minimum: 1
+          description: Number of distinct eligible actors required for approval.
+        approveScaReference:
+          type: string
+          description: >-
+            Pass as dynamicLinkingData.reference when creating the SCA challenge for approval.
+            The challenge must also carry this proposal's amount and currency.
+        rejectScaReference:
+          type: string
+          description: >-
+            Pass as dynamicLinkingData.reference when creating the SCA challenge for rejection.
+            Approval and rejection references are deliberately different.
         createdAt: { type: string, format: date-time }
         expiresAt:
           type: string

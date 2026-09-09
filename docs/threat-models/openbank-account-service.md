@@ -669,10 +669,12 @@ terminal; approvals keep the proposal PENDING until the configured number of dis
 present. The final state transition and `SavingsWithdrawalApproved` outbox insert share the same
 database transaction, preventing two concurrent final approvers from emitting twice.
 
-Residual rollout gate: SCA consumption is a separate service transaction. N_OF_M grant admission
-must remain disabled until retry recovery is explicitly reference-bound and proven for the
-"SCA spent, account transaction unavailable" window. The schema and consumer are additive so this
-gate can be held without changing existing SOLO behaviour.
+SCA consumption is a separate service transaction, so every proposal response publishes distinct
+approve/reject references. The device signs the chosen reference together with the proposal amount
+and currency; account-service restates and compares all three at consume time. If consume committed
+but the account transaction was unavailable, a retry may recover an already-consumed challenge only
+after that exact signed tuple, actor, purpose and immutable proposal match. The database decision
+ledger then makes recovery idempotent and prevents a duplicate vote or executable event.
 
 Risk class: elevation of privilege and non-repudiation. Mandate events share the existing
 `party-events-in` consumer so Kafka cannot load-balance lifecycle and mandate records between two
