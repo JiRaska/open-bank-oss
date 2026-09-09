@@ -238,6 +238,21 @@ mp:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Complete immutable rosters, replayable from a compacted stream. This channel uses its own
+      # group so a large bootstrap cannot rebalance or delay authority-removing lifecycle events.
+      approval-group-revisions-in:
+        connector: smallrye-kafka
+        topic: openbank.delegation.approval-group-revisions
+        auto:
+          offset:
+            reset: earliest
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.account.approval-group-revisions-in
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 "%dev":
   quarkus:

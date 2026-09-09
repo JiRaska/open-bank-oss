@@ -630,6 +630,19 @@ fail-closed rejection of non-SOLO grants. Risk class: authorization integrity. R
 consumer-first (account-service migration and consumer before delegation-service producer);
 rollback removes the producer fields first and may retain the additive projection columns.
 
+## Immutable approval-group revisions
+
+The delegation event consumer stores each complete approval-group roster under `(groupId, revision)`;
+an identical replay is a no-op and different content for the same identity fails to the configured
+DLQ. Operations will reference one revision and copy its eligible actors into their own immutable
+snapshot, so later membership changes cannot rewrite an in-flight decision. This consumer does not
+activate N-of-M by itself. Revisions arrive on a dedicated compacted, unbounded-retention topic
+keyed by `groupId:revision`; its separate consumer group prevents a large bootstrap from delaying
+authority-removing grant lifecycle events. Delegation-service's append-only database history remains
+the reconciliation source if Kafka state is lost. Missing history fails closed. Rollout is the
+producer topic and history first, then this projection, then operation enforcement;
+rollback disables enforcement first and leaves both additive history tables intact for evidence.
+
 ## SCA-derived representative identity
 
 An entity-owned savings proposal is still addressed under the entity subject, but the human
@@ -640,6 +653,37 @@ exact, active `SOLE` mandate with `requiredSignatures=1`. `JOINT`, unknown, inac
 incomplete facts fail closed before the one-shot challenge is consumed. This preserves the human
 evidence in `WithdrawalProposal.decidedBy` and `ApprovalStore` without falsely claiming that one
 signature satisfies a statutory quorum.
+
+## Immutable withdrawal-approval snapshots
+
+Each delegated withdrawal proposal copies the grant id, exact approval-group revision, threshold,
+and eligible party ids into account-service storage. Later group edits therefore cannot widen an
+already-open operation, and a changed or inactive group forces grant re-issuance before a new
+operation is admitted. The proposing delegate is removed from the snapshot; admission fails closed
+when the remaining roster cannot meet the threshold.
+
+Quorum truth is the PostgreSQL decision ledger, not the Redis inbox and not a caller-supplied count.
+The repository locks the proposal row, admits only a party in the immutable roster, and relies on
+unique `(proposal_id, party_id)` and globally unique `sca_session_id` constraints. A rejection is
+terminal; approvals keep the proposal PENDING until the configured number of distinct actors is
+present. The final state transition and `SavingsWithdrawalApproved` outbox insert share the same
+database transaction, preventing two concurrent final approvers from emitting twice.
+
+SCA consumption is a separate service transaction, so every proposal response publishes distinct
+approve/reject references. The device signs the chosen reference together with the proposal amount
+and currency; account-service restates and compares all three at consume time. If consume committed
+but the account transaction was unavailable, a retry may recover an already-consumed challenge only
+after that exact signed tuple, actor, purpose and immutable proposal match. The database decision
+ledger then makes recovery idempotent and prevents a duplicate vote or executable event.
+
+The operation-inbox read model exposes aggregate progress, never the immutable roster itself. An
+account owner may see all proposals on the account, a maker only proposals they created, and an
+approval-group member only proposals whose captured roster includes them. Unrelated callers receive
+an empty set rather than an existence oracle. One batch decision query supplies
+`approvalsReceived`, `myDecision` and `canDecide`, avoiding per-row calls as corporate inboxes grow.
+Migration V29 backfills the account owner into every pre-existing PENDING proposal's roster; without
+that expand step, deploying the new ledger would strand legitimate SOLO proposals created by the
+old writer.
 
 Risk class: elevation of privilege and non-repudiation. Mandate events share the existing
 `party-events-in` consumer so Kafka cannot load-balance lifecycle and mandate records between two

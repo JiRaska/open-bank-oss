@@ -51,6 +51,12 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      - resource:
+          type: topic
+          name: openbank.delegation.approval-group-revisions
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       # #5752: the EXPLICIT per-service DLQ topics. SmallRye's implicit
       # `dead-letter-topic-<channel>` name is derived from the channel name alone, so
       # account-service and card-issuance-service (both consumers of `delegation-events-in`) were
@@ -60,6 +66,12 @@ spec:
       - resource:
           type: topic
           name: openbank.dlq.account.delegation-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.account.approval-group-revisions-in
           patternType: literal
         operations: [Write, Describe]
         host: "*"
@@ -92,6 +104,12 @@ spec:
       - resource:
           type: group
           name: openbank-account-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-account-service-approval-groups
           patternType: literal
         operations: [Read]
         host: "*"

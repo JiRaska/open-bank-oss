@@ -45,6 +45,7 @@ data class OfferDelegationRequest(
     val capabilities: Set<DelegationCapability>,
     val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
     val requiredApprovals: Int? = null,
+    val approvalGroupId: UUID? = null,
     val perTransactionLimit: MoneyDto? = null,
     val dailyLimit: MoneyDto? = null,
     val monthlyLimit: MoneyDto? = null,
@@ -62,6 +63,7 @@ data class PreviewDelegationRequest(
     val capabilities: Set<DelegationCapability>,
     val approvalPolicy: ApprovalPolicy = ApprovalPolicy.SOLO,
     val requiredApprovals: Int? = null,
+    val approvalGroupId: UUID? = null,
     val perTransactionLimit: MoneyDto? = null,
     val dailyLimit: MoneyDto? = null,
     val monthlyLimit: MoneyDto? = null,
@@ -69,7 +71,13 @@ data class PreviewDelegationRequest(
     val validTo: OffsetDateTime? = null,
 )
 
-data class DelegationPreviewResponse(val valid: Boolean = true)
+data class DelegationPreviewResponse(
+    val valid: Boolean = true,
+    val scaReference: String,
+    val approvalGroupId: UUID?,
+    val approvalGroupRevision: Long?,
+    val requiredApprovals: Int?,
+)
 
 data class RevokeDelegationRequest(val reason: String)
 
@@ -104,6 +112,8 @@ data class DelegationResponse(
     val capabilities: Set<DelegationCapability>,
     val approvalPolicy: ApprovalPolicy,
     val requiredApprovals: Int?,
+    val approvalGroupId: UUID?,
+    val approvalGroupRevision: Long?,
     val perTransactionLimit: MoneyDto?,
     val dailyLimit: MoneyDto?,
     val monthlyLimit: MoneyDto?,
@@ -129,6 +139,8 @@ data class DelegationResponse(
             capabilities = g.capabilities,
             approvalPolicy = g.approvalPolicy,
             requiredApprovals = g.requiredApprovals,
+            approvalGroupId = g.approvalGroupId,
+            approvalGroupRevision = g.approvalGroupRevision,
             perTransactionLimit = g.perTransactionLimit?.let { MoneyDto.from(it) },
             dailyLimit = g.dailyLimit?.let { MoneyDto.from(it) },
             monthlyLimit = g.monthlyLimit?.let { MoneyDto.from(it) },

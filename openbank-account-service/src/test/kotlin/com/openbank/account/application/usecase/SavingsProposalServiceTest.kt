@@ -5,18 +5,23 @@
 package com.openbank.account.application.usecase
 
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.ApprovalGroupRevisionRepository
 import com.openbank.account.application.port.out.PartyMandateProjectionRepository
 import com.openbank.account.application.port.out.ScaChallengeClient
 import com.openbank.account.application.port.out.ScaChallengeSnapshot
+import com.openbank.account.application.port.out.WithdrawalApprovalDecision
+import com.openbank.account.application.port.out.WithdrawalDecisionResult
 import com.openbank.account.application.port.out.WithdrawalProposalRepository
 import com.openbank.account.domain.model.Account
+import com.openbank.account.domain.model.ApprovalGroupRevision
+import com.openbank.account.domain.model.DelegatedAccessGrant
 import com.openbank.account.domain.model.PartyMandateProjection
+import com.openbank.account.domain.model.SavingsWithdrawalScaReference
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
-import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.domain.identifiers.Ids
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -41,6 +46,7 @@ class SavingsProposalServiceTest {
     private val approvalStore: ApprovalStore = mockk()
     private val scaClient: ScaChallengeClient = mockk()
     private val partyMandateRepository: PartyMandateProjectionRepository = mockk()
+    private val approvalGroupRepository: ApprovalGroupRevisionRepository = mockk()
     private val clock: Clock = Clock.fixed(Instant.parse("2026-08-01T12:00:00Z"), ZoneOffset.UTC)
 
     private lateinit var service: SavingsProposalService
@@ -60,6 +66,7 @@ class SavingsProposalServiceTest {
                 approvalStore,
                 scaClient,
                 partyMandateRepository,
+                approvalGroupRepository,
                 clock,
             )
     }
@@ -83,7 +90,7 @@ class SavingsProposalServiceTest {
 
     @Test
     fun `propose without the grant is forbidden`(): Unit = runBlocking {
-        coEvery { savingsGuard.isAuthorized(accountId, delegate, any()) } returns false
+        coEvery { savingsGuard.authorization(accountId, delegate, any()) } returns null
         assertThatThrownBy { runBlocking { service.propose(command()) } }
             .isInstanceOf(ProposalForbiddenException::class.java)
         coVerify(exactly = 0) { approvalStore.create(any(), any(), any(), any()) }
@@ -91,7 +98,8 @@ class SavingsProposalServiceTest {
 
     @Test
     fun `propose creates a PENDING proposal and an approval record`(): Unit = runBlocking {
-        coEvery { savingsGuard.isAuthorized(accountId, delegate, any()) } returns true
+        coEvery { savingsGuard.authorization(accountId, delegate, any()) } returns
+            SavingsGoalDelegationGuard.Authorization(owner, null)
         coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
             emptyList()
         coEvery { approvalStore.create(any(), any(), any(), any()) } returns pendingApproval(delegate)
@@ -121,7 +129,8 @@ class SavingsProposalServiceTest {
                 createdAt = now.minusSeconds(60),
                 expiresAt = now.plus(Duration.ofHours(47)),
             )
-            coEvery { savingsGuard.isAuthorized(accountId, delegate, any()) } returns true
+            coEvery { savingsGuard.authorization(accountId, delegate, any()) } returns
+                SavingsGoalDelegationGuard.Authorization(owner, null)
             coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
                 listOf(original)
 
@@ -147,7 +156,8 @@ class SavingsProposalServiceTest {
             createdAt = now.minus(Duration.ofDays(3)),
             expiresAt = now.minus(Duration.ofDays(1)),
         )
-        coEvery { savingsGuard.isAuthorized(accountId, delegate, any()) } returns true
+        coEvery { savingsGuard.authorization(accountId, delegate, any()) } returns
+            SavingsGoalDelegationGuard.Authorization(owner, null)
         // The sweep may not have flipped it yet — it is still PENDING but expired.
         coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
             listOf(expired)
@@ -158,6 +168,47 @@ class SavingsProposalServiceTest {
 
         assertThat(created.proposal.id).isNotEqualTo(expired.id)
         coVerify(exactly = 1) { proposalRepository.save(any<WithdrawalProposal>()) }
+    }
+
+    @Test
+    fun `N of M proposal snapshots the exact active group revision and excludes the maker`(): Unit = runBlocking {
+        val groupId = UUID.randomUUID()
+        val approvers = setOf(delegate, UUID.randomUUID(), UUID.randomUUID())
+        val grant = DelegatedAccessGrant(
+            id = UUID.randomUUID(),
+            accountId = accountId,
+            grantorPartyId = owner,
+            granteePartyId = delegate,
+            capabilities = setOf(DelegatedAccessGrant.CAP_SAVINGS_PROPOSE_WITHDRAW),
+            approvalPolicy = "N_OF_M",
+            requiredApprovals = 2,
+            approvalGroupId = groupId,
+            approvalGroupRevision = 4,
+            validFrom = now.minusDays(1),
+        )
+        coEvery { savingsGuard.authorization(accountId, delegate, any()) } returns
+            SavingsGoalDelegationGuard.Authorization(owner, grant)
+        coEvery { approvalGroupRepository.findLatest(groupId) } returns ApprovalGroupRevision(
+            groupId = groupId,
+            ownerPartyId = owner,
+            revision = 4,
+            name = "Treasury",
+            members = approvers,
+            threshold = 2,
+            active = true,
+        )
+        coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
+            emptyList()
+        coEvery { approvalStore.create(any(), any(), any(), any()) } returns pendingApproval(delegate)
+        coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
+
+        val proposal = service.propose(command()).proposal
+
+        assertThat(proposal.delegationGrantId).isEqualTo(grant.id)
+        assertThat(proposal.approvalGroupId).isEqualTo(groupId)
+        assertThat(proposal.approvalGroupRevision).isEqualTo(4)
+        assertThat(proposal.requiredApprovals).isEqualTo(2)
+        assertThat(proposal.eligibleApproverIds).containsExactlyInAnyOrderElementsOf(approvers - delegate)
     }
 
     @Test
@@ -184,7 +235,7 @@ class SavingsProposalServiceTest {
         val decided = service.decide(accountId, proposal.id, owner, true, UUID.randomUUID())
 
         assertThat(decided.status).isEqualTo(WithdrawalProposalStatus.APPROVED)
-        coVerify { proposalRepository.save(any<WithdrawalProposal>(), any()) }
+        coVerify { proposalRepository.recordDecision(proposal.id, owner, true, any(), any(), any()) }
     }
 
     @Test
@@ -202,8 +253,8 @@ class SavingsProposalServiceTest {
         val decided = service.decide(accountId, proposal.id, representative, true, UUID.randomUUID())
 
         assertThat(decided.decidedBy).isEqualTo(representative)
-        coVerify { scaClient.consumeChallenge(any(), representative) }
-        coVerify { approvalStore.decide("approval-1", representative.toString(), true) }
+        coVerify { scaClient.consumeChallenge(any(), representative, any(), any(), any()) }
+        coVerify { proposalRepository.recordDecision(proposal.id, representative, true, any(), any(), any()) }
     }
 
     @Test
@@ -219,7 +270,7 @@ class SavingsProposalServiceTest {
             runBlocking { service.decide(accountId, proposal.id, representative, true, UUID.randomUUID()) }
         }.isInstanceOf(ProposalForbiddenException::class.java)
 
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
     }
 
@@ -232,7 +283,7 @@ class SavingsProposalServiceTest {
         assertThatThrownBy {
             runBlocking { service.decide(accountId, proposal.id, delegate, true, UUID.randomUUID()) }
         }.isInstanceOf(ProposalForbiddenException::class.java)
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
     }
 
@@ -247,16 +298,16 @@ class SavingsProposalServiceTest {
         }.isInstanceOf(ProposalForbiddenException::class.java)
 
         coVerify(exactly = 0) { partyMandateRepository.findActive(any(), any()) }
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
     }
 
     @Test
-    fun `a store-level decision failure propagates instead of being swallowed`(): Unit = runBlocking {
+    fun `a repository decision failure propagates instead of being swallowed`(): Unit = runBlocking {
         val proposal = proposal()
         stubOwnerAndProposal(proposal)
-        coEvery { approvalStore.decide("approval-1", owner.toString(), true) } throws
-            SelfApprovalNotAllowedException(owner.toString())
+        coEvery { proposalRepository.recordDecision(any(), any(), any(), any(), any(), any()) } throws
+            IllegalStateException("concurrent decision conflict")
 
         assertThatThrownBy {
             runBlocking { service.decide(accountId, proposal.id, owner, true, UUID.randomUUID()) }
@@ -266,15 +317,13 @@ class SavingsProposalServiceTest {
     @Test
     fun `reject flips to REJECTED without emitting an event`(): Unit = runBlocking {
         val proposal = proposal()
-        stubOwnerAndProposal(proposal)
+        stubOwnerAndProposal(proposal, approve = false)
         coEvery { approvalStore.decide("approval-1", owner.toString(), false) } returns
             pendingApproval(delegate).copy(status = ApprovalStatus.REJECTED)
-        coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
-
         val decided = service.decide(accountId, proposal.id, owner, false, UUID.randomUUID())
 
         assertThat(decided.status).isEqualTo(WithdrawalProposalStatus.REJECTED)
-        coVerify(exactly = 0) { proposalRepository.save(any<WithdrawalProposal>(), any()) }
+        coVerify { proposalRepository.recordDecision(proposal.id, owner, false, any(), any(), any()) }
     }
 
     @Test
@@ -297,6 +346,50 @@ class SavingsProposalServiceTest {
     }
 
     @Test
+    fun `SCA signed for the opposite decision is rejected without being spent`(): Unit = runBlocking {
+        val proposal = proposal()
+        stubOwnerAndProposal(proposal)
+        coEvery { scaClient.getChallenge(any()) } returns ScaChallengeSnapshot(
+            id = UUID.randomUUID(),
+            partyId = owner,
+            purpose = "SAVINGS_WITHDRAW_APPROVAL",
+            status = "PENDING",
+            amount = "1500.00",
+            currency = "CZK",
+            reference = SavingsWithdrawalScaReference.of(proposal.id, approve = false),
+        )
+
+        assertThatThrownBy {
+            runBlocking { service.decide(accountId, proposal.id, owner, true, UUID.randomUUID()) }
+        }.isInstanceOf(ProposalScaException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { proposalRepository.recordDecision(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `retry recovers an exactly bound challenge already consumed before the account commit`(): Unit = runBlocking {
+        val proposal = proposal()
+        stubOwnerAndProposal(proposal)
+        coEvery { scaClient.getChallenge(any()) } returns ScaChallengeSnapshot(
+            id = UUID.randomUUID(),
+            partyId = owner,
+            purpose = "SAVINGS_WITHDRAW_APPROVAL",
+            status = "COMPLETED",
+            amount = "1500.0",
+            currency = "czk",
+            reference = SavingsWithdrawalScaReference.of(proposal.id, approve = true),
+            consumedAt = now.minusSeconds(1),
+        )
+
+        val decided = service.decide(accountId, proposal.id, owner, true, UUID.randomUUID())
+
+        assertThat(decided.status).isEqualTo(WithdrawalProposalStatus.APPROVED)
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) { proposalRepository.recordDecision(any(), owner, true, any(), any(), any()) }
+    }
+
+    @Test
     fun `approve accepts a PENDING decoupled challenge and lets consume promote it`(): Unit = runBlocking {
         // The state every customer-driven approval is actually in. The previous
         // `status == "COMPLETED"` pre-check rejected exactly this, so no owner could ever approve
@@ -313,7 +406,7 @@ class SavingsProposalServiceTest {
 
         assertThat(decided.status).isEqualTo(WithdrawalProposalStatus.APPROVED)
         // Approval is still enforced — by consume, which owns it.
-        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), owner) }
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), owner, "1500.00", "CZK", any()) }
     }
 
     @Test
@@ -328,7 +421,7 @@ class SavingsProposalServiceTest {
 
         service.decide(accountId, proposal.id, owner, true, UUID.randomUUID())
 
-        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), owner) }
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), owner, "1500.00", "CZK", any()) }
     }
 
     @Test
@@ -336,7 +429,8 @@ class SavingsProposalServiceTest {
         // sca-service answers 409 for an already-spent challenge and refuses one never approved.
         val proposal = proposal()
         stubOwnerAndProposal(proposal)
-        coEvery { scaClient.consumeChallenge(any(), owner) } throws IllegalStateException("already consumed")
+        coEvery { scaClient.consumeChallenge(any(), owner, any(), any(), any()) } throws
+            IllegalStateException("already consumed")
 
         assertThatThrownBy {
             runBlocking { service.decide(accountId, proposal.id, owner, true, UUID.randomUUID()) }
@@ -354,7 +448,7 @@ class SavingsProposalServiceTest {
         }.isInstanceOf(ProposalExpiredException::class.java)
 
         // Checked before the SCA leg: a doomed decision must not spend the owner's one-shot factor.
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { approvalStore.decide(any(), any(), any()) }
     }
 
@@ -381,7 +475,85 @@ class SavingsProposalServiceTest {
         }
     }
 
-    private fun stubOwnerAndProposal(proposal: WithdrawalProposal, scaActor: UUID = owner) {
+    @Test
+    fun `approval inbox exposes aggregate progress but not unrelated proposals to a group member`(): Unit =
+        runBlocking {
+            val member = UUID.randomUUID()
+            val other = UUID.randomUUID()
+            val visible = proposal().copy(
+                approvalGroupId = UUID.randomUUID(),
+                approvalGroupRevision = 3,
+                requiredApprovals = 2,
+                eligibleApproverIds = setOf(member, other),
+            )
+            val hidden = proposal().copy(id = UUID.randomUUID(), eligibleApproverIds = setOf(other))
+            val account = mockk<Account>()
+            io.mockk.every { account.partyId } returns owner
+            coEvery { accountRepository.findById(accountId) } returns account
+            coEvery { proposalRepository.findByAccountAndStatus(accountId, null) } returns listOf(visible, hidden)
+            coEvery { proposalRepository.findDecisions(setOf(visible.id)) } returns listOf(
+                WithdrawalApprovalDecision(visible.id, member, true, now.minusMinutes(1)),
+            )
+
+            val inbox = service.listForAccount(accountId, null, member)
+
+            assertThat(inbox).hasSize(1)
+            assertThat(inbox.single().proposal.id).isEqualTo(visible.id)
+            assertThat(inbox.single().approvalsReceived).isEqualTo(1)
+            assertThat(inbox.single().myDecision).isEqualTo(ProposalActorDecision.APPROVED)
+            assertThat(inbox.single().canDecide).isFalse()
+        }
+
+    @Test
+    fun `approval inbox does not reveal proposals to an unrelated party`(): Unit = runBlocking {
+        val stranger = UUID.randomUUID()
+        val proposal = proposal().copy(eligibleApproverIds = setOf(UUID.randomUUID()))
+        val account = mockk<Account>()
+        io.mockk.every { account.partyId } returns owner
+        coEvery { accountRepository.findById(accountId) } returns account
+        coEvery { proposalRepository.findByAccountAndStatus(accountId, null) } returns listOf(proposal)
+        coEvery { proposalRepository.findDecisions(emptySet()) } returns emptyList()
+
+        assertThat(service.listForAccount(accountId, null, stranger)).isEmpty()
+    }
+
+    @Test
+    fun `eligible approver sees actionable progress without the private roster`(): Unit = runBlocking {
+        val member = UUID.randomUUID()
+        val proposal = proposal().copy(
+            requiredApprovals = 2,
+            eligibleApproverIds = setOf(member, UUID.randomUUID()),
+        )
+        val account = mockk<Account>()
+        io.mockk.every { account.partyId } returns owner
+        coEvery { accountRepository.findById(accountId) } returns account
+        coEvery { proposalRepository.findByAccountAndStatus(accountId, null) } returns listOf(proposal)
+        coEvery { proposalRepository.findDecisions(setOf(proposal.id)) } returns emptyList()
+
+        val item = service.listForAccount(accountId, null, member).single()
+
+        assertThat(item.approvalsReceived).isZero()
+        assertThat(item.myDecision).isNull()
+        assertThat(item.canDecide).isTrue()
+    }
+
+    @Test
+    fun `cancel keeps the real approval progress instead of returning a synthetic zero`(): Unit = runBlocking {
+        val proposal = proposal()
+        coEvery { proposalRepository.findById(proposal.id) } returns proposal
+        coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
+        coEvery { proposalRepository.findDecisions(setOf(proposal.id)) } returns listOf(
+            WithdrawalApprovalDecision(proposal.id, owner, true, now.minusMinutes(1)),
+        )
+
+        val cancelled = service.cancel(accountId, proposal.id, delegate)
+
+        assertThat(cancelled.status).isEqualTo(WithdrawalProposalStatus.CANCELLED)
+        assertThat(cancelled.approvalsReceived).isEqualTo(1)
+        assertThat(cancelled.canDecide).isFalse()
+    }
+
+    private fun stubOwnerAndProposal(proposal: WithdrawalProposal, scaActor: UUID = owner, approve: Boolean = true) {
         val account = mockk<Account>()
         io.mockk.every { account.partyId } returns owner
         coEvery { accountRepository.findById(accountId) } returns account
@@ -393,13 +565,32 @@ class SavingsProposalServiceTest {
             partyId = scaActor,
             purpose = "SAVINGS_WITHDRAW_APPROVAL",
             status = "PENDING",
+            amount = "1500.00",
+            currency = "CZK",
+            reference = SavingsWithdrawalScaReference.of(proposal.id, approve),
         )
-        coEvery { scaClient.consumeChallenge(any(), scaActor) } returns ScaChallengeSnapshot(
+        coEvery { scaClient.consumeChallenge(any(), scaActor, any(), any(), any()) } returns ScaChallengeSnapshot(
             id = UUID.randomUUID(),
             partyId = scaActor,
             purpose = "SAVINGS_WITHDRAW_APPROVAL",
             status = "COMPLETED",
         )
+        coEvery {
+            proposalRepository.recordDecision(proposal.id, scaActor, any(), any(), any(), any())
+        } answers {
+            val approved = thirdArg<Boolean>()
+            val scaSessionId = arg<UUID>(3)
+            val decidedAt = arg<OffsetDateTime>(4)
+            WithdrawalDecisionResult(
+                proposal = if (approved) {
+                    proposal.approve(scaActor, scaSessionId, decidedAt)
+                } else {
+                    proposal.reject(scaActor, decidedAt)
+                },
+                acceptedApprovals = if (approved) 1 else 0,
+                replayed = false,
+            )
+        }
     }
 
     private fun proposal() = WithdrawalProposal(

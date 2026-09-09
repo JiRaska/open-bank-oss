@@ -7,6 +7,8 @@ package com.openbank.account.infrastructure.rest
 import com.openbank.account.application.usecase.ProposalForbiddenException
 import com.openbank.account.application.usecase.ProposeWithdrawalCommand
 import com.openbank.account.application.usecase.SavingsProposalService
+import com.openbank.account.application.usecase.WithdrawalProposalView
+import com.openbank.account.domain.model.SavingsWithdrawalScaReference
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
 import com.openbank.libs.authz.Authorize
@@ -40,22 +42,45 @@ data class ProposalResponse(
     val note: String?,
     val status: WithdrawalProposalStatus,
     val approvalId: String?,
+    val approvalGroupId: UUID?,
+    val approvalGroupRevision: Long?,
+    val requiredApprovals: Int,
+    val approvalsReceived: Int,
+    val myDecision: String?,
+    val canDecide: Boolean,
+    val approveScaReference: String,
+    val rejectScaReference: String,
     val createdAt: OffsetDateTime,
     val expiresAt: OffsetDateTime,
 ) {
     companion object {
-        fun from(p: WithdrawalProposal): ProposalResponse = ProposalResponse(
-            id = p.id,
-            accountId = p.accountId,
-            delegatePartyId = p.delegatePartyId,
-            amountMinor = p.amountMinor,
-            currency = p.currency,
-            note = p.note,
-            status = p.status,
-            approvalId = p.approvalId,
-            createdAt = p.createdAt,
-            expiresAt = p.expiresAt,
+        fun from(p: WithdrawalProposal): ProposalResponse = from(
+            WithdrawalProposalView(p, approvalsReceived = 0, myDecision = null, canDecide = false),
         )
+
+        fun from(view: WithdrawalProposalView): ProposalResponse {
+            val p = view.proposal
+            return ProposalResponse(
+                id = p.id,
+                accountId = p.accountId,
+                delegatePartyId = p.delegatePartyId,
+                amountMinor = p.amountMinor,
+                currency = p.currency,
+                note = p.note,
+                status = p.status,
+                approvalId = p.approvalId,
+                approvalGroupId = p.approvalGroupId,
+                approvalGroupRevision = p.approvalGroupRevision,
+                requiredApprovals = p.requiredApprovals,
+                approvalsReceived = view.approvalsReceived,
+                myDecision = view.myDecision?.name,
+                canDecide = view.canDecide,
+                approveScaReference = SavingsWithdrawalScaReference.of(p.id, approve = true),
+                rejectScaReference = SavingsWithdrawalScaReference.of(p.id, approve = false),
+                createdAt = p.createdAt,
+                expiresAt = p.expiresAt,
+            )
+        }
     }
 }
 
@@ -117,7 +142,9 @@ class SavingsProposalResource(private val proposalService: SavingsProposalServic
     suspend fun list(
         @PathParam("accountId") accountId: UUID,
         @QueryParam("status") status: WithdrawalProposalStatus?,
-    ): List<ProposalResponse> = proposalService.listForAccount(accountId, status).map { ProposalResponse.from(it) }
+        @HeaderParam(AccountResource.CUSTOMER_PARTY_HEADER) callerPartyId: UUID?,
+    ): List<ProposalResponse> = proposalService.listForAccount(accountId, status, callerPartyId)
+        .map { ProposalResponse.from(it) }
 
     @POST
     @Path("/{proposalId}/decide")

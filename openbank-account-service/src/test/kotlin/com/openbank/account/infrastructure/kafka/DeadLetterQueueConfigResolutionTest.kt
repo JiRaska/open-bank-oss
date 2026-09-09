@@ -120,6 +120,7 @@ class DeadLetterQueueConfigResolutionTest {
         val EXPECTED = listOf(
             "party-events-in" to "openbank.dlq.account.party-events-in",
             "delegation-events-in" to "openbank.dlq.account.delegation-events-in",
+            "approval-group-revisions-in" to "openbank.dlq.account.approval-group-revisions-in",
         )
     }
 }

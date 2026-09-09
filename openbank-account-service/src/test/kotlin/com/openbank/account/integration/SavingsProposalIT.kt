@@ -4,6 +4,7 @@
 
 package com.openbank.account.integration
 
+import com.openbank.account.domain.model.SavingsWithdrawalScaReference
 import com.openbank.account.it.PostgresRedpandaRedisTestResource
 import com.openbank.account.it.StubScaChallengeClient
 import io.quarkus.test.common.QuarkusTestResource
@@ -35,9 +36,11 @@ import java.util.UUID
 class SavingsProposalIT {
 
     class InMemoryDelegationChannel : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchIncomingChannelsToInMemory("delegation-events-in") +
-                InMemoryConnector.switchIncomingChannelsToInMemory("party-events-in")
+        override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(
+            "delegation-events-in",
+            "approval-group-revisions-in",
+            "party-events-in",
+        )
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -61,6 +64,11 @@ class SavingsProposalIT {
 
         val proposalId = propose(accountId)
         StubScaChallengeClient.party.set(ownerParty)
+        StubScaChallengeClient.amount.set("1500.00")
+        StubScaChallengeClient.currency.set("CZK")
+        StubScaChallengeClient.reference.set(
+            SavingsWithdrawalScaReference.of(UUID.fromString(proposalId), approve = true),
+        )
 
         val status: String = (
             Given {
@@ -91,6 +99,11 @@ class SavingsProposalIT {
         partySource.runOnVertxContext(true)
         partySource.send(mandateGrantedEvent(representative))
         StubScaChallengeClient.party.set(representative)
+        StubScaChallengeClient.amount.set("1500.00")
+        StubScaChallengeClient.currency.set("CZK")
+        StubScaChallengeClient.reference.set(
+            SavingsWithdrawalScaReference.of(UUID.fromString(proposalId), approve = true),
+        )
 
         var response: io.restassured.response.Response? = null
         var attempts = 0
@@ -102,7 +115,9 @@ class SavingsProposalIT {
                 .body("""{"approve": true, "scaSessionId": "${UUID.randomUUID()}"}""")
                 .post("/api/v1/accounts/$accountId/savings-goal/delegation/proposals/$proposalId/decide")
             if (response?.statusCode == 200) break
-            assertThat(response?.statusCode).isEqualTo(403)
+            assertThat(response?.statusCode)
+                .withFailMessage("unexpected decision response: ${response?.asString()}")
+                .isEqualTo(403)
             delay(250)
         }
 

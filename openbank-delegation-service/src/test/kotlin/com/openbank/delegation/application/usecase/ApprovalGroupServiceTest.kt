@@ -60,6 +60,32 @@ class ApprovalGroupServiceTest {
     }
 
     @Test
+    fun `create validates members then consumes owner SCA and emits the complete revision`(): Unit = runBlocking {
+        coEvery { repository.create(any(), any()) } answers { firstArg() }
+
+        val created = service.create(createCommand())
+
+        assertThat(created.members).containsExactlyInAnyOrder(memberA, memberB)
+        assertThat(created.threshold).isEqualTo(2)
+        assertThat(created.revision).isEqualTo(1)
+        coVerify {
+            sca.consumeChallenge(
+                scaId,
+                owner,
+                ApprovalGroupScaBinding.create(owner, "Treasury", setOf(memberA, memberB), 2),
+            )
+        }
+        coVerify {
+            repository.create(
+                created,
+                match<DomainEvent> {
+                    it is ApprovalGroupChanged && it.revision == 1L && it.members == setOf(memberA, memberB)
+                },
+            )
+        }
+    }
+
+    @Test
     fun `exact create retry returns immutable original result without repeating side effects`(): Unit = runBlocking {
         val original = group()
         coEvery { repository.findByScaSessionId(scaId) } returns original
@@ -102,32 +128,6 @@ class ApprovalGroupServiceTest {
 
         coVerify(exactly = 2) { repository.findByScaSessionId(scaId) }
         coVerify(exactly = 1) { sca.consumeChallenge(any(), any(), any()) }
-    }
-
-    @Test
-    fun `create validates members then consumes owner SCA and emits the complete revision`(): Unit = runBlocking {
-        coEvery { repository.create(any(), any()) } answers { firstArg() }
-
-        val created = service.create(createCommand())
-
-        assertThat(created.members).containsExactlyInAnyOrder(memberA, memberB)
-        assertThat(created.threshold).isEqualTo(2)
-        assertThat(created.revision).isEqualTo(1)
-        coVerify {
-            sca.consumeChallenge(
-                scaId,
-                owner,
-                ApprovalGroupScaBinding.create(owner, "Treasury", setOf(memberA, memberB), 2),
-            )
-        }
-        coVerify {
-            repository.create(
-                created,
-                match<DomainEvent> {
-                    it is ApprovalGroupChanged && it.revision == 1L && it.members == setOf(memberA, memberB)
-                },
-            )
-        }
     }
 
     @Test

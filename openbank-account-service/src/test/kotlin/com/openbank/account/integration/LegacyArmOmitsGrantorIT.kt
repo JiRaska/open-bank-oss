@@ -81,8 +81,10 @@ import java.util.UUID
 class LegacyArmOmitsGrantorIT {
 
     class InMemoryDelegationChannel : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchIncomingChannelsToInMemory("delegation-events-in")
+        override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(
+            "delegation-events-in",
+            "approval-group-revisions-in",
+        )
 
         override fun stop() = InMemoryConnector.clear()
     }

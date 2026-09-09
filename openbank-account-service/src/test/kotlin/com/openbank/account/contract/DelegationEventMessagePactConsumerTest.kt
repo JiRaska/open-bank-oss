@@ -54,6 +54,16 @@ import java.util.UUID
  * openbank-delegation-service (`@PactFolder`, runs on every PR), which produces these messages
  * from the real `DelegationActivated`/`DelegationRevoked` domain types — so a field renamed in
  * `DelegationEvents.kt` reddens the replay rather than silently emptying this projection.
+ *
+ * ## Negative identity boundary
+ *
+ * This is an asynchronous message contract, so an unauthorized producer cannot be represented as
+ * an HTTP 401/403 Pact interaction. It is rejected before a payload exists: Kafka authenticates the
+ * workload with mTLS and the account consumer receives only from the explicitly granted topic.
+ * `openbank-infra/gitops/components/delegation/kafka-delegation-mtls.yaml` owns the producer Write
+ * ACL and `openbank-infra/gitops/components/accounts/kafka-account-mtls.yaml` owns the consumer Read
+ * ACL. The repository's Kafka ACL gates verify that negative boundary; this Pact deliberately owns
+ * the payload boundary inside it.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(
@@ -179,5 +189,41 @@ class DelegationEventMessagePactConsumerTest {
         assertThat(UUID.fromString(node.path("aggregateId").asText())).isNotNull()
         assertThat(UUID.fromString(node.path("grantorPartyId").asText())).isNotNull()
         assertThat(node.path("resourceType").asText()).isEqualTo("ACCOUNT")
+    }
+
+    @Pact(consumer = "openbank-account-service", provider = "openbank-delegation-service")
+    fun approvalGroupRevisedPact(builder: MessagePactBuilder): MessagePact = builder
+        .given("an approval group roster has been revised")
+        .expectsToReceive("an ApprovalGroupRevised event with a complete roster")
+        .withContent(
+            newJsonBody { o ->
+                o.stringValue("eventType", "ApprovalGroupRevised")
+                o.uuid("aggregateId")
+                o.uuid("ownerPartyId")
+                o.stringType("name", "Treasury approvers")
+                o.array("members") { members ->
+                    members.stringValue("aaaa5555-bbbb-4ccc-8ddd-eeeeffff0004")
+                    members.stringValue("aaaa6666-bbbb-4ccc-8ddd-eeeeffff0005")
+                }
+                o.integerType("threshold", 2)
+                o.integerType("revision", 4)
+                o.booleanType("active", true)
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "approvalGroupRevisedPact")
+    fun `ApprovalGroupRevised carries the immutable operation roster`(messages: List<Message>) {
+        val node = objectMapper.readTree(messages.first().contentsAsBytes())
+
+        assertThat(node.path("eventType").asText()).isEqualTo("ApprovalGroupRevised")
+        assertThat(UUID.fromString(node.path("aggregateId").asText())).isNotNull()
+        assertThat(UUID.fromString(node.path("ownerPartyId").asText())).isNotNull()
+        assertThat(node.path("members")).hasSize(2)
+        assertThat(node.path("members").map { UUID.fromString(it.asText()) }).hasSize(2)
+        assertThat(node.path("threshold").asInt()).isEqualTo(2)
+        assertThat(node.path("revision").asLong()).isEqualTo(4)
+        assertThat(node.path("active").asBoolean()).isTrue()
     }
 }

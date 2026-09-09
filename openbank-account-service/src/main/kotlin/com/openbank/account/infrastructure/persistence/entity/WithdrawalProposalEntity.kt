@@ -7,11 +7,15 @@ package com.openbank.account.infrastructure.persistence.entity
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
+import jakarta.persistence.CollectionTable
 import jakarta.persistence.Column
+import jakarta.persistence.ElementCollection
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
+import jakarta.persistence.FetchType
 import jakarta.persistence.Id
+import jakarta.persistence.JoinColumn
 import jakarta.persistence.Table
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -46,6 +50,26 @@ class WithdrawalProposalEntity : PanacheEntityBase() {
     @Column(name = "approval_id")
     var approvalId: String? = null
 
+    @Column(name = "delegation_grant_id", updatable = false)
+    var delegationGrantId: UUID? = null
+
+    @Column(name = "approval_group_id", updatable = false)
+    var approvalGroupId: UUID? = null
+
+    @Column(name = "approval_group_revision", updatable = false)
+    var approvalGroupRevision: Long? = null
+
+    @Column(name = "required_approvals", nullable = false, updatable = false)
+    var requiredApprovals: Int = 1
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(
+        name = "savings_withdrawal_eligible_approvers",
+        joinColumns = [JoinColumn(name = "proposal_id")],
+    )
+    @Column(name = "party_id", nullable = false)
+    var eligibleApproverIds: MutableSet<UUID> = linkedSetOf()
+
     @Column(name = "decided_by")
     var decidedBy: UUID? = null
 
@@ -70,6 +94,11 @@ class WithdrawalProposalEntity : PanacheEntityBase() {
         note = note,
         status = status,
         approvalId = approvalId,
+        delegationGrantId = delegationGrantId,
+        approvalGroupId = approvalGroupId,
+        approvalGroupRevision = approvalGroupRevision,
+        requiredApprovals = requiredApprovals,
+        eligibleApproverIds = eligibleApproverIds.toSet(),
         decidedBy = decidedBy,
         decidedAt = decidedAt,
         scaSessionId = scaSessionId,
@@ -87,6 +116,11 @@ class WithdrawalProposalEntity : PanacheEntityBase() {
             note = p.note
             status = p.status
             approvalId = p.approvalId
+            delegationGrantId = p.delegationGrantId
+            approvalGroupId = p.approvalGroupId
+            approvalGroupRevision = p.approvalGroupRevision
+            requiredApprovals = p.requiredApprovals
+            eligibleApproverIds = p.eligibleApproverIds.toMutableSet()
             decidedBy = p.decidedBy
             decidedAt = p.decidedAt
             scaSessionId = p.scaSessionId
