@@ -16,7 +16,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Delegation Service — events
-  version: 1.3.0
+  version: 1.4.0
   description: |
     Domain events emitted when a customer-to-party delegation grant changes state (ADR-0232).
 
@@ -111,6 +111,14 @@ channels:
     messages:
       DelegationSpendReservationStateChanged:
         $ref: '#/components/messages/DelegationSpendReservationStateChanged'
+  notificationRequests:
+    address: openbank.notification.requests
+    title: Disclosure OTP delivery commands
+    description: |
+      Existing notification-service command emitted after a redemption is durably issued. The
+      payload uses channel `EMAIL`, template `OTP_CODE`, and the canonical NotificationRequest wire
+      shape documented by notification-service. Kafka acknowledgement is awaited before issuance
+      returns, while the durable redemption remains safe to rotate if delivery is indeterminate.
 
 operations:
   publishDelegationEvents:
@@ -163,6 +171,15 @@ operations:
       default-off until a compatible downstream binding consumer is deployed and healthy.
     messages:
       - $ref: '#/channels/spendReservationState/messages/DelegationSpendReservationStateChanged'
+  publishDisclosureOtp:
+    action: send
+    title: Request separate-channel delivery of a disclosure OTP
+    channel:
+      $ref: '#/channels/notificationRequests'
+    description: |
+      Produced directly by `KafkaDisclosureOtpSender`, not through the delegation transactional
+      outbox. The redemption row is committed first and the emitter acknowledgement is awaited;
+      callers may rotate an ISSUED redemption when delivery is uncertain.
 
 components:
   messageTraits:

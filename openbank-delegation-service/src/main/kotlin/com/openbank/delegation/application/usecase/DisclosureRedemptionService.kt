@@ -14,6 +14,7 @@ import com.openbank.delegation.application.port.out.DisclosureSnapshotContentRea
 import com.openbank.delegation.application.port.out.IssueRedemptionRecord
 import com.openbank.delegation.domain.model.DisclosureStatus
 import com.openbank.delegation.domain.model.RedemptionStatus
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import java.security.MessageDigest
 import java.time.Clock
@@ -50,7 +51,7 @@ class DisclosureRedemptionService(
         val magicToken = secrets.newOpaqueToken()
         val otp = secrets.newOtp()
         val otpDigest = secrets.hashOtp(otp)
-        val redemptionId = UUID.randomUUID()
+        val redemptionId = Ids.newId()
         val issued = redemptions.issue(
             IssueRedemptionRecord(
                 redemptionId,
