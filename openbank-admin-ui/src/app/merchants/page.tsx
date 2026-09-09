@@ -17,7 +17,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { RefreshCw, Store, Trash2, Plus, ImageUp, ImageOff } from 'lucide-react'
+import { AlertTriangle, RefreshCw, Store, Trash2, Plus, ImageUp, ImageOff } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -53,6 +53,8 @@ type Draft = {
   lon: string
 }
 
+type PendingRemoval = { kind: 'entry' | 'logo'; merchant: Merchant }
+
 const EMPTY_DRAFT: Draft = { descriptorKey: '', cleanName: '', category: '', city: '', country: '', lat: '', lon: '' }
 
 export default function MerchantsPage() {
@@ -67,6 +69,8 @@ export default function MerchantsPage() {
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [uploading, setUploading] = useState<string | null>(null)
+  const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null)
+  const [removing, setRemoving] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -128,7 +132,7 @@ export default function MerchantsPage() {
     }
   }
 
-  const remove = async (descriptorKey: string) => {
+  const remove = async (descriptorKey: string): Promise<boolean> => {
     setActionError(null)
     try {
       const res = await fetch(svcUrl(SERVICE, `${CATALOGUE}/${encodeURIComponent(descriptorKey)}`), {
@@ -136,11 +140,13 @@ export default function MerchantsPage() {
       })
       if (!res.ok && res.status !== 404) {
         setActionError(t('Smazání selhalo', 'Delete failed'))
-        return
+        return false
       }
       await load()
+      return true
     } catch {
       setActionError(t('Služba je nedostupná', 'The service is unreachable'))
+      return false
     }
   }
 
@@ -182,7 +188,7 @@ export default function MerchantsPage() {
     }
   }
 
-  const removeLogo = async (descriptorKey: string) => {
+  const removeLogo = async (descriptorKey: string): Promise<boolean> => {
     setActionError(null)
     try {
       const res = await fetch(
@@ -191,12 +197,24 @@ export default function MerchantsPage() {
       )
       if (!res.ok && res.status !== 404) {
         setActionError(t('Smazání loga selhalo', 'Deleting the logo failed'))
-        return
+        return false
       }
       await load()
+      return true
     } catch {
       setActionError(t('Služba je nedostupná', 'The service is unreachable'))
+      return false
     }
+  }
+
+  const confirmRemoval = async () => {
+    if (!pendingRemoval || removing) return
+    setRemoving(true)
+    const completed = pendingRemoval.kind === 'entry'
+      ? await remove(pendingRemoval.merchant.descriptorKey)
+      : await removeLogo(pendingRemoval.merchant.descriptorKey)
+    setRemoving(false)
+    if (completed) setPendingRemoval(null)
   }
 
   const th = { padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' } as const
@@ -223,7 +241,7 @@ export default function MerchantsPage() {
         </button>}
       />
 
-      {actionError && <div className="card" role="alert" style={{ marginBottom: 14, borderColor: 'var(--red)', color: 'var(--red)', fontSize: 13 }}>
+      {actionError && !pendingRemoval && <div className="card" role="alert" style={{ marginBottom: 14, borderColor: 'var(--red)', color: 'var(--red)', fontSize: 13 }}>
         {actionError}
       </div>}
 
@@ -353,7 +371,7 @@ export default function MerchantsPage() {
                     {m.logoContentHash && <button
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      onClick={() => void removeLogo(m.descriptorKey)}
+                      onClick={() => { setActionError(null); setPendingRemoval({ kind: 'logo', merchant: m }) }}
                       aria-label={t(`Smazat logo ${m.descriptorKey}`, `Delete the logo for ${m.descriptorKey}`)}
                     >
                       <ImageOff size={12} aria-hidden="true" />
@@ -361,7 +379,7 @@ export default function MerchantsPage() {
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      onClick={() => void remove(m.descriptorKey)}
+                      onClick={() => { setActionError(null); setPendingRemoval({ kind: 'entry', merchant: m }) }}
                       aria-label={t(`Smazat ${m.descriptorKey}`, `Delete ${m.descriptorKey}`)}
                     >
                       <Trash2 size={12} aria-hidden="true" />
@@ -378,6 +396,83 @@ export default function MerchantsPage() {
           </table>
         </div>
       </>}
+      {pendingRemoval && <MerchantRemovalDialog
+        removal={pendingRemoval}
+        busy={removing}
+        failed={actionError != null}
+        onCancel={() => { if (!removing) { setPendingRemoval(null); setActionError(null) } }}
+        onConfirm={() => void confirmRemoval()}
+      />}
+    </div>
+  )
+}
+
+function MerchantRemovalDialog({ removal, busy, failed, onCancel, onConfirm }: {
+  removal: PendingRemoval
+  busy: boolean
+  failed: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const { t } = useLanguage()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const isEntry = removal.kind === 'entry'
+  const titleId = 'merchant-removal-title'
+  const impactId = 'merchant-removal-impact'
+
+  useEffect(() => { cancelRef.current?.focus() }, [])
+
+  return (
+    <div
+      ref={dialogRef}
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={impactId}
+      aria-busy={busy}
+      onKeyDown={event => {
+        if (event.key === 'Escape' && !busy) onCancel()
+        if (event.key !== 'Tab' || !dialogRef.current) return
+        const controls = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not(:disabled)'))
+        if (controls.length === 0) return
+        const first = controls[0]
+        const last = controls[controls.length - 1]
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+        if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+      }}
+      style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(15,23,42,.68)', display: 'grid', placeItems: 'center', padding: 20 }}
+    >
+      <div className="card" style={{ width: 'min(520px, 100%)', padding: 22 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <AlertTriangle aria-hidden="true" size={20} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <h2 id={titleId} style={{ margin: 0, fontSize: 17 }}>
+              {isEntry ? t('Smazat záznam obchodníka?', 'Delete the merchant entry?') : t('Smazat logo obchodníka?', 'Delete the merchant logo?')}
+            </h2>
+            <p id={impactId} style={{ margin: '7px 0 0', color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.5 }}>
+              {isEntry
+                ? t('Transakce s tímto descriptorem se přestanou obohacovat názvem, kategorií, polohou i logem.', 'Transactions carrying this descriptor will no longer be enriched with its name, category, location or logo.')
+                : t('Záznam a jeho obohacovací data zůstanou zachována; odstraní se pouze uložený obrázek.', 'The entry and its enrichment data will remain; only the stored image will be removed.')}
+            </p>
+          </div>
+        </div>
+        <div style={{ marginTop: 14, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface-2)', fontSize: 13 }}>
+          <strong>{removal.merchant.cleanName}</strong><br />
+          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{removal.merchant.descriptorKey}</span>
+        </div>
+        {failed && <p role="alert" style={{ color: 'var(--danger)', fontSize: 13, margin: '12px 0 0' }}>
+          {isEntry ? t('Záznam se nepodařilo smazat. Můžete akci opakovat.', 'The entry could not be deleted. You can try again.') : t('Logo se nepodařilo smazat. Můžete akci opakovat.', 'The logo could not be deleted. You can try again.')}
+        </p>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+          <button ref={cancelRef} type="button" className="btn btn-secondary" disabled={busy} onClick={onCancel}>
+            {t('Ponechat', 'Keep')}
+          </button>
+          <button type="button" className="btn btn-danger" disabled={busy} aria-busy={busy} onClick={onConfirm}>
+            {busy ? t('Mažu…', 'Deleting…') : isEntry ? t('Smazat záznam', 'Delete entry') : t('Smazat logo', 'Delete logo')}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

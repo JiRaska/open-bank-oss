@@ -10,7 +10,7 @@ import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ClipboardList, RefreshCw, ChevronRight, X, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
-import { PageHeader } from '@/components/ui'
+import { Drawer, PageHeader } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 
 const SVC = 'onboarding-service'
@@ -369,19 +369,13 @@ function RecordDrawer({
   const stageColor = STAGE_COLOR[record.funnelStage as Stage] ?? 'var(--text-muted)'
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 40 }}
-      />
-      {/* Drawer */}
-      <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: '420px',
-        background: 'var(--surface)', borderLeft: '1px solid var(--border)',
-        zIndex: 50, overflowY: 'auto', padding: '24px',
-        boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
-      }}>
+    <Drawer
+      title={t(`Detail onboardingu ${record.legalName ?? record.partyId}`, `Onboarding details for ${record.legalName ?? record.partyId}`)}
+      description={t('Stav onboardingu, identity a související bankovní odkazy.', 'Onboarding, identity and related banking status.')}
+      onClose={onClose}
+      width={420}
+    >
+      <div style={{ padding: 24 }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
@@ -390,8 +384,8 @@ function RecordDrawer({
               {record.partyId}
             </div>
           </div>
-          <button onClick={onClose} className="btn btn-secondary" style={{ padding: '4px 8px' }} aria-label={t('Zavřít', 'Close')}>
-            <X size={14} />
+          <button type="button" onClick={onClose} className="btn btn-secondary" style={{ padding: '4px 8px' }} aria-label={t('Zavřít detail onboardingu', 'Close onboarding details')}>
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
 
@@ -440,7 +434,7 @@ function RecordDrawer({
           )}
         </div>
       </div>
-    </>
+    </Drawer>
   )
 }
 
