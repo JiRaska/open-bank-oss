@@ -7,18 +7,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import MerchantsPage from '@/app/merchants/page'
 
-const merchant = {
-  descriptorKey: 'BILLA',
-  cleanName: 'Billa',
-  logoUrl: null,
-  logoContentHash: 'a'.repeat(64),
-  category: null,
-  lat: null,
-  lon: null,
-  city: null,
-  country: null,
-  updatedAt: '2026-09-09T08:00:00Z',
-}
+const merchant = { descriptorKey: 'BILLA', cleanName: 'Billa', logoContentHash: 'a'.repeat(64) }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 
 function renderPage(write: () => Response = () => json({}, 204)) {

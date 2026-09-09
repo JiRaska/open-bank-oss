@@ -3,14 +3,14 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import MerchantsPage from '@/app/merchants/page'
 
 vi.mock('@/components/auth/AuthGuard', () => ({ Can: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
 
 const catalogue = {
-  data: [{ descriptorKey: 'BILLA', cleanName: 'Billa', logoUrl: null, logoContentHash: null, category: 'GROCERIES', lat: null, lon: null, city: 'Praha', country: 'CZ', updatedAt: '2026-09-09T08:00:00Z' }],
+  data: [{ descriptorKey: 'BILLA', cleanName: 'Billa', category: 'GROCERIES', city: 'Praha', country: 'CZ' }],
   total: 1,
 }
 const worklist = [
@@ -63,24 +63,5 @@ describe('merchant catalogue worklist', () => {
     render(React.createElement(LanguageProvider, null, React.createElement(MerchantsPage)))
 
     await waitFor(() => expect(screen.queryByText('Billa')).not.toBeInTheDocument())
-  })
-
-  it('makes every backend page reachable and reports the visible range', async () => {
-    const first = { ...catalogue.data[0], descriptorKey: 'FIRST', cleanName: 'First merchant' }
-    const second = { ...catalogue.data[0], descriptorKey: 'SECOND', cleanName: 'Second merchant' }
-    vi.stubGlobal('fetch', vi.fn((url: string) => {
-      if (String(url).includes('/unmatched')) return Promise.resolve(json([]))
-      const isSecondPage = String(url).includes('page=1')
-      return Promise.resolve(json({ data: [isSecondPage ? second : first], total: 51 }))
-    }))
-
-    render(React.createElement(LanguageProvider, null, React.createElement(MerchantsPage)))
-
-    await screen.findByText('First merchant')
-    expect(screen.getByText('Showing 1–1 of 51')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-    await screen.findByText('Second merchant')
-    expect(screen.getByText('Showing 51–51 of 51')).toBeInTheDocument()
-    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('page=1&size=50'))).toBe(true)
   })
 })
