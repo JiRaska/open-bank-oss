@@ -46,14 +46,14 @@ class ApprovalGroupResource(private val groups: ApprovalGroupUseCase) {
         val owner = requireNotNull(callerPartyId) { "$CUSTOMER_PARTY_HEADER header is required" }
         val reference = if (body.groupId == null) {
             require(body.expectedRevision == null) { "expectedRevision is only valid with groupId" }
-            ApprovalGroupScaBinding.create(owner, body.name, body.members, body.threshold)
+            ApprovalGroupScaBinding.create(owner, body.name, body.validatedMembers(), body.threshold)
         } else {
             ApprovalGroupScaBinding.revise(
                 owner,
                 body.groupId,
                 requireNotNull(body.expectedRevision) { "expectedRevision is required with groupId" },
                 body.name,
-                body.members,
+                body.validatedMembers(),
                 body.threshold,
             )
         }
@@ -67,9 +67,9 @@ class ApprovalGroupResource(private val groups: ApprovalGroupUseCase) {
         request: ApprovalGroupWriteRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) callerPartyId: UUID?,
     ): Response {
-        requireNotNull(request) { "request body is required" }
+        val body = requireNotNull(request) { "request body is required" }
         val owner = requireNotNull(callerPartyId) { "$CUSTOMER_PARTY_HEADER header is required" }
-        val created = groups.create(request.toCreate(owner))
+        val created = groups.create(body.toCreate(owner))
         return Response.status(Response.Status.CREATED).entity(created.toResponse()).build()
     }
 
@@ -124,7 +124,7 @@ data class ApprovalGroupScaReferenceRequest(
     val groupId: UUID? = null,
     val expectedRevision: Long? = null,
     val name: String,
-    val members: Set<UUID>,
+    val members: Set<UUID?>,
     val threshold: Int,
 )
 
@@ -132,7 +132,7 @@ data class ApprovalGroupScaReferenceResponse(val reference: String)
 
 data class ApprovalGroupWriteRequest(
     val name: String,
-    val members: Set<UUID>,
+    val members: Set<UUID?>,
     val threshold: Int,
     val scaSessionId: UUID,
     val expectedRevision: Long? = null,
@@ -141,7 +141,7 @@ data class ApprovalGroupWriteRequest(
         ownerPartyId = owner,
         callerPartyId = owner,
         name = name,
-        members = members,
+        members = validatedMembers(),
         threshold = threshold,
         scaSessionId = scaSessionId,
     )
@@ -152,11 +152,17 @@ data class ApprovalGroupWriteRequest(
         callerPartyId = owner,
         expectedRevision = requireNotNull(expectedRevision) { "expectedRevision is required for replacement" },
         name = name,
-        members = members,
+        members = validatedMembers(),
         threshold = threshold,
         scaSessionId = scaSessionId,
     )
 }
+
+private fun ApprovalGroupScaReferenceRequest.validatedMembers(): Set<UUID> = members.validated()
+private fun ApprovalGroupWriteRequest.validatedMembers(): Set<UUID> = members.validated()
+private fun Set<UUID?>.validated(): Set<UUID> = mapIndexed { index, member ->
+    requireNotNull(member) { "members[$index] is required" }
+}.toSet()
 
 data class ApprovalGroupResponse(
     val id: UUID,

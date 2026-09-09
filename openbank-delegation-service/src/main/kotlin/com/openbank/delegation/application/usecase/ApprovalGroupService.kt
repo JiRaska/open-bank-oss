@@ -18,6 +18,7 @@ import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.sql.SQLException
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -44,6 +45,9 @@ class ApprovalGroupService(
 
     override suspend fun create(command: CreateApprovalGroupCommand): ApprovalGroup {
         requireOwner(command.callerPartyId, command.ownerPartyId)
+        repository.findByScaSessionId(command.scaSessionId)?.let { existing ->
+            return requireMatchingReplay(existing, command)
+        }
         val now = OffsetDateTime.now(clock)
         val group = ApprovalGroup(
             ownerPartyId = command.ownerPartyId,
@@ -60,10 +64,16 @@ class ApprovalGroupService(
             command.ownerPartyId,
             ApprovalGroupScaBinding.create(command.ownerPartyId, group.name, group.members, group.threshold),
         )
-        return repository.create(
-            group,
-            ApprovalGroupChanged.from(group, eventType = "ApprovalGroupCreated", at = clock.instant()),
-        )
+        return try {
+            repository.create(
+                group,
+                ApprovalGroupChanged.from(group, eventType = "ApprovalGroupCreated", at = clock.instant()),
+            )
+        } catch (@Suppress("TooGenericExceptionCaught") exception: Exception) {
+            if (!exception.isApprovalGroupCommandConflict()) throw exception
+            val winner = repository.findByScaSessionId(command.scaSessionId) ?: throw exception
+            requireMatchingReplay(winner, command)
+        }
     }
 
     override suspend fun revise(command: ReviseApprovalGroupCommand): ApprovalGroup {
@@ -163,6 +173,26 @@ class ApprovalGroupService(
         const val SCA_PURPOSE = "DELEGATION_APPROVAL_GROUP"
     }
 }
+
+private fun requireMatchingReplay(existing: ApprovalGroup, command: CreateApprovalGroupCommand): ApprovalGroup {
+    require(
+        existing.ownerPartyId == command.ownerPartyId &&
+            existing.name == command.name.trim() &&
+            existing.members == command.members &&
+            existing.threshold == command.threshold,
+    ) { "approval-group SCA session was already used for a different command" }
+    return existing
+}
+
+private const val SQLSTATE_UNIQUE_VIOLATION = "23505"
+private const val APPROVAL_GROUP_COMMAND_CONSTRAINT = "delegation_approval_group_commands_pkey"
+
+private fun Throwable.isApprovalGroupCommandConflict(): Boolean = generateSequence(this) { it.cause }
+    .filterIsInstance<SQLException>()
+    .any {
+        it.message?.contains(APPROVAL_GROUP_COMMAND_CONSTRAINT) == true &&
+            (it.sqlState == SQLSTATE_UNIQUE_VIOLATION || it.message.orEmpty().contains("(23505)"))
+    }
 
 /** Stable, language-neutral SCA fingerprint. Length prefixes remove delimiter ambiguity. */
 object ApprovalGroupScaBinding {

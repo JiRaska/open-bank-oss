@@ -12,6 +12,7 @@ interface ApprovalGroupRepository {
     suspend fun create(group: ApprovalGroup, event: DomainEvent): ApprovalGroup
     suspend fun update(group: ApprovalGroup, expectedRevision: Long, event: DomainEvent): ApprovalGroup
     suspend fun findById(id: UUID): ApprovalGroup?
+    suspend fun findByScaSessionId(scaSessionId: UUID): ApprovalGroup?
     suspend fun findByOwner(ownerPartyId: UUID): List<ApprovalGroup>
 }
 

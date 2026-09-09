@@ -9,6 +9,7 @@ import com.openbank.delegation.application.port.out.ApprovalGroupConcurrentUpdat
 import com.openbank.delegation.application.port.out.ApprovalGroupRepository
 import com.openbank.delegation.application.port.out.DelegationOutboxRepository
 import com.openbank.delegation.domain.model.ApprovalGroup
+import com.openbank.delegation.infrastructure.persistence.entity.ApprovalGroupCommandEntity
 import com.openbank.delegation.infrastructure.persistence.entity.ApprovalGroupEntity
 import com.openbank.delegation.infrastructure.persistence.entity.ApprovalGroupRevisionEntity
 import com.openbank.libs.domain.event.DomainEvent
@@ -32,6 +33,8 @@ class ApprovalGroupRepositoryImpl(
             .flatMap { session -> session.persist(ApprovalGroupEntity.fromDomain(group)) }
             .flatMap { Panache.getSession() }
             .flatMap { session -> session.persist(ApprovalGroupRevisionEntity.fromDomain(group)) }
+            .flatMap { Panache.getSession() }
+            .flatMap { session -> session.persist(ApprovalGroupCommandEntity.fromDomain(group)) }
             .flatMap { outboxRepository.persistInTransaction(event.toOutbox()).replaceWith(group) }
     }.awaitSuspending()
 
@@ -56,6 +59,8 @@ class ApprovalGroupRepositoryImpl(
                     Panache.getSession().flatMap { it.flush() }
                         .flatMap { Panache.getSession() }
                         .flatMap { session -> session.persist(ApprovalGroupRevisionEntity.fromDomain(group)) }
+                        .flatMap { Panache.getSession() }
+                        .flatMap { session -> session.persist(ApprovalGroupCommandEntity.fromDomain(group)) }
                         .flatMap { outboxRepository.persistInTransaction(event.toOutbox()) }
                         .replaceWith(group)
                 }
@@ -63,6 +68,12 @@ class ApprovalGroupRepositoryImpl(
 
     override suspend fun findById(id: UUID): ApprovalGroup? = Panache.withSession {
         find("groupId", id).firstResult<ApprovalGroupEntity>()
+    }.awaitSuspending()?.toDomain()
+
+    override suspend fun findByScaSessionId(scaSessionId: UUID): ApprovalGroup? = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.find(ApprovalGroupCommandEntity::class.java, scaSessionId)
+        }
     }.awaitSuspending()?.toDomain()
 
     override suspend fun findByOwner(ownerPartyId: UUID): List<ApprovalGroup> = Panache.withSession {
