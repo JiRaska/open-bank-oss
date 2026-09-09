@@ -144,6 +144,15 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Change log
 
+- **2026-09-09** — Added the D7 disclosure preparation lifecycle. Only the authenticated grantor
+  of an active `DOCUMENT` grant can create a request, and creation plus the snapshot command is one
+  transaction. A second database predicate closes the revoke-between-read-and-write race. UUID
+  request IDs are permanently bound to one grant/source, result events are source/snapshot checked,
+  and malformed or conflicting outcomes are nacked to an explicit DLQ. The read surface returns
+  metadata only; no recipient token or PDF content is exposed in this slice. Residual risk is the
+  intentionally absent public redemption policy, which must add hashed single-purpose secrets,
+  bounded attempts, expiry, revocation and atomic view consumption before content delivery.
+
 - **2026-09-07** — Role-preset creation is now replay-safe (#8351, ADR-0292). A retried
   `POST /api/v1/delegation-role-presets` stacked a duplicate catalog row; `create` now checks the
   admin-supplied natural key (name, resourceType) first and replays the original, with

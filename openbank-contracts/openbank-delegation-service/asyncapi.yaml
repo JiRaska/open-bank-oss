@@ -84,6 +84,8 @@ channels:
         $ref: '#/components/messages/SpendConfirmed'
       SpendReleased:
         $ref: '#/components/messages/SpendReleased'
+      DisclosureSnapshotRequested:
+        $ref: '#/components/messages/DisclosureSnapshotRequested'
   approvalGroupRevisions:
     address: openbank.delegation.approval-group-revisions
     title: Immutable approval-group revision bootstrap stream
@@ -138,6 +140,7 @@ operations:
       - $ref: '#/channels/delegationEvents/messages/SpendReserved'
       - $ref: '#/channels/delegationEvents/messages/SpendConfirmed'
       - $ref: '#/channels/delegationEvents/messages/SpendReleased'
+      - $ref: '#/channels/delegationEvents/messages/DisclosureSnapshotRequested'
   publishApprovalGroupRevisions:
     action: send
     title: Publish immutable approval-group revisions
@@ -184,6 +187,25 @@ components:
               assume each event arrives once.
 
   schemas:
+    disclosureEnvelope:
+      type: object
+      required: [eventId, aggregateId, aggregateType, eventType, version, occurredAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        aggregateId: { type: string, format: uuid, description: Disclosure request aggregate id. }
+        aggregateType: { type: string, const: Disclosure }
+        eventType: { type: string, const: DisclosureSnapshotRequested }
+        version: { type: integer, const: 1 }
+        occurredAt: { type: string, format: date-time }
+    disclosureSnapshotRequested:
+      type: object
+      required: [requestId, sourceDocumentId, expectedPartyRef]
+      properties:
+        requestId: { type: string, format: uuid }
+        sourceDocumentId: { type: string, format: uuid }
+        expectedPartyRef:
+          type: string
+          description: Grantor party identifier that document-service must match against source ownership.
     approvalGroupRevision:
       type: object
       description: >-
@@ -507,6 +529,17 @@ components:
                 event convention (AccountEvents, LedgerEvents).
 
   messages:
+    DisclosureSnapshotRequested:
+      name: DisclosureSnapshotRequested
+      title: Prepare immutable bytes for a party-bound disclosure
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/disclosureEnvelope'
+          - $ref: '#/components/schemas/disclosureSnapshotRequested'
+
     ApprovalGroupCreated:
       name: ApprovalGroupCreated
       title: First immutable approval roster revision

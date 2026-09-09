@@ -173,6 +173,17 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      disclosure-snapshot-events-in:
+        connector: smallrye-kafka
+        topic: openbank.documents.disclosure-snapshot.event
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-delegation-service
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.delegation.disclosure-snapshot-events-in
 
 "%dev":
   quarkus:
