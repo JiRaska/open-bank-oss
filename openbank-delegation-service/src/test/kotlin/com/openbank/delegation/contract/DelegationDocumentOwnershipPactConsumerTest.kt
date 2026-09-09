@@ -31,6 +31,7 @@ class DelegationDocumentOwnershipPactConsumerTest {
         const val OWNER_PARTY_ID = "88888888-9999-4aaa-8bbb-cccccccccccc"
         const val SNAPSHOT_ID = "99999999-aaaa-4bbb-8ccc-dddddddddddd"
         const val SNAPSHOT_SHA256 = "397f16a0e617d2898c400f7c9db43b117395f2518b348d563b603d8aa35f6399"
+        const val WRONG_SNAPSHOT_SHA256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         const val PDF = "%PDF-1.7 sealed disclosure"
     }
 
@@ -71,14 +72,14 @@ class DelegationDocumentOwnershipPactConsumerTest {
         .toPact()
 
     @Pact(consumer = "openbank-delegation-service", provider = "openbank-document-service")
-    fun getDisclosureSnapshotContentWithoutIdentityPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("an immutable disclosure snapshot exists but caller identity is missing")
-        .uponReceiving("GET disclosure snapshot content without service identity")
+    fun getDisclosureSnapshotContentWithWrongDigestPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("an immutable disclosure snapshot exists but the supplied digest is wrong")
+        .uponReceiving("GET disclosure snapshot content with the wrong pinned digest")
         .path("/api/v1/documents/disclosure-snapshots/$SNAPSHOT_ID/content")
         .method("GET")
-        .headers("X-Expected-SHA256", SNAPSHOT_SHA256)
+        .headers("X-Expected-SHA256", WRONG_SNAPSHOT_SHA256)
         .willRespondWith()
-        .status(401)
+        .status(404)
         .toPact()
 
     @Test
@@ -112,13 +113,13 @@ class DelegationDocumentOwnershipPactConsumerTest {
     }
 
     @Test
-    @PactTestFor(pactMethod = "getDisclosureSnapshotContentWithoutIdentityPact")
-    fun `content read rejects a missing service identity with 401`(mockServer: MockServer) {
+    @PactTestFor(pactMethod = "getDisclosureSnapshotContentWithWrongDigestPact")
+    fun `content read hides snapshot metadata when the digest is wrong`(mockServer: MockServer) {
         given()
             .baseUri(mockServer.getUrl())
-            .header("X-Expected-SHA256", SNAPSHOT_SHA256)
+            .header("X-Expected-SHA256", WRONG_SNAPSHOT_SHA256)
             .get("/api/v1/documents/disclosure-snapshots/$SNAPSHOT_ID/content")
             .then()
-            .statusCode(401)
+            .statusCode(404)
     }
 }

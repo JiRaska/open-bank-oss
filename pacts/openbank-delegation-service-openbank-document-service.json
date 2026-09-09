@@ -26,21 +26,21 @@
       }
     },
     {
-      "description": "GET disclosure snapshot content without service identity",
+      "description": "GET disclosure snapshot content with the wrong pinned digest",
       "providerStates": [
         {
-          "name": "an immutable disclosure snapshot exists but caller identity is missing"
+          "name": "an immutable disclosure snapshot exists but the supplied digest is wrong"
         }
       ],
       "request": {
         "headers": {
-          "X-Expected-SHA256": "397f16a0e617d2898c400f7c9db43b117395f2518b348d563b603d8aa35f6399"
+          "X-Expected-SHA256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
         "method": "GET",
         "path": "/api/v1/documents/disclosure-snapshots/99999999-aaaa-4bbb-8ccc-dddddddddddd/content"
       },
       "response": {
-        "status": 401
+        "status": 404
       }
     },
     {

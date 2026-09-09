@@ -144,8 +144,8 @@ class DocumentPactBrokerProviderVerificationTest {
     @State("an immutable disclosure snapshot with the expected digest exists")
     fun stateDisclosureSnapshotExists() = seedDisclosureSnapshot()
 
-    @State("an immutable disclosure snapshot exists but caller identity is missing")
-    fun stateDisclosureSnapshotWithoutCallerIdentityExists() = seedDisclosureSnapshot()
+    @State("an immutable disclosure snapshot exists but the supplied digest is wrong")
+    fun stateDisclosureSnapshotWithWrongDigestExists() = seedDisclosureSnapshot()
 
     private fun seedDisclosureSnapshot() = runOnVertxContext {
         val bytes = DISCLOSURE_PDF.toByteArray()
