@@ -159,7 +159,17 @@ class PartyResource {
         @QueryParam("size") @DefaultValue("20") size: Int,
         @QueryParam("status") statusParam: String?,
     ): Response {
-        val status = statusParam?.uppercase()?.let { runCatching { PartyStatus.valueOf(it) }.getOrNull() }
+        // #9038: absent status means unfiltered; an UNPARSEABLE one must not silently drop the
+        // condition and answer the full list with a 200 (the #8699 shape). libs-runtime maps
+        // IllegalArgumentException to 400; never a service-local mapper (#526).
+        val status = statusParam?.uppercase()?.let {
+            runCatching { PartyStatus.valueOf(it) }
+                .getOrElse { _ ->
+                    throw IllegalArgumentException(
+                        "unknown status '$it'; expected one of ${PartyStatus.entries.joinToString()}",
+                    )
+                }
+        }
         // ADR-0067 pilot: first live feature-flag evaluation in the fleet. Cosmetic, fail-static —
         // surfaces the resolved variant in a response header so the flip is observable via curl,
         // without changing the response body or any business logic. Flag-as-code: party-list-enriched.
