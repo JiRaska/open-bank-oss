@@ -114,8 +114,14 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @Path("/approval-groups")
     @Blocking
     fun createApprovalGroup(body: String?): Response {
-        val partyId = partyId()
-        return upstream.post("$delegationServiceUrl$UPSTREAM/approval-groups", partyId, body ?: "{}")
+        val context = partyContext()
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/approval-groups",
+            context.principal.toString(),
+            body ?: "{}",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
     }
 
     @GET
@@ -130,16 +136,26 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @Path("/approval-groups/{id}")
     @Blocking
     fun reviseApprovalGroup(@PathParam("id") id: UUID, body: String?): Response {
-        val partyId = partyId()
-        return upstream.put("$delegationServiceUrl$UPSTREAM/approval-groups/$id", partyId, body ?: "{}")
+        val context = partyContext()
+        return upstream.put(
+            "$delegationServiceUrl$UPSTREAM/approval-groups/$id",
+            context.principal.toString(),
+            body ?: "{}",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
     }
 
     @DELETE
     @Path("/approval-groups/{id}")
     @Blocking
     fun deactivateApprovalGroup(@PathParam("id") id: UUID): Response {
-        val partyId = partyId()
-        return upstream.delete("$delegationServiceUrl$UPSTREAM/approval-groups/$id", partyId)
+        val context = partyContext()
+        return upstream.deleteWithHeaders(
+            "$delegationServiceUrl$UPSTREAM/approval-groups/$id",
+            context.principal.toString(),
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
     }
 
     /**
@@ -207,7 +223,8 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @Path("/preview")
     @Blocking
     fun preview(body: String?): Response {
-        val partyId = partyId()
+        val context = partyContext()
+        val partyId = context.principal.toString()
         val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
             ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
         val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
@@ -216,7 +233,13 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         }
         node.put(FIELD_GRANTOR, partyId)
         node.remove(FIELD_GRANT_SCA_SESSION)
-        return upstream.post("$delegationServiceUrl$UPSTREAM/preview", partyId, json.writeValueAsString(node))
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM/preview",
+            partyId,
+            json.writeValueAsString(node),
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
     }
 
     /**
@@ -249,7 +272,8 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @POST
     @Blocking
     fun offer(body: String?): Response {
-        val partyId = partyId()
+        val context = partyContext()
+        val partyId = context.principal.toString()
         val node = runCatching { json.readTree(body ?: "{}") as? ObjectNode }.getOrNull()
             ?: return refuse(Response.Status.BAD_REQUEST, "Body must be a JSON object")
         val declared = node.get(FIELD_GRANTOR)?.asText()?.takeIf { it.isNotBlank() }
@@ -257,7 +281,13 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
             return refuse(Response.Status.FORBIDDEN, "grantorPartyId must be the authenticated party")
         }
         node.put(FIELD_GRANTOR, partyId)
-        return upstream.post("$delegationServiceUrl$UPSTREAM", partyId, json.writeValueAsString(node))
+        return upstream.post(
+            "$delegationServiceUrl$UPSTREAM",
+            partyId,
+            json.writeValueAsString(node),
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
+        )
     }
 
     /**
@@ -321,7 +351,11 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @jakarta.ws.rs.core.Context
     lateinit var requestHeaders: jakarta.ws.rs.core.HttpHeaders
 
-    private fun partyId(): String {
+    private data class PartyContext(val actor: UUID, val principal: UUID)
+
+    private fun partyId(): String = partyContext().principal.toString()
+
+    private fun partyContext(): PartyContext {
         val claimed = CustomerEdgeResource.resolvePartyIdClaim(
             partyIdClaim = jwt.getClaim<String>("party_id"),
             sub = jwt.subject,
@@ -337,7 +371,7 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
             null
         }
         val resolved = if (this::actingForResolver.isInitialized) actingForResolver.resolve(human, actingFor) else human
-        return resolved.toString()
+        return PartyContext(actor = human, principal = resolved)
     }
 
     // One helper rather than a forbidden()/badRequest() pair: detekt's TooManyFunctions fires AT
@@ -351,6 +385,7 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
         const val UPSTREAM = "/api/v1/delegations"
         const val FIELD_GRANTOR = "grantorPartyId"
         const val FIELD_GRANT_SCA_SESSION = "grantScaSessionId"
+        const val ACTOR_PARTY_HEADER = "X-Customer-Actor-Party-Id"
         const val DEFAULT_REASON = "Revoked by grantor"
 
         /** Constraints the schema still names but no service enforces. See [offer]. */
