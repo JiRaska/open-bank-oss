@@ -23,21 +23,12 @@ test.describe('SDD mandate recovery', () => {
           contentType: 'application/json',
           body: JSON.stringify([{
             id: '11111111-1111-1111-1111-111111111111',
-            accountId: '22222222-2222-2222-2222-222222222222',
             umr: 'UMR-EVIDENCE-42',
-            creditorIdentifier: 'CZ98ZZZ00000000001',
             creditorName: 'Verified Utilities SE',
-            debtorName: 'Example Manufacturing a.s.',
             debtorIban: 'CZ6508000000192000145399',
             status: 'ACTIVE',
-            scheme: 'B2B',
-            sequenceType: 'RCUR',
-            signatureDate: '2026-01-15',
-            b2bConfirmed: true,
-            lastCollectionDate: '2026-08-31',
-            lastPreNotificationDate: '2026-08-20',
+            scheme: 'CORE',
             createdAt: '2026-08-31T08:00:00Z',
-            amendments: [],
           }]),
         })
         return
@@ -49,8 +40,6 @@ test.describe('SDD mandate recovery', () => {
     await page.goto('/sdd')
     await expect(page.getByText('UMR-EVIDENCE-42')).toBeVisible()
     await expect(page.getByText('Verified Utilities SE')).toBeVisible()
-    await expect(page.getByText(/B2B potvrzeno|B2B confirmed/)).toBeVisible()
-    await expect(page.getByText('B2B · RCUR')).toBeVisible()
 
     const initialRequests = requests
     failRefresh = true

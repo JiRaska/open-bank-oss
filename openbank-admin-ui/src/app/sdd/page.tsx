@@ -15,7 +15,16 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
-import { parseSddMandates, type SddMandate } from '@/lib/sdd/sddMandateContract'
+
+type Mandate = {
+  id: string
+  umr?: string
+  creditorName?: string
+  debtorIban?: string
+  status: string
+  scheme?: string
+  createdAt?: string
+}
 
 // Mirrors MandateStatus in sdd-service — an omitted member is a filter an operator cannot select.
 const STATUSES = ['', 'PENDING_CONFIRMATION', 'ACTIVE', 'SUSPENDED', 'CANCELLED', 'EXPIRED'] as const
@@ -24,7 +33,7 @@ export default function SddPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [status, setStatus] = useState('')
-  const [rows, setRows] = useState<SddMandate[]>([])
+  const [rows, setRows] = useState<Mandate[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
 
@@ -39,7 +48,7 @@ export default function SddPage() {
         return
       }
       const data = await res.json() as unknown
-      setRows(parseSddMandates(data))
+      setRows(Array.isArray(data) ? data as Mandate[] : [])
       setUnavailable(null)
     } catch {
       setUnavailable({ kind: 'unreachable' })
@@ -71,12 +80,8 @@ export default function SddPage() {
         </button>}
       />
 
-      {!unavailable && <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
-        <label htmlFor="sdd-status-filter" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>
-          {t('Stav mandátu', 'Mandate status')}
-        </label>
+      {!unavailable && <div style={{ display: 'flex', gap: 4, marginBottom: 14 }}>
         <select
-          id="sdd-status-filter"
           value={status}
           onChange={e => setStatus(e.target.value)}
           style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)' }}
@@ -86,46 +91,33 @@ export default function SddPage() {
         </select>
       </div>}
 
-      <div className="card" style={{ padding: 0, overflowX: 'auto' }} tabIndex={0} role="region" aria-label={t('Posuvná tabulka mandátů', 'Scrollable mandate table')}>
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {unavailable && <DataUnavailable kind={unavailable.kind} service="sdd-service" feature={t('Mandáty inkas', 'Direct debit mandates')} lang={language} dense={rows.length > 0} />}
         {(!unavailable || rows.length > 0) && (
-        <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse', fontSize: 13 }}>
-          <caption className="sr-only">{t('Přehled mandátů inkas', 'Direct debit mandate overview')}</caption>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
               <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>UMR</th>
               <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Věřitel', 'Creditor')}</th>
-              <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Dlužník', 'Debtor')}</th>
-              <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Schéma / sekvence', 'Scheme / sequence')}</th>
+              <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Dlužník (IBAN)', 'Debtor (IBAN)')}</th>
+              <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Schéma', 'Scheme')}</th>
               <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Stav', 'Status')}</th>
-              <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Aktivita', 'Activity')}</th>
+              <th style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)' }}>{t('Vytvořeno', 'Created')}</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(m => {
               return (
                 <tr key={m.id} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{m.umr}</td>
-                  <td style={{ padding: '10px 14px' }}>
-                    <div style={{ fontWeight: 600 }}>{m.creditorName}</div>
-                    <div style={{ marginTop: 2, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)' }}>{m.creditorIdentifier}</div>
-                  </td>
-                  <td style={{ padding: '10px 14px' }}>
-                    <div>{m.debtorName}</div>
-                    <div style={{ marginTop: 2, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-tertiary)' }}>{m.debtorIban}</div>
-                  </td>
-                  <td style={{ padding: '10px 14px' }}>
-                    <div style={{ fontWeight: 600 }}>{m.scheme} · {m.sequenceType}</div>
-                    {m.scheme === 'B2B' && <div style={{ marginTop: 3, fontSize: 11, color: m.b2bConfirmed ? 'var(--success)' : 'var(--warning)' }}>
-                      {m.b2bConfirmed ? t('B2B potvrzeno', 'B2B confirmed') : t('B2B čeká na potvrzení', 'B2B confirmation pending')}
-                    </div>}
-                  </td>
+                  <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{m.umr ?? m.id.slice(0, 8)}</td>
+                  <td style={{ padding: '10px 14px' }}>{m.creditorName ?? '—'}</td>
+                  <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{m.debtorIban ?? '—'}</td>
+                  <td style={{ padding: '10px 14px' }}>{m.scheme ?? '—'}</td>
                   <td style={{ padding: '10px 14px' }}>
                     <StatusBadge status={m.status} />
                   </td>
                   <td style={{ padding: '10px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
-                    <div>{t('Podepsáno', 'Signed')}: {formatDate(m.signatureDate, dateLocale)}</div>
-                    <div style={{ marginTop: 2 }}>{t('Poslední inkaso', 'Last collection')}: {m.lastCollectionDate ? formatDate(m.lastCollectionDate, dateLocale) : '—'}</div>
+                    {m.createdAt ? new Date(m.createdAt).toLocaleString(dateLocale) : '—'}
                   </td>
                 </tr>
               )
@@ -141,8 +133,4 @@ export default function SddPage() {
       </div>
     </div>
   )
-}
-
-function formatDate(value: string, locale: string): string {
-  return new Date(`${value}T00:00:00Z`).toLocaleDateString(locale, { timeZone: 'UTC' })
 }

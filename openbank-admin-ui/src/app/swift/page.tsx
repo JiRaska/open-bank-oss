@@ -15,7 +15,11 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { StatusBadge } from '@/components/ui'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { parseSwiftMessages, swiftLifecycleGroup, swiftStatusTone, type SwiftMessage } from '@/lib/swift/swiftMessageContract'
+
+interface SwiftMessage {
+  id: string; messageType: string; senderBic: string; receiverBic: string
+  amount: number; currency: string; status: string; createdAt: string; reference: string
+}
 
 export default function SwiftPage() {
   const { t, language } = useLanguage()
@@ -27,9 +31,8 @@ export default function SwiftPage() {
   const { data, loading, unavailable, waking, reload } = useServiceResource<SwiftMessage[]>(
     svcUrl('swift-service', '/api/v1/swift/messages'),
     { select: (raw) => {
-      const parsed = parseSwiftMessages(raw)
       setLastSuccessfulAt(new Date())
-      return parsed
+      return Array.isArray(raw) ? (raw as SwiftMessage[]) : ((raw as { messages?: SwiftMessage[] }).messages ?? [])
     } },
   )
   const messages = data ?? []
@@ -89,9 +92,9 @@ export default function SwiftPage() {
         {hasSnapshot && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
             { label: t('Zpráv celkem', 'Total messages'), value: messages.length, icon: <Globe size={16} />, color: 'var(--accent)' },
-            { label: t('V procesu', 'In flight'), value: messages.filter(m => swiftLifecycleGroup(m.status) === 'in_flight').length, icon: <Clock size={16} />, color: 'var(--warning)' },
-            { label: t('Potvrzeno', 'Confirmed'), value: messages.filter(m => swiftLifecycleGroup(m.status) === 'confirmed').length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-            { label: t('K řešení', 'Exceptions'), value: messages.filter(m => swiftLifecycleGroup(m.status) === 'exception').length, icon: <AlertTriangle size={16} />, color: 'var(--danger)' },
+            { label: t('Odesláno', 'Sent'), value: messages.filter(m => m.status === 'SENT').length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
+            { label: t('Čeká', 'Pending'), value: messages.filter(m => m.status === 'PENDING' || m.status === 'PROCESSING').length, icon: <Clock size={16} />, color: 'var(--warning)' },
+            { label: t('Chyby', 'Errors'), value: messages.filter(m => m.status === 'FAILED').length, icon: <AlertTriangle size={16} />, color: 'var(--danger)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
               <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
@@ -147,7 +150,7 @@ export default function SwiftPage() {
                       {m.amount?.toLocaleString(numberLocale, { minimumFractionDigits: 2 })} {m.currency}
                     </td>
                     <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{m.reference}</td>
-                    <td style={{ padding: '12px 16px' }}><StatusBadge status={m.status} tone={swiftStatusTone(m.status)} /></td>
+                    <td style={{ padding: '12px 16px' }}><StatusBadge status={m.status} tone={m.status === 'PROCESSING' ? 'info' : undefined} /></td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString(dateLocale) : '—'}</td>
                     <td style={{ padding: '12px 8px', textAlign: 'right' }}><ChevronRight size={14} style={{ color: 'var(--text-tertiary)' }} /></td>
                   </tr>
